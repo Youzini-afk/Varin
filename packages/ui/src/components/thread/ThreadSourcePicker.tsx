@@ -210,7 +210,8 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
         {prepared.source.mode !== 'live_root' && <p>Fixed revision: {prepared.source.revision}</p>}
         {provenance && <div aria-label="Capture provenance">
           <p>Consistency: {provenance.consistency}</p>
-          {provenance.consistency === 'fixed-root' ? <p>Fixed root: {provenance.root}</p> : <>
+          {'root' in provenance ? <><p>Fixed root: {provenance.root}</p>
+            {provenance.consistency === 'refreshed-root' && provenance.conflicts.length > 0 && <p>Conflicts: {provenance.conflicts.join(', ')}</p>}</> : <>
             <p>Content: {provenance.contentMode}</p>
             <p>Additional capture paths: {provenance.captureScopes.length ? provenance.captureScopes.join(', ') : 'Default inventory only'}</p>
             <p>Omitted draft paths: {provenance.omittedDraftPaths.length ? provenance.omittedDraftPaths.join(', ') : 'None'}</p>

@@ -16,10 +16,10 @@ async function fixture() {
   const resolved = await models.resolveModel({ providerId: 'provider', modelId: 'model', thinkingLevel: 'high' });
   const parent: ChildModelBinding = { configuration: resolved.configuration, credential_scope: await resolved.credentialOwner.scope() };
   const capabilities: ChildCapabilityDescriptor[] = [
-    { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'retrieval'] },
-    { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
-    { name: 'process_spawn', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
-    { name: 'ask_user', version: '1', source_requirement: 'none', default_presets: ['worker'] },
+    { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'verifier', 'retrieval'] },
+    { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker', 'verifier'] },
+    { name: 'process_spawn', version: '1', source_requirement: 'physical', default_presets: ['worker', 'verifier'] },
+    { name: 'ask_user', version: '1', source_requirement: 'none', default_presets: ['worker', 'verifier'] },
   ];
   return { parent, models, capabilities, changeDefaults() { defaults = 0.9; } };
 }
@@ -37,7 +37,8 @@ it('compiles original configured profiles without losing unavailable choices, sc
   const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities, settings: async () => settings });
   const frozen = await prepare({ parent: f.parent, workFocus: 'code' });
   const profile = (id: string) => frozen.presets.find(value => value.id === `custom:${id}`)!;
-  expect(frozen.normal_unavailable?.code).toBe('child-worker-disabled');
+  expect(frozen.normal_unavailable).toBeNull();
+  expect(frozen.presets.find(preset=>preset.id==='verifier')).toMatchObject({unavailable:null,model_source:'inherit',work_mode:'isolated_write',tools:['file_read','file_write','process_spawn','ask_user']});
   expect(profile('reader')).toMatchObject({ model_source: 'inherit', model: null, unavailable: null, tools: ['file_read'] });
   expect(profile('selected')).toMatchObject({ model_source: 'selected', model: { configuration: { model: 'model' } }, unavailable: null });
   expect(profile('off').unavailable?.code).toBe('child-profile-disabled');

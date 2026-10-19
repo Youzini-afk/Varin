@@ -1249,7 +1249,7 @@ fn observe(
         Target::NewWork { .. } => {
             let thread = format!("thread:{id}");
             let branch = format!("branch:{id}");
-            tx.execute("INSERT INTO threads(id) VALUES(?1)", [&thread])?;
+            super::threads::insert(&tx, &thread)?;
             tx.execute(
                 "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
                 params![branch, thread],

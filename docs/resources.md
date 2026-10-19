@@ -41,6 +41,12 @@ Rust Storage 拥有内容寻址对象、不可变树、branch revision、pin、�
 Git 是 inventory、filter、换行、mode 和 linked-worktree 元数据的语义适配，不是 WorkingState 存储或第二个正文 writer。
 结果发布和 Integration 使用记录的 base/source/target，不复制一个未限定的“最新工作区”。结果与恢复各自持有对象引用。
 
+Agent 阶段交接使用选定 Run 的实际来源，保留对应 worktree；物理来源先捕获固定阶段，已发布结果直接复用。
+续接更新基础时，原成果与指定来源参与三方合并，实际来源和冲突写入本轮环境事实。
+`submit_code`／`update` 只在实际交换时捕获选定文件或片段，使用同一 Integration 与恢复 journal，
+不会在每次模型请求前扫描队友工作副本。固定成果可作读取来源；可写交换沿实际执行目录准入。
+详见[Agent 协作](collaboration.md)。
+
 ## 文件准入与观察
 
 Host Documents 负责根准入、文档修订和 Surface 协调。Rust Storage 负责规范化 exact/subtree 租约及物理捕获、apply、rename、remove。

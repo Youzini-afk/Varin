@@ -714,7 +714,8 @@ pub(super) fn promote_next(tx: &Transaction<'_>, branch: &str) -> Result<Option<
         return Ok(None);
     }
     loop {
-        let raw:Option<String>=tx.query_row("SELECT body FROM input_queue WHERE branch_id=?1 AND mode='next_run' AND state='queued' ORDER BY cursor LIMIT 1",[branch],|row|row.get(0)).optional()?;
+        // Delegated requests acquire a Run through activation after source preparation.
+        let raw:Option<String>=tx.query_row("SELECT body FROM input_queue WHERE branch_id=?1 AND mode='next_run' AND state='queued' AND run_id IS NOT NULL ORDER BY cursor LIMIT 1",[branch],|row|row.get(0)).optional()?;
         let Some(raw) = raw else {
             return Ok(None);
         };

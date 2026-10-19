@@ -16,6 +16,7 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) source_agent: Option<String>,
     pub(super) context: ToolExecutionContext,
     pub(super) input_ref: Value,
     pub(super) title: Option<String>,
@@ -59,11 +60,8 @@ impl ChildAdmissionPreparation {
                 "dispatch differs from its admitted call".into(),
             ));
         }
-        if original.frozen.source.as_ref() != self.handoff.as_ref().map(|handoff| &handoff.source) {
-            return Err(RuntimeError::Conflict(
-                "child source differs from the frozen invocation".into(),
-            ));
-        }
+        let parent:Run=record(&database,"runs",&self.context.run_id)?;
+        super::dispatch::validate_agent_source(&database,&parent,self.input.source_agent.as_deref(),self.handoff.as_ref())?;
         if let Some(handoff) = &self.handoff {
             handoff.source.validate()?;
             if handoff.operation_id != format!("child-source-handoff:{}", self.context.operation_id)
@@ -99,9 +97,10 @@ impl ChildAdmissionPreparation {
         launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
         Ok(PreparedChildAdmission {
+            source_agent:self.input.source_agent.clone(),
             context: self.context,
             input_ref,
-            title: self.input.task.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned),
+            title: self.input.name.as_deref().map(str::trim).map(str::to_owned).or_else(|| self.input.task.lines().map(str::trim).find(|line| !line.is_empty()).map(str::to_owned)),
             operation_revision: operation.revision,
             call_id: admitted.call.call_id,
             configuration_ref: self.content.save(&self.launch.configuration)?,
@@ -123,6 +122,8 @@ impl ChildAdmissionPreparation {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChildTaskView {
+    pub agent_id: String,
+    pub name: String,
     pub operation_id: String,
     pub parent_run_id: String,
     pub parent_thread_id: String,
@@ -157,6 +158,8 @@ impl ChildRead {
         let configuration = self.content.load(&child.configuration_ref)?;
         let launch = child.launch.load_child_intent(&self.content)?;
         Ok(ChildTaskView {
+            agent_id: child.agent_id,
+            name: child.name,
             operation_id: child.operation_id,
             parent_run_id: child.parent_run_id,
             parent_thread_id: child.parent_thread_id,

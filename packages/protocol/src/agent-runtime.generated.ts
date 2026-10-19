@@ -711,6 +711,8 @@ export type MessageActivationHold = 'manual_pause' | 'question' | 'goal_blocked'
 export type MessageActivation = { state: 'passive' } | { state: 'pending'; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'bound'; runId: string; executionId: string | null; holdReason: MessageActivationHold | null } | { state: 'cancelled'; runId: string | null; executionId: string | null } | { state: 'failed'; executionId: string | null; code: string };
 
 export interface MessageSendParams {
+  sourceAgent?: string;
+  name?: string;
   key: string;
   senderThreadId: string;
   senderBranchId: string;
@@ -1424,6 +1426,7 @@ export interface ThreadDeleteParams { threadId: string; key: string; expectedRev
 export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }
 
 export interface ThreadSummary {
+  agent_code?: string;
   parent_thread_id: string | null;
   main_branch_id: string;
   title: string;
@@ -1442,7 +1445,7 @@ export interface ThreadSummary {
   observer_project_ids: Array<string | null>;
 }
 
-export type AgentRuntimeStreamEvent = {v: 49; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 50; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2479,7 +2482,14 @@ export interface UnacceptedChildDependencies {
   mcp_binding: McpBinding | null;
 }
 
+export interface AgentSourceSelection {
+  run_id: string;
+  source: LaunchSource;
+}
+
 export interface ChildSourceHandoff {
+  refresh?: AgentSourceSelection;
+  source_run_id?: string;
   operation_id: string;
   source: LaunchSource;
   root: ChildSourceRoot;
@@ -2492,7 +2502,7 @@ export interface SourceDraftResource { workspaceId: string; resourceId: string; 
 
 export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }
 
-export type ChildSourceProvenance = { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
+export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
 
 export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
@@ -2553,7 +2563,7 @@ export interface ChildCapabilityDescriptor {
   name: string;
   version: string;
   source_requirement: 'none' | 'source' | 'physical' | 'live';
-  default_presets: ('worker' | 'retrieval')[];
+  default_presets: ('worker' | 'verifier' | 'retrieval')[];
   process?: boolean;
 }
 
@@ -2613,6 +2623,8 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  sourceAgent?: string;
+  name?: string;
   task: string;
   preset?: string;
   workMode?: ChildWorkMode;
@@ -2652,6 +2664,8 @@ export interface ChildReport {
 }
 
 export interface ChildTask {
+  agent_id?: string;
+  name?: string;
   operation_id: string;
   parent_run_id: string;
   parent_thread_id: string;
@@ -2676,6 +2690,8 @@ export interface ChildTask {
 }
 
 export interface ChildContinuationAcceptParams {
+  sourceAgent?: string;
+  name?: string;
   key: string;
   childOperationId: string;
   previousRunId: string;
@@ -2698,11 +2714,13 @@ export interface ChildExecutionReportReadParams {
   maxBytes?: number;
 }
 
-export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'computer_event'; event_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'calendar'; definition_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
+export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_continuation'; key: string; name?: string; source_agent?: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'computer_event'; event_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'message_request'; message_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'followup'; followup_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null } | { kind: 'calendar'; definition_id: string; occurrence_id: string; input_id: string; previous_execution_id: string; previous_run_id: string; previous_run_revision: number; expected_head: string | null };
 
-export type ChildSourceBasis = { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
+export type ChildSourceBasis = { kind: 'refreshed'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef | null; incoming: { run_id: string; source: LaunchSource } } | { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 
 export interface DelegatedExecution {
+  name?: string;
+  agent_id?: string;
   execution_id: string;
   child_operation_id: string;
   parent_run_id: string;
@@ -2744,6 +2762,16 @@ export interface ChildWait {
 }
 
 export interface FamilyListParams {
+  filePath?: string;
+  parentThreadId?: string;
+  parentBranchId?: string;
+  workspaceId?: string;
+  updatedAfterMs?: number;
+  updatedBeforeMs?: number;
+  scope?: string;
+  query?: string;
+  cursor?: string;
+  limit?: number;
   callerThreadId: string;
   includeSelf?: boolean;
 }
@@ -2801,6 +2829,14 @@ export interface FamilyBranch {
 }
 
 export interface FamilyMember {
+  source?: LaunchSource | null;
+  sourceRunId?: string | null;
+  operationId?: string | null;
+  latestExecutionId?: string | null;
+  agentId?: string;
+  name?: string;
+  current?: boolean;
+  updatedAtMs?: number;
   threadId: string;
   parentThreadId: string | null;
   task: string | null;
@@ -2809,6 +2845,7 @@ export interface FamilyMember {
 }
 
 export interface FamilyList {
+  nextCursor?: string | null;
   rootThreadId: string;
   members: FamilyMember[];
 }

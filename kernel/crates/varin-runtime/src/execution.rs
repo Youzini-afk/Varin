@@ -1366,6 +1366,7 @@ pub trait Persistence: Send + Sync + 'static {
     ) -> Result<Option<crate::catalog::goals::GoalContext>, ExecutionError> {
         Ok(None)
     }
+    fn teammate_context(&self, _run: &str, _epoch: u64) -> Result<Option<ConversationItem>, ExecutionError> { Ok(None) }
     fn goal_boundary(
         &self,
         _run: &str,
@@ -2531,6 +2532,7 @@ impl<
                         .persistence
                         .goal_context(&input.run_id, input.owner_generation)?;
                     binding.goal = goal.as_ref().map(|g| g.binding.clone());
+                    let teammates = self.persistence.teammate_context(&input.run_id,input.owner_generation)?;
                     // Current binding instructions belong to the fixed request context, after
                     // the existing system prefix and before growing history. Keep Goal's original
                     // provenance (and provider user role); neither these items nor their placement
@@ -2550,6 +2552,7 @@ impl<
                         let prefix = request_history.iter().take_while(|item| item.provenance.is_system()).count();
                         request_history.splice(prefix..prefix,
                             binding_context.iter().cloned().chain(goal.as_ref().and_then(|g| g.item.clone()).map(Arc::new)));
+                        request_history.extend(teammates.iter().cloned().map(Arc::new));
                         request_history
                     };
                     let request_history = project_request(&history, Some(&mut history_projection_reuse));
@@ -2969,7 +2972,7 @@ impl<
         (items, deltas, usage, result)
     }
 
-    fn execute_batch(
+    pub(crate) fn execute_batch(
         &self,
         input: &ExecutionInput,
         snapshot: &RequestSnapshot,

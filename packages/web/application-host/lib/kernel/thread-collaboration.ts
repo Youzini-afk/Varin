@@ -6,8 +6,8 @@ import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
 import { randomUUID } from 'node:crypto';
-import { admitRunSourceAuthority, sourceToolSchemas } from './source-launch.js';
-import { prepareChildSourceStore, prepareContinuationSourceStore } from './child-source-store.js';
+import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
+import { captureContinuationStage, prepareChildSourceStore, prepareContinuationSourceStore, prepareRefreshedContinuationSourceStore, releaseRefreshScratch } from './child-source-store.js';
 import { withManagedChildSource, releaseManagedUnacceptedSource, type ChildSourcePreparation } from './managed-source-collaboration.js';
 import { KernelClientError, type KernelClient } from './kernel-client.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
@@ -330,7 +330,29 @@ export class ThreadCollaboration {
     if (!basis || basis.source.branch_id === null || basis.source.revision === null) throw new Error('Continuation has no exact immutable source');
     await this.admitSourceRegistrations(basis.source, signal);
     return this.withSourceStore(basis.source, child.child_thread_id, signal, async store => {
-      const prepared = await prepareContinuationSourceStore(child, store, signal);
+      if (basis.kind === 'refreshed' && !await store.readSourcePreparation(`child-source:${child.execution_id}`, { signal })) {
+        const incoming = basis.incoming;
+        if (incoming.source.mode === 'fixed_branch') {
+          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,
+            physical: async () => { throw new Error('Fixed source has no physical directory'); } }, incoming.source, undefined, signal);
+        } else {
+        const launch = await this.owners.runtime.launch(incoming.run_id, signal);
+        if (!launch || !isDeepStrictEqual(launch.selection.source, incoming.source)) throw new Error('Selected Agent source changed');
+        const admitted = await admitRunSourceAuthority(this.owners.kernel, this.owners.runtime,
+          savedSourceLaunch(incoming.run_id, incoming.source, sourceToolSchemas(launch.selection).map(t => t.name)),
+          { signal, resolveLiveSource: this.owners.resolveLiveSource });
+        try {
+          if (admitted.kind !== 'local') throw new Error('Selected source changed resource Host');
+          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,
+            physical: async root => new KernelWorkingStateRootStore(await this.owners.storageAdapter.contextFromSourceGrant({
+              grant: admitted.grant, owningWorkspaceId: incoming.source.workspace_id, executionWorkspaceId: incoming.source.execution_workspace_id,
+              rootId: root.rootId, canonicalRoot: root.canonicalRoot })) }, incoming.source,
+            admitted.rootId && admitted.canonicalRoot ? { rootId: admitted.rootId, canonicalRoot: admitted.canonicalRoot } : undefined, signal);
+        } finally { await admitted.release(); }
+        }
+      }
+      const prepared = basis.kind === 'refreshed' ? await prepareRefreshedContinuationSourceStore(child, store, signal)
+        : await prepareContinuationSourceStore(child, store, signal);
       await this.admitSourceRegistrations(basis.source, signal);
       return this.owners.runtime.readyChildSource({ executionId: child.execution_id,
         source: { resourceOwner: prepared.source.resource_owner, mode: prepared.source.mode, liveRoot: prepared.source.live_root,
@@ -451,13 +473,17 @@ export class ThreadCollaboration {
           operation: { kind: 'child_release', execution: child } }, signal);
       });
     } else if (child.trigger.kind !== 'dispatch') {
-      if (!child.receipt && child.source_basis) {
+      if (child.source_basis && (!child.receipt || child.source_basis.kind === 'refreshed')) {
         await this.withSourceStore(child.source_basis.source, child.child_thread_id, signal, async store => {
+          if (child.source_basis?.kind === 'refreshed') {
+            await releaseRefreshScratch(child,store);
+          }
+          if (child.receipt) return;
           if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
           const branchId = `child-source:${child.execution_id}`;
           const branch = await store.getBranchRoot(branchId);
           if (branch) {
-            if (branch.baseRoot !== child.source_basis!.root) throw new Error('Unused continuation source identity changed');
+            if (child.source_basis!.kind !== 'refreshed' && branch.baseRoot !== child.source_basis!.root) throw new Error('Unused continuation source identity changed');
             await store.releaseBranchHandoffPin(branchId, `child-source-pin:${child.execution_id}`);
             await store.deleteBranch(branchId);
           }

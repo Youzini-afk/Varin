@@ -148,7 +148,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       const branchId = `source:${key}`;
       const restored = await store.readOriginalSource(branchId, { signal });
       if (restored) {
-        if (restored.provenance.consistency === 'fixed-root' || restored.provenance.captureIdentity !== captureIdentity) {
+        if (!('captureIdentity' in restored.provenance) || restored.provenance.captureIdentity !== captureIdentity) {
           throw new Error('This source preparation key already has a different selection');
         }
         const pin = await store.pinBranch(branchId, { revision: 0, signal });

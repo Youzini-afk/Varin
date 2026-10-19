@@ -19,6 +19,8 @@ fn send(f: &mut Fixture, key: &str) -> MessageReceipt {
             child.child_thread_id,
             child.child_branch_id,
             MessageInput {
+                source_agent: None,
+            name: None,
                 wait: None,
                 target_thread_id: Some("thread:parent".into()),
                 target_branch_id: Some("branch:parent".into()),

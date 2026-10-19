@@ -69,6 +69,7 @@ import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
+import { childEnded, childTaskRows } from '../conversation/childPresentation';
 
 // Presentation of owner-defined failure codes; unknown codes keep the owner's safe message.
 const runFailureKeys = new Map<string, I18nKey>([
@@ -510,7 +511,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const hasSummaries = Boolean(checkpoint?.proposal.summary.trim() || snapshot?.context.jobs.length);
   const sections = {
     plan: Boolean(snapshot?.goals.length || content?.plan),
-    threads: Boolean(snapshot?.children?.length || snapshot?.childExecutions?.length || snapshot?.delegatedExecutions?.length || snapshot?.thread.parent_thread_id),
+    threads: Boolean(api.collaboration || snapshot?.thread.parent_thread_id),
     outputs: Boolean(visibleOperations.length || snapshot?.followups.some(item => item.actor.kind !== 'goal') || content?.followups || hasRecovery),
     sources: Boolean(preparedSource || draft.workspacePath || launch?.selection.source || content?.research || resources?.system
       || resources?.appendSystem || resources?.instructions.length || resources?.instructionScopes.some(scope => scope.instructions.length)
@@ -520,7 +521,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   };
   const overviewRows: OverviewPeekRow[] = [];
   if (sections.plan) overviewRows.push({ id: 'plan', section: 'plan', icon: 'task', label: t('harness.overview.plan') });
-  if (sections.threads) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot?.children?.length || undefined });
+  if (sections.threads) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot ? (snapshot.childDirectory?.members.length??childTaskRows(snapshot.children??[],snapshot.childExecutions??[],snapshot.childActivity).filter(row=>!childEnded(row.state)).length) || undefined : undefined });
   if (sections.outputs) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'list-check-2', label: t('harness.overview.outputs'), value: visibleOperations.length || undefined });
   if (sections.sources) overviewRows.push({ id: 'sources', section: 'sources', icon: 'folder', label: t('harness.overview.sources') });
   if (sections.memory) overviewRows.push({ id: 'memory', section: 'memory', icon: 'book-open', label: t('harness.overview.memory') });
@@ -540,13 +541,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={reportOverviewContent.plan} />}
       </ThreadWorkOverviewSection>
       <ThreadWorkOverviewSection sessionKey={overviewKey} section="threads" visible={sections.threads || focused === 'threads'} title={t('harness.overview.threads')} icon="git-branch">
-      {snapshot && <ChildTasks api={api} identity={identity} children={snapshot.children ?? []}
-        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} pending={pending}
+      {snapshot && <ChildTasks key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} children={snapshot.children ?? []}
+        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending}
         cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
       {!readOnly && snapshot && api.collaboration && (run || snapshot.children?.length || delegated) && <Button variant="ghost" size="sm" disabled={pending}
         onClick={() => void act(() => api.collaboration!.cancelTree(identity), true)}>{t('harness.threads.stopAll')}</Button>}
       {launch && <ThreadChildProfiles launch={launch.selection} />}
-      {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} />}
+      {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} observe={api.observe} />}
       {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
       </ThreadWorkOverviewSection>

@@ -98,7 +98,7 @@ it('pins selected original Documents bytes/format/identity and reopens the recei
       const state = stored.states[file]!; assert.equal(state.kind, 'regular-file');
       if (state.kind === 'regular-file') assert.equal(f.objects.get(state.objectHash)?.toString(), `\uFEFFDRAFT ${file}\r\n`);
     }
-    assert(stored.provenance.consistency !== 'fixed-root');
+    assert(stored.provenance.consistency === 'stable-capture');
     assert.deepEqual(stored.provenance.drafts?.resources.map(resource => resource.resourceId), ['Z.txt', 'a.txt']);
     assert.equal(stored.provenance.drafts?.ownerId, 'original-editor');
     assert.equal(stored.provenance.drafts?.resources[0]?.documentInstanceId, 'document:Z.txt');

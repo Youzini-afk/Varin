@@ -60,6 +60,10 @@ pub enum DelegatedTrigger {
     },
     UserContinuation {
         key: String,
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        source_agent: Option<String>,
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        name: Option<String>,
         previous_execution_id: String,
         previous_run_id: String,
         previous_run_revision: u64,
@@ -69,6 +73,13 @@ pub enum DelegatedTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSourceBasis {
+    Refreshed {
+        source: launches::SourceSelection,
+        root: String,
+        provenance_ref: Value,
+        result: Option<ChildWorkingResultRef>,
+        incoming: dispatch::AgentSourceSelection,
+    },
     WorkingResult {
         source: launches::SourceSelection,
         root: String,
@@ -85,24 +96,25 @@ pub enum ChildSourceBasis {
 impl ChildSourceBasis {
     pub fn source(&self) -> &launches::SourceSelection {
         match self {
-            Self::WorkingResult { source, .. } | Self::ImmutableSource { source, .. } => source,
+            Self::WorkingResult { source, .. } | Self::ImmutableSource { source, .. } | Self::Refreshed { source, .. } => source,
         }
     }
     pub fn root(&self) -> &str {
         match self {
-            Self::WorkingResult { root, .. } | Self::ImmutableSource { root, .. } => root,
+            Self::WorkingResult { root, .. } | Self::ImmutableSource { root, .. } | Self::Refreshed { root, .. } => root,
         }
     }
     pub fn provenance_ref(&self) -> &Value {
         match self {
             Self::WorkingResult { provenance_ref, .. }
-            | Self::ImmutableSource { provenance_ref, .. } => provenance_ref,
+            | Self::ImmutableSource { provenance_ref, .. } | Self::Refreshed { provenance_ref, .. } => provenance_ref,
         }
     }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct DelegatedExecution {
+    pub name: String,
     pub execution_id: String,
     pub child_operation_id: String,
     pub trigger: DelegatedTrigger,
@@ -156,6 +168,8 @@ pub(super) fn execution_task(db: &Connection, id: &str) -> Result<ChildTask> {
     let execution = execution(db, id)?;
     let child = relation(db, &execution.child_operation_id)?;
     Ok(ChildTask {
+        agent_id: db.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
+        name: db.query_row("SELECT title FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
         execution_id: execution.execution_id.clone(),
         operation_id: child.operation_id,
         parent_run_id: child.parent_run_id,
@@ -231,6 +245,7 @@ pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
         ],
     )?;
     let execution = DelegatedExecution {
+        name: child.name.clone(),
         execution_id: child.execution_id.clone(),
         child_operation_id: child.operation_id.clone(),
         trigger: DelegatedTrigger::Dispatch,
@@ -263,6 +278,8 @@ fn insert_execution(
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DelegatedExecutionView {
+    pub name: String,
+    pub agent_id: String,
     pub execution_id: String,
     pub child_operation_id: String,
     pub parent_run_id: String,
@@ -292,6 +309,7 @@ pub struct DelegatedExecutionView {
     pub cancel_requested: bool,
 }
 pub struct DelegatedExecutionRead {
+    agent_id: String,
     relation: ChildRelation,
     execution: DelegatedExecution,
     content: crate::content::ContentStore,
@@ -320,6 +338,8 @@ impl DelegatedExecutionRead {
             })
             .transpose()?;
         Ok(DelegatedExecutionView {
+            name: execution.name.clone(),
+            agent_id: self.agent_id,
             execution_id: execution.execution_id.clone(),
             child_operation_id: execution.child_operation_id.clone(),
             parent_run_id: child.parent_run_id,
@@ -402,6 +422,7 @@ impl Catalog {
         execution: DelegatedExecution,
     ) -> Result<DelegatedExecutionRead> {
         Ok(DelegatedExecutionRead {
+            agent_id: self.db.query_row("SELECT agent_code FROM threads WHERE id=(SELECT child_thread_id FROM child_tasks WHERE id=?1)",[&execution.child_operation_id],|r|r.get(0))?,
             relation: relation(&self.db, &execution.child_operation_id)?,
             execution,
             content: self.content.clone(),
@@ -417,12 +438,17 @@ impl Catalog {
 #[serde(deny_unknown_fields)]
 pub struct ChildContinuationCommand {
     pub key: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub source_agent: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub name: Option<String>,
     pub child_operation_id: String,
     pub previous_run_id: String,
     pub expected_head: Option<String>,
     pub input: Value,
 }
 pub struct ChildContinuationPreparation {
+    incoming: Option<dispatch::AgentSourceSelection>,
     ingress: Option<(inputs::QueuedInputMetadata, Value)>,
     command: ChildContinuationCommand,
     existing: Option<DelegatedExecution>,
@@ -435,6 +461,7 @@ pub struct ChildContinuationPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildContinuation {
+    incoming: Option<dispatch::AgentSourceSelection>,
     pub(super) ingress: Option<inputs::QueuedInputMetadata>,
     command: ChildContinuationCommand,
     input_ref: Value,
@@ -519,6 +546,7 @@ impl ChildContinuationPreparation {
             })
             .transpose()?;
         Ok(PreparedChildContinuation {
+            incoming: self.incoming,
             ingress: self.ingress.map(|(row, _)| row),
             selection,
             provenance_ref,
@@ -545,7 +573,7 @@ fn check_retry(
 ) -> Result<()> {
     if execution.child_operation_id != command.child_operation_id
         || execution.input_ref != *input_ref
-        || !matches!(&execution.trigger,DelegatedTrigger::UserContinuation{key,previous_run_id,expected_head,..} if key==&command.key && previous_run_id==&command.previous_run_id && expected_head==&command.expected_head)
+        || !matches!(&execution.trigger,DelegatedTrigger::UserContinuation{key,name,source_agent,previous_run_id,expected_head,..} if key==&command.key && name==&command.name && source_agent==&command.source_agent && previous_run_id==&command.previous_run_id && expected_head==&command.expected_head)
     {
         return Err(RuntimeError::Conflict(
             "continuation key has different input or predecessor".into(),
@@ -592,6 +620,7 @@ impl Catalog {
             (Some(previous), Some(run), Some(launch), writers)
         };
         Ok(ChildContinuationPreparation {
+            incoming: if existing.is_none() { command.source_agent.as_deref().map(|identity| self.agent_source(&command.previous_run_id, identity)).transpose()? } else { None },
             ingress: None,
             command,
             existing,
@@ -616,6 +645,8 @@ impl Catalog {
             |r| r.get(0),
         )?;
         let mut preparation = self.capture_child_continuation(ChildContinuationCommand {
+            source_agent: match &row.origin { inputs::InputOrigin::Message { identity, .. } => identity.source_agent.clone(), _ => None },
+            name: None,
             key: row.id.clone(),
             child_operation_id,
             previous_run_id: previous.id,
@@ -757,6 +788,12 @@ impl Catalog {
             };
             Some(basis)
         };
+        let basis = if let Some(incoming) = prepared.incoming {
+            let original = basis.ok_or_else(|| RuntimeError::Invalid("source refresh requires an isolated file basis".into()))?;
+            let result = match &original { ChildSourceBasis::WorkingResult { result, .. } => Some(result.clone()), _ => None };
+            Some(ChildSourceBasis::Refreshed { source: original.source().clone(), root: original.root().into(),
+                provenance_ref: original.provenance_ref().clone(), result, incoming })
+        } else { basis };
         let continued_source = match source {
             ChildSource::Absent => Some(ChildSource::Absent),
             ChildSource::Shared { selection, .. } => Some(ChildSource::Shared {
@@ -807,8 +844,10 @@ impl Catalog {
             ));
         }
         let execution_id = id();
+        if let Some(name) = &prepared.command.name { super::threads::name(&tx,&child.child_thread_id,name)?; }
         let selected = prepared.selection.expect("prepared continuation selection");
         let mut next = DelegatedExecution {
+            name: tx.query_row("SELECT title FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
             execution_id: execution_id.clone(),
             child_operation_id: child.operation_id,
             trigger: if let Some(row) = &prepared.ingress {
@@ -864,7 +903,9 @@ impl Catalog {
                 }
             } else {
                 DelegatedTrigger::UserContinuation {
+                    source_agent: prepared.command.source_agent.clone(),
                     key: prepared.command.key.clone(),
+                    name: prepared.command.name.clone(),
                     previous_execution_id: previous.execution_id,
                     previous_run_id: run.id,
                     previous_run_revision: run.revision,

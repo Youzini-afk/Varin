@@ -188,6 +188,9 @@ pub(in crate::catalog) fn accept(
     if identity.kind == MessageKind::Inform {
         return Ok(IngressActivationFact::Passive);
     }
+    if identity.source_agent.is_some() {
+        return Ok(IngressActivationFact::Pending { execution_id: None });
+    }
     accept_target(db, &identity.target_thread_id, &identity.target_branch_id)
 }
 pub(in crate::catalog) fn accept_target(
@@ -318,6 +321,10 @@ pub(in crate::catalog) fn bind_pending(tx: &Transaction<'_>, run: &Run) -> Resul
     };
     for mut row in rows {
         let pending = fact(&row)?.execution_id();
+        // An explicit file refresh belongs to its newly admitted execution, never
+        // an already running predecessor or another queued refresh.
+        if row.mode == InputMode::NextRun && pending != execution_id.as_deref() { continue; }
+        if row.mode == InputMode::NextRun && pending.is_none() { continue; }
         if pending.is_some() && pending != execution_id.as_deref() {
             continue;
         }
@@ -349,6 +356,10 @@ pub(in crate::catalog) fn bind_execution(
             .collect::<Result<Vec<QueuedInputMetadata>>>()?
     };
     for mut row in rows {
+        if row.mode == InputMode::NextRun {
+            let execution = delegated::execution(tx, execution_id)?;
+            if !matches!(&execution.trigger, delegated::DelegatedTrigger::MessageRequest { message_id, .. } if message_id == &row.id) { continue; }
+        }
         if ingress::hold(tx, &row, None)?.is_some() {
             continue;
         }
@@ -414,6 +425,7 @@ fn cancel_unlaunched_trigger(
     }
     let child = delegated::relation(tx, &execution.child_operation_id)?;
     execution.cancel_requested = true;
+    let report_created=execution.report.is_none();
     if execution.report.is_none() {
         if !execution.code_result.settled() {
             execution.code_result = ChildCodeResult::Unavailable {
@@ -431,6 +443,7 @@ fn cancel_unlaunched_trigger(
     }
     execution.revision += 1;
     delegated::write_execution(tx, &execution)?;
+    if report_created {event(tx,execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;}
     event(
         tx,
         execution_id,
@@ -637,6 +650,7 @@ impl RequestActivationPreparation {
                     epoch,
                     intent,
                     history: history.clone(),
+                    environment: Vec::new(),
                     launch: Some(selection),
                     inherit_source: false,
                     initial: None,

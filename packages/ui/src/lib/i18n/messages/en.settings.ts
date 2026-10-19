@@ -2759,6 +2759,8 @@ export const settingsDict = {
   "settings.harness.role.retrievalAgent": "Research thread",
   "settings.harness.role.retrievalAgent.description": "Follows sources across multiple searches and reports facts.",
   "settings.harness.role.worker": "Worker",
+  "settings.harness.role.verifier": "Verifier",
+  "settings.harness.role.verifier.description": "Independently evaluates behavior and design, choosing verification appropriate to the work.",
   "settings.harness.role.worker.description": "Carries out assigned work and coordinates related changes.",
   "settings.harness.role.reader": "Reading assistant",
   "settings.harness.role.reader.description": "Assists with reading and organizing material.",

@@ -587,10 +587,20 @@ fn validate_child_mcp_derivation(
                 },
             ) => {
                 let basis = execution.source_basis.as_ref().ok_or_else(changed)?;
+                let same_provenance=match basis {
+                    super::delegated::ChildSourceBasis::Refreshed {incoming,..} => {
+                        let provenance:super::collaboration::ChildSourceProvenance=serde_json::from_value(content.load(provenance_ref)?)?;
+                        proof.handoff.refresh.as_ref()==Some(incoming) && matches!(provenance,
+                            super::collaboration::ChildSourceProvenance::RefreshedRoot {root,previous_root,incoming:observed,..}
+                            if root==pin.root && previous_root==basis.root() && &observed==incoming)
+                    },
+                    _=>proof.handoff.refresh.is_none() && pin.root==basis.root()
+                        && content.load(provenance_ref)?==content.load(basis.provenance_ref())?,
+                };
                 if previous_run_id != proved_previous
                     || previous_run_id == &proof.child_run_id
                     || handoff.is_some()
-                    || pin.root != basis.root()
+                    || !same_provenance
                     || proof.handoff.operation_id
                         != format!("child-source-handoff:{}", execution.execution_id)
                     || &proof.handoff.source != basis.source()
@@ -608,7 +618,6 @@ fn validate_child_mcp_derivation(
                     || source.resource_owner != basis.source().resource_owner
                     || source.workspace_id != basis.source().workspace_id
                     || source.execution_workspace_id != basis.source().execution_workspace_id
-                    || content.load(provenance_ref)? != content.load(basis.provenance_ref())?
                 {
                     return Err(changed());
                 }

@@ -4,7 +4,7 @@ import type { McpInteractionListParams, McpInteractionReadParams, McpInteraction
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
 import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
-import type { FamilyList, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
+import type { FamilyList, FamilyListParams, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { PlanSnapshot, PlanMutationResult, ChildReportPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
 import type { RunModelSelection, RunModelSelections } from '@varin/protocol';
@@ -145,7 +145,7 @@ export interface ThreadCompact extends ThreadIdentity {
 }
 /** Read-only discovery and immutable conversation views inside the original task family. */
 export interface ThreadFamilyAPI {
-  list(identity: ThreadIdentity, includeSelf?: boolean, signal?: AbortSignal): Promise<FamilyList>;
+  list(identity: ThreadIdentity, options?: boolean | Omit<FamilyListParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyList>;
   runs(identity: ThreadIdentity, request: Omit<FamilyRunsParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRuns>;
   read(identity: ThreadIdentity, request: Omit<FamilyReadParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyRead>;
   item(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyItem>;
@@ -158,6 +158,8 @@ export interface ThreadMessagesAPI {
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
 }
 export interface ThreadChildContinuation extends ThreadIdentity {
+  sourceAgent?: string;
+  name?: string;
   key: string;
   previousRunId: string;
   expectedHead: string | null;
@@ -166,6 +168,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   materials?: ThreadMaterialAttachment[];
 }
 export interface ThreadCollaborationAPI {
+  page?(identity: ThreadIdentity, options?: Omit<FamilyListParams,'callerThreadId'>, signal?:AbortSignal):Promise<ThreadChildPage>;
   integration(input: ThreadIntegrationCommand, signal?: AbortSignal): Promise<ThreadIntegrationState>;
   /** Explicit User input, retaining this child's exact previous execution configuration. */
   continueChild(input: ThreadChildContinuation, signal?: AbortSignal): Promise<DelegatedExecution>;
@@ -176,6 +179,11 @@ export interface ThreadCollaborationAPI {
   cancelChild(identity: ThreadIdentity, operationId: string): Promise<TreeCancellationReceipt>;
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
   cancelTree(identity: ThreadIdentity): Promise<TreeCancellationReceipt>;
+}
+export interface ThreadChildPage {
+  directory:FamilyList;
+  children:ChildTask[];
+  executions:DelegatedExecution[];
 }
 export type ThreadIntegrationCommand = ThreadIdentity & {
   key: string;
@@ -264,6 +272,7 @@ export interface ThreadSnapshot {
   policySelection: ThreadPolicyInspection | null;
   context: ThreadContextState;
   children?: ChildTask[];
+  childDirectory?:FamilyList;
   /** Executions of this exact parent branch's children, in each child's admission order. */
   childExecutions?: DelegatedExecution[];
   childActivity?: Record<string, { state: 'preparing' | 'running' | 'waiting' | 'settling' | 'preparation_failed'; reason?: string }>;

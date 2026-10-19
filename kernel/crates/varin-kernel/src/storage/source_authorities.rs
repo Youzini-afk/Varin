@@ -135,7 +135,7 @@ impl Storage {
             }
             if p.source.resource_owner != creator.result.source.resource_owner
                 || p.source.workspace_id != creator.result.source.workspace_id
-                || p.source.execution_workspace_id != creator.result.source.execution_workspace_id
+                || p.source.execution_workspace_id != handoff.source.execution_workspace_id
             {
                 return Err(denied(
                     "Private child source belongs to another original resource",
@@ -1009,7 +1009,10 @@ impl Storage {
                     ));
                 };
                 let branch = self.branch(step.result.source.branch_id.as_deref().unwrap())?;
-                if branch.base_root != pin.root || pin.source != handoff.source {
+                let same_basis=if handoff.refresh.is_some() {
+                    branch.parent_ref.as_deref()==Some(format!("child-refresh:{execution}@0").as_str())
+                } else {branch.base_root==pin.root};
+                if !same_basis || pin.source != handoff.source {
                     return Err(denied(
                         "Process lineage branch differs from its original handoff",
                     ));
@@ -1346,7 +1349,8 @@ impl Storage {
         if authority.result.scope.run_id() != Some(p.parent_run_id.as_str())
             || authority.result.scope.thread_id() != p.parent_thread_id
             || handoff.source != p.source
-            || authority.result.source != p.source
+            || authority.result.source.workspace_id != p.source.workspace_id
+            || authority.result.source.resource_owner != p.source.resource_owner
         {
             return Err(denied("Handoff belongs to another original parent/source"));
         }
@@ -1393,7 +1397,8 @@ impl Storage {
                     .to_string();
                 if *thread_id != format!("thread:child:{dispatch}")
                     || *branch_id != format!("branch:child:{dispatch}")
-                    || authority.result.source != handoff.source
+                    || authority.result.source.workspace_id != handoff.source.workspace_id
+                    || authority.result.source.resource_owner != handoff.source.resource_owner
                     || handoff.source != p.source
                 {
                     return Err(denied("Child grant differs from its original handoff"));
@@ -1449,6 +1454,15 @@ impl Storage {
                         "Continuation basis does not match original Storage root",
                     ));
                 }
+                if let Some(incoming)=&continuation.refresh {
+                    if incoming.source.workspace_id!=p.source.workspace_id || incoming.source.resource_owner!=p.source.resource_owner {
+                        return Err(denied("Incoming stage belongs to another resource owner"));
+                    }
+                    let stage=self.branch(&format!("child-incoming:{}",continuation.execution_id))?;
+                    if stage.workspace_id!=p.source.workspace_id || stage.write_revision!=0 || stage.head_revision!=0 {
+                        return Err(denied("Incoming stage is not the captured immutable source"));
+                    }
+                }
                 let dispatch = continuation.execution_id;
                 let op = format!("child-source-handoff:{dispatch}");
                 let pin_id = format!("child-pin:{dispatch}");
@@ -1457,6 +1471,8 @@ impl Storage {
                     resource_epoch: previous.resource_epoch,
                 };
                 let expected = ChildSourceHandoff {
+                    refresh: continuation.refresh,
+        source_run_id: None,
                     operation_id: op.clone(),
                     source: p.source.clone(),
                     resource_authority: Some(authority),

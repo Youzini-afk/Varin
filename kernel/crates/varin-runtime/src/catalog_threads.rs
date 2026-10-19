@@ -49,7 +49,38 @@ fn now_ms() -> Result<u64> {
     u64::try_from(elapsed.as_millis())
         .map_err(|_| RuntimeError::Invalid("system clock exceeds catalog range".into()))
 }
+pub(super) fn insert(tx: &Transaction<'_>, thread_id: &str) -> Result<()> {
+    loop {
+        let code = Uuid::new_v4().simple().to_string()[..8].to_uppercase();
+        let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE agent_code=?1 UNION ALL SELECT 1 FROM retired_agent_codes WHERE code=?1)", [&code], |r| r.get(0))?;
+        if !used {
+            tx.execute("INSERT INTO threads(id,agent_code) VALUES(?1,?2)", params![thread_id,code])?;
+            return Ok(());
+        }
+    }
+}
+pub(super) fn resolve(db: &Connection, identity: &str) -> Result<String> {
+    db.query_row("SELECT id FROM threads WHERE id=?1 OR agent_code=?2", params![identity,identity.to_uppercase()], |r| r.get(0))
+        .optional()?.ok_or_else(|| RuntimeError::NotFound(identity.into()))
+}
+pub(super) fn branch(db: &Connection, thread_id: &str) -> Result<String> {
+    let child: Option<String> = db.query_row("SELECT json_extract(body,'$.child_branch_id') FROM child_tasks WHERE child_thread_id=?1", [thread_id], |r| r.get(0)).optional()?;
+    if let Some(branch) = child { return Ok(branch); }
+    db.query_row("SELECT id FROM branches WHERE thread_id=?1 ORDER BY rowid LIMIT 1", [thread_id], |r| r.get(0)).map_err(Into::into)
+}
+pub(super) fn name(tx: &Transaction<'_>, thread_id: &str, name: &str) -> Result<()> {
+    let name = name.trim();
+    if name.is_empty() { return Err(RuntimeError::Invalid("Agent name is empty".into())); }
+    let changed = tx.execute("UPDATE threads SET title=?2,title_initialized=1,revision=revision+1,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1 AND title!=?2", params![thread_id,name,sql_number(now_ms()?)?])?;
+    if changed > 0 {
+        let revision = tx.query_row("SELECT revision FROM threads WHERE id=?1", [thread_id], |r| read_number(r,0))?;
+        event(tx,thread_id,revision,"thread.updated",json!({"title":name}))?;
+    }
+    Ok(())
+}
 pub(super) fn check_format(db: &Connection) -> Result<()> {
+    db.prepare("SELECT code FROM retired_agent_codes")?;
+    db.prepare("SELECT agent_code FROM threads")?;
     db.prepare("SELECT id,title,title_initialized,revision,created_at_ms,updated_at_ms,pinned,archived,deleted_at_ms,activity_cursor,read_cursor FROM threads")?;
     let invalid: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM threads WHERE typeof(title)!='text' OR length(trim(title))=0 OR title_initialized NOT IN (0,1) OR revision<1 OR created_at_ms<0 OR updated_at_ms<created_at_ms OR pinned NOT IN (0,1) OR archived NOT IN (0,1) OR deleted_at_ms<0 OR activity_cursor<0 OR read_cursor<0 OR read_cursor>activity_cursor)", [], |r| r.get(0))?;
     if invalid {
@@ -174,6 +205,26 @@ fn require_revision(db: &Connection, thread_id: &str, expected: u64) -> Result<(
     Ok(())
 }
 impl Catalog {
+    pub fn agent_identity(&self, identity: &str) -> Result<Value> {
+        let thread = resolve(&self.db,identity)?;
+        self.db.query_row("SELECT agent_code,title FROM threads WHERE id=?1",[&thread],|r|Ok(json!({"threadId":thread,"agentId":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?}))).map_err(Into::into)
+    }
+    pub fn rename_family_agent(&mut self, invocation: &super::tool_content::ToolInvocationSnapshot, target: &str, name: &str) -> Result<Value> {
+        self.validate_tool_invocation(invocation, true)?;
+        let run = self.run(&invocation.context.run_id)?;
+        let target = resolve(&self.db,target)?;
+        if super::scheduling::thread_family(&self.db,&run.thread_id)? != super::scheduling::thread_family(&self.db,&target)? {
+            return Err(RuntimeError::Conflict("Agent is outside this task family".into()));
+        }
+        let intent = json!({"kind":"agent.rename","target":target,"name":name});
+        let key = format!("agent-rename:{}",invocation.context.operation_id);
+        let tx = self.db.transaction()?;
+        if let Some(receipt) = existing_command(&tx,&key,&intent)? { return Ok(receipt); }
+        self::name(&tx,&target,name)?;
+        let receipt = save_command(&tx,&key,&intent,&target)?;
+        tx.commit()?;
+        Ok(receipt)
+    }
     /// Product discovery deliberately differs from internal owner discovery: tombstones and
     /// auxiliary context/memory inference stay available to original execution owners.
     pub fn list_thread_catalog(&self, query: &ThreadListQuery) -> Result<Vec<Value>> {
@@ -345,6 +396,7 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
         .ok_or_else(|| RuntimeError::Invalid("Thread has no initial branch".into()))?["branch_id"]
         .clone();
     summary["thread_id"] = json!(thread_id);
+    summary["agent_code"] = json!(db.query_row("SELECT agent_code FROM threads WHERE id=?1", [thread_id], |r| r.get::<_,String>(0))?);
     let parent_thread_id: Option<String> = db.query_row(
         "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",
         [thread_id], |row| row.get(0),

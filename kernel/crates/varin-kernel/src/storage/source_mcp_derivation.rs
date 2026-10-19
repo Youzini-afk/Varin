@@ -277,7 +277,8 @@ impl Storage {
                     || creator.result.scope.run_id() != Some(binding.parent_run_id.as_str())
                     || creator.result.scope.thread_id() != parent_record.result.scope.thread_id()
                     || creator.result.source != parent_record.result.source
-                    || creator.result.source != handoff.source
+                    || creator.result.source.workspace_id != handoff.source.workspace_id
+                    || creator.result.source.resource_owner != handoff.source.resource_owner
                 { return Err(denied("Dispatch handoff and frozen MCP definitions have different original owners")); }
                 let retained = parent_record.result.mcp_children.iter().find(|child| child.binding == *binding)
                     .filter(|child| !child.released)
@@ -328,7 +329,10 @@ impl Storage {
             || preparation_grant.host_id != grant.host_id
         { return Err(denied("Child initial pin has no original restricted preparation lineage")); }
         if let ChildSourceRoot::Fixed { pin } = &handoff.root {
-            if pin.source != handoff.source || pin.root != root || branch.base_root != root {
+            let same_basis=if handoff.refresh.is_some() {
+                branch.parent_ref.as_deref()==Some(format!("child-refresh:{execution}@0").as_str())
+            } else { pin.root==root };
+            if pin.source != handoff.source || !same_basis || branch.base_root != root {
                 return Err(denied("Fixed child handoff differs from its immutable initial root"));
             }
         }
@@ -507,8 +511,11 @@ mod tests {
     const EPOCH: &str = "derivation-epoch";
 
     fn issue(storage: &mut Storage, id: &str, thread: &str, run: &str) -> Grant {
+        issue_source(storage,id,thread,run,"workspace")
+    }
+    fn issue_source(storage: &mut Storage, id: &str, thread: &str, run: &str, execution:&str) -> Grant {
         storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation",
-            "threadId":thread,"runId":run,"owningWorkspace":"workspace","executionWorkspace":"workspace",
+            "threadId":thread,"runId":run,"owningWorkspace":"workspace","executionWorkspace":execution,
             "capabilities":["storage.read","storage.write","process"],"pathScopes":[""]}),
             HOST,"generation",&storage.root.to_string_lossy().into_owned(),EPOCH).unwrap();
         storage.load_grant(id).unwrap()
@@ -516,16 +523,16 @@ mod tests {
     fn open_source(storage: &mut Storage, source: &SourceSelection, path: &Path,
         id: &str, thread: &str, run: &str, purpose: &str) -> SourceAuthorityAddress
     {
-        let grant = issue(storage,id,thread,run);
+        let grant = issue_source(storage,id,thread,run,&source.execution_workspace_id);
         let physical = storage.file_root_register(&json!({"workspaceId":"workspace",
-            "executionWorkspaceId":"workspace","canonicalRoot":path}),&grant).unwrap();
+            "executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":path}),&grant).unwrap();
         let opened = storage.source_authority_open(serde_json::from_value::<SourceAuthorityOpenParams>(json!({
             "principalId":"client","coordinatorHostId":"coordinator","scope":{"kind":"run","threadId":thread,"runId":run,"epoch":1},
             "source":source,"grantId":id,"enabledTools":[],"purpose":purpose})).unwrap(),EPOCH,HOST).unwrap();
         let address: SourceAuthorityAddress = serde_json::from_value(json!({"principalId":"client","coordinatorHostId":"coordinator",
             "authorityId":opened["authorityId"],"resourceEpoch":EPOCH})).unwrap();
         let mut binding = json!({"resourceOwner":source.resource_owner,"grantId":id,"runId":run,"threadId":thread,
-            "workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":physical["rootId"],
+            "workspaceId":"workspace","executionWorkspaceId":source.execution_workspace_id,"rootId":physical["rootId"],
             "sourceMode":source.mode,"enabledTools":[]});
         binding["liveRoot"] = serde_json::to_value(&source.live_root).unwrap();
         if source.mode == varin_runtime::SourceMode::Materialized {
@@ -555,6 +562,7 @@ mod tests {
     }
     #[test]
     fn child_mcp_derivation_uses_real_source_evidence_and_independent_receipt_lifetime() {
+        for refresh in [false,true] {
         let root = std::env::temp_dir().join(format!("varin-mcp-derivation-{}",Uuid::new_v4()));
         let mut storage = Storage::open(&root,HOST).unwrap();
         let live_path = root.join("parent"); fs::create_dir(&live_path).unwrap();
@@ -586,22 +594,32 @@ mod tests {
         let creator_record = storage.source_authority(&creator,false,EPOCH).unwrap();
         let mut binding = creator_record.result.tool_binding.unwrap(); binding.target_authority = Some(creator);
         let grant = storage.load_grant(&binding.grant_id).unwrap();
+        let stage_path=root.join("selected-worktree");fs::create_dir(&stage_path).unwrap();
+        let stage=SourceSelection{execution_workspace_id:"selected-worktree".into(),
+            live_root:Some(varin_runtime::catalog::launches::LiveRoot{host_id:HOST.into(),root_id:"stage".into(),canonical_root:stage_path.to_string_lossy().into_owned()}),..source.clone()};
         let handoff: ChildSourceHandoff = serde_json::from_value(storage.child_source_handoff(&binding,
             &varin_runtime::execution::ToolExecutionContext { run_id:"parent-run".into(),operation_id:"dispatch".into(),
                 origin:varin_runtime::execution::ToolOrigin::ModelStep { request_id:"request".into() } },
             &varin_runtime::catalog::dispatch::ChildSourceDelegation {
+        agent_source: Some(varin_runtime::catalog::dispatch::AgentSourceSelection{run_id:"selected-run".into(),source:stage}),
                 work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,process:false,configured_preset:false,selection_ref:Value::Null },
             &grant,HOST,false).unwrap()).unwrap();
-        storage.claim_child_handoff(&json!({"grantId":"preparation","childThreadId":"thread:child:dispatch"}),
-            &handoff,HOST,"generation",&root.to_string_lossy(),EPOCH).unwrap();
+        let inspected=storage.inspect_source_handoff(&serde_json::from_value(json!({
+            "principalId":"client","coordinatorHostId":"coordinator","operationId":"dispatch",
+            "parentThreadId":"parent-thread","parentRunId":"parent-run","source":handoff.source})).unwrap(),EPOCH).unwrap();
+        assert_eq!(inspected,serde_json::to_value(&handoff).unwrap());
+        storage.claim_source_handoff(serde_json::from_value(json!({
+            "principalId":"client","coordinatorHostId":"coordinator","grantId":"preparation",
+            "scope":{"kind":"source_read","threadId":"thread:child:dispatch","branchId":"branch:child:dispatch","key":"child:dispatch"},
+            "source":handoff.source,"handoff":handoff})).unwrap(),EPOCH,HOST,"generation").unwrap();
         storage.begin_branch_builder(&json!({"builderId":"builder","operationId":"branch-create:child-source:dispatch",
             "branchId":"child-source:dispatch","workspaceId":"workspace","draftBasePaths":[],"captureScopes":[]}),"preparation").unwrap();
         let branch = storage.finish_branch_builder(&json!({"builderId":"builder","operationId":"branch-create:child-source:dispatch"}),"preparation").unwrap();
         storage.branch_pin(&json!({"branchId":"child-source:dispatch","pinId":"child-source-pin:dispatch","revision":0}),true,"preparation").unwrap();
         let child_source = SourceSelection { mode:varin_runtime::SourceMode::Materialized, live_root:None,
-            branch_id:Some("child-source:dispatch".into()),revision:Some(0),..source };
-        let child_grant = issue(&mut storage,"child-files","thread:child:dispatch","child-run");
-        let container = storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":root}),&child_grant).unwrap();
+            branch_id:Some("child-source:dispatch".into()),revision:Some(0),..handoff.source.clone() };
+        let child_grant = issue_source(&mut storage,"child-files","thread:child:dispatch","child-run",&child_source.execution_workspace_id);
+        let container = storage.file_root_register(&json!({"workspaceId":"workspace","executionWorkspaceId":child_source.execution_workspace_id,"canonicalRoot":root}),&child_grant).unwrap();
         let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!(["workspace","child-run"])).unwrap()));
         let operation = format!("source-materialize:{key}");
         let params = json!({"operationId":operation,"workspaceId":"workspace","rootId":container["rootId"],
@@ -654,20 +672,33 @@ mod tests {
         // Continuation derives from the predecessor's actual MCP Source. Its
         // synthetic Fixed handoff is resolved from Storage, never supplied to begin.
         let basis = SourceSelection { mode:varin_runtime::SourceMode::FixedBranch,..child_source.clone() };
+        let refresh_source=if refresh {
+            let params=json!({"operationId":"branch-create:child-incoming:continuation","branchId":"child-incoming:continuation","workspaceId":"workspace",
+                "draftBasePaths":[],"captureScopes":[],"entries":[{"path":"incoming-stage","state":{"kind":"directory","mode":null}}]});
+            storage.create_branch(&params,"child-files").unwrap();
+            Some(varin_runtime::catalog::dispatch::AgentSourceSelection{run_id:"selected-run".into(),source:handoff.source.clone()})
+        } else {None};
         storage.claim_source_handoff(serde_json::from_value(json!({
             "principalId":"client","coordinatorHostId":"coordinator","grantId":"continuation-preparation",
             "scope":{"kind":"source_read","threadId":"thread:child:dispatch","branchId":"branch:child:dispatch","key":"continuation"},
-            "source":basis,"continuation":{"executionId":"continuation","previousRunId":"child-run","root":branch["root"]}
+            "source":basis,"continuation":{"executionId":"continuation","previousRunId":"child-run","root":branch["root"],"refresh":refresh_source}
         })).unwrap(),EPOCH,HOST,"generation").unwrap();
+        let (next_root,next_parent)=if refresh {
+            let params=json!({"operationId":"branch-create:child-refresh:continuation","branchId":"child-refresh:continuation","workspaceId":"workspace",
+                "draftBasePaths":[],"captureScopes":[],"entries":[{"path":"incoming-stage","state":{"kind":"directory","mode":null}}]});
+            storage.authorize_child_handoff(&storage.load_grant("continuation-preparation").unwrap(),"branch.create.begin",&params).unwrap();
+            let merged=storage.create_branch(&params,"continuation-preparation").unwrap();
+            (merged["root"].clone(),"child-refresh:continuation@0")
+        } else {(branch["root"].clone(),"child-source:dispatch@0")};
         storage.begin_branch_builder(&json!({"builderId":"continuation-builder","operationId":"branch-create:child-source:continuation",
-            "branchId":"child-source:continuation","workspaceId":"workspace","draftBasePaths":[],"captureScopes":[],"baseRef":branch["root"],
-            "parentRef":"child-source:dispatch@0"}),"continuation-preparation").unwrap();
+            "branchId":"child-source:continuation","workspaceId":"workspace","draftBasePaths":[],"captureScopes":[],"baseRef":next_root,
+            "parentRef":next_parent}),"continuation-preparation").unwrap();
         let continuation_branch = storage.finish_branch_builder(&json!({"builderId":"continuation-builder",
             "operationId":"branch-create:child-source:continuation"}),"continuation-preparation").unwrap();
         storage.branch_pin(&json!({"branchId":"child-source:continuation","pinId":"child-source-pin:continuation","revision":0}),
             true,"continuation-preparation").unwrap();
         let continuation_source = SourceSelection { branch_id:Some("child-source:continuation".into()),..child_source.clone() };
-        let continuation_grant = issue(&mut storage,"continuation-files","thread:child:dispatch","continuation-run");
+        let continuation_grant = issue_source(&mut storage,"continuation-files","thread:child:dispatch","continuation-run",&child_source.execution_workspace_id);
         let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!(["workspace","continuation-run"])).unwrap()));
         let params = json!({"operationId":format!("source-materialize:{key}"),"workspaceId":"workspace","rootId":container["rootId"],
             "path":format!("managed/runs/{key}"),"sourceRoot":continuation_branch["root"]});
@@ -724,5 +755,6 @@ mod tests {
         assert_eq!(finish(&mut storage,reading).unwrap()["proof"],begun["proof"]);
         storage.gc().unwrap(); storage.drain_gc_files().unwrap(); assert!(!proof_path.exists() && !outcome_path.exists());
         drop(storage); fs::remove_dir_all(root).unwrap();
+        }
     }
 }

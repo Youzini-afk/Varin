@@ -4,7 +4,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { ChildSourceHandoff, DelegatedExecution, LaunchSource, UnacceptedChildSourcePin } from './protocol.generated.js';
 import { sourceToolSchemas, savedSourceLaunch } from './source-launch.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
-import { prepareChildSourceStore, prepareContinuationSourceStore, type ChildSourcePreparation } from './child-source-store.js';
+import { captureContinuationStage, prepareChildSourceStore, prepareContinuationSourceStore, prepareRefreshedContinuationSourceStore, releaseRefreshScratch, type ChildSourcePreparation } from './child-source-store.js';
 import type { StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
@@ -40,6 +40,22 @@ export async function withManagedChildSource<T>(
   const source = childPreparationSource(child);
   if (source.resource_owner.kind !== 'managed_host') throw new Error('Child does not have a managed source');
   const service = await runtime.managedSource(source.resource_owner, signal);
+  if (child.source_basis?.kind === 'refreshed' && !child.source) {
+    const incoming = child.source_basis.incoming;
+    const run = await runtime.run(incoming.run_id, signal);
+    const launch = await runtime.launch(run.id, signal);
+    if (!launch) throw new Error('Selected Agent launch is unavailable');
+    const fixed=incoming.source.mode==='fixed_branch';
+    if (!fixed && !isDeepStrictEqual(launch.selection.source,incoming.source)) throw new Error('Selected Agent source changed');
+    const { runId: _incomingRun, ...selected } = savedSourceLaunch(run.id, incoming.source, sourceToolSchemas(launch.selection).map(t => t.name));
+    const bound = await service.bind({ coordinatorHostId: runtime.coordinatorHostId,
+      scope: fixed?{kind:'source_read',threadId:run.thread_id,branchId:run.branch_id,key:`child-refresh:${child.execution_id}`}
+        :{ kind: 'run', threadId: run.thread_id, runId: run.id, epoch: run.epoch },
+      source: { ...selected, tools: [...selected.tools] }, purpose: fixed?'read':'source', retention: fixed?'caller':'run' }, signal);
+    const incomingAddress = { coordinatorHostId: runtime.coordinatorHostId, authorityId: bound.authorityId, resourceEpoch: bound.resourceEpoch };
+    try { await service.service({ ...incomingAddress, requestId: randomUUID(), operation: { kind: 'child_refresh_capture', execution: child } }, signal); }
+    finally { await service.release({ ...incomingAddress, mode: 'retire' }); }
+  }
   const selection = savedSourceLaunch(child.parent_run_id, source, sourceToolSchemas(child.launch).map(tool => tool.name));
   const { runId: _run, ...preparedSource } = selection;
   const handoff = child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
@@ -48,7 +64,8 @@ export async function withManagedChildSource<T>(
     scope: { kind: 'source_read', threadId: child.child_thread_id, branchId: child.child_branch_id, key: `child:${child.execution_id}` },
     source: { ...preparedSource, tools: [...preparedSource.tools] }, purpose: 'read', retention: 'caller',
     ...(child.trigger.kind === 'dispatch' ? { handoff: handoff! }
-      : { continuation: { executionId: child.execution_id, previousRunId: child.trigger.previous_run_id, root: child.source_basis!.root } }),
+      : { continuation: { executionId: child.execution_id, previousRunId: child.trigger.previous_run_id, root: child.source_basis!.root,
+        ...(child.source_basis?.kind==='refreshed'?{refresh:child.source_basis.incoming}:{}) } }),
   }, signal);
   const address = { coordinatorHostId: runtime.coordinatorHostId,
     authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch };
@@ -94,6 +111,26 @@ export function createManagedChildSourceService(options: {
   });
   return async (scope, operation, suppliedSignal) => {
     const signal = suppliedSignal ?? new AbortController().signal;
+    if (operation.kind === 'child_refresh_capture') {
+      const child = operation.execution, basis = child.source_basis;
+      if (basis?.kind !== 'refreshed' || !isDeepStrictEqual(scope.source, basis.incoming.source)
+        || !(scope.scope.kind==='run' && scope.scope.runId===basis.incoming.run_id
+          || scope.scope.kind==='source_read' && scope.scope.key===`child-refresh:${child.execution_id}`)) throw new Error('Incoming stage differs from its admitted source');
+      // Capturing a read source writes an immutable Storage snapshot, not files
+      // in that source. Its short-lived writer belongs to this preparation.
+      const grant=await options.storage.client.issueGrant({grantId:`child-stage:${randomUUID()}`,
+        owningWorkspace:scope.source.workspace_id,executionWorkspace:scope.source.execution_workspace_id,
+        threadId:child.child_thread_id,capabilities:['storage.read','storage.write'],pathScopes:['']},signal);
+      try {
+        const store = new KernelWorkingStateRootStore(await options.storage.contextFromBranchGrant({grant,
+          owningWorkspaceId:scope.source.workspace_id,executionWorkspaceId:scope.source.execution_workspace_id}));
+        await captureContinuationStage(child, { store, capture: options.capture,
+          physical: async root => new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({
+            grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
+            rootId: root.rootId, canonicalRoot: root.canonicalRoot })) }, scope.source, scope.physicalRoot ?? undefined, signal);
+        return { captured: true };
+      } finally {await options.storage.client.retireGrant(grant.grantId);}
+    }
     if (operation.kind === 'child_unaccepted_release') {
       const source = operation.source;
       if (!isDeepStrictEqual(scope.source, source.source) || scope.scope.kind !== 'source_read'
@@ -119,6 +156,9 @@ export function createManagedChildSourceService(options: {
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (operation.execution.trigger.kind !== 'dispatch') {
         const child = operation.execution, basis = child.source_basis;
+        if (basis?.kind === 'refreshed') {
+          return prepareRefreshedContinuationSourceStore(child, store, signal);
+        }
         if (!basis || !basis.source.branch_id || basis.source.revision === null) throw new Error('Continuation source is unavailable');
         const pin = await store.openBranchHandoffPin(basis.source.branch_id, `child-pin:${child.execution_id}`,
           {root:basis.root,revision:basis.source.revision,writeRevision:basis.source.revision},signal);
@@ -171,11 +211,14 @@ export function createManagedChildSourceService(options: {
       if (child.trigger.kind !== 'dispatch' && child.source_basis) {
         await store.releaseBranchHandoffPin(child.source_basis.source.branch_id!, `child-pin:${child.execution_id}`);
       }
+      if (child.source_basis?.kind === 'refreshed') {
+        await releaseRefreshScratch(child,store);
+      }
       if (!child.receipt) {
         const branchId = `child-source:${child.execution_id}`;
         const branch = await store.getBranchRoot(branchId);
         if (branch) {
-          if (child.source_basis && branch.baseRoot !== child.source_basis.root) throw new Error('Unused continuation source identity changed');
+          if (child.source_basis && child.source_basis.kind !== 'refreshed' && branch.baseRoot !== child.source_basis.root) throw new Error('Unused continuation source identity changed');
           await store.releaseBranchHandoffPin(branchId, `child-source-pin:${child.execution_id}`);
           await store.deleteBranch(branchId);
         }

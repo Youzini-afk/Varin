@@ -51,6 +51,8 @@ fn source_free_dispatch_executes_ordinary_effects_through_both_origins_and_file_
         assert_eq!(original.source, ChildSource::Absent);
         let next = db
             .capture_child_continuation(ChildContinuationCommand {
+                source_agent: None,
+            name: None,
                 key: "next-capability-step".into(),
                 child_operation_id: original.operation_id.clone(),
                 previous_run_id: f.run.id.clone(),

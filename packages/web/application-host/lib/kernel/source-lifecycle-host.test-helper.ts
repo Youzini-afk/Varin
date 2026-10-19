@@ -177,7 +177,7 @@ async function initialize(frame: Record<string, unknown>) {
     content: { mode: 'surface-drafts' as const, context }, captureScopes: [] };
   const prepared = await api.prepareSource(fixedRequest);
   sourceRequest = fixedRequest; preparedSource = prepared;
-  assert(prepared.provenance && prepared.provenance.consistency !== 'fixed-root');
+  assert(prepared.provenance && 'contentMode' in prepared.provenance);
   assert.equal(prepared.provenance.contentMode, 'fixed-draft-baseline');
   assert.equal(prepared.provenance.drafts?.snapshotRef, context.source === 'surface' && context.snapshot.status === 'ready' ? context.snapshot.ref : null);
   assert.equal(documents.releaseAgentInputSnapshot(consumer, context).released, true);

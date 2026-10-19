@@ -22,7 +22,7 @@ pub(super) fn execute(
         let executor = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
             .operation(&p.operation_id).map_err(domain)?.executor;
         let confirmed = match executor.as_deref() {
-            Some("integrate_child") => crate::integration_reconciliation::reconcile(
+            Some("integrate_child"|"submit_code"|"update") => crate::integration_reconciliation::reconcile(
                 &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
             Some("scheduled_task") => crate::schedule_reconciliation::reconcile(
                 &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
@@ -40,6 +40,8 @@ pub(super) fn execute(
             .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
             .capture_child_continuation(
                 varin_runtime::catalog::delegated::ChildContinuationCommand {
+                    source_agent: p.source_agent,
+            name: p.name,
                     key: p.key,
                     child_operation_id: p.child_operation_id,
                     previous_run_id: p.previous_run_id,
@@ -388,8 +390,9 @@ pub(super) fn execute(
                     record_id: text("recordId")?,
                 };
                 let effect = catalog.child_file_effect_bound(&writers).map_err(domain)?;
+                let paths:Vec<String>=serde_json::from_value(value["changedPaths"].clone())?;
                 catalog
-                    .attach_child_result_bound(&operation_id, result, effect, &writers)
+                    .attach_child_result_files_bound(&operation_id, result, effect, &writers,Some(&paths))
                     .map_err(domain)?
             };
             catalog

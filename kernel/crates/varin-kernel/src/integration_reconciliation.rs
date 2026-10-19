@@ -27,7 +27,7 @@ pub(crate) fn reconcile(
             .map_err(error)?
             .and_then(|launch| launch.selection.source)
             .ok_or_else(|| error("original Integration source is unavailable"))?;
-        if operation.executor.as_deref() != Some("integrate_child")
+        if !matches!(operation.executor.as_deref(),Some("integrate_child"|"submit_code"|"update"))
             || operation
                 .execution_owner
                 .as_ref()
@@ -53,14 +53,42 @@ pub(crate) fn reconcile(
     };
     let (operation, original_receipt) = read.load_with_external_receipt().map_err(error)?;
     let invocation: ToolInvocation = serde_json::from_value(operation.intent.clone())?;
-    if invocation.call.name != "integrate_child"
-        || invocation.call.schema_version != "2"
+    let exchange=matches!(invocation.call.name.as_str(),"submit_code"|"update");
+    if (!exchange && (invocation.call.name != "integrate_child" || invocation.call.schema_version != "2"))
+        || (exchange && invocation.call.schema_version!="1")
         || invocation.origin.operation_id(&invocation.call.call_id) != operation.id
     {
         return Err(KernelError::Authorization(
             "Integration Tool origin differs from its admitted intent".into(),
         ));
     }
+    let id = format!("integration:{}", operation.id);
+    let journal = resources.integration_receipt(source.clone(),run.id.clone(),run.thread_id.clone(),operation.id.clone())?;
+    if journal.is_null() {return Ok(false)}
+    let mut data=journal["data"].as_object().ok_or_else(||error("Integration journal data is malformed"))?.clone();
+    if let Some(result)=journal["result"].as_object(){data.extend(result.clone());}
+    let data=Value::Object(data);
+    let expected=if exchange {
+        let saved=&data["operationBinding"];
+        let db=owner.lock().map_err(error)?;
+        let source_run=db.run(saved["sourceRunId"].as_str().ok_or_else(||error("exchange source Run missing"))?).map_err(error)?;
+        let target_run=db.run(saved["targetRunId"].as_str().ok_or_else(||error("exchange target Run missing"))?).map_err(error)?;
+        for related in [&source_run,&target_run] {
+            db.capture_family_read(&run.thread_id,Some(&related.thread_id),Some(&related.branch_id)).map_err(error)?;
+        }
+        let target_launch=db.launch_metadata(&target_run.id).map_err(error)?.and_then(|l|l.selection.source).ok_or_else(||error("exchange target source missing"))?;
+        let supplied=if invocation.call.name=="submit_code" {invocation.call.arguments["target"].as_str()}else{invocation.call.arguments["source"].as_str()};
+        let other=if invocation.call.name=="submit_code" {&target_run}else{&source_run};
+        let peer=if let Some(supplied)=supplied {db.agent_identity(supplied).map_err(error)?["threadId"].as_str().map(str::to_owned)}else{db.child_task_for_thread(&run.thread_id).map_err(error)?.map(|c|c.parent_thread_id)};
+        if saved["kind"]!="code_exchange" || saved["operationId"]!=operation.id || saved["parentRunId"]!=run.id || saved["parentThreadId"]!=run.thread_id || saved["parentBranchId"]!=run.branch_id
+            || saved["callId"]!=invocation.call.call_id || saved["origin"]!=serde_json::to_value(&invocation.origin)?
+            || saved["target"]!=serde_json::to_value(target_launch)? || saved["childThreadId"]!=source_run.thread_id || saved["targetThreadId"]!=target_run.thread_id
+            || saved["result"]["workspaceId"]!=source.workspace_id || peer.as_deref()!=Some(&other.thread_id)
+            || (invocation.call.name=="submit_code" && source_run.id!=run.id) || (invocation.call.name=="update" && target_run.id!=run.id) {
+            return Err(KernelError::Authorization("exchange journal differs from its original invocation or family".into()));
+        }
+        saved.clone()
+    } else {
     let child_id = invocation.call.arguments["childOperationId"]
         .as_str()
         .ok_or_else(|| error("Integration child identity missing"))?;
@@ -90,27 +118,10 @@ pub(crate) fn reconcile(
             "Integration result belongs to another parent branch".into(),
         ));
     }
-    let expected = json!({"kind":"runtime_operation","operationId":operation.id,"parentRunId":run.id,"parentThreadId":run.thread_id,"parentBranchId":run.branch_id,
+    json!({"kind":"runtime_operation","operationId":operation.id,"parentRunId":run.id,"parentThreadId":run.thread_id,"parentBranchId":run.branch_id,
         "origin":invocation.origin,"callId":invocation.call.call_id,"childOperationId":child_id,"childExecutionId":execution_id,"childThreadId":child.child_thread_id,
-        "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":result.result_revision,"root":result.root,"publicationId":publication},"target":source});
-    let id = format!("integration:{}", operation.id);
-    let journal = resources.integration_receipt(
-        source.clone(),
-        run.id.clone(),
-        run.thread_id.clone(),
-        operation.id.clone(),
-    )?;
-    if journal.is_null() {
-        return Ok(false);
-    }
-    let mut data = journal["data"]
-        .as_object()
-        .ok_or_else(|| error("Integration journal data is malformed"))?
-        .clone();
-    if let Some(result) = journal["result"].as_object() {
-        data.extend(result.clone());
-    }
-    let data = Value::Object(data);
+        "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":result.result_revision,"root":result.root,"publicationId":publication},"target":source})
+    };
     if data["operationBinding"] != expected
         || journal["threadId"] != run.thread_id
         || journal["runId"] != run.id
@@ -254,7 +265,7 @@ pub(crate) fn reconcile(
     {
         return Err(error("native Integration diff stats malformed"));
     }
-    let projection = json!({"operationId":id,"status":status,"appliedPaths":applied,"conflictPaths":conflicts,"compensatedPaths":compensated,
+    let mut projection = json!({"operationId":id,"status":status,"appliedPaths":applied,"conflictPaths":conflicts,"compensatedPaths":compensated,
         "needsAttentionPaths":attention,"diffStats":data["diffStats"],"changedFiles":changed,"text":format!("Recorded integration {id}: {state}"),
         "receipt":{"kind":"integration","workspaceId":source.workspace_id,"operationId":id,"revision":journal["revision"],"state":state},
         "effect":effect,"executorStopped":true,"recoveryCoverage":"files-only"});
@@ -273,13 +284,34 @@ pub(crate) fn reconcile(
         None
     };
     let execution_owner = operation.execution_owner.as_ref().unwrap();
+    if exchange && terminal {
+        use varin_runtime::catalog::messages::MessageInput;
+        let preparation = {
+            let catalog = owner.lock().map_err(error)?;
+            let source_thread=expected["childThreadId"].as_str().ok_or_else(||error("exchange sender missing"))?;
+            let target_thread=expected["targetThreadId"].as_str().ok_or_else(||error("exchange receiver missing"))?;
+            projection["source"]=catalog.agent_identity(source_thread).map_err(error)?;
+            projection["target"]=catalog.agent_identity(target_thread).map_err(error)?;
+            projection["result"]=expected["result"].clone();
+            if catalog.has_code_notice(&operation.id).map_err(error)? {None} else {
+                let peer_run=catalog.run(if source_thread==run.thread_id {expected["targetRunId"].as_str()}else{expected["sourceRunId"].as_str()}.ok_or_else(||error("exchange peer Run missing"))?).map_err(error)?;
+                Some(catalog.prepare_code_notice(format!("code-exchange:{}",operation.id),run.thread_id.clone(),run.branch_id.clone(),&operation.id,execution_owner,
+                    MessageInput { source_agent:None,name:None,wait:None,target_thread_id:Some(peer_run.thread_id),target_branch_id:Some(peer_run.branch_id),reply_to:None,
+                        kind:varin_runtime::MessageKind::Inform,text:serde_json::to_string(&projection)? }).map_err(error)?)
+            }
+        };
+        if let Some(preparation)=preparation {
+            let prepared=preparation.load().map_err(error)?;
+            owner.lock().map_err(error)?.admit_message(prepared).map_err(error)?;
+        }
+    }
     let ExecutorOwner::External { epoch, .. } = execution_owner else {
         unreachable!()
     };
     let preparation = owner.lock().map_err(error)?.prepare_result_content();
     let prepared = preparation
         .write_external_receipt(preserved.unwrap_or_else(|| ExternalReceipt {
-            executor: "integrate_child".into(),
+            executor: invocation.call.name.clone(),
             identity: operation.id.clone(),
             epoch: epoch.clone(),
             outcome,

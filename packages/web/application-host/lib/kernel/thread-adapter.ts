@@ -5,7 +5,7 @@ import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams } from '@varin/protocol';
-import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
+import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@varin/application-client';
 import type { AgentProfilesAPI, ThreadAgentChoice } from '@varin/application-client';
@@ -301,9 +301,9 @@ export class ThreadAdapter {
     await this.requireIdentity(identity, signal);
     return this.runtime.getMessage({ threadId: identity.threadId, branchId: identity.branchId, messageId }, signal);
   }
-  async familyList(identity: ThreadIdentity, includeSelf?: boolean, signal?: AbortSignal) {
+  async familyList(identity: ThreadIdentity, options?: boolean | Omit<FamilyListParams, 'callerThreadId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
-    return this.runtime.familyList({ callerThreadId: identity.threadId, ...(includeSelf === undefined ? {} : { includeSelf }) }, signal);
+    return this.runtime.familyList({ callerThreadId: identity.threadId, ...(typeof options === 'boolean' ? { includeSelf: options } : options) }, signal);
   }
   async familyRuns(identity: ThreadIdentity, request: Omit<FamilyRunsParams, 'callerThreadId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
@@ -328,6 +328,8 @@ export class ThreadAdapter {
       // to the existing event-driven collaboration owner, including after Host restart.
       admissionStarted = true;
       return await this.runtime.acceptChildContinuation({ key: input.key, childOperationId: child.operation_id,
+        ...(input.name === undefined ? {} : { name: input.name }),
+        ...(input.sourceAgent === undefined ? {} : { sourceAgent: input.sourceAgent }),
         previousRunId: input.previousRunId, expectedHead: input.expectedHead, input: preparedInput }, signal);
     } catch (error) {
       if (!admissionStarted || error instanceof KernelRequestError && error.method === 'runtime.child.continuation.accept' && error.settlement === 'not_dispatched') {
@@ -364,6 +366,27 @@ export class ThreadAdapter {
   async children(identity: ThreadIdentity) {
     await this.requireIdentity(identity);
     return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId);
+  }
+  async childPage(identity:ThreadIdentity, options:Omit<FamilyListParams,'callerThreadId'>={}, signal?:AbortSignal):Promise<import('@varin/application-client').ThreadChildPage> {
+    await this.requireIdentity(identity,signal);
+    const directory=await this.runtime.familyList({callerThreadId:identity.threadId,...options,parentThreadId:identity.threadId,parentBranchId:identity.branchId},signal);
+    const direct=directory.members.filter(member=>member.parentThreadId===identity.threadId && member.operationId && member.latestExecutionId);
+    const pairs=await Promise.all(direct.map(async member=>{
+      const [child,execution]=await Promise.all([this.runtime.child(member.operationId!,signal),this.runtime.childExecution(member.latestExecutionId!,signal)]);
+      return child.parent_branch_id===identity.branchId?{child,execution}:null;
+    }));
+    const selected=pairs.filter((pair):pair is NonNullable<typeof pair>=>pair!==null);
+    return {directory:{...directory,members:directory.members.filter(member=>selected.some(pair=>pair.child.child_thread_id===member.threadId))},children:selected.map(pair=>pair.child),executions:selected.map(pair=>pair.execution)};
+  }
+  private async currentChildren(identity:ThreadIdentity) {
+    let cursor:string|undefined;
+    let combined:import('@varin/application-client').ThreadChildPage|undefined;
+    do {
+      const page=await this.childPage(identity,{scope:'current',...(cursor?{cursor}:{})});
+      combined=combined?{directory:{...page.directory,members:[...combined.directory.members,...page.directory.members]},children:[...combined.children,...page.children],executions:[...combined.executions,...page.executions]}:page;
+      cursor=page.directory.nextCursor??undefined;
+    }while(cursor);
+    return combined!;
   }
   async cancelChild(identity: ThreadIdentity, operationId: string) {
     await this.requireIdentity(identity);
@@ -956,8 +979,7 @@ export class ThreadAdapter {
       this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId, identity.branchId), this.context(identity),
       listThreadFollowups(this, identity),
       listThreadGoals(this, identity),
-      this.children(identity).then(async children => ({ children,
-        executions: (await Promise.all(children.map(child => this.runtime.childExecutions(child.operation_id)))).flat() })),
+      this.currentChildren(identity),
       this.childExecutions(identity),
     ]);
     const childActivity: NonNullable<ThreadSnapshot['childActivity']> = {};
@@ -1021,7 +1043,7 @@ export class ThreadAdapter {
     const recovery = this.recoveryReader ? await this.recoveryReader(identity) : undefined;
     return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,
-      children: childState.children, childExecutions: childState.executions, childActivity, delegatedExecutions };
+      children: childState.children, childExecutions: childState.executions, childDirectory:childState.directory,childActivity, delegatedExecutions };
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {

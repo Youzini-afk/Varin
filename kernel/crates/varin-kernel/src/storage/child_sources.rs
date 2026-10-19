@@ -50,8 +50,31 @@ impl Storage {
         {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
-        let source = binding.source_selection()?;
-        let physical = self.source_physical_root(binding, grant, host_id)?;
+        let source = delegation.agent_source.as_ref().map(|s|s.source.clone()).unwrap_or(binding.source_selection()?);
+        let physical = if let Some(stage)=&delegation.agent_source {
+            if source.workspace_id!=binding.workspace_id || source.resource_owner!=binding.resource_owner {
+                return Err(KernelError::Authorization("stage source belongs to another resource owner".into()));
+            }
+            match source.mode {
+                varin_runtime::SourceMode::FixedBranch=>None,
+                _=>{
+                    let directory=if source.mode==varin_runtime::SourceMode::LiveRoot {
+                        PathBuf::from(&source.live_root.as_ref().ok_or_else(||KernelError::Storage("stage live root missing".into()))?.canonical_root)
+                    } else {
+                        let key=hex::encode(Sha256::digest(serde_json::to_vec(&json!([source.workspace_id,source.environment_run_id.as_deref().unwrap_or(&stage.run_id)]))?));
+                        let receipt=self.operation_get(&json!({"operationId":format!("source-materialize:{key}")}))?;
+                        if receipt["state"]!="committed" || receipt["result"]["status"]!="materialized" {return Err(KernelError::Storage("stage execution directory is unavailable".into()))}
+                        self.root.join("managed").join("runs").join(key)
+                    };
+                    // Catalog delegated this exact related Run's file view. Keep the
+                    // original caller grant; register only the selected execution root.
+                    let mut stage_grant=grant.clone();
+                    stage_grant.execution_workspace=Some(source.execution_workspace_id.clone());
+                    let root=self.file_root_register(&json!({"workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":directory}),&stage_grant)?;
+                    Some(varin_runtime::catalog::launches::LiveRoot{host_id:host_id.into(),root_id:root["rootId"].as_str().ok_or_else(||KernelError::Storage("stage root missing".into()))?.into(),canonical_root:root["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("stage directory missing".into()))?.into()})
+                }
+            }
+        } else { self.source_physical_root(binding, grant, host_id)? };
         if authorize_only {
             return Ok(Value::Null);
         }
@@ -71,7 +94,8 @@ impl Storage {
                 json!({"kind":"fixed","pin":{"pin_id":pin_id,"root":pinned["root"],"source":source}})
             };
             Ok(
-                json!({"operation_id":operation_id,"source":source,"root":root,"resource_authority":binding.target_authority.as_ref().map(|authority|json!({"authority_id":authority.authority_id,"resource_epoch":authority.resource_epoch}))}),
+                { let mut handoff=json!({"operation_id":operation_id,"source":source,"root":root,"resource_authority":binding.target_authority.as_ref().map(|authority|json!({"authority_id":authority.authority_id,"resource_epoch":authority.resource_epoch}))});
+                  if let Some(stage)=&delegation.agent_source {handoff["source_run_id"]=json!(stage.run_id);} handoff },
             )
         })
     }
@@ -122,7 +146,12 @@ impl Storage {
             })?;
             self.validate_source_grant_owner(&grant.grant_id, original)?;
         }
-        Ok(receipt["result"].clone())
+        let mut result=receipt["result"].clone();
+        if kind=="working.result.publish" {
+            let record=self.working_record_get(&json!({"workspaceId":result["workspaceId"],"recordId":result["recordId"]}), &grant.grant_id,"working.result")?;
+            result["changedPaths"]=record["record"]["changedPaths"].clone();
+        }
+        Ok(result)
     }
     pub(crate) fn require_child_root_idle(
         &mut self,
@@ -207,6 +236,9 @@ impl Storage {
         let dispatch = id
             .strip_prefix("child-source-handoff:")
             .ok_or_else(|| KernelError::Authorization("corrupt handoff identity".into()))?;
+        if handoff.refresh.is_some() {
+            return self.authorize_child_refresh(grant, dispatch, &handoff, method, params);
+        }
         let branch = format!("child-source:{dispatch}");
         let deny = || {
             KernelError::Authorization(
@@ -340,6 +372,57 @@ impl Storage {
         }
         Ok(())
     }
+
+    /// Refresh reads its two fixed stages and writes the new private baseline.
+    fn authorize_child_refresh(&self, grant:&Grant, execution:&str,
+        handoff:&varin_runtime::catalog::collaboration::ChildSourceHandoff,
+        method:&str, params:&Value) -> Result<(),KernelError> {
+        let deny=||KernelError::Authorization("operation exceeds this continuation's source preparation".into());
+        let parent=handoff.source.branch_id.as_deref().ok_or_else(deny)?;
+        let source=format!("child-source:{execution}");
+        let incoming=format!("child-incoming:{execution}");
+        let merged=format!("child-refresh:{execution}");
+        let readable=[parent,source.as_str(),incoming.as_str(),merged.as_str()];
+        let writable=[source.as_str(),merged.as_str()];
+        if !matches!(method,"storage.health"|"storage.getBlob"|"storage.putBlob.begin"|"storage.putBlob.chunk"|
+            "storage.putBlob.finish"|"storage.putBlob.abort"|"storage.blob.release"|"branch.create.begin"|
+            "branch.create.append"|"branch.create.finish"|"branch.create.abort"|"branch.read"|"branch.pin"|
+            "branch.unpin"|"branch.delete"|"pin.read"|"operation.get"|"working.result.get") { return Err(deny()); }
+        if let Some(branch)=params.get("branchId").and_then(Value::as_str) {
+            if !readable.contains(&branch) { return Err(deny()); }
+            if method.starts_with("branch.create.") && !writable.contains(&branch) {return Err(deny());}
+            if method=="branch.read" && params["includeEntries"]!=false {
+                let expected=if branch==parent {handoff.source.revision.unwrap_or(0)} else {0};
+                if params["revision"].as_u64()!=Some(expected) {return Err(deny());}
+            }
+            if method=="branch.delete" && branch!=incoming && !writable.contains(&branch) {return Err(deny());}
+        }
+        if method=="branch.create.begin" {
+            let branch=params["branchId"].as_str().ok_or_else(deny)?;
+            if params["operationId"]!=format!("branch-create:{branch}"){return Err(deny());}
+            if branch==source {
+                let prior=self.branch(&merged)?;
+                if params["baseRef"]!=prior.base_root || params["parentRef"]!=format!("{merged}@0") {return Err(deny());}
+            } else if params.get("baseRef").is_some() {return Err(deny());}
+        }
+        if method=="pin.read" {
+            let pin=params["pinId"].as_str().ok_or_else(deny)?;
+            let owned:bool=self.conn.query_row("SELECT EXISTS(SELECT 1 FROM pins WHERE pin_id=?1 AND grant_id=?2)",
+                params![pin,grant.grant_id],|r|r.get(0))?;
+            if !owned {return Err(deny());}
+        }
+        let result_id=format!("working-result:{parent}@{}",handoff.source.revision.unwrap_or(0));
+        if let Some(record)=params.get("recordId").and_then(Value::as_str) {
+            if method=="working.result.get" {
+                if record!=result_id {return Err(deny());}
+            } else if method=="storage.getBlob" {
+                if record!=result_id && !readable.iter().any(|branch|record==format!("working-source:{branch}")) {return Err(deny());}
+            } else {return Err(deny());}
+        }
+        if method=="operation.get" && params["operationId"]!=handoff.operation_id
+            && !readable.iter().any(|branch|params["operationId"]==format!("branch-create:{branch}")) {return Err(deny());}
+        Ok(())
+    }
 }
 
 impl Storage {
@@ -368,7 +451,12 @@ impl Storage {
         if let Some(result) = receipt["result"].as_object() {
             data.extend(result.clone());
         }
-        let source = &read.source;
+        let exchange=data.get("operationBinding").and_then(|v|v.get("kind")).and_then(Value::as_str)==Some("code_exchange");
+        let target=if exchange {serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(data["operationBinding"]["target"].clone())?}else{read.source.clone()};
+        let source = &target;
+        if source.workspace_id!=read.source.workspace_id || source.resource_owner!=read.source.resource_owner {
+            return Err(KernelError::Authorization("file exchange journal belongs to another resource owner".into()));
+        }
         if data
             .get("operationBinding")
             .and_then(|value| value.get("target"))
@@ -389,7 +477,7 @@ impl Storage {
             varin_runtime::SourceMode::Materialized => {
                 let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([
                     source.workspace_id,
-                    source.environment_run_id.as_deref().unwrap_or(&read.run_id)
+                    source.environment_run_id.as_deref().unwrap_or(if exchange {data["operationBinding"]["targetRunId"].as_str().ok_or_else(||KernelError::Storage("exchange target Run missing".into()))?}else{&read.run_id})
                 ]))?));
                 let materialization = self
                     .operation_get(&json!({"operationId":format!("source-materialize:{key}")}))?;
@@ -691,6 +779,7 @@ mod handoff_tests {
                 &binding,
                 &context,
                 &varin_runtime::catalog::dispatch::ChildSourceDelegation {
+        agent_source: None,
                     work_mode: varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
                     process: false,
                     configured_preset: false,

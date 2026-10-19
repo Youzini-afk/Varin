@@ -11,6 +11,8 @@ use serde_json::json;
 use varin_runtime::{catalog::messages::*, execution::*, *};
 fn input(thread: &str, branch: &str, text: &str) -> MessageInput {
     MessageInput {
+        source_agent: None,
+            name: None,
         wait: None,
         target_thread_id: Some(thread.into()),
         target_branch_id: Some(branch.into()),
@@ -141,6 +143,8 @@ fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact()
         .load(&|| false)
         .is_err());
     let mut reply = MessageInput {
+        source_agent: None,
+            name: None,
         wait: None,
         target_thread_id: None,
         target_branch_id: None,

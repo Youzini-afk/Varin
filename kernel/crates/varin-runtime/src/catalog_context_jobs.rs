@@ -54,6 +54,7 @@ impl ContextJobAdmission {
 
 #[derive(Serialize, serde::Deserialize)]
 struct ContextJobRecipe {
+    recent: Value,
     bot_memory_snapshot: Option<memory::BotMemorySnapshotRef>,
     resource_activations: Vec<resources::ResourceActivation>,
     request: ContextJobRequest,
@@ -64,7 +65,7 @@ struct ContextJobRecipe {
     model_budget: ContextCompactionModelBudget,
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,plan_hash TEXT NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE INDEX context_jobs_owner ON context_jobs(owner_run_id,expected_revision); CREATE TABLE context_job_nodes(run_id TEXT NOT NULL REFERENCES context_jobs(run_id),node_id TEXT NOT NULL,node_index INTEGER NOT NULL,dependencies TEXT NOT NULL,PRIMARY KEY(run_id,node_id),UNIQUE(run_id,node_index)); CREATE TABLE context_job_steps(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),run_id TEXT NOT NULL,node_id TEXT NOT NULL,plan_hash TEXT NOT NULL,FOREIGN KEY(run_id,node_id) REFERENCES context_job_nodes(run_id,node_id));")?;
+    db.execute_batch("CREATE TABLE context_jobs(run_id TEXT PRIMARY KEY REFERENCES runs(id),job_key TEXT NOT NULL UNIQUE,branch_id TEXT NOT NULL REFERENCES branches(id),through_id TEXT NOT NULL REFERENCES history(id),expected_revision INTEGER NOT NULL,owner_run_id TEXT REFERENCES runs(id),recipe TEXT NOT NULL,plan_hash TEXT NOT NULL); CREATE INDEX context_jobs_branch ON context_jobs(branch_id); CREATE INDEX context_jobs_owner ON context_jobs(owner_run_id,expected_revision); CREATE TABLE context_job_nodes(run_id TEXT NOT NULL REFERENCES context_jobs(run_id),node_id TEXT NOT NULL,node_index INTEGER NOT NULL,dependencies TEXT NOT NULL,PRIMARY KEY(run_id,node_id),UNIQUE(run_id,node_index)); CREATE TABLE context_job_steps(request_id TEXT PRIMARY KEY REFERENCES model_steps(id),run_id TEXT NOT NULL,node_id TEXT NOT NULL,plan_hash TEXT NOT NULL,is_final INTEGER NOT NULL DEFAULT 0,FOREIGN KEY(run_id,node_id) REFERENCES context_job_nodes(run_id,node_id));")?;
     Ok(())
 }
 pub(super) fn check_format(db: &Connection) -> Result<()> {
@@ -75,6 +76,16 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 }
 
 impl Catalog {
+    pub(crate) fn context_node_recovery(&self,run:&str,node:&str)->Result<(Vec<Value>,Vec<HistoryItem>)> {
+        let mut q=self.db.prepare("SELECT s.body FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state='completed' AND c.is_final=0 ORDER BY s.rowid")?;
+        let steps=q.query_map(params![run,node],|r|r.get::<_,String>(0))?.map(|row|Ok(serde_json::from_str::<ModelStep>(&row?)?)).collect::<Result<Vec<_>>>()?;
+        let metadata=self.context_job_history(run)?.into_iter().filter(|item|steps.iter().any(|step|item.id.starts_with(&format!("model-item:{}:{}:",step.id.len(),step.id)) || item.id.starts_with(&format!("{}:result:",step.id)))).collect();
+        Ok((steps.into_iter().map(|step|step.request).collect(),metadata))
+    }
+    pub fn summary_project(&self,run:&str)->Result<Option<String>> {
+        let job=self.context_job_metadata(run)?.ok_or_else(||RuntimeError::NotFound(run.into()))?;
+        match job.owner_run_id {Some(owner)=>self.run_project_id(&owner),None=>Ok(None)}
+    }
     /// The summary worker resumes the original plan, rather than the last conversation step.
     /// Only requests proven not dispatched may be prepared again after reopening.
     pub(crate) fn capture_context_execution(
@@ -180,15 +191,17 @@ impl Catalog {
                 "active context checkpoint changed".into(),
             ));
         }
-        let source = source
+        let mut source = source
             .map(|(_, through_id, reference)| {
                 Ok::<_, RuntimeError>(SummarySource {
                     through_id,
                     checkpoint: Some(serde_json::from_str(&reference)?),
+                    recent_head: None,
                 })
             })
             .transpose()?
             .unwrap_or_default();
+        source.recent_head = self.head(&request.branch_id)?;
         let memory_reference = self.memory_state_identity(&request.branch_id)?;
         Ok(ContextJobPreparation {
             memory_reference,
@@ -364,7 +377,7 @@ impl Catalog {
         run_id: &str,
         request_id: Option<&str>,
     ) -> Result<Vec<ContextNodeOutput>> {
-        let mut statement = self.db.prepare("SELECT c.node_id,c.plan_hash,s.id,s.state,o.body FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id LEFT JOIN model_outputs o ON o.request_id=s.id WHERE c.run_id=?1 AND (?2 IS NULL OR c.request_id=?2) ORDER BY s.rowid")?;
+        let mut statement = self.db.prepare("SELECT c.node_id,c.plan_hash,s.id,CASE WHEN s.state='completed' AND c.is_final=0 THEN 'querying' ELSE s.state END,o.body FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id LEFT JOIN model_outputs o ON o.request_id=s.id WHERE c.run_id=?1 AND (?2 IS NULL OR c.request_id=?2) ORDER BY s.rowid")?;
         let rows = statement
             .query_map(params![run_id, request_id], |row| {
                 Ok((
@@ -748,6 +761,10 @@ pub struct ContextJobRead {
     _publication: crate::content::ContentPublication,
 }
 impl ContextJobRead {
+    pub fn read_scope(&self) -> Result<(String,Option<String>)> {
+        let recipe=self.recipe()?;
+        Ok((recipe.request.branch_id,recipe.source.recent_head))
+    }
     fn recipe(&self) -> Result<ContextJobRecipe> {
         let recipe: ContextJobRecipe =
             serde_json::from_value(self.content.load(&self.metadata.recipe)?)?;
@@ -808,6 +825,7 @@ impl ContextJobRead {
                 .collect()
         };
         Ok(ContextJobCompiler {
+            recent: self.content.load_items(&recipe.recent,&||false)?,
             recipe,
             sources,
             content: self.content,
@@ -835,12 +853,14 @@ impl ContextJobRead {
 }
 
 pub(crate) struct ContextJobCompiler {
+    recent: crate::execution::ConversationHistory,
     recipe: ContextJobRecipe,
     sources: std::collections::BTreeMap<String, ContextCompactionSource>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 impl ContextJobCompiler {
+    pub(crate) fn snapshot(&self,reference:&Value)->Result<crate::execution::RequestSnapshot>{self.content.load_snapshot(reference)}
     pub(crate) fn completed(
         &self,
         outputs: &[ContextNodeOutput],
@@ -920,6 +940,7 @@ impl ContextJobCompiler {
                 }
             });
         }
+        history.extend(self.recent.iter().map(|item|std::sync::Arc::unwrap_or_clone(item.clone())));
         let mut instructions = recipe.request.summary_recipe.request_text();
         if let Some(guidance) = &node.instructions {
             instructions.push_str(
@@ -986,6 +1007,7 @@ pub struct PreparedContextJob {
     submission: submissions::PreparedSubmission,
 }
 struct FrozenSummarySource {
+    recent: crate::execution::ConversationHistory,
     preview: ContextCompactionPreview,
     bot_memory_snapshot: Option<memory::BotMemorySnapshotRef>,
     resource_activations: Vec<resources::ResourceActivation>,
@@ -1011,7 +1033,7 @@ impl ContextJobPreparation {
                 "context job identity and boundary are required".into(),
             ));
         }
-        self.launch.tools.clear();
+        self.launch.tools = if self.request.compaction.as_ref().is_some_and(|candidate|matches!(candidate.plan,ContextCompactionPlan::Text{..})) {Vec::new()} else {vec![crate::summary_tools::schema()]};
         self.launch.tool_schema_generation = 0;
         self.launch.policy = policy_identity();
         self.launch.source = None;
@@ -1144,7 +1166,32 @@ impl ContextJobPreparation {
         if let Some(prior) = prior {
             history.insert(0, prior.into());
         }
-        let sources = crate::context_material::quote_sources(&self.request.key, history)?;
+        let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
+        for source in &mut sources {
+            if let Provenance::ExternalData{source:label}=&mut source.item.provenance {
+                let section=if source.source_id.contains(":prior-summary") {"S0"} else {"A"};
+                *label=format!("{section}:{label}");
+            }
+        }
+        let recent_metadata=source_metadata_until(database,self.source.recent_head.as_deref(),Some(&self.request.through_id))?;
+        let recent_history=hydrate_source(&self.content,recent_metadata)?;
+        let mut model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
+        let recent_limit=model_budget.source_budget_tokens.map(|tokens|tokens.saturating_sub(model_budget.max_output_tokens.unwrap_or(0)));
+        let quoted_recent=if recent_history.is_empty(){Vec::new()}else{crate::context_material::quote_sources(&format!("{}:B",self.request.key),recent_history)?.into_iter().map(|mut source|{source.item.provenance=Provenance::ExternalData{source:format!("B:{}",source.source_id)};std::sync::Arc::new(source.item)}).collect::<crate::execution::ConversationHistory>()};
+        let mut recent=Vec::new(); let mut used=0u64; let mut omitted=false;
+        for item in quoted_recent.into_iter().rev() {
+            let cost=crate::context_capacity::estimate_item(&item);
+            if recent_limit.is_some_and(|budget|used.saturating_add(cost)>budget) {omitted=true;break;}
+            used=used.saturating_add(cost); recent.push(item);
+        }
+        recent.reverse();
+        // B is quoted background shared by the nodes; only S0 and A are replaced.
+        let mut recent=recent;
+        if omitted {
+            recent.insert(0,std::sync::Arc::new(ConversationItem{resource_activation:None,id:format!("context-job:{}:B:range",self.request.key),provenance:Provenance::ExternalData{source:"B".into()},content:Content::Text{text:format!("B 已按本次模型容量节选。原文范围：branch={}，after={}，head={}；可用 summary_read 继续读取。",self.request.branch_id,self.request.through_id,self.source.recent_head.as_deref().unwrap_or(""))},opaque:None}));
+        }
+        let recent_tokens=recent.iter().map(|item|crate::context_capacity::estimate_item(item)).sum::<u64>();
+        model_budget.source_budget_tokens=model_budget.source_budget_tokens.map(|budget|budget.saturating_sub(recent_tokens));
         let source_cut_hash = crate::context_material::hash(&json!({
             "quoteFormat":crate::context_material::QUOTE_FORMAT,
             "branchId":self.request.branch_id,"throughId":self.request.through_id,"revision":self.request.expected_revision,
@@ -1155,13 +1202,11 @@ impl ContextJobPreparation {
             "modelBudget":crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?,
         }))?;
         Ok(FrozenSummarySource {
+            recent,
             preview: ContextCompactionPreview {
                 source_cut_hash,
                 sources,
-                model_budget: crate::context_material::model_budget(
-                    &self.configuration,
-                    &self.request.summary_recipe,
-                )?,
+                model_budget,
             },
             bot_memory_snapshot,
             resource_activations,
@@ -1220,6 +1265,7 @@ impl ContextJobPreparation {
                     .collect::<Vec<_>>(),
             )?;
             ContextJobRecipe {
+                recent: self.content.save_items(&frozen.recent)?,
                 request: self.request.clone(),
                 source: self.source.clone(),
                 sources,
@@ -1244,6 +1290,7 @@ impl ContextJobPreparation {
             .and_then(Value::as_str)
             .ok_or_else(|| RuntimeError::Invalid("summary source reference is malformed".into()))?
             .to_owned()];
+        if let Some(object)=recipe.recent.get("content_object").and_then(Value::as_str) {dependencies.push(object.into());}
         if let Some(snapshot) = &recipe.bot_memory_snapshot {
             dependencies.push(snapshot.dependency()?);
         }
@@ -1515,7 +1562,7 @@ fn completed_outputs<'a>(
                     ));
                 }
             }
-            "not_dispatched" => (),
+            "not_dispatched" | "querying" => (),
             _ => {
                 return Err(RuntimeError::Conflict(
                     "summary node has an unsettled or unsuccessful original ModelStep".into(),
@@ -1567,7 +1614,7 @@ pub(super) fn record_step(
             "summary request changed its plan or node".into(),
         ));
     };
-    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n, json_each(n.dependencies) dependency WHERE n.run_id=?1 AND n.node_id=?2 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=dependency.value AND s.state='completed')) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state!='not_dispatched')",params![run_id,step.node_id],|row|row.get(0))?;
+    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n, json_each(n.dependencies) dependency WHERE n.run_id=?1 AND n.node_id=?2 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=dependency.value AND s.state='completed' AND c.is_final=1)) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state!='not_dispatched' AND NOT (s.state='completed' AND c.is_final=0 AND NOT EXISTS(SELECT 1 FROM tool_calls t WHERE t.request_id=c.request_id AND t.receipt IS NULL)))",params![run_id,step.node_id],|row|row.get(0))?;
     if invalid {
         return Err(RuntimeError::Conflict(
             "summary node is already dispatched or dependencies are incomplete".into(),

@@ -759,6 +759,8 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
         );
         f.db.reconcile_child_reports().unwrap();
         let continuation = varin_runtime::catalog::delegated::ChildContinuationCommand {
+            source_agent: None,
+            name: None,
             key: "explicit-after-callback".into(),
             child_operation_id: child.operation_id.clone(),
             previous_run_id: run.clone(),

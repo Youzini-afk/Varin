@@ -296,6 +296,7 @@ export type HarnessModelRole =
   | "explore"
   | "retrievalAgent"
   | "worker"
+  | "verifier"
   | "reader"
   | "nextStep"
   | "permissionJudge"

@@ -196,6 +196,37 @@ fn real_main_sibling_nested_discovery_survives_terminal_and_never_grants_control
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_temporary_tail() {
+    let mut f=Fixture::new();
+    assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
+    let child=f.accept();f.settle_exchange();f.db.cancel_child(&child.operation_id).unwrap();
+    let tail=f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().unwrap();
+    let Content::Text{text}=&tail.content else {panic!("status text")};
+    assert!(text.contains(&child.agent_id));assert!(text.contains("reportCursor"));
+    let before=f.db.history("branch:parent").unwrap().len();
+    let launch=f.db.launch_intent(&f.context.run_id).unwrap().unwrap().selection;
+    let range=HistoryRange{branch_id:"branch:parent".into(),ancestor_id:None,leaf_id:f.db.head("branch:parent").unwrap()};
+    let snapshot=RequestSnapshot {view:RequestView {request_id:"consume-agent-report".into(),run_id:f.context.run_id.clone(),
+        origin:RequestOrigin::Conversation{compaction:None,step:2,history_range:range.clone()},
+        binding:RequestBinding {request_context:None,child_dispatch:f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,goal:None,resource_activations:vec![],resource_checkpoint_id:None,
+            connection_identity:launch.connection_identity,provider_family:launch.provider_family,model:launch.model,credential_ref:Some("credential-ref".into()),
+            configuration_generation:2,tool_schema_generation:1,tools:launch.tools,instruction_sources:vec![],memory_checkpoint:None,attachment_refs:vec![],environment_cursor:0,history_range:range},
+        history:vec![tail.into()]},serialized:json!({}).into()};
+    let epoch=f.db.epoch();
+    for record in [ExecutionRecord::RequestPrepared{snapshot:snapshot.into()},ExecutionRecord::ModelDispatched{request_id:"consume-agent-report".into()},
+        ExecutionRecord::ModelFinished{request_id:"consume-agent-report".into(),outcome:ModelOutcome::Completed,finish_reason:Some(FinishReason::Stop),
+            items:vec![ProviderItem{id:"received-report".into(),content:Content::Text{text:"received".into()},opaque:None}],interrupted_deltas:vec![],usage:UsageReceipt::default(),failure:None}] {
+        f.db.commit_execution(&f.context.run_id,epoch,&record).unwrap();
+    }
+    assert!(f.db.capture_family_read("thread:parent",None,None).unwrap().status_context().unwrap().is_none());
+    let history=f.db.history("branch:parent").unwrap();assert_eq!(history.len(),before+1);
+    assert!(history.iter().all(|item|!item.content.to_string().contains("当前协作任务")));
+    let page=f.db.capture_family_read("thread:parent",None,None).unwrap().list_page(false,FamilyListQuery{scope:Some("history".into()),query:Some(child.agent_id.to_lowercase()),limit:Some(1),..Default::default()},&||false).unwrap();
+    assert_eq!(page.members[0].thread_id,child.child_thread_id);assert!(!page.members[0].current);
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
+}
 #[test]
 fn retained_output_pages_return_exact_text_and_complete_records() {
     let mut f = Fixture::new();

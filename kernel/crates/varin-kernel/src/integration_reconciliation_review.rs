@@ -21,12 +21,16 @@ fn invoke(storage: &mut Storage, method: &str, value: Value) -> Value {
 }
 #[test]
 fn original_integration_unknown_stop_refines_and_replays_identical_public_body_without_disk() {
-    replay_scenario(None);
+    replay_scenario(None,false);
+}
+#[test]
+fn original_code_exchange_receipt_notifies_its_peer_once_after_restart() {
+    replay_scenario(None,true);
 }
 #[test]
 fn compensated_receipt_distinguishes_unissued_surface_intent_from_unacknowledged_dispatch() {
-    replay_scenario(Some("external-intent"));
-    replay_scenario(Some("external-dispatched"));
+    replay_scenario(Some("external-intent"),false);
+    replay_scenario(Some("external-dispatched"),false);
 }
 fn fix_result(db: &mut Catalog, child: &ChildTask) -> ChildWorkingResultRef {
     let epoch = db.epoch();
@@ -70,7 +74,7 @@ fn fix_result(db: &mut Catalog, child: &ChildTask) -> ChildWorkingResultRef {
         .unwrap();
     result
 }
-fn replay_scenario(tail_phase: Option<&str>) {
+fn replay_scenario(tail_phase: Option<&str>,exchange:bool) {
     let mut f = fixture::Fixture::new_isolated();
     let child = f.accept();
     f.settle_exchange();
@@ -89,6 +93,8 @@ fn replay_scenario(tail_phase: Option<&str>) {
         // lookup of the original dispatch's result cannot satisfy its exact publication.
         let original = f.db.child_task(&child.operation_id).unwrap();
         let command = varin_runtime::catalog::delegated::ChildContinuationCommand {
+            source_agent: None,
+            name: None,
             key: "continue-before-integration".into(),
             child_operation_id: child.operation_id.clone(),
             previous_run_id: child.receipt.as_ref().unwrap().run_id.clone(),
@@ -169,8 +175,8 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let target=serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"live_root","live_root":{"hostId":"host","rootId":"original-root","canonicalRoot":nonexistent},"workspace_id":"workspace-A","execution_workspace_id":"workspace-A","branch_id":null,"revision":null})).unwrap();
     let tool = ToolSchema {
         requirements: None,
-        name: "integrate_child".into(),
-        version: "2".into(),
+        name: if exchange {"update"}else{"integrate_child"}.into(),
+        version: if exchange {"1"}else{"2"}.into(),
         description: String::new(),
         schema: json!({"type":"object"}),
         output_schema: None,
@@ -197,7 +203,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
         credential_ref: Some("credential-ref".into()),
         configuration_generation: 2,
         tool_schema_generation: 1,
-        tools: vec![tool],
+        tools: vec![tool.clone()],
         instruction_sources: vec![],
         memory_checkpoint: None,
         attachment_refs: vec![],
@@ -206,9 +212,9 @@ fn replay_scenario(tail_phase: Option<&str>) {
     };
     let call = ToolCall {
         call_id: "integrate".into(),
-        name: "integrate_child".into(),
-        schema_version: "2".into(),
-        arguments: json!({"childOperationId":child.operation_id,"executionId":child.execution_id,"publicationId":publication}),
+        name: tool.name.clone(),
+        schema_version: tool.version.clone(),
+        arguments: if exchange {json!({"source":child.agent_id})}else{json!({"childOperationId":child.operation_id,"executionId":child.execution_id,"publicationId":publication})},
     };
     let context = ToolExecutionContext {
         run_id: run.run_id.clone(),
@@ -258,8 +264,8 @@ fn replay_scenario(tail_phase: Option<&str>) {
             tool: AdmittedTool {
                 call: call.clone(),
                 contract: ToolContract {
-                    name: "integrate_child".into(),
-                    schema_version: "2".into(),
+                    name: tool.name.clone(),
+                    schema_version: tool.version.clone(),
                     read_only: false,
                     completion: CompletionKind::Result,
                     lifetime: Lifetime::Run,
@@ -309,7 +315,7 @@ fn replay_scenario(tail_phase: Option<&str>) {
     let prepared =
         f.db.prepare_result_content()
             .write_external_receipt(ExternalReceipt {
-                executor: "integrate_child".into(),
+                executor: tool.name.clone(),
                 identity: context.operation_id.clone(),
                 epoch: "host-owner".into(),
                 outcome: Outcome::Indeterminate,
@@ -345,8 +351,16 @@ fn replay_scenario(tail_phase: Option<&str>) {
         identity: "installed:integrate@1".into(),
         epoch: "host-owner".into(),
     };
-    let operation_binding = json!({"kind":"runtime_operation","operationId":context.operation_id,"parentRunId":run.run_id,"parentThreadId":child.parent_thread_id,"parentBranchId":child.parent_branch_id,"origin":context.origin,"callId":call.call_id,"childOperationId":child.operation_id,"childExecutionId":child.execution_id,"childThreadId":child.child_thread_id,
+    let mut operation_binding = json!({"kind":"runtime_operation","operationId":context.operation_id,"parentRunId":run.run_id,"parentThreadId":child.parent_thread_id,"parentBranchId":child.parent_branch_id,"origin":context.origin,"callId":call.call_id,"childOperationId":child.operation_id,"childExecutionId":child.execution_id,"childThreadId":child.child_thread_id,
         "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":1,"root":result.root,"publicationId":publication},"target":launch.source});
+    if exchange {
+        operation_binding["kind"]=json!("code_exchange");
+        operation_binding["sourceRunId"]=json!(child.receipt.as_ref().unwrap().run_id);
+        operation_binding["targetRunId"]=json!(run.run_id);
+        operation_binding["targetThreadId"]=json!(run.thread_id);
+        operation_binding.as_object_mut().unwrap().remove("childOperationId");
+        operation_binding.as_object_mut().unwrap().remove("childExecutionId");
+    }
     let journal_id = format!("integration:{}", context.operation_id);
     let mut storage = Storage::open(&root.join("storage"), "host").unwrap();
     let storage_identity = root.join("storage").to_string_lossy().into_owned();
@@ -466,8 +480,17 @@ fn replay_scenario(tail_phase: Option<&str>) {
     } else {
         json!(["a.txt"])
     };
-    let expected = json!({"operationId":journal_id,"status":status,"appliedPaths":["a.txt"],"conflictPaths":[],"compensatedPaths":data["compensatedPaths"],"needsAttentionPaths":[],"diffStats":data["diffStats"],"changedFiles":changed,"text":format!("Recorded integration {journal_id}: {terminal}"),"receipt":{"kind":"integration","workspaceId":"workspace-A","operationId":journal_id,"revision":2,"state":terminal},"effect":"confirmed","executorStopped":true,"recoveryCoverage":"files-only"});
+    let mut expected = json!({"operationId":journal_id,"status":status,"appliedPaths":["a.txt"],"conflictPaths":[],"compensatedPaths":data["compensatedPaths"],"needsAttentionPaths":[],"diffStats":data["diffStats"],"changedFiles":changed,"text":format!("Recorded integration {journal_id}: {terminal}"),"receipt":{"kind":"integration","workspaceId":"workspace-A","operationId":journal_id,"revision":2,"state":terminal},"effect":"confirmed","executorStopped":true,"recoveryCoverage":"files-only"});
     let owner = runtime.catalog();
+    if exchange {
+        let db=owner.lock().unwrap();
+        expected["source"]=db.agent_identity(&child.child_thread_id).unwrap();
+        expected["target"]=db.agent_identity(&run.thread_id).unwrap();
+        expected["result"]=operation_binding["result"].clone();
+        let notice=db.capture_message(&run.thread_id,&run.branch_id,&format!("message:{}",context.operation_id)).unwrap().load().unwrap();
+        assert!(matches!(notice.summary.receipt.identity.actor,varin_runtime::catalog::messages::MessageActor::Agent {operation_id,..} if operation_id==context.operation_id));
+        assert_eq!(notice.summary.receipt.identity.kind,MessageKind::Inform);
+    }
     let original = {
         let db = owner.lock().unwrap();
         db.capture_operation_read(db.operation(&context.operation_id).unwrap())

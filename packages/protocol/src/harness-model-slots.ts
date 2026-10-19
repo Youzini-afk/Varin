@@ -15,6 +15,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "explore",
   "retrievalAgent",
   "worker",
+  "verifier",
   "reader",
   "nextStep",
   "permissionJudge",
@@ -25,7 +26,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "memoryOrganizer",
 ];
 
-const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker"]);
+const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier"]);
 
 export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,

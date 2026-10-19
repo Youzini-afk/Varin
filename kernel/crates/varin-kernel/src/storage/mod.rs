@@ -147,10 +147,11 @@ fn chrono_like_now() -> String {
     // Keep recovery timestamps RFC3339-shaped without adding a clock crate to
     // the kernel's small dependency set.  The civil-date conversion is the
     // standard proleptic Gregorian calculation used for Unix timestamps.
-    let seconds = std::time::SystemTime::now()
+    let elapsed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|value| value.as_secs() as i64)
-        .unwrap_or(0);
+        .unwrap_or_default();
+    let seconds = elapsed.as_secs() as i64;
+    let nanos = elapsed.subsec_nanos();
     let days = seconds.div_euclid(86_400);
     let day_seconds = seconds.rem_euclid(86_400);
     let z = days + 719_468;
@@ -166,7 +167,7 @@ fn chrono_like_now() -> String {
     let hour = day_seconds / 3_600;
     let minute = (day_seconds % 3_600) / 60;
     let second = day_seconds % 60;
-    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{nanos:09}Z")
 }
 
 fn recovery_fault(phase: &str) -> Result<(), KernelError> {

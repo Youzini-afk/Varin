@@ -83,6 +83,14 @@ UI projections retain exact identities and revisions and discard stale asynchron
 Host routes serve native product views; a renderer cannot supply prepared snapshots, trusted actors or
 operation owner records.
 
+`child-profiles.ts` composes the frozen implementation/verification/retrieval choices. `thread-adapter.ts`
+pages the native current/history directory before hydrating selected reports; UI state does not retire tasks.
+`child-source-store.ts` captures the selected concrete worktree and carries a reused Agent's changes over
+that fixed stage. Managed preparation uses the same original target handoff and restricted preparation grant.
+`code-exchange.ts` and `managed-code-exchange.ts` compose selected snapshots with the existing Integration,
+Documents and recovery owners. Native journal reconciliation publishes passive Agent notices under the original
+operation identity. See [collaboration](../../../../../docs/collaboration.md) for the product contract and prompts.
+
 ## Model, tool and extension bridges
 
 Model and credential selection uses the native [Host model service](../models/DOCUMENTATION.md). Runtime provider adapters freeze the

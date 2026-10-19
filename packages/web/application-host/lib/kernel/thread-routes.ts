@@ -6,7 +6,7 @@ import { sourceFailureCode } from './source-admission-error.js';
 import type { McpElicitationResponse, McpSamplingRequestAction, McpSamplingOutputAction } from '@varin/protocol';
 import type { OutputMediaHolder } from '@varin/protocol';
 import { parseComputerWorkRef, parseComputerExecutionRef } from '@varin/protocol';
-import type { FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
+import type { FamilyListParams,FamilyRunsParams, FamilyReadParams, FamilyItemParams, FollowupRegistrationTrigger } from '@varin/protocol';
 import { PlanConflict } from './plan-service.js';
 import { parseThreadImages } from './thread-images.js';
 import type { Express, RequestHandler } from 'express';
@@ -115,15 +115,15 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/list': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/get': ['runtime', 'threadId', 'branchId', 'messageId'],
-    'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf'],
+    'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf', 'scope', 'query', 'cursor', 'limit', 'parentThreadId', 'parentBranchId', 'workspaceId', 'updatedAfterMs', 'updatedBeforeMs', 'filePath'],
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
     'family/read': ['runtime', 'threadId', 'branchId', 'request'],
     'family/item': ['runtime', 'threadId', 'branchId', 'request'],
-    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'previousRunId', 'expectedHead', 'text', 'images', 'materials'],
+    'child/continue': ['runtime', 'threadId', 'branchId', 'key', 'name', 'sourceAgent', 'previousRunId', 'expectedHead', 'text', 'images', 'materials'],
     'child/executions': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/execution/report': ['runtime', 'threadId', 'branchId', 'executionId', 'itemId', 'offset', 'maxBytes'],
     'child/report': ['runtime', 'threadId', 'branchId', 'operationId', 'itemId', 'offset', 'maxBytes'],
-    'child/list': ['runtime', 'threadId', 'branchId'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
+    'child/list': ['runtime', 'threadId', 'branchId'], 'child/page':['runtime','threadId','branchId','options'], 'child/cancel': ['runtime', 'threadId', 'branchId', 'operationId'],
     'child/wait/cancel': ['runtime', 'threadId', 'branchId', 'waitId'], 'tree/cancel': ['runtime', 'threadId', 'branchId'],
     'resources/refresh': ['runtime', 'threadId', 'branchId', 'expectedRevision', 'instructionDirectories', 'supportingFiles'],
     'followup/jobs': ['runtime', 'threadId', 'branchId', 'runId'],
@@ -310,7 +310,15 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('messages/get', (body, signal) => adapter.getMessage(identity(body), text(body.messageId), signal));
   post('family/list', (body, signal) => {
     if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
-    return adapter.familyList(identity(body), body.includeSelf, signal);
+    return adapter.familyList(identity(body), { ...(body.includeSelf===undefined?{}:{includeSelf:body.includeSelf}),
+      ...(body.parentThreadId===undefined?{}:{parentThreadId:text(body.parentThreadId)}),
+      ...(body.parentBranchId===undefined?{}:{parentBranchId:text(body.parentBranchId)}),
+      ...(body.workspaceId===undefined?{}:{workspaceId:text(body.workspaceId)}),
+      ...(body.filePath===undefined?{}:{filePath:text(body.filePath)}),
+      ...(body.updatedAfterMs===undefined?{}:{updatedAfterMs:revision(body.updatedAfterMs)}),
+      ...(body.updatedBeforeMs===undefined?{}:{updatedBeforeMs:revision(body.updatedBeforeMs)}),
+      ...(body.scope===undefined?{}:{scope:text(body.scope)}), ...(body.query===undefined?{}:{query:text(body.query)}),
+      ...(body.cursor===undefined?{}:{cursor:text(body.cursor)}), ...(body.limit===undefined?{}:{limit:revision(body.limit)}) }, signal);
   });
   post('family/runs', (body, signal) => adapter.familyRuns(identity(body), familyRequest<FamilyRunsParams>(body.request), signal));
   post('family/read', (body, signal) => adapter.familyRead(identity(body), familyRequest<FamilyReadParams>(body.request), signal));
@@ -321,6 +329,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       const images = parseThreadImages(body.images);
       const materials = parseThreadMaterials(body.materials);
       return { ...identity(body), key: text(body.key), previousRunId: text(body.previousRunId),
+        ...(body.name===undefined?{}:{name:text(body.name)}),
+        ...(body.sourceAgent===undefined?{}:{sourceAgent:text(body.sourceAgent)}),
         expectedHead: body.expectedHead === null ? null : text(body.expectedHead), text: body.text,
         ...(images === undefined ? {} : { images }), ...(materials === undefined ? {} : { materials }) };
     });
@@ -331,6 +341,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
   post('child/report', (body, signal) => adapter.readChildReport(identity(body), text(body.operationId), text(body.itemId), body.offset === undefined ? 0 : revision(body.offset), body.maxBytes === undefined ? 65536 : revision(body.maxBytes), signal));
   post('child/list', body => adapter.children(identity(body)));
+  post('child/page',(body,signal)=>adapter.childPage(identity(body),familyRequest<Omit<FamilyListParams,'callerThreadId'>>(body.options??{}),signal));
   post('child/cancel', body => adapter.cancelChild(identity(body), text(body.operationId)));
   post('child/wait/cancel', body => adapter.cancelChildWait(identity(body), text(body.waitId)));
   post('tree/cancel', body => adapter.cancelTree(identity(body)));

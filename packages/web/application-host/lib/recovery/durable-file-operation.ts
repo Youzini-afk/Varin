@@ -11,15 +11,14 @@ interface IntegrationBinding {
   parentRunId: string;
   parentThreadId: string;
   parentBranchId: string;
-  childOperationId: string;
-  childExecutionId: string;
   childThreadId: string;
   result: { workspaceId: string; branchId: string; resultRevision: number; root: string; publicationId: string };
   target: LaunchSource;
 }
 export type IntegrationOperationBinding = IntegrationBinding & (
-  | { kind: "runtime_operation"; origin: ToolOrigin; callId: string }
-  | { kind: "user_operation"; key: string }
+  | { kind: "runtime_operation"; childOperationId: string; childExecutionId: string; origin: ToolOrigin; callId: string }
+  | { kind: "user_operation"; childOperationId: string; childExecutionId: string; key: string }
+  | { kind: "code_exchange"; origin: ToolOrigin; callId: string; sourceRunId: string; targetRunId: string; targetThreadId: string }
 );
 
 /** A failed response is not proof that the durable transition failed. */

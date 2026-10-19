@@ -60,7 +60,7 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
       config: { kind: 'builtin', slot: definition.slot, binding: sharedBinding(binding) },
       effective: { name: overrides?.name ?? definition.name, description: overrides?.description ?? definition.description,
         instructions: overrides?.instructions ?? definition.instructions, enabled: binding.enabled !== false,
-        model, modelSource: model ? 'selected' : definition.slot === 'worker' ? 'inherit' : 'unconfigured',
+        model, modelSource: model ? 'selected' : ['worker', 'verifier'].includes(definition.slot) ? 'inherit' : 'unconfigured',
         ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
         worktree: overrides?.worktree ?? definition.worktree, workFocus: [...definition.workFocus] },
       tools: resolveAgentTools(overrides?.tools, target, definition.tools),

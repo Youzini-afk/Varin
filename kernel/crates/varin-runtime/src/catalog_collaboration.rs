@@ -53,6 +53,18 @@ pub struct SourceDraftProvenance {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "consistency", deny_unknown_fields)]
 pub enum ChildSourceProvenance {
+    #[serde(rename = "refreshed-root")]
+    RefreshedRoot {
+        root: String,
+        #[serde(rename = "previousRoot")]
+        previous_root: String,
+        incoming: dispatch::AgentSourceSelection,
+        #[serde(rename = "incomingRoot")]
+        incoming_root: String,
+        conflicts: Vec<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resources: Option<Value>,
+    },
     #[serde(rename = "fixed-root")]
     FixedRoot {
         root: String,
@@ -110,6 +122,10 @@ pub struct ChildSourceAuthority {pub authority_id:String,pub resource_epoch:Stri
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildSourceHandoff {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub refresh: Option<super::dispatch::AgentSourceSelection>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub source_run_id: Option<String>,
     pub resource_authority: Option<ChildSourceAuthority>,
     pub operation_id: String,
     pub source: launches::SourceSelection,
@@ -118,6 +134,8 @@ pub struct ChildSourceHandoff {
 impl ChildSourceHandoff {
     pub fn fixed(operation_id: &str, pin: ChildSourcePin) -> Self {
         Self {
+            refresh:None,
+            source_run_id:None,
             resource_authority:None,
             operation_id: format!("child-source-handoff:{operation_id}"),
             source: pin.source.clone(),
@@ -232,6 +250,8 @@ pub struct ChildReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildTask {
+    pub agent_id: String,
+    pub name: String,
     pub execution_id: String,
     pub operation_id: String,
     pub parent_run_id: String,
@@ -327,8 +347,9 @@ impl Catalog {
     }
 
     pub fn child_task(&self, operation_id: &str) -> Result<ChildTask> {
-        delegated::relation(&self.db, operation_id)?;
-        delegated::execution_task(&self.db, operation_id)
+        if delegated::relation(&self.db, operation_id).is_ok() {return delegated::execution_task(&self.db, operation_id)}
+        let thread=super::threads::resolve(&self.db,operation_id)?;
+        self.child_task_for_thread(&thread)?.ok_or_else(||RuntimeError::NotFound(operation_id.into()))
     }
     pub fn child_tasks(&self) -> Result<Vec<ChildTask>> {
         read_all::<delegated::ChildRelation>(&self.db, "child_tasks")?
@@ -435,8 +456,8 @@ impl Catalog {
             ));
         }
         let parent: launch_content::LaunchMetadata = record(&tx, "run_launches", &run.id)?;
-        if parent.selection.source.as_ref() != handoff.as_ref().map(|handoff| &handoff.source)
-            || parent.selection.tool_schema_generation != child_launch.tool_schema_generation
+        super::dispatch::validate_agent_source(&tx,&run,prepared.source_agent.as_deref(),handoff.as_ref())?;
+        if parent.selection.tool_schema_generation != child_launch.tool_schema_generation
             || parent.selection.tools_ref != prepared.parent_tools_ref
         {
             return Err(RuntimeError::Conflict(
@@ -445,7 +466,7 @@ impl Catalog {
         }
         let child_thread_id = format!("thread:child:{}", op.id);
         let child_branch_id = format!("branch:child:{}", op.id);
-        tx.execute("INSERT INTO threads(id) VALUES(?1)", [&child_thread_id])?;
+        super::threads::insert(&tx, &child_thread_id)?;
         super::threads::initialize_title(&tx, &child_thread_id, prepared.title.as_deref())?;
         tx.execute(
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
@@ -453,6 +474,8 @@ impl Catalog {
         )?;
         let mut child =
             ChildTask {
+                agent_id: tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?,
+                name: prepared.title.clone().unwrap_or_else(|| "Agent".into()),
                 execution_id: op.id.clone(),
                 operation_id: op.id.clone(),
                 parent_run_id: run.id.clone(),
@@ -471,6 +494,7 @@ impl Catalog {
                 source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
                     if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly
                         && handoff.source.resource_owner.is_local()
+                        && handoff.source_run_id.is_none()
                         && matches!(handoff.root, ChildSourceRoot::Physical { .. })
                     {
                         let mut selection = handoff.source.clone();
@@ -498,7 +522,12 @@ impl Catalog {
             };
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
-        super::result_content::publish_job_acceptance(&tx, &mut op, &admitted, "preparing_child")?;
+        let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
+            operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
+            content:Some(json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}).into()),
+        })?;
+        let content_ref=match acceptance {super::result_content::ToolCompletionMetadata::JobAccepted{content_ref,..}=>content_ref,_=>unreachable!()};
+        super::result_content::publish_job_acceptance_content(&tx, &mut op, &admitted, "preparing_child",content_ref)?;
         op.handed_off = true;
         op.phase = OperationPhase::Preparing;
         op.effect = Effect::None;
@@ -576,7 +605,9 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
             .collect::<std::result::Result<_, _>>()?;
         rows
     };
-    if version != Some(8)
+    db.prepare("SELECT execution_id,path FROM child_result_files")?;
+    db.prepare("SELECT operation_id,peer_thread_id FROM code_exchange_peers")?;
+    if version != Some(9)
         || columns
             != vec![
                 ("id".into(), "TEXT".into(), 0, 1),
@@ -681,7 +712,20 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
     Ok(())
 }
 pub(super) fn initialize_new(db: &Connection) -> Result<()> {
-    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE INDEX child_tasks_parent ON child_tasks(json_extract(body,'$.parent_thread_id')); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',8);")?;
+    db.execute_batch("CREATE TABLE child_tasks(id TEXT PRIMARY KEY REFERENCES operations(id),child_thread_id TEXT NOT NULL UNIQUE REFERENCES threads(id),body TEXT NOT NULL); CREATE INDEX child_tasks_parent ON child_tasks(json_extract(body,'$.parent_thread_id')); CREATE TABLE delegated_executions(id TEXT PRIMARY KEY,child_operation_id TEXT NOT NULL REFERENCES child_tasks(id),command_key TEXT UNIQUE,run_id TEXT UNIQUE REFERENCES runs(id),body TEXT NOT NULL); CREATE INDEX delegated_executions_child ON delegated_executions(child_operation_id); CREATE TABLE child_result_files(execution_id TEXT NOT NULL REFERENCES delegated_executions(id) ON DELETE CASCADE,path TEXT NOT NULL,PRIMARY KEY(execution_id,path)); CREATE INDEX child_result_files_path ON child_result_files(path,execution_id); INSERT INTO runtime_domains(name,version) VALUES('collaboration',9);")?;
+    db.execute_batch("CREATE TABLE code_exchange_peers(operation_id TEXT PRIMARY KEY REFERENCES operations(id) ON DELETE CASCADE,peer_thread_id TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE); CREATE INDEX code_exchange_peers_thread ON code_exchange_peers(peer_thread_id,operation_id);")?;
+    Ok(())
+}
+
+pub(super) fn track_code_peer(tx:&Transaction<'_>,run:&Run,operation_id:&str,call:&crate::execution::ToolCall)->Result<()> {
+    let field=match call.name.as_str() {"submit_code"=>"target","update"=>"source",_=>return Ok(())};
+    let peer=if let Some(identity)=call.arguments[field].as_str() {super::threads::resolve(tx,identity).ok()}
+        else {tx.query_row("SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",[&run.thread_id],|r|r.get::<_,String>(0)).optional()?};
+    if let Some(peer)=peer.filter(|peer|peer!=&run.thread_id) {
+        if super::scheduling::thread_family(tx,&peer)?==super::scheduling::thread_family(tx,&run.thread_id)? {
+            tx.execute("INSERT OR IGNORE INTO code_exchange_peers(operation_id,peer_thread_id) VALUES(?1,?2)",params![operation_id,peer])?;
+        }
+    }
     Ok(())
 }
 
@@ -942,7 +986,18 @@ impl ChildPreparation {
         let mut launch = child.launch.load_child_intent(&content)?;
         launch.source = source;
         let operation_id = child.execution_id;
-        let submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+        let source_fact = if let Some(delegated::ChildSourceBasis::Refreshed { incoming, root, .. }) = &execution.source_basis {
+            let provenance = match &execution.source { Some(ChildSource::Ready { provenance_ref, .. }) => content.load(provenance_ref)?, _ => Value::Null };
+            let fact = crate::execution::ConversationItem::<crate::output::ResolvedMedia> {
+                id: format!("child-source-refresh:{}", execution.execution_id),
+                provenance: crate::execution::Provenance::EnvironmentFact { event_id: format!("child-source-refresh:{}", execution.execution_id) },
+                content: crate::execution::Content::Text { text: format!("本轮文件基础已更新，携带了此前成果中的修改。\n{}", json!({"previousRoot":root,"incoming":incoming,
+                    "root":provenance["root"],"incomingRoot":provenance["incomingRoot"],"incomingBranch":format!("child-incoming:{}",execution.execution_id),"conflicts":provenance["conflicts"]})) },
+                opaque: None, resource_activation: None,
+            };
+            Some(content.save_history(&serde_json::to_value(fact)?, &None)?)
+        } else { None };
+        let mut submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
             input_preparation,
             command: SubmitInput {
                 key: format!("child:{operation_id}"),
@@ -990,6 +1045,7 @@ impl ChildPreparation {
             content,
             publication,
         })?;
+        if let Some(fact) = source_fact { submission.environment.push(fact); }
         Ok(PreparedChild {
             operation_id,
             submission: Some(submission),
@@ -1492,7 +1548,11 @@ impl ChildSourcePreparation {
             .content
             .save(&serde_json::to_value(&self.provenance)?)?;
         if let Some(basis) = &self.execution.source_basis {
-            if self.pin.root != basis.root() || provenance_ref != *basis.provenance_ref() {
+            let matches = if let delegated::ChildSourceBasis::Refreshed { incoming, root, .. } = basis {
+                matches!(&self.provenance, ChildSourceProvenance::RefreshedRoot { root: next, previous_root, incoming: selected, incoming_root, .. }
+                    if next == &self.pin.root && previous_root == root && selected == incoming && !incoming_root.is_empty())
+            } else { self.pin.root == basis.root() && provenance_ref == *basis.provenance_ref() };
+            if !matches {
                 return Err(RuntimeError::Conflict(
                     "continued source differs from its exact immutable basis".into(),
                 ));
@@ -1687,6 +1747,10 @@ impl Catalog {
         effect: Effect,
         bindings: &ChildWriterBindings,
     ) -> Result<ChildTask> {
+        self.attach_child_result_files_bound(operation_id,result,effect,bindings,None)
+    }
+    pub fn attach_child_result_files_bound(&mut self,operation_id:&str,result:ChildWorkingResultRef,effect:Effect,
+        bindings:&ChildWriterBindings,changed_paths:Option<&[String]>) -> Result<ChildTask> {
         if operation_id != bindings.operation_id {
             return Err(RuntimeError::Conflict(
                 "child writer identity changed".into(),
@@ -1720,6 +1784,11 @@ impl Catalog {
                 effect,
             })
         {
+            if let Some(paths)=changed_paths {
+                let tx=self.db.transaction()?;
+                for path in paths {tx.execute("INSERT OR IGNORE INTO child_result_files(execution_id,path) VALUES(?1,?2)",params![child.execution_id,path])?;}
+                tx.commit()?;
+            }
             return Ok(child);
         }
         child.code_result = ChildCodeResult::Published { result, effect };
@@ -1731,7 +1800,7 @@ impl Catalog {
             }
             .into();
         }
-        self.commit_child_metadata(child, "child.result_ready")
+        self.commit_child_metadata_with_files(child, "child.result_ready", changed_paths)
     }
     /// Synchronous fixture convenience; production loads the original binding bodies outside Catalog.
     pub fn child_writers_stopped_sync(&self, operation_id: &str) -> Result<bool> {
@@ -1846,10 +1915,16 @@ impl Catalog {
             _publication: self.content.begin_publication(),
         })
     }
-    fn commit_child_metadata(&mut self, mut child: ChildTask, kind: &str) -> Result<ChildTask> {
+    fn commit_child_metadata(&mut self, child: ChildTask, kind: &str) -> Result<ChildTask> {
+        self.commit_child_metadata_with_files(child,kind,None)
+    }
+    fn commit_child_metadata_with_files(&mut self, mut child: ChildTask, kind: &str, files:Option<&[String]>) -> Result<ChildTask> {
         let tx = self.db.transaction()?;
         child.revision += 1;
         delegated::write_child_task(&tx, &child)?;
+        if let Some(files)=files {
+            for path in files {tx.execute("INSERT OR IGNORE INTO child_result_files(execution_id,path) VALUES(?1,?2)",params![child.execution_id,path])?;}
+        }
         event(&tx, &child.execution_id, child.revision, kind, Value::Null)?;
         tx.commit()?;
         Ok(child)

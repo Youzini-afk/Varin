@@ -67,12 +67,13 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
     case 'structure_units': valid = record(value) && text(value.status) && text(value.revision) && Array.isArray(value.units); break;
     case 'original_source': valid = value === null || record(value) && text(value.root) && record(value.provenance); break;
     case 'child_prepare': valid = record(value) && source(value.source) && pin(value.pin) && record(value.provenance); break;
+    case 'child_refresh_capture': valid = record(value) && value.captured === true; break;
     case 'child_result_prepare': case 'child_result_read': valid = value === null || record(value)
       && text(value.publicationId) && text(value.candidateOperationId) && text(value.workspaceId) && text(value.branchId)
       && text(value.root) && text(value.baseRoot) && text(value.pinId) && text(value.basePinId) && typeof value.writeRevision === 'number'; break;
-    case 'child_result_publish': valid = record(value) && text(value.branchId) && typeof value.resultRevision === 'number'
+    case 'child_result_publish': case 'code_capture': valid = record(value) && text(value.branchId) && typeof value.resultRevision === 'number'
       && strings(value.changedPaths) && record(value.pathStates) && record(value.baseStates); break;
-    case 'integration': valid = record(value) && text(value.status) && strings(value.changedFiles); break;
+    case 'integration': case 'code_apply': valid = record(value) && text(value.status) && strings(value.changedFiles); break;
     case 'user_integration': valid = record(value) && ['none', 'confirmed', 'partial', 'unknown'].includes(String(value.effect))
       && typeof value.executorStopped === 'boolean' && record(value.state) && Array.isArray(value.state.operations)
       && value.state.operations.every(row => record(row) && text(row.operationId) && text(row.sourceRunId) && text(row.state)

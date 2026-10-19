@@ -198,6 +198,7 @@ impl Storage {
         temporary_owners: &BTreeMap<String, String>,
         source_paths: &BTreeMap<String, String>,
         source_records: &BTreeMap<String, (String, String)>,
+        source_refs: &BTreeMap<String,String>,
         source_roots: &[&str],
         workspace_id: &str,
         grant_id: &str,
@@ -207,6 +208,12 @@ impl Storage {
                 let supplied_owner = temporary_owners.values().any(|owned| owned == hash);
                 let target_path = segments.join("/");
                 let source_path = source_paths.get(&target_path).unwrap_or(&target_path);
+                let referenced=if let Some(reference)=source_refs.get(&target_path) {
+                    let grant=self.load_grant(grant_id)?;
+                    if !crate::authority::path_allowed(&grant,source_path) {return Err(KernelError::Authorization("content source path is outside the grant".into()));}
+                    let root=self.resolve_base_ref(reference,workspace_id)?;
+                    self.root_get(&root,source_path)?.as_ref().and_then(PathState::object_hash)==Some(hash)
+                } else {false};
                 let source_matches = source_roots.iter().try_fold(false, |matched, root| {
                     if matched {
                         return Ok(true);
@@ -248,7 +255,7 @@ impl Storage {
                 } else {
                     false
                 };
-                if !supplied_owner && !source_matches && !record_matches {
+                if !supplied_owner && !source_matches && !record_matches && !referenced {
                     return Err(KernelError::Authorization(format!(
                         "content object is not bound to an authorized source: {target_path}"
                     )));
@@ -553,6 +560,7 @@ impl Storage {
         let mut owners_to_consume = BTreeMap::new();
         let mut source_paths = BTreeMap::new();
         let mut source_records = BTreeMap::new();
+        let mut source_refs=BTreeMap::new();
         for entry in entries {
             self.check_cancelled()?;
             let path = entry
@@ -581,6 +589,7 @@ impl Storage {
                 ));
             }
             let normalized_path = segments.join("/");
+            if let Some(reference)=entry.get("sourceRef").and_then(Value::as_str) {source_refs.insert(normalized_path.clone(),reference.to_owned());}
             if let Some(source_path) = entry.get("sourcePath").and_then(Value::as_str) {
                 source_paths.insert(
                     normalized_path.clone(),
@@ -638,6 +647,7 @@ impl Storage {
             &owners_to_consume,
             &source_paths,
             &source_records,
+            &source_refs,
             &[&base_root],
             workspace_id,
             grant_id,
@@ -1029,6 +1039,7 @@ impl Storage {
         let mut owners_to_consume = BTreeMap::new();
         let mut source_paths = BTreeMap::new();
         let mut source_records = BTreeMap::new();
+        let mut source_refs=BTreeMap::new();
         for change in changes {
             self.check_cancelled()?;
             let path = change
@@ -1057,6 +1068,7 @@ impl Storage {
                 ));
             }
             let normalized_path = segments.join("/");
+            if let Some(reference)=change.get("sourceRef").and_then(Value::as_str) {source_refs.insert(normalized_path.clone(),reference.to_owned());}
             if let Some(source_path) = change.get("sourcePath").and_then(Value::as_str) {
                 source_paths.insert(
                     normalized_path.clone(),
@@ -1104,6 +1116,7 @@ impl Storage {
             &owners_to_consume,
             &source_paths,
             &source_records,
+            &source_refs,
             &[&branch.head_root, &branch.base_root, &effective_base],
             &branch.workspace_id,
             grant_id,

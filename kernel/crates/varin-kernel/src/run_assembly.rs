@@ -340,6 +340,12 @@ impl RunAssembly {
         let mut launch_source = None;
         let mut declarations = Vec::new();
         let mut collaboration_source = None;
+        if is_context_job && !text_compaction {
+            declarations.push(varin_runtime::composition::tools::ToolDeclaration::new(
+                varin_runtime::summary_tools::schema(),
+                Arc::new(varin_runtime::summary_tools::SummaryTools::new(runtime.catalog())),
+            ));
+        }
         if let Some(binding) = tool_binding {
             launch_source = Some(binding.source_selection()?);
             let retrieval_project_id = runtime

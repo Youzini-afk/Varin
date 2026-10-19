@@ -2757,6 +2757,8 @@ export const settingsDict = {
   "settings.harness.role.retrievalAgent": "多轮检索",
   "settings.harness.role.retrievalAgent.description": "多次查找、核对来源并整理事实。",
   "settings.harness.role.worker": "执行智能体",
+  "settings.harness.role.verifier": "验证智能体",
+  "settings.harness.role.verifier.description": "独立判断实际行为与设计质量，按任务需要选择验证方式。",
   "settings.harness.role.worker.description": "完成委派工作，理解整体目标并协调相关改动。",
   "settings.harness.role.reader": "阅读辅助",
   "settings.harness.role.reader.description": "辅助阅读和整理材料。",

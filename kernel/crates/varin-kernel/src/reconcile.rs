@@ -24,7 +24,7 @@ pub(crate) fn reconcile(
                 let requested: Vec<String> = operations.iter().map(|op| op.id.clone()).collect();
                 let mut reconciled = Vec::new();
                 for operation in &operations {
-                    if operation.executor.as_deref() == Some("integrate_child")
+                    if matches!(operation.executor.as_deref(),Some("integrate_child"|"submit_code"|"update"))
                         && crate::integration_reconciliation::reconcile(
                             &runtime,
                             &resources,

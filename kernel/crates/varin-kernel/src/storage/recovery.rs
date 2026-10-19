@@ -1552,7 +1552,7 @@ impl Storage {
         let kind = params_value.get("kind").and_then(Value::as_str);
         let (sql, values) = if let Some(kind) = kind {
             (
-                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY created_at DESC LIMIT ?3 OFFSET ?4",
+                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 AND kind = ?2 ORDER BY updated_at DESC, rowid DESC LIMIT ?3 OFFSET ?4",
                 vec![
                     Value::String(workspace_id.clone()),
                     Value::String(kind.to_string()),
@@ -1562,7 +1562,7 @@ impl Storage {
             )
         } else {
             (
-                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 ORDER BY created_at DESC LIMIT ?2 OFFSET ?3",
+                "SELECT operation_id, kind, state, data_json, revision, session_id, thread_id, run_id, created_at, updated_at FROM recovery_operations WHERE workspace_id = ?1 ORDER BY updated_at DESC, rowid DESC LIMIT ?2 OFFSET ?3",
                 vec![
                     Value::String(workspace_id.clone()),
                     Value::from(page_size + 1),

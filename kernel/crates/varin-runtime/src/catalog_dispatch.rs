@@ -32,6 +32,7 @@ impl From<crate::execution::ToolSourceRequirement> for ChildSourceRequirement {
 #[serde(rename_all = "snake_case")]
 pub enum ChildPresetDefault {
     Worker,
+    Verifier,
     Retrieval,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,6 +51,10 @@ pub struct ChildCapabilityDescriptor {
 pub struct DispatchInput {
     pub task: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preset: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work_mode: Option<ChildWorkMode>,
@@ -58,7 +63,8 @@ pub struct DispatchInput {
 }
 impl DispatchInput {
     pub fn validate(&self) -> Result<()> {
-        if self.task.trim().is_empty()
+        if self.task.trim().is_empty() || self.name.as_deref().is_some_and(|name| name.trim().is_empty())
+            || self.source_agent.as_deref().is_some_and(|source|source.trim().is_empty())
             || self.preset.as_ref().is_some_and(|id| id.trim().is_empty())
         {
             return Err(RuntimeError::Invalid(
@@ -296,6 +302,8 @@ pub struct ResolvedChildSelection {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildSourceDelegation {
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub agent_source: Option<AgentSourceSelection>,
     pub work_mode: ChildWorkMode,
     pub process: bool,
     pub configured_preset: bool,
@@ -304,11 +312,72 @@ pub struct ChildSourceDelegation {
 impl ResolvedChildSelection {
     pub fn source_delegation(&self) -> ChildSourceDelegation {
         ChildSourceDelegation {
+        agent_source: None,
             work_mode: self.profile.work_mode,
             process: self.process,
             configured_preset: self.profile.preset_id.is_some(),
             selection_ref: self.frozen_reference.clone(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AgentSourceSelection {
+    pub run_id: String,
+    pub source: launches::SourceSelection,
+}
+pub(super) fn agent_file_source(db: &Connection, run: &Run) -> Result<launches::SourceSelection> {
+    let selected: super::launch_content::LaunchMetadata = record(db,"run_launches",&run.id)?;
+    let mut source = selected.selection.source.ok_or_else(|| RuntimeError::Invalid("selected Agent has no file source".into()))?;
+    if run.state.terminal() {
+        let body: Option<String> = db.query_row("SELECT body FROM delegated_executions WHERE run_id=?1", [&run.id], |r| r.get(0)).optional()?;
+        if let Some(body) = body {
+            let execution: super::delegated::DelegatedExecution = serde_json::from_str(&body)?;
+            if let super::collaboration::ChildCodeResult::Published { result, .. } = execution.code_result {
+                source.mode=SourceMode::FixedBranch; source.branch_id=Some(result.branch_id); source.revision=Some(result.result_revision);
+                source.live_root=None; source.environment_run_id=None;
+            }
+        }
+    }
+    Ok(source)
+}
+pub(super) fn validate_agent_source(db: &Connection, parent: &Run, source_agent: Option<&str>,
+    handoff: Option<&super::collaboration::ChildSourceHandoff>) -> Result<()> {
+    let launch: super::launch_content::LaunchMetadata = record(db,"run_launches",&parent.id)?;
+    if let Some(identity)=source_agent {
+        let thread=super::threads::resolve(db,identity)?;
+        if super::scheduling::thread_family(db,&thread)? != super::scheduling::thread_family(db,&parent.thread_id)? {
+            return Err(RuntimeError::Conflict("file source is outside this task family".into()));
+        }
+        let handoff=handoff.ok_or_else(||RuntimeError::Invalid("Agent source handoff missing".into()))?;
+        let run:Run=record(db,"runs",handoff.source_run_id.as_deref().ok_or_else(||RuntimeError::Invalid("Agent source Run missing".into()))?)?;
+        let parent_source=launch.selection.source.as_ref().ok_or_else(||RuntimeError::Invalid("dispatch requires a file source".into()))?;
+        if run.thread_id!=thread || agent_file_source(db,&run)? != handoff.source
+            || handoff.source.workspace_id!=parent_source.workspace_id || handoff.source.resource_owner!=parent_source.resource_owner {
+            return Err(RuntimeError::Conflict("Agent source differs from its original workspace".into()));
+        }
+    } else if launch.selection.source.as_ref()!=handoff.map(|h|&h.source) || handoff.is_some_and(|h|h.source_run_id.is_some()) {
+        return Err(RuntimeError::Conflict("child source differs from the frozen invocation".into()));
+    }
+    Ok(())
+}
+impl Catalog {
+    pub fn dispatch_agent_source(&self, run_id:&str, input:&DispatchInput)->Result<Option<AgentSourceSelection>> {
+        let Some(identity)=&input.source_agent else{return Ok(None)};
+        self.agent_source(run_id, identity).map(Some)
+    }
+    pub fn agent_source(&self, run_id: &str, identity: &str) -> Result<AgentSourceSelection> {
+        let parent=self.run(run_id)?;
+        let thread=super::threads::resolve(&self.db,identity)?;
+        let branch=super::threads::branch(&self.db,&thread)?;
+        let run_id:String=self.db.query_row("SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",[branch],|r|r.get(0))?;
+        let source=agent_file_source(&self.db,&self.run(&run_id)?)?;
+        let selected=AgentSourceSelection{run_id,source};
+        let handoff=super::collaboration::ChildSourceHandoff{refresh:None,source_run_id:Some(selected.run_id.clone()),source:selected.source.clone(),operation_id:String::new(),resource_authority:None,
+            root:super::collaboration::ChildSourceRoot::Physical{root:launches::LiveRoot{host_id:String::new(),root_id:String::new(),canonical_root:String::new()}}};
+        validate_agent_source(&self.db,&parent,Some(identity),Some(&handoff))?;
+        Ok(selected)
     }
 }
 impl ChildDispatchSelection {
@@ -344,9 +413,17 @@ impl ChildDispatchSelection {
             .map(|capability| capability.source_requirement)
     }
     pub fn preset_tools(&self, preset: &ChildPreset) -> Vec<String> {
+        let mut tools = preset.tools.clone();
+        if preset.tools_source == ChildPresetToolsSource::Default {
+            for tool in &self.frozen.allowed_delegation {
+                if self.host_tool(&tool.name).is_some()
+                    && self.source_requirement(&tool.name) != Some(ChildSourceRequirement::Live)
+                    && !(preset.work_mode == ChildWorkMode::ReadOnly && self.physical_tool(&tool.name))
+                    && !tools.contains(&tool.name) { tools.push(tool.name.clone()); }
+            }
+        }
         if preset.tools_source == ChildPresetToolsSource::Default && self.frozen.source.is_none() {
-            preset
-                .tools
+            tools
                 .iter()
                 .filter(|name| {
                     !matches!(
@@ -361,7 +438,7 @@ impl ChildDispatchSelection {
                 .cloned()
                 .collect()
         } else {
-            preset.tools.clone()
+            tools
         }
     }
     pub fn unavailable_source_tools(&self, tools: &[String]) -> Vec<String> {
@@ -417,11 +494,7 @@ impl ChildDispatchSelection {
                 ));
             }
             (
-                if input.tools.is_none() {
-                    self.preset_tools(preset)
-                } else {
-                    preset.tools.clone()
-                },
+                self.preset_tools(preset),
                 input.work_mode.unwrap_or(preset.work_mode),
                 preset.instructions.clone(),
                 preset
@@ -1011,6 +1084,7 @@ impl Catalog {
                     continue;
                 }
                 execution.cancel_requested = true;
+                let report_created=execution.receipt.is_none() && execution.report.is_none();
                 if execution.receipt.is_none() && execution.report.is_none() {
                     if !execution.code_result.settled() {
                         execution.code_result = ChildCodeResult::Unavailable {
@@ -1035,6 +1109,7 @@ impl Catalog {
                     "child.cancel_requested",
                     Value::Null,
                 )?;
+                if report_created {event(&tx,&execution.execution_id,execution.revision,"child.report_ready",json!({"outcome":"cancelled"}))?;}
             }
         }
         let cursor: u64 =

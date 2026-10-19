@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 49;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 50;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2430,6 +2430,8 @@ pub(crate) struct KernelComputeGrammarParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildContinuationAcceptParams {
+    pub(crate) source_agent: Option<String>,
+    pub(crate) name: Option<String>,
     pub(crate) key: String,
     pub(crate) child_operation_id: String,
     pub(crate) previous_run_id: String,
@@ -2539,6 +2541,16 @@ pub(crate) struct ChildWaitParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FamilyListParams {
+    pub(crate) file_path: Option<String>,
+    pub(crate) parent_thread_id: Option<String>,
+    pub(crate) parent_branch_id: Option<String>,
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) updated_after_ms: Option<i64>,
+    pub(crate) updated_before_ms: Option<i64>,
+    pub(crate) scope: Option<String>,
+    pub(crate) query: Option<String>,
+    pub(crate) cursor: Option<String>,
+    pub(crate) limit: Option<i64>,
     pub(crate) caller_thread_id: String,
     pub(crate) include_self: Option<bool>,
 }
@@ -2581,6 +2593,8 @@ pub(crate) struct FamilyItemParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct MessageSendParams {
+    pub(crate) source_agent: Option<String>,
+    pub(crate) name: Option<String>,
     pub(crate) key: String,
     pub(crate) sender_thread_id: String,
     pub(crate) sender_branch_id: String,
@@ -3054,6 +3068,7 @@ pub(crate) struct KernelCreateEntry {
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
+    pub(crate) source_ref: Option<String>,
     pub(crate) source_record_id: Option<String>,
     pub(crate) source_slot: Option<String>,
 }
@@ -3065,6 +3080,7 @@ pub(crate) struct KernelBranchChange {
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
+    pub(crate) source_ref: Option<String>,
     pub(crate) source_record_id: Option<String>,
     pub(crate) source_slot: Option<String>,
 }

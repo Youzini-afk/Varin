@@ -513,6 +513,8 @@ fn continued_child_proves_the_actual_predecessor_basis_and_new_materialized_sour
         .unwrap();
     let prepared =
         f.db.capture_child_continuation(ChildContinuationCommand {
+            source_agent: None,
+            name: None,
             key: "continue-managed".into(),
             child_operation_id: initial.operation_id.clone(),
             previous_run_id: first_run.clone(),
@@ -584,6 +586,8 @@ fn continued_child_proves_the_actual_predecessor_basis_and_new_materialized_sour
         previous_run_id: first_run,
     };
     proof.handoff = ChildSourceHandoff {
+        refresh:None,
+        source_run_id: None,
         operation_id: format!("child-source-handoff:{}", next.execution_id),
         source: source_basis.source().clone(),
         resource_authority: Some(ChildSourceAuthority {

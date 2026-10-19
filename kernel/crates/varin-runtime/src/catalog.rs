@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 77;
+pub(crate) const FORMAT: i64 = 78;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -309,7 +309,7 @@ impl Catalog {
             ));
         }
 
-        tx.execute("INSERT INTO threads(id) VALUES(?1)", [thread_id])?;
+        threads::insert(&tx, thread_id)?;
         if let Some(bot_id) = bot_id {
             if !bot::permitted(&tx, bot_id, self.epoch)? { return Err(RuntimeError::RequestActivationHeld); }
             tx.execute("INSERT INTO bot_thread_bindings(thread_id,bot_id) VALUES(?1,?2)", params![thread_id, bot_id])?;
@@ -438,7 +438,7 @@ impl Catalog {
             }
         }
         if create_thread {
-            tx.execute("INSERT INTO threads(id) VALUES(?1)", [&command.thread_id])?;
+            threads::insert(&tx, &command.thread_id)?;
             tx.execute(
                 "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
                 params![command.branch_id, command.thread_id],
@@ -535,6 +535,18 @@ impl Catalog {
             "UPDATE branches SET head=?2,active_run=?3 WHERE id=?1",
             params![command.branch_id, input_id, run_id],
         )?;
+        let mut parent = input_id.clone();
+        for reference in &prepared.environment {
+            let item = HistoryItem { id: id(), run_id: run_id.clone(), thread_id: run.thread_id.clone(),
+                parent: Some(parent), source: HistorySource::Environment, content: reference.clone(), provider: None };
+            tx.execute("INSERT INTO history(id,thread_id,parent,body,run_id) VALUES(?1,?2,?3,?4,?5)",
+                params![item.id,item.thread_id,item.parent,encode(&item)?,run_id])?;
+            parent = item.id;
+            event(tx,&run.branch_id,0,"history.appended",json!({"id":parent}))?;
+        }
+        if !prepared.environment.is_empty() {
+            tx.execute("UPDATE branches SET head=?2 WHERE id=?1",params![run.branch_id,parent])?;
+        }
         if let Some(selection) = launch {
             if let Some(source) = selection.source.as_ref() {
                 launches::validate_environment_source(&tx, &run.thread_id, source)?;
@@ -1637,7 +1649,9 @@ fn read_all<T: DeserializeOwned>(db: &Connection, table: &str) -> Result<Vec<T>>
 const SCHEMA: &str = r#"
 CREATE TABLE runtime_meta(id INTEGER PRIMARY KEY CHECK(id=1),epoch INTEGER NOT NULL);
 INSERT INTO runtime_meta VALUES(1,0);
-CREATE TABLE threads(id TEXT PRIMARY KEY,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
+CREATE TABLE threads(id TEXT PRIMARY KEY,agent_code TEXT NOT NULL UNIQUE,title TEXT NOT NULL DEFAULT 'New thread',title_initialized INTEGER NOT NULL DEFAULT 0 CHECK(title_initialized IN (0,1)),revision INTEGER NOT NULL DEFAULT 1 CHECK(revision>0),created_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),updated_at_ms INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)*1000),pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0,1)),deleted_at_ms INTEGER,activity_cursor INTEGER NOT NULL DEFAULT 0 CHECK(activity_cursor>=0),read_cursor INTEGER NOT NULL DEFAULT 0 CHECK(read_cursor>=0));
+CREATE TABLE retired_agent_codes(code TEXT PRIMARY KEY);
+CREATE TRIGGER retire_agent_code BEFORE DELETE ON threads BEGIN INSERT INTO retired_agent_codes(code) VALUES(old.agent_code); END;
 CREATE TABLE branches(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),head TEXT,active_run TEXT);
 CREATE INDEX branches_thread ON branches(thread_id);
 CREATE TABLE history(id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES threads(id),parent TEXT REFERENCES history(id),run_id TEXT NOT NULL REFERENCES runs(id) DEFERRABLE INITIALLY DEFERRED,body TEXT NOT NULL);

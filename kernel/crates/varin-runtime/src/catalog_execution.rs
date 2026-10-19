@@ -144,6 +144,15 @@ impl Persistence for Mutex<Catalog> {
             .map_err(policy_error)?;
         read.map(|r| r.load()).transpose().map_err(policy_error)
     }
+    fn teammate_context(&self, run: &str, epoch: u64) -> std::result::Result<Option<ConversationItem>,ExecutionError> {
+        let read = {
+            let catalog=self.lock().map_err(catalog_lock_error)?;
+            let run=catalog.run(run).map_err(policy_error)?;
+            fence(&run,epoch).map_err(policy_error)?;
+            catalog.capture_family_read(&run.thread_id,None,None).map_err(policy_error)?
+        };
+        read.status_context().map_err(policy_error)
+    }
     fn goal_boundary(
         &self,
         run: &str,
@@ -837,6 +846,7 @@ pub(super) struct ExecutionBodyPreparation {
     has_goal: bool,
 }
 pub(super) struct PreparedExecutionBodies {
+    teammate_deliveries: Vec<(String,u64)>,
     _publication: crate::content::ContentPublication,
     request: Option<Value>,
     tools_ref: Option<Value>,
@@ -954,6 +964,18 @@ impl ExecutionBodyPreparation {
             )?),
             _ => None,
         };
+        let mut teammate_deliveries=Vec::new();
+        if let Some(snapshot)=&snapshot {
+            for item in snapshot.view.history.iter().filter(|item|item.id.starts_with("teammates:")) {
+                if let Content::Text{text}=&item.content {
+                    if let Some((_,json))=text.split_once('\n') {
+                        if let Ok(rows)=serde_json::from_str::<Vec<Value>>(json) {
+                            for row in rows {if let (Some(id),Some(cursor))=(row["executionId"].as_str(),row["reportCursor"].as_u64()){teammate_deliveries.push((id.into(),cursor));}}
+                        }
+                    }
+                }
+            }
+        }
         let mut history = std::collections::HashMap::new();
         for item in history_items(record) {
             let provider = item.opaque.as_ref().map(|o| ProviderOriginal {
@@ -1057,6 +1079,7 @@ impl ExecutionBodyPreparation {
             None
         };
         Ok(PreparedExecutionBodies {
+            teammate_deliveries,
             _publication: self.publication,
             request,
             tools_ref,
@@ -1128,6 +1151,7 @@ impl Catalog {
         prepared: PreparedExecutionBodies,
     ) -> Result<()> {
         let PreparedExecutionBodies {
+            teammate_deliveries,
             _publication,
             request: prepared_request,
             tools_ref,
@@ -1188,6 +1212,18 @@ impl Catalog {
         let tx = self.db.transaction()?;
         let mut run: Run = record_value(&tx, run_id)?;
         fence(&run, epoch)?;
+        if let ExecutionRecord::ModelFinished{request_id,outcome:ModelOutcome::Completed,..}=record {
+            for (execution,cursor) in teammate_deliveries {
+                let delegated=super::delegated::execution(&tx,&execution)?;
+                let relation=super::delegated::relation(&tx,&delegated.child_operation_id)?;
+                let recipient=if let super::delegated::DelegatedTrigger::MessageRequest { message_id, .. }=&delegated.trigger {
+                    let input: super::inputs::QueuedInputMetadata=super::record(&tx,"input_queue",message_id)?;
+                    super::messages::message_identity(&input)?.sender_thread_id.clone()
+                } else { relation.parent_thread_id };
+                if run.thread_id!=recipient { continue; }
+                tx.execute("INSERT OR IGNORE INTO deliveries(observer,fact_cursor,request,state) VALUES(?1,?2,?3,'\"committed\"')",params![format!("agent-status:{execution}"),sql_number(cursor)?,request_id])?;
+            }
+        }
         let referenced_request = match record {
             ExecutionRecord::RequestNotDispatched { request_id, .. }
             | ExecutionRecord::ModelDispatched { request_id }
@@ -1458,6 +1494,7 @@ impl Catalog {
                 outcome,
                 items,
                 usage,
+                finish_reason,
                 ..
             } => {
                 let mut step: ModelStep = super::record(&tx, "model_steps", request_id)?;
@@ -1507,6 +1544,7 @@ impl Catalog {
                     "UPDATE model_steps SET state=?2 WHERE id=?1",
                     params![request_id, encode(&step.state)?.trim_matches('"')],
                 )?;
+                tx.execute("UPDATE context_job_steps SET is_final=?2 WHERE request_id=?1",params![request_id,*outcome==ModelOutcome::Completed && *finish_reason==Some(FinishReason::Stop)])?;
                 // Completion, original output, semantic history and unresolved call identities commit together.
                 if *outcome == ModelOutcome::Completed {
                     for item in items {
@@ -1639,6 +1677,7 @@ impl Catalog {
                         params![key, run_id, encode(&op)?],
                     )?;
                 }
+                super::collaboration::track_code_peer(&tx,&run,key,&tool.call)?;
             }
             ExecutionRecord::ToolDispatched {
                 context,

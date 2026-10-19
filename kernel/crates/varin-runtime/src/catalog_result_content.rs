@@ -348,12 +348,17 @@ pub(super) fn publish_job_acceptance(
     admitted: &super::tool_content::ToolIntent,
     phase: &str,
 ) -> Result<()> {
+    publish_job_acceptance_content(tx,op,admitted,phase,None)
+}
+pub(super) fn publish_job_acceptance_content(
+    tx:&Transaction<'_>,op:&mut Operation,admitted:&super::tool_content::ToolIntent,phase:&str,content_ref:Option<Value>,
+) -> Result<()> {
     let completion = super::result_content::ToolCompletionMetadata::JobAccepted {
         operation_id: op.id.clone(),
         phase: phase.into(),
         effect: Effect::None,
         lifetime: Lifetime::Thread,
-        content_ref: None,
+        content_ref,
     };
     if op
         .call_completion

@@ -122,6 +122,8 @@ fn reply(f: &Fixture, id: &str, key: &str, kind: varin_runtime::MessageKind) -> 
             "thread:parent".into(),
             "branch:parent".into(),
             MessageInput {
+                source_agent: None,
+            name: None,
                 wait: None,
                 target_thread_id: None,
                 target_branch_id: None,

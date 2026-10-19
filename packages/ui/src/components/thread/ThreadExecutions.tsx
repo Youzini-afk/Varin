@@ -19,7 +19,8 @@ export function ThreadExecutions({ api, identity, executions }: { api: ThreadsAP
   return <div className="space-y-2">
     {executions.map((execution, index) => <details key={execution.execution_id} className="rounded-lg border border-border/50 px-3 py-2 typography-meta">
       <summary className="flex cursor-pointer items-center justify-between gap-2">
-        <span>{t(triggers[execution.trigger.kind])} · {index + 1}</span><ChildState state={execution.state} />
+        <span>{execution.name || t(triggers[execution.trigger.kind])} · {index + 1}
+          {execution.agent_id && <span className="ml-2 font-mono text-muted-foreground">{execution.agent_id}</span>}</span><ChildState state={execution.state} />
       </summary>
       <div className="mt-2 space-y-2">
         <ChildFileResult result={execution.code_result} />

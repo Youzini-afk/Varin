@@ -595,6 +595,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.integration.retry': '读取原操作结果',
   'chat.integration.refresh': '刷新预览',
   'chat.family.refresh': '刷新',
+  'chat.family.history': '已结束任务',
+  'chat.family.current': '当前任务',
   'chat.family.failed': '读取失败，请刷新。',
   'chat.family.empty': '暂无其他任务。',
   'chat.family.untitled': '未命名任务',

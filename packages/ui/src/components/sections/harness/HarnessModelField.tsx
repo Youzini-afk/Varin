@@ -15,7 +15,7 @@ export function HarnessModelField({ harness, update, slot, enableControl = true 
   const selected = harness.models[slot];
   const catalog = useConfigurationModels();
   const selectedModel = catalog.modelsFor(selected?.providerId ?? '', 'chat').find(model => model.id === selected?.modelId);
-  const inherited = slot === 'worker';
+  const inherited = slot === 'worker' || slot === 'verifier';
   const label = t(slot === 'explore' ? 'settings.page.harness.codeRetrieval.mode.llm' : `settings.harness.role.${slot}`);
   const emptyLabel = t(inherited ? 'settings.page.harness.models.mainModel' : 'settings.harness.models.noModel');
   return <div className="flex min-w-0 flex-col gap-2 py-2 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-6" data-settings-item={`harness.models.${slot}`}>

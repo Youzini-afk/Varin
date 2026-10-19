@@ -137,7 +137,15 @@ pub struct FamilyBranch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FamilyMember {
+    pub source: Option<launches::SourceSelection>,
+    pub source_run_id: Option<String>,
+    pub operation_id: Option<String>,
+    pub latest_execution_id: Option<String>,
     pub thread_id: String,
+    pub agent_id: String,
+    pub name: String,
+    pub current: bool,
+    pub updated_at_ms: u64,
     pub parent_thread_id: Option<String>,
     pub task: Option<String>,
     pub state: String,
@@ -148,7 +156,29 @@ pub struct FamilyMember {
 pub struct FamilyList {
     pub root_thread_id: String,
     pub members: Vec<FamilyMember>,
+    pub next_cursor: Option<String>,
 }
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct FamilyListQuery {
+    pub file_path: Option<String>,
+    pub parent_thread_id: Option<String>,
+    pub parent_branch_id: Option<String>,
+    pub workspace_id: Option<String>,
+    pub updated_after_ms: Option<u64>,
+    pub updated_before_ms: Option<u64>,
+    pub scope: Option<String>,
+    pub query: Option<String>,
+    pub cursor: Option<String>,
+    pub limit: Option<usize>,
+}
+#[derive(Serialize, Deserialize)]
+struct MemberCursor { caller:String, root:String, before:i64, maximum:i64, scope:String, query:Option<String>,filters:String }
+// Current work is projected from the owners that already track execution and delivery.
+const CURRENT: &str = "(EXISTS(SELECT 1 FROM branches b WHERE b.thread_id=t.id AND b.active_run IS NOT NULL)
+ OR EXISTS(SELECT 1 FROM code_exchange_peers p JOIN operations o ON o.id=p.operation_id WHERE p.peer_thread_id=t.id AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.effect')='unknown'))
+ OR EXISTS(SELECT 1 FROM input_queue q WHERE q.branch_id IN (SELECT id FROM branches WHERE thread_id=t.id) AND q.state='queued' AND q.activation='activating')
+ OR EXISTS(SELECT 1 FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id WHERE c.child_thread_id=t.id AND d.rowid=(SELECT max(x.rowid) FROM delegated_executions x WHERE x.child_operation_id=c.id) AND (json_extract(d.body,'$.report') IS NULL OR json_extract(d.body,'$.code_result.kind') IN ('pending','settling','candidate') OR NOT EXISTS(SELECT 1 FROM deliveries x WHERE x.state='\"committed\"' AND (x.observer='agent-status:'||d.id OR (d.id=c.id AND x.observer='child-report-history:'||c.id))))))";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunPage {
@@ -266,6 +296,12 @@ fn check(cancel: &dyn Fn() -> bool) -> Result<()> {
     }
 }
 impl Catalog {
+    pub fn summary_family_read(&self,branch:&str,head:Option<String>)->Result<(FamilyRead,String)> {
+        let thread:String=self.db.query_row("SELECT thread_id FROM branches WHERE id=?1",[branch],|r|r.get(0))?;
+        let mut read=self.capture_family_read(&thread,Some(&thread),Some(branch))?;
+        read.target.as_mut().expect("summary source").2=head;
+        Ok((read,thread))
+    }
     pub fn capture_family_read(
         &self,
         caller: &str,
@@ -280,7 +316,13 @@ impl Catalog {
         if !exists {
             return Err(RuntimeError::NotFound(caller.into()));
         }
-        let target = match (thread, branch) {
+        let resolved_thread = thread.map(|thread| super::threads::resolve(&self.db,thread)).transpose()?;
+        let resolved_branch = match (resolved_thread.as_deref(), branch) {
+            (Some(thread), None) => Some(super::threads::branch(&self.db,thread)?),
+            (_, Some(branch)) => Some(branch.to_owned()),
+            _ => None,
+        };
+        let target = match (resolved_thread.as_deref(), resolved_branch.as_deref()) {
             (Some(thread), Some(branch)) => {
                 let (actual, head): (String, Option<String>) = self
                     .db
@@ -352,6 +394,34 @@ impl Catalog {
     }
 }
 impl FamilyRead {
+    pub fn status_context(self) -> Result<Option<ConversationItem>> {
+        let db=self.open(&||false)?;
+        let caller=self.caller.clone();
+        let page=self.list_page_in(&db,false,FamilyListQuery::default(),&||false)?;
+        if page.members.is_empty() { return Ok(None); }
+        let mut rows=Vec::new();
+        for member in page.members {
+            let mut row=json!({"name":member.name,"agentId":member.agent_id,"task":member.task.as_deref().and_then(|task|task.lines().next()),"state":member.state,"branches":member.branches});
+            if let Some(run)=member.branches.iter().find_map(|branch|branch.active_run_id.as_deref()) {
+                let progress:Option<(String,String)>=db.query_row("SELECT coalesce(json_extract(body,'$.executor'),''),json_extract(body,'$.phase') FROM operations WHERE run_id=?1 ORDER BY rowid DESC LIMIT 1",[run],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+                if let Some((tool,phase))=progress {row["progress"]=json!({"tool":tool,"phase":phase});}
+            }
+            let handoff:Option<(String,Option<String>,String,String)>=db.query_row("SELECT o.id,json_extract(o.body,'$.executor'),json_extract(o.body,'$.phase'),json_extract(o.body,'$.effect') FROM code_exchange_peers p JOIN operations o ON o.id=p.operation_id WHERE p.peer_thread_id=?1 AND (json_extract(o.body,'$.phase')!='terminal' OR json_extract(o.body,'$.effect')='unknown') ORDER BY o.rowid DESC LIMIT 1",[&member.thread_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional()?;
+            if let Some((id,tool,phase,effect))=handoff {row["handoff"]=json!({"operationId":id,"tool":tool,"phase":phase,"effect":effect});}
+            let execution:Option<(String,String)>=db.query_row("SELECT d.id,d.body FROM delegated_executions d JOIN child_tasks c ON c.id=d.child_operation_id WHERE c.child_thread_id=?1 ORDER BY d.rowid DESC LIMIT 1",[&member.thread_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+            if let Some((id,raw))=execution {
+                let execution:delegated::DelegatedExecution=serde_json::from_str(&raw)?;
+                if let Some(report)=execution.report {
+                    row["executionId"]=json!(id);
+                    row["report"]=json!({"outcome":report.outcome,"runId":report.run_id,"detail":report.detail});
+                    row["codeResult"]=serde_json::to_value(execution.code_result)?;
+                    if let Some(cursor)=db.query_row("SELECT cursor FROM events WHERE subject=?1 AND kind='child.report_ready' ORDER BY cursor DESC LIMIT 1",[&id],|r|read_number(r,0)).optional()? {row["reportCursor"]=json!(cursor);}
+                }
+            }
+            rows.push(row);
+        }
+        Ok(Some(ConversationItem { resource_activation:None,id:format!("teammates:{caller}"),provenance:crate::execution::Provenance::ExternalData{source:"current-teammates".into()},content:Content::Text{text:format!("当前协作任务：\n{}",serde_json::to_string(&rows)?)},opaque:None }))
+    }
     pub fn authorize(self, cancel: &dyn Fn() -> bool) -> Result<()> {
         self.open(cancel)?;
         self.finish(cancel)
@@ -512,25 +582,36 @@ impl FamilyRead {
         Ok(anchor)
     }
     pub fn list(self, include_self: bool, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
+        self.list_page(include_self, FamilyListQuery { scope:Some("all".into()),..Default::default() },cancel)
+    }
+    pub fn list_page(self, include_self: bool, query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let db = self.open(cancel)?;
+        self.list_page_in(&db,include_self,query,cancel)
+    }
+    fn list_page_in(&self,db:&Connection, include_self: bool, query:FamilyListQuery, cancel: &dyn Fn() -> bool) -> Result<FamilyList> {
         let root = super::scheduling::thread_family(&db, &self.caller)?;
-        let mut pending = vec![root.clone()];
-        let mut seen = BTreeSet::new();
+        let scope = query.scope.as_deref().unwrap_or("current");
+        if !["current","history","all"].contains(&scope) || query.limit == Some(0) { return Err(RuntimeError::Invalid("invalid task directory query".into())); }
+        let maximum:i64 = db.query_row("SELECT coalesce(max(rowid),0) FROM threads",[],|r|r.get(0))?;
+        let parent=query.parent_thread_id.as_deref().map(|id|super::threads::resolve(&db,id)).transpose()?;
+        let filters=serde_json::to_string(&json!([include_self,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms,query.updated_before_ms,query.file_path,query.limit]))?;
+        let cursor = query.cursor.as_deref().map(|v|self.decode::<MemberCursor>(v)).transpose()?;
+        if cursor.as_ref().is_some_and(|c|c.caller!=self.caller || c.root!=root || c.scope!=scope || c.query!=query.query || c.filters!=filters) { return Err(RuntimeError::Conflict("task directory cursor belongs to another query".into())); }
+        let maximum=cursor.as_ref().map_or(maximum,|c|c.maximum);
+        let before=cursor.as_ref().map_or(maximum.saturating_add(1),|c|c.before);
+        let scope_filter = match scope { "current"=>CURRENT.to_owned(),"history"=>format!("NOT {CURRENT}"),_=>"1".into() };
+        let limit=query.limit.unwrap_or(usize::MAX);
+        let read_limit=query.limit.map(|limit|sql_number(limit.saturating_add(1) as u64)).transpose()?.unwrap_or(-1);
+        let sql=format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id) SELECT t.id,t.rowid,{CURRENT},t.updated_at_ms FROM threads t JOIN family f ON t.id=f.id WHERE t.deleted_at_ms IS NULL AND t.rowid<=?2 AND t.rowid<?3 AND (?4 OR t.id!=?5) AND ({scope_filter}) AND (?6 IS NULL OR t.id=?6 OR instr(lower(t.title),lower(?6))>0 OR t.agent_code=upper(?6))
+          AND (?8 IS NULL OR EXISTS(SELECT 1 FROM child_tasks c WHERE c.child_thread_id=t.id AND json_extract(c.body,'$.parent_thread_id')=?8 AND (?9 IS NULL OR json_extract(c.body,'$.parent_branch_id')=?9)))
+          AND (?10 IS NULL OR EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=t.id AND json_extract(l.body,'$.selection.source.workspace_id')=?10))
+          AND (?11 IS NULL OR t.updated_at_ms>=?11) AND (?12 IS NULL OR t.updated_at_ms<=?12)
+          AND (?13 IS NULL OR EXISTS(SELECT 1 FROM child_result_files f JOIN delegated_executions d ON d.id=f.execution_id JOIN child_tasks c ON c.id=d.child_operation_id WHERE c.child_thread_id=t.id AND f.path=?13)) ORDER BY t.rowid DESC LIMIT ?7");
+        let candidates = db.prepare(&sql)?.query_map(params![root,maximum,before,include_self,self.caller,query.query,read_limit,parent,query.parent_branch_id,query.workspace_id,query.updated_after_ms.map(sql_number).transpose()?,query.updated_before_ms.map(sql_number).transpose()?,query.file_path], |r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?,r.get::<_,bool>(2)?,read_number(r,3)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
         let mut members = Vec::new();
-        while let Some(thread) = pending.pop() {
+        let next_cursor=if candidates.len()>limit { Some(self.sign(&MemberCursor{caller:self.caller.clone(),root:root.clone(),before:candidates[limit-1].1,maximum,scope:scope.into(),query:query.query.clone(),filters})?) } else {None};
+        for (thread,_,current,updated_at_ms) in candidates.into_iter().take(limit) {
             check(cancel)?;
-            if !seen.insert(thread.clone()) {
-                return Err(RuntimeError::Invalid("cyclic task lineage".into()));
-            }
-            let mut children=db.prepare("SELECT child_thread_id FROM child_tasks WHERE json_extract(body,'$.parent_thread_id')=?1 ORDER BY rowid")?;
-            pending.extend(
-                children
-                    .query_map([&thread], |row| row.get::<_, String>(0))?
-                    .collect::<std::result::Result<Vec<_>, _>>()?,
-            );
-            if !include_self && thread == self.caller {
-                continue;
-            }
             if super::scheduling::thread_family(&db, &thread)? != root {
                 return Err(RuntimeError::Invalid("inconsistent task lineage".into()));
             }
@@ -547,6 +628,10 @@ impl FamilyRead {
                     delegated::execution_task(&db, &relation.operation_id)
                 })
                 .transpose()?;
+            let latest_execution=child.as_ref().map(|child| -> Result<delegated::DelegatedExecution> {
+                let raw:String=db.query_row("SELECT body FROM delegated_executions WHERE child_operation_id=?1 ORDER BY rowid DESC LIMIT 1",[&child.operation_id],|r|r.get(0))?;
+                Ok(serde_json::from_str(&raw)?)
+            }).transpose()?;
             let mut statement = db.prepare(
                 "SELECT id,head,active_run FROM branches WHERE thread_id=?1 ORDER BY rowid",
             )?;
@@ -596,9 +681,7 @@ impl FamilyRead {
                 } else {
                     "active".into()
                 }
-            } else if let Some(child) = &child {
-                let body:String=db.query_row("SELECT body FROM delegated_executions WHERE child_operation_id=?1 ORDER BY rowid DESC LIMIT 1",[&child.operation_id],|row|row.get(0))?;
-                let execution: delegated::DelegatedExecution = serde_json::from_str(&body)?;
+            } else if let Some(execution) = &latest_execution {
                 execution.state().to_owned()
             } else {
                 db.query_row(
@@ -609,17 +692,27 @@ impl FamilyRead {
                 .optional()?
                 .unwrap_or_else(|| "idle".into())
             };
-            let task = child
-                .as_ref()
-                .map(|child| {
-                    self.content
-                        .load_cancellable(&child.input_ref, cancel)
-                        .and_then(|value| {
-                            Ok(serde_json::from_value::<collaboration::DispatchInput>(value)?.task)
-                        })
-                })
-                .transpose()?;
+            let latest_execution_id=latest_execution.as_ref().map(|e|e.execution_id.clone());
+            let task=latest_execution.as_ref().map(|execution| -> Result<String> {
+                let value=if matches!(execution.trigger,delegated::DelegatedTrigger::MessageRequest{..}|delegated::DelegatedTrigger::Followup{..}|delegated::DelegatedTrigger::Calendar{..}|delegated::DelegatedTrigger::ComputerEvent{..}) {
+                    self.content.load_history_payload(&execution.input_ref)?.0
+                } else { self.content.load_cancellable(&execution.input_ref,cancel)? };
+                if matches!(execution.trigger,delegated::DelegatedTrigger::Dispatch) { return Ok(serde_json::from_value::<collaboration::DispatchInput>(value)?.task); }
+                Ok(value.as_str().or_else(||value["text"].as_str()).or_else(||value["content"]["text"].as_str()).map(str::to_owned).unwrap_or_else(||value.to_string()))
+            }).transpose()?;
+            let source_run_id:Option<String>=db.query_row("SELECT r.id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 ORDER BY r.rowid DESC LIMIT 1",[&thread],|r|r.get(0)).optional()?;
+            let source=source_run_id.as_deref().map(|id| -> Result<_> {
+                let run:Run=record(db,"runs",id)?;
+                let selected:Option<launch_content::LaunchMetadata>=optional_record(db,"run_launches",id)?;
+                selected.filter(|l|l.selection.source.is_some()).map(|_|dispatch::agent_file_source(db,&run)).transpose()
+            }).transpose()?.flatten();
             members.push(FamilyMember {
+                source,source_run_id,
+                operation_id:child.as_ref().map(|c|c.operation_id.clone()),latest_execution_id,
+                agent_id: db.query_row("SELECT agent_code FROM threads WHERE id=?1",[&thread],|r|r.get(0))?,
+                name: db.query_row("SELECT title FROM threads WHERE id=?1",[&thread],|r|r.get(0))?,
+                current,
+                updated_at_ms,
                 thread_id: thread,
                 parent_thread_id: child.map(|child| child.parent_thread_id),
                 task,
@@ -631,6 +724,7 @@ impl FamilyRead {
         Ok(FamilyList {
             root_thread_id: root,
             members,
+            next_cursor,
         })
     }
     pub fn runs(

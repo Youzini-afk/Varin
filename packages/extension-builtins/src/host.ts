@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION_ID,
   VARIN_BUILTIN_LANGUAGE_SERVERS_EXTENSION_ID,
   VARIN_BUILTIN_CONTEXT_FRAGMENTS_EXTENSION_ID,
   VARIN_BUILTIN_COMPUTER_EXTENSION_ID,
@@ -44,6 +45,7 @@ export const resolveVarinBuiltinPackageRoot = (
 };
 
 export const VARIN_BUILTIN_EXTENSION_PACKAGE_ROOTS: ReadonlyMap<string, string> = new Map([
+  [VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL('./builtin-packages/code-exchange/', import.meta.url)))],
   [VARIN_BUILTIN_IMAGES_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL('./builtin-packages/images/', import.meta.url)))],
   [VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL('./builtin-packages/interactive-ui/', import.meta.url)))],
   [VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID, resolveVarinBuiltinPackageRoot(fileURLToPath(new URL("./builtin-packages/environment-forward/", import.meta.url)))],

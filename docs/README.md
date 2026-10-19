@@ -9,6 +9,7 @@
 | 安装、启动和使用 | [项目 README](../.github/readme/README.zh-CN.md)、[用户文档](../packages/docs/README.zh-CN.md) |
 | 系统如何装配、谁拥有状态 | [架构](architecture.md) |
 | Agent loop、历史、请求、工具、恢复与续接 | [运行时](runtime.md) |
+| 角色、任务复用、状态收纳和代码交换 | [Agent 协作](collaboration.md) |
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
 | 上下文、检索、材料、知识和记忆 | [检索与上下文](retrieval.md) |
 | 外壳、Profile、Documents 和编辑器 | [工作台](workbench.md) |
@@ -18,11 +19,6 @@
 | 开发命令与验证选择 | [开发](development.md)、[性能](performance.md) |
 | 仍需真实环境证据的运行时场景 | [运行时验收](runtime-acceptance.md) |
 | 部署、恢复、扩展开发和依赖维护 | [操作指南](ops/README.md) |
-
-## 待实施设计
-
-- [Agent 工作侧重与编程协作](design/agent-modes-and-collaboration.md)：三条工作线、实现与验证解耦、用途名与短码、任务复用与自动收纳、双向文件交换、角色开关及提示词。
-- [动态上下文投递与摘要能力恢复](design/context-delivery-and-compaction.md)：临时队友状态尾部、环境观察独立投递、摘要 S0/A/B 材料与只读查询；计划不做自动增量推送。
 
 ## 源码旁的说明
 

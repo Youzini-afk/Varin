@@ -91,6 +91,8 @@ fn continuation_command(
     input: Value,
 ) -> ChildContinuationCommand {
     ChildContinuationCommand {
+        source_agent: None,
+            name: None,
         key: key.into(),
         child_operation_id: child.operation_id.clone(),
         previous_run_id: child.receipt.as_ref().unwrap().run_id.clone(),
@@ -342,7 +344,7 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
             .unwrap()
     };
     assert_eq!(member(&f.db).state, "preparing");
-    assert_eq!(member(&f.db).task, Some(f.input.task.clone()));
+    assert_eq!(member(&f.db).task, Some("again".into()));
     f.db.fail_delegated_preparation(&accepted.execution_id, "source_unavailable")
         .unwrap();
     assert_eq!(member(&f.db).state, "failed");
@@ -436,6 +438,78 @@ fn isolated_continuation_uses_exact_published_root_without_rewriting_unknown_eff
     let root = f.root.clone();
     drop(f);
     std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_fact() {
+    let mut f=Fixture::new_isolated();
+    let initial=first(&mut f);
+    let identity=f.db.agent_identity(&initial.child_thread_id).unwrap();
+    finish(&mut f.db,&initial,Some("first stage"));
+    let prior=result(&mut f.db,&initial,Effect::Confirmed);
+    let bindings=f.db.capture_child_writer_bindings(&initial.execution_id).unwrap().load().unwrap();
+    f.db.attach_child_result_files_bound(&initial.execution_id,prior.clone(),Effect::Confirmed,&bindings,Some(&["src/feature.ts".into()])).unwrap();
+    let mut command=continuation_command(&f.db,&initial,"refresh-stage",json!("Continue on the integrated stage"));
+    command.name=Some("阶段返工".into());
+    command.source_agent=Some(f.db.agent_identity(&initial.parent_thread_id).unwrap()["agentId"].as_str().unwrap().into());
+    let next=accept(&mut f.db,command);
+    assert_eq!(next.name,"阶段返工");
+    assert_eq!(f.db.agent_identity(identity["agentId"].as_str().unwrap()).unwrap()["threadId"],initial.child_thread_id);
+    assert_eq!(f.db.delegated_execution(&initial.execution_id).unwrap().name,initial.name);
+    let ChildSourceBasis::Refreshed {incoming,result:Some(carried),..}=next.source_basis.as_ref().unwrap() else {panic!("refresh basis")};
+    assert_eq!(carried,&prior);
+    assert_eq!(incoming.run_id,initial.parent_run_id);
+    let mut source=next.source_basis.as_ref().unwrap().source().clone();
+    source.branch_id=Some(format!("child-source:{}",next.execution_id)); source.revision=Some(0);source.mode=SourceMode::Materialized;
+    let root="merged-refreshed-root".to_string();
+    let mut fixed=source.clone();fixed.mode=SourceMode::FixedBranch;
+    let provenance=ChildSourceProvenance::RefreshedRoot {root:root.clone(),previous_root:prior.root.clone(),incoming:incoming.clone(),incoming_root:"incoming-fixed-stage".into(),conflicts:vec![],resources:None};
+    let prepared=f.db.prepare_child_source(&next.execution_id,ChildSourcePin {pin_id:format!("child-source-pin:{}",next.execution_id),root,source:fixed},source.clone(),provenance).unwrap().load().unwrap();
+    f.db.attach_child_source(prepared).unwrap();
+    let continued=prepare(&mut f.db,&next,source);
+    let history=f.db.history(&continued.child_branch_id).unwrap();
+    assert_eq!(history.last().unwrap().source,HistorySource::Environment);
+    assert!(history.last().unwrap().content.to_string().contains("incoming-fixed-stage"));
+    let code=identity["agentId"].as_str().unwrap().to_string();
+    let root=f.root.clone(); drop(f.db);
+    let db=Catalog::open(&root).unwrap();
+    assert_eq!(db.agent_identity(&code).unwrap()["name"],"阶段返工");
+    let mut members=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,Default::default(),&||false).unwrap().members;
+    let member=members.remove(0);
+    assert_eq!(member.agent_id,code);assert_eq!(member.task.as_deref(),Some("Continue on the integrated stage"));
+    let files=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,
+        varin_runtime::catalog::family::FamilyListQuery {scope:Some("all".into()),file_path:Some("src/feature.ts".into()),..Default::default()},&||false).unwrap();
+    assert_eq!(files.members.len(),1);assert_eq!(files.members[0].agent_id,code);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn source_refresh_requests_wait_for_their_own_next_execution() {
+    use varin_runtime::catalog::messages::*;
+    use varin_runtime::catalog::activation::MessageActivation;
+    let mut f=Fixture::new_isolated();let initial=first(&mut f);
+    let code=f.db.agent_identity(&initial.parent_thread_id).unwrap()["agentId"].as_str().unwrap().to_string();
+    let mut receipts=Vec::new();
+    for key in ["refresh-one","refresh-two"] {
+        let preparation=f.db.prepare_user_message(key.into(),initial.parent_thread_id.clone(),initial.parent_branch_id.clone(),MessageInput {
+            source_agent:Some(code.clone()),name:None,wait:None,target_thread_id:Some(initial.agent_id.clone()),target_branch_id:None,reply_to:None,
+            kind:MessageKind::Request,text:key.into(),
+        }).unwrap().load().unwrap();
+        receipts.push(f.db.admit_message(preparation).unwrap().receipt);
+    }
+    for candidate in f.db.capture_request_activations().unwrap() {
+        f.db.admit_request_activation(candidate.load().unwrap()).unwrap();
+    }
+    let state=|db:&Catalog,receipt:&MessageReceipt|db.capture_message(&initial.parent_thread_id,&initial.parent_branch_id,&receipt.identity.message_id).unwrap().load().unwrap().summary.activation;
+    assert!(matches!(state(&f.db,&receipts[0]),MessageActivation::Pending{execution_id:None,..}));
+    finish(&mut f.db,&initial,Some("old run finished"));result(&mut f.db,&initial,Effect::Confirmed);
+    for candidate in f.db.capture_request_activations().unwrap() {
+        f.db.admit_request_activation(candidate.load().unwrap()).unwrap();
+    }
+    let MessageActivation::Pending{execution_id:Some(id),..}=state(&f.db,&receipts[0]) else {panic!("first refresh must prepare")};
+    assert!(matches!(f.db.delegated_execution(&id).unwrap().source_basis,Some(ChildSourceBasis::Refreshed{..})));
+    assert!(matches!(state(&f.db,&receipts[1]),MessageActivation::Pending{execution_id:None,..}));
+    let root=f.root.clone();drop(f);std::fs::remove_dir_all(root).unwrap();
 }
 #[test]
 fn active_user_input_uses_original_execution_but_idle_and_next_run_cannot_clone_it() {
@@ -1026,6 +1100,8 @@ fn request_child(
             child.parent_thread_id.clone(),
             child.parent_branch_id.clone(),
             MessageInput {
+                source_agent: None,
+            name: None,
                 wait: None,
                 target_thread_id: Some(child.child_thread_id.clone()),
                 target_branch_id: Some(child.child_branch_id.clone()),

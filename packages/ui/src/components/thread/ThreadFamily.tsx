@@ -9,7 +9,7 @@ import { ThreadContent } from './ThreadContent';
 import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { ChildState } from '../conversation/childPresentation';
 
-type Props = { api: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity };
+type Props = { api: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; observe?:ThreadsAPI['observe'] };
 /** A follow-up's actual bound Run uses the same read-only history and original-record reader. */
 export function ThreadRunHistory({ api, mediaRead, identity, runId }: Props & { runId: string }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
@@ -22,38 +22,56 @@ export function ThreadFamily(props: Props) {
   const identity = React.useMemo(() => ({ runtime: 'agent' as const, threadId: props.identity.threadId, branchId: props.identity.branchId }), [props.identity.threadId, props.identity.branchId]);
   return <FamilyCard key={JSON.stringify([host, props.identity.threadId, props.identity.branchId])} {...props} identity={identity} host={host} />;
 }
-function FamilyCard({ api, mediaRead, identity, host }: Props & { host: number }) {
+function FamilyCard({ api, mediaRead, identity, host, observe }: Props & { host: number }) {
   const { t } = useI18n();
   const [open, setOpen] = React.useState(false);
   return <section aria-label="Task family" className="space-y-2 typography-meta">
     <Button variant="ghost" size="sm" aria-expanded={open} onClick={() => setOpen(value => !value)}>{t('harness.threads.viewAll')}</Button>
-    {open && <FamilyMembers api={api} mediaRead={mediaRead} identity={identity} host={host} />}
+    {open && <FamilyMembers api={api} mediaRead={mediaRead} identity={identity} host={host} observe={observe} />}
   </section>;
 }
-function FamilyMembers({ api, mediaRead, identity, host }: Props & { host: number }) {
+function FamilyMembers({ api, mediaRead, identity, host, observe }: Props & { host: number }) {
   const { t } = useI18n();
   const [version, setVersion] = React.useState(0);
+  const [reconnect, setReconnect] = React.useState(0);
   const [family, setFamily] = React.useState<FamilyList>();
   const [error, setError] = React.useState(false);
   const [selected, setSelected] = React.useState<FamilyMember>();
+  const [scope,setScope]=React.useState<'current'|'history'>('current');
+  const [cursor,setCursor]=React.useState<string>();
+  React.useEffect(()=>{
+    if(!observe)return;
+    const controller=new AbortController();let queued=false;
+    void observe(null,event=>{
+      if('stream' in event || !/^(thread\.|run\.|child\.|message\.|input\.|operation\.|execution\.committed|delivery\.)/.test(event.kind))return;
+      if(queued)return;queued=true;queueMicrotask(()=>{queued=false;if(!controller.signal.aborted){setCursor(undefined);setVersion(value=>value+1);}});
+    },{signal:controller.signal}).then(()=>{if(!controller.signal.aborted)setError(true);},()=>{if(!controller.signal.aborted)setError(true);});
+    return ()=>controller.abort();
+  },[observe,reconnect]);
   React.useEffect(() => {
     const controller = new AbortController();
-    setFamily(undefined); setSelected(undefined); setError(false);
-    void api.list(identity, false, controller.signal).then(result => {
-      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setFamily(result);
+    setError(false);
+    void api.list(identity, { scope, cursor }, controller.signal).then(result => {
+      if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) {
+        setFamily(previous=>({...result,members:cursor?[...(previous?.members??[]),...result.members.filter(member=>!previous?.members.some(old=>old.threadId===member.threadId))]:result.members}));
+        setSelected(previous=>previous ? result.members.find(member=>member.threadId===previous.threadId)??previous:undefined);
+      }
     }, () => { if (!controller.signal.aborted && host === getRuntimeEndpointGeneration()) setError(true); });
     return () => controller.abort();
-  }, [api, identity, host, version]); // Identity is keyed by the outer panel.
+  }, [api, identity, host, version, scope, cursor]);
   return <>
-    <Button size="sm" variant="ghost" onClick={() => setVersion(value => value + 1)}>{t('chat.family.refresh')}</Button>
+    <Button size="sm" variant="ghost" onClick={() => {setCursor(undefined);setVersion(value => value + 1);setReconnect(value=>value+1);}}>{t('chat.family.refresh')}</Button>
+    <Button size="sm" variant="ghost" aria-pressed={scope==='history'} onClick={()=>{setScope(value=>value==='current'?'history':'current');setCursor(undefined);setFamily(undefined);}}>{t(scope==='current'?'chat.family.history':'chat.family.current')}</Button>
     {error ? <p role="alert">{t('chat.family.failed')}</p> : !family ? <p role="status">{t('common.loading')}</p> : <>
       {family.members.length === 0 && <p>{t('chat.family.empty')}</p>}
       <ul className="space-y-1">{family.members.map(member => <li key={member.threadId}>
-        <Button variant="ghost" size="sm" className="max-w-full truncate" aria-pressed={selected?.threadId === member.threadId} onClick={() => setSelected(member)}>{member.task || t('chat.family.untitled')}</Button>
+        <Button variant="ghost" size="sm" className="max-w-full truncate" aria-pressed={selected?.threadId === member.threadId} onClick={() => setSelected(member)}>{member.name || member.task || t('chat.family.untitled')}</Button>
+        {member.agentId && <button className="font-mono text-muted-foreground" title={member.agentId} onClick={()=>void navigator.clipboard.writeText(member.agentId!)}>{member.agentId}</button>}
         <ChildState state={member.state} />
       </li>)}</ul>
-      {selected && <FamilyConversation key={selected.threadId} api={api} mediaRead={mediaRead} identity={identity} host={host} member={selected} />}
+      {family.nextCursor && <Button variant="ghost" size="sm" onClick={()=>setCursor(family.nextCursor!)}>{t('chat.family.more')}</Button>}
     </>}
+    {selected && <FamilyConversation key={selected.threadId} api={api} mediaRead={mediaRead} identity={identity} host={host} member={selected} />}
   </>;
 }
 function FamilyConversation({ api, mediaRead, identity, host, member }: Props & { host: number; member: FamilyMember }) {

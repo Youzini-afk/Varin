@@ -320,6 +320,8 @@ impl Fixture {
             db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
         } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
         let mut input = DispatchInput {
+        source_agent: None,
+            name: None,
             task: "Read the fixed file and report".into(),
             preset: None,
             work_mode: Some(if isolated {
@@ -915,13 +917,13 @@ impl Fixture {
         let ToolOrigin::PolicyAction { action_id, node_id } = &context.origin else {
             panic!("policy call required")
         };
-        let completion = ToolCompletion::JobAccepted {
+        let completion = self.db.capture_call_completion(&context.operation_id).and_then(|read|read.load()).unwrap_or_else(|_|ToolCompletion::JobAccepted {
             content: None,
             operation_id: context.operation_id.clone(),
             phase: phase.into(),
             effect: Effect::None,
             lifetime: Lifetime::Thread,
-        };
+        });
         self.db
             .commit_execution(
                 &context.run_id,
@@ -947,13 +949,7 @@ impl Fixture {
         let result = ToolResult {
             request_id: "parent-request".into(),
             call_id: "dispatch-call".into(),
-            completion: ToolCompletion::JobAccepted {
-                content: None,
-                operation_id: self.context.operation_id.clone(),
-                phase: "preparing_child".into(),
-                effect: Effect::None,
-                lifetime: Lifetime::Thread,
-            },
+            completion: self.db.capture_call_completion(&self.context.operation_id).unwrap().load().unwrap(),
         };
         self.db
             .commit_execution(&self.context.run_id, self.db.epoch(), &{

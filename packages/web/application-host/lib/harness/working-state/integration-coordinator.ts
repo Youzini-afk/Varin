@@ -225,7 +225,7 @@ const editorStateFrom = async (
   };
 };
 
-const readableText = async (store: WorkingStateRootStore, state: RecoveryState): Promise<string | undefined> => {
+const readableText = async (store: Pick<WorkingStateRootStore,'getObject'>, state: RecoveryState): Promise<string | undefined> => {
   if (state.kind !== "regular-file") return undefined;
   const bytes = await store.getObject(state.objectHash);
   if (bytes === null) return undefined;
@@ -670,7 +670,8 @@ export class IntegrationCoordinator {
       for (const row of rows) {
         const binding = (row.data as { operationBinding?: IntegrationOperationBinding } | undefined)?.operationBinding, selected = input.operationBinding;
         if (!binding || !selected || binding.parentThreadId !== selected.parentThreadId
-          || binding.parentBranchId !== selected.parentBranchId || binding.childExecutionId !== selected.childExecutionId
+          || binding.parentBranchId !== selected.parentBranchId || binding.kind !== selected.kind
+          || (binding.kind !== 'code_exchange' && selected.kind !== 'code_exchange' && binding.childExecutionId !== selected.childExecutionId)
           || !isDeepStrictEqual(binding.result, selected.result) || !isDeepStrictEqual(binding.target, selected.target)) continue;
         const id = String(row.operationId);
         const record = await (this.readIntegrationOperation
@@ -1722,6 +1723,11 @@ export class IntegrationCoordinator {
 
       const mergeBaseStates = { ...result.baseStates };
       const mergeChildStates = { ...result.pathStates };
+      const diskObjects=new Map(Object.values(diskParentStates).flatMap(state=>state.kind==='regular-file'?[[state.objectHash,state] as const]:[]));
+      const mergeReader={getObject:async(hash:string)=>{
+        const state=diskObjects.get(hash);
+        return state&&context.fileStore.readContent?context.fileStore.readContent(parentIdentity,state):store.getObject(hash);
+      }};
       for (const file of result.changedPaths) {
         mergeBaseStates[file] ??= { kind: "missing" };
         mergeChildStates[file] ??= { kind: "missing" };
@@ -1730,7 +1736,7 @@ export class IntegrationCoordinator {
           mergeChildStates[file] = await editorStateFrom(store, result.pathStates[file]!);
         }
         const childText = await readableText(store, mergeChildStates[file]!);
-        const parentText = await readableText(store, parentState[file]!);
+        const parentText = await readableText(mergeReader, parentState[file]!);
         const baselineText = await readableText(store, mergeBaseStates[file]!);
         if (childText !== undefined) texts[file] = { ...texts[file], child: childText };
         if (parentText !== undefined) texts[file] = { ...texts[file], parent: parentText };
@@ -1746,7 +1752,7 @@ export class IntegrationCoordinator {
         baseState: mergeBaseStates,
         parentState,
         childState: mergeChildStates,
-        readContent: async (state) => state.kind === "regular-file" ? store.getObject(state.objectHash) : null,
+        readContent: async (state) => state.kind === "regular-file" ? mergeReader.getObject(state.objectHash) : null,
       });
       const bindingFingerprint = previewFingerprint(bindings, input.resultRevision);
       let plan = applyResolutions(

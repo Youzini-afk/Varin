@@ -68,6 +68,7 @@ impl ToolExecutor for NoTools {
 #[derive(Clone, Copy)]
 enum Mode {
     Text,
+    Read,
     Fail,
     Tool,
     Cancel,
@@ -102,13 +103,14 @@ impl ModelProvider for Provider {
                 provider_request_id: None,
             });
         }
-        let content = if matches!(self.mode, Mode::Tool) {
+        let querying=matches!(self.mode,Mode::Read) && !request.view.history.iter().any(|item|matches!(item.content,Content::ToolResult{..}));
+        let content = if matches!(self.mode, Mode::Tool) || querying {
             Content::ToolCall {
                 call: ToolCall {
                     call_id: "forbidden".into(),
-                    name: "write".into(),
+                    name: if querying {"summary_read"} else {"write"}.into(),
                     schema_version: "1".into(),
-                    arguments: json!({}),
+                    arguments: if querying {json!({"kind":"history","query":{"kind":"recent"}})}else{json!({})},
                 },
             }
         } else {
@@ -124,7 +126,7 @@ impl ModelProvider for Provider {
             },
         })
         .unwrap();
-        Ok(if matches!(self.mode, Mode::Tool) {
+        Ok(if matches!(self.mode, Mode::Tool) || querying {
             FinishReason::ToolCalls
         } else {
             FinishReason::Stop
@@ -169,6 +171,8 @@ fn summary_execution_isolated_and_fixed_boundary_preserves_tail() {
     exercise(Mode::Text);
 }
 #[test]
+fn summary_reads_frozen_history_and_uses_retained_recent_background() {exercise(Mode::Read);}
+#[test]
 fn failed_summary_never_publishes() {
     exercise(Mode::Fail);
 }
@@ -194,6 +198,10 @@ fn exercise(mode: Mode) {
             configuration: json!({}),
         })
         .unwrap();
+    if matches!(mode,Mode::Read) {
+        let run=db.run(&source.run_id).unwrap();
+        db.append_history(&run.id,run.epoch,Some(&source.input_id),varin_runtime::HistorySource::User,json!({"text":"RECENT B retained for the main conversation"}),None).unwrap();
+    }
     let prior = db
         .publish_context(varin_runtime::catalog::context::ContextProposal {
             key: "prior".into(),
@@ -245,7 +253,7 @@ fn exercise(mode: Mode) {
             key: "tail".into(),
             thread_id: "thread".into(),
             branch_id: "main".into(),
-            expected_head: Some(source.input_id.clone()),
+            expected_head: db.head("main").unwrap(),
             input: json!({"text":"TAIL MUST REMAIN"}),
             configuration: json!({}),
         })
@@ -274,7 +282,7 @@ fn exercise(mode: Mode) {
                 seen: seen.clone(),
                 entered: tx,
             }),
-            tools: Arc::new(NoTools),
+            tools: Arc::new(varin_runtime::summary_tools::SummaryTools::new(supervisor.catalog())),
             policy: Arc::new(DefaultAgentPolicy),
             progress: ProgressSink::default(),
         },
@@ -288,9 +296,13 @@ fn exercise(mode: Mode) {
     }
     let report = handle.wait().unwrap();
     let views = seen.lock().unwrap();
-    assert_eq!(views.len(), 1);
+    assert_eq!(views.len(), if matches!(mode,Mode::Read){2}else{1});
     let view = &views[0];
-    assert!(view.binding.tools.is_empty());
+    assert_eq!(view.binding.tools,vec![varin_runtime::summary_tools::schema()]);
+    if matches!(mode,Mode::Read) {
+        assert!(view.history.iter().any(|item|matches!((&item.provenance,&item.content),(Provenance::ExternalData{source},Content::Text{text}) if source.starts_with("B:")&&text.contains("RECENT B retained"))));
+        assert!(views[1].history.iter().any(|item|matches!(&item.content,Content::ToolResult{result} if matches!(&result.completion,ToolCompletion::Result{outcome:varin_runtime::Outcome::Succeeded,..}))));
+    }
     assert!(matches!(&view.history[0].content,Content::Text{text} if text == SUMMARIZER_SYSTEM));
     assert!(
         matches!(&view.history.last().unwrap().content,Content::Text{text} if text == SUMMARY_REQUEST)
@@ -303,7 +315,7 @@ fn exercise(mode: Mode) {
     );
     let catalog = supervisor.catalog();
     let mut db = catalog.lock().unwrap();
-    if matches!(mode, Mode::Text) {
+    if matches!(mode, Mode::Text | Mode::Read) {
         assert_eq!(report.state, RunState::Completed);
         let prepared = db
             .prepare_context_job_publication(&job.receipt.run_id)

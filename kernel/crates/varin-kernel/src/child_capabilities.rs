@@ -21,8 +21,10 @@ pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
     definitions()
         .into_iter()
         .map(|definition| {
-            let (source_requirement, default_presets) =
+            let (source_requirement, mut default_presets) =
                 definition.child.expect("child declaration");
+            use varin_runtime::catalog::dispatch::ChildPresetDefault::{Worker, Verifier};
+            if default_presets.contains(&Worker) { default_presets.push(Verifier); }
             ChildCapabilityDescriptor {
                 process: definition
                     .schema
@@ -178,6 +180,29 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
                 error(e.to_string())
             })?
         };
+        if let Some(reference) = binding.child_dispatch.as_ref().filter(|_|has_child_catalog) {
+            let read=self.catalog.lock().map_err(|e|error(e.to_string()))?.capture_child_dispatch(reference);
+            let selected=read.load().map_err(|e|error(e.to_string()))?;
+            let view=discovery(&selected);
+            let available=|id:&str|view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["id"]==id && preset["unavailable"].is_null()));
+            let main=self.catalog.lock().map_err(|e|error(e.to_string()))?.child_task_for_thread(&run.thread_id).map_err(|e|error(e.to_string()))?.is_none();
+            let mut text=String::new();
+            if main {text.push_str("围绕用户目标推进工作，保持对整体设计、任务关系和当前进展的理解。结合实际实现和验证证据，调整工作并判断整体交付。");}
+            if binding.tools.iter().any(|tool|tool.name=="dispatch") {
+                if available("worker") {text.push_str("\n你可以委派 Agent 完成实现或修复，按任务需要组织协作。");}
+                if available("verifier") {text.push_str("\n你可以把验证交给独立的 Agent，与实现并行推进。由验证 Agent 承担验证时，可以让实现方专注实现，将测试编写和运行交给验证方按实际需要处理。");}
+            }
+            if (!main || view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["unavailable"].is_null())))
+                && binding.tools.iter().any(|tool|tool.name=="send") {
+                text.push_str(if binding.tools.iter().any(|tool|tool.name=="submit_code") {
+                    "\n你可以直接与相关 Agent 交流、查看彼此工作、交换代码改动并协调依赖。"
+                } else { "\n你可以直接与相关 Agent 交流、查看彼此工作并协调依赖。" });
+            }
+            if !text.is_empty() {
+                let identity=hex::encode(Sha256::digest(text.as_bytes()));
+                context.push(ConversationItem{id:format!("collaboration:{identity}"),resource_activation:None,provenance:Provenance::SystemInstruction{source:"agent_collaboration".into()},content:Content::Text{text},opaque:None}.into());
+            }
+        }
         if binding.tools.iter().any(|tool| tool.name == "dispatch")
             && !varin_runtime::tool_disclosure::enabled(&binding.tools) {
             let text = if let Some(reference) = binding

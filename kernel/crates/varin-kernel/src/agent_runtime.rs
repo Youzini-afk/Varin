@@ -2401,6 +2401,8 @@ pub(crate) fn spawn(
                                                 "file_write"
                                                     | "file_edit"
                                                     | "integrate_child"
+                                                    | "submit_code"
+                                                    | "update"
                                                     | "process_write"
                                                     | "process_resize"
                                             )
@@ -3198,7 +3200,7 @@ mod policy_domains_review;
 
 /// The public API and ordinary tools consume the same captured domain reader.
 enum FamilyCommand {
-    List(varin_runtime::catalog::family::FamilyRead, bool),
+    List(varin_runtime::catalog::family::FamilyRead, bool, varin_runtime::catalog::family::FamilyListQuery),
     Runs(
         varin_runtime::catalog::family::FamilyRead,
         Option<String>,
@@ -3234,6 +3236,10 @@ impl FamilyCommand {
                         .capture_family_read(&p.caller_thread_id, None, None)
                         .map_err(domain)?,
                     p.include_self.unwrap_or(false),
+                    varin_runtime::catalog::family::FamilyListQuery{file_path:p.file_path,parent_thread_id:p.parent_thread_id,parent_branch_id:p.parent_branch_id,workspace_id:p.workspace_id,
+                        updated_after_ms:p.updated_after_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedAfterMs".into()))?,
+                        updated_before_ms:p.updated_before_ms.map(u64::try_from).transpose().map_err(|_|KernelError::Protocol("invalid updatedBeforeMs".into()))?,
+                        scope:p.scope,query:p.query,cursor:p.cursor,limit:size(p.limit)?.or(Some(20))},
                 )
             }
             "runtime.family.runs" => {
@@ -3295,8 +3301,8 @@ impl FamilyCommand {
             return Err(KernelError::Cancelled);
         }
         let value = match self {
-            Self::List(read, include_self) => {
-                serde_json::to_value(read.list(include_self, cancelled).map_err(domain)?)
+            Self::List(read, include_self, query) => {
+                serde_json::to_value(read.list_page(include_self, query, cancelled).map_err(domain)?)
             }
             Self::Runs(read, cursor, limit) => serde_json::to_value(
                 read.runs(cursor.as_deref(), limit, cancelled)

@@ -588,6 +588,8 @@ export const dict = {
   'chat.integration.retry': 'Read original result',
   'chat.integration.refresh': 'Refresh preview',
   'chat.family.refresh': 'Refresh',
+  'chat.family.history': 'Finished tasks',
+  'chat.family.current': 'Current tasks',
   'chat.family.failed': 'Unable to load. Please refresh.',
   'chat.family.empty': 'No other tasks.',
   'chat.family.untitled': 'Untitled task',

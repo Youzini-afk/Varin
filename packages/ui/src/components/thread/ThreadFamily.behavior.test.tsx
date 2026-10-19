@@ -48,7 +48,7 @@ it('reads on demand, keeps saved Run/tool identities, and pages original partial
   partial.nextCursor = 'next-old-records'; partial.scanComplete = false;
   api.read.mockResolvedValueOnce(partial);
   await render(api); expect(api.list).not.toHaveBeenCalled();
-  await click(dict['harness.threads.viewAll']); expect(api.list).toHaveBeenCalledWith(identity, false, expect.any(AbortSignal));
+  await click(dict['harness.threads.viewAll']); expect(api.list).toHaveBeenCalledWith(identity, {scope:'current',cursor:undefined}, expect.any(AbortSignal));
   await click('first task');
   expect(api.read.mock.calls[0]!.slice(0, 2)).toEqual([identity, { threadId: 'thread:first', branchId: 'branch:first', query: { kind: 'recent' }, anchor: undefined, cursor: undefined }]);
   expect(api.runs).toHaveBeenCalledWith(identity, { threadId: 'thread:first', branchId: 'branch:first', cursor: undefined }, expect.any(AbortSignal));

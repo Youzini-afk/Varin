@@ -20,7 +20,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | Resource conflict/capacity admission and nested calls | [resource_admission.rs](src/resource_admission.rs), [execution_capacity.rs](src/execution_capacity.rs), [nested_tools.rs](src/nested_tools.rs) |
 | Context checkpoint/summary plans and capacity | [context_job.rs](src/context_job.rs), [context_execution.rs](src/context_execution.rs), [catalog_context_jobs.rs](src/catalog_context_jobs.rs), [context_capacity.rs](src/context_capacity.rs) |
 | Protocol adapters, frozen bodies and credential resolution | [providers](src/providers/README.md), [request_body.rs](src/request_body.rs) |
-| Child/family work, messages and continuation | [catalog_collaboration.rs](src/catalog_collaboration.rs), [catalog_messages.rs](src/catalog_messages.rs), [catalog_activation.rs](src/catalog_activation.rs) |
+| Child/family work, current/history directory, messages and continuation | [catalog_collaboration.rs](src/catalog_collaboration.rs), [catalog_delegated.rs](src/catalog_delegated.rs), [catalog_family.rs](src/catalog_family.rs), [catalog_messages.rs](src/catalog_messages.rs), [catalog_activation.rs](src/catalog_activation.rs) |
 | Durable conditions and deliveries | [catalog_observations.rs](src/catalog_observations.rs), [catalog_followups.rs](src/catalog_followups.rs), [catalog_process_wait.rs](src/catalog_process_wait.rs), [catalog_reply_wait.rs](src/catalog_reply_wait.rs) |
 | Goals, Bot suspension and memory work | [catalog_goals.rs](src/catalog_goals.rs), [catalog_bot.rs](src/catalog_bot.rs), [catalog_memory_work.rs](src/catalog_memory_work.rs) |
 | Independent domain Jobs and calendar occurrences | [catalog_host_jobs.rs](src/catalog_host_jobs.rs), [catalog_calendar.rs](src/catalog_calendar.rs) |
@@ -71,6 +71,10 @@ worker retains only its latest compiled prefix under exact epoch/Run/branch/chec
 new steps hydrate the new suffix, while current memory/Goal/policy evidence is freshly projected.
 Navigation, changed checkpoints and worker exit discard the derived cache.
 
+The current-teammates projection is appended last and omitted when empty. It is temporary request data;
+only the exact request snapshot retains it. Delivery acknowledgements consume reports actually included in
+the organizer's completed model exchange. The same indexed lifecycle facts drive current/history UI pages.
+
 `RequestBody` is the only provider-body representation. Responses/Azure/Codex can retain independent
 item fragments and tool schemas; Codex also retains the exact ordered system-text join. Grouped
 protocols reuse complete messages under their actual source sequence and tool-call dependencies;
@@ -87,6 +91,10 @@ exclusive for a conversation or one summary node. Audit history may reflect comp
 node inputs follow only the frozen recipe. Pure text produces zero ModelSteps. Complete serialized
 capacity is checked before dispatch; reopening consumes completed nodes and never replays an unknown
 dispatch. A failed node cancels and joins its remaining workers before the Run settles.
+
+Summary recipes freeze S0, replaced history A and retained recent background B. B stays in the main branch.
+Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related
+records; normal Tool invocations retain query audit and recovery. Text plans remain tool-free.
 
 ## Composition with the kernel and Host
 

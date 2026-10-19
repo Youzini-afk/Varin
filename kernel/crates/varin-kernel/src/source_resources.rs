@@ -624,6 +624,7 @@ pub(crate) struct SourceHandoffInspectParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceContinuation {
+    pub refresh: Option<varin_runtime::catalog::dispatch::AgentSourceSelection>,
     pub execution_id: String,
     pub previous_run_id: String,
     pub root: String,

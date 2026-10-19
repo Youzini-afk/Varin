@@ -5,7 +5,7 @@ import { CaptureInventoryChangedError } from '../../documents/capture-inventory.
 import { stateIdentity } from '../../recovery/journal-files.js';
 import { normalizePathIdentity } from '../../workspace/path-safety.js';
 import type { ChildSourceProvenance, SourceResourceCapture, SourceDraftProvenance } from '../../kernel/protocol.generated.js';
-type CapturedSourceProvenance = Exclude<ChildSourceProvenance, { consistency: 'fixed-root' }>;
+type CapturedSourceProvenance = Extract<ChildSourceProvenance, { consistency: 'stable-capture' | 'git-base-with-overlay' }>;
 import { createBranchWithDraftBaseline, overlayDraftsOnBaseline } from './draft-baseline.js';
 import type { RecoveryState, WorkingBranchRoot, WorkingStateRootStore, WorkingBranchCreateOptions } from './types.js';
 import { directoryBaselineFingerprint, gitBaselineFingerprint, withAncestorDirectories, type BaselineInventory } from './workspace-baseline.js';
@@ -161,7 +161,7 @@ export async function captureStableSourceBaseline(
   const { store, signal, captureWorkspaceId } = input;
   const restored = await store.readSourcePreparation(input.branchId, signal ? { signal } : undefined);
   if (restored) {
-    if (restored.provenance.consistency === 'fixed-root' || restored.provenance.contentMode !== input.content.mode
+    if (!('contentMode' in restored.provenance) || restored.provenance.contentMode !== input.content.mode
       || restored.provenance.captureIdentity !== input.captureIdentity
       || JSON.stringify(restored.provenance.captureScopes) !== JSON.stringify([...new Set(input.captureScopes)].sort())) {
       throw new Error('Source preparation has different fixed provenance');

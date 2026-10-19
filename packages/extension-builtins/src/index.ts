@@ -1,4 +1,6 @@
 import { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
+import { CODE_EXCHANGE_CAPABILITY, CODE_EXCHANGE_TOOL_DECLARATIONS, VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION_ID } from './code-exchange-tools.js';
+export * from './code-exchange-tools.js';
 export { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
 import { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
 import { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENSION_ID } from './image-tools.js';
@@ -566,6 +568,13 @@ export const VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION: VarinBuiltinExtensionDe
     capabilities: { host: [RESEARCH_DISCOVERY_CAPABILITY] }, provides: { services: [...RESEARCH_DISCOVERY_TOOL_DECLARATIONS] } },
 };
 
+export const VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION_ID, displayName: 'Agent code exchange', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [CODE_EXCHANGE_CAPABILITY] }, provides: { services: [...CODE_EXCHANGE_TOOL_DECLARATIONS] } },
+};
+
 export const VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION_ID, displayName: 'Interactive content', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -660,6 +669,7 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION,
   VARIN_BUILTIN_WEB_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
+  VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
   VARIN_BUILTIN_IMAGES_EXTENSION,
   VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION,

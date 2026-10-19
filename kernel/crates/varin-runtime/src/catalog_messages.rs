@@ -37,6 +37,10 @@ pub enum MessageActor {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MessageInput {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_agent: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wait: Option<MessageWaitOptions>,
     pub target_thread_id: Option<String>,
@@ -50,8 +54,11 @@ impl MessageInput {
         if let Some(duration) = self.wait.as_ref().and_then(|w| w.timeout_ms) {
             super::observations::deadline_after(super::observations::wall_time_ms()?, duration)?;
         }
-        if self.text.trim().is_empty() {
+        if self.text.trim().is_empty() || self.name.as_deref().is_some_and(|name|name.trim().is_empty()) {
             return Err(RuntimeError::Invalid("message text is required".into()));
+        }
+        if self.source_agent.as_deref().is_some_and(|s| s.trim().is_empty()) || (self.source_agent.is_some() && self.kind != MessageKind::Request) {
+            return Err(RuntimeError::Invalid("sourceAgent selects the file basis for a work request".into()));
         }
         if self.reply_to.as_deref().is_some_and(str::is_empty) {
             return Err(RuntimeError::Invalid(
@@ -60,7 +67,7 @@ impl MessageInput {
         }
         if self.reply_to.is_none()
             && (self.target_thread_id.as_deref().is_none_or(str::is_empty)
-                || self.target_branch_id.as_deref().is_none_or(str::is_empty))
+                || self.target_branch_id.as_deref().is_some_and(str::is_empty))
         {
             return Err(RuntimeError::Invalid(
                 "a message requires its target Thread and branch, or replyTo".into(),
@@ -72,6 +79,8 @@ impl MessageInput {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageIdentity {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_agent: Option<String>,
     pub message_id: String,
     pub sender_thread_id: String,
     pub sender_branch_id: String,
@@ -140,6 +149,7 @@ pub struct MessagePreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedMessage {
+    name: Option<String>,
     wait: Option<MessageWaitOptions>,
     key: String,
     identity: MessageIdentity,
@@ -201,7 +211,8 @@ fn route(
         if input
             .target_thread_id
             .as_ref()
-            .is_some_and(|v| v != &original.sender_thread_id)
+                .map(|v| super::threads::resolve(db,v)).transpose()?
+                .is_some_and(|v| v != original.sender_thread_id)
             || input
                 .target_branch_id
                 .as_ref()
@@ -216,16 +227,9 @@ fn route(
             original.sender_branch_id.clone(),
         )
     } else {
-        (
-            input
-                .target_thread_id
-                .clone()
-                .ok_or_else(|| RuntimeError::Invalid("target Thread required".into()))?,
-            input
-                .target_branch_id
-                .clone()
-                .ok_or_else(|| RuntimeError::Invalid("target branch required".into()))?,
-        )
+        let target = super::threads::resolve(db,input.target_thread_id.as_deref().ok_or_else(|| RuntimeError::Invalid("target Agent required".into()))?)?;
+        let branch = input.target_branch_id.clone().map(Ok).unwrap_or_else(||super::threads::branch(db,&target))?;
+        (target,branch)
     };
     if sender == target {
         return Err(RuntimeError::Invalid(
@@ -243,6 +247,20 @@ fn route(
     Ok((target, target_branch))
 }
 impl Catalog {
+    pub fn has_code_notice(&self, operation_id:&str)->Result<bool> {
+        Ok(self.db.query_row("SELECT EXISTS(SELECT 1 FROM commands WHERE id=?1)",[format!("code-notice:code-exchange:{operation_id}")],|r|r.get(0))?)
+    }
+    pub fn prepare_code_notice(&self, key:String, sender:String, branch:String, operation_id:&str, expected_owner:&ExecutorOwner,input:MessageInput)->Result<MessagePreparation> {
+        let operation=self.operation(operation_id)?;
+        let run=self.run(&operation.run_id)?;
+        let intent=ToolIntent::from_operation(&operation)?;
+        if run.thread_id!=sender || run.branch_id!=branch || operation.execution_owner.as_ref()!=Some(expected_owner)
+            || !matches!(expected_owner,ExecutorOwner::External{..})
+            || !matches!(operation.executor.as_deref(),Some("submit_code"|"update")) || input.kind!=MessageKind::Inform {
+            return Err(RuntimeError::Conflict("code notice differs from its original tool owner".into()));
+        }
+        self.prepare_message(format!("code-notice:{key}"),sender,branch,MessageActor::Agent{run_id:run.id,operation_id:operation.id.clone(),origin:intent.origin().clone()},input,None,None)
+    }
     pub fn prepare_user_message(
         &self,
         key: String,
@@ -325,6 +343,7 @@ impl Catalog {
         } else {
             let (target_thread_id, target_branch_id) = route(&self.db, &sender, &branch, &input)?;
             MessageIdentity {
+                source_agent: input.source_agent.clone(),
                 message_id: match &actor {
                     MessageActor::Agent { operation_id, .. } => format!("message:{operation_id}"),
                     MessageActor::User => id(),
@@ -406,6 +425,8 @@ impl Catalog {
         }
         // Recheck the actual family and original reverse route after body preparation.
         let routing = MessageInput {
+            source_agent: identity.source_agent.clone(),
+            name: None,
             wait: None,
             target_thread_id: Some(identity.target_thread_id.clone()),
             target_branch_id: Some(identity.target_branch_id.clone()),
@@ -458,6 +479,7 @@ impl Catalog {
             }
         }
         let accepted_at_ms = super::observations::wall_time_ms()?;
+        if let Some(name) = &prepared.name { super::threads::name(&tx,&identity.target_thread_id,name)?; }
         let deadline_at_ms = prepared
             .wait
             .as_ref()
@@ -478,7 +500,7 @@ impl Catalog {
             thread_id: identity.target_thread_id.clone(),
             branch_id: identity.target_branch_id.clone(),
             run_id: activation.run_id().map(str::to_owned),
-            mode: InputMode::Boundary,
+            mode: if identity.source_agent.is_some() { InputMode::NextRun } else { InputMode::Boundary },
             state: InputState::Queued,
             revision: 1,
             cursor,
@@ -494,7 +516,7 @@ impl Catalog {
             },
             delivered_cursor: None,
         };
-        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?7,'boundary','queued',?3,'message',?8,?4,?5,?6)", params![input.id,input.branch_id,sql_number(cursor)?,identity.sender_thread_id,identity.sender_branch_id,encode(&input)?,input.run_id,encode(&input.activation)?.trim_matches('"')])?;
+        tx.execute("INSERT INTO input_queue(id,branch_id,run_id,mode,state,cursor,origin,activation,sender_thread_id,sender_branch_id,body) VALUES(?1,?2,?7,?9,'queued',?3,'message',?8,?4,?5,?6)", params![input.id,input.branch_id,sql_number(cursor)?,identity.sender_thread_id,identity.sender_branch_id,encode(&input)?,input.run_id,encode(&input.activation)?.trim_matches('"'),encode(&input.mode)?.trim_matches('"')])?;
         tx.execute(
             "INSERT INTO input_history_content(input_id,body) VALUES(?1,?2)",
             params![input.id, encode(&prepared.history)?],
@@ -674,6 +696,7 @@ impl MessagePreparation {
             None
         };
         Ok(PreparedMessage {
+            name: self.input.name,
             wait: self.input.wait,
             key: self.key,
             identity: self.identity,

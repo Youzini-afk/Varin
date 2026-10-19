@@ -36,7 +36,7 @@ export interface ManagedSourceBindRequest {
   operationId?: string;
   retention: 'run' | 'caller';
   handoff?: ChildSourceHandoff;
-  continuation?: { executionId: string; previousRunId: string; root: string };
+  continuation?: { executionId: string; previousRunId: string; root: string; refresh?: import('../kernel/protocol.generated.js').AgentSourceSelection };
 }
 /** References to the target's Storage remain target references. They confer no local access. */
 export interface ManagedSourceBinding {
@@ -88,6 +88,8 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string}
+  | {kind:'code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;branchId:string;source:import('../kernel/code-exchange.js').CodeParticipant;target:import('../kernel/code-exchange.js').CodeParticipant;result:import('./working-state/types.js').WorkingResult}
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
   | { kind: 'mcp'; action: import('./managed-mcp-contract.js').ManagedMcpAction }
@@ -118,6 +120,7 @@ export type SourceServiceOperation =
   | { kind: 'compute'; input: Omit<KernelComputeStartParams, 'workspaceId' | 'rootId' | 'branchId' | 'revision' | 'pinId' | 'objects'> }
   | { kind: 'original_source'; branchId: string }
   | { kind: 'child_prepare'; execution: DelegatedExecution }
+  | { kind: 'child_refresh_capture'; execution: DelegatedExecution }
   | { kind: 'child_result_prepare'; execution: DelegatedExecution }
   | { kind: 'child_result_publish'; execution: DelegatedExecution }
   | { kind: 'child_result_read'; execution: DelegatedExecution }
@@ -184,6 +187,8 @@ export interface ManagedSourceService {
 }
 
 export interface SourceServiceResults {
+  code_capture: import('./working-state/types.js').WorkingResult;
+  code_apply: import('./working-state/integration-coordinator.js').IntegrationOperationReceipt;
   user_integration: import('../kernel/thread-integrations.js').UserIntegrationResult;
   schedule: import('../kernel/tool-bridge.js').ToolExecutionReceipt;
   mcp: import('./managed-mcp-contract.js').ManagedMcpReply;
@@ -209,6 +214,7 @@ export interface SourceServiceResults {
   compute: import('../kernel/compute-runner.js').KernelComputeResult;
   original_source: import('./working-state/types.js').WorkingOriginalSource | null;
   child_prepare: ManagedChildSourceReceipt;
+  child_refresh_capture: { captured: true };
   child_result_prepare: import('./working-state/types.js').WorkingResultCandidate | null;
   child_result_read: import('./working-state/types.js').WorkingResultCandidate | null;
   child_result_publish: import('./working-state/types.js').WorkingResult;

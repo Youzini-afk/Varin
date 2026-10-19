@@ -82,6 +82,8 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
 }
 fn input() -> DispatchInput {
     DispatchInput {
+        source_agent: None,
+        name: None,
         task: "Perform the selected task".into(),
         preset: None,
         work_mode: None,

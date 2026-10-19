@@ -41,6 +41,8 @@ import { FileObservationService } from './lib/kernel/file-observation-service.js
 import { createScheduleToolOwner, SCHEDULE_CAPABILITY } from './lib/kernel/schedule-tool-owner.js';
 import { CalendarOwner } from './lib/scheduled-tasks/calendar-owner.js';
 import { createChildProfilePreparer } from './lib/kernel/child-profiles.js';
+import { createCodeExchangeOwner, CODE_EXCHANGE_CAPABILITY } from './lib/kernel/code-exchange.js';
+import { createManagedCodeExchangeService } from './lib/kernel/managed-code-exchange.js';
 import { createPlanOwner } from './lib/kernel/plan-owner.js';
 import { PlanService } from './lib/kernel/plan-service.js';
 import { createPersonalizationContextResolver } from './lib/memory/personalization-context.js';
@@ -1991,6 +1993,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const targetIntegrations = createManagedIntegrationService({ kernel: kernelClient, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator });
+  const targetCodeExchange = createManagedCodeExchangeService({ kernel: kernelClient, storage: kernelStorageAdapter,
+    documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
+    coordinator: threadIntegrationCoordinator });
   const userIntegrationOwners = { kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator, resolveLiveSource: liveSources.validate };
@@ -2034,9 +2039,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     serviceOperation: (scope, operation, signal) => {
       switch (operation.kind) {
         case 'mcp': return targetMcpService.request(scope, operation.action, signal);
-        case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
+        case 'child_refresh_capture': case 'child_prepare': case 'child_result_prepare': case 'child_result_publish': case 'child_result_read': case 'child_release': case 'child_unaccepted_release':
           return targetChildSources(scope, operation, signal);
         case 'integration': return targetIntegrations(scope, operation, signal);
+        case 'code_capture': case 'code_apply': return targetCodeExchange(scope, operation, signal);
         case 'user_integration': return targetUserIntegrations(scope, operation, signal);
         case 'schedule': return targetSchedules(scope, operation, signal);
         default: return targetSourceQuery(scope, operation, signal);
@@ -2692,6 +2698,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       openTarget: createIntegrationTargetOpener({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
         recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore, resolveLiveSource: liveSources.validate,
         documents: documentsAuthority }) }));
+  const unregisterCodeExchangeCapability = extensionRuntime.capabilities.register(CODE_EXCHANGE_CAPABILITY,
+    createCodeExchangeOwner({ kernel: kernelClient, runtime: agentRuntime, storage: kernelStorageAdapter,
+      coordinator: threadIntegrationCoordinator, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
+      resolveLiveSource: liveSources.validate, documents: documentsAuthority,
+      onCleanupError: () => console.error('[CodeExchange] Original delivery or source cleanup requires retry') }));
   const unregisterDocumentsCapability = extensionRuntime.capabilities.register(
     'workspace.documents',
     createDocumentsCapabilityHandler(documentsAuthority),
@@ -2953,6 +2964,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       unregisterInteractiveUiCapability();
       interactiveUi.close();
       unregisterChildIntegrationCapability();
+      unregisterCodeExchangeCapability();
       unregisterScheduleCapability();
       unregisterDocumentsCapability();
       unregisterWorkspaceRecoveryCapability();

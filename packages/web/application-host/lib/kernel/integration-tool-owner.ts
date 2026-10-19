@@ -209,7 +209,7 @@ export function createIntegrationReceiptReconciler(options: {
       const operations = await options.runtime.activeOperations(thread.thread_id, undefined, signal);
       await Promise.all(operations.map(async operation => {
         if (operation.effect !== 'unknown' || operation.execution_owner?.kind !== 'external'
-          || !object(operation.intent) || !object(operation.intent.call) || operation.intent.call.name !== 'integrate_child') return;
+          || !object(operation.intent) || !object(operation.intent.call) || !['integrate_child','submit_code','update'].includes(String(operation.intent.call.name))) return;
         try {
           signal.throwIfAborted();
           // Catalog derives the unique journal and source from this original execution identity.

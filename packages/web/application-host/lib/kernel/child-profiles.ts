@@ -91,6 +91,7 @@ export function createChildProfilePreparer(owners: {
       return profile;
     }));
     signal?.throwIfAborted();
-    return freeze(presets, settings.models.worker?.enabled === false ? unavailable('child-worker-disabled') : null, descriptors);
+    return freeze(presets, settings.models.worker?.enabled === false && settings.models.verifier?.enabled === false
+      && !presets.some(preset => !preset.unavailable) ? unavailable('child-roles-disabled') : null, descriptors);
   };
 }

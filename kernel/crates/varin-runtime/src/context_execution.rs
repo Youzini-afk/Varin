@@ -248,7 +248,20 @@ fn execute_node(
     if cancel.is_cancelled() {
         return Err(error("summary cancelled before preparation"));
     }
-    let context = compiler.compile_node(node, outputs).map_err(error)?;
+    let mut context = compiler.compile_node(node, outputs).map_err(error)?;
+    let (queries,metadata)=engine.persistence.lock().map_err(error)?.context_node_recovery(&input.run_id,node).map_err(error)?;
+    let mut recovered=compiler.history(metadata).map_err(error)?;
+    for reference in queries {
+        let snapshot=compiler.snapshot(&reference).map_err(error)?;
+        let calls=recovered.iter().filter_map(|item|match &item.content {Content::ToolCall{call} if item.id.starts_with(&format!("model-item:{}:{}:",snapshot.view.request_id.len(),snapshot.view.request_id))=>Some(call.clone()),_=>None}).collect::<Vec<_>>();
+        let cached=recovered.iter().filter_map(|item|match &item.content{Content::ToolResult{result} if result.request_id==snapshot.view.request_id=>Some((result.call_id.clone(),result.clone())),_=>None}).collect::<BTreeMap<_,_>>();
+        if calls.iter().any(|call|!cached.contains_key(&call.call_id)) {
+            let results=engine.execute_batch(input,&snapshot,calls,cancel,&cached,None)?;
+            engine.persistence.commit(&input.run_id,input.owner_generation,&ExecutionRecord::ToolBatchCommitted{request_id:snapshot.view.request_id.clone(),results:results.clone()})?;
+            for result in results {if !cached.contains_key(&result.call_id){recovered.push(std::sync::Arc::new(ConversationItem{resource_activation:None,id:format!("{}:result:{}",result.request_id,result.call_id),provenance:Provenance::ToolData{call_id:result.call_id.clone()},content:Content::ToolResult{result},opaque:None}));}}
+        }
+    }
+    context.history.extend(recovered);
     let mut binding = input.binding.clone();
     binding.goal = engine
         .persistence
@@ -257,12 +270,14 @@ fn execute_node(
     binding.instruction_sources = context.instruction_sources;
     binding.memory_checkpoint = context.memory_checkpoint;
     binding.resource_checkpoint_id = context.resource_checkpoint_id;
+    loop {
+    if cancel.is_cancelled(){return Err(error("summary query cancelled"));}
     let id = format!("{}:node:{}:{}", input.run_id, node, uuid::Uuid::new_v4());
     let view = RequestView {
         request_id: id.clone(),
         run_id: input.run_id.clone(),
         origin: RequestOrigin::Conversation {
-            compaction: context.compaction,
+            compaction: context.compaction.clone(),
             step: compiler
                 .plan()
                 .nodes()
@@ -272,8 +287,8 @@ fn execute_node(
                 + 1,
             history_range: binding.history_range.clone(),
         },
-        binding,
-        history: context.history,
+        binding:binding.clone(),
+        history: context.history.clone(),
     };
     let serialized = engine.provider.serialize_cancellable(&view, None, cancel)?;
     let preview =
@@ -362,7 +377,7 @@ fn execute_node(
             request_id: id.clone(),
             outcome,
             finish_reason: result.as_ref().ok().copied(),
-            items,
+            items:items.clone(),
             interrupted_deltas: if result.is_err() || interrupted {
                 deltas
             } else {
@@ -372,7 +387,15 @@ fn execute_node(
             failure: result.as_ref().err().cloned(),
         },
     )?;
-    result.map_err(|failure| ExecutionError::new(failure.code, failure.message))?;
+    let finish=result.map_err(|failure| ExecutionError::new(failure.code, failure.message))?;
+    if finish==FinishReason::ToolCalls {
+        let calls=items.iter().filter_map(|item|match &item.content{Content::ToolCall{call}=>Some(call.clone()),_=>None}).collect();
+        context.history.extend(items.iter().map(|item|std::sync::Arc::new(model_history_item(&id,item))));
+        let results=engine.execute_batch(input,&snapshot,calls,cancel,&BTreeMap::new(),None)?;
+        engine.persistence.commit(&input.run_id,input.owner_generation,&ExecutionRecord::ToolBatchCommitted{request_id:id,results:results.clone()})?;
+        context.history.extend(results.into_iter().map(|result|std::sync::Arc::new(ConversationItem{resource_activation:None,id:format!("{}:result:{}",result.request_id,result.call_id),provenance:Provenance::ToolData{call_id:result.call_id.clone()},content:Content::ToolResult{result},opaque:None})));
+        continue;
+    }
     let output = engine
         .persistence
         .lock()
@@ -382,5 +405,6 @@ fn execute_node(
     if output.node_id != node || output.state != "completed" {
         return Err(error("summary node did not complete"));
     }
-    Ok(output)
+    return Ok(output)
+    }
 }

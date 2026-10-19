@@ -180,6 +180,14 @@ const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
   if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
     return { consistency: source.consistency, root: source.root, ...(resources ? { resources } : {}) };
   }
+  if (source.consistency === 'refreshed-root' && typeof source.root === 'string' && source.root
+    && typeof source.previousRoot === 'string' && typeof source.incomingRoot === 'string'
+    && typeof asRecord(source.incoming).run_id === 'string' && asRecord(source.incoming).source
+    && Array.isArray(source.conflicts) && source.conflicts.every((p): p is string => typeof p === 'string')) {
+    return { consistency: 'refreshed-root', root: source.root, previousRoot: source.previousRoot,
+      incomingRoot: source.incomingRoot, incoming: source.incoming as Extract<ChildSourceProvenance, { consistency: 'refreshed-root' }>['incoming'],
+      conflicts: source.conflicts, ...(resources ? { resources } : {}) };
+  }
   if ((source.consistency === "stable-capture" || source.consistency === "git-base-with-overlay")
     && (source.contentMode === "saved-files" || source.contentMode === "fixed-draft-baseline")
     && Array.isArray(source.captureScopes) && source.captureScopes.every((item): item is string => typeof item === "string")
@@ -275,7 +283,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   private readonly captureOwners = new WeakMap<Record<string, RecoveryState>, Map<string, string>>();
   /** Original physical modes, before the Windows Git-index projection. */
   private readonly captureStates = new WeakMap<Record<string, RecoveryState>, Record<string, RecoveryState>>();
-  private readonly sourceByHash = new Map<string, { branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
+  private readonly sourceByHash = new Map<string, { root?:string; branchId?: string; pinId?: string; path?: string; revision?: number; recordId?: string; slot?: string; ownerId?: string }>();
 
   constructor(private readonly context: KernelStorageContext) {}
 
@@ -467,8 +475,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       result[path] = state;
       if (state.kind === "regular-file") {
         this.sourceByHash.set(state.objectHash, options?.pin
-          ? { pinId: options.pin.pinId, path }
-          : { branchId, path, ...(options?.revision === undefined ? {} : { revision: options.revision }) });
+            ? { root:read.root,pinId: options.pin.pinId, path }
+            : { root:read.root,branchId, path, ...(options?.revision === undefined ? {} : { revision: options.revision }) });
       }
     }
     return result;
@@ -504,8 +512,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       throw new Error(`Working result ${branchId}@${revision} differs from its fixed root`);
     }
     const resultRecordId = `working-result:${branchId}@${revision}`;
-    for (const [file, state] of Object.entries(pathStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
-    for (const [file, state] of Object.entries(baseStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { recordId: resultRecordId, slot: `base:${file}` });
+    for (const [file, state] of Object.entries(pathStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { root:document.root,recordId: resultRecordId, slot: `result:${file}`, branchId, path: file, revision });
+    for (const [file, state] of Object.entries(baseStates)) if (state.kind === "regular-file") this.sourceByHash.set(state.objectHash, { root:document.baseRoot,recordId: resultRecordId, path:file,slot: `base:${file}` });
     const stats = asRecord(document.diffStats);
     if (stats.files !== changedPaths.length || typeof stats.insertions !== "number" || typeof stats.deletions !== "number") throw new Error("Working result has malformed diff stats");
     return { resultRevision: revision, branchId, ...(typeof document.parentRef === "string" ? { parentRef: document.parentRef } : {}),
@@ -876,13 +884,15 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     } };
   }
 
-  private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; ownerId?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
+  private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; ownerId?: string; sourceRef?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
     const source = state.kind === "regular-file" ? this.sourceByHash.get(state.objectHash) : undefined;
     return {
       path: normalize(file),
       state: toKernelState(state),
       ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
         ? { ownerId: this.ownerByHash.get(state.objectHash)! }
+        : state.kind === "regular-file" && source?.root && source.path
+          ? {sourceRef:source.root,sourcePath:source.path}
         : state.kind === "regular-file" && source?.recordId && source.slot
           ? { sourceRecordId: source.recordId, sourceSlot: source.slot }
           : state.kind === "regular-file" && source?.path
@@ -923,7 +933,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       offset = slice.nextOffset;
     }
     const provenance = parseSourceProvenance(JSON.parse(Buffer.concat(chunks).toString("utf8")));
-    if (provenance.consistency === "fixed-root" && provenance.root !== receipt.root) {
+    if ('root' in provenance && provenance.root !== receipt.root) {
       throw new Error("Working source provenance differs from its prepared branch");
     }
     return { root: receipt.root, provenance };
@@ -940,7 +950,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     if (!branch || branch.root !== original.root || branch.baseRoot !== original.root || branch.writeRevision !== 0 || branch.headRevision !== 0) {
       throw new Error("Working source branch changed after preparation");
     }
-    if (original.provenance.consistency !== "fixed-root"
+    if ('captureScopes' in original.provenance
       && JSON.stringify(original.provenance.captureScopes) !== JSON.stringify(branch.captureScopes)) {
       throw new Error("Working source provenance differs from its prepared branch");
     }
@@ -1234,17 +1244,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       await this.context.client.releaseBlob(ownerId);
       this.ownerByHash.delete(state.objectHash);
     }
-    const changes = Object.entries(committedWrites).map(([path, state]) => ({
-      path,
-      state: toKernelState(state),
-      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
-        ? { ownerId: this.ownerByHash.get(state.objectHash)! }
-        : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.recordId && this.sourceByHash.get(state.objectHash)?.slot
-          ? { sourceRecordId: this.sourceByHash.get(state.objectHash)!.recordId!, sourceSlot: this.sourceByHash.get(state.objectHash)!.slot! }
-          : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.branchId && this.sourceByHash.get(state.objectHash)?.path
-            ? { sourcePath: this.sourceByHash.get(state.objectHash)!.path! }
-            : {}),
-    }));
+    const changes = Object.entries(committedWrites).map(([path, state]) => this.kernelEntry(path,state));
     const result = await this.context.client.writeBranch({ operationId: `branch-write:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`, branchId, expectedWriteRevision, changes });
     if (result.status === "committed") {
       for (const state of Object.values(committedWrites)) if (state.kind === "regular-file") this.ownerByHash.delete(state.objectHash);
@@ -1281,17 +1281,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
     }
     const committedWrites = compactTreeWrites(normalized);
-    const changes = Object.entries(committedWrites).map(([path, state]) => ({
-      path,
-      state: toKernelState(state),
-      ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
-        ? { ownerId: this.ownerByHash.get(state.objectHash)! }
-        : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.recordId && this.sourceByHash.get(state.objectHash)?.slot
-          ? { sourceRecordId: this.sourceByHash.get(state.objectHash)!.recordId!, sourceSlot: this.sourceByHash.get(state.objectHash)!.slot! }
-          : state.kind === "regular-file" && this.sourceByHash.get(state.objectHash)?.branchId && this.sourceByHash.get(state.objectHash)?.path
-            ? { sourcePath: this.sourceByHash.get(state.objectHash)!.path! }
-            : {}),
-    }));
+    const changes = Object.entries(committedWrites).map(([path, state]) => this.kernelEntry(path,state));
     const result = await this.context.client.writeBranch({
       operationId: `branch-rebase:${branchId}:${expectedWriteRevision + 1}:${randomUUID()}`,
       branchId,
@@ -1719,6 +1709,8 @@ export class KernelStorageAdapter {
     this.unregisterExit = this.client.subscribeExit(() => this.grants.clear());
     this.boundFileStore = options.fileStore;
     this.fileStoreProxy = {
+      readContent:(...args)=>this.boundFileStore?.readContent?.(...args)??Promise.reject(new Error('Kernel recovery content reader is not bound')),
+      storeContent:(...args)=>this.boundFileStore?.storeContent?.(...args)??Promise.reject(new Error('Kernel recovery content writer is not bound')),
       applyState: (...args) => this.boundFileStore?.applyState(...args) ?? Promise.reject(new Error("Kernel recovery file store is not bound")),
       captureState: (...args) => this.boundFileStore?.captureState(...args) ?? Promise.reject(new Error("Kernel recovery file store is not bound")),
       hashFile: (...args) => this.boundFileStore?.hashFile(...args) ?? Promise.reject(new Error("Kernel recovery file store is not bound")),

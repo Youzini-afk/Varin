@@ -69,7 +69,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       get: (identity, messageId, signal) => post('messages/get', { ...identity, messageId }, signal),
     },
     family: {
-      list: (identity, includeSelf, signal) => post('family/list', { ...identity, includeSelf }, signal),
+      list: (identity, options, signal) => post('family/list', { ...identity, ...(typeof options === 'boolean' ? { includeSelf: options } : options) }, signal),
       runs: (identity, request, signal) => post('family/runs', { ...identity, request }, signal),
       read: (identity, request, signal) => post('family/read', { ...identity, request }, signal),
       item: (identity, request, signal) => post('family/item', { ...identity, request }, signal),
@@ -82,6 +82,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       executions: (identity, operationId, signal) => post('child/executions', { ...identity, ...(operationId ? { operationId } : {}) }, signal),
       readExecutionReport: (identity, executionId, itemId, offset, maxBytes, signal) => post('child/execution/report', { ...identity, executionId, itemId, offset, maxBytes }, signal),
       children: identity => post('child/list', identity),
+      page:(identity,options,signal)=>post('child/page',{...identity,options},signal),
       readReport: (identity, operationId, itemId, offset, maxBytes, signal) => post('child/report', { ...identity, operationId, itemId, offset, maxBytes }, signal),
       cancelChild: (identity, operationId) => post('child/cancel', { ...identity, operationId }),
       cancelWait: (identity, waitId) => post('child/wait/cancel', { ...identity, waitId }),

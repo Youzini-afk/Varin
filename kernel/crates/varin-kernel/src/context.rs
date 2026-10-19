@@ -122,15 +122,6 @@ impl ContextPreparation for CapacityPreparation {
                 .map_err(failed)?;
             (configuration, revision, existing, budget)
         };
-        let Some(capacity) = configuration.context_window_tokens else {
-            return Ok(ContextRequestPreparation::Ready);
-        };
-        let estimate = match budget {
-            Some((read, protocol)) => read
-                .estimate(view, serialized, protocol, cancel)
-                .map_err(failed)?,
-            None => estimate_request(view, serialized),
-        };
         // These are identities and local estimates, not a new measurement ledger. The Host
         // binds them to the Thread, full launch/configuration, credential and policy selection.
         let mut identity = serde_json::to_value(&view.binding).map_err(failed)?;
@@ -158,6 +149,17 @@ impl ContextPreparation for CapacityPreparation {
         if !settings.enabled {
             return Ok(ContextRequestPreparation::Ready);
         }
+        // Observation publication belongs to every request boundary. Capacity settings
+        // only decide whether this request also needs budget preparation.
+        let Some(capacity) = configuration.context_window_tokens else {
+            return Ok(ContextRequestPreparation::Ready);
+        };
+        let estimate = match budget {
+            Some((read, protocol)) => read
+                .estimate(view, serialized, protocol, cancel)
+                .map_err(failed)?,
+            None => estimate_request(view, serialized),
+        };
         let timing: PreparationTiming = prepared
             .get("timing")
             .cloned()

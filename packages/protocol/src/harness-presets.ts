@@ -23,12 +23,13 @@ import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type PresetId = "worker" | "retrieval";
+export type PresetId = "worker" | "verifier" | "retrieval";
 
 /** Projects the selected runtime's owning declarations; this is not a tool-name registry. */
 export function agentPresetTools(capabilities: readonly { name: string; default_presets: readonly PresetId[] }[]): Record<PresetId, string[]> {
   return {
     worker: capabilities.filter(tool => tool.default_presets.includes("worker")).map(tool => tool.name),
+    verifier: capabilities.filter(tool => tool.default_presets.includes("verifier")).map(tool => tool.name),
     retrieval: capabilities.filter(tool => tool.default_presets.includes("retrieval")).map(tool => tool.name),
   };
 }
@@ -62,8 +63,15 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
   worker: {
     id: "worker", slot: "worker",
     worktree: "isolated",
-    systemPromptFragment: "Complete the assigned work with awareness of the overall goal and related tasks. Read teammates' relevant work, coordinate shared interfaces directly, and inform the main agent of decisions affecting the overall design. Revisit the task boundary when evidence calls for it. Verify the actual result in proportion to its risk.",
-    teamDescription: "independent implementation or other assigned work, including coordination and relevant verification",
+    name: "实现 Agent",
+    systemPromptFragment: "理解分配任务在整体目标中的作用，完成实现或修复，保持与相关工作的协调和设计一致性。根据实际发现调整做法，交付可供后续工作使用的成果。",
+    teamDescription: "完成实现或修复",
+  },
+  verifier: {
+    id: "verifier", slot: "verifier", name: "验证 Agent",
+    worktree: "isolated",
+    systemPromptFragment: "从用户目标和系统整体出发，独立判断实现的正确性、完整性和设计质量，关注相关模块之间的实际行为。自主选择验证方法，依据实际证据形成结论，说明重要发现及其影响。验证以支持判断为度，新增测试和改进建议兼顾实际收益、设计简洁性和维护成本。",
+    teamDescription: "独立判断正确性、完整性和设计质量",
   },
   "retrieval": {
     id: "retrieval",

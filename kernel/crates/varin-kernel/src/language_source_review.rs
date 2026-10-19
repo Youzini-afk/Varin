@@ -408,6 +408,8 @@ impl Review {
             .unwrap();
         for id in ["worker", "retrieval", "custom:language_reader"] {
             let input = varin_runtime::catalog::dispatch::DispatchInput {
+        source_agent: None,
+                name: None,
                 task: "Inspect the original source".into(),
                 preset: Some(id.into()),
                 work_mode: None,
