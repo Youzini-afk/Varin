@@ -187,16 +187,16 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
             let available=|id:&str|view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["id"]==id && preset["unavailable"].is_null()));
             let main=self.catalog.lock().map_err(|e|error(e.to_string()))?.child_task_for_thread(&run.thread_id).map_err(|e|error(e.to_string()))?.is_none();
             let mut text=String::new();
-            if main {text.push_str("围绕用户目标推进工作，保持对整体设计、任务关系和当前进展的理解。结合实际实现和验证证据，调整工作并判断整体交付。");}
+            if main {text.push_str("Advance the user's goal while maintaining an understanding of the overall design, task relationships, and current progress. Use implementation and verification evidence to adjust the work and judge the overall delivery.");}
             if binding.tools.iter().any(|tool|tool.name=="dispatch") {
-                if available("worker") {text.push_str("\n你可以委派 Agent 完成实现或修复，按任务需要组织协作。");}
-                if available("verifier") {text.push_str("\n你可以把验证交给独立的 Agent，与实现并行推进。由验证 Agent 承担验证时，可以让实现方专注实现，将测试编写和运行交给验证方按实际需要处理。");}
+                if available("worker") {text.push_str("\nYou can delegate implementation or fixes to Agents and organize collaboration as the task requires.");}
+                if available("verifier") {text.push_str("\nYou can delegate verification to an independent Agent and proceed with implementation in parallel. When a verification Agent handles verification, you can let implementers focus on implementation and leave test writing and execution to the verifier as needed.");}
             }
             if (!main || view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["unavailable"].is_null())))
                 && binding.tools.iter().any(|tool|tool.name=="send") {
                 text.push_str(if binding.tools.iter().any(|tool|tool.name=="submit_code") {
-                    "\n你可以直接与相关 Agent 交流、查看彼此工作、交换代码改动并协调依赖。"
-                } else { "\n你可以直接与相关 Agent 交流、查看彼此工作并协调依赖。" });
+                    "\nYou can communicate directly with related Agents, inspect one another's work, exchange code changes, and coordinate dependencies."
+                } else { "\nYou can communicate directly with related Agents, inspect one another's work, and coordinate dependencies." });
             }
             if !text.is_empty() {
                 let identity=hex::encode(Sha256::digest(text.as_bytes()));
