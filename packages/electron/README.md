@@ -182,8 +182,8 @@ Build its separate native archive with `bun run --cwd packages/electron package:
 This is the only build path that downloads the pinned model and prepares Node ONNX. It emits
 `Varin-local-semantic-<version>-<platform>-<arch>.tar.gz` and a checksum into `dist`; the release
 workflow publishes these alongside, rather than inside, the application. The archive excludes the
-unused browser ONNX distribution. Set `VARIN_SMOKE_LOCAL_SEMANTIC_PACK` to that archive when running
-the desktop smoke to additionally exercise the explicit import flow.
+unused browser ONNX distribution. Component build verification and installation checks own its
+inference and import behavior.
 
 ### Native libraries built from source
 
@@ -225,11 +225,8 @@ Release ARM64 packages run natively on GitHub's `windows-11-arm` runner. The wor
 `VARIN_TARGET_ARCH=arm64`, packages with `--win --arm64`, executes the unpacked ARM64 application,
 and publishes `latest-arm64.yml` beside the architecture-specific installer and blockmap.
 
-After packaging, verify that the unpacked application starts its native kernel using only packaged
-dependencies, then check the renderer app-ready signal/error boundary, Thread Catalog readiness, lazy materialization and a
-real hover request through the built-in TypeScript language service, plus a real terminal create/close
-cycle. Merely finding compiled Host files is not proof that their unpacked assets or the bundled runtime
-can execute:
+After packaging, run the shared startup smoke against the unpacked Windows executable. It checks
+the main workspace, renderer readiness and the embedded Host's `/health` response:
 
 ```bash
 bun run electron:smoke:win
@@ -267,11 +264,13 @@ assembles the architecture-specific updater channels, and can upload only the ve
 existing draft GitHub Release. The slow macOS Intel target is a manual opt-in on that workflow, so routine
 releases do not wait for the Intel runner. Publishing the draft remains a separate deliberate action.
 
-The Linux and macOS smoke path starts the unpacked packaged application, waits for the renderer's
-`__varinAppReady` signal, rejects the React error boundary, checks `/health`, and creates and closes a
-real terminal. Linux additionally verifies the AppImage, Electron executable, desktop identity, and
-packaged native module architecture. macOS checks the application executable and packaged `.node`
-modules before launch.
+All platforms share one startup smoke: launch the unpacked packaged application with clean temporary
+data configured to use the local Host, wait for its main workspace and renderer readiness, then check
+the embedded Host and native kernel through `/health`. The Windows entry only supplies its default executable path. Feature
+verification for terminals, recovery, language services, semantic components and editors stays with
+the respective owners. Linux separately verifies the AppImage, Electron executable, desktop identity,
+and packaged native module architecture. macOS checks executable and native module architecture
+before launch; signing and payload checks remain part of packaging.
 
 Windows updates use `latest.yml` for x64 and the `latest-arm64.yml` channel for ARM64 so each installation resolves an architecture-matching installer.
 

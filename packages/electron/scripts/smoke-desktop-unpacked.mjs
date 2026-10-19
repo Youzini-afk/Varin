@@ -1,29 +1,10 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { VARIN_WORKSPACE_RECOVERY_SERVICE_ID, VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION } from '../../extension-contract/src/services.ts';
-
-const appPath = path.resolve(process.argv[2] ?? '');
-const appArguments = process.argv.slice(3);
-const smokeEnvironment = { ...process.env };
-for (const variable of [
-  'VARIN_AGENT_DIR',
-  'VARIN_RUNTIME_SOURCE',
-  'VARIN_SKIP_LOCAL_SERVER',
-  'VARIN_SMOKE_PROFILE_SOURCE',
-  'VARIN_SMOKE_LOCAL_SEMANTIC_PACK',
-  'ELECTRON_RUN_AS_NODE',
-  'NODE_PATH',
-]) {
-  delete smokeEnvironment[variable];
-}
-
-if (!process.argv[2] || !existsSync(appPath)) {
-  throw new Error(`Missing packaged Varin executable at ${appPath}`);
-}
+import { fileURLToPath } from 'node:url';
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const DEVTOOLS_TIMEOUT_MS = 20_000;
@@ -150,7 +131,7 @@ const waitForRenderer = async (userDataDir) => {
     target = targets.find((candidate) => (
       candidate?.type === 'page'
       && typeof candidate.url === 'string'
-      && candidate.url.startsWith('varin-ui://app')
+      && candidate.url.split(/[?#]/, 1)[0] === 'varin-ui://app/index.html'
       && typeof candidate.webSocketDebuggerUrl === 'string'
     ));
   }
@@ -159,7 +140,6 @@ const waitForRenderer = async (userDataDir) => {
   const devTools = await connectDevTools(target.webSocketDebuggerUrl);
   try {
     let lastState;
-    let continuedFromLocalWelcome = false;
     for (let attempt = 0; attempt < 120; attempt += 1) {
       const evaluation = await devTools.evaluate(`(() => ({
         apiBaseUrl: typeof window.__VARIN_API_BASE_URL__ === 'string' ? window.__VARIN_API_BASE_URL__ : '',
@@ -167,7 +147,6 @@ const waitForRenderer = async (userDataDir) => {
         diagnostics: window.__varinStartupDiagnostics ?? null,
         href: window.location.href,
         localOrigin: typeof window.__VARIN_LOCAL_ORIGIN__ === 'string' ? window.__VARIN_LOCAL_ORIGIN__ : '',
-        localRuntimeContinueReady: document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)') !== null,
         mainWorkspace: window.__varinStartupDiagnostics?.bootView?.screen === 'main' && window.__varinStartupDiagnostics?.runtimeReady === true && window.__varinStartupDiagnostics?.catalogLoaded === true && !window.__varinStartupDiagnostics?.catalogError,
         ready: window.__varinAppReady === true,
       }))()`);
@@ -185,18 +164,6 @@ const waitForRenderer = async (userDataDir) => {
           mode: 'main',
           state: lastState,
         };
-      }
-      if (!continuedFromLocalWelcome && lastState?.localRuntimeContinueReady === true) {
-        const continuation = await devTools.evaluate(`(() => {
-          const action = document.querySelector('[data-native-local-runtime-continue="true"]:not(:disabled)');
-          if (!(action instanceof HTMLButtonElement)) return false;
-          action.click();
-          return true;
-        })()`);
-        if (continuation?.exceptionDetails) {
-          throw new Error(`Packaged local-runtime welcome continuation failed: ${continuation.exceptionDetails.text}`);
-        }
-        continuedFromLocalWelcome = continuation?.result?.value === true;
       }
       await delay(250);
     }
@@ -224,145 +191,117 @@ const waitForExit = (child, milliseconds) => new Promise((resolve) => {
   });
 });
 
-const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-desktop-smoke-'));
-const userDataDir = path.join(smokeRoot, 'user-data');
-const workspaceRoot = path.join(smokeRoot, 'workspace');
-await fsp.mkdir(workspaceRoot);
-const logPaths = [
-  path.join(userDataDir, 'logs', 'main.log'),
-  ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Varin', 'main.log')] : []),
-  ...(process.platform === 'linux' ? [
-    path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Varin', 'logs', 'main.log'),
-  ] : []),
-];
-let processOutput = '';
-const child = spawn(appPath, [
-  `--user-data-dir=${userDataDir}`,
-  '--remote-debugging-port=0',
-  '--remote-debugging-address=127.0.0.1',
-  '--remote-allow-origins=*',
-  ...appArguments,
-], {
-  cwd: path.dirname(appPath),
-  env: {
-    ...smokeEnvironment,
-    VARIN_STARTUP_PERF: '1',
-    VARIN_DATA_DIR: userDataDir,
-    VARIN_WORKSPACE_ROOT: workspaceRoot,
-  },
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
-for (const stream of [child.stdout, child.stderr]) {
-  stream.on('data', (chunk) => {
-    processOutput = (processOutput + chunk.toString()).slice(-6_000);
+export async function smokeDesktopApp(executable, appArguments = []) {
+  const appPath = path.resolve(executable ?? '');
+  if (!executable || !existsSync(appPath)) throw new Error(`Missing packaged Varin executable at ${appPath}`);
+  const smokeEnvironment = { ...process.env };
+  for (const variable of [
+    'VARIN_AGENT_DIR', 'VARIN_RUNTIME_SOURCE', 'VARIN_SKIP_LOCAL_SERVER', 'VARIN_SERVER_URL',
+    'VARIN_SMOKE_PROFILE_SOURCE', 'VARIN_SMOKE_LOCAL_SEMANTIC_PACK', 'ELECTRON_RUN_AS_NODE', 'NODE_PATH',
+  ]) delete smokeEnvironment[variable];
+  const smokeRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'varin-desktop-smoke-'));
+  const userDataDir = path.join(smokeRoot, 'user-data');
+  const workspaceRoot = path.join(smokeRoot, 'workspace');
+  await fsp.mkdir(workspaceRoot);
+  await fsp.mkdir(userDataDir);
+  // Select the embedded Host up front; completing onboarding restarts the app.
+  await fsp.writeFile(path.join(userDataDir, 'settings.json'), JSON.stringify({
+    desktopDefaultHostId: 'local',
+    desktopInitialHostChoiceCompleted: true,
+  }));
+  const logPaths = [
+    path.join(userDataDir, 'logs', 'main.log'),
+    ...(process.platform === 'darwin' ? [path.join(os.homedir(), 'Library', 'Logs', 'Varin', 'main.log')] : []),
+    ...(process.platform === 'linux' ? [
+      path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'Varin', 'logs', 'main.log'),
+    ] : []),
+  ];
+  let processOutput = '';
+  const child = spawn(appPath, [
+    `--user-data-dir=${userDataDir}`,
+    '--remote-debugging-port=0',
+    '--remote-debugging-address=127.0.0.1',
+    '--remote-allow-origins=*',
+    ...appArguments,
+  ], {
+    cwd: path.dirname(appPath),
+    env: {
+      ...smokeEnvironment,
+      VARIN_STARTUP_PERF: '1',
+      VARIN_DATA_DIR: userDataDir,
+      VARIN_WORKSPACE_ROOT: workspaceRoot,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    windowsHide: true,
   });
-}
-let spawnError;
-child.once('error', (error) => {
-  spawnError = error;
-});
-
-const readLog = async () => {
-  for (const logPath of logPaths) {
-    const content = await fsp.readFile(logPath, 'utf8').catch(() => '');
-    if (content) return content;
+  for (const stream of [child.stdout, child.stderr]) {
+    stream.on('data', (chunk) => {
+      processOutput = (processOutput + chunk.toString()).slice(-6_000);
+    });
   }
-  return '';
-};
+  const launched = new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
 
-try {
-  if (spawnError) throw spawnError;
-  const renderer = await waitForRenderer(userDataDir);
-  if (child.exitCode !== null) {
-    throw new Error(`Packaged Varin exited before startup completed (code ${child.exitCode}).`);
-  }
-  const runtimeValue = renderer.state?.localOrigin || renderer.state?.apiBaseUrl;
-  let runtimeUrl;
+  const readLog = async () => {
+    for (const logPath of logPaths) {
+      const content = await fsp.readFile(logPath, 'utf8').catch(() => '');
+      if (content) return content;
+    }
+    return '';
+  };
+
   try {
-    runtimeUrl = new URL(runtimeValue);
-  } catch {
-    throw new Error(`Packaged renderer did not expose its local runtime origin: ${String(runtimeValue || '(missing)')}`);
-  }
-  if (!['http:', 'https:'].includes(runtimeUrl.protocol)
-    || !['127.0.0.1', '::1', '[::1]', 'localhost'].includes(runtimeUrl.hostname)) {
-    throw new Error(`Packaged renderer exposed a non-local runtime origin: ${runtimeUrl.origin}`);
-  }
-  const baseUrl = runtimeUrl.origin;
-  const healthResponse = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(10_000) });
-  const health = await healthResponse.json();
-  if (!healthResponse.ok || health?.status !== 'ok') {
-    throw new Error(`Packaged health check returned HTTP ${healthResponse.status}: ${JSON.stringify(health)}`);
-  }
-  if (health.kernel?.ready !== true || !health.kernel?.epoch) {
-    throw new Error(`Packaged native kernel is unavailable: ${JSON.stringify(health.kernel)}`);
-  }
+    await launched;
+    const renderer = await waitForRenderer(userDataDir);
+    if (child.exitCode !== null) {
+      throw new Error(`Packaged Varin exited before startup completed (code ${child.exitCode}).`);
+    }
+    const runtimeValue = renderer.state?.localOrigin || renderer.state?.apiBaseUrl;
+    let runtimeUrl;
+    try {
+      runtimeUrl = new URL(runtimeValue);
+    } catch {
+      throw new Error(`Packaged renderer did not expose its local runtime origin: ${String(runtimeValue || '(missing)')}`);
+    }
+    if (!['http:', 'https:'].includes(runtimeUrl.protocol)
+      || !['127.0.0.1', '::1', '[::1]', 'localhost'].includes(runtimeUrl.hostname)) {
+      throw new Error(`Packaged renderer exposed a non-local runtime origin: ${runtimeUrl.origin}`);
+    }
+    const baseUrl = runtimeUrl.origin;
+    const healthResponse = await fetch(`${baseUrl}/health`, { signal: AbortSignal.timeout(10_000) });
+    const health = await healthResponse.json();
+    if (!healthResponse.ok || health?.status !== 'ok') {
+      throw new Error(`Packaged health check returned HTTP ${healthResponse.status}: ${JSON.stringify(health)}`);
+    }
+    if (health.kernel?.ready !== true || !health.kernel?.epoch) {
+      throw new Error(`Packaged native kernel is unavailable: ${JSON.stringify(health.kernel)}`);
+    }
 
-  const recoveryResponse = await fetch(`${baseUrl}/api/varin/extensions/v1/services/invoke`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      args: [],
-      method: 'listStorageWorkspaces',
-      serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID,
-      version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
-    }),
-    signal: AbortSignal.timeout(20_000),
-  });
-  const recoveryPayload = await recoveryResponse.json();
-  const recovery = recoveryPayload?.result;
-  if (!recoveryResponse.ok || recovery?.status !== 'ready' || !Array.isArray(recovery.workspaces)) {
-    throw new Error(`Packaged recovery service returned HTTP ${recoveryResponse.status}: ${JSON.stringify(recoveryPayload)}`);
+    console.log(JSON.stringify({
+      appPath,
+      architecture: process.arch,
+      health: 'ok',
+      platform: process.platform,
+      renderer: renderer.mode,
+      nativeKernel: health.kernel,
+    }, null, 2));
+  } catch (error) {
+    const log = await readLog();
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${message}\n--- process output ---\n${processOutput}\n--- main.log ---\n${log.slice(-6_000)}`);
+  } finally {
+    if (child.pid) {
+      if (child.exitCode === null) {
+        if (process.platform === 'win32') {
+          spawnSync('taskkill.exe', ['/pid', String(child.pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true });
+        } else child.kill('SIGTERM');
+      }
+      if (!(await waitForExit(child, 5_000)) && child.exitCode === null) child.kill('SIGKILL');
+    }
+    await delay(500);
+    await fsp.rm(smokeRoot, { recursive: true, force: true, maxRetries: process.platform === 'win32' ? 20 : 3, retryDelay: 250 });
   }
+}
 
-  const workspaceResponse = await fetch(`${baseUrl}/api/documents/workspace/resolve`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ path: workspaceRoot }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  const workspace = await workspaceResponse.json();
-  if (!workspaceResponse.ok || typeof workspace?.workspaceId !== 'string' || !workspace.workspaceId) {
-    throw new Error(`Packaged workspace resolution failed with HTTP ${workspaceResponse.status}: ${JSON.stringify(workspace)}`);
-  }
-  const terminalResponse = await fetch(`${baseUrl}/api/terminal/create`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ cols: 80, cwd: workspaceRoot, rows: 24 }),
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!terminalResponse.ok) {
-    throw new Error(`Packaged terminal create failed with HTTP ${terminalResponse.status}: ${await terminalResponse.text()}`);
-  }
-  const terminal = await terminalResponse.json();
-  if (terminal?.status !== 'running' || typeof terminal.sessionId !== 'string') {
-    throw new Error(`Packaged terminal returned ${JSON.stringify(terminal)}`);
-  }
-  const closeResponse = await fetch(`${baseUrl}/api/terminal/${encodeURIComponent(terminal.sessionId)}`, {
-    method: 'DELETE',
-    signal: AbortSignal.timeout(15_000),
-  });
-  const closed = await closeResponse.json();
-  if (!closeResponse.ok || closed?.success !== true) {
-    throw new Error(`Packaged terminal close returned HTTP ${closeResponse.status}: ${JSON.stringify(closed)}`);
-  }
-
-  console.log(JSON.stringify({
-    appPath,
-    architecture: process.arch,
-    health: 'ok',
-    platform: process.platform,
-    renderer: renderer.mode,
-    recovery: 'inventory-ok',
-    nativeKernel: health.kernel,
-    terminal: 'create-close-ok',
-  }, null, 2));
-} catch (error) {
-  const log = await readLog();
-  const message = error instanceof Error ? error.message : String(error);
-  throw new Error(`${message}\n--- process output ---\n${processOutput}\n--- main.log ---\n${log.slice(-6_000)}`);
-} finally {
-  if (child.exitCode === null) child.kill('SIGTERM');
-  if (!(await waitForExit(child, 5_000)) && child.exitCode === null) child.kill('SIGKILL');
-  await delay(500);
-  await fsp.rm(smokeRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 250 });
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  await smokeDesktopApp(process.argv[2], process.argv.slice(3));
 }
