@@ -308,6 +308,7 @@ it('Bot Sleep joins its original child owner, while Delete retries original reso
     children: async () => [], childExecutions: async () => [structuredClone(child), other], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 1 }), events: async () => [], childExecution: async () => structuredClone(child), launch: async () => null,
     releaseMcpResourceSource: vi.fn(async () => {}),
+    retireSourceGrants: vi.fn(async () => {}),
     releaseChildResources: vi.fn(async () => {
       if (releasingFails) throw new Error('Original child release is not confirmed');
       child.resources_released = true; return structuredClone(child);

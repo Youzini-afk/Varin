@@ -9,7 +9,8 @@ import { ThreadExecutions } from '../thread/ThreadExecutions';
 import { ThreadIntegrationPanel } from '../thread/ThreadIntegrationPanel';
 import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { useI18n } from '@/lib/i18n';
-import { ChildState, ChildFileResult, childEnded, childTaskRows } from './childPresentation';
+import { ChildState, ChildFileResult } from './childPresentation';
+import { childEnded, childTaskRows } from './childTaskRows';
 
 /** A row follows the newest execution; each report still uses its own immutable owner. */
 export function ChildTasks({ api, identity, children, executions, activity, directory, pending, cancel }: {

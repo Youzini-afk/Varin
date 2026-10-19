@@ -68,6 +68,7 @@ function routeFixture() {
       case 'runtime.events.read': return [{ cursor: 11, kind: 'mcp.resource_listener_changed', subject: facts.operation.id,
         revision: facts.operation.revision, data: { subscription: structuredClone(facts.operation.mcp_resource_subscription) } }];
       case 'runtime.context.inspect': case 'runtime.child.for_thread': return null;
+      case 'runtime.family.list': return { rootThreadId: identity.threadId, members: [], nextCursor: null };
       case 'runtime.input.list': case 'runtime.context_job.list': case 'runtime.child.list': case 'runtime.child.execution.list':
       case 'runtime.followup.list': case 'runtime.goal.list': return [];
       default: throw new Error(`Unexpected kernel request: ${method}`);

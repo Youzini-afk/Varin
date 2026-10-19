@@ -69,7 +69,7 @@ import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
 import { ChildTasks } from '../conversation/ChildTasks';
-import { childEnded, childTaskRows } from '../conversation/childPresentation';
+import { childEnded, childTaskRows } from '../conversation/childTaskRows';
 
 // Presentation of owner-defined failure codes; unknown codes keep the owner's safe message.
 const runFailureKeys = new Map<string, I18nKey>([

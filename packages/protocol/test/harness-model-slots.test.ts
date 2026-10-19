@@ -5,14 +5,21 @@ import {
   mergeHarnessSettings,
   parseHarnessAgent,
   observePresets,
+  type PresetId,
 } from "../src/index.js";
+
+const builtinTools = {
+  worker: ["file_read"],
+  verifier: ["file_read"],
+  retrieval: ["file_read"],
+} satisfies Record<PresetId, string[]>;
 
 describe("Harness model slots", () => {
   it("disabled roles retain their configured model and cannot inherit the main model", () => {
     const main = { providerId: "p", modelId: "main" };
     const slots = { worker: { ...main, enabled: false }, researchInvestigation: { ...main, enabled: false } };
     assert.equal(resolveHarnessModelSlot("worker", slots, main), null);
-    assert.equal(observePresets(slots, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.availability, "disabled");
+    assert.equal(observePresets(slots, main, {}, undefined, 'agent', builtinTools).find(profile => profile.id === "worker")!.availability, "disabled");
     assert.equal(slots.worker.modelId, "main");
     assert.deepEqual(resolveHarnessModelSlot("worker", { worker: { ...slots.worker, enabled: true } }, main), main);
   });
@@ -23,17 +30,17 @@ describe("Harness model slots", () => {
     const main = { providerId: "p", modelId: "main" };
     const settings = mergeHarnessSettings({ agents: { facts: agent } }, { agents: { facts: { ...agent, instructions: "untrusted override" } } });
     assert.equal(settings.agents.facts?.instructions, "Cite source lines.");
-    assert.equal(observePresets({}, main, settings.agents, "code", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!.availability, "scope_unavailable");
-    const profile = observePresets({}, main, settings.agents, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!;
+    assert.equal(observePresets({}, main, settings.agents, "code", "agent", builtinTools).find(profile => profile.id === "custom:facts")!.availability, "scope_unavailable");
+    const profile = observePresets({}, main, settings.agents, "research", "agent", builtinTools).find(profile => profile.id === "custom:facts")!;
     assert.deepEqual(profile.model, main);
     assert.equal(profile.modelSource, "inherit");
-    const explicitlySame = observePresets({}, main, { facts: { ...agent, model: main } }, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!;
+    const explicitlySame = observePresets({}, main, { facts: { ...agent, model: main } }, "research", "agent", builtinTools).find(profile => profile.id === "custom:facts")!;
     assert.equal(explicitlySame.modelSource, "selected");
-    assert.equal(observePresets({ worker: { ...main } }, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.modelSource, "selected");
-    assert.equal(observePresets({}, main, {}, undefined, 'agent', { worker: ['file_read'], retrieval: ['file_read'] }).find(profile => profile.id === "worker")!.modelSource, "inherit");
+    assert.equal(observePresets({ worker: { ...main } }, main, {}, undefined, 'agent', builtinTools).find(profile => profile.id === "worker")!.modelSource, "selected");
+    assert.equal(observePresets({}, main, {}, undefined, 'agent', builtinTools).find(profile => profile.id === "worker")!.modelSource, "inherit");
     assert.deepEqual(profile.definition.tools, ["read", "grep"]);
     assert.equal(profile.definition.systemPromptFragment, agent.instructions);
-    assert.equal(observePresets({}, main, { facts: { ...agent, enabled: false } }, "research", "agent", { worker: ["file_read"], retrieval: ["file_read"] }).find(profile => profile.id === "custom:facts")!.availability, "disabled");
+    assert.equal(observePresets({}, main, { facts: { ...agent, enabled: false } }, "research", "agent", builtinTools).find(profile => profile.id === "custom:facts")!.availability, "disabled");
     assert.throws(() => parseHarnessAgent({ ...agent, workFocus: ["invented"] }), /Invalid agent/);
     assert.throws(() => mergeHarnessSettings({ models: { worker: { providerId: "p" } } }, {}), /Invalid binding/);
   });
@@ -63,7 +70,7 @@ describe('Runtime tool selections', () => {
     const settings = mergeHarnessSettings({ agents: { reader: { name: 'Reader', description: '', instructions: '', enabled: true,
       tools: ['file_read'], worktree: 'none', workFocus: [] } } }, {});
     const model = { providerId: 'provider', modelId: 'model' };
-    const native = observePresets({}, model, settings.agents, undefined, 'agent', { worker: ['file_write'], retrieval: ['file_read'] });
+    const native = observePresets({}, model, settings.agents, undefined, 'agent', { ...builtinTools, worker: ['file_write'] });
     assert.deepEqual(native.find(p => p.id === 'worker')?.definition.tools, ['file_write']);
     assert.deepEqual(native.find(p => p.id === 'custom:reader')?.definition.tools, ['file_read']);
     assert.equal(native.find(p => p.id === 'retrieval')?.availability, 'unconfigured');

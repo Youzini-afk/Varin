@@ -112,6 +112,7 @@ it('projects only the displayed failed Run\'s original failure and preserves an 
       case 'runtime.history.page': return { head: null, previous: null, items: [] };
       case 'runtime.context.inspect': case 'runtime.launch.inspect': case 'runtime.child.for_thread': return null;
       case 'runtime.model.inspect': return { desired: null, active: null };
+      case 'runtime.family.list': return { rootThreadId: identity.threadId, members: [], nextCursor: null };
       case 'runtime.run.failure':
         expect(params).toEqual({ runId: run.id });
         if (unreadable) throw new Error('Original failure unavailable');

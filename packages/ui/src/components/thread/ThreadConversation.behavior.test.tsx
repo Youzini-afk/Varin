@@ -405,6 +405,9 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
     source: sourceFree ? { kind: 'absent' } : { kind: 'pending', handoff: { operation_id: 'handoff', resource_authority: null, source: { resource_owner: { kind: 'local' as const }, mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null },
       root: { kind: 'fixed' as const, pin: { pin_id: 'pin', root: 'root', source: { resource_owner: { kind: 'local' as const }, mode: 'fixed_branch' as const, workspace_id: 'workspace', execution_workspace_id: 'workspace', branch_id: 'source', revision: 0, live_root: null } } } } },
   };
+  const report = child.report;
+  const finalState = child.state;
+  child.state = 'running'; child.report = null; child.resources_released = false;
   f.view.children = [child];
   const observation: ThreadSnapshot['operations'][number] = { id: 'original-child-wait', run_id: 'ui-run', epoch: 1, revision: 1,
     phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'run', handed_off: false,
@@ -420,20 +423,16 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
   f.api.collaboration = { integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await act(async () => {
+    const details = container.querySelector<HTMLDetailsElement>('[aria-label="harness.threads.title"] details')!;
+    details.open = true;
+    details.dispatchEvent(new window.Event('toggle'));
+  });
   const assertFileResult = () => sourceFree
     ? expect(container.textContent).not.toMatch(/chat.children.(filesPublished|noChanges|settling|filesUnavailable)/)
     : expect(container.textContent).toContain('chat.children.settling');
   assertFileResult();
-  if (sourceFree) {
-    const card = container.querySelector('[aria-label="harness.threads.title"]')!;
-    expect(card.textContent).toContain('harness.threads.state.failed');
-    expect(card.textContent).toContain('The original child report');
-    expect(card.textContent).not.toMatch(/Private working copy|Read-only source|Preparing a stable source|No file changes|File result (pending|unavailable)/);
-  }
   expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
-  await act(async () => { button('Read report').click(); });
-  expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0, undefined, expect.any(AbortSignal));
-  expect(container.textContent).toContain('Original bytes');
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
   expect(cancelChild).not.toHaveBeenCalled();
@@ -443,6 +442,19 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   // A short admission ACK is not a process-stop or file-publication fact.
   assertFileResult();
   expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
+  expect(container.textContent).not.toContain('The original child report');
+  child.state = finalState; child.report = report;
+  await act(async () => f.emit({ cursor: 4, subject: child.operation_id, revision: 4, kind: 'child.completed', data: {} }));
+  assertFileResult();
+  const card = container.querySelector('[aria-label="harness.threads.title"]')!;
+  expect(card.textContent).toContain('The original child report');
+  if (sourceFree) {
+    expect(card.textContent).toContain('harness.threads.state.failed');
+    expect(card.textContent).not.toMatch(/Private working copy|Read-only source|Preparing a stable source|No file changes|File result (pending|unavailable)/);
+  }
+  await act(async () => { button('Read report').click(); });
+  expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0, undefined, expect.any(AbortSignal));
+  expect(container.textContent).toContain('Original bytes');
   await act(async () => { button('Stop task and children').click(); });
   expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
 });
@@ -696,6 +708,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
   f.submit.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-frame-too-large'));
   f.submit.mockImplementationOnce(async input => {
     f.view.history.push({ id: 'accepted-image', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content: { text: input.text, attachments: input.images?.map(() => storedImage) } });
+    f.view.historyPage.head = 'accepted-image'; f.view.thread.branches[0]!.head = 'accepted-image';
     return { thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', input_id: 'sent', cursor: 1 };
   });
   const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhC0AAAAASUVORK5CYII=';
@@ -994,6 +1007,7 @@ it('retries a conversation fork with the same request key and opens only the acc
 it('does not navigate to a late fork result after the user selects another branch', async () => {
   const f = fixture();
   f.view.history = [{ id: 'selected-message', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'branch point' }, provider: null }];
+  f.view.historyPage.head = 'selected-message'; f.view.thread.branches[0]!.head = 'selected-message';
   let resolveFork!: (value: ThreadIdentity) => void;
   f.api.fork = () => new Promise(resolve => { resolveFork = resolve; });
   const open = vi.fn();
@@ -1002,7 +1016,7 @@ it('does not navigate to a late fork result after the user selects another branc
   const next = { ...identity, branchId: 'user-selected-branch' };
   f.view.identity = next;
   f.view.thread.branches = [{ branch_id: next.branchId, head: null, active_run_id: null, latest_run: null }];
-  f.view.history = [];
+  f.view.history = []; f.view.historyPage = { head: null, previous: null };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={next} onBranchCreated={open} />); });
   await act(async () => { resolveFork({ ...identity, branchId: 'late-created-fork' }); });
   expect(open).not.toHaveBeenCalled();
@@ -1106,7 +1120,8 @@ it('adds a hidden skill command and retains the draft and image through a resour
   expect(f.submit).toHaveBeenCalledTimes(2);
   const [first, second] = f.submit.mock.calls.map(([input]) => input);
   expect(second!.key).not.toBe(first!.key);
-  expect(second).toEqual({ ...first, key: second!.key });
+  expect(second!.clientTime).toMatchObject({ sentAt: expect.any(String), timeZone: first!.clientTime!.timeZone });
+  expect(second).toEqual({ ...first, key: second!.key, clientTime: second!.clientTime });
   expect(composer().value).toBe('');
   expect(composer().closest('form')?.querySelector('img')).toBeNull();
 });
@@ -1122,6 +1137,7 @@ it('projects frozen skill metadata separately from original history and editable
   const attachments = [storedImage];
   const content = { text, attachments, skillInvocations: [invocation] };
   f.view.history = [{ id: 'skill-history', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', provider: null, content }];
+  f.view.historyPage.head = 'skill-history'; f.view.thread.branches[0]!.head = 'skill-history';
   f.view.inputs = [{ id: 'skill-queued', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run',
     mode: 'boundary', state: 'queued', revision: 1, content, cursor: 1 }];
   // Resource refresh does not rewrite the material already accepted with each input.
@@ -2929,6 +2945,7 @@ it('projects a delegated rerank request independently of its cheap query, preser
 it('keeps sleeping Bot history readable without composer or execution mutations', async () => {
   const f = fixture(true);
   f.view.history = [{ id: 'saved', thread_id: identity.threadId, run_id: 'ui-run', parent: null, source: 'user', content: { text: 'Retained Bot history' }, provider: null }];
+  f.view.historyPage.head = 'saved'; f.view.thread.branches[0]!.head = 'saved';
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} readOnly />));
   expect(container.textContent).toContain('Retained Bot history');
   expect(container.querySelector('form')).toBeNull();

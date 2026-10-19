@@ -71,6 +71,7 @@ function fixture() {
       case 'runtime.status': return { eventCursor: 5 };
       case 'runtime.history.page': return { head: null, previous: null, items: [] };
       case 'runtime.context.inspect': case 'runtime.child.for_thread': return null;
+      case 'runtime.family.list': return { rootThreadId: identity.threadId, members: [], nextCursor: null };
       case 'runtime.input.list': case 'runtime.thread.operations.active': case 'runtime.context_job.list': case 'runtime.child.list': case 'runtime.child.execution.list': case 'runtime.goal.list': return [];
       default: throw new Error(`Unexpected RPC: ${method}`);
     }

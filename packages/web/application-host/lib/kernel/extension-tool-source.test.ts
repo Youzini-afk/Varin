@@ -70,7 +70,7 @@ it('warm and cold/dynamic ordinary discovery project owning source dependencies 
     const scope = await f.prepare({ runId: 'run', threadId: 'thread', branchId: 'history-branch', source: selected }, [], new AbortController().signal);
     leases.push(...scope.initial);
     try {
-      expect(scope.initial.map(lease => lease.binding.tool.name).sort()).toEqual(warm ? expected : []);
+      expect(scope.initial.map(lease => lease.binding.tool.name).sort()).toEqual(expected);
       scope.start(async (_slot, lease) => { if (lease) leases.push(lease); });
       await vi.waitFor(() => expect(scope.inspect().filter(entry => entry.status === 'ready' || entry.status === 'unavailable')).toHaveLength(4));
       expect(scope.inspect().filter(entry => entry.status === 'ready').map(entry => entry.prepared!.tool.name).sort()).toEqual(expected);
