@@ -44,7 +44,7 @@ export async function startThreadFromNavigation(target: { directory?: string | n
   const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
   await selectConversationShell(false, current);
   current();
-  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? useDirectoryStore.getState().currentDirectory });
+  const draftKey = useThreadStore.getState().openDraft({ workspacePath: target.directory ?? undefined });
   if (target.directory) useDirectoryStore.getState().setDirectory(target.directory);
   useUIStore.getState().setActiveMainTab('chat');
   useUIStore.getState().closeMainSurfaces();

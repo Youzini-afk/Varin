@@ -18,6 +18,7 @@ import { DiffIcon } from '@/components/icons/DiffIcon';
 import { useUIStore, type ContextPanelMode, type MainTab } from '@/stores/useUIStore';
 import { ContextPanelControls } from './ContextPanelControls';
 import { useThreadStore } from '@/stores/useThreadStore';
+import { useSelectedThreadWorkspace } from '@/hooks/useSelectedThreadWorkspace';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
@@ -122,17 +123,20 @@ export const Header: React.FC<HeaderProps> = ({
   const archiveSession = React.useCallback((threadId: string) => useThreadStore.getState().updateThread(threadId, { archived: true }), []);
   const deleteSession = useThreadStore(state => state.deleteThread);
   const renameSession = React.useCallback((threadId: string, title: string) => useThreadStore.getState().updateThread(threadId, { title }), []);
-  const sessionDirectory = useDirectoryStore(state => state.currentDirectory);
-  const activeProject = useProjectsStore(useShallow((state) => {
+  const navigationDirectory = useDirectoryStore(state => state.currentDirectory);
+  const conversationWorkspace = useSelectedThreadWorkspace();
+  const sessionDirectory = conversationWorkspace.composerKey ? conversationWorkspace.directory ?? '' : navigationDirectory;
+  const navigationProject = useProjectsStore(useShallow((state) => {
     if (!state.activeProjectId) {
       return null;
     }
     const project = state.projects.find((candidate) => candidate.id === state.activeProjectId);
     return project ? { id: project.id, path: project.path, label: project.label } : null;
   }));
+  const activeProject = conversationWorkspace.composerKey ? conversationWorkspace.project : navigationProject;
   const activeProjectLabel = React.useMemo(() => {
     if (!activeProject) {
-      return null;
+      return conversationWorkspace.composerKey && sessionDirectory ? sessionDirectory.split(/[\\/]/).filter(Boolean).at(-1) ?? null : null;
     }
 
     const trimmedLabel = activeProject.label?.trim();
@@ -142,7 +146,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const pathSegments = activeProject.path.split(/[\\/]/).filter(Boolean);
     return pathSegments[pathSegments.length - 1] ?? null;
-  }, [activeProject]);
+  }, [activeProject, conversationWorkspace.composerKey, sessionDirectory]);
 
   const { isMobile } = useDeviceInfo();
 

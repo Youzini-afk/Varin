@@ -183,7 +183,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       onOpenChange={setWorkspaceOpen} onCompactChange={() => {}} onSelect={() => {}}>
       {workspaceOpen && <div className="min-h-0 overflow-y-auto"><ThreadSourcePicker api={api} identity={null} initialPath={draft.workspacePath} draftSelection={draft.sourceSelection}
         onDraftSelection={sourceChanged} active={locked} launch={null} prepared={null} onPrepared={ignorePrepared} onPreparingChange={ignorePrepared}
-        onUseChatOnly={() => patch({ workspacePath: undefined })} /></div>}
+        onUseChatOnly={() => patch({ workspacePath: undefined, sourceSelection: undefined, preparedSource: null })} /></div>}
     </WorkOverviewControl>
     </div>
   </section>;

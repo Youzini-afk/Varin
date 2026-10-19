@@ -279,7 +279,7 @@ export const useKeyboardShortcuts = () => {
       if (matchedNewSessionShortcut || matchedWorktreeShortcut) {
         if (e.repeat) return;
         e.preventDefault();
-        const creation = matchedWorktreeShortcut ? createWorktreeThread() : startThreadFromNavigation({ directory: currentDirectory });
+        const creation = matchedWorktreeShortcut ? createWorktreeThread() : startThreadFromNavigation();
         void creation.catch((error) => {
           toast.error(
             matchedWorktreeShortcut

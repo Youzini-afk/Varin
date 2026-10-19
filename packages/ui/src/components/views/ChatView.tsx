@@ -3,7 +3,7 @@ import { ThreadConversation } from '@/components/thread/ThreadConversation';
 import { ChatErrorBoundary } from '@/components/chat/ChatErrorBoundary';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useSelectedThreadWorkspace } from '@/hooks/useSelectedThreadWorkspace';
 import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
@@ -29,7 +29,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   const hostKey = useThreadStore(state => state.hostKey);
   const [error, setError] = React.useState<string>();
   React.useEffect(() => { setError(undefined); }, [hostKey]);
-  const directory = useDirectoryStore(state => state.currentDirectory);
+  const { directory } = useSelectedThreadWorkspace();
   React.useEffect(() => {
     if (active && autoOpenDraft && api && catalogLoaded && !identity && !draftKey && !error && !readOnly) {
       void startThreadFromNavigation().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));

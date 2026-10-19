@@ -5,7 +5,8 @@ import type { ThreadSummary } from '@varin/protocol';
 import { bindThreadStore, useThreadStore } from '@/stores/useThreadStore';
 import { useBotNavigation } from '@/lib/bots';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { openThreadFromNavigation } from './threadNavigation';
+import { openThreadFromNavigation, startThreadFromNavigation } from './threadNavigation';
+import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { buildDeepLink, parseDeepLink } from '@/apps/deepLinks';
 import { followThreadDeepLink } from '@/apps/threadDeepLinkNavigation';
 const state = vi.hoisted(() => ({ host: 1, document: undefined as VarinWorkbenchProfileDocument | undefined, select: vi.fn(), directory: vi.fn() }));
@@ -13,7 +14,7 @@ vi.mock('@varin/application-client', async original => ({ ...await original<type
 vi.mock('@/lib/extensions/catalog-store', () => ({ getVarinExtensionCatalogState: () => ({ snapshot: { workbench: { authoritative: true, document: state.document } } }) }));
 vi.mock('@/lib/extensions/workbench-shell-transition', () => ({ selectActiveWorkbenchProfile: state.select }));
 vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surface: 'web' } }));
-vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ setDirectory: state.directory }) } }));
+vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: { getState: () => ({ currentDirectory: '/previous-project', setDirectory: state.directory }) } }));
 const summary = (id: string, botId: string | null): ThreadSummary => ({ thread_id: id, main_branch_id: `${id}:main`, title: id, revision: 1, created_at_ms: 0, updated_at_ms: 0,
   pinned: false, archived: false, deleted_at_ms: null, activity_cursor: 0, read_cursor: 0, unread: false, bot_id: botId, parent_thread_id: null, observer_project_ids: [],
   branches: ['main', 'review'].map(branch => ({ branch_id: `${id}:${branch}`, head: null, active_run_id: null, latest_run: null })) });
@@ -32,6 +33,16 @@ beforeEach(async () => {
   await useThreadStore.getState().selectThread({ threadId: 'ordinary' });
 });
 afterEach(() => { unbind?.(); registerRuntimeAPIs(null); });
+it('opens global drafts without a project and attaches only an explicitly chosen project', async () => {
+  const global = await startThreadFromNavigation();
+  expect(useThreadDraftStore.getState().drafts[global].workspacePath).toBeUndefined();
+  expect(state.directory).not.toHaveBeenCalled();
+  const project = await startThreadFromNavigation({ directory: '/chosen-project' });
+  expect(useThreadDraftStore.getState().drafts[project].workspacePath).toBe('/chosen-project');
+  expect(state.directory).toHaveBeenCalledWith('/chosen-project');
+  const chatOnly = await startThreadFromNavigation({ directory: null });
+  expect(useThreadDraftStore.getState().drafts[chatOnly].workspacePath).toBeUndefined();
+});
 it('follows Bot notification links using Catalog ownership and the exact target branch while retaining ordinary selection', async () => {
   const hostKey = JSON.stringify(['https://host.test', 'host']);
   const intent = parseDeepLink(buildDeepLink({ type: 'thread', hostKey, threadId: 'child', branchId: 'child:review' }));
