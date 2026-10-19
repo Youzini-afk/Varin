@@ -78,7 +78,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
     slot: "retrievalAgent",
     worktree: "none",
     systemPromptFragment:
-      "Preset focus: information retrieval.",
+      "Find, verify, and synthesize facts relevant to the assigned question. Understand the surrounding context and follow useful leads across sources and their relationships. Let the evidence guide further retrieval, filling gaps that matter to the answer and examining differences between sources that could change the conclusion.\n\nLet the question and evidence determine the depth of investigation. Deliver when the material answers the question or further retrieval offers little practical value.\n\nProvide a concise, usable synthesis with precise source locations and enough context to understand the conclusions, clearly distinguishing confirmed facts, inferences, and unresolved questions.",
     teamDescription: "multi-step fact retrieval",
   },
 };
