@@ -44,7 +44,7 @@ module.exports = (context) => {
     const helper = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'computer-driver', 'macos',
       'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');
     if (!fs.existsSync(helper)) throw new Error('Missing native macOS Computer helper: ' + helper);
-    execFileSync('lipo', ['-verify_arch', targetArchitecture === 'x64' ? 'x86_64' : 'arm64', helper], { stdio: 'inherit' });
+    execFileSync('lipo', [helper, '-verify_arch', targetArchitecture === 'x64' ? 'x86_64' : 'arm64'], { stdio: 'inherit' });
     execFileSync('codesign', ['--verify', '--strict', path.dirname(path.dirname(path.dirname(helper)))], { stdio: 'inherit' });
     // The normal electron-builder signing phase runs after this hook and signs
     // nested app bundles with the enclosing app's identity. Unsigned packaging
