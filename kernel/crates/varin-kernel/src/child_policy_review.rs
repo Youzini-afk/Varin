@@ -298,6 +298,8 @@ impl Fixture {
         policy.set_catalog(runtime.catalog());
         let memory = crate::host_query::OwnerChannel::new("memory", output.clone());
         memory.initialize(EPOCH);
+        let context = crate::host_query::OwnerChannel::new("context", output.clone());
+        context.initialize(EPOCH);
         let plan = crate::plan_bridge::PlanBridge::new(output.clone());
         plan.initialize(EPOCH);
         let assembly = RunAssembly {
@@ -311,7 +313,7 @@ impl Fixture {
             language: crate::language::LanguageBridge::new(output.clone()),
             retrieval: crate::retrieval::RetrievalBridge::new(output.clone()),
             memory,
-            context: crate::host_query::OwnerChannel::new("context", output.clone()),
+            context,
             resource: crate::host_query::OwnerChannel::new("resource", output.clone()),
             plan,
             policy,
@@ -439,6 +441,13 @@ impl Fixture {
     }
     fn ordinary_frame(&self, frame: &Value) -> bool {
         match frame["kind"].as_str().unwrap() {
+            "context-request" => {
+                assert_eq!(frame["query"]["runId"], self.run.id);
+                assert_eq!(frame["query"]["action"], "prepare");
+                self.assembly.context.receive(json!({"v":1,"kind":"context-response","id":frame["id"],
+                    "kernelEpoch":EPOCH,"result":{"status":"ready"}}));
+                true
+            }
             "memory-request" => {
                 assert_eq!(frame["query"]["runId"], self.run.id);
                 assert_eq!(
@@ -490,6 +499,7 @@ impl Fixture {
         assembly.policy.close();
         assembly.credentials.close();
         assembly.memory.close();
+        assembly.context.close();
         assembly.plan.close();
         drop(assembly);
         drop(frames);
@@ -503,6 +513,7 @@ impl Fixture {
         self.assembly.policy.close();
         self.assembly.credentials.close();
         self.assembly.memory.close();
+        self.assembly.context.close();
         self.assembly.plan.close();
         drop(self);
         std::fs::remove_dir_all(root).unwrap();

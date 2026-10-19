@@ -52,6 +52,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
         vec![
             varin_runtime::catalog::dispatch::ChildPresetDefault::Worker,
             varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval,
+            varin_runtime::catalog::dispatch::ChildPresetDefault::Verifier,
         ]
     );
     for name in [
@@ -70,7 +71,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
         );
         assert_eq!(
             capability.default_presets,
-            vec![varin_runtime::catalog::dispatch::ChildPresetDefault::Worker, varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval]
+            vec![varin_runtime::catalog::dispatch::ChildPresetDefault::Worker, varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval, varin_runtime::catalog::dispatch::ChildPresetDefault::Verifier]
         );
         let schema = directory.iter().find(|tool| tool.name == name).unwrap();
         let requirements = schema.requirements.as_ref().unwrap();
@@ -174,10 +175,11 @@ fn binding_hook_freezes_model_visible_configuration_without_changing_tool_schema
         .unwrap();
     assert_eq!(binding.tools, original_tools);
     assert!(binding.child_dispatch.is_some());
-    assert_eq!(context.len(), 1);
-    let Content::Text { text } = &context[0].content else {
-        panic!("expected visible selection")
-    };
+    let text = context.iter().find_map(|item| match (&item.provenance, &item.content) {
+        (Provenance::SystemInstruction { source }, Content::Text { text })
+            if source == "child_dispatch_configuration" => Some(text),
+        _ => None,
+    }).expect("expected visible selection");
     assert!(text.contains("allowed_delegation"));
     assert!(text.contains("fixture-catalog"));
     assert!(!text.contains("credential-ref"));
@@ -429,9 +431,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
         assert_eq!(resolved.profile.work_mode, mode);
         input.tools = Some(vec!["code_retrieval".into()]);
         let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
-        assert!(
-            error.message.contains("code_retrieval") && error.message.contains("select a source")
-        );
+        assert!(error.message.contains("exceed the frozen delegation"), "{error}");
         input.tools = None;
         input.work_mode = Some(ChildWorkMode::ReadOnly);
         assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
@@ -442,10 +442,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
             vec!["file_read".into()]
         });
         let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
-        assert!(error.message.contains("file_read") && error.message.contains("select a source"));
-        if member == ChildPresetDefault::Worker {
-            assert!(error.message.contains("process_spawn"));
-        }
+        assert!(error.message.contains("exceed the frozen delegation"), "{error}");
         input.tools = None;
         selected.catalog.presets[index].tools_source = ChildPresetToolsSource::Explicit;
         assert!(crate::collaboration::resolve_selection(&selected, &input)

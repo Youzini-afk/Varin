@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import { WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
@@ -333,6 +333,8 @@ describe('terminal runtime', () => {
   });
 
   it('lists available shells and uses the selected shell for create and restart', async () => {
+    vi.stubEnv('VARIN_TERMINAL_SHELL', '');
+    vi.stubEnv('SHELL', '');
     const executables = new Set(['/bin/zsh', '/bin/bash', '/bin/sh']);
     const harness = createHarness({
       fs: {
@@ -378,7 +380,10 @@ describe('terminal runtime', () => {
         expect(requiredProcess(harness.processes, 1).shell).toBe('/bin/bash');
         expect(requiredProcess(harness.processes, 1).args).toEqual(['-l', '--init-file', expect.stringContaining('bash-')]);
       }
-    } finally { await harness.runtime.shutdown(); }
+    } finally {
+      vi.unstubAllEnvs();
+      await harness.runtime.shutdown();
+    }
   });
 
   it('rejects invalid and unavailable explicit shells', async () => {

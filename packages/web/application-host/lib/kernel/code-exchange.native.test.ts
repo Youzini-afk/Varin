@@ -13,7 +13,8 @@ import type { DelegatedExecution } from './protocol.generated.js';
 import { captureContinuationStage, prepareRefreshedContinuationSourceStore } from './child-source-store.js';
 
 it('exchanges fixed selected changes repeatedly, preserves receiver edits, and replays the original receipt', async () => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-code-exchange-'));
+  // Admitted source roots use real paths; Windows TEMP may contain a short-name alias.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-code-exchange-')));
   const sender = path.join(root,'sender'), receiver=path.join(root,'receiver'), dataDir=path.join(root,'data');
   await fs.mkdir(sender); await fs.mkdir(receiver);
   const original='sender=0\n\nreceiver=0\n';
@@ -79,7 +80,7 @@ it('exchanges fixed selected changes repeatedly, preserves receiver edits, and r
 });
 
 it('refreshes a reused Agent from the selected worktree and retains its independent changes', async () => {
-  const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-agent-refresh-'));
+  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'varin-agent-refresh-')));
   const originalTree=path.join(root,'own-worktree'),selectedTree=path.join(root,'selected-worktree'),dataDir=path.join(root,'data');
   await fs.mkdir(originalTree);await fs.mkdir(selectedTree);
   const original='own=0\n\nteam=0\n';

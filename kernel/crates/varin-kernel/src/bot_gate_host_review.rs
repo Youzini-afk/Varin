@@ -481,6 +481,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
         memory: memory.clone(), context: crate::host_query::OwnerChannel::new("context", send.clone()), resource: crate::host_query::OwnerChannel::new("resource", send.clone()),
         plan, policy, models: crate::run_models::RunModels::new(runtime.catalog(), credentials), tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge.clone()), responses: send.into(), epoch: EPOCH.into(),
     };
+    assembly.context.initialize(EPOCH);
     let model = Arc::new(ProductMemoryModel::default());
     let (finished, completion) = mpsc::channel();
     let mut f = Fixture {
@@ -549,6 +550,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
         if let Some(frame) = frame {
             match frame["kind"].as_str().unwrap() {
                 "memory-response" => memory.receive(frame),
+                "context-response" => assembly.context.receive(frame),
                 "fixture-prepared" => {
                     assert!(!prepared);
                     prepared = true;

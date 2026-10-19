@@ -31,7 +31,7 @@ impl ModelProvider for Batch {
     }
 }
 fn calls(waits: Vec<Value>) -> Vec<ToolCall> {
-    waits.into_iter().enumerate().map(|(i,wait)|ToolCall{call_id:format!("send-{i}"),name:"send".into(),schema_version:"3".into(),arguments:json!({"kind":"inform","targetThreadId":"thread:parent","targetBranchId":"branch:parent","text":format!("Original request {i}"),"wait":wait})}).collect()
+    waits.into_iter().enumerate().map(|(i,wait)|ToolCall{call_id:format!("send-{i}"),name:"send".into(),schema_version:crate::message_tools::schema().version,arguments:json!({"kind":"inform","targetThreadId":"thread:parent","targetBranchId":"branch:parent","text":format!("Original request {i}"),"wait":wait})}).collect()
 }
 fn fixture() -> Fixture {
     Fixture::with_tools(

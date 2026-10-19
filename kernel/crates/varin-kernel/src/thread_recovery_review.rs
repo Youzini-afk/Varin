@@ -158,7 +158,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         |_| Ok(()),
         Default::default(),
     );
-    let (output, _frames) = mpsc::sync_channel(256);
+    let (output, frames) = mpsc::sync_channel(256);
     let credentials = crate::credential_bridge::CredentialBridge::new(output.clone());
     credentials.initialize("epoch").unwrap();
     let bridge = crate::host_tools::ToolBridge::new(output.clone().into());
@@ -185,6 +185,16 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
     assembly.memory.initialize("epoch");
     assembly.context.initialize("epoch");
     assembly.resource.initialize("epoch");
+    let context = assembly.context.clone();
+    let host = std::thread::spawn(move || {
+        for frame in frames {
+            if frame["kind"] == "context-request" {
+                assert_eq!(frame["query"]["action"], "prepare");
+                context.receive(json!({"v":1,"kind":"context-response","id":frame["id"],
+                    "kernelEpoch":frame["kernelEpoch"],"result":{"status":"ready"}}));
+            }
+        }
+    });
     let wires = Arc::new(Mutex::new(Vec::new()));
     let config = json!({"providerFamily":"openai-responses","model":"controlled","endpoint":"https://controlled.invalid/responses","allowAnonymous":true,"configurationGeneration":1});
     let launch = |text: &str, write: bool| {
@@ -324,9 +334,11 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         std::fs::read_to_string(workspace.join("a.txt")).unwrap(),
         "C"
     );
+    assembly.context.close();
     drop(assembly);
     drop(runtime);
     drop(storage);
     drop(owner);
+    host.join().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }

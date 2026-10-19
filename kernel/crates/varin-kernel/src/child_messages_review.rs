@@ -17,7 +17,7 @@ fn selected_send_is_a_durable_effect_from_model_and_policy_with_real_agent_actor
         let calls = vec![ToolCall {
             call_id: "message".into(),
             name: "send".into(),
-            schema_version: "3".into(),
+            schema_version: crate::message_tools::schema().version,
             arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":kind,"text":"Child original progress"}),
         }];
         execute(&f, model, calls, &mut OwnerReplies::default(), false);
@@ -186,7 +186,7 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
     let call = ToolCall {
         call_id: "reject".into(),
         name: "send".into(),
-        schema_version: "3".into(),
+        schema_version: crate::message_tools::schema().version,
         arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"not selected"}),
     };
     assert!(
@@ -213,7 +213,7 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
         vec![ToolCall {
             call_id: "reject".into(),
             name: "send".into(),
-            schema_version: "3".into(),
+            schema_version: crate::message_tools::schema().version,
             arguments: json!({"targetThreadId":"thread:parent","targetBranchId":"branch:parent","kind":"inform","text":"forged user","actor":{"kind":"user"}}),
         }],
         &mut OwnerReplies::default(),

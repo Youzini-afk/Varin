@@ -657,9 +657,10 @@ fn managed_source_pre_spawn_failures_settle_original_receipt_without_guardian_ou
         let failed = owner
             .tool(&address, "process_spawn", "process", args.clone())
             .unwrap();
-        // An execution error alone still carries no stop proof. The original owner must
-        // establish the target was never admitted, including when its reply was lost.
-        assert_eq!(failed["result"]["completion"]["effect"], "unknown", "{failed}");
+        // A known pre-spawn failure retains its original receipt without reporting an unknown effect.
+        assert_eq!(failed["accepted"], false, "{failed}");
+        assert_eq!(failed["executorStopped"], true, "{failed}");
+        assert_eq!(failed["result"]["completion"]["kind"], "not_dispatched", "{failed}");
         let mut observe = address.clone();
         observe["operationId"] = json!("request:tool:process");
         let receipt = owner

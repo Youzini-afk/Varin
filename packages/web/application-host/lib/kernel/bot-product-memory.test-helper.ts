@@ -53,6 +53,10 @@ export async function installProductMemory(root: string, kernel: KernelClient, r
     kernel.setMemoryOwner(createMemoryOwner({ personalization: {} as never, prepareContext,
         bot: createBotMemoryOwner({ runtime, history, memory, prepareContext, knowledge: knowledge.knowledgeForThread }),
     }));
+    kernel.setContextOwner({
+        query: async query => { assert.equal(query.action, 'prepare'); return { status: 'ready' }; },
+        close() {},
+    });
     // An independent actual Bot store contains a tempting row. It must never enter this Bot's request.
     await memory.remember({ scope: 'bot', ownerId: 'unrelated-bot' }, { content: 'OTHER_BOT_SECRET', trigger: 'recovery evidence', source: { kind: 'user-extracted' } });
     assert(await store(botScopeId('unrelated-bot')));
