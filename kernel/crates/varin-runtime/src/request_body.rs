@@ -1,7 +1,7 @@
 //! Provider JSON with immutable, already encoded fragments. Only the final wire buffer is
 //! contiguous: freezing copies fragment bytes, without reconstructing or escaping their payloads.
 use bytes::Bytes;
-use crate::token_count::{TokenCounter, TokenizerName};
+use crate::token_count::TokenCounter;
 use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{
     value::{to_raw_value, RawValue},
@@ -16,7 +16,7 @@ use std::{
 #[derive(Debug)]
 pub(crate) struct FrozenJson {
     raw: Box<RawValue>,
-    tokens: OnceLock<(TokenizerName, u64)>,
+    tokens: OnceLock<(String, u64)>,
 }
 impl FrozenJson {
     pub(crate) fn new(value: Value) -> Arc<Self> {
@@ -25,10 +25,10 @@ impl FrozenJson {
             raw: to_raw_value(&value).expect("JSON value serializes"),
         })
     }
-    fn tokens(&self, counter: TokenCounter) -> u64 {
+    fn tokens(&self, counter: &TokenCounter) -> u64 {
         let count = || counter.json(&serde_json::from_str(self.raw.get()).expect("validated JSON"));
-        let (name, tokens) = self.tokens.get_or_init(|| (counter.name, count()));
-        if *name == counter.name { *tokens } else { count() }
+        let (name, tokens) = self.tokens.get_or_init(|| (counter.identity().to_owned(), count()));
+        if name == counter.identity() { *tokens } else { count() }
     }
 }
 impl Serialize for FrozenJson {
@@ -50,7 +50,7 @@ impl Field {
             value => Self::Json(FrozenJson::new(value)),
         }
     }
-    fn tokens(&self, counter: TokenCounter) -> u64 {
+    fn tokens(&self, counter: &TokenCounter) -> u64 {
         match self {
             Self::Json(value) => value.tokens(counter),
             Self::Array(items) => items.iter().fold(counter.count("[]"), |size, value| {
@@ -215,7 +215,7 @@ impl RequestBody {
         fields.insert(key.into(), Field::Object(Box::new(body)));
         self.encoded.take();
     }
-    pub(crate) fn estimated_tokens(&self, counter: TokenCounter) -> u64 {
+    pub(crate) fn estimated_tokens(&self, counter: &TokenCounter) -> u64 {
         let Root::Object(fields) = &self.root else {
             let Root::Json(value) = &self.root else {
                 unreachable!()
@@ -401,7 +401,7 @@ mod tests {
         ],"model":"before"});
         let body = RequestBody::from(value.clone());
         let counter = TokenCounter::for_model("gpt-4o");
-        let tokens = body.estimated_tokens(counter);
+        let tokens = body.estimated_tokens(&counter);
         assert!(
             tokens < 128,
             "media and encrypted signatures are not text estimates"
@@ -424,14 +424,14 @@ mod tests {
         let recovered: RequestBody =
             serde_json::from_slice(&serde_json::to_vec(&body).unwrap()).unwrap();
         assert_eq!(recovered.wire_bytes(), bytes);
-        assert_eq!(recovered.estimated_tokens(counter), tokens);
+        assert_eq!(recovered.estimated_tokens(&counter), tokens);
         let mut nested = RequestBody::from(json!({}));
         nested.insert_object("request", body.clone());
         let recovered: RequestBody = serde_json::from_slice(&serde_json::to_vec(&nested).unwrap()).unwrap();
-        assert_eq!(recovered.estimated_tokens(counter), nested.estimated_tokens(counter));
+        assert_eq!(recovered.estimated_tokens(&counter), nested.estimated_tokens(&counter));
         let fragment = FrozenJson::new(json!("你好，世界！"));
-        assert_eq!(fragment.tokens(counter), 4);
-        assert_eq!(fragment.tokens(TokenCounter::for_model("gpt-4")), 7);
-        assert_eq!(fragment.tokens.get(), Some(&(counter.name, 4)));
+        assert_eq!(fragment.tokens(&counter), 4);
+        assert_eq!(fragment.tokens(&TokenCounter::for_model("gpt-4")), 7);
+        assert_eq!(fragment.tokens.get(), Some(&(counter.identity().to_owned(), 4)));
     }
 }

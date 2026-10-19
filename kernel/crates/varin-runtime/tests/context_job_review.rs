@@ -140,6 +140,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
+        tokenizer: None,
         request_context: None,
         child_dispatch: None,
         goal: None,

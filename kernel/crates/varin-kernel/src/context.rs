@@ -461,6 +461,7 @@ mod tests {
                 history_range: range.clone(),
             },
             binding: RequestBinding {
+                tokenizer: None,
                 request_context: None,
                 child_dispatch: None,
                 goal: None,

@@ -1,13 +1,17 @@
-//! Offline tokenizers shared by context planning and original-material selection.
+//! Model metadata selects an offline encoding or an immutable Host-prepared tokenizer file.
 use crate::execution::{Content, ConversationItem};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{io::Read, sync::OnceLock};
+use sha2::{Digest, Sha256};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex, OnceLock},
+};
 use tiktoken_rs::tokenizer::Tokenizer as OpenAiTokenizer;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TokenizerName {
+pub enum Encoding {
     #[default]
     O200kBase,
     O200kHarmony,
@@ -15,146 +19,186 @@ pub enum TokenizerName {
     P50kBase,
     P50kEdit,
     R50kBase,
-    DeepseekV4,
-    DeepseekV41,
-    Qwen3,
 }
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+impl Encoding {
+    fn from_openai(value: OpenAiTokenizer) -> Self {
+        match value {
+            OpenAiTokenizer::O200kBase => Self::O200kBase,
+            OpenAiTokenizer::O200kHarmony => Self::O200kHarmony,
+            OpenAiTokenizer::Cl100kBase => Self::Cl100kBase,
+            OpenAiTokenizer::P50kBase => Self::P50kBase,
+            OpenAiTokenizer::P50kEdit => Self::P50kEdit,
+            OpenAiTokenizer::R50kBase | OpenAiTokenizer::Gpt2 => Self::R50kBase,
+        }
+    }
+    fn openai(self) -> OpenAiTokenizer {
+        match self {
+            Self::O200kBase => OpenAiTokenizer::O200kBase,
+            Self::O200kHarmony => OpenAiTokenizer::O200kHarmony,
+            Self::Cl100kBase => OpenAiTokenizer::Cl100kBase,
+            Self::P50kBase => OpenAiTokenizer::P50kBase,
+            Self::P50kEdit => OpenAiTokenizer::P50kEdit,
+            Self::R50kBase => OpenAiTokenizer::R50kBase,
+        }
+    }
+    fn label(self) -> &'static str {
+        match self {
+            Self::O200kBase => "o200k_base",
+            Self::O200kHarmony => "o200k_harmony",
+            Self::Cl100kBase => "cl100k_base",
+            Self::P50kBase => "p50k_base",
+            Self::P50kEdit => "p50k_edit",
+            Self::R50kBase => "r50k_base",
+        }
+    }
+}
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum TokenizerBinding {
+    Encoding { name: Encoding },
+    File { path: String, sha256: String },
+}
+impl Default for TokenizerBinding {
+    fn default() -> Self {
+        Self::Encoding {
+            name: Encoding::default(),
+        }
+    }
+}
+type Loaded = Arc<OnceLock<Result<tokenizers::Tokenizer, String>>>;
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct TokenCounter {
-    pub name: TokenizerName,
+    pub name: TokenizerBinding,
     pub matched: bool,
+    #[serde(skip)]
+    loaded: OnceLock<Loaded>,
 }
-
 impl TokenCounter {
     pub fn for_model(model: &str) -> Self {
+        Self::for_binding(model, None)
+    }
+    pub fn for_binding(model: &str, binding: Option<&TokenizerBinding>) -> Self {
+        if let Some(binding) = binding {
+            return Self {
+                name: binding.clone(),
+                matched: true,
+                loaded: OnceLock::new(),
+            };
+        }
         let model = model
             .rsplit('/')
             .next()
             .unwrap_or(model)
             .to_ascii_lowercase();
-        let name = if matches!(
-            model.as_str(),
-            "deepseek-v4.1-flash" | "deepseek-v4.1-flash-1017"
-        ) {
-            Some(TokenizerName::DeepseekV41)
-        } else if matches!(model.as_str(), "deepseek-v4-pro" | "deepseek-v4-flash") {
-            Some(TokenizerName::DeepseekV4)
-        } else if model == "qwen3-8b" {
-            Some(TokenizerName::Qwen3)
-        } else {
-            tiktoken_rs::tokenizer::get_tokenizer(&model).map(|tokenizer| match tokenizer {
-                OpenAiTokenizer::O200kBase => TokenizerName::O200kBase,
-                OpenAiTokenizer::O200kHarmony => TokenizerName::O200kHarmony,
-                OpenAiTokenizer::Cl100kBase => TokenizerName::Cl100kBase,
-                OpenAiTokenizer::P50kBase => TokenizerName::P50kBase,
-                OpenAiTokenizer::P50kEdit => TokenizerName::P50kEdit,
-                OpenAiTokenizer::R50kBase | OpenAiTokenizer::Gpt2 => TokenizerName::R50kBase,
-            })
-        };
+        let encoding = tiktoken_rs::tokenizer::get_tokenizer(&model).map(Encoding::from_openai);
         Self {
-            name: name.unwrap_or_default(),
-            matched: name.is_some(),
+            name: TokenizerBinding::Encoding {
+                name: encoding.unwrap_or_default(),
+            },
+            matched: encoding.is_some(),
+            loaded: OnceLock::new(),
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self.name {
-            TokenizerName::O200kBase => "o200k_base",
-            TokenizerName::O200kHarmony => "o200k_harmony",
-            TokenizerName::Cl100kBase => "cl100k_base",
-            TokenizerName::P50kBase => "p50k_base",
-            TokenizerName::P50kEdit => "p50k_edit",
-            TokenizerName::R50kBase => "r50k_base",
-            TokenizerName::DeepseekV4 => "deepseek-v4",
-            TokenizerName::DeepseekV41 => "deepseek-v4.1",
-            TokenizerName::Qwen3 => "qwen3",
-        }
-    }
-
-    pub fn description(self) -> String {
-        format!(
-            "{}{}",
-            self.label(),
-            if self.matched {
-                ""
-            } else {
-                " (reference tokenizer)"
-            }
+    pub fn for_configuration(configuration: &Value) -> Self {
+        let binding = configuration
+            .get("tokenizer")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        Self::for_binding(
+            configuration["model"].as_str().unwrap_or_default(),
+            binding.as_ref(),
         )
     }
-
-    fn huggingface(self) -> Option<&'static tokenizers::Tokenizer> {
-        static DEEPSEEK_V4: OnceLock<tokenizers::Tokenizer> = OnceLock::new();
-        static DEEPSEEK_V41: OnceLock<tokenizers::Tokenizer> = OnceLock::new();
-        static QWEN3: OnceLock<tokenizers::Tokenizer> = OnceLock::new();
-        let (cell, bytes): (&OnceLock<_>, &[u8]) = match self.name {
-            TokenizerName::DeepseekV4 => (
-                &DEEPSEEK_V4,
-                include_bytes!("../assets/tokenizers/deepseek-v4.json.gz"),
-            ),
-            TokenizerName::DeepseekV41 => (
-                &DEEPSEEK_V41,
-                include_bytes!("../assets/tokenizers/deepseek-v4.1.json.gz"),
-            ),
-            TokenizerName::Qwen3 => (&QWEN3, include_bytes!("../assets/tokenizers/qwen3.json.gz")),
-            _ => return None,
+    fn file(&self) -> Option<&tokenizers::Tokenizer> {
+        let TokenizerBinding::File { path, sha256 } = &self.name else {
+            return None;
         };
-        Some(cell.get_or_init(|| {
-            let mut json = Vec::new();
-            flate2::read::GzDecoder::new(bytes)
-                .read_to_end(&mut json)
-                .expect("bundled tokenizer gzip");
-            let mut tokenizer =
-                tokenizers::Tokenizer::from_bytes(json).expect("bundled tokenizer JSON");
+        // The Host gives identical content one immutable path. Load/hash/parse once, outside Catalog locks.
+        static FILES: OnceLock<Mutex<BTreeMap<(String, String), Loaded>>> = OnceLock::new();
+        let cell = self.loaded.get_or_init(|| {
+            FILES
+                .get_or_init(Default::default)
+                .lock()
+                .unwrap()
+                .entry((path.clone(), sha256.clone()))
+                .or_default()
+                .clone()
+        });
+        cell.get_or_init(|| {
+            let bytes =
+                std::fs::read(path).map_err(|_| "tokenizer file unavailable".to_string())?;
+            if hex::encode(Sha256::digest(&bytes)) != *sha256 {
+                return Err("tokenizer file content changed".into());
+            }
+            let mut tokenizer = tokenizers::Tokenizer::from_bytes(bytes)
+                .map_err(|_| "unsupported tokenizer file".to_string())?;
             tokenizer
                 .with_truncation(None)
-                .expect("untruncated tokenizer");
+                .map_err(|_| "tokenizer configuration invalid".to_string())?;
             tokenizer.with_padding(None);
-            tokenizer
-        }))
+            Ok(tokenizer)
+        })
+        .as_ref()
+        .ok()
     }
-
-    fn openai(self) -> &'static tiktoken_rs::CoreBPE {
-        let tokenizer = match self.name {
-            TokenizerName::O200kHarmony => OpenAiTokenizer::O200kHarmony,
-            TokenizerName::Cl100kBase => OpenAiTokenizer::Cl100kBase,
-            TokenizerName::P50kBase => OpenAiTokenizer::P50kBase,
-            TokenizerName::P50kEdit => OpenAiTokenizer::P50kEdit,
-            TokenizerName::R50kBase => OpenAiTokenizer::R50kBase,
-            _ => OpenAiTokenizer::O200kBase,
-        };
-        tiktoken_rs::bpe_for_tokenizer(tokenizer).expect("bundled tiktoken encoding")
+    fn encoding(&self) -> Encoding {
+        match &self.name {
+            TokenizerBinding::Encoding { name } => *name,
+            _ => Encoding::default(),
+        }
     }
-
-    pub fn count(self, text: &str) -> u64 {
-        match self.huggingface() {
-            Some(tokenizer) => tokenizer
-                .encode(text, false)
-                .expect("bundled tokenizer encodes UTF-8")
-                .len() as u64,
+    pub(crate) fn identity(&self) -> &str {
+        match &self.name {
+            TokenizerBinding::File { sha256, .. } if self.file().is_some() => sha256,
+            _ => self.encoding().label(),
+        }
+    }
+    pub fn description(&self) -> String {
+        match &self.name {
+            TokenizerBinding::File { .. } if self.file().is_some() => {
+                "configured tokenizer.json".into()
+            }
+            TokenizerBinding::File { .. } => {
+                "o200k_base (reference tokenizer; configured file unavailable)".into()
+            }
+            _ => format!(
+                "{}{}",
+                self.encoding().label(),
+                if self.matched {
+                    ""
+                } else {
+                    " (reference tokenizer)"
+                }
+            ),
+        }
+    }
+    fn openai(&self) -> &'static tiktoken_rs::CoreBPE {
+        tiktoken_rs::bpe_for_tokenizer(self.encoding().openai()).expect("bundled tiktoken encoding")
+    }
+    pub fn count(&self, text: &str) -> u64 {
+        match self
+            .file()
+            .and_then(|tokenizer| tokenizer.encode(text, false).ok())
+        {
+            Some(encoded) => encoded.len() as u64,
             None => self.openai().count_ordinary(text) as u64,
         }
     }
-
-    /// A source excerpt starts at an original UTF-8 boundary. Its enclosing JSON is measured
-    /// separately by the planner, since it also consumes input space.
-    pub(crate) fn prefix_bytes(self, text: &str, tokens: u64) -> usize {
+    pub(crate) fn prefix_bytes(&self, text: &str, tokens: u64) -> usize {
         if tokens == 0 {
             return 0;
         }
         let tokens = usize::try_from(tokens).unwrap_or(usize::MAX);
-        let mut end = match self.huggingface() {
-            Some(tokenizer) => {
-                let encoded = tokenizer
-                    .encode(text, false)
-                    .expect("bundled tokenizer encodes UTF-8");
+        let mut end = match self
+            .file()
+            .and_then(|tokenizer| tokenizer.encode(text, false).ok())
+        {
+            Some(encoded) => {
                 if encoded.len() <= tokens {
                     return text.len();
                 }
                 encoded
                     .get_offsets()
-                    .get(tokens.saturating_sub(1))
+                    .get(tokens - 1)
                     .map_or(0, |(_, end)| *end)
             }
             None => {
@@ -175,7 +219,7 @@ impl TokenCounter {
         end
     }
 
-    pub(crate) fn item(self, item: &ConversationItem) -> u64 {
+    pub(crate) fn item(&self, item: &ConversationItem) -> u64 {
         match &item.content {
             Content::Text { text } | Content::ReasoningSummary { text } => self.count(text),
             Content::Media { .. } | Content::ProviderOnly => 0,
@@ -199,7 +243,7 @@ impl TokenCounter {
         }
     }
 
-    pub(crate) fn json(self, value: &Value) -> u64 {
+    pub(crate) fn json(&self, value: &Value) -> u64 {
         // Count text leaves and envelope pieces independently so cached fragments and a
         // recovered request use the same accounting, regardless of serialization layout.
         match value {
@@ -228,7 +272,7 @@ impl TokenCounter {
         }
     }
 
-    pub(crate) fn field(self, key: &str) -> u64 {
+    pub(crate) fn field(&self, key: &str) -> u64 {
         self.count(&format!(
             "{}:",
             serde_json::to_string(key).expect("JSON key")
@@ -255,37 +299,51 @@ pub(crate) fn opaque(object: &serde_json::Map<String, Value>, key: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn model_vocabularies_count_unicode_and_preserve_complete_source_prefixes() {
+    fn generic_files_share_counts_and_retain_unicode_without_model_names() {
         let modern = TokenCounter::for_model("openai/gpt-4o");
-        let older = TokenCounter::for_model("gpt-4");
-        assert_eq!(modern.count("Hello, world!"), 4);
         assert_eq!(modern.count("你好，世界！"), 4);
-        assert_eq!(older.count("你好，世界！"), 7);
-        assert!(!TokenCounter::for_model("custom-closed-model").matched);
-        for model in [
-            "gpt-4o",
-            "deepseek-ai/DeepSeek-V4-Pro",
-            "deepseek-v4.1-flash-1017",
-            "Qwen/Qwen3-8B",
-        ] {
-            let counter = TokenCounter::for_model(model);
-            assert!(counter.matched);
-            let text = "第一行中文 🎉\nconst x = 123;\n".repeat(500);
-            assert_eq!(counter.count(""), 0);
-            assert!(
-                counter.count(&text) > 3000,
-                "{model} must encode the entire input"
-            );
-            assert_eq!(counter.prefix_bytes(&text, 0), 0);
-            let end = counter.prefix_bytes(&text, 37);
-            assert!(end > 0 && end < text.len() && text.is_char_boundary(end));
-            assert!(counter.count(&text[..end]) <= 37, "{model} token prefix");
-            assert_eq!(
-                counter.prefix_bytes(&text, counter.count(&text)),
-                text.len()
-            );
-        }
+        assert_eq!(TokenCounter::for_model("gpt-4").count("你好，世界！"), 7);
+        assert!(!TokenCounter::for_model("any-private-model").matched);
+        let root = std::env::temp_dir().join(format!("varin-tokenizer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let tokenizer = tokenizers::Tokenizer::new(
+            tokenizers::models::wordlevel::WordLevel::builder()
+                .vocab(
+                    [("[UNK]".into(), 0), ("中文 🎉".into(), 1)]
+                        .into_iter()
+                        .collect(),
+                )
+                .unk_token("[UNK]".into())
+                .build()
+                .unwrap(),
+        );
+        let bytes = tokenizer.to_string(false).unwrap().into_bytes();
+        let path = root.join("tokenizer.json");
+        std::fs::write(&path, &bytes).unwrap();
+        let binding = TokenizerBinding::File {
+            path: path.to_string_lossy().into(),
+            sha256: hex::encode(Sha256::digest(&bytes)),
+        };
+        let a = TokenCounter::for_binding("unlisted-model-a", Some(&binding));
+        let b = TokenCounter::for_binding("unlisted-model-b", Some(&binding));
+        assert_eq!(a.count("中文 🎉"), 1);
+        assert_eq!(b.count("中文 🎉"), 1);
+        assert!(std::ptr::eq(a.file().unwrap(), b.file().unwrap()));
+        assert_eq!(a.prefix_bytes("中文 🎉", 1), "中文 🎉".len());
+        assert_eq!(a.prefix_bytes("中文 🎉", 0), 0);
+        let recovered: TokenCounter =
+            serde_json::from_value(serde_json::to_value(&a).unwrap()).unwrap();
+        assert_eq!(recovered.count("中文 🎉"), 1);
+        let bad = TokenCounter::for_binding(
+            "unlisted",
+            Some(&TokenizerBinding::File {
+                path: root.join("missing.json").to_string_lossy().into(),
+                sha256: "missing".into(),
+            }),
+        );
+        assert_eq!(bad.count("你好，世界！"), 4);
+        assert!(bad.description().contains("reference tokenizer"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

@@ -160,3 +160,23 @@ it('the actual Host start owner keeps a frozen summary tool-free even when curre
   expect(extensions).not.toHaveBeenCalled();
   expect(request).toHaveBeenCalledWith('runtime.run.start', { runId: 'summary' }, expect.any(AbortSignal));
 });
+
+it('replans a model candidate when tokenizer preparation changes its counting basis before admission', async () => {
+  const f = fixture();
+  const original = f.owner.prepare;
+  f.owner.prepare = vi.fn(async (...args: Parameters<ContextCompactionOwner['prepare']>) => {
+    const lease = await original(...args);
+    if (!lease) throw new Error('Missing fixture lease');
+    return { ...lease, candidate: { ...candidate,
+      plan: { kind: 'model_plan' as const, sourceCutHash: args[1].sourceCutHash, nodes: [{ id: 'fold', inputs: [], instructions: null }], finalNodeId: 'fold' } } };
+  });
+  f.runtime.previewContextJob.mockResolvedValueOnce({ sourceCutHash: 'reference-cut', sources: [], modelBudget: { contextWindowTokens: null, maxOutputTokens: null, sourceBudgetTokens: null } });
+  f.runtime.previewContextJob.mockResolvedValueOnce({ sourceCutHash: 'prepared-cut', sources: [], modelBudget: { contextWindowTokens: null, maxOutputTokens: null, sourceBudgetTokens: null } });
+  const configuration = { model: 'original-model', tokenizer: { kind: 'encoding', name: 'cl100k_base' } };
+  await admitContextJobCandidate(f.runtime as unknown as AgentRuntimeClient, f.owner, { threadId: 'thread:main' }, input,
+    new AbortController().signal, async () => ({ configuration, credentialScope: input.credentialScope! }));
+  expect(f.owner.prepare).toHaveBeenCalledTimes(2);
+  expect(f.release).toHaveBeenCalledTimes(2);
+  expect(f.runtime.createContextJob).toHaveBeenCalledOnce();
+  expect(f.runtime.createContextJob.mock.calls[0]?.[0]).toMatchObject({ configuration, compaction: { plan: { sourceCutHash: 'prepared-cut' } } });
+});

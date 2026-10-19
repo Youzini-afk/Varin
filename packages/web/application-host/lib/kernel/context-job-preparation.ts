@@ -45,7 +45,20 @@ export async function admitContextJobCandidate(runtime: Runtime, owner: ContextC
     }
     signal.throwIfAborted();
     lease?.assertAvailable();
-    if (bindModel && lease?.candidate.plan.kind !== 'text') admissionInput = { ...input, ...await bindModel() };
+    if (bindModel && lease?.candidate.plan.kind !== 'text') {
+      admissionInput = { ...input, ...await bindModel() };
+      const counting = (configuration: unknown) => {
+        const value = configuration as { model?: unknown; tokenizer?: unknown } | undefined;
+        return [value?.model, value?.tokenizer];
+      };
+      // A background tokenizer download can complete between pure preview and binding.
+      // Replan only when that changes the input counting basis, using the now-frozen binding.
+      if (owner && lease && !isDeepStrictEqual(counting(input.configuration), counting(admissionInput.configuration))) {
+        lease.release(); lease = undefined;
+        const preview = await runtime.previewContextJob(admissionInput, signal);
+        lease = await owner.prepare(scope, preview, signal);
+      }
+    }
     signal.throwIfAborted();
     lease?.assertAvailable();
     enteredAdmission = true;

@@ -5,6 +5,11 @@ import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 import type { AuthorizationState } from './mcp-connections.js';
 
 export type ModelOperation = 'chat' | 'embedding' | 'rerank' | 'decision' | 'image-generation' | 'image-editing';
+export type ModelTokenizer =
+  | { kind: 'encoding'; name: string }
+  | { kind: 'huggingface'; repository: string; revision?: string }
+  | { kind: 'url'; url: string }
+  | { kind: 'file'; path: string };
 export type ModelDecisionPaths = Partial<Record<'classify' | 'tokenize' | 'applyTemplate' | 'completion', string>>;
 /** Non-secret connection settings. Omitted proxy inherits the executing Host's policy. */
 export interface ModelConnectionOptions {
@@ -23,6 +28,7 @@ export type ConnectionAuthentication =
 import type { ModelThinkingConfiguration } from '@varin/protocol';
 export type { ModelThinkingEffort, ModelThinkingConfiguration } from '@varin/protocol';
 export interface ChannelModel {
+  tokenizer?: ModelTokenizer;
   id: string;
   /** Wire protocol for providers serving more than one API. */
   protocol?: string;
@@ -44,7 +50,7 @@ export interface ChannelModel {
   catalog?: { source?: 'service'; overrides: ModelCatalogField[] };
 }
 export type ModelCatalogField = Exclude<keyof ChannelModel, 'id' | 'enabled' | 'catalog'>;
-export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision'];
+export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
 export interface ModelDirectoryStatus { revision: string; updatedAt?: number; refreshing: boolean; issue?: 'cache-unavailable' | 'refresh-failed' | 'partial-refresh' | 'cache-write-failed' }
 export interface ModelDirectorySnapshot { models: ChannelModel[]; status: ModelDirectoryStatus }
 export interface ModelChannel {

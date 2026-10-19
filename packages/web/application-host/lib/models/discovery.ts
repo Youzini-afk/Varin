@@ -1,3 +1,4 @@
+import { discoveredTokenizer } from './tokenizer-metadata.js';
 /** Provider directory responses are normalized to the same editable model metadata as presets. */
 import type { DiscoveredModel, ModelOperation } from '@varin/application-client';
 import { MODEL_THINKING_EFFORTS } from '@varin/protocol';
@@ -12,7 +13,8 @@ export function modelList(response: unknown): DiscoveredModel[] {
   if (!object(response) || !Array.isArray(response.data)) throw new Error('Model discovery returned an invalid list');
   return response.data.map(item => {
     if (!object(item) || typeof item.id !== 'string' || !item.id) throw new Error('Model discovery returned an invalid model');
-    return { id: item.id, name: typeof item.display_name === 'string' ? item.display_name : typeof item.name === 'string' ? item.name : item.id };
+    const tokenizer = discoveredTokenizer(item);
+    return { ...(tokenizer ? { tokenizer } : {}), id: item.id, name: typeof item.display_name === 'string' ? item.display_name : typeof item.name === 'string' ? item.name : item.id };
   });
 }
 export function openRouterModels(response: unknown): DiscoveredModel[] {

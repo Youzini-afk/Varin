@@ -99,6 +99,11 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   const editModels = (models: ChannelModel[]) => edit({ models: models.map(model => {
     const previous = draft?.models.find(value => value.id === model.id);
     if (!previous?.catalog || !model.catalog) return model;
+    if (previous.tokenizer && !model.tokenizer) {
+      const tokenizer = type?.catalog?.find(value => value.id === model.id)?.tokenizer;
+      return { ...model, tokenizer: tokenizer ? structuredClone(tokenizer) : undefined,
+        catalog: { ...model.catalog, overrides: model.catalog.overrides.filter(field => field !== 'tokenizer') } };
+    }
     const changed = MODEL_CATALOG_FIELDS.filter(field => JSON.stringify(previous[field]) !== JSON.stringify(model[field]));
     return { ...model, catalog: { ...model.catalog, overrides: [...new Set([...model.catalog.overrides, ...changed])] } };
   }) });

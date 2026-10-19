@@ -140,6 +140,7 @@ impl Harness {
             .bind_child_dispatch(&run.id, prepared)
             .unwrap();
         let binding = RequestBinding {
+            tokenizer: None,
             request_context: None,
             child_dispatch: dispatch_ref.clone(),
             goal: None,

@@ -69,6 +69,7 @@ fn second_process(f: &mut Fixture) -> String {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    tokenizer: None,
                     request_context: None,
                     child_dispatch: None,
                     goal: f.db.goal_binding(&f.run).unwrap(),

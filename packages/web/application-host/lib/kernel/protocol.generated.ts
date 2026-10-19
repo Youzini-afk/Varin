@@ -439,7 +439,7 @@ export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind
 
 export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
 
-export interface RequestBinding { request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+export interface RequestBinding {tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
 export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 
@@ -2927,6 +2927,8 @@ export interface ContextCompactionCandidate {producer:ContextCompactionProducer;
 
 export interface ContextCompactionSource {sourceId:string;item:{id:string;provenance:{kind:'external_data';source:string};content:{kind:'text';text:string}|{kind:'media';media:ResolvedMedia};opaque:null}}
 
+export type TokenizerBinding = {kind: 'encoding'; name: string} | {kind: 'file'; path: string; sha256: string}
+
 export interface ContextCompactionModelBudget {contextWindowTokens:number|null;maxOutputTokens:number|null;sourceBudgetTokens:number|null}
 
 export interface ContextCompactionPreview {sourceCutHash:string;sources:ContextCompactionSource[];modelBudget:ContextCompactionModelBudget}
@@ -3009,6 +3011,7 @@ export type RunCancellationReceipt = Omit<Run, 'configuration'>;
 export type OperationCancellationReceipt = Omit<Operation, 'intent' | 'result' | 'external_receipt'>;
 
 export interface ModelSessionConfiguration {
+  tokenizer?: TokenizerBinding;
   catalogModelId?: string;
   providerId?: string;
   providerFamily: string;

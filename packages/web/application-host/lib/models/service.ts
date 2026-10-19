@@ -22,6 +22,8 @@ import { modelOAuthProviders, type ModelOAuthProvider } from './oauth.js';
 import { AuthorizationFlows } from '../authorization-flows.js';
 import { ConfigWatchManager } from '../configuration-watch.js';
 import { ModelDirectory } from './directory.js';
+import { ModelTokenizers } from './tokenizers.js';
+import { validTokenizer } from './tokenizer-metadata.js';
 import { followDirectory, validCatalogOverrides } from './directory-models.js';
 import type { CredentialScope, CredentialDispatch } from '../kernel/credential-owner.js';
 import type { SelectedModel, ModelExecutionAuthority } from '../kernel/model-authority.js';
@@ -76,6 +78,7 @@ export class ModelsService {
   readonly file: ConfigurationFile<ModelsDocument>;
   readonly credentialPath: string;
   readonly modelDirectory: ModelDirectory;
+  readonly tokenizers: ModelTokenizers;
   readonly #aws = new AwsCredentialOwner();
   readonly #google = new GoogleCredentialOwner();
   readonly #anthropic: AnthropicCredentialOwner;
@@ -101,6 +104,7 @@ export class ModelsService {
       return { ...document, channels: (document.channels ?? []) as ModelChannel[] };
     });
     this.modelDirectory = new ModelDirectory(directory, this.types, () => this.#changed('channels'));
+    this.tokenizers = new ModelTokenizers(directory, () => this.#directoryNetwork, () => this.#changed('channels'));
   }
   prepareContributions(types: readonly ChannelType[], providers: readonly ModelOAuthProvider[]): () => void {
     for (const type of types) compileToolJsonSchema(type.parametersSchema);
@@ -152,6 +156,7 @@ export class ModelsService {
         || model.thinkingLevelMap !== undefined && (!object(model.thinkingLevelMap) || Object.entries(model.thinkingLevelMap).some(([level, value]) =>
           !(THINKING_LEVELS as readonly string[]).includes(level) || value !== null && (typeof value !== 'string' || !value.trim())))
         || model.parameters !== undefined && !object(model.parameters) || model.compat !== undefined && !object(model.compat)) return fail('channel-model-invalid', 'Model fields or operations are invalid');
+      if (model.tokenizer !== undefined && !validTokenizer(model.tokenizer)) return fail('model-tokenizer-invalid', 'Choose a supported encoding, Hugging Face repository, tokenizer URL or absolute Host file path');
       if (model.catalog !== undefined && !validCatalogOverrides(model.catalog)) return fail('channel-model-invalid', 'Model directory overrides are invalid');
       if (model.thinking !== undefined && !isModelThinkingConfiguration(model.thinking)) return fail('model-thinking-invalid', 'Choose valid thinking controls and supported levels');
       if (model.decision !== undefined && (!object(model.decision) || Object.keys(model.decision).some(key => key !== 'api' && key !== 'paths')
@@ -248,6 +253,10 @@ export class ModelsService {
         const defaults = candidate.models.some(model => model.catalog) ? new Map((await this.#directoryModels(candidate)).map(model => [model.id, model])) : new Map<string, ChannelModel>();
         const resolved = { ...candidate, models: candidate.models.map(model => followDirectory(model, defaults.get(model.id))) };
         this.validate(resolved);
+        for (const model of resolved.models) {
+          const issue = model.tokenizer && this.tokenizers.issue(model.tokenizer);
+          if (issue) issues.push({ channelId: candidate.id, code: 'model-tokenizer-unavailable', message: `${model.name}: ${issue}` });
+        }
         ids.add(candidate.id); channels.push(resolved); this.#acceptedChannels.set(candidate.id, structuredClone(resolved));
       } catch (error) {
         issues.push({ ...(id === undefined ? {} : { channelId: id }), code: error instanceof ModelConfigurationError ? error.code : 'channel-invalid', message: error instanceof ModelConfigurationError ? error.message : 'Channel configuration is invalid' });
@@ -264,6 +273,9 @@ export class ModelsService {
       return document;
     });
     this.#queueDirectoryRefresh();
+    if (channel.enabled) for (const model of channel.models) {
+      if (model.enabled && model.tokenizer) void this.tokenizers.prepare(model.tokenizer);
+    }
     return this.read();
   }
   async remove(id: string, expectedRevision: string) {
@@ -393,6 +405,7 @@ export class ModelsService {
       api, baseUrl: basePath ? appendModelPath(channel.baseUrl, basePath) : channel.baseUrl, maxTokens: model.maxOutputTokens ?? 0,
       ...(type.requestProfile ? { requestProfile: type.requestProfile } : {}),
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
+      ...(model.tokenizer ? { tokenizer: structuredClone(model.tokenizer) } : {}),
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }), input: model.input ?? ['text'],
       ...(model.reasoning === undefined ? {} : { reasoning: model.reasoning }),
       ...(model.thinking === undefined ? {} : { thinking: structuredClone(model.thinking) }),
@@ -400,6 +413,8 @@ export class ModelsService {
       ...(model.parameters === undefined ? {} : { samplingParams: model.parameters }),
       ...(model.compat === undefined && channel.type !== 'github-copilot' ? {} : { compat: { ...model.compat, ...(channel.type === 'github-copilot' ? { copilot: true } : {}) } }), allowAnonymous: channel.authentication.kind === 'none' };
   }
+  async prepareTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.resolve(source); }
+  async cachedTokenizer(source: import('@varin/application-client').ModelTokenizer) { return this.tokenizers.cached(source); }
   async listModels(): Promise<SelectedModel[]> {
     return (await this.read()).channels.filter(channel => channel.enabled)
       .flatMap(channel => channel.models.filter(model => model.enabled && model.operations.includes('chat')).map(model => this.#selected(channel, model)));

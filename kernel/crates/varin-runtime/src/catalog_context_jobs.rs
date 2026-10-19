@@ -215,9 +215,9 @@ impl Catalog {
             Some(owner) => Some(self.run(owner)?),
             None => activation::latest_run(&self.db, &request.branch_id)?,
         };
-        let continuation_tokenizer = crate::token_count::TokenCounter::for_model(
-            conversation.as_ref().and_then(|run| run.configuration["model"].as_str())
-                .or_else(|| configuration["model"].as_str()).unwrap_or_default());
+        let continuation_tokenizer = crate::token_count::TokenCounter::for_configuration(
+            conversation.as_ref().filter(|run| run.configuration["model"].is_string())
+                .map(|run| &run.configuration).unwrap_or(&configuration));
         Ok(ContextJobPreparation {
             continuation_tokenizer,
             memory_reference,
@@ -842,7 +842,7 @@ impl ContextJobRead {
         };
         Ok(ContextJobCompiler {
             originals: recipe.originals.as_ref().map(|reference| self.content.load_items(reference, &|| false)
-                .map(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer))).transpose()?,
+                .map(|items| crate::context_retention::Originals::new(items, recipe.continuation_tokenizer.clone()))).transpose()?,
             recent: self.content.load_items(&recipe.recent,&||false)?,
             recipe,
             sources,
@@ -1194,7 +1194,7 @@ impl ContextJobPreparation {
             history.insert(0, prior.into());
         }
         let mut sources = crate::context_material::quote_sources(&self.request.key, history)?;
-        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer).annotate(&mut sources);
+        crate::context_retention::Originals::new(originals.clone(), self.continuation_tokenizer.clone()).annotate(&mut sources);
         let model_budget=crate::context_material::model_budget(&self.configuration,&self.request.summary_recipe)?;
         let continuation_budget_tokens = self.request.summary_recipe.continuation_budget_tokens
             .or_else(|| model_budget.source_budget_tokens.map(|tokens| tokens.saturating_mul(3) / 5));
@@ -1246,12 +1246,12 @@ impl ContextJobPreparation {
             original
         } else {
             let frozen = self.frozen_source(&database)?;
-            let summary_tokenizer = crate::token_count::TokenCounter::for_model(self.configuration["model"].as_str().unwrap_or_default());
+            let summary_tokenizer = crate::token_count::TokenCounter::for_configuration(&self.configuration);
             let compaction = match &self.request.compaction {
                 Some(candidate) => candidate.clone(),
                 None => ContextCompactionCandidate {
                     producer: ContextCompactionProducer::builtin(),
-                    plan: crate::context_material::builtin_plan(&frozen.preview, summary_tokenizer)?,
+                    plan: crate::context_material::builtin_plan(&frozen.preview, &summary_tokenizer)?,
                 },
             };
             compaction.producer.validate()?;
@@ -1259,7 +1259,7 @@ impl ContextJobPreparation {
             if self.request.compaction.is_some() && matches!(
                 compaction.producer,
                 ContextCompactionProducer::Builtin { .. }
-            ) && compaction.plan != crate::context_material::builtin_plan(&frozen.preview, summary_tokenizer)?
+            ) && compaction.plan != crate::context_material::builtin_plan(&frozen.preview, &summary_tokenizer)?
             {
                 return Err(RuntimeError::Invalid(
                     "builtin compaction producer must use the core fold plan".into(),
@@ -1275,7 +1275,7 @@ impl ContextJobPreparation {
                     .collect::<Vec<_>>(),
             )?;
             ContextJobRecipe {
-                continuation_tokenizer: self.continuation_tokenizer,
+                continuation_tokenizer: self.continuation_tokenizer.clone(),
                 originals: Some(self.content.save_items(&frozen.originals)?),
                 continuation_budget_tokens: frozen.continuation_budget_tokens,
                 recent: self.content.save_items(&frozen.recent)?,
@@ -1446,8 +1446,8 @@ impl ContextJobPublication {
             crate::context_retention::Selection { summary, retain: Vec::new() }
         } else { crate::context_retention::Selection::parse(&summary)? };
         let retained = recipe.originals.as_ref().map(|reference| -> Result<_> {
-            let counter = recipe.continuation_tokenizer;
-            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter);
+            let counter = recipe.continuation_tokenizer.clone();
+            let originals = crate::context_retention::Originals::new(self.content.load_items(reference, &|| false)?, counter.clone());
             let items = originals.select(&selection.retain)?;
             crate::execution::validate_history_pairs(&items)
                 .map_err(|error| RuntimeError::Invalid(error.to_string()))?;

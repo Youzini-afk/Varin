@@ -257,6 +257,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             leaf_id: Some(receipt.input_id.clone()),
         };
         let binding = RequestBinding {
+            tokenizer: None,
             request_context: None,
             child_dispatch: None,
             goal: None,

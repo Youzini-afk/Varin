@@ -163,6 +163,7 @@ impl Fixture {
             leaf_id: self.db.head("branch").unwrap(),
         };
         let binding = RequestBinding {
+            tokenizer: None,
             request_context: None,
             child_dispatch: None,
             goal: None,

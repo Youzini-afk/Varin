@@ -61,6 +61,29 @@ Token counts require non-negative safe integers, including every model override;
 distinct from the default. Resource file roots are `VARIN_DATA_DIR/resources` and
 `.varin/resources`; see [resource admission](../agent-resources/DOCUMENTATION.md).
 
+## Tokenizer metadata and cache
+
+`ChannelModel.tokenizer` accepts a tiktoken encoding, a Hugging Face repository/revision, a public
+`tokenizer.json` URL, or an explicit absolute Host file path. Discovery propagates precise tokenizer
+metadata and Hugging Face repository IDs through directory defaults and saved overrides. Family labels
+such as “GPT” or “Llama” remain insufficient to identify a particular vocabulary; remote metadata never
+selects local files. The advanced model editor exposes the same source choices.
+
+`ModelTokenizers` prepares resources under `VARIN_DATA_DIR/cache/tokenizers`. Downloads use the Host's
+egress policy without model credentials. Concurrent preparation for the same source shares one job;
+files are published atomically under their SHA-256, and source references persist across restarts.
+Floating repository references are pinned to the first cached content; select a new revision to update.
+Local file changes are detected from filesystem metadata and create a new immutable cache file.
+Conversation preparation uses available cache entries and starts missing downloads in the background.
+Failures appear in model settings; an uncached request continues with reference-tokenizer estimation.
+
+The prepared file hash/path or encoding is frozen in `ModelSessionConfiguration` and `RequestBinding`.
+Configuration edits/download completion affect subsequent bindings, while queued/recovered requests
+keep their original reference. Rust loads tokenizer JSON data, disables padding/truncation, shares it
+across models and caches fragment counts. It never executes repository code or downloads on the counting
+path. Unsupported or unavailable tokenizer files retain reference counting and identify it in estimate
+metadata. Existing provider-usage calibration remains separate from local text token counts.
+
 ## Channels and model selection
 
 A channel type declares its protocol, operation support, authentication options, parameter schema,
@@ -281,7 +304,7 @@ Provider usage belongs to its original ModelStep or inference Operation. Repeate
 or parent/child projections do not create another consumption record. Actual, estimated, missing
 and pending measurements stay distinct; cancellation is not zero usage. Context capacity uses full
 request tokenizer counts and eligible prior actual usage. The native runtime selects the tokenizer
-from the upstream request model ID, labels unmatched models as reference-tokenizer estimates, and
+from frozen model metadata (then tiktoken's model mapping), labels unmatched models as reference-tokenizer estimates, and
 keeps conversation retention counts separate from the compaction model input. Retrieval uses
 tokenizer/chunk estimates, and
 Goal budgets retain their existing output-token scope. These are different consumers of evidence,

@@ -66,6 +66,7 @@ pub fn calibrated_estimate(
         || a.connection_identity != b.connection_identity
         || a.provider_family != b.provider_family
         || a.model != b.model
+        || a.tokenizer != b.tokenizer
         || a.credential_ref != b.credential_ref
         || a.configuration_generation != b.configuration_generation
         || a.tool_schema_generation != b.tool_schema_generation
@@ -87,14 +88,14 @@ pub fn calibrated_estimate(
         estimate.estimated_tokens = (i128::from(input) + i128::from(estimate.estimated_tokens)
             - i128::from(old_estimate))
         .clamp(0, i128::from(u64::MAX)) as u64;
-        estimate.method = format!("actual-input-calibrated; {} delta; media unmeasured", TokenCounter::for_model(&view.binding.model).description());
+        estimate.method = format!("actual-input-calibrated; {} delta; media unmeasured", TokenCounter::for_binding(&view.binding.model, view.binding.tokenizer.as_ref()).description());
     }
     estimate
 }
 pub fn estimate_request(view: &RequestView, serialized: &RequestBody) -> InputEstimate {
-    let counter = TokenCounter::for_model(&view.binding.model);
+    let counter = TokenCounter::for_binding(&view.binding.model, view.binding.tokenizer.as_ref());
     InputEstimate {
-        estimated_tokens: serialized.estimated_tokens(counter),
+        estimated_tokens: serialized.estimated_tokens(&counter),
         unmeasured_media: view
             .history
             .iter()
@@ -136,7 +137,7 @@ pub enum BudgetDecision {
 /// Candidates derive only from this actual request. The original admission subsequently proves
 /// immutable ancestry and validates all source tool pairs again before freezing any excerpts.
 pub fn budget_candidates(view: &RequestView) -> Vec<BudgetCandidate> {
-    let counter = TokenCounter::for_model(&view.binding.model);
+    let counter = TokenCounter::for_binding(&view.binding.model, view.binding.tokenizer.as_ref());
     let costs: Vec<_> = view
         .history
         .iter()
@@ -245,7 +246,7 @@ pub fn continuation_budget(
     estimate: &InputEstimate,
     timing: &PreparationTiming,
 ) -> u64 {
-    let counter = TokenCounter::for_model(&view.binding.model);
+    let counter = TokenCounter::for_binding(&view.binding.model, view.binding.tokenizer.as_ref());
     let costs: Vec<_> = view
         .history
         .iter()

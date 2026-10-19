@@ -35,6 +35,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            tokenizer: None,
             request_context: None,
             child_dispatch: None,
             goal: None,

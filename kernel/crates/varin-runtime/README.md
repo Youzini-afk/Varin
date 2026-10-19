@@ -100,11 +100,14 @@ Offline tokenizer counts accompany each retention group, and the continuation bu
 originals. User message parts and complete provider/tool exchanges share a group. Costs identify
 unmeasured media/provider content and are not provider billing measurements. The original history remains
 durable; checkpoint references keep selected items, including their media, alive through collection.
-`token_count` selects the encoding by request model ID: tiktoken mappings for OpenAI, bundled official
-DeepSeek V4/V4.1 Flash and Qwen3-8B vocabularies, and a labeled o200k reference for unmatched models.
-Immutable request fragments cache counts; whole-request estimates retain actual-usage calibration.
-Summary input uses its own model tokenizer; the retained material uses the frozen conversation tokenizer.
-Tokenizer assets, revisions and licenses are recorded in `assets/tokenizers/sources.json`.
+`token_count` loads a generic tokenizer binding frozen in model configuration and request snapshots:
+an encoding name or a content-addressed Host-prepared `tokenizer.json` file. The Host owns discovery,
+public downloads and cache preparation; Rust hashes/parses the immutable file once and shares the
+loaded tokenizer. Missing/unusable files use a labeled reference encoding without stopping the Run.
+OpenAI mappings come from tiktoken; unmatched models use the o200k reference. No model-specific
+vocabularies or model-name branches are bundled. Immutable request fragments cache counts; changed
+tokenizer bindings invalidate calibration/reuse identities. Summary input uses its own model tokenizer;
+retained material uses the frozen conversation tokenizer.
 Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;
 forking or navigation that discards the summary also discards its selection.
 Model nodes use [summary_tools.rs](src/summary_tools.rs) for read-only original history/output and related

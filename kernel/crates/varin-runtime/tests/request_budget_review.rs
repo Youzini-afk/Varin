@@ -325,7 +325,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
                 - estimate_request(&original.view, &original.serialized).estimated_tokens
         );
         assert!(calibrated.method.starts_with("actual-input-calibrated"));
-        for mutation in 0..10 {
+        for mutation in 0..11 {
             let mut changed = current.clone();
             match mutation {
                 0 => changed.binding.tools.push(ToolSchema {
@@ -354,6 +354,7 @@ fn actual_serializers_keep_cache_semantics_full_tail_and_exact_prefix_invalidati
                         boundary_id: "boundary".into(),
                     }
                 }
+                10 => changed.binding.tokenizer = Some(token_count::TokenizerBinding::Encoding { name: token_count::Encoding::Cl100kBase }),
                 _ => {
                     Arc::make_mut(&mut changed.history[0]).content = Content::Text {
                         text: "edited original".into(),

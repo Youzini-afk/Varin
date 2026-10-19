@@ -40,7 +40,7 @@ pub(crate) fn model_budget(
 ) -> Result<ContextCompactionModelBudget> {
     let capacity: Capacity = serde_json::from_value(configuration.clone())?;
     // Every model node carries the read capability as well as these instructions.
-    let counter = TokenCounter::for_model(configuration["model"].as_str().unwrap_or_default());
+    let counter = TokenCounter::for_configuration(configuration);
     let fixed = counter.count(SUMMARIZER_SYSTEM)
         + counter.count(&recipe.request_text())
         + counter.json(&serde_json::to_value(crate::summary_tools::schema())?);
@@ -260,7 +260,7 @@ pub(crate) fn validate_plan(
     }
     Ok(())
 }
-pub(crate) fn builtin_plan(preview: &ContextCompactionPreview, counter: TokenCounter) -> Result<ContextCompactionPlan> {
+pub(crate) fn builtin_plan(preview: &ContextCompactionPreview, counter: &TokenCounter) -> Result<ContextCompactionPlan> {
     let budget = preview.model_budget.source_budget_tokens;
     if budget == Some(0) {
         return Err(RuntimeError::Invalid(
@@ -453,7 +453,7 @@ mod tests {
             )
             .unwrap(),
         };
-        let plan = builtin_plan(&preview, TokenCounter::default()).unwrap();
+        let plan = builtin_plan(&preview, &TokenCounter::default()).unwrap();
         assert!(plan.nodes().len() > 1);
         let body = serde_json::to_string(&source).unwrap();
         let mut reconstructed = String::new();
@@ -595,7 +595,7 @@ mod tests {
             sources: quote_sources("original-summary", originals).unwrap(),
             model_budget: model_budget(&json!({}), &ContextSummaryRecipe::manual()).unwrap(),
         };
-        let plan = builtin_plan(&preview, TokenCounter::default()).unwrap();
+        let plan = builtin_plan(&preview, &TokenCounter::default()).unwrap();
         let items: Vec<_> = plan
             .nodes()
             .iter()

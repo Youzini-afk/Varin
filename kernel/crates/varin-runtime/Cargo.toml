@@ -20,4 +20,3 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "net", "macros", "sync"] }
 tiktoken-rs = "0.12.1"
 tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }

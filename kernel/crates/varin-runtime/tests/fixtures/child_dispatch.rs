@@ -469,6 +469,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    tokenizer: None,
                     request_context: None,
                     child_dispatch: dispatch_context.clone(),
                     goal: None,
@@ -660,6 +661,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    tokenizer: None,
                     request_context: None,
                     child_dispatch: self
                         .db

@@ -2824,6 +2824,7 @@ pub(crate) struct ModelAdapterContribution {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSessionConfiguration {
+    pub(crate) tokenizer: Option<varin_runtime::token_count::TokenizerBinding>,
     pub(crate) catalog_model_id: Option<String>,
     pub(crate) provider_id: Option<String>,
     pub(crate) provider_family: String,

@@ -108,6 +108,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 .unwrap(),
         );
         let binding = RequestBinding {
+            tokenizer: None,
             request_context: None,
             child_dispatch: None,
             goal: None,
@@ -538,6 +539,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .unwrap();
     let run = submitted.run_id.clone();
     let binding = RequestBinding {
+        tokenizer: None,
         request_context: None,
         child_dispatch: None,
         goal: None,

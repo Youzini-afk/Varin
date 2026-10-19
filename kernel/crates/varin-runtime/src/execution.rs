@@ -372,6 +372,8 @@ pub struct ModelRequestContext {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokenizer: Option<crate::token_count::TokenizerBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_context: Option<ModelRequestContext>,
     #[serde(default)]
     pub child_dispatch: Option<Value>,
@@ -715,6 +717,7 @@ impl RequestCompileReuse {
                 && a.provider_family == b.provider_family
                 && a.connection_identity == b.connection_identity
                 && a.model == b.model
+                && a.tokenizer == b.tokenizer
                 && a.credential_ref == b.credential_ref
                 && a.configuration_generation == b.configuration_generation
                 && a.tool_schema_generation == b.tool_schema_generation

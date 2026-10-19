@@ -1,3 +1,4 @@
+import { discoveredTokenizer } from './tokenizer-metadata.js';
 /** models.dev is metadata. SDK labels select installed codecs; they never load packages. */
 import type { ChannelModel, DiscoveredModel, ModelCatalogField } from '@varin/application-client';
 import { MODEL_CATALOG_FIELDS } from '@varin/application-client';
@@ -50,7 +51,8 @@ export function directoryModels(data: Record<string, unknown>, type: ChannelType
     const ownLimit = object(raw.limit) ? raw.limit : {}, canonicalLimit = object(canonical.limit) ? canonical.limit : {};
     const context = positive(ownLimit.context) ? ownLimit.context : canonicalLimit.context;
     const outputLimit = positive(ownLimit.output) ? ownLimit.output : canonicalLimit.output;
-    const parsed: DiscoveredModel = { id, name: typeof model.name === 'string' ? model.name : id, protocol, operations,
+    const tokenizer = discoveredTokenizer(model);
+    const parsed: DiscoveredModel = { ...(tokenizer ? { tokenizer } : {}), id, name: typeof model.name === 'string' ? model.name : id, protocol, operations,
       ...(Array.isArray(modalities.input) ? { input: modalities.input.includes('image') ? ['text', 'image'] : ['text'] } : {}),
       ...(positive(context) ? { contextWindow: context } : {}),
       ...(positive(outputLimit) ? { maxOutputTokens: outputLimit } : {}),

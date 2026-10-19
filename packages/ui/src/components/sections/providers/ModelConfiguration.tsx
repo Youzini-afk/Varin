@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ModelCommonSettings } from './ModelCommonSettings';
 import { ModelApiSettings } from './ModelApiSettings';
+import { ModelTokenizerSettings } from './ModelTokenizerSettings';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
@@ -74,6 +75,7 @@ export function ModelConfiguration({ model, type, busy, selected, inheritedImage
       </SettingsSection>
       <ModelApiSettings model={model} type={type} disabled={disabled} inheritedImageApi={inheritedImageApi} inheritedDecisionApi={inheritedDecisionApi} inheritedPaths={inheritedPaths} onChange={update} />
       <SettingsSection title={t('settings.models.advanced')}>
+        {chat ? <ModelTokenizerSettings model={model} disabled={disabled} onChange={update} validity={validity} /> : null}
         {chat && (type.protocols?.length ?? 0) > 1 ? <SettingsFieldRow label={t('settings.models.protocol')}><Select value={protocol} disabled={disabled} onValueChange={value => update({ protocol: value })}><SelectTrigger size="settings" aria-label={t('settings.models.protocol')}><SelectValue /></SelectTrigger><SelectContent>{type.protocols!.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select></SettingsFieldRow> : null}
         {chat && model.reasoning ? <div className="space-y-3">
             <SettingsFieldRow label={t('settings.models.thinkingMode')}><Select value={thinking.mode} disabled={disabled} onValueChange={mode => changeMode(mode as ModelThinkingConfiguration['mode'])}><SelectTrigger size="settings" aria-label={t('settings.models.thinkingMode')}><SelectValue /></SelectTrigger><SelectContent>{modes.map(mode => <SelectItem key={mode} value={mode}>{t(`settings.models.thinkingMode.${mode}`)}</SelectItem>)}</SelectContent></Select></SettingsFieldRow>

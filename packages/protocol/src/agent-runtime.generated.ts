@@ -2008,6 +2008,7 @@ export type RunCancellationReceipt = Omit<Run, 'configuration'>;
 export type OperationCancellationReceipt = Omit<Operation, 'intent' | 'result' | 'external_receipt'>;
 
 export interface ModelSessionConfiguration {
+  tokenizer?: TokenizerBinding;
   catalogModelId?: string;
   providerId?: string;
   providerFamily: string;

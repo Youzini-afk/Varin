@@ -150,6 +150,7 @@ pub fn build_provider(
     connection.tool_output_visible_bytes = configuration.tool_output_visible_bytes.map(|bytes| bytes as usize);
     let provider = selected.bind(&configuration, connection)?;
     let binding = RequestBinding {
+        tokenizer: configuration.tokenizer,
         request_context: None,
         child_dispatch: None,
         goal: None, resource_activations: Vec::new(),

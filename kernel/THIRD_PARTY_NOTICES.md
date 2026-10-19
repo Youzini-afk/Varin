@@ -43,39 +43,10 @@ SOFTWARE.
 
 ## Offline context tokenizers
 
-Tokenizer asset provenance, immutable upstream revisions and SHA-256 hashes are recorded in
-`crates/varin-runtime/assets/tokenizers/sources.json`. The JSON vocabularies are gzip-compressed
-for embedding; vocabulary contents are unchanged. Runtime loading disables tokenizer padding
-and truncation for context counting.
+The kernel uses tiktoken-rs and Hugging Face tokenizers as generic encoding engines. Model-specific
+vocabularies are prepared by the Host from configured model metadata and are not bundled with Varin.
 
-### DeepSeek V4 Pro / Flash and V4.1 Flash / Flash-1017
-
-MIT License
-
-Copyright (c) 2023 DeepSeek
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-### Qwen3-8B vocabulary and Hugging Face tokenizers
-
-Qwen3-8B is distributed by Qwen under Apache-2.0. Hugging Face tokenizers is also Apache-2.0.
-
+### Hugging Face tokenizers
 
                                  Apache License
                            Version 2.0, January 2004
@@ -265,7 +236,7 @@ Qwen3-8B is distributed by Qwen under Apache-2.0. Hugging Face tokenizers is als
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright 2024 Alibaba Cloud
+   Copyright [yyyy] [name of copyright owner]
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -278,6 +249,7 @@ Qwen3-8B is distributed by Qwen under Apache-2.0. Hugging Face tokenizers is als
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+
 
 ### tiktoken-rs
 
@@ -327,32 +299,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-
-### flate2
-
-Copyright (c) 2014-2026 Alex Crichton
-
-Permission is hereby granted, free of charge, to any
-person obtaining a copy of this software and associated
-documentation files (the "Software"), to deal in the
-Software without restriction, including without
-limitation the rights to use, copy, modify, merge,
-publish, distribute, sublicense, and/or sell copies of
-the Software, and to permit persons to whom the Software
-is furnished to do so, subject to the following
-conditions:
-
-The above copyright notice and this permission notice
-shall be included in all copies or substantial portions
-of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
-ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
-PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
-SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
-CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
-IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-DEALINGS IN THE SOFTWARE.
