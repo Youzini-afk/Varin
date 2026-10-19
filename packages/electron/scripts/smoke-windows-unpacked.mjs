@@ -5,7 +5,7 @@ import fsp from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { VARIN_WORKSPACE_RECOVERY_SERVICE_ID, VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION } from '../../extension-contract/dist/index.js';
+import { VARIN_WORKSPACE_RECOVERY_SERVICE_ID, VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION } from '../../extension-contract/src/services.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
