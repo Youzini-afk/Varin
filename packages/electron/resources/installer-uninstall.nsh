@@ -120,6 +120,7 @@ Function un.VarinFinishCreate
   ${EndIf}
   Call un.VarinStylePage
   GetDlgItem $0 $HWNDPARENT 1
+  ShowWindow $0 ${SW_SHOW}
   SendMessage $0 ${WM_SETTEXT} 0 "STR:$(VarinFinish)"
   GetDlgItem $0 $HWNDPARENT 2
   ShowWindow $0 ${SW_HIDE}

@@ -10,9 +10,14 @@
 Var VarinPage
 Var VarinTitle
 Var VarinSubtitle
+Var VarinScene
 !ifndef BUILD_UNINSTALLER
 Var VarinDirectoryInput
 Var VarinDirectoryLabel
+Var VarinLocationControl
+Var VarinLicenseControl
+Var VarinHeroTitle
+Var VarinHeroSubtitle
 Var VarinBrowseButton
 Var VarinShortcutControl
 Var VarinShortcut
@@ -50,6 +55,7 @@ Var VarinProgressDescription
   !define MUI_CUSTOMFUNCTION_UNGUIINIT un.VarinGuiInit
 !endif
 !macro customHeader
+  AutoCloseWindow true
   BrandingText " "
   Caption "${PRODUCT_NAME}"
   UninstallCaption "${PRODUCT_NAME}"
@@ -89,13 +95,13 @@ Var VarinProgressDescription
       StrCpy $VarinPrimary "${VARIN_LIGHT_PRIMARY}"
       StrCpy $VarinOnPrimary "${VARIN_LIGHT_ON_PRIMARY}"
     ${EndIf}
-    VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary"
+    VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary" "${VERSION} · Windows"
     CreateFont $VarinTitleFont "Segoe UI" 18 500
   FunctionEnd
   Function ${PREFIX}VarinStylePage
-    VarinSetup::Page "$VarinPage"
-    SendMessage $VarinTitle ${WM_SETFONT} $VarinTitleFont 1
-    SetCtlColors $VarinSubtitle "$VarinMuted" "$VarinBackground"
+    VarinSetup::Page "$VarinPage" "$VarinScene"
+    VarinSetup::TextStyle "$VarinTitle" "title"
+    VarinSetup::TextStyle "$VarinSubtitle" "muted"
     GetDlgItem $0 $HWNDPARENT 2
     SendMessage $0 ${WM_SETTEXT} 0 "STR:$(VarinCancel)"
   FunctionEnd
@@ -112,17 +118,15 @@ Var VarinProgressDescription
 !macroend
 
 !macro VarinPageHeader TITLE SUBTITLE
+  StrCpy $VarinScene "standard"
   nsDialogs::Create 1018
   Pop $VarinPage
   ${If} $VarinPage == error
     Abort
   ${EndIf}
-  ${NSD_CreateLabel} 0 0 100% 7% "${VERSION} · Windows"
-  Pop $0
-  SetCtlColors $0 "$VarinMuted" "$VarinBackground"
-  ${NSD_CreateLabel} 0 10% 100% 12% "${TITLE}"
+  ${NSD_CreateLabel} 0 17% 100% 12% "${TITLE}"
   Pop $VarinTitle
-  ${NSD_CreateLabel} 0 24% 100% 12% "${SUBTITLE}"
+  ${NSD_CreateLabel} 0 29% 100% 10% "${SUBTITLE}"
   Pop $VarinSubtitle
 !macroend
 

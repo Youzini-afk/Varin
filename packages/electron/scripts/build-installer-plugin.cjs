@@ -29,6 +29,18 @@ async function prepareInstallerUI(destination) {
     })) strings.push(`!define VARIN_${appearance.toUpperCase()}_${key} "${value.slice(1)}"`);
   }
   await fs.writeFile(path.join(destination, 'installer-generated.nsh'), '\uFEFF' + strings.join('\n') + '\n');
+  // Render the same vector mark as the product, without a second hand-copied logo.
+  const glyph = await fs.readFile(path.join(root, 'resources/icons/tray/tray-glyph.svg'), 'utf8');
+  const polygons = [...glyph.matchAll(/<path d="([^"]+)"/g)].map(([, data], index) => {
+    if (/[a-z]/i.test(data.replace(/[MLZ]/g, ''))) throw new Error('Installer glyph requires polygon paths.');
+    const numbers = data.match(/-?\d+(?:\.\d+)?/g)?.map(Number) || [];
+    if (numbers.length < 6 || numbers.length % 2) throw new Error('Invalid installer glyph polygon.');
+    const points = [];
+    for (let i = 0; i < numbers.length; i += 2) points.push(`{${numbers[i].toFixed(3)}f, ${numbers[i + 1].toFixed(3)}f}`);
+    return `static const Gdiplus::PointF brand${index}[]{${points.join(',')}};`;
+  });
+  if (polygons.length !== 2) throw new Error('Expected the two-part Varin brand mark.');
+  await fs.writeFile(path.join(destination, 'installer-brand.h'), polygons.join('\n') + '\n');
   if (process.platform !== 'win32') throw new Error('Building the Windows installer UI requires the Windows MSVC toolchain.');
   const source = path.join(root, 'installer/VarinSetup.cpp');
   const definitions = path.join(root, 'installer/VarinSetup.def');
@@ -44,7 +56,7 @@ async function prepareInstallerUI(destination) {
   if (!installation) throw new Error('MSVC x86 build tools are required for the Unicode NSIS UI plugin.');
   const developer = path.join(installation, 'Common7/Tools/VsDevCmd.bat');
   const host = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const command = `call ${quote(developer)} -arch=x86 -host_arch=${host} && cl /nologo /LD /std:c++17 /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE ${quote(source)} /Fo${quote(path.join(destination, 'VarinSetup.obj'))} /link /OUT:${quote(output)} /DEF:${quote(definitions)} user32.lib gdi32.lib comctl32.lib uxtheme.lib dwmapi.lib`;
+  const command = `call ${quote(developer)} -arch=x86 -host_arch=${host} && cl /nologo /LD /std:c++17 /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /I${quote(destination)} ${quote(source)} /Fo${quote(path.join(destination, 'VarinSetup.obj'))} /link /OUT:${quote(output)} /DEF:${quote(definitions)} user32.lib gdi32.lib comctl32.lib uxtheme.lib dwmapi.lib gdiplus.lib`;
   const built = await exec(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
     windowsHide: true, windowsVerbatimArguments: true, cwd: destination, env: { ...process.env, VSLANG: '1033' },
   });

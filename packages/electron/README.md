@@ -128,8 +128,11 @@ are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
 
 ### Windows installer payload and performance
 
-Windows setup uses compact native pages for installation, upgrades and uninstall. The first page
-combines the target directory and desktop shortcut choice; installation scope expands in place.
+Windows setup uses a product-owned, frameless native window for installation, upgrades and uninstall.
+The first page centers Varin's vector mark, wordmark and primary action. Installation settings reveal
+the target directory, desktop shortcut and user/machine scope together; the license link lives in
+that settings view. The original window system still supplies dragging, minimizing, closing and
+keyboard/accessibility behavior. Controls retain their native values and actions under custom drawing.
 Existing installations retain their location, and the original UAC bridge transfers the chosen
 directory and shortcut preference when elevation is needed. The finish page offers opening Varin
 or simply closing setup. English, Simplified Chinese and Traditional Chinese have dedicated copy;
@@ -137,7 +140,8 @@ other installer languages use English for these custom strings.
 
 The native NSIS plugin uses Varin's default monochrome light/dark palette, generated from the same
 theme sources as the workbench, and follows Windows' app appearance. It does not load the user's
-workbench accent preference. MSVC builds a small x86 Unicode DLL for NSIS on both Windows x64 and
+workbench accent preference. Its vector geometry is generated from the versioned product glyph.
+MSVC builds a small x86 Unicode DLL for NSIS on both Windows x64 and
 ARM64 builders. No browser or additional desktop runtime is started for setup.
 
 Uninstall keeps data by default. Explicit cleanup names the initiating user's default application
@@ -164,7 +168,8 @@ temporary-tree path or weaken error handling. The same focused suite checks defa
 upgrade preservation and explicit cleanup through a real generated uninstaller.
 
 Extraction progress comes directly from 7-Zip's output. NSIS owns the subsequent registration and
-shortcut steps. An extraction failure shows its diagnostic in the same window with Retry and Exit;
+shortcut steps, then advances directly to the completion page. Progress has no wizard navigation.
+An extraction failure shows its diagnostic in the same window with Retry and Exit;
 the failed extractor has exited before a retry starts. Uninstall shows its current phase with an indeterminate bar rather than estimating
 a percentage by scanning the filesystem first. Detailed output is available on demand.
 
