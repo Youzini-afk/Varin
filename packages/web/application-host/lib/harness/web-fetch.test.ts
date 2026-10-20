@@ -718,7 +718,7 @@ describe("structured reading (D-315 L3)", () => {
     const cached = await service.fetch({ url, find: "mETHODS body" }, fetchContext);
     const fixed = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId, find: "mETHODS body" }, fetchContext);
     expect(cached).toMatchObject({ status: "ok", markdown: fetched.markdown, fromCache: true });
-    expect(fixed).toMatchObject({ status: "ok", markdown: fetched.markdown, snapshot: fetched.snapshot });
+    expect(fixed).toMatchObject({ status: "ok", markdown: fetched.markdown, snapshot: fetched.snapshot, fromCache: true });
     const whole = await service.fetch({ snapshotId: fetched.snapshot!.snapshotId }, fetchContext);
     expect(whole).toMatchObject({ status: "ok", markdown: structuredMarkdown, snapshot: fetched.snapshot });
     for (const source of [{ url }, { snapshotId: fetched.snapshot!.snapshotId }]) {

@@ -280,6 +280,7 @@ impl KernelToolExecutor {
                 }),
                 false,
                 Some(key),
+                None,
                 cancel,
             )
             .map_err(|failure| {

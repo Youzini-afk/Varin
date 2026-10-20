@@ -362,3 +362,18 @@ it('the private bridge rejects model-selected snapshots, malformed origins and u
   expect(bridge.consume({ kind: 'public-event' })).toBe(false);
   bridge.close();
 });
+
+it('UI resource requests reach their bound owner, including unavailable client observations', async () => {
+  const replies: PrivateResourceResponse[] = [];
+  const bridge = new ResourceBridge(() => 'epoch', async value => { replies.push(value); }, () => {});
+  const owner = vi.fn(async (query: ResourceQuery) => resourceQueryFailure('unavailable', 'No connected client', query));
+  bridge.setOwner(owner);
+  for (const view of ['source', 'screen', 'structure'] as const) {
+    bridge.consume({ v: 1, kind: 'resource-request', id: view, kernelEpoch: 'epoch',
+      query: { ...request('ui'), request: { kind: 'ui', ref: 'ui:report', view } } });
+  }
+  await vi.waitFor(() => expect(replies).toHaveLength(3));
+  expect(owner).toHaveBeenCalledTimes(3);
+  for (const reply of replies) expect(reply.result).toMatchObject({ status: 'unavailable', reason: 'No connected client' });
+  bridge.close();
+});

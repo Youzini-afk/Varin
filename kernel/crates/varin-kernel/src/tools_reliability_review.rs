@@ -126,6 +126,34 @@ fn file_write_creates_without_a_read_and_keeps_existing_content_on_an_unversione
 }
 
 #[test]
+fn healthcheck_file_contracts_keep_line_endings_and_distinguish_invalid_targets() {
+    let mut f = Fixture::new();
+    fs::create_dir_all(f.root.join("work/tree")).unwrap();
+    fs::write(f.root.join("work/tree/crlf.txt"), "aaa\r\nbbb\r\nccc\r\n").unwrap();
+    let original = f.read(json!({"path":"tree\\crlf.txt"}));
+    let edited = f.call("file_edit", json!({"path":"tree\\crlf.txt","readVersion":original["readVersion"],
+        "edits":[{"oldText":"aaa\r\nbbb","newText":"AAA\r\nBBB"}]}));
+    let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = edited else { panic!("{edited:?}") };
+    assert_eq!(content.data["state"]["kind"], "regular-file");
+    assert!(content.data.get("stateJson").is_none());
+    let edited = f.call("file_edit", json!({"path":"tree/crlf.txt","readVersion":content.data["readVersion"],
+        "edits":[{"oldText":"AAA\nBBB","newText":"one\ntwo"}]}));
+    assert!(matches!(edited, ToolCompletion::Result { outcome: Outcome::Succeeded, .. }));
+    assert_eq!(fs::read_to_string(f.root.join("work/tree/crlf.txt")).unwrap(), "one\r\ntwo\r\nccc\r\n");
+    assert!(matches!(f.call("file_read",json!({"path":"tree"})),
+        ToolCompletion::Result { outcome: Outcome::Failed, content, .. } if content.data["error"] == "not_a_file"));
+    let missing = f.call("file_list", json!({"paths":["tree/missing"]}));
+    assert!(serde_json::to_string(&missing).unwrap().contains("Discovery path does not exist: tree/missing"));
+    let small = f.call("file_list", json!({"paths":["tree"],"maxBytes":1}));
+    let ToolCompletion::Result { content, .. } = small else { panic!("{small:?}") };
+    assert_eq!(content.data["records"].as_array().unwrap().len(), 1);
+    assert_eq!(content.data["nextCursor"], "tree");
+    let invalid = f.try_call("file_list", json!({"maxResults":0})).unwrap_err();
+    assert!(invalid.to_string().contains("maxResults"));
+    assert!(!invalid.to_string().contains("query"));
+}
+
+#[test]
 fn text_edits_can_read_existing_content_larger_than_a_response_frame_internally() {
     let mut f=Fixture::new();
     let mut body="x".repeat(crate::protocol::MAX_BLOB_RESPONSE_BYTES+1);

@@ -606,7 +606,7 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (found.ref.document?.kind === "pdf") {
       if (!documentReader) return { status: "failed", url: found.ref.finalUrl, reason: "PDF reader is unavailable" };
       const result = await documentReader.read({ ...request, snapshotId }, documentContext(ctx));
-      return result;
+      return result.status === "ok" ? { ...result, fromCache: true } : result;
     }
     if (request.view === "page-image") return { status: "page-image-unavailable", snapshotId,
       ...(request.page !== undefined ? { page: request.page } : {}), reason: "snapshot is not a PDF" };
@@ -616,7 +616,7 @@ export function createWebFetch(deps: WebFetchDeps) {
       status: "ok", url: found.ref.sourceUrl, finalUrl: found.ref.finalUrl,
       contentType: found.ref.contentType ?? "text/markdown",
       ...(found.ref.title ? { title: found.ref.title } : {}),
-      markdown: selected.body, bytes: found.body.byteLength, fromCache: false, rendered: found.ref.rendered === true,
+      markdown: selected.body, bytes: found.body.byteLength, fromCache: true, rendered: found.ref.rendered === true,
       snapshot: found.ref, ...(found.ref.structure ? { structure: found.ref.structure } : {}),
       ...(selected.range ? { range: selected.range } : {}),
     };
@@ -632,6 +632,8 @@ export function createWebFetch(deps: WebFetchDeps) {
     if (snapshotId) return readSnapshot(snapshotId, request, ctx);
     const url = request.url?.trim() ?? "";
     if (!url) return { status: "failed", url: "", reason: "url or snapshotId is required" };
+    try { new URL(url); }
+    catch { return { status: "failed", url, reason: "invalid_url" }; }
 
     // Check domain policy
     const domainCheck = checkDomainPolicy(url, ctx.workspaceId, ctx.domainPolicy);

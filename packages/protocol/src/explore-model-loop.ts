@@ -180,14 +180,17 @@ export async function runExploreModelLoop(options: {
           for (const view of views.views) seen.add(view.viewId);
           for (const action of freshActions) offeredActions.set(action.actionId, actionContext);
           if (!selected) throw new Error("Explore model returned no valid selection or follow-up.");
-          // Each batch compares its new evidence with the retained group.
-          // Replacement is explicit, rather than accumulating every yes.
-          const applied = await call(() => port.select(selected.groups));
-          selectedViews.clear();
-          for (const view of applied.selectedViews) selectedViews.set(view.viewId, view);
-          participation.select = applied.accepted.length || !selected.groups.length || selectedViews.size ? "used" : "skipped";
-          if (!applied.accepted.length && applied.rejected.length) {
-            participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map(entry => entry.reason))].join('; ')}. Source ranking was kept.`;
+          // A follow-up without a new selection keeps the last accepted material.
+          // A completed empty decision still explicitly clears it.
+          const continuing = !selected.done && Boolean(selected.followup || selected.actionIds.length);
+          if (selected.groups.length || !continuing) {
+            const applied = await call(() => port.select(selected.groups));
+            selectedViews.clear();
+            for (const view of applied.selectedViews) selectedViews.set(view.viewId, view);
+            participation.select = applied.accepted.length || !selected.groups.length || selectedViews.size ? "used" : "skipped";
+            if (!applied.accepted.length && applied.rejected.length) {
+              participation.note = `Explore model selection was rejected: ${[...new Set(applied.rejected.map(entry => entry.reason))].join('; ')}. Source ranking was kept.`;
+            }
           }
           const actions = views.actions.filter(action => selected.actionIds.includes(action.actionId));
           let launched = false;

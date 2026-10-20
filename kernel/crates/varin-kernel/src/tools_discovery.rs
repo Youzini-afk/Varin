@@ -23,23 +23,23 @@ pub(super) struct FileQueryArgs {
     max_bytes: Option<usize>,
 }
 impl FileQueryArgs {
-    pub fn validate(&self) -> Result<(), ExecutionError> {
-        for path in self.paths.as_deref().unwrap_or_default() {
+    pub fn validate(&mut self) -> Result<(), ExecutionError> {
+        for path in self.paths.as_mut().into_iter().flatten() {
+            normalize_separators(path);
             normalized_path(path, true)?;
         }
         if let Some(cursor) = &self.cursor {
             normalized_path(cursor, true)?;
             if self.search { return Err(ExecutionError::new("invalid_tool_arguments", "cursor is available for file_list")); }
         }
-        if (self.search && self.query.as_deref().is_none_or(str::is_empty))
-            || self
-                .max_results
-                .is_some_and(|n| n < 1 || n > 9_007_199_254_740_991)
-            || self
-                .max_bytes
-                .is_some_and(|n| n == 0 || n > crate::protocol::MAX_FRAME_BYTES / 2)
-        {
-            return Err(ExecutionError::new("invalid_tool_arguments", "Search requires a nonempty query; result and byte limits must be positive and fit the protocol output budget"));
+        if self.search && self.query.as_deref().is_none_or(str::is_empty) {
+            return Err(ExecutionError::new("invalid_tool_arguments", "file_search requires a nonempty query"));
+        }
+        if self.max_results.is_some_and(|n| n < 1 || n > 9_007_199_254_740_991) {
+            return Err(ExecutionError::new("invalid_tool_arguments", "maxResults must be a positive safe integer"));
+        }
+        if self.max_bytes.is_some_and(|n| n == 0 || n > crate::protocol::MAX_FRAME_BYTES / 2) {
+            return Err(ExecutionError::new("invalid_tool_arguments", "maxBytes must be positive and fit the protocol output budget"));
         }
         Ok(())
     }
@@ -168,7 +168,7 @@ impl KernelResourceClient {
                     })?
                     .len()
                     + 1;
-                if bytes.saturating_add(size) > budget || (!args.search && records.len() >= args.max_results.unwrap_or(100) as usize) {
+                if (bytes.saturating_add(size) > budget && !records.is_empty()) || (!args.search && records.len() >= args.max_results.unwrap_or(100) as usize) {
                     truncated = true;
                     break;
                 }

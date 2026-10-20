@@ -221,6 +221,9 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     let prefix=if within(requested,scope){requested}else if within(scope,requested){scope}else{continue;};
                     if seeded.iter().any(|p|within(prefix,p)){continue;}seeded.push(prefix.clone());
                     if let Some(hash)=reader.path(root,prefix)?{stack.push(Visit::Path(hash,prefix.clone()));}
+                    else if !shadowed.iter().any(|p|within(p,prefix)||within(prefix,p)) {
+                        return Err(format!("Discovery path does not exist: {prefix}"));
+                    }
                 }
             }
             let mut seen=HashSet::new();
@@ -263,8 +266,15 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
             let mut walk_starts = Vec::new();
             for prefix in &roots {
                 let target = root.join(prefix);
-                let directory_prefix = if fs::symlink_metadata(&target).is_ok_and(|m|
-                    m.is_dir()||(!task.params.include_tracked.unwrap_or(false)&&!m.file_type().is_symlink())) {
+                let metadata = match fs::symlink_metadata(&target) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        if shadowed.iter().any(|p|within(p,prefix)||within(prefix,p)) { continue; }
+                        return Err(format!("Discovery path does not exist: {prefix}"));
+                    },
+                    Err(error) => return Err(format!("Cannot inspect discovery path {prefix}: {error}")),
+                };
+                let directory_prefix = if metadata.is_dir()||(!task.params.include_tracked.unwrap_or(false)&&!metadata.file_type().is_symlink()) {
                     prefix.clone()
                 } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
                 if selected.insert(directory_prefix.clone()) { walk_starts.push(directory_prefix); }

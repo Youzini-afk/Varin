@@ -12,7 +12,12 @@ const validRequest = (value: unknown): value is AgentResourceRequest => record(v
     && (value.activationId === undefined || text(value.activationId)) && keys(value, ['kind', 'resourceId', 'relativePath', 'activationId'])
   || value.kind === 'instruction-scope' && typeof value.targetPath === 'string'
     && (value.targetType === undefined || value.targetType === 'file' || value.targetType === 'directory')
-    && keys(value, ['kind', 'targetPath', 'targetType']));
+    && keys(value, ['kind', 'targetPath', 'targetType'])
+  || value.kind === 'ui' && text(value.ref)
+    && (value.view === undefined || ['summary', 'source', 'state', 'screen', 'structure'].includes(String(value.view)))
+    && (value.file === undefined || typeof value.file === 'string')
+    && ['startLine', 'endLine', 'offset', 'limit'].every(key => value[key] === undefined || Number.isSafeInteger(value[key]) && Number(value[key]) >= (key === 'offset' ? 0 : 1))
+    && keys(value, ['kind', 'ref', 'view', 'file', 'startLine', 'endLine', 'offset', 'limit']));
 const validQuery = (value: unknown): value is ResourceQuery => record(value) && text(value.runId) && validToolOrigin(value.origin)
   && text(value.callId) && text(value.resourceCheckpointId) && validRequest(value.request)
   && keys(value, ['runId', 'origin', 'callId', 'resourceCheckpointId', 'request']);

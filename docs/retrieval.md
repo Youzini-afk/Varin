@@ -28,6 +28,7 @@ Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及�
 
 共享 Explore planner 和 progressive selection 在 `packages/protocol`；Host 算法在 `harness/explore*.ts`。
 原生 adapter 保留原请求、回执、取消和交付寿命。
+选材模型请求继续搜索且暂未选择新材料时，保留此前已接受的材料；结束判断中的空选择才会清空结果。
 
 快速检索卡片从原查询读取阶段、来源状态和已读取片段的位置，显示持续耗时与候选数量。Host 通过私有检索桥发送
 完整进度快照，Rust 使用原调用的 Thread/branch/Run/operation 身份转发临时观察事件；慢消费者合并待发快照，

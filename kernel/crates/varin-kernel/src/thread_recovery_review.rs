@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, mpsc};
 use varin_runtime::execution::*;
 use varin_runtime::supervisor::RunSupervisor;
-use varin_runtime::{Catalog, RunState, SubmitInput};
+use varin_runtime::{Catalog, Outcome, RunState, SubmitInput};
 #[path = "../../varin-runtime/tests/fixtures/input_admission.rs"]
 mod admission;
 use admission::InputAdmission;
@@ -56,6 +56,26 @@ impl ModelProvider for Model {
         for item in &request.view.history {
             if let Content::ToolResult { result } = &item.content {
                 if result.call_id == write_id {
+                    for (id, args) in [
+                        (format!("{write_id}-points"), json!({})),
+                        (format!("{write_id}-before"), json!({"point":"current:before"})),
+                    ] {
+                        if let Some(completion) = request.view.history.iter().find_map(|item| match &item.content {
+                            Content::ToolResult { result } if result.call_id == id => Some(&result.completion),
+                            _ => None,
+                        }) {
+                            assert!(matches!(completion, ToolCompletion::Result { outcome: Outcome::Succeeded, .. }), "{completion:?}");
+                        } else {
+                            let schema = request.view.binding.tools.iter().find(|tool| tool.name == "recovery_points").unwrap();
+                            emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                                id: id.clone(), opaque: None,
+                                content: Content::ToolCall { call: ToolCall {
+                                    call_id: id, name: schema.name.clone(), schema_version: schema.version.clone(), arguments: args,
+                                }},
+                            }}).unwrap();
+                            return Ok(FinishReason::ToolCalls);
+                        }
+                    }
                     if !later {
                         self.catalog
                             .lock()
@@ -232,7 +252,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
             .dispatch("file.root.register", &args, Some(&grant_id), &grant)
             .unwrap();
         drop(store);
-        let params=serde_json::from_value(json!({"runId":run.id,"toolBinding":{"resourceOwner":{"kind":"local"},"grantId":grant_id,"runId":run.id,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","sourceMode":"live_root","rootId":registered["rootId"],"liveRoot":{"hostId":"host","canonicalRoot":workspace,"rootId":registered["rootId"]},"enabledTools":["file_read","file_write"]}})).unwrap();
+        let params=serde_json::from_value(json!({"runId":run.id,"toolBinding":{"resourceOwner":{"kind":"local"},"grantId":grant_id,"runId":run.id,"threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","sourceMode":"live_root","rootId":registered["rootId"],"liveRoot":{"hostId":"host","canonicalRoot":workspace,"rootId":registered["rootId"]},"enabledTools":["file_read","file_write","recovery_points"]}})).unwrap();
         let PreparedLaunch::Start(mut start) = assembly
             .prepare(RunPreparation::new(params, &run).unwrap(), None, || false)
             .unwrap()

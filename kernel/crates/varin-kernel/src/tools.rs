@@ -445,7 +445,7 @@ impl ResourceOperation {
                 "optional fields must be omitted rather than null",
             ));
         }
-        let parsed = match kind {
+        let mut parsed = match kind {
             ToolKind::CodeRetrieval => {
                 return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery);
             }
@@ -511,12 +511,17 @@ impl ResourceOperation {
             }
         }
         .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
-        match &parsed {
+        match &mut parsed {
             Self::FileQuery(args) => args.validate()?,
             Self::FileRead(args) => {
+                normalize_separators(&mut args.path);
                 normalized_path(&args.path, false)?;
             }
             Self::FileMutation(mutation) => {
+                normalize_separators(match mutation {
+                    TextMutation::Write(args) => &mut args.path,
+                    TextMutation::Edit(args) => &mut args.path,
+                });
                 normalized_path(mutation.path(), false)?;
                 if mutation.read_version().is_empty() && matches!(mutation, TextMutation::Edit(_)) {
                     return Err(ExecutionError::new(
@@ -714,6 +719,9 @@ impl ResourceOperation {
             }
         }
     }
+}
+fn normalize_separators(path: &mut String) {
+    if path.contains('\\') { *path = path.replace('\\', "/"); }
 }
 fn normalized_path(path: &str, root: bool) -> Result<(), ExecutionError> {
     if (path.is_empty() && !root)
@@ -1428,6 +1436,7 @@ impl KernelResourceClient {
             operation,
             authorize_only,
             None,
+            None,
             cancellation,
         )
     }
@@ -1438,6 +1447,7 @@ impl KernelResourceClient {
         operation: ResourceOperation,
         authorize_only: bool,
         expected_resource_key: Option<String>,
+        invocation_call_id: Option<&str>,
         cancellation: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
         if cancellation.is_cancelled() {
@@ -1471,13 +1481,17 @@ impl KernelResourceClient {
                     self.journal_catalog
                         .as_ref()
                         .map(|catalog| {
-                            let read = catalog
+                            let owner = catalog
                                 .lock()
                                 .map_err(|_| {
                                     KernelError::Storage("journal owner unavailable".into())
-                                })?
-                                .capture_journal_anchor(context)
+                                })?;
+                            let read = match invocation_call_id {
+                                Some(call_id) => owner.capture_invocation_journal(context, call_id),
+                                None => owner.capture_journal_anchor(context),
+                            }
                                 .map_err(|error| KernelError::Operation(error.to_string()))?;
+                            drop(owner);
                             read.load()
                                 .map_err(|error| KernelError::Operation(error.to_string()))
                         })
@@ -2167,7 +2181,7 @@ impl KernelToolExecutor {
                         .map_err(|_| {
                             ExecutionError::new("source_journal", "Journal owner unavailable")
                         })?
-                        .capture_journal_anchor(context)
+                        .capture_invocation_journal(context, &call.call_id)
                         .and_then(|r| r.load())
                         .map_err(|e| ExecutionError::new("source_journal", e.to_string()))
                 })
@@ -2332,6 +2346,7 @@ impl KernelToolExecutor {
             };
         }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        let read = matches!(operation, ResourceOperation::FileRead(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let restore = matches!(operation, ResourceOperation::FileRestore(_));
         let result = if let ResourceOperation::FileQuery(args) = &operation {
@@ -2348,6 +2363,7 @@ impl KernelToolExecutor {
                 operation,
                 false,
                 expected_key,
+                Some(&call.call_id),
                 cancel,
             )
         };
@@ -2370,9 +2386,14 @@ impl KernelToolExecutor {
                         phase: phase.expect("checked process receipt").into(),
                         effect: Effect::Dispatched,
                         lifetime: Lifetime::Thread,
-                        content: None,
+                        content: Some(result.into()),
                     }
                 }
+            }
+            Ok(mut result) if read && result["state"]["kind"] == "directory" => {
+                result["error"] = json!("not_a_file");
+                result["message"] = json!("The path is a directory; use file_list to read its entries.");
+                ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content: result.into() }
             }
             // The conditional resource owner proved the target was untouched.
             // Use the explicit no-dispatch receipt; generic mutating Result(None)

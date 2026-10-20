@@ -443,6 +443,8 @@ impl Storage {
         if let Some(state) = receipt["stateJson"].as_str() {
             let state: FileState = serde_json::from_str(state)?;
             receipt["readVersion"] = json!(read_version(root_id, path, &state)?);
+            receipt["state"] = serde_json::to_value(state)?;
+            receipt.as_object_mut().unwrap().remove("stateJson");
         }
         if let Some(object) = receipt.as_object_mut() {
             object.remove("__nativeRequestHash");

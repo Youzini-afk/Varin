@@ -66,8 +66,18 @@ impl Catalog {
         if operation.run_id != run.id || intent.origin() != &context.origin {
             return Err(RuntimeError::Conflict("journal invocation changed".into()));
         }
+        self.capture_invocation_journal(context, &intent.call().call_id)
+    }
+    /// Read-only invocations do not create durable Operations. Their original
+    /// request still owns the same immutable history used by file recovery.
+    pub fn capture_invocation_journal(
+        &self,
+        context: &ToolExecutionContext,
+        call_id: &str,
+    ) -> Result<JournalAnchorRead> {
+        let run = self.run(&context.run_id)?;
         Ok(JournalAnchorRead {
-            invocation: self.capture_tool_invocation(context, &intent.call().call_id)?,
+            invocation: self.capture_tool_invocation(context, call_id)?,
             database: self.database_path.clone(),
             thread: run.thread_id,
             epoch: self.epoch,
