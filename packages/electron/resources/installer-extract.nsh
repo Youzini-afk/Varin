@@ -1,7 +1,12 @@
 !ifndef VARIN_INSTALLER_EXTRACT_INCLUDED
 !define VARIN_INSTALLER_EXTRACT_INCLUDED
 
+Var VarinProgressBar
+Var VarinProgressStatus
 !ifndef BUILD_UNINSTALLER
+  !define /ifndef VARIN_INSTALLER_UI_DIR "${__FILEDIR__}\installer-tools"
+  !define /ifndef VARIN_EXTRACT_LABEL "Extracting application files"
+  !addplugindir /x86-unicode "${VARIN_INSTALLER_UI_DIR}"
   !ifndef VARIN_INSTALLER_7ZA
     !define VARIN_INSTALLER_7ZA "${__FILEDIR__}\installer-tools\7za.exe"
   !endif
@@ -18,18 +23,27 @@
   Function VarinExtractInstallerPayload
     Exch $R1
     Push $R0
+    Push $R2
   varin_extract_retry:
-    nsExec::ExecToLog '"$PLUGINSDIR\varin-7za.exe" x "$R1" "-o$OUTDIR" -y -bd -bso0 -bsp0'
+    VarinSetup::Extract "$PLUGINSDIR\varin-7za.exe" "$R1" "$OUTDIR" "$VarinProgressBar" "$VarinProgressStatus" "${VARIN_EXTRACT_LABEL}"
     Pop $R0
+    Pop $R2
     StrCmp $R0 "0" varin_extract_done
     ; A failed decode must not become an apparently successful installation.
     ; Interactive installs can retry after freeing space or closing a file.
     IfSilent varin_extract_failed
-    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(decompressionFailed)" IDRETRY varin_extract_retry
+    !ifdef VARIN_EXTRACT_INLINE_RETRY
+      VarinSetup::Retry "$VarinProgressPage" "$(VarinInstallFailed)" "$(decompressionFailed)$\r$\n$R2" "$(VarinRetryInstall)" "$(VarinExit)"
+      Pop $R0
+      StrCmp "$R0" "retry" varin_extract_retry
+    !else
+      MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION "$(decompressionFailed)$\r$\n$R2" IDRETRY varin_extract_retry
+    !endif
   varin_extract_failed:
     SetErrorLevel 2
     Quit
   varin_extract_done:
+    Pop $R2
     Pop $R0
     Pop $R1
   FunctionEnd

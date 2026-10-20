@@ -1,92 +1,149 @@
+!include "LogicLib.nsh"
+!include "FileFunc.nsh"
+!include "nsDialogs.nsh"
+!include "UAC.nsh"
+!include "${__FILEDIR__}\installer-tools\installer-generated.nsh"
+!addplugindir /x86-unicode "${__FILEDIR__}\installer-tools"
+!define VARIN_EXTRACT_LABEL "$(VarinExtracting)"
+!define VARIN_EXTRACT_INLINE_RETRY
+
+Var VarinPage
+Var VarinTitle
+Var VarinSubtitle
+!ifndef BUILD_UNINSTALLER
+Var VarinDirectoryInput
+Var VarinDirectoryLabel
+Var VarinBrowseButton
+Var VarinShortcutControl
+Var VarinShortcut
+Var VarinScopeControl
+Var VarinAllUsersControl
+Var VarinOptionsButton
+Var VarinOptionsOpen
+Var VarinDesiredDirectory
+Var VarinIsUpgrade
+!else
+Var VarinRemoveData
+Var VarinDataControl
+Var VarinDataWarning
+Var VarinRetentionTitle
+Var VarinRetentionText
+Var VarinUserData
+Var VarinDataFailed
+!endif
+Var VarinTheme
+Var VarinBackground
+Var VarinForeground
+Var VarinMuted
+Var VarinSurface
+Var VarinPrimary
+Var VarinOnPrimary
+Var VarinTitleFont
+Var VarinProgressPage
+Var VarinProgressTitle
+Var VarinProgressDescription
 !include "${__FILEDIR__}\installer-extract.nsh"
 
 !ifndef BUILD_UNINSTALLER
-!include "FileFunc.nsh"
+  !define MUI_CUSTOMFUNCTION_GUIINIT VarinGuiInit
+!else
+  !define MUI_CUSTOMFUNCTION_UNGUIINIT un.VarinGuiInit
+!endif
+!macro customHeader
+  BrandingText " "
+  Caption "${PRODUCT_NAME}"
+  UninstallCaption "${PRODUCT_NAME}"
+  SetFont "Segoe UI" 10
+!macroend
 
-!define VARIN_INSTALL_DIR_NAME "Varin"
+; Retain the existing CLI switch and add the user's explicit checkbox choice.
+!ifndef BUILD_UNINSTALLER
+!macro _VarinNoDesktop _a _b _t _f
+  StrCmp "$VarinShortcut" "0" `${_t}`
+  ${StdUtils.TestParameter} $R9 "no-desktop-shortcut"
+  StrCmp "$R9" "true" `${_t}` `${_f}`
+!macroend
+!undef isNoDesktopShortcut
+!define isNoDesktopShortcut `"" VarinNoDesktop ""`
+!endif
 
-Var VarinDirectoryInput
-
-Function VarinResolveInstallDirectory
-  Push $0
-  Push $1
-
-  StrCpy $0 "$INSTDIR"
-  StrCmp "$0" "" done_resolve_install_directory
-
-  ; A directory picker returns a parent path. Remove trailing separators except for a drive root, then
-  ; compare the actual final path component instead of relying on a hard-coded product-name length.
-  loop_trim_trailing_slash:
-    StrLen $1 "$0"
-    IntCmp $1 3 done_trim_trailing_slash
-    StrCpy $1 "$0" 1 -1
-    StrCmp "$1" "\" 0 done_trim_trailing_slash
-    StrCpy $0 "$0" -1
-    Goto loop_trim_trailing_slash
-
-  done_trim_trailing_slash:
-    StrCpy $INSTDIR "$0"
-    ${GetFileName} "$INSTDIR" $1
-    StrCmp "$1" "${VARIN_INSTALL_DIR_NAME}" done_resolve_install_directory
-
-    StrCpy $1 "$INSTDIR" 1 -1
-    StrCmp "$1" "\" 0 append_with_separator
-      StrCpy $INSTDIR "$INSTDIR${VARIN_INSTALL_DIR_NAME}"
-      Goto done_resolve_install_directory
-
-    append_with_separator:
-      StrCpy $INSTDIR "$INSTDIR\${VARIN_INSTALL_DIR_NAME}"
-
-  done_resolve_install_directory:
-    Pop $1
-    Pop $0
-FunctionEnd
-
-!macro customPageAfterChangeDir
-  Page custom VarinDirectoryPageCreate VarinDirectoryPageLeave
-
-  Function VarinDirectoryBrowse
-    nsDialogs::SelectFolderDialog "$(^DirBrowseText)" "$INSTDIR"
-    Pop $0
-    StrCmp "$0" "error" done_varin_directory_browse
-    StrCmp "$0" "" done_varin_directory_browse
-
-    StrCpy $INSTDIR "$0"
-    Call VarinResolveInstallDirectory
-    ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
-
-    done_varin_directory_browse:
+!macro VarinThemeFunctions PREFIX
+  Function ${PREFIX}VarinGuiInit
+    ClearErrors
+    ReadRegDWORD $VarinTheme HKCU "Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" "AppsUseLightTheme"
+    ${If} ${Errors}
+      StrCpy $VarinTheme "1"
+    ${EndIf}
+    ${If} $VarinTheme == "0"
+      StrCpy $VarinBackground "${VARIN_DARK_BACKGROUND}"
+      StrCpy $VarinForeground "${VARIN_DARK_FOREGROUND}"
+      StrCpy $VarinMuted "${VARIN_DARK_MUTED}"
+      StrCpy $VarinSurface "${VARIN_DARK_SURFACE}"
+      StrCpy $VarinPrimary "${VARIN_DARK_PRIMARY}"
+      StrCpy $VarinOnPrimary "${VARIN_DARK_ON_PRIMARY}"
+    ${Else}
+      StrCpy $VarinBackground "${VARIN_LIGHT_BACKGROUND}"
+      StrCpy $VarinForeground "${VARIN_LIGHT_FOREGROUND}"
+      StrCpy $VarinMuted "${VARIN_LIGHT_MUTED}"
+      StrCpy $VarinSurface "${VARIN_LIGHT_SURFACE}"
+      StrCpy $VarinPrimary "${VARIN_LIGHT_PRIMARY}"
+      StrCpy $VarinOnPrimary "${VARIN_LIGHT_ON_PRIMARY}"
+    ${EndIf}
+    VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary"
+    CreateFont $VarinTitleFont "Segoe UI" 18 500
   FunctionEnd
-
-  Function VarinDirectoryPageCreate
-    !insertmacro MUI_HEADER_TEXT_PAGE "$(^DirSubText)" "$(^DirBrowseText)"
-    nsDialogs::Create 1018
-    Pop $0
-    StrCmp "$0" "error" 0 +2
-      Abort
-
-    Call VarinResolveInstallDirectory
-
-    ${NSD_CreateLabel} 0 0 100% 38u "$(^DirText)"
-    Pop $0
-
-    ${NSD_CreateGroupBox} 0 68u 100% 46u "$(^DirSubText)"
-    Pop $0
-
-    ${NSD_CreateText} 16u 87u 72% 12u "$INSTDIR"
-    Pop $VarinDirectoryInput
-
-    ${NSD_CreateBrowseButton} 78% 86u 20% 14u "$(^BrowseBtn)"
-    Pop $0
-    ${NSD_OnClick} $0 VarinDirectoryBrowse
-
-    nsDialogs::Show
+  Function ${PREFIX}VarinStylePage
+    VarinSetup::Page "$VarinPage"
+    SendMessage $VarinTitle ${WM_SETFONT} $VarinTitleFont 1
+    SetCtlColors $VarinSubtitle "$VarinMuted" "$VarinBackground"
+    GetDlgItem $0 $HWNDPARENT 2
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:$(VarinCancel)"
   FunctionEnd
-
-  Function VarinDirectoryPageLeave
-    ${NSD_GetText} $VarinDirectoryInput $INSTDIR
-    Call VarinResolveInstallDirectory
-    ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
+  Function ${PREFIX}VarinProgressShow
+    FindWindow $VarinProgressPage "#32770" "" $HWNDPARENT
+    GetDlgItem $VarinProgressBar $VarinProgressPage 1004
+    GetDlgItem $VarinProgressStatus $VarinProgressPage 1006
+    !if "${PREFIX}" == "un."
+      VarinSetup::Progress "$VarinProgressPage" "$VarinProgressTitle" "$VarinProgressDescription" "$(VarinDetails)" "uninstall"
+    !else
+      VarinSetup::Progress "$VarinProgressPage" "$VarinProgressTitle" "$VarinProgressDescription" "$(VarinDetails)" "install"
+    !endif
   FunctionEnd
 !macroend
-!endif
+
+!macro VarinPageHeader TITLE SUBTITLE
+  nsDialogs::Create 1018
+  Pop $VarinPage
+  ${If} $VarinPage == error
+    Abort
+  ${EndIf}
+  ${NSD_CreateLabel} 0 0 100% 7% "${VERSION} · Windows"
+  Pop $0
+  SetCtlColors $0 "$VarinMuted" "$VarinBackground"
+  ${NSD_CreateLabel} 0 10% 100% 12% "${TITLE}"
+  Pop $VarinTitle
+  ${NSD_CreateLabel} 0 24% 100% 12% "${SUBTITLE}"
+  Pop $VarinSubtitle
+!macroend
+
+!include "${__FILEDIR__}\installer-install.nsh"
+!include "${__FILEDIR__}\installer-uninstall.nsh"
+!macro customAssistedPages
+  !ifndef BUILD_UNINSTALLER
+    !insertmacro VarinThemeFunctions ""
+    !insertmacro VarinInstallFunctions
+    Page custom VarinReadyCreate VarinReadyLeave
+    !define MUI_PAGE_CUSTOMFUNCTION_SHOW VarinProgressShow
+    !insertmacro MUI_PAGE_INSTFILES
+    Page custom VarinFinishCreate VarinFinishLeave
+  !else
+    !insertmacro VarinThemeFunctions "un."
+    !insertmacro VarinUninstallFunctions
+    ; Only dual user/machine installations need the existing selection page.
+    !insertmacro PAGE_INSTALL_MODE
+    UninstPage custom un.VarinReadyCreate un.VarinReadyLeave
+    !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.VarinProgressShow
+    !insertmacro MUI_UNPAGE_INSTFILES
+    UninstPage custom un.VarinFinishCreate
+  !endif
+!macroend

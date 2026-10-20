@@ -43,11 +43,14 @@ async function prepare(projectDir = path.resolve(__dirname, '..')) {
       await fs.rm(temporary, { force: true });
     }
   }
+  await require('./build-installer-plugin.cjs').prepareInstallerUI(destination);
   return destination;
 }
 
 module.exports = async (context) => {
-  if (context.electronPlatformName === 'win32') await prepare(context.packager.projectDir);
+  if (context.electronPlatformName === 'win32') {
+    await prepare(context.packager.projectDir);
+  }
 };
 module.exports.prepare = prepare;
 

@@ -47,6 +47,9 @@ palette, so the application loading animation starts from the same composition.
 | `scripts/bundle-main.mjs` | Bundles Electron main code into `dist-bundle/main.mjs` for packaging |
 | `scripts/verify-native.mjs` | Runs the staged release-kernel and TriviumDB smoke under Electron's Node runtime |
 | `scripts/package.mjs` | Runs `electron-builder`; release automation can explicitly select unsigned Windows or macOS packaging |
+| `resources/installer*.nsh` | Compact Windows setup pages, original UAC integration, extraction and explicit data-cleanup hooks |
+| `installer/VarinSetup.cpp` | Native monochrome controls, streamed extractor progress and cleanup without following directory links |
+| `scripts/build-installer-plugin.cjs` | Builds the x86 NSIS plugin and generates default-theme colors and localized copy |
 | `resources/` | Packaged web assets, icons, and macOS entitlements |
 
 The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. The `files` config in `package.json` ships only those two bundled entries — no `.ts` source, test, or loader reaches the packaged app.
@@ -125,6 +128,24 @@ are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
 
 ### Windows installer payload and performance
 
+Windows setup uses compact native pages for installation, upgrades and uninstall. The first page
+combines the target directory and desktop shortcut choice; installation scope expands in place.
+Existing installations retain their location, and the original UAC bridge transfers the chosen
+directory and shortcut preference when elevation is needed. The finish page offers opening Varin
+or simply closing setup. English, Simplified Chinese and Traditional Chinese have dedicated copy;
+other installer languages use English for these custom strings.
+
+The native NSIS plugin uses Varin's default monochrome light/dark palette, generated from the same
+theme sources as the workbench, and follows Windows' app appearance. It does not load the user's
+workbench accent preference. MSVC builds a small x86 Unicode DLL for NSIS on both Windows x64 and
+ARM64 builders. No browser or additional desktop runtime is started for setup.
+
+Uninstall keeps data by default. Explicit cleanup names the initiating user's default application
+data directory; UAC elevation does not substitute the administrator's profile. Project directories,
+custom data roots and external index locations remain outside that cleanup. Directory junctions and
+symlinks are removed as links without traversing their targets. Cleanup failures retain an actionable
+result and can be retried. Upgrade uninstalls preserve data even with a cleanup flag.
+
 The assisted NSIS installer keeps electron-builder's 7z payload and differential blockmap, but does not
 use the stock 7z extraction path. Stock electron-builder first expands the whole archive below
 `$PLUGINSDIR`, then copies that complete tree into `$INSTDIR`; tens of thousands of small runtime files
@@ -133,12 +154,19 @@ directly against `$INSTDIR`, checks its exit status, and retries a failed intera
 shutdown, old-version uninstall, registry/shortcut handling, updater cache and archive production remain
 electron-builder-owned.
 
-`bun-patches/app-builder-lib@26.17.0.patch` adds only the extraction-hook seam to the regular NSIS
-template. `prepare-installer-tool.cjs` stages the checksum-pinned Windows 7-Zip binary and its licenses;
+`bun-patches/app-builder-lib@26.17.0.patch` adds narrow hooks for page composition, extraction and
+application-data cleanup to the regular NSIS template. `prepare-installer-tool.cjs` stages the
+checksum-pinned Windows 7-Zip binary, its licenses, localized strings and the native UI plugin;
 the installer embeds that helper in its private plugin directory rather than requiring 7-Zip on the
 user's machine. `scripts/nsis-archive.test.mjs` exercises real 7z creation, differential blockmaps,
 long Unicode paths and corrupt-payload failure so a builder upgrade cannot silently restore the
-temporary-tree path or weaken error handling.
+temporary-tree path or weaken error handling. The same focused suite checks default preservation,
+upgrade preservation and explicit cleanup through a real generated uninstaller.
+
+Extraction progress comes directly from 7-Zip's output. NSIS owns the subsequent registration and
+shortcut steps. An extraction failure shows its diagnostic in the same window with Retry and Exit;
+the failed extractor has exited before a retry starts. Uninstall shows its current phase with an indeterminate bar rather than estimating
+a percentage by scanning the filesystem first. Detailed output is available on demand.
 
 Desktop file filters omit JS/TS source maps, generated Host declarations, duplicate Web assets and
 SDK-only sources/types. They do not blanket-remove `src`, TypeScript runtime inputs or Python stubs.

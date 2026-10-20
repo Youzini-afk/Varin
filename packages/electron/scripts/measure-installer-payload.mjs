@@ -91,6 +91,7 @@ try {
       : `nsisunz::Unzip "${nsisPath(archive)}" "$INSTDIR"\nPop $0\nStrCmp $0 "success" +3\nSetErrorLevel 1\nQuit`;
     const customIncludes = customDirect7z ? [
       `!define VARIN_INSTALLER_7ZA "${nsisPath(installerSevenZip)}"`,
+      `!define VARIN_INSTALLER_UI_DIR "${nsisPath(path.dirname(installerSevenZip))}"`,
       `!include "${nsisPath(extractorInclude)}"`,
     ] : [];
     await writeFile(script, '\uFEFF' + [

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm, symlink, access } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,7 +16,8 @@ const library = createRequire(builderRequire.resolve('app-builder-lib'));
 const { NsisTarget } = library('./targets/nsis/NsisTarget');
 const { createBlockmap } = library('./targets/differentialUpdateInfoBuilder');
 const { getPath7za } = library('./toolsets/7zip');
-const { getMakeNsisPath } = library('./toolsets/windows');
+const { getMakeNsisPath, getNsisPluginsPath } = library('./toolsets/windows');
+const { NsisScriptGenerator } = library('./targets/nsis/nsisScriptGenerator');
 const exec = promisify(execFile);
 const configuration = require('../package.json').build;
 const resources = fileURLToPath(new URL('../resources/', import.meta.url));
@@ -80,6 +81,7 @@ test('the actual NSIS extraction hook preserves long Unicode paths and rejects c
         'Name "Varin extraction regression"', `OutFile "${nsisPath(program)}"`,
         '!include "LogicLib.nsh"', 'LangString decompressionFailed 1033 "Payload extraction failed"',
         `!define VARIN_INSTALLER_7ZA "${nsisPath(path.join(tools, '7za.exe'))}"`,
+        `!define VARIN_INSTALLER_UI_DIR "${nsisPath(tools)}"`,
         `!include "${nsisPath(extractorInclude)}"`,
         `!include "${nsisPath(path.join(builderRoot, 'templates/nsis/include/extractAppPackage.nsh'))}"`,
         'Section', `SetOutPath "${nsisPath(destination)}"`,
@@ -95,6 +97,59 @@ test('the actual NSIS extraction hook preserves long Unicode paths and rejects c
     await writeFile(invalid, 'not a 7z archive');
     await assert.rejects(run(invalid, 'invalid'), (error) => error.code === 2);
   } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('uninstall keeps data by default and during upgrades; explicit cleanup leaves junction targets intact', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'varin-uninstall-data-'));
+  const product = path.basename(root);
+  const data = path.join(process.env.APPDATA, product);
+  try {
+    await require('./prepare-installer-tool.cjs').prepare();
+    const compiler = await getMakeNsisPath();
+    const plugins = path.join(await getNsisPluginsPath(), 'x86-unicode');
+    const header = new NsisScriptGenerator();
+    header.addIncludeDir(path.join(builderRoot, 'templates/nsis/include'));
+    header.addPluginDir('x86-unicode', plugins);
+    header.include('StdUtils.nsh');
+    header.flags(['updated', 'delete-app-data', 'no-desktop-shortcut']);
+    const uninstaller = path.join(root, 'uninstall.exe');
+    const creator = path.join(root, 'creator.exe');
+    const script = path.join(root, 'cleanup.nsi');
+    await writeFile(script, '\uFEFF' + [
+      'Unicode true', 'RequestExecutionLevel user', 'SilentInstall silent', 'SetCompress off',
+      `Name "${product}"`, `OutFile "${nsisPath(creator)}"`,
+      '!define BUILD_UNINSTALLER', `!define PRODUCT_FILENAME "${product}"`, `!define PRODUCT_NAME "${product}"`, '!define VERSION "1.0.0"',
+      header.build(), '!include "MUI2.nsh"', 'Var installMode',
+      `!include "${nsisPath(path.join(resources, 'installer.nsh'))}"`,
+      '!insertmacro VarinThemeFunctions "un."', '!insertmacro VarinUninstallFunctions',
+      'UninstPage custom un.VarinReadyCreate un.VarinReadyLeave',
+      '!define MUI_PAGE_CUSTOMFUNCTION_SHOW un.VarinProgressShow', '!insertmacro MUI_UNPAGE_INSTFILES',
+      'UninstPage custom un.VarinFinishCreate', '!insertmacro MUI_LANGUAGE "English"',
+      'Function un.onInit', 'StrCpy $installMode "CurrentUser"', '!insertmacro customUnInit', 'FunctionEnd',
+      'Section', `WriteUninstaller "${nsisPath(uninstaller)}"`, 'SectionEnd',
+      'Section "Uninstall"', '!insertmacro customRemoveAppData', 'SectionEnd',
+    ].join('\n'));
+    await exec(compiler.path, ['/V2', script], { env: { ...process.env, ...compiler.env }, windowsHide: true });
+    await exec(creator, ['/S'], { windowsHide: true });
+    await mkdir(data, { recursive: true });
+    await writeFile(path.join(data, 'conversation.txt'), 'retained conversation');
+    await mkdir(path.join(root, 'project'));
+    await writeFile(path.join(root, 'project/user-file.txt'), 'user project');
+    await symlink(path.join(root, 'project'), path.join(data, 'linked-project'), 'junction');
+    const uninstall = (...args) => exec(uninstaller, ['/S', ...args, `_?=${root}`], { windowsHide: true, timeout: 30_000 });
+    await uninstall();
+    assert.equal(await readFile(path.join(data, 'conversation.txt'), 'utf8'), 'retained conversation');
+    await uninstall('--updated', '--delete-app-data');
+    assert.equal(await readFile(path.join(data, 'conversation.txt'), 'utf8'), 'retained conversation');
+    await uninstall('--delete-app-data');
+    await assert.rejects(access(data), { code: 'ENOENT' });
+    assert.equal(await readFile(path.join(root, 'project/user-file.txt'), 'utf8'), 'user project');
+  } finally {
+    await rm(data, { recursive: true, force: true });
     await rm(root, { recursive: true, force: true });
   }
 });

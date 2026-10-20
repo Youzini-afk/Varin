@@ -18,3 +18,57 @@ index f5470bf..0512f99 100644
    DoneExtract7za:
 +  !endif
  !macroend
+diff --git a/templates/nsis/assistedInstaller.nsh b/templates/nsis/assistedInstaller.nsh
+--- a/templates/nsis/assistedInstaller.nsh
++++ b/templates/nsis/assistedInstaller.nsh
+@@ -1,9 +1,18 @@
+ !include UAC.nsh
+ 
+ !ifndef INSTALL_MODE_PER_ALL_USERS
+-  !include multiUserUi.nsh
++  !ifmacrodef customAssistedPages
++    !ifdef BUILD_UNINSTALLER
++      !include multiUserUi.nsh
++    !endif
++  !else
++    !include multiUserUi.nsh
++  !endif
+ !endif
+ 
++!ifmacrodef customAssistedPages
++  !insertmacro customAssistedPages
++!else
+ !ifndef BUILD_UNINSTALLER
+ 
+   !ifmacrodef customWelcomePage
+@@ -81,6 +90,8 @@
+   !insertmacro MUI_UNPAGE_FINISH
+ !endif
+ 
++!endif ; customAssistedPages
++
+ !macro initMultiUser
+   !ifdef INSTALL_MODE_PER_ALL_USERS
+     !insertmacro setInstallModePerAllUsers
+diff --git a/templates/nsis/uninstaller.nsh b/templates/nsis/uninstaller.nsh
+--- a/templates/nsis/uninstaller.nsh
++++ b/templates/nsis/uninstaller.nsh
+@@ -213,6 +213,9 @@
+     !insertmacro unregisterFileAssociations
+   !endif
+ 
++  !ifmacrodef customRemoveAppData
++    !insertmacro customRemoveAppData
++  !else
+   Var /GLOBAL isDeleteAppData
+   StrCpy $isDeleteAppData "0"
+ 
+@@ -247,6 +250,8 @@
+     ${endif}
+   ${endif}
+ 
++  !endif ; customRemoveAppData
++
+   DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY}"
+   !ifdef UNINSTALL_REGISTRY_KEY_2
+     DeleteRegKey SHELL_CONTEXT "${UNINSTALL_REGISTRY_KEY_2}"
