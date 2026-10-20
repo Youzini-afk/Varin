@@ -192,7 +192,13 @@ static void move(HWND window, int x, int y, int width, int height) {
   if (window) SetWindowPos(window, nullptr, px(x), px(y), px(width), px(height), SWP_NOZORDER | SWP_NOACTIVATE);
 }
 static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
-  if (window==installerWindow && message==WM_NCCALCSIZE && wp) return 0;
+  // The full window is client-owned, including recalculation without valid-area
+  // tracking. Letting either activation or NC paint reach the stock dialog frame
+  // brings back its bright border after focus changes and modal dialogs.
+  if (window==installerWindow && message==WM_NCCALCSIZE) return 0;
+  if (window==installerWindow && message==WM_NCPAINT) return 0;
+  if (window==installerWindow && message==WM_NCACTIVATE)
+    return DefSubclassProc(window,message,wp,-1);
   if (window==installerWindow && message==WM_NCLBUTTONDBLCLK && wp==HTCAPTION) return 0;
   if (window==installerWindow && message==WM_NCHITTEST) {
     POINT point{static_cast<short>(LOWORD(lp)),static_cast<short>(HIWORD(lp))}; ScreenToClient(window,&point);
@@ -320,7 +326,9 @@ extern "C" __declspec(dllexport) void __cdecl Theme(HWND parent, int size, wchar
     installerWindow=parent;
     SetWindowSubclass(parent,windowProc,1,0);
     const LONG_PTR style=GetWindowLongPtrW(parent,GWL_STYLE);
-    SetWindowLongPtrW(parent,GWL_STYLE,(style & ~(WS_CAPTION|WS_MAXIMIZEBOX))|WS_THICKFRAME|WS_MINIMIZEBOX|WS_SYSMENU);
+    SetWindowLongPtrW(parent,GWL_STYLE,(style & ~(WS_CAPTION|WS_MAXIMIZEBOX|DS_MODALFRAME))|WS_THICKFRAME|WS_MINIMIZEBOX|WS_SYSMENU);
+    SetWindowLongPtrW(parent,GWL_EXSTYLE,GetWindowLongPtrW(parent,GWL_EXSTYLE)&
+                     ~(WS_EX_DLGMODALFRAME|WS_EX_CLIENTEDGE|WS_EX_STATICEDGE|WS_EX_WINDOWEDGE));
     SetWindowPos(parent, nullptr, 0, 0, px(620),px(588), SWP_NOMOVE | SWP_NOZORDER | SWP_FRAMECHANGED);
     const int corner=2; DwmSetWindowAttribute(parent,33,&corner,sizeof(corner));
     CreateWindowW(L"BUTTON",L"Minimize",WS_CHILD|WS_VISIBLE|BS_OWNERDRAW,px(524),px(8),px(38),px(30),parent,reinterpret_cast<HMENU>(IDFRAMEMINIMIZE),module,nullptr);
