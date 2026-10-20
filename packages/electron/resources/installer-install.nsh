@@ -1,5 +1,6 @@
 !ifndef BUILD_UNINSTALLER
 !define VARIN_INSTALLER_LICENSE "${__FILEDIR__}\..\..\..\LICENSE"
+!include "${__FILEDIR__}\installer-directory.nsh"
 !macro customInit
   StrCpy $VarinShortcut "1"
   ${If} ${isNoDesktopShortcut}
@@ -25,34 +26,14 @@
 !macroend
 
 !macro VarinInstallFunctions
-Function VarinResolveInstallDirectory
-  ; Preserve an explicitly selected Varin folder and normalize trailing separators.
-  GetFullPathName $INSTDIR "$INSTDIR"
-  varin_trim:
-    StrLen $0 "$INSTDIR"
-    IntCmp $0 3 varin_trim_done varin_trim_done
-    StrCpy $1 "$INSTDIR" 1 -1
-    StrCmp "$1" "\" 0 varin_trim_done
-    StrCpy $INSTDIR "$INSTDIR" -1
-    Goto varin_trim
-  varin_trim_done:
-  ${GetFileName} "$INSTDIR" $0
-  ${If} $0 != "${PRODUCT_FILENAME}"
-    StrCpy $1 "$INSTDIR" 1 -1
-    ${If} $1 == "\"
-      StrCpy $INSTDIR "$INSTDIR${PRODUCT_FILENAME}"
-    ${Else}
-      StrCpy $INSTDIR "$INSTDIR\${PRODUCT_FILENAME}"
-    ${EndIf}
-  ${EndIf}
-FunctionEnd
+!insertmacro VarinDirectoryFunctions
 Function VarinDirectoryBrowse
   Pop $0
   nsDialogs::SelectFolderDialog "$(VarinLocation)" "$INSTDIR"
   Pop $0
   ${If} $0 != error
   ${AndIf} $0 != ""
-    StrCpy $INSTDIR "$0"
+    StrCpy $VarinDesiredDirectory "$0"
     Call VarinResolveInstallDirectory
     ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
     Call VarinReadyState
@@ -201,8 +182,8 @@ Function VarinReadyCreate
 FunctionEnd
 Function VarinReadyLeave
   Call VarinReadyState
-  ${NSD_GetText} $VarinDirectoryInput $INSTDIR
-  ${GetRoot} "$INSTDIR" $0
+  ${NSD_GetText} $VarinDirectoryInput $VarinDesiredDirectory
+  ${GetRoot} "$VarinDesiredDirectory" $0
   ${If} $0 == ""
     MessageBox MB_ICONEXCLAMATION "$(VarinPathError)"
     Abort

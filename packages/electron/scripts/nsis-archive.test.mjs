@@ -25,6 +25,47 @@ const extractorInclude = path.join(resources, 'installer-extract.nsh');
 const builderRoot = path.dirname(builderRequire.resolve('app-builder-lib/package.json'));
 const nsisPath = (value) => value.replaceAll('/', '\\').replace(/\$/g, () => '$$');
 
+test('install locations preserve drive roots instead of using the installer working directory', {
+  skip: process.platform !== 'win32',
+}, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'varin-install-directory-'));
+  try {
+    const cases = [
+      ['C:\\', 'C:\\Varin'],
+      ['D:\\', 'D:\\Varin'],
+      ['D:', 'D:\\Varin'],
+      ['D:\\Apps\\', 'D:\\Apps\\Varin'],
+      ['D:\\Apps\\Varin\\', 'D:\\Apps\\Varin'],
+      ['D:\\中文 工作\\', 'D:\\中文 工作\\Varin'],
+      ['\\\\server\\share\\', '\\\\server\\share\\Varin'],
+    ];
+    const script = path.join(root, 'directories.nsi');
+    const program = path.join(root, 'directories.exe');
+    const output = path.join(root, 'locations.txt');
+    await writeFile(script, '\uFEFF' + [
+      'Unicode true', 'RequestExecutionLevel user', 'SilentInstall silent', 'SetCompress off',
+      'Name "Varin install directory regression"', `OutFile "${nsisPath(program)}"`,
+      '!define PRODUCT_FILENAME "Varin"', 'Var VarinDesiredDirectory',
+      `!include "${nsisPath(path.join(resources, 'installer-directory.nsh'))}"`,
+      '!insertmacro VarinDirectoryFunctions', 'Section',
+      `FileOpen $9 "${nsisPath(output)}" w`,
+      ...cases.flatMap(([input]) => [
+        `StrCpy $VarinDesiredDirectory "${nsisPath(input)}"`,
+        'Call VarinResolveInstallDirectory',
+        'FileWriteUTF16LE $9 "$INSTDIR$\\r$\\n"',
+      ]),
+      'FileClose $9', 'SectionEnd',
+    ].join('\n'));
+    const compiler = await getMakeNsisPath();
+    await exec(compiler.path, ['/V2', script], { env: { ...process.env, ...compiler.env }, windowsHide: true });
+    // No files are installed: only run the production resolver and record its output.
+    await exec(program, [], { cwd: root, windowsHide: true });
+    assert.deepEqual((await readFile(output, 'utf16le')).trimEnd().split('\r\n'), cases.map(([, expected]) => expected));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function buildArchive(root) {
   const source = path.join(root, 'app');
   const deepPath = 'resources/app.asar.unpacked/node_modules/@varin/extension-builtins/dist/builtin-packages/language-servers/runtime/dist/typeshed-fallback/stubs/oauthlib/oauthlib/oauth2/rfc6749/grant_types/resource_owner_password_credentials.pyi';
