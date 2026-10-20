@@ -203,6 +203,7 @@ fn pending_file_worker(method: &str) -> bool {
     matches!(
         method,
         "storage.getBlob"
+            | "file.read"
             | "file.lease.wait"
             | "file.capture"
             | "file.captureBatch"
@@ -563,6 +564,13 @@ impl Kernel {
                 storage.prepare_blob_read(&authorized_params, &authorized_grant, cancellation)?;
             self.spawn_blob_read(task, BlobReadReply::Wire(request.clone()), completions)?;
             return Ok(None);
+        }
+        if method == "file.read" {
+            if let Some(task)=storage.prepare_file_read(&authorized_params,&authorized_grant,cancellation)? {
+                self.spawn_blob_read(crate::storage::blob_reads::BlobReadTask::File(task),BlobReadReply::Wire(request.clone()),completions)?;
+                return Ok(None);
+            }
+            return Ok(Some(response_ok(id,storage.file_read(&authorized_params,&authorized_grant,true)?)));
         }
         if method == "working.result.publish" {
             use crate::storage::result_publication::ResultPublicationAdmission;
@@ -987,7 +995,7 @@ impl Kernel {
             &self.epoch,
             self.host_id.as_deref().unwrap_or(""),
             self.host_generation.as_deref().unwrap_or(""),
-            "storage.getBlob",
+            task.method(),
             task.params(),
         )?;
         if request["epoch"].as_str() != Some(&self.epoch)

@@ -8,7 +8,7 @@ type ThreadState = { selectedIdentity: ThreadIdentity | null };
 import { WorkspaceRecoveryPanel } from './WorkspaceRecoveryPanel';
 
 const mocks = vi.hoisted(() => ({ api: undefined as WorkspaceRecoveryAPI | undefined, state: {} as ThreadState,
-  host: 1, listeners: new Set<() => void>() }));
+  host: 1, listeners: new Set<() => void>(), t: (key: string) => key }));
 vi.mock('@varin/application-client', async original => ({
   ...await original<typeof import('@varin/application-client')>(),
   getRuntimeEndpointGeneration: () => mocks.host,
@@ -20,9 +20,29 @@ vi.mock('@/stores/useUIStore', () => ({ useUIStore: (select: (state: unknown) =>
 vi.mock('@/lib/recovery/workspaceRecovery', async original => ({
   ...await original<typeof import('@/lib/recovery/workspaceRecovery')>(), getWorkspaceRecoveryAPI: () => mocks.api!,
 }));
-vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
+vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.t }) }));
+vi.mock('@/components/views/PierreDiffViewer', () => ({ PierreDiffViewer: ({ original, modified }: { original: string; modified: string }) =>
+  <div data-preview><pre>{original}</pre><pre>{modified}</pre></div> }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@/components/ui/dropdown-menu', () => {
+  const Menu = React.createContext({ open: false, setOpen: (_open: boolean) => {} });
+  return {
+    DropdownMenu: ({ children }: React.PropsWithChildren) => {
+      const [open, setOpen] = React.useState(false);
+      return <Menu.Provider value={{ open, setOpen }}>{children}</Menu.Provider>;
+    },
+    DropdownMenuTrigger: ({ render, children }: React.PropsWithChildren<{ render: React.ReactElement<{ onClick(): void }> }>) => {
+      const menu = React.useContext(Menu);
+      return React.cloneElement(render, { onClick: () => menu.setOpen(!menu.open) }, children);
+    },
+    DropdownMenuContent: ({ children }: React.PropsWithChildren) => React.useContext(Menu).open ? <div>{children}</div> : null,
+    DropdownMenuItem: ({ children, onClick, disabled }: React.PropsWithChildren<{ onClick?: () => void; disabled?: boolean }>) => {
+      const menu = React.useContext(Menu);
+      return <button disabled={disabled} onClick={() => { onClick?.(); menu.setOpen(false); }}>{children}</button>;
+    },
+  };
+});
 vi.mock('@/components/ui/dialog', () => ({
   Dialog: ({ open, children }: React.PropsWithChildren<{ open: boolean }>) => open ? <div role="dialog">{children}</div> : null,
   DialogContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
@@ -39,7 +59,11 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
-const button = (text: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)!;
+const button = (text: string) => [...document.querySelectorAll<HTMLButtonElement>('button, [role="menuitem"]')].find(item => item.textContent === text)!;
+const openHistory = async () => {
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="contextPanel.recovery.files.actions"]')!.click());
+  await act(async () => button('contextPanel.recovery.files.history').click());
+};
 function fixture() {
   const original: WorkspaceCombinedRecoveryOperation = { id: 'original-recovery', revision: 'original-revision', conversation: { kind: 'thread', threadId: 'original-thread', branchId: 'original-branch' }, workspaceId: 'original-owner',
     state: 'complete', fileState: 'restored', conversationState: 'navigated', entryId: 'original-entry', expectedLeafId: 'before-recovery', targetLeafId: 'after-recovery',
@@ -76,16 +100,39 @@ it('reads the original undo operation after a lost reply without changing its na
   const f = fixture(); const apply = f.applyCombinedRecovery.getMockImplementation()!;
   f.applyCombinedRecovery.mockImplementationOnce(async input => { await apply(input); throw new Error('Undo response lost'); });
   await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await openHistory();
   await act(async () => button('contextPanel.recovery.actions.undo').click());
   expect(f.prepareCombinedUndo).toHaveBeenCalledOnce(); expect(f.getCombinedOperation).toHaveBeenCalledWith('undo-original');
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.textContent).toContain('contextPanel.recovery.native.undoOperation');
 });
 
+it('loads a file diff only when opened and keeps the selected original worktree', async () => {
+  fixture();
+  const fileRecovery = vi.fn<WorkspaceRecoveryAPI['fileRecovery']>(async input => {
+    if (input.action === 'list') return { points: [{ id: 'p-saved', label: 'Saved files', runId: 'original-run',
+      sourceRunId: 'original-worktree-run', before: 'p-saved', after: 'p-saved', createdAt: '2026-10-20T10:00:00Z',
+      state: 'ready', paths: ['a.ts'], byteLength: 20 }], currentSourceRunId: 'different-current-run' };
+    if (input.action === 'inspect') return { files: [{ path: 'a.ts', target: { kind: 'regular-file' } }] };
+    if (input.action === 'preview') return { preview: { path: 'a.ts',
+      current: { kind: 'text', text: 'current source', byteLength: 14, nextOffset: 14, eof: true, version: 'now' },
+      target: { kind: 'text', text: 'saved source', byteLength: 12, nextOffset: 12, eof: true, version: 'then' } } };
+    throw new Error('Unexpected recovery request');
+  });
+  mocks.api!.fileRecovery = fileRecovery;
+  await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Saved files'))!.click());
+  expect(fileRecovery.mock.calls.some(([input]) => input.action === 'preview')).toBe(false);
+  await act(async () => button('a.ts').click());
+  expect(fileRecovery).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'preview', point: 'p-saved', path: 'a.ts', sourceRunId: 'original-worktree-run' }));
+  expect(container.querySelector('[data-preview]')?.textContent).toBe('current sourcesaved source');
+});
+
 it('retains the exact undo attempt across an unavailable readback and a dismissed recovery dialog', async () => {
   const f = fixture(); f.applyCombinedRecovery.mockRejectedValueOnce(new Error('Reply lost'));
   f.getCombinedOperation.mockRejectedValueOnce(new Error('Offline'));
   await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await openHistory();
   await act(async () => button('contextPanel.recovery.actions.undo').click());
   expect(button('contextPanel.recovery.actions.undo').disabled).toBe(true);
   await act(async () => button('sessions.sidebar.dialogs.cancel').click());
@@ -102,6 +149,7 @@ it('resumes a rediscovered original undo instead of preparing another undo inten
   const f = fixture(); const interrupted = { ...f.undoOperation, state: 'files-restored' as const, conversationState: 'unchanged' as const };
   f.operations.push(interrupted); f.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
   await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await openHistory();
   await act(async () => button('contextPanel.recovery.actions.undo').click());
   expect(f.prepareCombinedUndo).not.toHaveBeenCalled();
   expect(f.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: f.undoOperation.id, expectedRevision: f.undoOperation.revision, conflictPolicy: 'abort', confirmedConflicts: [] });
@@ -112,6 +160,7 @@ it('never applies an undo prepared by a previous Host after the user switches Ho
   const f = fixture(); let resolve!: (result: Awaited<ReturnType<WorkspaceRecoveryAPI['prepareCombinedUndo']>>) => void;
   f.prepareCombinedUndo.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await openHistory();
   await act(async () => button('contextPanel.recovery.actions.undo').click());
   mocks.host += 1; await act(async () => mocks.listeners.forEach(listener => listener()));
   await act(async () => resolve({ status: 'ready', plan: f.plan }));
@@ -134,7 +183,7 @@ it('inspects the original worktree and reads a lost file-restore reply by its or
   await act(async () => root.render(<WorkspaceRecoveryPanel />));
   await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Saved files'))!.click());
   expect(fileRecovery).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'inspect', sourceRunId: 'original-worktree-run', point: 'p-saved' }));
-  await act(async () => button('contextPanel.recovery.files.restoreSelected').click());
+  await act(async () => button('contextPanel.recovery.files.restorePoint').click());
   const original = fileRecovery.mock.calls.find(([input]) => input.action === 'restore')![0];
   expect(original).toMatchObject({ sourceRunId: 'original-worktree-run', paths: ['a.ts'], point: 'p-saved' });
   await act(async () => button('contextPanel.recovery.files.checkOperation').click());

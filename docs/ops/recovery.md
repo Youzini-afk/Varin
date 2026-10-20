@@ -17,6 +17,11 @@ The conversation navigation default can be conversation only, conversation and f
 The file timeline groups internal input records into complete conversation rounds and updates when
 the Run ends. Read-only rounds add no empty point.
 
+The sidebar opens rounds in place. Select the start or end, choose files, and open a file to see
+the difference from its current content to the selected version. Content is read only when opened;
+large previews can load further pages. The footer reports each restore and offers undo. The menu
+contains named points, restore history, and storage details for the original resource Host.
+
 Agents receive `recovery_points` and `file_restore` as resident tools in physical workspaces with
 the corresponding file permissions. The former lists points, inspects affected paths and observes
 an original restore operation. The latter accepts a point, `current:before`, or an operation to undo.

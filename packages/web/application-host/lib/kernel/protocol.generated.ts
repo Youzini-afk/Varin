@@ -119,6 +119,7 @@ export type KernelMethod =
   | "source.handoff.claim"
   | "runtime.branch.recovery.range"
   | "runtime.run.recovery"
+  | "runtime.recovery.labels"
   | "runtime.branch.navigation.prepare"
   | "runtime.branch.navigate"
   | "runtime.branch.navigation.receipt"
@@ -241,6 +242,7 @@ export type KernelMethod =
   | "storage.getBlob"
   | "storage.object.rebindOwner"
   | "file.read.check"
+  | "file.read"
   | "file.root.register"
   | "file.operation.list"
   | "file.operation.reconcile"
@@ -2237,6 +2239,19 @@ export interface KernelFileReadCheckParams {
   workspaceId: string;
   rootId: string;
   path: string;
+}
+
+export interface KernelFileReadParams {
+  workspaceId: string;
+  rootId: string;
+  path: string;
+  offset?: number;
+  length?: number;
+}
+
+export interface RecoveryLabelsParams {
+  threadId: string;
+  runIds: string[];
 }
 
 export interface KernelFileReadCheckResult {
@@ -6011,6 +6026,7 @@ export type KernelMethodParams = {
   "runtime.followup.control": FollowupControlParams;
   "runtime.branch.recovery.range": NavigationSelectParams;
   "runtime.run.recovery": RunParams;
+  "runtime.recovery.labels": RecoveryLabelsParams;
   "runtime.branch.navigation.prepare": NavigationSelectParams;
   "runtime.branch.navigate": NavigationParams;
   "runtime.branch.navigation.receipt": NavigationReceiptParams;
@@ -6119,6 +6135,7 @@ export type KernelMethodParams = {
   "storage.getBlob": KernelGetBlobParams;
   "storage.object.rebindOwner": KernelObjectOwnerRebindParams;
   "file.read.check": KernelFileReadCheckParams;
+  "file.read": KernelFileReadParams;
   "file.root.register": KernelFileRootRegisterParams;
   "file.operation.list": KernelFileOperationListParams;
   "file.operation.reconcile": KernelFileOperationReconcileParams;
@@ -7347,6 +7364,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.recovery.labels";
+      params: RecoveryLabelsParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.branch.navigation.prepare";
       params: NavigationSelectParams;
       epoch?: string;
@@ -8312,6 +8338,15 @@ export type KernelRequest =
       id: string;
       method: "file.read.check";
       params: KernelFileReadCheckParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "file.read";
+      params: KernelFileReadParams;
       epoch?: string;
       grantId?: string;
     }

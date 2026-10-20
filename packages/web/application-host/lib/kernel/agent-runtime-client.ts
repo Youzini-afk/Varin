@@ -934,6 +934,9 @@ export class AgentRuntimeClient {
   recoveryRun(runId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryRangeTurn[]> {
     return this.kernel.agentRuntimeRequest('runtime.run.recovery', { runId }, signal);
   }
+  recoveryLabels(threadId: string, runIds: string[], signal?: AbortSignal): Promise<Record<string, string>> {
+    return this.kernel.agentRuntimeRequest('runtime.recovery.labels', { threadId, runIds }, signal);
+  }
   prepareNavigation(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').NavigationSelection> {
     return this.kernel.agentRuntimeRequest('runtime.branch.navigation.prepare', input, signal);
   }

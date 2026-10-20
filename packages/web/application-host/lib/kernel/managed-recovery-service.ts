@@ -153,10 +153,13 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
         const files = await fileResources(target, signal);
         const identity = { authorityId: 'kernel', workspaceId: target.target.workspaceId,
           canonicalRoot: target.target.canonicalRoot, filesystemProfile: process.platform, fileTarget: target.target };
-        const result = action.method === 'recovery.files.restore'
+        const result: Record<string, unknown> = action.storage ? { storage: await files.recoveryStorage(identity) } : action.preview
+          ? { preview: await files.previewRecoveryFile(identity, action.input, action.preview, signal) }
+          : action.method === 'recovery.files.restore'
           ? await restoreFilesWithEditors(options.documents, files, identity, action.input, signal)
           : await files.recoveryFiles(identity, action.method, action.input, signal);
         if (Array.isArray(result.points)) result.points = result.points.map(point => ({ ...point, sourcePath: target.target.canonicalRoot }));
+        result.source = { runId: target.target.runId, workspaceId: target.target.workspaceId, path: target.target.canonicalRoot };
         return { status: 'files', result };
       }
       if (action.kind === 'prepare' || action.kind === 'settle') {

@@ -1002,6 +1002,13 @@ pub(crate) struct NavigationSelectParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RecoveryLabelsParams {
+    pub(crate) thread_id: String,
+    pub(crate) run_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NavigationParams {
     pub(crate) thread_id: String,
     pub(crate) branch_id: String,
@@ -1654,6 +1661,16 @@ pub(crate) struct KernelFileReadCheckParams {
     pub(crate) workspace_id: String,
     pub(crate) root_id: String,
     pub(crate) path: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileReadParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) path: String,
+    pub(crate) offset: Option<i64>,
+    pub(crate) length: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3851,6 +3868,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.run.recovery" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.recovery.labels" => serde_json::from_value::<RecoveryLabelsParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.branch.navigation.prepare" => {
             serde_json::from_value::<NavigationSelectParams>(params.clone())
                 .map(|_| ())
@@ -4241,6 +4261,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "file.read.check" => serde_json::from_value::<KernelFileReadCheckParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "file.read" => serde_json::from_value::<KernelFileReadParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "file.root.register" => {

@@ -35,6 +35,10 @@ export function createFileRecoveryService(options: {
       : { ...(input.point ? { point: input.point } : {}), ...(input.cursor !== undefined ? { cursor: input.cursor } : {}), ...(input.limit !== undefined ? { limit: input.limit } : {}) };
     if (input.paths) args.paths = input.paths;
     if (input.overwritePaths) args.overwritePaths = input.overwritePaths;
+    if (input.action === 'history') args.operations = true;
+    const preview = input.action === 'preview' ? { path: input.path!,
+      ...(input.currentOffset !== undefined ? { currentOffset: input.currentOffset } : {}),
+      ...(input.targetOffset !== undefined ? { targetOffset: input.targetOffset } : {}) } : undefined;
     // One identifier survives a transport retry; undo identifies a new operation.
     const operationId = method === 'recovery.points' ? undefined : input.requestId ?? randomUUID();
     let activeTurns: RecoveryRangeTurn[] = [];
@@ -55,7 +59,7 @@ export function createFileRecoveryService(options: {
       const result = await service.recovery({ coordinatorHostId: options.runtime.coordinatorHostId,
         binding: { operationId: operationId ?? `points:${sourceRunId}`, workspaceId: source.workspace_id,
           conversation: input.conversation, turns: turns.map(turn => ({ turn, restore: false })) },
-        action: { kind: 'files', method, input: command } });
+        action: { kind: 'files', method, input: command, ...(preview ? { preview } : {}), ...(input.action === 'storage' ? { storage: true } : {}) } });
       if (result.status !== 'files') throw new Error('The original Host did not return its file recovery result');
       if (Array.isArray(result.result.operations)) result.result.operations = result.result.operations.map(operation => ({ ...operation, sourceRunId: operation.sourceRunId ?? sourceRunId }));
       return result.result;
@@ -72,15 +76,18 @@ export function createFileRecoveryService(options: {
       fileTarget: { kind: 'physical', workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
         threadId: run.thread_id, runId: sourceRunId, rootId, canonicalRoot: root, sourceMode: source.mode } };
     const files = await options.resolveFiles(identity);
-    const result = method === 'recovery.files.restore'
+    const result: Record<string, unknown> = input.action === 'storage' ? { storage: await files.recoveryStorage(identity) }
+      : preview ? { preview: await files.previewRecoveryFile(identity, command, preview) }
+      : method === 'recovery.files.restore'
       ? await restoreFilesWithEditors(options.documents, files, identity, command)
       : await files.recoveryFiles(identity, method, command);
     if (Array.isArray(result.points)) result.points = result.points.map(point => ({ ...point, sourcePath: root }));
+    result.source = { runId: sourceRunId, workspaceId: source.workspace_id, path: root };
     if (Array.isArray(result.operations)) result.operations = result.operations.map(operation => ({ ...operation, sourceRunId: operation.sourceRunId ?? sourceRunId }));
     return result;
   };
   return async (input: FileRecoveryRequest): Promise<FileRecoveryResult> => {
-    if (input.action !== 'list') {
+    if (input.action !== 'list' && input.action !== 'history') {
       if (!input.sourceRunId) throw new Error('Select a recovery point in its original worktree');
       const result = await request(input, input.sourceRunId);
       return input.action === 'restore' || input.action === 'undo' || input.action === 'operation'
@@ -93,14 +100,26 @@ export function createFileRecoveryService(options: {
     const points: FileRecoveryPoint[] = [];
     const operations: NonNullable<FileRecoveryResult['operations']> = [];
     const failures: string[] = [];
-    for (const result of pages) {
+    let currentSource: FileRecoveryResult['source'];
+    for (const [index, result] of pages.entries()) {
       if (result.status === 'rejected') { failures.push(result.reason instanceof Error ? result.reason.message : String(result.reason)); continue; }
       if (Array.isArray(result.value.points)) points.push(...result.value.points as FileRecoveryPoint[]);
       if (Array.isArray(result.value.operations)) operations.push(...result.value.operations as typeof operations);
+      if (index === 0 && result.value.source) currentSource = result.value.source as FileRecoveryResult['source'];
     }
     points.sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
     operations.sort((left, right) => Date.parse(right.createdAt ?? '') - Date.parse(left.createdAt ?? ''));
-    return { ...(sources[0] ? { currentSourceRunId: sources[0].runId } : {}), points: points.slice(offset, offset + limit), operations: operations.slice(0, limit), nextCursor: points.length > offset + limit ? offset + limit : null,
+    const visible = input.action === 'history' ? [] : points.slice(offset, offset + limit);
+    const runIds = [...new Set(visible.filter(point => !point.label && !point.runId.startsWith('restore:')).map(point => point.runId))];
+    if (runIds.length) {
+      try {
+        const labels = await options.runtime.recoveryLabels(input.conversation.threadId, runIds);
+        for (const point of visible) { const label = labels[point.runId]; if (label) point.title = label; }
+      } catch (error) { failures.push(error instanceof Error ? error.message : String(error)); }
+    }
+    return { ...(currentSource ? { currentSourceRunId: currentSource.runId, source: currentSource } : {}),
+      points: visible, operations: input.action === 'history' ? operations.slice(offset, offset + limit) : operations.slice(0, limit),
+      nextCursor: (input.action === 'history' ? operations.length : points.length) > offset + limit ? offset + limit : null,
       ...(failures.length ? { failures } : {}) };
   };
 }

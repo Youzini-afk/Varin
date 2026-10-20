@@ -12,6 +12,8 @@ pub(crate) struct RecoveryPointsArgs {
     pub paths: Option<Vec<String>>,
     pub cursor: Option<usize>,
     pub limit: Option<usize>,
+    pub references: Option<bool>,
+    pub operations: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -28,6 +30,7 @@ pub(crate) struct FileRestoreArgs {
 
 #[derive(Clone)]
 struct Change {
+    checkpoint: String,
     sequence: i64,
     run: String,
     path: String,
@@ -436,7 +439,7 @@ impl Storage {
         )?;
         self.registered_file_root(root, grant)?;
         let mut query = self.conn.prepare(
-            "SELECT c.sequence,t.run_id,d.path,d.before_json,d.after_json,c.created_at,t.status,json_extract(t.file_target_json,'$.runId')
+            "SELECT c.sequence,t.run_id,d.path,d.before_json,d.after_json,c.created_at,t.status,json_extract(t.file_target_json,'$.runId'),c.id
              FROM recovery_checkpoints c JOIN recovery_turns t ON t.workspace_id=c.workspace_id AND t.checkpoint_id=c.id
              JOIN recovery_changes d ON d.workspace_id=c.workspace_id AND d.checkpoint_id=c.id
              WHERE c.workspace_id=?1 AND json_extract(t.conversation_json,'$.threadId')=?2
@@ -452,6 +455,7 @@ impl Storage {
                     r.get::<_, String>(5)?,
                     r.get::<_, String>(6)?,
                     r.get::<_, String>(7)?,
+                    r.get::<_, String>(8)?,
                 ))
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -459,6 +463,7 @@ impl Storage {
             .filter(|row| path_allowed(grant, &row.2))
             .map(|row| {
                 Ok(Change {
+                    checkpoint: row.8,
                     sequence: row.0,
                     run: row.1,
                     path: row.2,
@@ -552,6 +557,31 @@ impl Storage {
         if let Some(operation) = &args.operation {
             return self.reconcile_file_restore(workspace, root, thread, operation, grant);
         }
+        if args.operations == Some(true) {
+            self.recovery_workspace(
+                &json!({"workspaceId":workspace,"threadId":thread}),
+                &grant.grant_id,
+            )?;
+            self.registered_file_root(root, grant)?;
+            let cursor = args.cursor.unwrap_or(0);
+            let limit = args.limit.unwrap_or(20);
+            if limit == 0 {
+                return Err(KernelError::Operation("limit must be positive".into()));
+            }
+            let mut operations = self.file_restore_operations(
+                workspace,
+                root,
+                thread,
+                cursor,
+                limit.saturating_add(1),
+                grant,
+            )?;
+            let more = operations.len() > limit;
+            operations.truncate(limit);
+            return Ok(
+                json!({"operations":operations,"nextCursor":if more {Some(cursor.saturating_add(limit))}else{None}}),
+            );
+        }
         let changes = self.point_changes(workspace, root, thread, grant)?;
         if let Some(point) = &args.point {
             let targets = self.file_point_targets(
@@ -564,7 +594,26 @@ impl Storage {
                 args.paths.as_deref(),
                 grant,
             )?;
-            let files=targets.into_iter().map(|(path,(expected,target))|json!({"path":path,"expected":expected,"target":target})).collect::<Vec<_>>();
+            let named = if args.references == Some(true) && point.starts_with('p') {
+                self.named_file_points(workspace, root, thread, grant)?
+                    .into_iter()
+                    .find(|value| value["id"] == *point)
+            } else {
+                None
+            };
+            let files=targets.into_iter().map(|(path,(expected,target))|{
+                let mut value=json!({"path":path,"expected":expected,"target":target});
+                if args.references==Some(true) {
+                    if let Some(hash)=target["objectHash"].as_str() {
+                        let source=changes.iter().filter(|change|change.path==path).find_map(|change|{
+                            ["before","after"].into_iter().find(|slot|(if *slot=="before" {&change.before}else{&change.after})["objectHash"]==hash)
+                                .map(|slot|json!({"recordId":format!("change:{}:{path}",change.checkpoint),"slot":slot}))
+                        }).or_else(||named.as_ref().map(|named|json!({"recordId":format!("operation-file:{}:{path}",named["runId"].as_str().unwrap()),"slot":"target"})));
+                        value["targetSource"]=source.unwrap_or(Value::Null);
+                    }
+                }
+                value
+            }).collect::<Vec<_>>();
             return Ok(json!({"point":point,"files":files,"coverage":"recorded-files"}));
         }
         let mut groups: BTreeMap<String, Value> = BTreeMap::new();
@@ -620,9 +669,24 @@ impl Storage {
         }
         let next = cursor.saturating_add(limit);
         let more = next < points.len();
+        let operations = self.file_restore_operations(workspace, root, thread, 0, limit, grant)?;
+        Ok(
+            json!({"points":points.into_iter().skip(cursor).take(limit).collect::<Vec<_>>(),"nextCursor":if more {Some(next)} else {None},"operations":operations}),
+        )
+    }
+
+    fn file_restore_operations(
+        &self,
+        workspace: &str,
+        root: &str,
+        thread: &str,
+        cursor: usize,
+        limit: usize,
+        grant: &Grant,
+    ) -> Result<Vec<Value>, KernelError> {
         let operations={
-            let mut query=self.conn.prepare("SELECT operation_id,state,data_json,result_json,created_at FROM recovery_operations WHERE workspace_id=?1 AND thread_id=?2 AND kind='file-restore' AND json_extract(data_json,'$.rootId')=?3 ORDER BY rowid DESC LIMIT ?4")?;
-            let rows=query.query_map(params![workspace,thread,root,limit as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,String>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
+            let mut query=self.conn.prepare("SELECT operation_id,state,data_json,result_json,created_at FROM recovery_operations WHERE workspace_id=?1 AND thread_id=?2 AND kind='file-restore' AND json_extract(data_json,'$.rootId')=?3 ORDER BY rowid DESC LIMIT ?4 OFFSET ?5")?;
+            let rows=query.query_map(params![workspace,thread,root,limit as i64,cursor as i64],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,String>(4)?)))?.collect::<Result<Vec<_>,_>>()?;
             rows
         }.into_iter().map(|(id,state,data,result,created)| {
             let data:Value=serde_json::from_str(&data)?;
@@ -636,9 +700,7 @@ impl Storage {
             if let Some(files)=value["files"].as_array_mut() {files.retain(|file|file["path"].as_str().is_some_and(|p|path_allowed(grant,p)));}
             Ok::<_,KernelError>(value)
         }).collect::<Result<Vec<_>,_>>()?;
-        Ok(
-            json!({"points":points.into_iter().skip(cursor).take(limit).collect::<Vec<_>>(),"nextCursor":if more {Some(next)} else {None},"operations":operations}),
-        )
+        Ok(operations)
     }
 
     fn restore_capture(
@@ -1202,6 +1264,27 @@ mod tests {
         let undone = f.restore("restore-2", None, Some("restore-1"));
         assert_eq!(undone["status"], "applied");
         assert_eq!(fs::read_to_string(f.workspace.join("a.txt")).unwrap(), "C");
+        let mut page = |cursor| {
+            f.storage
+                .file_recovery_points(
+                    "workspace",
+                    &f.root_id,
+                    "thread",
+                    &serde_json::from_value(json!({"operations":true,"limit":1,"cursor":cursor}))
+                        .unwrap(),
+                    None,
+                    &f.grant,
+                )
+                .unwrap()
+        };
+        let first = page(0);
+        let second = page(1);
+        assert_eq!(first["nextCursor"], 1);
+        assert!(second["nextCursor"].is_null());
+        assert_ne!(
+            first["operations"][0]["operationId"],
+            second["operations"][0]["operationId"]
+        );
         let changes=f.storage.recovery_change_list(&json!({"workspaceId":"workspace","conversation":{"kind":"thread","threadId":"thread","branchId":"main"}}),"actor").unwrap();
         assert_eq!(
             changes["changes"][1]["after"]["objectHash"],
@@ -1256,6 +1339,28 @@ mod tests {
             .to_owned();
         f.write("a.txt", "C");
         f.write("new.txt", "new file");
+        let inspection = f
+            .storage
+            .file_recovery_points(
+                "workspace",
+                &f.root_id,
+                "thread",
+                &serde_json::from_value(json!({"point":point,"references":true,"paths":["a.txt"]}))
+                    .unwrap(),
+                Some(&f.anchor),
+                &f.grant,
+            )
+            .unwrap();
+        let target = &inspection["files"][0];
+        let content = f
+            .storage
+            .read_blob_fixture(
+                &json!({"hash":target["target"]["objectHash"],
+            "recordId":target["targetSource"]["recordId"],"slot":target["targetSource"]["slot"]}),
+                &f.grant,
+            )
+            .unwrap();
+        assert_eq!(content["bytesBase64"], "Qg==");
         assert_eq!(
             f.restore("restore-named", Some(&point), None)["status"],
             "applied"

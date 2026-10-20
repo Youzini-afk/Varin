@@ -1187,7 +1187,7 @@ pub(crate) fn spawn(
                             if method == "runtime.branch.recovery.sources" { return Ok(serde_json::to_value(owner.recovery_sources(&p.thread_id,&p.branch_id).map_err(domain)?)?); }
                             return Ok(serde_json::to_value(match p.key { Some(key)=>owner.navigation_receipt(&p.thread_id,&p.branch_id,&key), None=>owner.latest_navigation_receipt(&p.thread_id,&p.branch_id) }.map_err(domain)?)?);
                         }
-                        if method == "runtime.branch.navigation.prepare" || method == "runtime.branch.navigate" || method == "runtime.branch.recovery.range" || method == "runtime.operation.recovery.anchor" || method == "runtime.run.recovery" {
+                        if method == "runtime.branch.navigation.prepare" || method == "runtime.branch.navigate" || method == "runtime.branch.recovery.range" || method == "runtime.operation.recovery.anchor" || method == "runtime.run.recovery" || method == "runtime.recovery.labels" {
                             let method = method.to_string();
                             let catalog = runtime.catalog();
                             let response_id = id.clone();
@@ -1198,6 +1198,11 @@ pub(crate) fn spawn(
                             thread::spawn(move || {
                                 let result = (|| -> Result<Value, KernelError> {
                                     if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                                    if method == "runtime.recovery.labels" {
+                                        let p: RecoveryLabelsParams=serde_json::from_value(params)?;
+                                        let read=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?.capture_recovery_labels(&p.thread_id,p.run_ids);
+                                        return read.load(&||cancelled.load(Ordering::Acquire)).map_err(domain);
+                                    }
                                     if method == "runtime.operation.recovery.anchor" {
                                         let p: OperationInspectParams = serde_json::from_value(params)?;
                                         let read = {

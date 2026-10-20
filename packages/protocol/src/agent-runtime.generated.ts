@@ -1295,6 +1295,11 @@ export interface RetrievalQuery {
   limit?: number;
 }
 
+export interface RecoveryLabelsParams {
+  threadId: string;
+  runIds: string[];
+}
+
 export interface LanguageQuery {
   runId: string;
   threadId: string;

@@ -51,6 +51,13 @@ records stay until older retained points and named points no longer need them. T
 label-only `createCheckpoint` endpoint is retired.
 
 `FileRecoveryTimeline` uses this API for selected paths, naming, undo and original-operation readback.
+The sidebar expands rounds and file differences in place. Visible round titles come from a batched
+`runtime.recovery.labels` read of the original user input, independent of the current branch head.
+Inspect reads only path metadata; opening a file reads the current physical file through the native
+`file.read` worker and the selected target through its retained recovery reference. Preview does not
+create a checkpoint. Large text is paged at UTF-8 boundaries and the viewer checks versions before
+appending. Restore history is separately paged, and storage details are requested from the original
+resource Host only when opened.
 The Host uses Documents barriers for the affected registered paths, preserves unsaved drafts as
 per-file results, and lets clean files proceed. File-only recovery keeps the conversation active.
 

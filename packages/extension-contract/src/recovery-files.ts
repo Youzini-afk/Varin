@@ -1,6 +1,7 @@
 import type { RecoveryConversation } from './recovery.js';
 
 export interface FileRecoveryPoint {
+  title?: string;
   sourcePath?: string;
   id: string;
   runId: string;
@@ -12,6 +13,24 @@ export interface FileRecoveryPoint {
   label?: string;
   paths: string[];
   byteLength: number;
+}
+export interface FileRecoverySource {
+  runId: string;
+  workspaceId: string;
+  path: string;
+}
+export interface FileRecoveryTextSlice {
+  kind: 'text' | 'binary' | 'missing' | 'unsupported';
+  text?: string;
+  byteLength: number;
+  nextOffset: number;
+  eof: boolean;
+  version?: string;
+}
+export interface FileRecoveryPreview {
+  path: string;
+  current: FileRecoveryTextSlice;
+  target: FileRecoveryTextSlice;
 }
 export interface FileRecoveryPath {
   path: string;
@@ -34,7 +53,10 @@ export interface FileRecoveryOperation {
 }
 export interface FileRecoveryRequest {
   conversation: RecoveryConversation;
-  action: 'list' | 'inspect' | 'operation' | 'restore' | 'undo' | 'name' | 'release';
+  action: 'list' | 'history' | 'inspect' | 'preview' | 'storage' | 'operation' | 'restore' | 'undo' | 'name' | 'release';
+  path?: string;
+  currentOffset?: number;
+  targetOffset?: number;
   sourceRunId?: string;
   point?: string;
   operationId?: string;
@@ -46,6 +68,9 @@ export interface FileRecoveryRequest {
   limit?: number;
 }
 export interface FileRecoveryResult {
+  source?: FileRecoverySource;
+  preview?: FileRecoveryPreview;
+  storage?: { byteLength: number; objectCount: number };
   currentSourceRunId?: string;
   failures?: string[];
   points?: FileRecoveryPoint[];
@@ -59,24 +84,25 @@ export interface FileRecoveryResult {
 export function parseFileRecoveryRequest(input: unknown): FileRecoveryRequest {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('File recovery request is required');
   const value = input as FileRecoveryRequest;
-  if (!['list', 'inspect', 'operation', 'restore', 'undo', 'name', 'release'].includes(value.action)
+  if (!['list', 'history', 'inspect', 'preview', 'storage', 'operation', 'restore', 'undo', 'name', 'release'].includes(value.action)
     || value.conversation?.kind !== 'thread' || !value.conversation.threadId || !value.conversation.branchId) throw new Error('File recovery requires its conversation');
-  for (const key of ['sourceRunId', 'point', 'operationId', 'requestId', 'name'] as const) {
+  for (const key of ['sourceRunId', 'point', 'operationId', 'requestId', 'name', 'path'] as const) {
     if (value[key] !== undefined && (typeof value[key] !== 'string' || !value[key].trim())) throw new Error(`${key} must be a non-empty string`);
   }
   for (const key of ['paths', 'overwritePaths'] as const) {
     if (value[key] !== undefined && (!Array.isArray(value[key]) || value[key].some(path => typeof path !== 'string' || !path))) throw new Error(`${key} must contain file paths`);
   }
-  for (const key of ['cursor', 'limit'] as const) {
+  for (const key of ['cursor', 'limit', 'currentOffset', 'targetOffset'] as const) {
     if (value[key] !== undefined && (!Number.isSafeInteger(value[key]) || value[key]! < (key === 'limit' ? 1 : 0))) throw new Error(`${key} is invalid`);
   }
-  if (['inspect', 'restore', 'release'].includes(value.action) && !value.point) throw new Error('A recovery point is required');
+  if (['inspect', 'preview', 'restore', 'release'].includes(value.action) && !value.point) throw new Error('A recovery point is required');
+  if (value.action === 'preview' && !value.path) throw new Error('Select a file to preview');
   if (['undo', 'operation'].includes(value.action) && !value.operationId) throw new Error('An original restore operation is required');
   if (value.action === 'name' && !value.name) throw new Error('A recovery point name is required');
   return {
     action: value.action,
     conversation: { kind: 'thread', threadId: value.conversation.threadId, branchId: value.conversation.branchId },
-    ...Object.fromEntries(['sourceRunId', 'point', 'operationId', 'requestId', 'paths', 'overwritePaths', 'name', 'cursor', 'limit']
+    ...Object.fromEntries(['sourceRunId', 'point', 'operationId', 'requestId', 'paths', 'overwritePaths', 'name', 'cursor', 'limit', 'path', 'currentOffset', 'targetOffset']
       .filter(key => (value as unknown as Record<string, unknown>)[key] !== undefined)
       .map(key => [key, (value as unknown as Record<string, unknown>)[key]])),
   };
@@ -106,6 +132,28 @@ export function parseFileRecoveryResult(input: unknown): FileRecoveryResult {
   };
   const row = object(input);
   const result: FileRecoveryResult = {};
+  if (row.storage !== undefined) {
+    const storage = object(row.storage);
+    if (![storage.byteLength, storage.objectCount].every(value => Number.isSafeInteger(value) && (value as number) >= 0)) throw new Error('Invalid recovery storage statistics');
+    result.storage = { byteLength: storage.byteLength as number, objectCount: storage.objectCount as number };
+  }
+  if (row.source !== undefined) {
+    const source = object(row.source);
+    result.source = { runId: text(source.runId), workspaceId: text(source.workspaceId), path: text(source.path) };
+  }
+  if (row.preview !== undefined) {
+    const preview = object(row.preview);
+    const slice = (value: unknown): FileRecoveryTextSlice => {
+      const part = object(value);
+      if (!['text', 'binary', 'missing', 'unsupported'].includes(text(part.kind))
+        || typeof part.eof !== 'boolean' || !Number.isSafeInteger(part.byteLength) || (part.byteLength as number) < 0
+        || !Number.isSafeInteger(part.nextOffset) || (part.nextOffset as number) < 0) throw new Error('Invalid recovery content page');
+      return { kind: part.kind as FileRecoveryTextSlice['kind'], byteLength: part.byteLength as number,
+        nextOffset: part.nextOffset as number, eof: part.eof,
+        ...(part.kind === 'text' ? { text: text(part.text) } : {}), ...(part.version ? { version: text(part.version) } : {}) };
+    };
+    result.preview = { path: text(preview.path), current: slice(preview.current), target: slice(preview.target) };
+  }
   if (row.points !== undefined) {
     if (!Array.isArray(row.points)) throw new Error('Invalid recovery points');
     result.points = row.points.map(value => {
@@ -114,6 +162,7 @@ export function parseFileRecoveryResult(input: unknown): FileRecoveryResult {
       return { id: text(point.id), runId: text(point.runId), sourceRunId: text(point.sourceRunId), before: text(point.before), after: text(point.after),
         createdAt: text(point.createdAt), state: text(point.state), paths: strings(point.paths), byteLength: point.byteLength,
         ...(point.sourcePath ? { sourcePath: text(point.sourcePath) } : {}),
+        ...(point.title ? { title: text(point.title) } : {}),
         ...(point.label ? { label: text(point.label) } : {}) };
     });
   }

@@ -319,6 +319,8 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
     assert!(original.iter().all(|turn| turn.settled));
     assert_eq!(original[0].anchor.execution_id, range[0].anchor.execution_id);
     assert_eq!(original[1].entry_ids, range[1].entry_ids);
+    let labels=owner.lock().unwrap().capture_recovery_labels("thread",vec![first.run_id.clone()]);
+    assert_eq!(labels.load(&||false).unwrap()[&first.run_id],"FUTURE_ONLY");
     let second = launch("NEW_ONLY", false);
     let serialized = serde_json::to_string(
         &wires

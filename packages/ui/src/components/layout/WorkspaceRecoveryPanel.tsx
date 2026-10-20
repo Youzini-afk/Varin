@@ -4,7 +4,6 @@ import type {
   WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
-  WorkspaceRecoveryStatus,
 } from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
@@ -15,7 +14,6 @@ import {
   requireWorkspaceRecoveryResult,
 } from '@/lib/recovery/workspaceRecovery';
 import { cn } from '@/lib/utils';
-import { formatWorkspaceArchiveBytes } from '@/lib/workspaceArchive';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { useUIStore } from '@/stores/useUIStore';
@@ -41,9 +39,8 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
   const branchId = identity?.branchId;
   const preference = useUIStore(state => state.recoveryPreference);
   const workspaceId = useWorkbenchWorkspaceId();
-  const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
+  const [page, setPage] = React.useState<'timeline' | 'history' | 'storage' | 'name'>('timeline');
   const [operations, setOperations] = React.useState<WorkspaceCombinedRecoveryOperation[]>([]);
-  const [refreshKey, setRefreshKey] = React.useState(0);
   const conversation = React.useMemo(() => sessionId && branchId ? { kind: 'thread' as const, threadId: sessionId, branchId } : null, [sessionId, branchId]);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -57,13 +54,13 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
   React.useEffect(() => {
     latestScope.current = scope;
     setUndoIntent(undefined); setUndoDialogOpen(false); undoInFlight.current = false;
-    setStatus(null); setOperations([]); setError(null);
+    setPage('timeline'); setOperations([]); setError(null);
     return () => { if (latestScope.current === scope) latestScope.current = ''; };
   }, [scope]);
 
   const refresh = React.useCallback(async () => {
+    if (page !== 'history') return;
     if (!workspaceId) {
-      setStatus(null);
       setOperations([]);
       return;
     }
@@ -71,20 +68,16 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
     setError(null);
     try {
       const api = getWorkspaceRecoveryAPI();
-      const [nextStatus, nextOperations] = await Promise.all([
-        api.status(workspaceId),
-        api.listCombinedOperations(workspaceId),
-      ]);
+      const nextOperations = await api.listCombinedOperations(workspaceId);
       if (!current()) return;
       dataScope.current = scope;
-      setStatus(requireWorkspaceRecoveryResult(nextStatus));
       setOperations(requireWorkspaceRecoveryResult(nextOperations).operations.filter(operation => operation.conversation.threadId === identity?.threadId));
     } catch (cause) {
       if (current()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (current()) setBusy(null);
     }
-  }, [current, scope, workspaceId, identity?.threadId]);
+  }, [current, scope, workspaceId, identity?.threadId, page]);
 
   React.useEffect(() => {
     void refresh();
@@ -172,66 +165,9 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-y-auto bg-background">
-      <div className="flex items-start gap-3 border-b border-border/60 px-4 py-4">
-        <div className="min-w-0 flex-1">
-          <h2 className="typography-ui-header text-foreground">{t('contextPanel.mode.recovery')}</h2>
-          <p className="mt-1 typography-meta text-muted-foreground">
-            {t('contextPanel.recovery.native.description')}
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          onClick={() => { setRefreshKey(value => value + 1); void refresh(); }}
-          disabled={busy !== null}
-          aria-label={t('settings.varin.recovery.actions.refresh')}
-          title={t('settings.varin.recovery.actions.refresh')}
-        >
-          <Icon name="refresh" className={cn('size-4', busy === 'refresh' && 'animate-spin')} />
-        </Button>
-      </div>
-
-      <div className="space-y-6 px-4 py-5">
-        {conversation && <FileRecoveryTimeline key={scope} conversation={conversation} refreshKey={refreshKey} onChanged={refresh} />}
-        {status ? (
-          <section className="rounded-xl border border-border/60 bg-muted/15 p-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="typography-ui-label font-medium text-foreground">{t('contextPanel.recovery.files.storageTitle')}</p>
-                <p className="mt-1 typography-micro text-muted-foreground">
-                  {t('contextPanel.recovery.files.storageScope')}
-                </p>
-                <p className="mt-1 truncate typography-micro text-muted-foreground" title={status.identity.canonicalRoot}>{status.identity.canonicalRoot}</p>
-              </div>
-
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-
-              <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.objects')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.objectCount}</p>
-              </div>
-              <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.size')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">
-                  {formatWorkspaceArchiveBytes(status.storage.byteLength)}
-                </p>
-              </div>
-            </div>
-            {status.failures.length > 0 ? (
-              <div className="mt-3 space-y-1 rounded-lg border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-2">
-                {status.failures.map((failure) => (
-                  <p key={`${failure.operationId ?? failure.code}:${failure.message}`} className="typography-micro text-[var(--status-error)]">
-                    {failure.operationId ? `${failure.operationId}: ` : ''}{failure.message}
-                  </p>
-                ))}
-              </div>
-            ) : null}
-          </section>
-        ) : null}
-
+    <div className="flex h-full min-h-0 flex-col bg-background">
+      {conversation && <FileRecoveryTimeline key={scope} conversation={conversation} refreshKey={0} onChanged={refresh} onPageChange={setPage}
+        historyContent={<>
         {(operations.length > 0 || undoIntent) && <section className="border-t border-border/60 pt-5">
           <h3 className="typography-ui-label font-medium text-foreground">
             {t('contextPanel.recovery.native.operations')}
@@ -281,13 +217,8 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
             ) : null}
           </div>
         </section>}
-
-        {error ? (
-          <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">
-            {error}
-          </div>
-        ) : null}
-      </div>
+          {error && <p role="alert" className="typography-meta text-[var(--status-error)]">{error}</p>}
+        </>} />}
       {undoIntent && undoDialogOpen && <RecoveryDialog key={`${scope}:${undoIntent.plan.id}`} open
         plan={undoIntent.plan} initialAttempt={undoIntent.attempt} allowConversationOnly={false}
         onAttempt={attempt => setUndoIntent(value => value ? { ...value, attempt } : value)}

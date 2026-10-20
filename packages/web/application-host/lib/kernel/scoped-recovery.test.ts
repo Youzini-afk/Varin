@@ -9,6 +9,7 @@ import type { HostResourceOperationGate } from '../recovery/durable-file-operati
 import { createWorkspaceRecoveryEngine } from '../recovery/journal-engine.js';
 import { createInMemoryRecoveryDurablePort } from '../recovery/recovery-durable-port.test-helper.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
+import { KernelFileResourceBackend } from './file-resource-backend.js';
 
 const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }); });
@@ -39,8 +40,34 @@ const fixture = async () => {
   const bindings = createScopedKernelRecoveryBindings(adapter as unknown as KernelStorageAdapter,
     { authority, threadId: 'parent-thread', runId: 'parent-run', storageRoot: path.join(root, 'objects'), resourceOperationGate: gate });
   const identity: RecoveryIdentity = { workspaceId: 'owning', canonicalRoot: root, authorityId: 'host', filesystemProfile: 'test' };
-  return { ...bindings, client, adapter, identity, root, gate, entered };
+  return { ...bindings, client, adapter, identity, root, gate, entered, authority };
 };
+
+it('previews current and recorded content on the original root, paging across UTF-8 without captures', async () => {
+  const h = await fixture();
+  const saved = Buffer.from(`${'a'.repeat(256 * 1024 - 1)}中文`);
+  const source = { recordId: 'operation-file:named:a.txt', slot: 'target' };
+  const fileRead = vi.fn(async () => ({ missing: false, readVersion: 'current-version',
+    content: { text: '现在', byteLength: 6, nextOffset: 6, eof: true } }));
+  const getBlob = vi.fn(async (_hash: string, _source: unknown, range: { offset: number; length: number }) => {
+    const end = Math.min(saved.length, range.offset + range.length);
+    return { bytesBase64: saved.subarray(range.offset, end).toString('base64'), nextOffset: end, eof: end === saved.length };
+  });
+  Object.assign(h.client, { fileRead, getBlob, recoveryFiles: vi.fn(async () => ({
+    files: [{ path: 'a.txt', target: { kind: 'regular-file', objectHash: 'recorded-version', byteLength: saved.length }, targetSource: source }],
+  })) });
+  const files = new KernelFileResourceBackend(h.adapter as unknown as KernelStorageAdapter, { authority: h.authority });
+  const command = { threadId: 'thread', sourceRunId: 'original-run', arguments: { point: 'named' } };
+  const first = await files.previewRecoveryFile(h.identity, command, { path: 'a.txt' });
+  const second = await files.previewRecoveryFile(h.identity, command, { path: 'a.txt', targetOffset: first.target.nextOffset });
+  expect(first.target.text! + second.target.text!).toBe(saved.toString('utf8'));
+  expect(second.target.eof).toBe(true);
+  expect(first.current.text).toBe('现在');
+  expect(fileRead).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'owning', rootId: 'admitted-root', path: 'a.txt' }), undefined);
+  expect(getBlob).toHaveBeenCalledWith('recorded-version', source, expect.anything());
+  expect(h.client.fileCapture).not.toHaveBeenCalled();
+  expect(h.adapter.fileAuthorityContext).not.toHaveBeenCalled();
+});
 
 it('keeps file capture, apply and original journal receipt on the admitted actor', async () => {
   const h = await fixture();

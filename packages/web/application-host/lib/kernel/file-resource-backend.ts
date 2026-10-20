@@ -135,6 +135,54 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     return context.client.recoveryFiles(method, { ...input, workspaceId: identity.workspaceId, rootId: context.rootId }, signal);
   }
 
+  async previewRecoveryFile(identity: RecoveryIdentity, command: Parameters<KernelFileResourceBackend['recoveryFiles']>[2],
+    input: { path: string; currentOffset?: number; targetOffset?: number }, signal?: AbortSignal): Promise<import('@varin/extension-contract').FileRecoveryPreview> {
+    const context = await this.bind(identity);
+    const selected = await this.recoveryFiles(identity, 'recovery.points', { ...command,
+      arguments: { point: command.arguments.point, paths: [input.path], references: true } }, signal);
+    const item = (selected.files as Array<{ path: string; target: RecoveryState; targetSource?: { recordId: string; slot: string } }>)
+      .find(file => file.path === input.path);
+    if (!item) throw new Error('This file has no state at the selected recovery point');
+    // Same page size as existing recovery object reads. Further pages are requested by the viewer.
+    const length = 256 * 1024;
+    type Slice = import('@varin/extension-contract').FileRecoveryTextSlice;
+    const target = async (): Promise<Slice> => {
+      const state = item.target;
+      if (state.kind === 'missing') return { kind: 'missing', byteLength: 0, nextOffset: 0, eof: true };
+      if (state.kind !== 'regular-file') return { kind: 'unsupported', byteLength: 0, nextOffset: 0, eof: true };
+      if (!item.targetSource) throw new Error('The recorded file content is unavailable');
+      const offset = Math.min(input.targetOffset ?? 0, state.byteLength);
+      const page = await context.client.getBlob(state.objectHash, item.targetSource,
+        { offset, length: Math.min(length, state.byteLength - offset), signal });
+      const bytes = Buffer.from(page.bytesBase64, 'base64');
+      try {
+        const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes, { stream: !page.eof });
+        if (text.includes('\0')) throw new Error('binary');
+        return { kind: 'text', text, byteLength: state.byteLength, nextOffset: offset + Buffer.byteLength(text),
+          eof: page.eof, version: state.objectHash };
+      } catch {
+        return { kind: 'binary', byteLength: state.byteLength, nextOffset: page.nextOffset, eof: true, version: state.objectHash };
+      }
+    };
+    const current = async (): Promise<Slice> => {
+      const read = await context.client.fileRead({ workspaceId: identity.workspaceId, rootId: context.rootId,
+        path: input.path, offset: input.currentOffset ?? 0, length }, signal);
+      if (read.missing) return { kind: 'missing', byteLength: 0, nextOffset: 0, eof: true, ...(read.readVersion ? { version: read.readVersion } : {}) };
+      if (!read.content) return { kind: 'unsupported', byteLength: 0, nextOffset: 0, eof: true };
+      const content = read.content;
+      return { kind: typeof content.text === 'string' ? 'text' : 'binary',
+        ...(typeof content.text === 'string' ? { text: content.text } : {}), byteLength: content.byteLength,
+        nextOffset: content.nextOffset, eof: typeof content.text !== 'string' || content.eof, ...(read.readVersion ? { version: read.readVersion } : {}) };
+    };
+    const [now, then] = await Promise.all([current(), target()]);
+    return { path: input.path, current: now, target: then };
+  }
+
+  async recoveryStorage(identity: RecoveryIdentity) {
+    const context = await this.bind(identity);
+    return context.client.recoveryStatistics(identity.workspaceId);
+  }
+
   private translated(context: BoundFileContext, resourceId: string): string {
     return joinResource(context.basePath, resourceId);
   }

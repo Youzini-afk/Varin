@@ -19,7 +19,8 @@ export interface ManagedRecoveryNavigation {
 export type ManagedRecoveryAction =
   | { kind: 'settle' }
   | { kind: 'files'; method: 'recovery.points' | 'recovery.files.restore' | 'recovery.point.create' | 'recovery.point.release';
-      input: Omit<import('../kernel/protocol.generated.js').KernelFileRecoveryParams, 'workspaceId' | 'rootId'> }
+      input: Omit<import('../kernel/protocol.generated.js').KernelFileRecoveryParams, 'workspaceId' | 'rootId'>;
+      preview?: { path: string; currentOffset?: number; targetOffset?: number }; storage?: boolean }
   | { kind: 'prepare'; entryId: string; navigation: ManagedRecoveryNavigation }
   | { kind: 'prepare_undo'; undoOf: string; navigation: ManagedRecoveryNavigation }
   | { kind: 'apply'; input: WorkspaceCombinedRecoveryApplyInput }

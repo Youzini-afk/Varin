@@ -92,6 +92,13 @@ export type KernelBlobReadSource =
   | { recordId: string; slot: string }
   | { ownerId: string };
 
+export interface KernelFileReadResult {
+  missing: boolean;
+  readVersion?: string;
+  state?: { kind: string };
+  content?: { text?: string; byteLength: number; nextOffset: number; eof: boolean };
+}
+
 export interface KernelCreateBranchInput {
   sourceProvenance?: { objectHash: string; ownerId: string };
   operationId: string;
@@ -148,6 +155,9 @@ export class KernelScopedClient {
 
   fileReadCheck(params: KernelMethodParams["file.read.check"], signal?: AbortSignal): Promise<{ resourceKey: string }> {
     return this.owner.fileReadCheck(params, this.grant, signal);
+  }
+  fileRead(params: KernelMethodParams["file.read"], signal?: AbortSignal): Promise<KernelFileReadResult> {
+    return this.owner.fileRead(params, this.grant, signal);
   }
 
   computeStart(params: KernelMethodParams["compute.start"], signal?: AbortSignal): Promise<KernelComputeReadResult> {
@@ -722,6 +732,9 @@ export class KernelClient {
   }
   async fileReadCheck(params: KernelMethodParams["file.read.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ resourceKey: string }> {
     return this.requestRaw<{ resourceKey: string }>("file.read.check", params, { signal, grant });
+  }
+  async fileRead(params: KernelMethodParams["file.read"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelFileReadResult> {
+    return this.requestRaw<KernelFileReadResult>("file.read", params, { signal, grant });
   }
   setMemoryOwner(owner: MemoryToolOwner): void { this.memoryBridge.setOwner(owner); }
   /** Original domain promises may outlive their cancellation responses and kernel epoch. */

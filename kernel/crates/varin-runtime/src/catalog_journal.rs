@@ -26,6 +26,10 @@ fn is_input(source: HistorySource) -> bool {
     )
 }
 impl Catalog {
+    pub fn capture_recovery_labels(&self, thread: &str, runs: Vec<String>) -> RecoveryLabelsRead {
+        RecoveryLabelsRead { thread:thread.into(), runs, database:self.database_path.clone(), epoch:self.epoch,
+            content:self.content.clone(), _publication:self.content.begin_publication() }
+    }
     pub fn recovery_sources(&self, thread: &str, branch: &str) -> Result<Vec<Value>> {
         if self.branch_thread_id(branch)? != thread { return Err(RuntimeError::Conflict("recovery branch owner differs".into())); }
         let mut query=self.db.prepare("SELECT l.id,json_extract(l.body,'$.selection.source') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source') IS NOT NULL ORDER BY l.rowid DESC")?;
@@ -106,6 +110,38 @@ impl Catalog {
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
         })
+    }
+}
+/// A visible page needs only its original user input, independently of today's head.
+pub struct RecoveryLabelsRead {
+    thread:String,
+    runs:Vec<String>,
+    database:std::path::PathBuf,
+    epoch:u64,
+    content:crate::content::ContentStore,
+    _publication:crate::content::ContentPublication,
+}
+impl RecoveryLabelsRead {
+    pub fn load(self, cancelled:&dyn Fn()->bool)->Result<Value> {
+        let db=history_views::current_history_owner(&self.database,self.epoch)?;
+        let mut labels=serde_json::Map::new();
+        for id in self.runs.into_iter().collect::<std::collections::BTreeSet<_>>() {
+            if cancelled() {return Err(RuntimeError::DispatchCancelled);}
+            let run:Run=record(&db,"runs",&id)?;
+            if run.thread_id!=self.thread {return Err(RuntimeError::Conflict("Recovery title belongs to another Thread".into()));}
+            let raw:Option<String>=db.query_row("SELECT body FROM history WHERE run_id=?1 AND json_extract(body,'$.source')='user' ORDER BY rowid LIMIT 1",[&id],|row|row.get(0)).optional()?;
+            if let Some(raw)=raw {
+                let item:HistoryItem=serde_json::from_str(&raw)?;
+                let (body,_)=self.content.load_history_payload_cancellable(&item.content,cancelled)?;
+                if let Some(text)=body.as_str().or_else(||body["text"].as_str()) {
+                    // Titles are a short display excerpt, not another model-generated summary.
+                    let title=text.split_whitespace().flat_map(|part|part.chars().chain(std::iter::once(' '))).take(160).collect::<String>().trim_end().to_owned();
+                    if !title.is_empty() {labels.insert(id,json!(title));}
+                }
+            }
+        }
+        history_views::current_history_owner(&self.database,self.epoch)?;
+        Ok(Value::Object(labels))
     }
 }
 impl JournalAnchorRead {
