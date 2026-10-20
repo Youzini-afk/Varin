@@ -12,6 +12,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import type { ThreadSummary } from '@varin/protocol';
 import { ThreadSidebarList } from './ThreadSidebarList';
@@ -73,7 +74,8 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
         {disclosure}
         <button className="flex min-w-0 flex-1 items-center gap-2 px-2 py-2 text-left text-sm" aria-current={selected?.threadId === thread.thread_id ? 'page' : undefined}
           onClick={() => void act(() => navigate(thread.thread_id))}>
-          <Icon name={working ? 'loader-4' : thread.pinned ? 'pushpin' : 'chat-4'} className={`size-4 shrink-0 ${working ? 'animate-spin text-primary' : ''}`} />
+          {thread.parent_thread_id && <AgentAvatar identity={thread.thread_id} avatar={thread.avatar} size={20} />}
+          {working || thread.pinned || !thread.parent_thread_id ? <Icon name={working ? 'loader-4' : thread.pinned ? 'pushpin' : 'chat-4'} className={`size-4 shrink-0 ${working ? 'animate-spin text-primary' : ''}`} /> : null}
           <span className="min-w-0 flex-1"><span className="block truncate">{thread.title || t('sessions.sidebar.session.untitled')}</span>
             {projectLabels.length > 0 && <span className="block truncate typography-micro text-muted-foreground">{projectLabels.join(' · ')}</span>}
           </span>

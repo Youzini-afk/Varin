@@ -1,4 +1,10 @@
 export const settingsDict = {
+  "settings.agents.avatar.library": "Avatar library",
+  "settings.agents.avatar.fixed": "Selected avatar",
+  "settings.agents.avatar.automatic": "Automatic assignment",
+  "settings.agents.avatar.description": "Choose a fixed avatar or assign one at random for each new Agent. Existing Agents keep their avatar when reused or renamed.",
+  "settings.agents.avatar.option": "Avatar {number}",
+  "settings.agents.avatar.useAutomatic": "Use automatic assignment",
   "settings.harness.role.contextCompaction": "Context organization",
   "settings.harness.role.contextCompaction.description": "Update summaries and retain original material so the conversation can continue within its context budget.",
   "settings.agents.automatic": "Automatic",

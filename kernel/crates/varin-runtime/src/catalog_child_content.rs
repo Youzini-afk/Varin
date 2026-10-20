@@ -16,6 +16,7 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) avatar: Option<String>,
     pub(super) source_agent: Option<String>,
     pub(super) context: ToolExecutionContext,
     pub(super) input_ref: Value,
@@ -97,6 +98,7 @@ impl ChildAdmissionPreparation {
         launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
         Ok(PreparedChildAdmission {
+            avatar: self.launch.selected_profile.avatar.clone(),
             source_agent:self.input.source_agent.clone(),
             context: self.context,
             input_ref,
@@ -122,6 +124,8 @@ impl ChildAdmissionPreparation {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChildTaskView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub agent_id: String,
     pub name: String,
     pub operation_id: String,
@@ -158,6 +162,7 @@ impl ChildRead {
         let configuration = self.content.load(&child.configuration_ref)?;
         let launch = child.launch.load_child_intent(&self.content)?;
         Ok(ChildTaskView {
+            avatar: child.avatar,
             agent_id: child.agent_id,
             name: child.name,
             operation_id: child.operation_id,

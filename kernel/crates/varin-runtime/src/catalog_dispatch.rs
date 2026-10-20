@@ -132,6 +132,8 @@ pub enum ChildPresetToolsSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub id: String,
     pub name: String,
     pub instructions: String,
@@ -238,6 +240,8 @@ fn validate_names(names: &[String]) -> Result<()> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildSelectedProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub preset_id: Option<String>,
     pub catalog_identity: Option<String>,
     pub work_mode: ChildWorkMode,
@@ -467,7 +471,7 @@ impl ChildDispatchSelection {
     /// are still assembled and checked by their owning tool directory in the kernel.
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
-        let (mut tools, mode, instructions, model) = if let Some(id) = &input.preset {
+        let (mut tools, mode, instructions, model, avatar) = if let Some(id) = &input.preset {
             let preset = self
                 .catalog
                 .presets
@@ -501,6 +505,7 @@ impl ChildDispatchSelection {
                     .model
                     .clone()
                     .unwrap_or_else(|| self.frozen.parent_model.clone()),
+                preset.avatar.clone(),
             )
         } else {
             if let Some(failure) = &self.catalog.normal_unavailable {
@@ -533,7 +538,7 @@ impl ChildDispatchSelection {
                     ChildWorkMode::ReadOnly
                 }
             });
-            (tools, mode, String::new(), self.frozen.parent_model.clone())
+            (tools, mode, String::new(), self.frozen.parent_model.clone(), None)
         };
         if let Some(selected) = &input.tools {
             if selected.iter().any(|name| !tools.contains(name)) {
@@ -615,6 +620,7 @@ impl ChildDispatchSelection {
                 .cloned()
                 .collect(),
             profile: ChildSelectedProfile {
+                avatar,
                 preset_id: input.preset.clone(),
                 catalog_identity: Some(self.catalog.identity.clone()),
                 work_mode: mode,

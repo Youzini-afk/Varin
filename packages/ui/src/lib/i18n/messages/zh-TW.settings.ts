@@ -1,4 +1,10 @@
 export const settingsDict = {
+  "settings.agents.avatar.library": "頭像庫",
+  "settings.agents.avatar.fixed": "指定頭像",
+  "settings.agents.avatar.automatic": "自動分配",
+  "settings.agents.avatar.description": "可選擇固定頭像，或為新 Agent 隨機分配。現有 Agent 重用和改名時保留原頭像。",
+  "settings.agents.avatar.option": "頭像 {number}",
+  "settings.agents.avatar.useAutomatic": "使用自動分配",
   "settings.harness.role.contextCompaction": "上下文整理",
   "settings.harness.role.contextCompaction.description": "更新摘要並選擇保留的對話原文，在上下文預算內保留繼續工作所需的資訊。",
   "settings.agents.automatic": "自動執行",

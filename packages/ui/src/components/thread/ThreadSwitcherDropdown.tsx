@@ -2,6 +2,7 @@ import React from 'react';
 import { useSidebarCatalog, type SidebarConversation as SessionSummary, type ConversationSessionAttentionState } from '../conversation/sidebarCatalog';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,7 +47,7 @@ const SwitcherNode: React.FC<{
       ? <Icon name="error-warning" className="size-3.5 shrink-0 text-[var(--status-error)]" />
       : attention
         ? <Icon name="notification-3" className="size-3.5 shrink-0 text-[var(--status-warning)]" />
-        : <Icon name={depth > 0 ? 'ai-agent' : 'chat-4'} className="size-3.5 shrink-0 text-muted-foreground" />;
+        : session.parentId ? null : <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground" />;
   return (
     <>
       <DropdownMenuItem
@@ -54,7 +55,7 @@ const SwitcherNode: React.FC<{
         className={cn('min-w-0 gap-2', currentSessionId === session.id && 'bg-interactive-active')}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
       >
-        {icon}
+        {session.parentId && <AgentAvatar identity={session.id} avatar={session.avatar} size={20} />}{icon}
         <span className="min-w-0 flex-1">
           <span className="block truncate typography-ui-label text-foreground">
             {conversationSessionTitle(session, untitled)}

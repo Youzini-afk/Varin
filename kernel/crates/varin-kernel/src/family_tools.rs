@@ -319,7 +319,10 @@ impl ToolExecutor for FamilyTools {
                 Arguments::List(args) => {
                     let current = self.catalog.lock().map_err(error)?.run(&context.run_id).map_err(error)?;
                     let mut options=args.query_options; options.limit=options.limit.or(Some(20));
-                    let mut page = serde_json::to_value(read.list_page(args.include_self, options, &cancelled).map_err(error)?).map_err(error)?;
+                    let mut family = read.list_page(args.include_self, options, &cancelled).map_err(error)?;
+                    // Avatars belong to UI projections, not the model's working directory.
+                    for member in &mut family.members { member.avatar = None; }
+                    let mut page = serde_json::to_value(family).map_err(error)?;
                     let mut identity=self.catalog.lock().map_err(error)?.agent_identity(&current.thread_id).map_err(error)?;
                     identity["branchId"]=json!(current.branch_id); identity["runId"]=json!(current.id);
                     page["current"]=identity;

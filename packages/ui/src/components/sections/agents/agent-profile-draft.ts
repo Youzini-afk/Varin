@@ -1,7 +1,8 @@
 import type { AgentProfileConfig, AgentProfileView, AgentRuntime, AgentProfileSaveRequest } from '@varin/application-client';
-import type { ThinkingLevel, WorkFocusId } from '@varin/protocol';
+import type { AgentAvatarId, ThinkingLevel, WorkFocusId } from '@varin/protocol';
 
 export interface AgentProfileDraft {
+  avatar: AgentAvatarId | '';
   name: string;
   description: string;
   instructions: string;
@@ -21,6 +22,7 @@ export const agentProfileDrafts = new Map<string, RetainedAgentProfileDraft>();
 export function makeAgentProfileDraft(profile?: AgentProfileView, newTools: readonly string[] = []): AgentProfileDraft {
   const effective = profile?.effective;
   return {
+    avatar: effective?.avatar ?? '',
     name: effective?.name ?? '', description: effective?.description ?? '', instructions: effective?.instructions ?? '',
     enabled: effective?.enabled ?? true,
     providerId: effective?.model?.providerId ?? '', modelId: effective?.model?.modelId ?? '',
@@ -42,6 +44,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
   if (profile?.config.kind === 'builtin') {
     const defaults = profile.defaults ? { ...profile.defaults, ...defaultLabels } : null;
     const overrides = {
+      ...(draft.avatar ? { avatar: draft.avatar } : {}),
       ...(draft.name.trim() === defaults?.name ? {} : { name: draft.name.trim() }),
       ...(draft.description === defaults?.description ? {} : { description: draft.description }),
       ...(draft.instructions === defaults?.instructions ? {} : { instructions: draft.instructions }),
@@ -54,6 +57,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
   } else {
     config = { kind: 'custom', key: profile?.config.kind === 'custom' ? profile.config.key : '', agent: {
       name: draft.name.trim(), description: draft.description, instructions: draft.instructions, enabled: draft.enabled,
+      ...(draft.avatar ? { avatar: draft.avatar } : {}),
       ...(model ? { model } : {}), ...(Object.keys(modelSettings).length ? { modelSettings } : {}),
       worktree: draft.worktree, workFocus: draft.workFocus,
     } };

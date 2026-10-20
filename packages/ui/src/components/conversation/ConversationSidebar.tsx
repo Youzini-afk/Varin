@@ -3,6 +3,7 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { useSidebarCatalog, type SidebarConversation as SessionSummary, type ConversationSessionAttentionState } from './sidebarCatalog';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -310,6 +311,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           <span className="size-5 shrink-0" />
         )}
 
+        {session.parentId && <AgentAvatar identity={session.id} avatar={session.avatar} size={20} />}
         {isBusy ? (
           <span
             className="mx-[3px] size-2 shrink-0 rounded-full bg-primary"
@@ -324,9 +326,9 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           </span>
         ) : pinned ? (
           <Icon name="pushpin" className="size-3.5 shrink-0 text-primary" />
-        ) : (
+        ) : !session.parentId ? (
           <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground/70" />
-        )}
+        ) : null}
 
         {props.editingId === session.id ? (
           <Input

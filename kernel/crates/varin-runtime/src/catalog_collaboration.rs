@@ -250,6 +250,8 @@ pub struct ChildReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildTask {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub agent_id: String,
     pub name: String,
     pub execution_id: String,
@@ -474,6 +476,10 @@ impl Catalog {
         )?;
         let mut child =
             ChildTask {
+                avatar: Some(prepared.avatar.unwrap_or_else(|| {
+                    let index = (Uuid::new_v4().as_u128() % crate::AGENT_AVATAR_IDS.len() as u128) as usize;
+                    crate::AGENT_AVATAR_IDS[index].to_owned()
+                })),
                 agent_id: tx.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child_thread_id],|r|r.get(0))?,
                 name: prepared.title.clone().unwrap_or_else(|| "Agent".into()),
                 execution_id: op.id.clone(),

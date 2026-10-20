@@ -34,6 +34,7 @@ export interface AgentProfileView {
   kind: 'builtin' | 'custom';
   config: AgentProfileConfig;
   effective: {
+    avatar?: import('@varin/protocol').AgentAvatarId;
     name: string;
     description: string;
     instructions: string;

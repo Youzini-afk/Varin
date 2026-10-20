@@ -14,6 +14,7 @@ export * from "./harness-computer.js";
 export * from "./harness-model-slots.js";
 export * from "./harness-presets.js";
 export * from "./harness-agents.js";
+export * from './agent-avatars.js';
 export * from "./harness-experiments.js";
 export * from "./harness-settings-service.js";
 export * from "./harness-web.js";

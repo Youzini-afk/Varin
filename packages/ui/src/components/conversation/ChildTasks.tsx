@@ -2,6 +2,7 @@ import React from 'react';
 import type { ChildTask, DelegatedExecution } from '@varin/protocol';
 import type { ThreadIdentity, ThreadsAPI, ThreadSnapshot } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Button } from '@/components/ui/button';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadChildReport } from '../thread/ThreadChildReport';
@@ -72,7 +73,7 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
       hidden={!active.some(row=>row.child.operation_id===child.operation_id)&&!showEnded&&!opened.has(child.operation_id)}
       onToggle={event=>{const open=event.currentTarget.open;setOpened(previous=>{if(previous.has(child.operation_id)===open)return previous;const next=new Set(previous);if(open)next.add(child.operation_id);else next.delete(child.operation_id);return next;});}}>
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 hover:bg-interactive-hover [&::-webkit-details-marker]:hidden">
-        <Icon name="chat-3" className="size-3.5 shrink-0 text-muted-foreground" />
+        <AgentAvatar identity={child.child_thread_id} avatar={child.avatar} size={22} />
         <span className="min-w-0 flex-1 truncate typography-meta font-medium" title={task}>{child.name || child.input.name || task}</span>
         {child.agent_id && <span className="font-mono typography-micro text-muted-foreground">{child.agent_id}</span>}
         <ChildState state={latest?.cancel_requested && !childEnded(state) ? 'stopping' : state} />

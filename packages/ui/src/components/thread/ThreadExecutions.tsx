@@ -6,6 +6,7 @@ import { ThreadIntegrationPanel } from './ThreadIntegrationPanel';
 import { ChildFileResult, ChildState } from '../conversation/childPresentation';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 
 const triggers: Record<DelegatedExecution['trigger']['kind'], I18nKey> = {
   dispatch: 'chat.children.trigger.dispatch', user_continuation: 'chat.children.trigger.user',
@@ -19,7 +20,7 @@ export function ThreadExecutions({ api, identity, executions }: { api: ThreadsAP
   return <div className="space-y-2">
     {executions.map((execution, index) => <details key={execution.execution_id} className="rounded-lg border border-border/50 px-3 py-2 typography-meta">
       <summary className="flex cursor-pointer items-center justify-between gap-2">
-        <span>{execution.name || t(triggers[execution.trigger.kind])} · {index + 1}
+        <span className="flex min-w-0 items-center gap-2"><AgentAvatar identity={execution.child_thread_id} avatar={execution.avatar} size={20} />{execution.name || t(triggers[execution.trigger.kind])} · {index + 1}
           {execution.agent_id && <span className="ml-2 font-mono text-muted-foreground">{execution.agent_id}</span>}</span><ChildState state={execution.state} />
       </summary>
       <div className="mt-2 space-y-2">

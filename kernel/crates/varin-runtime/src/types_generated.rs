@@ -256,6 +256,8 @@ pub enum McpResourceFactKind {
     Gap,
 }
 
+pub const AGENT_AVATAR_IDS: &[&str] = &["slope-lilac", "dome-ivory", "taper-sage", "pebble-blue", "overlap-coral", "notch-ochre", "slant-mint", "round-lilac", "tile-blue", "fold-sage", "cap-coral", "wave-ivory"];
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunFailure {

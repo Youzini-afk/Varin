@@ -16,6 +16,7 @@ import { ModelSelector } from './ModelSelector';
 import { agentProfileLabels, agentProfileDefaultLabels } from './agent-profile-presentation';
 import { agentProfileDrafts, agentProfileSaveRequest, makeAgentProfileDraft, type AgentProfileDraft } from './agent-profile-draft';
 import { ContextAgentDetails } from './ContextAgentDetails';
+import { AgentAvatarPicker } from './AgentAvatarPicker';
 
 interface Props {
   profile?: AgentProfileView;
@@ -90,6 +91,8 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
   return <form onSubmit={event => { void save(event); }} data-agent-editor="profile" data-runtime={snapshot.runtime}>
     <SettingsSection settingsItem="agents.catalog" contentClassName="space-y-5" info={t('settings.agents.applies')}>
       <p className="typography-meta text-muted-foreground">{t(profile?.automation ? 'settings.agents.context.applies' : 'settings.agents.sharedFields')}</p>
+      <SettingsStackedField label={t('settings.agents.avatar.library')}><AgentAvatarPicker identity={profile?.id ?? 'new-agent'}
+        value={draft.avatar} disabled={busy} onChange={avatar => update({ avatar })} /></SettingsStackedField>
       <div className="flex items-center justify-between gap-3"><label htmlFor="agent-enabled" className="typography-ui-label">{t(profile?.automation ? 'settings.agents.context.enabled' : 'settings.agents.enabled')}</label>
         <Switch id="agent-enabled" checked={draft.enabled} disabled={busy} onCheckedChange={enabled => update({ enabled })} /></div>
       <SettingsStackedField label={t('settings.agents.name')}><Input aria-label={t('settings.agents.name')} required value={draft.name} disabled={busy} onChange={event => update({ name: event.target.value })} /></SettingsStackedField>
@@ -132,7 +135,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
     {validationError && <p role="alert" className="mb-4 typography-meta text-destructive">{validationError}</p>}
     {dirty && revision !== snapshot.revision && <p role="status" className="mb-3 typography-meta text-[var(--status-warning)]">{t('settings.agents.changedElsewhere')}</p>}
     <SettingsActionBar dirty={dirty || !profile} saving={busy} onSave={() => save()} onCancel={() => { discard(); onCancel?.(); }} saveDisabled={!draft.name.trim()} saveLabel={t('settings.common.actions.saveChanges')} error={validationError}>
-      {builtin && profile.defaults && <Button type="button" variant="ghost" disabled={busy} onClick={() => update({ ...profile.defaults!, ...agentProfileDefaultLabels(profile, t), tools: profile.defaults!.tools.join(', '), toolsChange: 'reset', temperature: '', thinkingLevel: 'inherit' })}>{t('settings.common.actions.reset')}</Button>}
+      {builtin && profile.defaults && <Button type="button" variant="ghost" disabled={busy} onClick={() => update({ ...profile.defaults!, ...agentProfileDefaultLabels(profile, t), avatar: '', tools: profile.defaults!.tools.join(', '), toolsChange: 'reset', temperature: '', thinkingLevel: 'inherit' })}>{t('settings.common.actions.reset')}</Button>}
     </SettingsActionBar>
   </form>;
 }

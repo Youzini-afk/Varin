@@ -259,6 +259,7 @@ export type ChatSessionEntry =
 
 
 export interface ChatToolExecutionState {
+  agent?: { threadId: string; avatar?: string };
   parentToolCallId?: string;
   args: JsonValue;
   isError?: boolean;

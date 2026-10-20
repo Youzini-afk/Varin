@@ -9,6 +9,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildRelation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub operation_id: String,
     pub parent_run_id: String,
     pub parent_thread_id: String,
@@ -168,6 +170,7 @@ pub(super) fn execution_task(db: &Connection, id: &str) -> Result<ChildTask> {
     let execution = execution(db, id)?;
     let child = relation(db, &execution.child_operation_id)?;
     Ok(ChildTask {
+        avatar: child.avatar,
         agent_id: db.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
         name: db.query_row("SELECT title FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
         execution_id: execution.execution_id.clone(),
@@ -224,6 +227,7 @@ pub(super) fn write_child_task(db: &Connection, child: &ChildTask) -> Result<()>
 }
 pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
     let relation = ChildRelation {
+        avatar: child.avatar.clone(),
         operation_id: child.operation_id.clone(),
         parent_run_id: child.parent_run_id.clone(),
         parent_thread_id: child.parent_thread_id.clone(),
@@ -278,6 +282,8 @@ fn insert_execution(
 
 #[derive(Debug, Clone, Serialize)]
 pub struct DelegatedExecutionView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub name: String,
     pub agent_id: String,
     pub execution_id: String,
@@ -338,6 +344,7 @@ impl DelegatedExecutionRead {
             })
             .transpose()?;
         Ok(DelegatedExecutionView {
+            avatar: child.avatar,
             name: execution.name.clone(),
             agent_id: self.agent_id,
             execution_id: execution.execution_id.clone(),

@@ -43,6 +43,7 @@ export function agentPresetTools(capabilities: readonly { name: string; default_
 export type PresetWorktree = "isolated" | "none";
 
 export interface ExecutionPreset {
+  avatar?: import('./agent-runtime.generated.js').AgentAvatarId;
   id: string;
   slot?: HarnessModelRole;
   tools: string[];
@@ -122,6 +123,7 @@ export function observePresets(
         : focus && agent.workFocus.length && !agent.workFocus.includes(focus) ? "scope_unavailable"
           : model ? "available" : "unconfigured",
       definition: { id, tools: tools.names, worktree: agent.worktree,
+        ...(agent.avatar ? { avatar: agent.avatar } : {}),
         systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
         name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });
   }

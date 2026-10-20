@@ -30,7 +30,7 @@ const agent = (overrides: Record<string, unknown> = {}) => ({ name: 'Configured 
 it('compiles original configured profiles without losing unavailable choices, scope or inheritance provenance', async () => {
   const f = await fixture();
   const settings = { harness: { models: { worker: { enabled: false } }, agents: {
-    reader: agent(), selected: agent({ model: { providerId: 'provider', modelId: 'model' } }),
+    reader: agent({ avatar: 'dome-ivory' }), selected: agent({ model: { providerId: 'provider', modelId: 'model' } }),
     off: agent({ enabled: false }), research: agent({ workFocus: ['research'] }),
     unsupported: agent({ tools: ['file_read', 'computer'] }), physical: agent({ tools: ['process_spawn'] }),
     process: agent({ tools: ['file_read', 'process_spawn'], worktree: 'isolated' }),
@@ -40,7 +40,7 @@ it('compiles original configured profiles without losing unavailable choices, sc
   const profile = (id: string) => frozen.presets.find(value => value.id === `custom:${id}`)!;
   expect(frozen.normal_unavailable).toBeNull();
   expect(frozen.presets.find(preset=>preset.id==='verifier')).toMatchObject({unavailable:null,model_source:'inherit',work_mode:'isolated_write',tools:['file_read','file_write','process_spawn','ask_user']});
-  expect(profile('reader')).toMatchObject({ model_source: 'inherit', model: null, unavailable: null, tools: ['file_read'] });
+  expect(profile('reader')).toMatchObject({ model_source: 'inherit', model: null, unavailable: null, tools: ['file_read'], avatar: 'dome-ivory' });
   expect(profile('selected')).toMatchObject({ model_source: 'selected', model: { configuration: { model: 'model' } }, unavailable: null });
   expect(profile('off').unavailable?.code).toBe('child-profile-disabled');
   expect(profile('research').unavailable?.code).toBe('child-profile-scope_unavailable');
@@ -109,10 +109,10 @@ it('prepares defaults and explicitly saved runtime profiles from the original se
     expect(retrieval.config.kind).toBe('builtin');
     if (retrieval.config.kind !== 'builtin') throw new Error('fixture profile');
     view = (await profiles.save({ runtime: 'agent', expectedRevision: view.revision, id: retrieval.id,
-      config: { ...retrieval.config, binding: { providerId: 'provider', modelId: 'model' } } })).snapshot;
+      config: { ...retrieval.config, binding: { providerId: 'provider', modelId: 'model', agent: { avatar: 'slope-lilac' } } } })).snapshot;
     const frozen = await prepare({ parent: f.parent });
     expect(frozen.presets.find(p => p.id === 'worker')?.tools).toEqual(['file_read', 'file_write', 'process_spawn', 'ask_user']);
-    expect(frozen.presets.find(p => p.id === 'retrieval')).toMatchObject({ tools: ['file_read'], unavailable: null });
+    expect(frozen.presets.find(p => p.id === 'retrieval')).toMatchObject({ tools: ['file_read'], unavailable: null, avatar: 'slope-lilac' });
     expect(frozen.presets.find(p => p.id === 'custom:custom')?.tools).toEqual(['extension_read']);
     expect(frozen.presets.find(p => p.id === 'custom:native')?.tools).toEqual(['file_read']);
     const custom = view.profiles.find(profile => profile.id === 'varin:custom:custom')!;

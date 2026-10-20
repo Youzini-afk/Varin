@@ -67,6 +67,7 @@ export class HistoryPresentation {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};
     const calls = new Map<string, { id: string; name: string }>();
+    const children = new Map(snapshot?.children?.map(child => [child.operation_id, child]));
     const live = new Map(progress.map(item => [item.operationId, item]));
     const completed = new Map<string, Record<string, unknown>>(history.flatMap(item => {
       const result = object(object(item.content).content).result;
@@ -98,6 +99,11 @@ export class HistoryPresentation {
             status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown' };
           if (update?.runId === item.run_id) toolExecutions[id]!.partialResult = json({ details: update.details });
         }
+        const child = children.get(operationId);
+        if (child) {
+          toolExecutions[id] ??= { toolCallId: id, name: String(call.name), args: json(call.arguments), status: receipt ? outcomeStatus(receipt.outcome) : 'background' };
+          toolExecutions[id]!.agent = { threadId: child.child_thread_id, ...(child.avatar ? { avatar: child.avatar } : {}) };
+        }
       }
       let entry = this.entries.get(item.id);
       if (!entry) {
@@ -106,7 +112,9 @@ export class HistoryPresentation {
           const text = typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '';
           entry = { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
         } else if (item.source !== 'assistant' && (content.kind === 'text' || content.kind === 'reasoning_summary')) {
-          entry = { ...base, type: 'custom_message', customType: item.source === 'agent' ? 'thread-message' : item.source, display: true, content: String(content.text ?? '') };
+          const sender = object(envelope.provenance).thread_id;
+          entry = { ...base, type: 'custom_message', customType: item.source === 'agent' ? 'thread-message' : item.source, display: true, content: String(content.text ?? ''),
+            ...(item.source === 'agent' && typeof sender === 'string' ? { details: { senderThreadId: sender } } : {}) };
         } else if (content.kind === 'text' || content.kind === 'reasoning_summary') {
           const text = String(content.text ?? '');
           entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text }], configuration) };

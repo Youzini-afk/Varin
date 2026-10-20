@@ -397,11 +397,12 @@ pub(super) fn inspect(db: &Connection, thread_id: &str) -> Result<Value> {
         .clone();
     summary["thread_id"] = json!(thread_id);
     summary["agent_code"] = json!(db.query_row("SELECT agent_code FROM threads WHERE id=?1", [thread_id], |r| r.get::<_,String>(0))?);
-    let parent_thread_id: Option<String> = db.query_row(
-        "SELECT json_extract(body,'$.parent_thread_id') FROM child_tasks WHERE child_thread_id=?1",
-        [thread_id], |row| row.get(0),
+    let child: Option<(String, Option<String>)> = db.query_row(
+        "SELECT json_extract(body,'$.parent_thread_id'), json_extract(body,'$.avatar') FROM child_tasks WHERE child_thread_id=?1",
+        [thread_id], |row| Ok((row.get(0)?, row.get(1)?)),
     ).optional()?;
-    summary["parent_thread_id"] = json!(parent_thread_id);
+    summary["parent_thread_id"] = json!(child.as_ref().map(|(parent, _)| parent));
+    if let Some((_, Some(avatar))) = child { summary["avatar"] = json!(avatar); }
     summary["bot_id"] = json!(bot::thread_bot(db, thread_id)?);
     summary["branches"] = json!(branches);
     summary["observer_project_ids"] = json!(observer_project_ids);

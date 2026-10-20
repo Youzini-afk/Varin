@@ -146,6 +146,13 @@ resubmit an entire old document. Same-owner and cross-owner results retain their
 Host changes retire old reads and drafts; omitted tools, empty selection, and reset are distinct.
 Accepted Runs are not rewritten by editing a default. Functional models stay with their owning settings domains.
 
+Agent avatars share one role-independent library: `components/ui/agent-avatar-art.ts` owns the SVG paths
+and `AgentAvatar` renders them at every size. Stable IDs come from the protocol registry. Native dispatch
+persists a random choice on the child relation, or uses the profile's fixed choice; reuse and rename retain it.
+The profile picker controls future dispatches. Legacy identities use the frozen identity-based palette in
+`@varin/protocol`, so expanding the library does not change their appearance. Existing status indicators remain
+separate from avatars; displaying a message does not fetch an extra profile or image.
+
 Provider editing separates connection configuration, model discovery, and authentication. Discovery
 and login have different interaction identities and cancellation. Saving a configuration is not
 successful login. Credentials stay in their native owner, never renderer settings. See

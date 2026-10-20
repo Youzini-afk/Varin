@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { agentProfileLabels } from './agent-profile-presentation';
 import { AgentProfileEditor } from './AgentProfileEditor';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { useAgentProfiles } from './useAgentProfiles';
 import { cancelAgentProfileCreation, removeAgentProfile, saveAgentProfile } from './agent-profiles-store';
 
@@ -22,7 +23,7 @@ function AgentProfilesDetails({ api, host, state, snapshot, refresh }: ReturnTyp
   return <>
     <SettingsPageLayout title={profile ? agentProfileLabels(profile, t).name : t(state.creating ? 'settings.varin.agents.definition.createAgent' : 'settings.page.agents.title')}
       description={profile ? agentProfileLabels(profile, t).description : undefined} showSaveStatus
-      titleAccessory={profile ? <span className="typography-micro text-muted-foreground">{t(profile.kind === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')}</span> : undefined}
+      titleAccessory={profile ? <span className="flex items-center gap-2 typography-micro text-muted-foreground"><AgentAvatar identity={profile.id} avatar={profile.effective.avatar} size={28} />{t(profile.kind === 'builtin' ? 'settings.agents.builtin' : 'settings.agents.custom')}</span> : undefined}
       headerEnd={<div className="flex gap-2"><Button type="button" variant="ghost" size="sm" disabled={state.loading || state.saving} onClick={() => { void refresh(true); }}>{t('settings.varin.agents.actions.refresh')}</Button>
         {profile?.kind === 'custom' && snapshot && <Button variant="ghost" size="icon" disabled={state.saving} aria-label={t('settings.common.actions.delete')} onClick={() => setDeleting({ id: profile.id, name: profile.effective.name, revision: snapshot.revision })}><Icon name="delete-bin" className="size-4" /></Button>}</div>}>
       {!api && <p role="alert" className="mb-4 typography-meta text-destructive">{t('settings.agents.apiUnavailable')}</p>}

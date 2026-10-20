@@ -448,6 +448,8 @@ fn isolated_continuation_uses_exact_published_root_without_rewriting_unknown_eff
 fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_fact() {
     let mut f=Fixture::new_isolated();
     let initial=first(&mut f);
+    let avatar=initial.avatar.clone().expect("new child has a persisted avatar");
+    assert!(varin_runtime::AGENT_AVATAR_IDS.contains(&avatar.as_str()));
     let identity=f.db.agent_identity(&initial.child_thread_id).unwrap();
     finish(&mut f.db,&initial,Some("first stage"));
     let prior=result(&mut f.db,&initial,Effect::Confirmed);
@@ -471,6 +473,7 @@ fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_
     let prepared=f.db.prepare_child_source(&next.execution_id,ChildSourcePin {pin_id:format!("child-source-pin:{}",next.execution_id),root,source:fixed},source.clone(),provenance).unwrap().load().unwrap();
     f.db.attach_child_source(prepared).unwrap();
     let continued=prepare(&mut f.db,&next,source);
+    assert_eq!(continued.avatar.as_deref(),Some(avatar.as_str()));
     let history=f.db.history(&continued.child_branch_id).unwrap();
     assert_eq!(history.last().unwrap().source,HistorySource::Environment);
     assert!(history.last().unwrap().content.to_string().contains("incoming-fixed-stage"));
@@ -478,8 +481,11 @@ fn reused_agent_keeps_identity_and_round_name_and_receives_its_refreshed_source_
     let root=f.root.clone(); drop(f.db);
     let db=Catalog::open(&root).unwrap();
     assert_eq!(db.agent_identity(&code).unwrap()["name"],"阶段返工");
+    let execution=db.delegated_execution(&initial.execution_id).unwrap();
+    assert_eq!(db.capture_delegated_execution(execution).unwrap().load().unwrap().avatar.as_deref(),Some(avatar.as_str()));
     let mut members=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,Default::default(),&||false).unwrap().members;
     let member=members.remove(0);
+    assert_eq!(member.avatar.as_deref(),Some(avatar.as_str()));
     assert_eq!(member.agent_id,code);assert_eq!(member.task.as_deref(),Some("Continue on the integrated stage"));
     let files=db.capture_family_read(&initial.parent_thread_id,None,None).unwrap().list_page(false,
         varin_runtime::catalog::family::FamilyListQuery {scope:Some("all".into()),file_path:Some("src/feature.ts".into()),..Default::default()},&||false).unwrap();

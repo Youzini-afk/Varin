@@ -619,6 +619,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         identity: "original-settings-selection".into(),
         normal_unavailable: None,
         presets: vec![ChildPreset {
+            avatar: None,
             tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
             id: "writer".into(),
             name: "Writer".into(),

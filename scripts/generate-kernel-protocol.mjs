@@ -27,7 +27,9 @@ const taggedUnions = Object.entries(schema.dto ?? {}).filter(([, spec]) => spec.
 const pascal = value => value.split('_').map(part => part[0].toUpperCase() + part.slice(1)).join('');
 const rustField = field => field.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 const runtimeTaggedUnions = taggedUnions.map(([name, spec]) => `#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]\npub enum ${name} {\n${Object.entries(spec.taggedUnion).map(([kind, fields]) => `    ${pascal(kind)}${Object.keys(fields).length ? ` { ${Object.entries(fields).map(([field, type]) => `${rustField(field) !== field ? `#[serde(rename = ${JSON.stringify(field)})] ` : ''}${rustField(field)}: ${type === 'string' ? 'String' : type}`).join(', ')} }` : ''},`).join('\n')}\n}\n`).join('\n');
-const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + structs + '\n' + runtimeTaggedUnions;
+const avatarTypes = 'export const AGENT_AVATAR_IDS = ' + JSON.stringify(schema.agentAvatars) + ' as const;\nexport type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];\n\n';
+const avatarRust = 'pub const AGENT_AVATAR_IDS: &[&str] = &[' + schema.agentAvatars.map(id => JSON.stringify(id)).join(', ') + '];\n\n';
+const runtimeTypesGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nuse serde::{Deserialize, Serialize};\n\n' + Object.entries(schema.runtimeEnums ?? {}).map(([name, variants]) => `#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]\n#[serde(rename_all = "snake_case")]\npub enum ${name} {\n${variants.map(v => `    ${v},`).join('\n')}\n}\n`).join('\n') + '\n' + avatarRust + structs + '\n' + runtimeTaggedUnions;
 const checkOnly = process.argv.includes('--check');
 const methods = Object.keys(schema.methods).map((method) => `  | ${JSON.stringify(method)}`).join('\n');
 const methodParams = schema.methodParams ?? {};
@@ -56,7 +58,7 @@ const extensionToolsGenerated = '// Generated from kernel/protocol/schema.json. 
   + extensionToolNames.map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
 const extensionModelsGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\nimport type { Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from \'./nested-tools.generated.js\';\n\n'
   + ["HistoryRange", "ModelOpaqueItem", "ModelToolCall", "ModelToolCompletion", "ModelContent", "ModelConversationItem", "RequestBinding", "RequestOrigin", "RequestView", "ModelUsageReceipt", "ProviderEvent", "FinishReason", "ModelProtocolCall", "ModelProtocolResult", "ModelSessionConfiguration", "TokenizerBinding", "ModelHttpConfiguration", "ResourceActivation", "AgentResourceReference"].map(name => renderDto(name, schema.dto[name])).join('\n\n') + '\n';
-const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
+const protocolGenerated = '// Generated from kernel/protocol/schema.json. Do not hand-edit.\n\n' + avatarTypes + dtoEntries.filter(([name]) => (schema.runtimeExports ?? []).includes(name)).map(([name, spec]) => renderDto(name, spec)).join('\n\n') + '\n';
 const generated = `/**
  * Generated from \`kernel/protocol/schema.json\`.
  * Do not hand-edit the wire shapes; run \`node scripts/generate-kernel-protocol.mjs\`.
@@ -75,6 +77,7 @@ export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v${schema.protocolVersion}" 
 export type KernelMethod =
 ${methods};
 
+${avatarTypes}
 ${dtoEntries.map(([name, spec]) => renderDto(name, spec)).join('\n\n')}
 
 export type McpBuiltinOperation = ${schema.mcpCapabilities.map(value => JSON.stringify(value.operation)).join(" | ")};

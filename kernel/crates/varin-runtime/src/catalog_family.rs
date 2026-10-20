@@ -137,6 +137,8 @@ pub struct FamilyBranch {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FamilyMember {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar: Option<String>,
     pub source: Option<launches::SourceSelection>,
     pub source_run_id: Option<String>,
     pub operation_id: Option<String>,
@@ -707,6 +709,7 @@ impl FamilyRead {
                 selected.filter(|l|l.selection.source.is_some()).map(|_|dispatch::agent_file_source(db,&run)).transpose()
             }).transpose()?.flatten();
             members.push(FamilyMember {
+                avatar: child.as_ref().and_then(|child| child.avatar.clone()),
                 source,source_run_id,
                 operation_id:child.as_ref().map(|c|c.operation_id.clone()),latest_execution_id,
                 agent_id: db.query_row("SELECT agent_code FROM threads WHERE id=?1",[&thread],|r|r.get(0))?,

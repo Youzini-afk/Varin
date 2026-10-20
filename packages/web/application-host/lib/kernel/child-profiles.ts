@@ -59,6 +59,7 @@ export function createChildProfilePreparer(owners: {
         ? resolveAgentTools(settings.models[definition.slot]?.agent?.tools, 'agent', definition.tools).source
         : 'explicit';
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,
+        ...(definition.avatar ? { avatar: definition.avatar } : {}),
         tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : 'read_only',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }

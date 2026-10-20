@@ -8,6 +8,7 @@ import { historyParts } from '@/lib/agent-runtime/thread-content';
 import { ThreadContent } from './ThreadContent';
 import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
 import { ChildState } from '../conversation/childPresentation';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 
 type Props = { api: ThreadFamilyAPI; mediaRead: ThreadsAPI['mediaRead']; identity: ThreadIdentity; observe?:ThreadsAPI['observe'] };
 /** A follow-up's actual bound Run uses the same read-only history and original-record reader. */
@@ -65,7 +66,7 @@ function FamilyMembers({ api, mediaRead, identity, host, observe }: Props & { ho
     {error ? <p role="alert">{t('chat.family.failed')}</p> : !family ? <p role="status">{t('common.loading')}</p> : <>
       {family.members.length === 0 && <p>{t('chat.family.empty')}</p>}
       <ul className="space-y-1">{family.members.map(member => <li key={member.threadId}>
-        <Button variant="ghost" size="sm" className="max-w-full truncate" aria-pressed={selected?.threadId === member.threadId} onClick={() => setSelected(member)}>{member.name || member.task || t('chat.family.untitled')}</Button>
+        <Button variant="ghost" size="sm" className="max-w-full gap-2 truncate" aria-pressed={selected?.threadId === member.threadId} onClick={() => setSelected(member)}><AgentAvatar identity={member.threadId} avatar={member.avatar} size={20} />{member.name || member.task || t('chat.family.untitled')}</Button>
         {member.agentId && <button className="font-mono text-muted-foreground" title={member.agentId} onClick={()=>void navigator.clipboard.writeText(member.agentId!)}>{member.agentId}</button>}
         <ChildState state={member.state} />
       </li>)}</ul>

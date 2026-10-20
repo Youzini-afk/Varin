@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatToolCall, ChatToolResultMessage } from './types';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useI18n } from '@/lib/i18n';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -10,13 +11,13 @@ export function ChatThreadMessageCard({ call, result, failed }: { call: ChatTool
   const [open, setOpen] = React.useState(false);
   const args = call.arguments && typeof call.arguments === 'object' && !Array.isArray(call.arguments) ? call.arguments : {};
   const targetId = typeof args.targetThreadId === 'string' ? args.targetThreadId : undefined;
-  const target = useThreadStore(state => state.threads.find(thread => thread.thread_id === targetId));
+  const target = useThreadStore(state => targetId ? state.threads.find(thread => thread.thread_id === targetId || thread.agent_code === targetId.toUpperCase()) : undefined);
   const text = typeof args.text === 'string' ? args.text : '';
   return <details open={open} onToggle={event => { if (event.target === event.currentTarget) setOpen(event.currentTarget.open); }} className="group/message my-1 rounded-lg border border-border/60">
     <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 typography-meta [&::-webkit-details-marker]:hidden">
       <Icon name={!result && !failed ? 'loader-4' : 'chat-1'} className={!result && !failed ? 'size-3.5 animate-spin text-muted-foreground' : 'size-3.5 text-muted-foreground'} />
       <span className="shrink-0">{t(args.replyTo ? 'harness.messages.reply' : 'harness.messages.send')}</span>
-      {targetId && <span className="min-w-0 max-w-40 truncate">→ {target?.title ?? targetId}</span>}
+      {targetId && <span className="flex min-w-0 max-w-40 items-center gap-1.5">→ {target && <AgentAvatar identity={target.thread_id} avatar={target.avatar} size={20} />}<span className="truncate">{target?.title ?? targetId}</span></span>}
       <span className="min-w-0 flex-1 truncate text-muted-foreground">{text}</span>
       <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground" />
     </summary>

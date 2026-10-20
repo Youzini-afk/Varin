@@ -1,5 +1,8 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory"] as const;
+export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
+
 export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:"direct"}|{mode:"proxy";url:string} }
 
 export interface FileObservationAuthority {coordinatorHostId:string;authorityId:string;resourceEpoch:string;}
@@ -1443,9 +1446,10 @@ export interface ThreadSummary {
   thread_id: string;
   branches: ThreadBranch[];
   observer_project_ids: Array<string | null>;
+  avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 52; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 53; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2604,6 +2608,7 @@ export interface ChildPreset {
   unavailable: ChildCapabilityFailure | null;
   model_source: 'inherit' | 'selected';
   inherit_base: ChildModelBinding | null;
+  avatar?: string;
 }
 
 export interface ChildDispatchCatalog {
@@ -2619,6 +2624,7 @@ export interface ChildSelectedProfile {
   work_mode: ChildWorkMode;
   tools: string[];
   instructions: string;
+  avatar?: string;
 }
 
 export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };
@@ -2701,6 +2707,7 @@ export interface ChildTask {
   source: ChildSource;
   code_result: ChildCodeResult;
   selected_profile: ChildSelectedProfile;
+  avatar?: string;
 }
 
 export interface ChildContinuationAcceptParams {
@@ -2762,6 +2769,7 @@ export interface DelegatedExecution {
   terminal_head: string | null;
   resources_released: boolean;
   cancel_requested: boolean;
+  avatar?: string;
 }
 
 export interface ChildWait {
@@ -2856,6 +2864,7 @@ export interface FamilyMember {
   task: string | null;
   state: string;
   branches: FamilyBranch[];
+  avatar?: string;
 }
 
 export interface FamilyList {

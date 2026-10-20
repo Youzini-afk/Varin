@@ -5,6 +5,7 @@ import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard
 import type { JsonValue } from '@varin/protocol';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry, ChatThinkingContent, ChatToolCall, ChatToolResultMessage, ChatUserContent, ChatUserMessage } from './types';
 import { Icon } from '@/components/icon/Icon';
+import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
@@ -382,6 +383,7 @@ const ChatToolCard: React.FC<{
       )}
     >
       <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
+        {execution?.agent && <AgentAvatar identity={execution.agent.threadId} avatar={execution.agent.avatar} size={20} />}
         <Icon
           name={fileChanges.length ? 'code-sslash' : status === 'running' ? 'loader-4' : status === 'error' || status === 'unknown' ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'background' ? 'time' : status === 'waiting' ? 'question' : 'check'}
           className={cn(
@@ -1111,6 +1113,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
               if (message.customType === 'thread-message') {
                 const details = message.details && typeof message.details === 'object' && !Array.isArray(message.details) ? message.details as Record<string, unknown> : {};
                 return <ChatReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
+                  senderThreadId={typeof details.senderThreadId === 'string' ? details.senderThreadId : undefined}
                   id={typeof details.messageId === 'string' ? details.messageId : undefined} content={chatContentText(message.content)} />;
               }
               return (
@@ -1144,6 +1147,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
             if (entry.customType === 'thread-message') {
               const details = entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details) ? entry.details as Record<string, unknown> : {};
               return <ChatReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
+                senderThreadId={typeof details.senderThreadId === 'string' ? details.senderThreadId : undefined}
                 id={typeof details.messageId === 'string' ? details.messageId : undefined} content={chatContentText(entry.content)} />;
             }
             return (

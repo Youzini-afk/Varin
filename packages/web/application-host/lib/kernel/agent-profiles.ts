@@ -64,6 +64,7 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
       id: `varin:builtin:${definition.slot}`, kind: 'builtin',
       config: { kind: 'builtin', slot: definition.slot, binding: sharedBinding(binding) },
       effective: { name: overrides?.name ?? definition.name, description: overrides?.description ?? definition.description,
+        ...(overrides?.avatar ? { avatar: overrides.avatar } : {}),
         instructions: overrides?.instructions ?? definition.instructions, enabled: binding.enabled !== false,
         model, modelSource: model ? 'selected' : ['worker', 'verifier', 'contextCompaction'].includes(definition.slot) ? 'inherit' : 'unconfigured',
         ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
@@ -77,6 +78,7 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
   for (const [key, agent] of Object.entries(selected.agents)) {
     profiles.push({ id: `varin:custom:${key}`, kind: 'custom', config: { kind: 'custom', key, agent: sharedAgent(agent) },
       effective: { name: agent.name, description: agent.description, instructions: agent.instructions, enabled: agent.enabled,
+        ...(agent.avatar ? { avatar: agent.avatar } : {}),
         model: agent.model ?? null, modelSource: agent.model ? 'selected' : 'inherit',
         ...(agent.modelSettings ? { modelSettings: agent.modelSettings } : {}), worktree: agent.worktree, workFocus: [...agent.workFocus] },
       tools: resolveAgentTools(agent.tools, target), defaults: null });

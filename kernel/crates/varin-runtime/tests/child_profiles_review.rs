@@ -64,6 +64,7 @@ fn install(
 }
 fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     ChildPreset {
+        avatar: None,
         tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
         id: id.into(),
         name: format!("Configured {id}"),
@@ -100,7 +101,8 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
     let mut other = parent.clone();
     other.configuration.model = "selected-worker".into();
     other.configuration.model_options = Some(json!({"temperature":0}));
-    let selected = preset("worker-custom", Some(other.clone()));
+    let mut selected = preset("worker-custom", Some(other.clone()));
+    selected.avatar = Some("dome-ivory".into());
     let catalog = ChildDispatchCatalog {
         native_capabilities: Vec::new(),
         identity: "configuration-1".into(),
@@ -121,6 +123,7 @@ fn selected_presets_freeze_real_model_and_instructions_normal_disabled_is_indepe
     request.preset = Some("worker-custom".into());
     let resolved = selection.resolve(&request).unwrap();
     assert_eq!(resolved.model, other);
+    assert_eq!(resolved.profile.avatar.as_deref(), Some("dome-ivory"));
     assert_eq!(
         resolved.profile.instructions,
         "Original selected instructions"
