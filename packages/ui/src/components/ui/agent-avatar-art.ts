@@ -5,7 +5,7 @@ export interface AgentAvatarArt {
   color: string;
   accent?: { path: string; color: string };
   eyes: string;
-  wink?: string;
+  eyeStroke?: string;
 }
 
 // Flat silhouettes and punctuation-like eyes. Keep existing IDs/art stable when adding characters.
@@ -22,6 +22,42 @@ const bodies = {
   fold: 'M7 26Q8 18 16 16L43 9Q49 8 52 15L60 37Q63 46 55 50L32 58Q28 59 25 55L21 49Q19 46 14 47Q7 48 6 40Z',
   cap: 'M10 21Q15 12 27 10Q43 7 52 18Q58 25 60 40L60 46Q60 54 51 54L14 55Q5 55 5 47Q5 33 10 21Z',
   wave: 'M6 25Q11 15 25 16Q32 17 38 12Q44 7 51 14Q59 22 59 35L58 47Q57 55 47 56L16 56Q6 56 5 47L4 36Q3 30 6 25Z',
+  capsule: 'M21 17H43Q60 17 60 34Q60 51 43 51H21Q4 51 4 34Q4 17 21 17Z',
+  pillar: 'M16 22Q16 5 32 5Q49 5 49 22L48 47Q48 60 33 60Q16 60 16 47Z',
+  lozenge: 'M27 7Q32 3 38 8L57 26Q63 32 58 39L40 57Q34 63 27 58L7 39Q1 33 7 26Z',
+  wedge: 'M10 31L42 10Q49 5 52 14L61 46Q63 55 53 55H14Q5 55 5 46Q5 37 10 31Z',
+  arch: 'M8 30Q8 10 31 10Q54 10 56 30L58 48Q59 55 51 55H12Q5 55 6 48Z',
+  oval: 'M3 32Q3 15 29 14Q55 13 61 31Q66 48 41 53Q15 59 6 47Q3 43 3 32Z',
+  squircle: 'M5 30Q5 7 29 7H35Q59 7 59 30V37Q59 58 35 58H29Q5 58 5 37Z',
+  shield: 'M11 13Q32 6 53 13Q58 15 58 22L55 43Q54 49 48 52L36 59Q32 61 28 59L16 52Q10 49 9 43L6 22Q6 15 11 13Z',
+  sail: 'M10 32Q19 15 46 7Q52 5 53 12L58 47Q59 55 49 56H14Q5 56 5 47Q5 39 10 32Z',
+  lean: 'M18 9H43Q49 9 51 17L60 48Q62 56 54 57H28Q21 57 19 50L9 18Q7 9 18 9Z',
+  bridge: 'M6 28Q8 14 20 14Q27 14 31 19Q34 22 38 18Q44 13 50 17Q57 22 59 35L60 45Q61 54 50 55H15Q4 55 4 44Z',
+  crest: 'M7 31Q8 19 22 18Q29 17 32 11Q35 5 42 8Q52 12 56 27L60 44Q63 55 50 56H16Q4 56 5 44Z',
+  step: 'M6 26Q6 20 13 20H25Q29 20 29 15V13Q29 7 36 7H48Q57 7 57 16L59 47Q60 56 50 57H15Q6 57 6 48Z',
+  offset: 'M7 20Q7 12 16 12H40Q48 12 48 20L47 44Q47 53 38 53H14Q6 53 6 45Z',
+  orbit: 'M18 12Q35 4 49 15Q61 24 58 40Q55 55 38 58Q20 61 9 47Q4 40 9 33Q13 29 9 23Q7 17 18 12Z',
+  cushion: 'M12 16Q32 10 52 16Q60 19 57 29Q55 34 58 41Q61 51 50 54Q31 60 12 54Q3 51 6 41Q9 34 6 27Q3 18 12 16Z',
+  curve: 'M8 19Q9 10 19 10H46Q56 10 58 21L59 44Q60 56 47 57H30Q22 57 22 50Q22 46 16 46H12Q5 46 5 39Z',
+  bevel: 'M20 8H44Q49 8 52 13L59 24Q61 27 60 33L57 47Q56 51 51 54L41 59Q38 60 33 59L13 55Q8 54 7 49L3 31Q2 26 5 22L14 12Q17 8 20 8Z',
+  drift: 'M5 30Q7 20 23 19L42 16Q54 14 58 26L61 39Q64 51 50 53L18 55Q4 56 3 44Q2 37 5 30Z',
+  stack: 'M8 27Q8 18 18 18H35Q45 18 45 28V47Q45 57 35 57H18Q8 57 8 47Z',
+  tilt: 'M6 24Q4 16 12 13L37 5Q45 3 48 11L59 40Q63 49 54 52L28 60Q20 62 17 54Z',
+  fan: 'M12 10Q32 6 52 10Q61 12 60 21L53 47Q51 54 44 56L34 59Q30 60 26 58L16 53Q10 50 9 44L4 21Q3 12 12 10Z',
+  mound: 'M7 37Q15 15 28 10Q35 7 41 14Q54 28 59 44Q63 55 50 57Q32 59 13 56Q1 54 7 37Z',
+  tab: 'M7 14Q7 8 14 8H27Q32 8 33 15L34 20H50Q58 20 59 29L60 46Q61 55 50 55H15Q6 55 6 46Z',
+  span: 'M20 12H43Q49 12 52 20L60 41Q64 54 50 55H14Q0 54 4 41L12 20Q15 12 20 12Z',
+  ripple: 'M6 28Q7 14 19 14Q28 14 33 18Q39 23 46 16Q51 12 56 18Q60 24 59 35L58 46Q57 55 47 56H15Q4 56 4 45Z',
+  facet: 'M8 26L28 7Q32 3 37 7L56 20Q60 23 60 29L56 49Q55 55 48 56L20 58Q13 59 10 53L4 37Q2 31 8 26Z',
+  comma: 'M32 7Q54 7 57 28Q60 43 47 52Q35 60 17 57Q9 55 13 48Q16 43 10 37Q5 31 8 22Q13 7 32 7Z',
+  inset: 'M14 9H33Q40 9 40 16V18Q40 23 46 23H51Q58 23 58 31V48Q58 56 49 56H15Q6 56 6 47V18Q6 9 14 9Z',
+  pocket: 'M12 12H52Q59 12 59 20L55 43Q52 59 32 59Q12 59 9 43L5 20Q5 12 12 12Z',
+  rise: 'M6 27Q6 21 12 19L32 10Q38 7 44 11L54 19Q58 22 58 29V47Q58 57 48 57H16Q6 57 6 47Z',
+  sweep: 'M14 12Q19 9 27 11L49 17Q60 20 59 31L57 43Q56 49 50 51L14 59Q5 61 5 51L5 27Q5 17 14 12Z',
+  bend: 'M8 18Q8 10 17 10H40Q56 10 58 29L60 44Q61 56 48 56H32Q24 56 23 49L22 47Q21 43 16 43H14Q7 43 7 36Z',
+  twin: 'M9 19Q10 11 20 11L38 14Q46 15 46 24L43 47Q42 57 32 56L14 53Q6 52 7 43Z',
+  arc: 'M14 9Q37 8 50 23Q62 37 52 49Q42 60 16 58Q8 58 8 50V17Q8 9 14 9Z',
+  tuck: 'M15 8H43Q52 8 54 17L59 43Q61 53 51 55L32 58Q27 59 24 54L21 50Q19 47 14 48Q7 49 6 41L5 20Q4 8 15 8Z',
 };
 const eyes = {
   dash: 'M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z',
@@ -30,12 +66,29 @@ const eyes = {
   curious: 'M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z',
   attentive: 'M20 29Q23 29 23 32V35Q23 38 20 38Q18 38 18 35V32Q18 29 20 29ZM42 29Q45 29 45 32V35Q45 38 42 38Q40 38 40 35V32Q40 29 42 29Z',
   wink: 'M20 29L25 30Q27 30 27 32Q27 34 25 34L20 33Q18 33 18 31Q18 29 20 29Z',
+  dots: 'M25 33A3 3 0 1 1 19 33A3 3 0 1 1 25 33ZM45 33A3 3 0 1 1 39 33A3 3 0 1 1 45 33Z',
+  upward: 'M20 26H24Q26 26 26 28V31Q26 33 24 33H20Q18 33 18 31V28Q18 26 20 26ZM40 26H44Q46 26 46 28V31Q46 33 44 33H40Q38 33 38 31V28Q38 26 40 26Z',
+  side: 'M26 30H28Q30 30 30 33V34Q30 37 28 37H26Q24 37 24 34V33Q24 30 26 30ZM45 30H47Q49 30 49 33V34Q49 37 47 37H45Q43 37 43 34V33Q43 30 45 30Z',
+  inward: 'M26 29Q29 29 29 32V35Q29 38 26 38Q23 38 23 35V32Q23 29 26 29ZM38 29Q41 29 41 32V35Q41 38 38 38Q35 38 35 35V32Q35 29 38 29Z',
+  offset: 'M19 33H24Q26 33 26 35Q26 37 24 37H19Q17 37 17 35Q17 33 19 33ZM41 27H44Q47 27 47 30V32Q47 35 44 35H41Q38 35 38 32V30Q38 27 41 27Z',
+  angled: 'M18 28L25 30Q27 31 26 33Q26 35 23 34L17 32Q15 31 16 29Q16 27 18 28ZM41 30L47 28Q49 27 50 29Q51 31 48 32L42 34Q39 35 39 33Q38 31 41 30Z',
+  low: 'M19 36H24Q27 36 27 38Q27 40 24 40H19Q16 40 16 38Q16 36 19 36ZM40 36H45Q48 36 48 38Q48 40 45 40H40Q37 40 37 38Q37 36 40 36Z',
+  leftWink: 'M40 29H43Q46 29 46 32V34Q46 37 43 37H40Q37 37 37 34V32Q37 29 40 29Z',
+  tilted: 'M19 34L23 31Q25 29 27 31Q28 33 26 35L22 38Q19 40 18 38Q17 36 19 34ZM39 29L43 26Q45 24 47 26Q48 28 46 30L42 33Q39 35 38 33Q37 31 39 29Z',
+  wide: 'M18 29H21Q24 29 24 32V34Q24 37 21 37H18Q15 37 15 34V32Q15 29 18 29ZM43 29H46Q49 29 49 32V34Q49 37 46 37H43Q40 37 40 34V32Q40 29 43 29Z',
+  smallDash: 'M22 31H25Q27 31 27 33Q27 35 25 35H22Q20 35 20 33Q20 31 22 31ZM39 31H42Q44 31 44 33Q44 35 42 35H39Q37 35 37 33Q37 31 39 31Z',
+};
+
+const arcs = {
+  smile: 'M18 33Q22 27 26 33M38 33Q42 27 46 33',
+  rest: 'M18 31Q22 35 26 31M38 31Q42 35 46 31',
+  leftWink: 'M18 33Q22 27 26 33',
 };
 
 export const AGENT_AVATAR_ART: Readonly<Record<AgentAvatarId, AgentAvatarArt>> = {
   'slope-lilac': { body: bodies.slope, color: '#C7B5EF', eyes: eyes.dash },
   'dome-ivory': { body: bodies.dome, color: '#E9DED0', eyes: eyes.square },
-  'taper-sage': { body: bodies.taper, color: '#A8BD96', eyes: eyes.wink, wink: 'M40 33Q44 27 48 33' },
+  'taper-sage': { body: bodies.taper, color: '#A8BD96', eyes: eyes.wink, eyeStroke: 'M40 33Q44 27 48 33' },
   'pebble-blue': { body: bodies.pebble, color: '#85B3D2', eyes: eyes.calm },
   'overlap-coral': { body: bodies.overlap, color: '#EE9583', eyes: eyes.curious,
     accent: { path: 'M33 20L47 17Q56 15 59 24L62 43Q64 52 56 54L29 56Z', color: '#C4746B' } },
@@ -45,11 +98,50 @@ export const AGENT_AVATAR_ART: Readonly<Record<AgentAvatarId, AgentAvatarArt>> =
   'tile-blue': { body: bodies.tile, color: '#91ADC8', eyes: eyes.square },
   'fold-sage': { body: bodies.fold, color: '#B2BDA2', eyes: eyes.calm },
   'cap-coral': { body: bodies.cap, color: '#DA9C99', eyes: eyes.attentive },
-  'wave-ivory': { body: bodies.wave, color: '#DCD2BD', eyes: eyes.wink, wink: 'M40 33Q44 28 48 33' },
+  'wave-ivory': { body: bodies.wave, color: '#DCD2BD', eyes: eyes.wink, eyeStroke: 'M40 33Q44 28 48 33' },
+  'capsule-sky': { body: bodies.capsule, color: '#A2C7DC', eyes: eyes.dots },
+  'pillar-lilac': { body: bodies.pillar, color: '#C6B4DD', eyes: eyes.inward },
+  'lozenge-mint': { body: bodies.lozenge, color: '#A5CAB7', eyes: eyes.smallDash },
+  'wedge-apricot': { body: bodies.wedge, color: '#E8B48B', eyes: eyes.offset },
+  'arch-butter': { body: bodies.arch, color: '#E8D58E', eyes: '', eyeStroke: arcs.smile },
+  'oval-rose': { body: bodies.oval, color: '#D6A4B4', eyes: eyes.wide },
+  'squircle-periwinkle': { body: bodies.squircle, color: '#AAB8DE', eyes: eyes.upward },
+  'shield-sage': { body: bodies.shield, color: '#ADBD9D', eyes: eyes.calm },
+  'sail-ivory': { body: bodies.sail, color: '#DFD4BD', eyes: eyes.dash },
+  'lean-coral': { body: bodies.lean, color: '#DF9A87', eyes: eyes.side },
+  'bridge-aqua': { body: bodies.bridge, color: '#9ECBC8', eyes: eyes.leftWink, eyeStroke: arcs.leftWink },
+  'crest-lilac': { body: bodies.crest, color: '#B7A6D5', eyes: eyes.attentive },
+  'step-blue': { body: bodies.step, color: '#8FB7D2', eyes: eyes.offset },
+  'offset-peach': { body: bodies.offset, color: '#EABDA5', eyes: eyes.smallDash,
+    accent: { path: 'M24 22H49Q58 22 58 30V47Q58 57 48 57H25Z', color: '#C99380' } },
+  'orbit-sage': { body: bodies.orbit, color: '#B8C5A3', eyes: eyes.side },
+  'cushion-ochre': { body: bodies.cushion, color: '#D8BB7E', eyes: '', eyeStroke: arcs.rest },
+  'curve-mint': { body: bodies.curve, color: '#9EC2AF', eyes: eyes.upward },
+  'bevel-rose': { body: bodies.bevel, color: '#CF9EB0', eyes: eyes.angled },
+  'drift-blue': { body: bodies.drift, color: '#9AAFD0', eyes: eyes.low },
+  'stack-ivory': { body: bodies.stack, color: '#E2D8C5', eyes: eyes.inward,
+    accent: { path: 'M27 7H46Q56 7 56 17V40Q56 49 46 49H27Q19 49 19 40V17Q19 7 27 7Z', color: '#BDB5A3' } },
+  'tilt-pistachio': { body: bodies.tilt, color: '#C6CF9C', eyes: eyes.tilted },
+  'fan-coral': { body: bodies.fan, color: '#E6A28D', eyes: eyes.wide },
+  'mound-lavender': { body: bodies.mound, color: '#C3B4D9', eyes: eyes.low },
+  'tab-butter': { body: bodies.tab, color: '#E4CD86', eyes: eyes.offset },
+  'span-jade': { body: bodies.span, color: '#91B9AB', eyes: eyes.square },
+  'ripple-peach': { body: bodies.ripple, color: '#E9B699', eyes: '', eyeStroke: arcs.smile },
+  'facet-blue': { body: bodies.facet, color: '#91AEC7', eyes: eyes.attentive },
+  'comma-lilac': { body: bodies.comma, color: '#BCACD5', eyes: eyes.side },
+  'inset-sage': { body: bodies.inset, color: '#A9BA98', eyes: eyes.smallDash },
+  'pocket-rose': { body: bodies.pocket, color: '#DBB0B7', eyes: eyes.dots },
+  'rise-ivory': { body: bodies.rise, color: '#D9CFB9', eyes: eyes.leftWink, eyeStroke: arcs.leftWink },
+  'sweep-aqua': { body: bodies.sweep, color: '#91C1C3', eyes: eyes.tilted },
+  'bend-ochre': { body: bodies.bend, color: '#DEC08E', eyes: eyes.upward },
+  'twin-periwinkle': { body: bodies.twin, color: '#B5BFE2', eyes: eyes.smallDash,
+    accent: { path: 'M32 14L50 18Q59 20 58 29L56 49Q55 57 46 56L29 53Z', color: '#8C9FC9' } },
+  'arc-apricot': { body: bodies.arc, color: '#D9B08C', eyes: eyes.curious },
+  'tuck-jade': { body: bodies.tuck, color: '#A0BBA2', eyes: '', eyeStroke: arcs.rest },
 };
 
 /** Standalone exports and preview boards use the same paths as the application. */
 export function agentAvatarSvg(id: AgentAvatarId): string {
   const art = AGENT_AVATAR_ART[id];
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${art.accent ? `<path fill="${art.accent.color}" d="${art.accent.path}"/>` : ''}<path fill="${art.color}" d="${art.body}"/><path fill="#202326" d="${art.eyes}"/>${art.wink ? `<path fill="none" stroke="#202326" stroke-width="4" stroke-linecap="round" d="${art.wink}"/>` : ''}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">${art.accent ? `<path fill="${art.accent.color}" d="${art.accent.path}"/>` : ''}<path fill="${art.color}" d="${art.body}"/><path fill="#202326" d="${art.eyes}"/>${art.eyeStroke ? `<path fill="none" stroke="#202326" stroke-width="4" stroke-linecap="round" d="${art.eyeStroke}"/>` : ''}</svg>`;
 }

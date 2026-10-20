@@ -131,15 +131,15 @@ test('creates a custom Agent through the Host API with explicit runtime tools an
   await render(); await click(container.querySelector('[aria-label="Create agent"]')!);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Tools (comma or newline separated)"]')?.value).toBe('file_read');
   await edit('Name', 'New helper'); await edit('Responsibility', 'Created here'); await edit('Instructions', 'Inspect the source.'); await edit('Tools (comma or newline separated)', 'file_read');
-  await click(container.querySelector('[aria-label="Avatar 2"]')!);
+  await click(container.querySelector('[aria-label="Avatar 48"]')!);
   await save();
   const input = fixture.writes.at(-1)!;
   expect(input.id).toBeUndefined(); expect(input.config).toMatchObject({ kind: 'custom', key: '', agent: { name: 'New helper', description: 'Created here', instructions: 'Inspect the source.', enabled: true, worktree: 'none', workFocus: [] } });
   expect(input.tools).toEqual(['file_read']);
   const added = Object.values((await persisted()).harness.agents).find((value: unknown) => (value as { name: string }).name === 'New helper');
-  expect(added).toMatchObject({ tools: ['file_read'], avatar: 'dome-ivory' });
+  expect(added).toMatchObject({ tools: ['file_read'], avatar: 'tuck-jade' });
   expect(container.querySelector('h1')?.textContent).toBe('New helper');
-  expect(container.querySelector('[aria-label="Avatar 2"]')?.getAttribute('aria-pressed')).toBe('true');
+  expect(container.querySelector('[aria-label="Avatar 48"]')?.getAttribute('aria-pressed')).toBe('true');
   await click(button('Use automatic assignment')); await save();
   const reset = Object.values((await persisted()).harness.agents).find((value: unknown) => (value as { name: string }).name === 'New helper');
   expect(reset).not.toHaveProperty('avatar');

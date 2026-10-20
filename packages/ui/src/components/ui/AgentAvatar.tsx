@@ -14,6 +14,6 @@ export function AgentAvatar({ identity, avatar, className, size = 24, label }: {
     {art.accent && <path fill={art.accent.color} d={art.accent.path} />}
     <path fill={art.color} d={art.body} />
     <path fill="#202326" d={art.eyes} />
-    {art.wink && <path fill="none" stroke="#202326" strokeWidth={4} strokeLinecap="round" d={art.wink} />}
+    {art.eyeStroke && <path fill="none" stroke="#202326" strokeWidth={4} strokeLinecap="round" d={art.eyeStroke} />}
   </svg>;
 }
