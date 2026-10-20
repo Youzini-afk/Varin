@@ -102,7 +102,7 @@ export type SemanticSearchRequest = {
 export type SemanticSearchResult = {
   status: SemanticIndexStatus;
   hits: SemanticHit[];
-  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" | "content-changed" | "index-watch-unavailable" | "unsupported-files" }>;
+  gaps: Array<{ path: string; reason: "draft-vector-pending" | "draft-unavailable" | "thread-vector-pending" | "index-read-failed" | "index-not-ready" | "content-changed" | "index-watch-unavailable" | "unsupported-files" }>;
 };
 
 const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => {
@@ -1079,7 +1079,6 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     /** Original query session checks recovery before any vector cache can be consumed. */
     queryVector(question: string, cached: number[] | undefined, signal: AbortSignal): Promise<number[]>;
     sourceView?: SemanticSourceView;
-    documentVectors?(texts: readonly string[], documents: readonly { path: string; revision: string }[], signal: AbortSignal): Promise<number[][]>;
   }) => {
     const managedSource = request.sourceView?.resourceOwner.kind === 'managed_host';
     const scopeSnapshot = managedSource ? undefined : options.getIndexScope?.();
@@ -1093,14 +1092,12 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     assertAvailable();
     const embedder = request.embedder;
     if (request.sourceView) {
-      if (!request.documentVectors) throw new Error('Source document inference session is unavailable');
       return acquireSourceQuery({ scope, source: request.sourceView, embedder, roots: request.roots,
         ...(scopeSnapshot ? { indexScope: scopeSnapshot } : {}),
         ...(managedSource || options.indexDirectories === undefined ? {} : { indexDirectories: options.indexDirectories }),
-        ...(!managedSource && options.includeIgnoredDirectories ? { includeIgnoredDirectories: options.includeIgnoredDirectories } : {}),
-        structure: options.structureSource, cache: queryCache, scheduler, signal,
+        cache: queryCache, scheduler, signal,
         store: () => storeFor(scope, embedder, false), assertAvailable, authorize: request.authorize,
-        cacheAuthority: request.cacheAuthority, queryVector: request.queryVector, documentVectors: request.documentVectors });
+        cacheAuthority: request.cacheAuthority, queryVector: request.queryVector });
     }
     const status = statusForEmbedder(scope, embedder);
     const resourceRoot = (await options.documents.inspectWorkspace(scope.scopeId)).root;

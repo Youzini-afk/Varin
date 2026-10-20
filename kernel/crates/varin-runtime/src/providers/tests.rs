@@ -264,6 +264,43 @@ fn tool_output_preview_keeps_records_and_cursors_and_explicit_pages_intact() {
         assert!(Arc::ptr_eq(&projected.history[1], &request.history[1]), "{name}: explicit pages retain their full body and continuation");
     }
 }
+#[test]
+fn retrieval_preview_limit_keeps_complete_evidence_in_the_original_output() {
+    let conn = connection(vec![], 1);
+    for gateway in [false, true] {
+        let mut request = view(responses::FAMILY);
+        request.binding.tools[0].name = "read_thread".into();
+        let args = json!({"question":"where is the behavior?", "limit":1});
+        let call = ToolCall { call_id: "retrieval".into(), schema_version: "1".into(),
+            name: if gateway { "tool_invoke" } else { "code_retrieval" }.into(),
+            arguments: if gateway { json!({"reference":{"name":"code_retrieval","version":"1"},"arguments":args}) } else { args } };
+        let snippets = json!([
+            {"path":"contract.rs","content":"contract","requiredGroups":["behavior"]},
+            {"path":"implementation.rs","content":"implementation","requiredGroups":["behavior"]},
+            {"path":"caller.rs","content":"caller","requiredGroups":[]}
+        ]);
+        let data = json!({"status":"ready","snippets":snippets});
+        request.history.push(ConversationItem { resource_activation:None, id:"call".into(),
+            provenance:Provenance::Assistant, content:Content::ToolCall { call }, opaque:None }.into());
+        request.history.push(ConversationItem { resource_activation:None, id:"original".into(),
+            provenance:Provenance::ToolData { call_id:"retrieval".into() },
+            content:Content::ToolResult { result: ToolResult { request_id:"request".into(), call_id:"retrieval".into(),
+                completion:ToolCompletion::Result { outcome:crate::Outcome::Succeeded, effect:crate::Effect::None,
+                    content: if gateway { json!({"reference":{"name":"code_retrieval"},"result":data}).into() } else { data.into() } } } },
+            opaque:None }.into());
+        let projected = input_projection::model_input(&request, &conn, None);
+        let Content::ToolResult { result } = &projected.history[1].content else { panic!("result"); };
+        let output = super::completion_output(&result.completion).unwrap();
+        let pointer = if gateway { "/result/snippets" } else { "/snippets" };
+        assert!(output.data.pointer(pointer).unwrap().as_array().unwrap().is_empty());
+        let Content::ToolResult { result } = &request.history[1].content else { panic!("original"); };
+        assert_eq!(super::completion_output(&result.completion).unwrap().data.pointer(pointer).unwrap(), &snippets);
+        let OutputPart::Text { text } = output.parts.last().unwrap() else { panic!("read reference"); };
+        let notice: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(notice["outputPreview"]["omitted"][0]["read"]["arguments"]["query"]["itemId"], "original");
+    }
+}
+
 fn generate(
     provider: &impl ModelProvider,
     family: &str,

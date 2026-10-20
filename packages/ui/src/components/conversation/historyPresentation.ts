@@ -95,7 +95,7 @@ export class HistoryPresentation {
         const update = candidate?.toolName === call.name ? candidate : undefined;
         if ((!operation && !receipt && snapshot?.activeRun?.id === item.run_id) || (update && update.runId === item.run_id)) {
           const running = !receipt && snapshot?.activeRun?.id === item.run_id;
-          toolExecutions[id] ??= { toolCallId: id, name: String(call.name), args: json(call.arguments),
+          toolExecutions[id] ??= { toolCallId: id, operationId, name: String(call.name), args: json(call.arguments),
             status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown' };
           if (update?.runId === item.run_id) toolExecutions[id]!.partialResult = json({ details: update.details });
         }
@@ -176,7 +176,7 @@ export class HistoryPresentation {
 function projectExecution(operation: Operation, id: string, call: Record<string, unknown>): ChatToolExecutionState {
   const completion = operation.call_completion;
   const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
-  return { toolCallId: id, name: String(call.name), args: json(call.arguments),
+  return { toolCallId: id, operationId: operation.id, name: String(call.name), args: json(call.arguments),
     status: operation.phase === 'terminal' ? outcomeStatus(operation.outcome) : operation.executor === 'ask_user' ? 'waiting' : 'running',
     ...(output?.data == null ? {} : { result: json(presentedOutput(output.data)) }) };
 }

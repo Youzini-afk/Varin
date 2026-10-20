@@ -670,6 +670,7 @@ export interface ExploreModelParticipation {
    */
   fastDecision?: ExploreModelStageStatus;
   note?: string;
+  tokenizer?: string;
 }
 
 /**
@@ -694,6 +695,8 @@ export interface ExploreFastDecisionDetails {
   missing: number;
   /** Materials withheld from a batch by the model-input budget. */
   unevaluatedMaterials: number;
+  tokenizer?: string;
+  reusedJudgments?: number;
   usage?: { inputTokens?: number; outputTokens?: number };
   note?: string;
 }
@@ -703,6 +706,7 @@ export type ExploreSemanticGapReason =
   | "draft-unavailable"
   | "thread-vector-pending"
   | "index-read-failed"
+  | "index-not-ready"
   | "content-changed"
   | "index-watch-unavailable"
   | "unsupported-files";
@@ -751,6 +755,7 @@ export interface ExploreToolProgress {
   /** Distinct versioned views received by the coordinator, before selection. */
   receivedSnippets: number;
   receivedFiles: number;
+  selectedViewIds?: string[];
   sources: ExploreQuerySourceState[];
   activities: ExploreProgressActivity[];
 }
@@ -826,6 +831,10 @@ export interface ExploreQueryRange {
 
 export interface ExploreQueryView {
   viewId: string;
+  /** Stable source location, separate from this immutable rendition and revision. */
+  materialId?: string;
+  /** Source paths connected by observed lookup dependencies, not asserted call edges. */
+  relatedPaths?: string[];
   path: string;
   startLine: number;
   endLine: number;
@@ -845,8 +854,6 @@ export interface ExploreQueryView {
 export interface ExploreQueryViewsParams {
   queryId: string;
   seen?: string[];
-  /** Conservative input capacity supplied by the configured model consumer. */
-  inputBytes?: number;
 }
 
 export interface ExploreQueryViewsResult {
@@ -860,7 +867,6 @@ export interface ExploreQueryViewsResult {
   sequence: number;
   pending: boolean;
   actions: ExploreQueryAction[];
-  outputByteBudget: number;
 }
 
 export interface ExploreQuerySelectedRange {
@@ -932,6 +938,7 @@ export interface ExploreQueryAction {
   locate?: { text: string; kind: "identifier" | "literal" };
   /** Why this candidate exists, e.g. which material produced it. */
   why: string;
+  dependencies?: Array<{ viewId: string; revision: string }>;
 }
 
 export interface ExploreQueryFollowupParams {
@@ -984,7 +991,7 @@ export interface ExploreSearchResult {
   details: {
     provenance: ExploreSearchProvenance[];
     anchors: { supplied: string[]; used: string[]; truncated: number };
-    byteBudget: number;
+    byteBudget?: number;
     structure?: {
       files: Array<{
         path: string;

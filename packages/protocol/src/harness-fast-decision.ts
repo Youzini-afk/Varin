@@ -62,6 +62,10 @@ export function resolveFastDecisionPurpose(
 /** Credential-free resolved binding identity, produced by the Host inference owner. */
 export interface HarnessResolvedFastDecisionBinding extends HarnessFastDecisionBinding {
   configurationId: string;
+  /** Actual frozen model capacity, not a property of the classifier protocol. */
+  contextWindowTokens?: number;
+  /** Adapter label vocabulary, when choices must map to single tokens. */
+  maxChoiceOptions?: number;
 }
 
 export type HarnessFastDecisionPurposeStatus =
@@ -132,6 +136,8 @@ export interface HarnessFastDecisionParams {
   purpose: HarnessFastDecisionPurpose;
   /** The consumer's goal, e.g. the explore question. */
   goal: string;
+  /** Query-local decision context, serialized after reusable source material. */
+  context?: unknown;
   materials: FastDecisionMaterial[];
   questions: FastDecisionQuestion[];
   batchId: string;

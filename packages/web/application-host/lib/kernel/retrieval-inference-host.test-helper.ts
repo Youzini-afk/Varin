@@ -53,6 +53,7 @@ let indexScope: ReturnType<typeof createProjectIndexScope> | undefined;
 let ledger: ReturnType<typeof createSemanticInferenceLedger> | undefined;
 let embeddingRequests = 0, indexRequests = 0, retrievalCalls = 0;
 let documentRequests = 0, fixedUnits = 0, lexicalSearches = 0, backgroundScan = false, guardMutation = false;
+let queryExpanded = false;
 let guardPath: string | undefined;
 let releaseLexical!: () => void;
 const lexicalStarted = new Promise<void>(resolve => { releaseLexical = resolve; });
@@ -90,7 +91,8 @@ async function editMaterialized(path: string, content: string, suffix: string) {
     const captured = await actor.fileCapture({ ...address, operationId: `semantic-capture:${suffix}`, store: false });
     const bytes = Buffer.from(content), blob = await actor.putBlob(bytes, `semantic-edit:${suffix}`);
     const applied = await actor.fileApply({ ...address, operationId: `semantic-apply:${suffix}`, expectedJson: String(captured.stateJson),
-      targetJson: JSON.stringify({ kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.byteLength, mode: 420 }), ownerId: blob.ownerId });
+      targetJson: JSON.stringify({ kind: 'regular-file', objectHash: blob.hash, byteLength: bytes.byteLength,
+        mode: (JSON.parse(String(captured.stateJson)) as { mode?: number }).mode }), ownerId: blob.ownerId });
     assert.equal(applied.status, 'applied');
     await actor.releaseBlob(blob.ownerId);
   } finally { await kernel.revokeGrant(mutation.grantId); }
@@ -165,11 +167,16 @@ const egress=createEgressRuntime({env:{},resolveAll:async()=>[{address:'93.184.2
       assert.equal(body.state.goal,usesExplore()?'How does retrievalNeedle resolve its dependency?':'retrievalNeedle');
       assert(body.state.materials.every(material=>!material.text.includes('FORBIDDEN_SOURCE')));
       assert.equal('messages' in body,false);
-      if(mode==='llm-auto'||mode==='semantic-auto') assert(Object.keys(body.questions).every(id=>id.startsWith('a:')),'classifier keeps only its original action duty');
       if(mode==='decision-stop') return heldResponse(init);
       const usage=mode==='decision-unknown'?{input_tokens:7}:{input_tokens:requests*7,output_tokens:requests};
       if(mode==='decision-partial'&&body.state.materials.some(material=>material.text.includes('DISCOVERED_HELPER'))) return Response.json({answers:'invalid original second batch',usage});
-      const answers=Object.fromEntries(Object.keys(body.questions).map(id=>[id,{type:'noul',noul:id.startsWith('m:')||id==='a:symbol:hiddenHelper'||id==='a:read:allowed/helper.ts'?1:0}]));
+      const answers: Record<string, unknown> = Object.fromEntries(Object.entries(body.questions).map(([id, value]) => {
+        const choices = (value as { criteria: Record<string, string> }).criteria;
+        let choice = id.startsWith('m:') ? 'keep' : choices['symbol:hiddenHelper'] ? 'symbol:hiddenHelper'
+          : choices['read:allowed/helper.ts'] ? 'read:allowed/helper.ts' : Object.keys(choices).find(id => id.startsWith('wait:')) ?? 'deliver';
+        if (id === 'next' && usesExplore() && !queryExpanded && choices.expand) { queryExpanded = true; choice = 'expand'; }
+        return [id, { type: 'choice', choice }];
+      }));
       // An unissued identifier is provider data, never source or action authority.
       answers['a:read:private/secret.ts']={type:'noul',noul:1};
       return Response.json({answers,usage});
@@ -360,6 +367,8 @@ async function initialize(frame:Record<string,unknown>) {
     retrievalCalls++;
     if(fixedSemantic()) queryFacts.push({question:query.question,localCalls: (await localCalls()).length - localValidationCalls,documentRequests,indexRequests,embeddingRequests,fixedUnits,expected,
       status:result.status,stages:result.stages});
+    else if (usesDecision()) queryFacts.push({ status: result.status, diagnostics: result.diagnostics, coverage: result.coverage,
+      snippets: result.snippets.map(({ path, startLine, endLine }) => ({ path, startLine, endLine })) });
     if(mode==='semantic-credential'&&retrievalCalls===1) await credentials.storeCredential('controlled-second-account-key','embedding');
     if(result.status==='failed') console.error('retrieval fixture failure',sourceMode,mode,result.message,result.stages);
     return result;
@@ -410,7 +419,8 @@ async function handle(frame:Record<string,unknown>) {
           const bytes=Buffer.from(fixedSemantic()?semanticBody('WORKING_MAGENTA_CAPSULE_紫'):'// actual working copy padding\n'.repeat(4000)+'export const retrievalNeedle = "SOURCE_A_WORKING_COPY";\n');
           const blob=await actor.putBlob(bytes,`source-view-cas-edit:${runId}`);
           const applied=await actor.fileApply({...address,operationId:`source-view-apply-edit:${runId}`,expectedJson:String(captured.stateJson),
-            targetJson:JSON.stringify({kind:'regular-file',objectHash:blob.hash,byteLength:bytes.byteLength,mode:420}),ownerId:blob.ownerId});
+            targetJson:JSON.stringify({kind:'regular-file',objectHash:blob.hash,byteLength:bytes.byteLength,
+              mode:(JSON.parse(String(captured.stateJson)) as { mode?: number }).mode}),ownerId:blob.ownerId});
           assert.equal(applied.status,'applied');await actor.releaseBlob(blob.ownerId);
         }
       }

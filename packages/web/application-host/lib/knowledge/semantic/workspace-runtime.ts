@@ -430,9 +430,8 @@ return;
       active.throwIfAborted(); assertAvailable();
     };
     const knownDimensions = state.backend.embedder.space.dim;
-    const makeQueryEmbedder = (cached?: number[], documents?: readonly { path: string; revision: string }[]): SemanticEmbedder => selection.kind === 'local_component'
-      ? selection.lease.queryEmbedder(input.inference, { guard: active => validateAvailable(active), ...(cached ? { cached } : {}),
-        ...(documents ? { beforeDispatch: (active: AbortSignal) => input.sourceView!.validateDocuments(documents, active) } : {}) })
+    const makeQueryEmbedder = (cached?: number[]): SemanticEmbedder => selection.kind === 'local_component'
+      ? selection.lease.queryEmbedder(input.inference, { guard: active => validateAvailable(active), ...(cached ? { cached } : {}) })
       : createRemoteEmbedder({ binding: selection.lease.binding,
       knownDimensions: pinnedEmbedder?.space.dim || knownDimensions,
       client: { embed: params => selection.lease.consume(input.inference, { ...params,
@@ -443,26 +442,13 @@ return;
           items: params.items.map((item, index) => ({ id: item.id, index, vector: cached })),
         } } : {}),
         guard: () => validateAvailable(params.signal ?? signal),
-        ...(documents ? { beforeDispatch: (active: AbortSignal) => input.sourceView!.validateDocuments(documents, active) } : {}),
       }) } });
     let pinnedEmbedder: SemanticEmbedder | undefined;
     const embedder = pinnedEmbedder = makeQueryEmbedder();
     try {
       pinned = await state.runtime.acquirePublishedQuery(workspaceScope(cacheWorkspaceId), {
         embedder, roots: input.roots, signal, cacheAuthority: identity.cacheAuthority,
-        ...(input.sourceView ? { sourceView: input.sourceView,
-          documentVectors: async (texts: readonly string[], documents: readonly { path: string; revision: string }[], active: AbortSignal) => {
-            const documentEmbedder = makeQueryEmbedder(undefined, documents);
-            const vectors = await documentEmbedder.embed(texts, { purpose: 'document', signal: active });
-            await validateAvailable(active);
-            Object.assign(embedder.space, documentEmbedder.space);
-            // Remember a dimension learned from real source work in the same
-            // current backend; this is not a paid preparation probe.
-            if (state.queryInference === current && state.backend.embedder.space.dim === 0) {
-              Object.assign(state.backend.embedder.space, documentEmbedder.space);
-            }
-            return vectors;
-          } } : {}),
+        ...(input.sourceView ? { sourceView: input.sourceView } : {}),
         queryVector: async (question, cached, active) => {
           const [vector] = await makeQueryEmbedder(cached).embed([question], { purpose: 'query', signal: active });
           if (!vector) throw new Error('Native query embedding is missing');

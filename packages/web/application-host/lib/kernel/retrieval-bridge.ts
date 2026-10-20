@@ -1,7 +1,8 @@
 import { sourceFailureCode } from './source-admission-error.js';
 import { waitWithSignal } from '../cancellation.js';
 import type { RetrievalQuery } from './protocol.generated.js';
-import type { RetrievalOwner, RetrievalResult } from './retrieval-owner.js';
+import type { RetrievalOwner, RetrievalResult, RetrievalMaterialReader } from './retrieval-owner.js';
+import { toolOperationId } from './protocol.generated.js';
 import type { ExploreToolProgress } from '@varin/protocol';
 
 export interface PrivateRetrievalResponse { v: 1; kind: 'retrieval-response'; id: string; kernelEpoch: string; result: RetrievalResult }
@@ -26,7 +27,8 @@ const validQuery = (value: unknown): value is RetrievalQuery => {
 /** Only private kernel frames reach this adapter. Calls never enter a serial Host queue. */
 export class RetrievalBridge {
   private owner?: RetrievalOwner;
-  private readonly active = new Map<string, { epoch: string; controller: AbortController }>();
+  private readonly active = new Map<string, { epoch: string; controller: AbortController; delivery: AbortController;
+    operationId?: string; reader?: RetrievalMaterialReader }>();
   constructor(private readonly currentEpoch: () => string | null,
     private readonly send: (response: PrivateRetrievalResponse | PrivateRetrievalProgress) => Promise<void>, private readonly transportFailed: () => void) {}
   setOwner(owner: RetrievalOwner): void {
@@ -37,10 +39,21 @@ export class RetrievalBridge {
     for (const entry of this.active.values()) entry.controller.abort(new DOMException('Retrieval channel closed', 'AbortError'));
     this.active.clear();
   }
+  async readMaterial(operationId: string, viewId: string) {
+    const entries = [...this.active.values()].filter(entry => entry.operationId === operationId && entry.reader
+      && entry.epoch === this.currentEpoch() && !entry.controller.signal.aborted);
+    if (entries.length !== 1) throw new Error('Original retrieval material is unavailable; read its completed result instead');
+    return entries[0]!.reader!(viewId);
+  }
   consume(value: unknown): boolean {
-    if (!record(value) || !['retrieval-request','retrieval-cancel'].includes(String(value.kind))) return false;
+    if (!record(value) || !['retrieval-request','retrieval-cancel','retrieval-finish'].includes(String(value.kind))) return false;
     if (value.v !== 1 || !text(value.id) || !text(value.kernelEpoch) || value.kernelEpoch !== this.currentEpoch()) return true;
     const id = value.id; const epoch = value.kernelEpoch;
+    if (value.kind === 'retrieval-finish') {
+      const entry = this.active.get(id);
+      if (entry?.epoch === epoch) entry.delivery.abort();
+      return true;
+    }
     if (value.kind === 'retrieval-cancel') {
       const entry = this.active.get(id);
       if (entry?.epoch === epoch) entry.controller.abort(new DOMException('Retrieval query cancelled', 'AbortError'));
@@ -48,9 +61,16 @@ export class RetrievalBridge {
     }
     if (this.active.has(id)) return true;
     const controller = new AbortController();
-    const entry = { epoch, controller };
+    const entry: { epoch: string; controller: AbortController; delivery: AbortController; operationId?: string; reader?: RetrievalMaterialReader } =
+      { epoch, controller, delivery: new AbortController() };
     this.active.set(id, entry);
     const query = value.query;
+    if (validQuery(query)) {
+      const invocation = query.invocation;
+      entry.operationId = invocation.kind === 'nested_call' ? invocation.parentOperationId
+        : toolOperationId(invocation.kind === 'model_step' ? { kind: 'model_step', request_id: invocation.requestId }
+          : { kind: 'policy_action', action_id: invocation.actionId, node_id: invocation.nodeId }, invocation.toolCallId);
+    }
     const owner = this.owner;
     void (async () => {
       let latest: ExploreToolProgress | undefined;
@@ -71,7 +91,7 @@ export class RetrievalBridge {
         result = validQuery(query) && owner
           // Cancellation detaches even a non-cooperative owner. Its durable inference ledger
           // can still settle actual dispatch facts without reviving this result delivery.
-          ? await waitWithSignal(owner(query, controller.signal, emit), controller.signal)
+          ? await waitWithSignal(owner(query, controller.signal, emit, entry.delivery.signal, reader => { entry.reader = reader; }), controller.signal)
           : unavailableRetrievalResult(owner ? 'Invalid retrieval query' : 'Retrieval owner is unavailable');
       } catch (error) {
         const failure = sourceFailureCode(error);
@@ -79,10 +99,13 @@ export class RetrievalBridge {
           : { ...unavailableRetrievalResult('Retrieval query failed'), ...(failure ? { sourceFailure: failure } : {}) };
       }
       if (this.active.get(id) !== entry) return;
-      while (sending) await sending;
+      latest = undefined;
       this.active.delete(id);
       if (epoch !== this.currentEpoch()) return;
-      await this.send({ v: 1, kind: 'retrieval-response', id, kernelEpoch: epoch, result });
+      // Rust reconstructs admitted spans itself. Do not send a second copy of
+      // every source body through the private bridge frame.
+      await this.send({ v: 1, kind: 'retrieval-response', id, kernelEpoch: epoch,
+        result: { ...result, snippets: result.snippets.map(({ content: _content, ...snippet }) => ({ ...snippet, content: '' })) } });
     })().catch(() => this.transportFailed());
     return true;
   }

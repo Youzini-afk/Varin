@@ -6,7 +6,8 @@
 [Agent runtime](runtime.md) 拥有不可变 request/context 与后台 inference，消费既有 Host 领域服务；
 执行适配器不另造文件、文档或知识权威。
 
-快速检索的后续调整见[快速检索设计](design/fast-code-retrieval.md)。该方案待实现，本文继续描述当前机制。
+快速检索在直接搜索/读取与独立检索 Agent 之间，交付可继续工作的代码证据。它属于原工具 Operation，不创建协作成员、worktree 或独立聊天。
+上下文充分是前提：优化复用和无收益扩展，需要联合理解的代码共同进入判断，输入小不是独立目标。
 
 ## 证据先绑定来源
 
@@ -28,14 +29,47 @@ Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及�
 - `related` 描述文件级 import、reverse import 与 connection topology，不等同于 LSP references；association 不冒充确认连接。
 - LSP 使用所属语言进程与版本化文档视图。固定来源必须使用自己的文本/环境，不能借用不一致的 live server 结果。
 
-共享 Explore planner 和 progressive selection 在 `packages/protocol`；Host 算法在 `harness/explore*.ts`。
-原生 adapter 保留原请求、回执、取消和交付寿命。
-选材模型请求继续搜索且暂未选择新材料时，保留此前已接受的材料；结束判断中的空选择才会清空结果。
+共享上下文组织与生成式判断在 `packages/protocol`；Host 的 `ExploreQueryRun` 保存原问题、版本化材料、已尝试工作、选择与来源状态。
+同一文件快照在多轮间复用，相同正文的新增命中依据合并；不可变 view 引用与材料位置、来源 revision 分开。
+原生入口接入已经打开的本地符号图，关系只在源文件版本吻合时使用。远端来源继续由原 Host 读取，不借用协调端同名目录的图。
 
-快速检索卡片从原查询读取阶段、来源状态和已读取片段的位置，显示持续耗时与候选数量。Host 通过私有检索桥发送
-完整进度快照，Rust 使用原调用的 Thread/branch/Run/operation 身份转发临时观察事件；慢消费者合并待发快照，
-执行线程继续处理查询与取消。UI 在模型提交工具调用后继续接收该工具的进度，以工具结果结束运行态。
-直接调用和 `tool_invoke` 使用同一张卡片。进度只含展示元数据，最终工具回执与模型上下文保持原有内容。
+一次查询只有一套选材与行动判断：
+
+| 设置 | 选材与补查 | 生成式模型用途 |
+| --- | --- | --- |
+| 自动 | 优先快速决策；未配置时依次采用 Explore LLM、重排、来源排序 | 快速决策按需请求查询扩展 |
+| 快速决策 | 比较材料贡献与下一步；交付也是正常选项 | 按需扩展仓库用语与搜索表达 |
+| Explore LLM | 同一材料/动作契约下的生成式判断 | 规划、选材和补查 |
+| 重排 | 对已取得材料排序 | 不运行自主补查循环 |
+| 来源排序 | 字面、已有关系、语义召回与确定性整理 | 不调用选材模型 |
+
+决策比较具体动作、等待某个已有结果、直接交付，不再将达到固定概率的所有动作同时排入队列。
+已选服务失败保留证据与原因，同次调用不更换付费提供商。配置、凭据和 tokenizer 在本次查询中固定；显式撤权仍即时生效。
+独立检索 Agent 使用 `models.retrievalAgent`；快速检索的生成式能力使用 `models.explore`，职责不混用。
+
+`models/token-count.ts` 租用 Rust 原生 TokenCounter，复用模型 tokenizer 获取、匹配质量与词表释放机制。
+分批计数包括序列化的问题、证据、选项、说明和生成输出空间，模型输入容量按实际绑定传递。
+同文件证据优先共同进入判断，分批保留共同背景和已选位置，无法完整容纳的片段报告容量原因。
+所有候选仍留在查询中，出现新关系后可以再次比较；没有逐轮摘要调用。相同判断输入和计数结果在查询内复用，提供商 usage 继续取原始回执。
+模型请求期间的结构增强不会使原快照失效；文件内容变化则刷新该文件的视图及动作依赖，保留其他文件的选择，再判断新的证据。
+模型窗口是输入边界，预览条数是展示选择，两者不控制删除已选证据。
+
+同轮同匹配规则的字面表达式合并成一次原生搜索，并保留各表达式的命中归属。
+默认发现遵守 ignore；显式 `paths` 在原授权范围内搜索隐藏/依赖目录，不沿用默认目录剪枝。
+快照由原来源准入，模型发送与应用结果时校验实际涉及的材料，最终 Rust 按文件读取并重建真实原文。
+
+快速检索卡片显示问题、实际阶段、已读片段和已选标记。Host 通过私有检索桥发送元数据快照，
+Rust 保留原 Thread/branch/Run/Operation 身份转发；慢消费者合并快照，正文按需从该查询读取。
+界面中的“摘录”读取当时快照；点击文件位置打开当前文件。二者具有明确的版本含义。
+直接调用和 `tool_invoke` 使用相同卡片，界面预览不进入主模型上下文。
+
+“使用已有材料”经原 Operation 的 `runtime.retrieval.finish` 控制交付，与取消整轮对话分开。
+它在准备、读取或判断期间都能到达。查询冻结已有结果、关闭新增工作；原推理 owner 继续持有已发请求，
+接收回执、保留 usage 并排空资源。最终结果不再等待剩余可选来源或慢观察者，独立后台索引继续运行。
+
+最终输出分开保留 `snippets`、`coverage`、`diagnostics` 和 `completion`。未探索范围、索引覆盖、服务失败与用户结束各有自己的事实。
+不存在检索专用 24 KiB 丢弃层；完整选中原文写入原工具历史，统一输出预览负责正文预算及 `read_thread` 引用。
+`limit` 只约束直接展开的片段数，必要材料组不在预览中拆半，续读指向同一次保存的完整结果。
 
 候选量/来源预算是覆盖事实，不是置信度。graph/index 缺口保持可见。Graph 给 path，真正文本须重读并重新定位 symbol/literal
 才输出位置；过期关系可以不带行号。可选 relation enrichment 不能让成功文本搜索失败，也不能挤掉 unread/partial 提示。
@@ -56,8 +90,10 @@ Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小�
 
 文件观察器启动和后台索引独立于前台查询准入。观察器尚未就绪时，查询使用当前可用索引和检索路径，
 标明覆盖未完成；观察器就绪后统一补齐扫描。多个查询复用同一次观察器准备。
+固定版本、物化 worktree 与 managed 来源同样只查询已有发布。候选逐文件核对实际版本，变更或未索引文件仍参加文本检索；
+前台不枚举整个来源来补建文档向量，索引覆盖单独报告。无已发布索引时也不会为这次查询冷建索引。
 
-Native 前台 query/document embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
+Native 前台 query embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
 Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属。辅助推理直接使用原生 inference 路径。后台文档索引继续使用现有 index owner。
 
 `localBekko` 是已有本地 embedding 组件。Native 未配置 embedding 选择可用它；显式 remote、disabled、invalid、unavailable

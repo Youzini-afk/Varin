@@ -57,6 +57,7 @@ import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
 import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
+import { retrievalGraph } from './lib/kernel/retrieval-graph.js';
 import { createRetrievalSourceOwner } from './lib/kernel/retrieval-source.js';
 import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
@@ -2551,6 +2552,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
+    graph: (query, roots, read) => {
+      if (query.source.resource_owner.kind !== 'local') return undefined;
+      const store = knowledgeStores.get(knowledgeStoreKeyForScope(query.source.workspace_id));
+      return store ? retrievalGraph(store, roots, read) : undefined;
+    },
     preparePipeline: async (query, signal, inference) => retrievalComposition.prepare({ threadId: query.threadId, query, inference,
       ...(query.source.resource_owner.kind === 'local' ? { configurationDirectory: await retrievalSources.routingWorkspace(query, signal), workspaceId: query.source.workspace_id } : {}),
       ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),

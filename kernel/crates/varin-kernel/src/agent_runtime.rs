@@ -299,6 +299,9 @@ pub(crate) fn spawn(
         let mut opening = false;
         let mut initialization_failure: Option<String> = None;
         let mut waiting = std::collections::VecDeque::new();
+        // Query leases share the runtime's tokenizer implementation and release its
+        // vocabulary when the last caller finishes. No content is persisted here.
+        let mut token_counters = std::collections::HashMap::<String, varin_runtime::token_count::TokenCounter>::new();
         loop {
             let command = if !opening && !waiting.is_empty() {
                 waiting.pop_front().expect("pending request")
@@ -701,6 +704,40 @@ pub(crate) fn spawn(
                                     done(&response_id);
                                     let _ = response_sender.send(response);
                                 })?;
+                            deferred = true;
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.retrieval.finish" {
+                            let p: OperationParams = serde_json::from_value(params)?;
+                            return retrieval_bridge.finish(&p.operation_id)
+                                .map(|accepted| json!({"accepted": accepted}))
+                                .map_err(|error| KernelError::Operation(error.to_string()));
+                        }
+                        if method == "runtime.tokenizers.open" {
+                            let p: KernelTokenizerOpenParams = serde_json::from_value(params)?;
+                            let lease_id = uuid::Uuid::new_v4().to_string();
+                            let counter = varin_runtime::token_count::TokenCounter::for_configuration(&p.configuration);
+                            token_counters.insert(lease_id.clone(), counter);
+                            return Ok(json!({"leaseId": lease_id}));
+                        }
+                        if method == "runtime.tokenizers.close" {
+                            let p: KernelTokenizerLeaseParams = serde_json::from_value(params)?;
+                            token_counters.remove(&p.lease_id);
+                            return Ok(Value::Null);
+                        }
+                        if method == "runtime.tokenizers.count" {
+                            let p: KernelTokenizerCountParams = serde_json::from_value(params)?;
+                            let counter = token_counters.get(&p.lease_id).cloned()
+                                .ok_or_else(|| KernelError::Operation("Tokenizer lease is unavailable".into()))?;
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            content_tasks.send(Box::new(move || {
+                                let counts: Vec<u64> = p.texts.iter().map(|text| counter.count(text)).collect();
+                                let _ = response_sender.send(response_ok(&response_id,
+                                    json!({"counts": counts, "tokenizer": counter.description()})));
+                                done(&response_id);
+                            })).map_err(|_| KernelError::Operation("Tokenizer worker is unavailable".into()))?;
                             deferred = true;
                             return Ok(Value::Null);
                         }

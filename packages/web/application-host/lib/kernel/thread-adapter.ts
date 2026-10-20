@@ -307,6 +307,16 @@ export class ThreadAdapter {
     if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
     return result;
   }
+  async finishRetrieval(operationId: string) {
+    const current = await this.runtime.operationStatus(operationId);
+    await this.requireRun(current.run_id);
+    return this.runtime.finishRetrieval(operationId);
+  }
+  async readRetrievalMaterial(operationId: string, viewId: string) {
+    const current = await this.runtime.operationStatus(operationId);
+    await this.requireRun(current.run_id);
+    return this.runtime.readRetrievalMaterial(operationId, viewId);
+  }
   async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     return this.runtime.sendMessage({ ...request, senderThreadId: identity.threadId, senderBranchId: identity.branchId }, signal);

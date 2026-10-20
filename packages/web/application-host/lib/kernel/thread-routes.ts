@@ -163,7 +163,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
     'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode', 'clientTime'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
-    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
+    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], 'operation/finish-retrieval': ['operationId'], 'operation/retrieval-material': ['operationId', 'viewId'], events: ['cursor'],
   };
   const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
     app.post(`/api/threads/${method}`, requireAuth, async (request, response) => {
@@ -531,6 +531,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('run/retry-preparation', async body => { await adapter.retryPreparation(text(body.runId)); return {}; });
   post('operation', body => adapter.requireOperation(text(body.operationId)));
   post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
+  post('operation/finish-retrieval', body => adapter.finishRetrieval(text(body.operationId)));
+  post('operation/retrieval-material', body => adapter.readRetrievalMaterial(text(body.operationId), text(body.viewId)));
   post('events', body => adapter.runtime.events(revision(body.cursor), 256));
   app.get('/api/threads/observe', requireAuth, async (request, response) => {
     let cursor: number;

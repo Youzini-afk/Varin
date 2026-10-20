@@ -45,6 +45,7 @@ import {
 } from "./explore-graph.js";
 import { fuseFileRanks } from "./explore-rrf.js";
 import { relocateSemanticFocus } from "../knowledge/semantic/relocate.js";
+import { ExploreEvidenceChanged } from '@varin/protocol';
 
 export {
   DEFAULT_ANCHOR_CAP,
@@ -120,6 +121,7 @@ export type ExploreSemanticSearch = {
 
 export interface ExploreDeps {
   rgSearch(pattern: string, options: ExploreRgSearchOptions): Promise<RgSearchReturn>;
+  rgSearchMany?(patterns: string[], options: ExploreRgSearchOptions): Promise<Map<string, RgSearchReturn>>;
   readFile(path: string): Promise<ExploreFileSnapshot>;
   structure?: Pick<StructureSource, "outline" | "classifyHits"> & Partial<Pick<StructureSource, "literalCalls">>;
   graph?: ExploreGraphRecall;
@@ -139,8 +141,6 @@ export interface ExploreResult {
   details: WireResult["details"];
 }
 
-/** Output excerpt count default. `limit` is a cap, not a quota. */
-export const DEFAULT_EXCERPT_LIMIT = 20;
 /** Working candidate-hit budget per generic/literal/identifier pattern. */
 export const DEFAULT_CANDIDATE_BUDGET = 200;
 /** Independent working budget for each anchor pattern. */
@@ -148,18 +148,12 @@ export const DEFAULT_ANCHOR_BUDGET = 80;
 /** Per-file hit cap inside the candidate pool (not a product hard reject). */
 export const DEFAULT_HITS_PER_FILE = 12;
 export const DEFAULT_READ_PARALLELISM = 3;
-/** Below the 32 KiB generic tool-result truncation so explore packs first. */
-export const DEFAULT_BYTE_BUDGET = 24 * 1024;
 /** Working nearest-neighbor budget. Not a product hard reject. */
 export const DEFAULT_SEMANTIC_RECALL = 24;
 /** Reserved from the public remaining wait for judge/present. Not a calibrated SLO. */
 export const DEFAULT_JUDGE_RESERVE_MS = 8_000;
 /** Public explore remaining wait shared across stages. Not a calibrated SLO. */
 export const DEFAULT_EXPLORE_QUERY_BUDGET_MS = 120_000;
-
-export function exploreHandleHint(handle: string): string {
-  return `\nFull result: get_output({handle: "${handle}"})`;
-}
 
 const VOCAB_PACKAGE_LIMIT = 12;
 const VOCAB_ENTRY_LIMIT = 12;
@@ -221,7 +215,6 @@ const normalizeRgResult = (value: RgSearchReturn): {
 };
 
 
-const utf8Bytes = (text: string): number => Buffer.byteLength(text, "utf8");
 
 const searchVariantsOf = (group: TermGroup): string[] => {
   if (group.kind === "anchor" || group.kind === "literal" || group.kind === "question" || group.kind === "plan") {
@@ -265,6 +258,7 @@ interface GraphClue {
 }
 
 interface FileEvidence {
+  relatedPaths: Set<string>;
   hits: Map<number, { text: string; groups: Set<string>; distinctive: Set<string>; clues: GraphClue[] }>;
   groups: Set<string>;
   distinctive: Set<string>;
@@ -316,6 +310,7 @@ interface PreparedWindow {
 }
 
 const emptyEvidence = (): FileEvidence => ({
+  relatedPaths: new Set(),
   hits: new Map(),
   groups: new Set(),
   distinctive: new Set(),
@@ -1249,6 +1244,8 @@ function collectPatterns(groups: TermGroup[]): Map<string, Array<{ group: TermGr
 export type ExploreQueryTerminal = "active" | "finished" | "cancelled";
 
 export interface ExploreQueryRunOptions {
+  /** A selected model decides relationship expansion through issued actions. */
+  guided?: boolean;
   signal?: AbortSignal;
   /** Shared abort for this query's sources. Prefer this over a second internal controller. */
   controller?: AbortController;
@@ -1264,11 +1261,11 @@ export interface ExploreQueryRun {
   /** Wake a progressive consumer when a later plan/follow-up adds work. */
   waitForProgress(afterSequence?: number, signal?: AbortSignal): Promise<void>;
   /** Read ready evidence without driving or awaiting source work. */
-  collect(options?: { seen?: readonly string[]; inputBytes?: number }): {
+  collect(options?: { seen?: readonly string[] }): {
     sequence: number; pending: boolean; views: ExploreQueryView[]; unevaluated: number;
     hypotheses?: { behavior?: string; expectedMaterials?: string[] };
   };
-  viewsForModel(byteBudget?: number): {
+  viewsForModel(): {
     views: ExploreQueryView[];
     unevaluated: number;
     hypotheses?: { behavior?: string; expectedMaterials?: string[] };
@@ -1289,11 +1286,16 @@ export interface ExploreQueryRun {
    */
   actionCandidates(): Promise<ExploreQueryAction[]>;
   selectedViews(): ExploreQueryView[];
+  view(viewId: string): ExploreQueryView | undefined;
+  refreshSnapshot(path: string, snapshot: ExploreFileSnapshot): Promise<void>;
+  evidenceVersion(): number;
   completedActionIds(): string[];
   setJudgmentPending(pending: boolean): void;
   /** Record the fast-decision loop's provenance for `finish` (D-312). */
   applyFastDecision(details: ExploreFastDecisionDetails): void;
   finish(model?: ExploreModelParticipation): ExploreResult;
+  requestDelivery(reason: 'decision' | 'user' | 'failed'): void;
+  deliveryReason(): 'decision' | 'user' | 'failed' | undefined;
   cancel(): void;
   readonly parsed: ExploreQueryParse;
   readonly deadlineAt: number;
@@ -1331,7 +1333,11 @@ export function createExploreQueryRun(
   const deadlineAt = options.deadlineAt ?? Number.POSITIVE_INFINITY;
   const reserveForJudgeMs = options.reserveForJudgeMs ?? 0;
   signal.throwIfAborted();
-  const excerptLimit = input.limit ?? DEFAULT_EXCERPT_LIMIT;
+  // Selection is retained in full. The original result owner applies the
+  // caller's preview limit after persistence, never while collecting evidence.
+  const excerptLimit = Number.POSITIVE_INFINITY;
+  let deliveryReason: 'decision' | 'user' | 'failed' | undefined;
+  let evidenceVersion = 0;
   const parsed = parseExploreQuery(input.question, input.anchors ?? []);
   const groups = parsed.groups;
   const { suppliedAnchors, usedAnchors, anchorsTruncated } = parsed;
@@ -1377,6 +1383,7 @@ export function createExploreQueryRun(
    * graph lookups already ran so a candidate never duplicates a launched task.
    */
   const issuedActions = new Map<string, ExploreQueryAction>();
+  const actionGenerations = new Map<string, number>();
   const scheduledActions = new Set<string>();
   const completedActions = new Set<string>();
   const linksRequested = new Set<string>();
@@ -1389,7 +1396,6 @@ export function createExploreQueryRun(
   let catalogEntries: string[] | undefined;
   let planHypotheses: { behavior?: string; expectedMaterials?: string[] } | undefined;
   let frozenViews: ExploreQueryView[] = [];
-  let unevaluatedViewCount = 0;
   type ChosenGroup = { id: string; purpose: string; windows: PreparedWindow[]; requiredFlags: boolean[] };
   let chosenGroups: ChosenGroup[] = [];
   let selectionApplied = false;
@@ -1422,13 +1428,18 @@ export function createExploreQueryRun(
     if (relationFacts.has(path)) return Promise.resolve(relationFacts.get(path)!);
     const existing = pendingRelations.get(path);
     if (existing) return existing;
+    const observed = snapshots.get(path);
     const pending = waitWithSignal(deps.graph!.fileRelations(path), signal).then(relations => {
+      if (snapshots.get(path) !== observed) return null;
       if (terminal === 'active' && !signal.aborted) relationFacts.set(path, relations);
       return relations;
     }).catch(error => {
-      if (!signal.aborted) relationFacts.set(path, null);
+      if (!signal.aborted && snapshots.get(path) === observed) relationFacts.set(path, null);
       throw error;
-    }).finally(() => { pendingRelations.delete(path); notifyProgress(); });
+    }).finally(() => {
+      if (pendingRelations.get(path) === pending) pendingRelations.delete(path);
+      notifyProgress();
+    });
     pendingRelations.set(path, pending);
     return pending;
   };
@@ -1529,10 +1540,20 @@ export function createExploreQueryRun(
     launchedPatterns += patterns.size;
     let hitCount = 0;
     for (const pattern of patterns.keys()) launchedExpressions.add(pattern);
+    const batches = new Map<number, string[]>();
+    for (const [pattern, owners] of patterns) {
+      const budget = owners.some(owner => owner.group.kind === 'anchor') ? DEFAULT_ANCHOR_BUDGET : DEFAULT_CANDIDATE_BUDGET;
+      batches.set(budget, [...(batches.get(budget) ?? []), pattern]);
+    }
+    const merged = new Map<string, RgSearchReturn>();
+    if (deps.rgSearchMany) await Promise.all([...batches].map(async ([candidateBudget, expressions]) => {
+      const results = await deps.rgSearchMany!(expressions, { fixedStrings: true, ...(input.paths ? { paths: input.paths } : {}), candidateBudget, hitsPerFile: DEFAULT_HITS_PER_FILE });
+      for (const [pattern, result] of results) merged.set(pattern, result);
+    }));
     await Promise.all([...patterns.entries()].map(async ([pattern, owners]) => {
       signal.throwIfAborted();
       const anchorOwned = owners.some((owner) => owner.group.kind === "anchor");
-      const result = normalizeRgResult(await deps.rgSearch(pattern, {
+      const result = normalizeRgResult(merged.get(pattern) ?? await deps.rgSearch(pattern, {
         fixedStrings: true,
         ...(input.paths ? { paths: input.paths } : {}),
         candidateBudget: anchorOwned ? DEFAULT_ANCHOR_BUDGET : DEFAULT_CANDIDATE_BUDGET,
@@ -1556,6 +1577,7 @@ export function createExploreQueryRun(
       for (const hit of result.hits) {
         for (const owner of owners) recordHit(byFile, hit, owner.group, owner.distinctive);
       }
+      notifyProgress();
     }));
     return hitCount > 0 ? "ready" : "empty";
   };
@@ -1815,7 +1837,18 @@ export function createExploreQueryRun(
 
   const replacePrepared = (path: string, windows: readonly PreparedWindow[]): void => {
     const kept = prepared.filter((window) => window.path !== path);
-    prepared.splice(0, prepared.length, ...kept, ...windows);
+    const merged = new Map<string, PreparedWindow>();
+    for (const window of windows) {
+      const key = windowIdentityKey(window), previous = merged.get(key);
+      merged.set(key, previous ? { ...window,
+        groups: new Set([...previous.groups, ...window.groups]),
+        distinctive: new Set([...previous.distinctive, ...window.distinctive]),
+        hitLines: [...new Set([...previous.hitLines, ...window.hitLines])],
+        arrivals: [...new Map([...previous.arrivals, ...window.arrivals].map(arrival => [JSON.stringify(arrival), arrival])).values()],
+        why: [...new Set([previous.why, window.why].flatMap(reason => reason.split('; ')))].join('; '),
+      } : window);
+    }
+    prepared.splice(0, prepared.length, ...kept, ...merged.values());
   };
 
   const markProvenance = (path: string, status: ExploreProvenance["status"], snapshot?: ExploreFileSnapshot): void => {
@@ -1843,6 +1876,7 @@ export function createExploreQueryRun(
           signal.throwIfAborted();
           snapshot = { status: "failed", message: "Document read failed. Search again or inspect workspace availability." };
         }
+        snapshot = snapshots.get(candidate.path) ?? snapshot;
         snapshots.set(candidate.path, snapshot);
       }
       if (snapshot.status !== "ready") {
@@ -1906,6 +1940,8 @@ export function createExploreQueryRun(
     const initialWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
     const commitWindows = (sliced: ReturnType<typeof windowsFor>, windows: PreparedWindow[], enhanced = false): void => {
       if (enhanced && windowedEvidence.get(path) !== consumedEvidence) return;
+      const current = snapshots.get(path);
+      if (current?.status !== 'ready' || current.revision !== snapshot.revision) return;
       if (terminal !== 'active' || signal.aborted) return;
       if (sliced.stale && !issues.some(issue => issue.path === path && issue.status === 'stale')) {
         issues.push({ path, status: 'stale', message: 'Some search hits no longer match this document revision; those hits were omitted.' });
@@ -1929,7 +1965,10 @@ export function createExploreQueryRun(
     windowedEvidence.set(path, consumedEvidence);
     if (!deps.structure) return;
     const enhancementKey = JSON.stringify([path, snapshot.revision, consumedEvidence, prepareStructure]);
-    if (enhancements.has(enhancementKey)) return;
+    if (enhancements.has(enhancementKey)) {
+      if (prepareStructure) await enhancements.get(enhancementKey);
+      return;
+    }
     pendingEnhancements.add(enhancementKey);
     const enhancement = scheduleEnhancement(async () => {
       if (deps.structure && !structureFiles.has(path)) structureFiles.set(path, { path, status: 'unavailable', provider: null });
@@ -1954,6 +1993,7 @@ export function createExploreQueryRun(
       }
     }).finally(() => { pendingEnhancements.delete(enhancementKey); notifyProgress(); });
     enhancements.set(enhancementKey, enhancement);
+    if (prepareStructure) await enhancement;
   };
 
   /**
@@ -2051,12 +2091,17 @@ export function createExploreQueryRun(
       if (byFile.size > 0) await materializeAvailable();
       const inflight = primaryInflight();
       if (inflight.length === 0) break;
-      await Promise.race([
-        ...inflight.map((task) => task.promise.catch(() => undefined)),
-        new Promise<void>((resolve) => {
-          setTimeout(resolve, Math.min(20, Math.max(1, remainingMs())));
-        }),
-      ]);
+      const observed = sequence;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          ...inflight.map((task) => task.promise.catch(() => undefined)),
+          waitForProgress(observed, signal),
+          ...(Number.isFinite(deadlineAt) ? [new Promise<void>(resolve => {
+            timer = setTimeout(resolve, Math.min(2_147_483_647, Math.max(0, remainingMs())));
+          })] : []),
+        ]);
+      } finally { if (timer) clearTimeout(timer); }
     }
     if (terminal === "active" && !signal.aborted) {
       await refreshReadEvidence();
@@ -2116,6 +2161,8 @@ export function createExploreQueryRun(
     ];
     return {
       viewId,
+      materialId: `${window.source}:${window.path}:${window.start}-${window.end}`,
+      relatedPaths: [...(byFile.get(window.path)?.relatedPaths ?? [])],
       path: window.path,
       startLine: window.start,
       endLine: window.end,
@@ -2131,7 +2178,7 @@ export function createExploreQueryRun(
     };
   };
 
-  const freezeViews = (byteBudget = Number.POSITIVE_INFINITY): void => {
+  const freezeViews = (): void => {
     const unique: PreparedWindow[] = [];
     const seen = new Set<string>();
     for (const window of prepared) {
@@ -2151,18 +2198,7 @@ export function createExploreQueryRun(
       return comparePath(left.path, right.path) || left.start - right.start;
     });
     frozenViews = [];
-    unevaluatedViewCount = 0;
-    let used = 0;
-    for (const window of unique) {
-      const view = toView(stableViewId(window), window);
-      const size = utf8Bytes(view.text) + 96;
-      if (used + size <= byteBudget) {
-        used += size;
-        frozenViews.push(view);
-      } else {
-        unevaluatedViewCount += 1;
-      }
-    }
+    for (const window of unique) frozenViews.push(toView(stableViewId(window), window));
     viewsFrozen = true;
   };
 
@@ -2201,6 +2237,7 @@ export function createExploreQueryRun(
       // The store's source timer can fire while materialization is awaiting
       // I/O, before the pump can set deadlineStopped on its next loop turn.
       // Deadline expiry keeps acquired material; earlier/user aborts still fail.
+      if (deliveryReason) return;
       if (!deadlineStopped && remainingMs() > 0) throw error;
       deadlineStopped = true;
       searchIncomplete = true;
@@ -2241,7 +2278,7 @@ export function createExploreQueryRun(
     await materializeScheduled(scheduled, Number.POSITIVE_INFINITY);
   }
 
-  if (deps.graph && (graphStatus as ExploreGraphStatus) === "ready") {
+  if (!options.guided && deps.graph && (graphStatus as ExploreGraphStatus) === "ready") {
     try {
       const seedPaths = [...readPaths];
       const connectionPaths: string[] = [];
@@ -2463,12 +2500,12 @@ export function createExploreQueryRun(
     freezeViews();
   };
 
-  const viewsForModel = (byteBudget = Number.POSITIVE_INFINITY) => {
-    if (!viewsFrozen) freezeViews(byteBudget);
+  const viewsForModel = () => {
+    if (!viewsFrozen) freezeViews();
     for (const view of frozenViews) offeredViews.set(view.viewId, view);
     return {
       views: frozenViews,
-      unevaluated: unevaluatedViewCount,
+      unevaluated: 0,
       ...(planHypotheses ? { hypotheses: planHypotheses } : {}),
     };
   };
@@ -2479,15 +2516,7 @@ export function createExploreQueryRun(
     const seen = new Set(options.seen);
     const available = frozenViews.filter(view => !seen.has(view.viewId));
     const views: ExploreQueryView[] = [];
-    let used = 0;
-    for (const view of available) {
-      const size = utf8Bytes(JSON.stringify(view));
-      // Keep an oversized item visible as its own batch; the provider adapter
-      // reports unsupported capacity rather than silently treating it as noise.
-      if (views.length && used + size > (options.inputBytes ?? Infinity)) break;
-      views.push(view); used += size;
-      offeredViews.set(view.viewId, view);
-    }
+    for (const view of available) { views.push(view); offeredViews.set(view.viewId, view); }
     return { sequence, pending: judgmentPending || (!signal.aborted && (driving || Boolean(pumpPromise) || primaryInflight().length > 0 || pendingEnhancements.size > 0 || pendingRelations.size > 0)),
       views, unevaluated: available.length - views.length,
       ...(planHypotheses ? { hypotheses: planHypotheses } : {}) };
@@ -2542,6 +2571,43 @@ export function createExploreQueryRun(
       offeredViews.set(view.viewId, view);
     }
     return [...views.values()];
+  };
+  const refreshSnapshot = async (path: string, snapshot: ExploreFileSnapshot): Promise<void> => {
+    if (terminal !== 'active') throw new ExploreEvidenceChanged();
+    evidenceVersion++;
+    snapshots.set(path, snapshot);
+    replacePrepared(path, []);
+    windowedEvidence.delete(path);
+    relationFacts.delete(path);
+    pendingRelations.delete(path);
+    for (const evidence of byFile.values()) evidence.relatedPaths.delete(path);
+    for (const [id, action] of issuedActions) {
+      if (action.target !== path && !action.dependencies?.some(dependency => offeredViews.get(dependency.viewId)?.path === path)) continue;
+      issuedActions.delete(id);
+      const range = action.startLine !== undefined && action.endLine !== undefined ? `:${action.startLine}-${action.endLine}` : '';
+      const base = `${action.kind}:${action.target}${range}`;
+      actionGenerations.set(base, (actionGenerations.get(base) ?? 0) + 1);
+      if (action.kind === 'symbol') symbolsSearched.delete(action.target);
+      if (action.kind === 'importers') importersRequested.delete(action.target);
+      if (action.kind === 'connect') linksRequested.delete(action.target);
+      relationLookupsRequested.delete(`${action.kind}:${action.target}`);
+    }
+    for (const group of chosenGroups) {
+      const keep = group.windows.map((window, index) => ({ window, required: group.requiredFlags[index]! })).filter(item => item.window.path !== path);
+      group.windows = keep.map(item => item.window); group.requiredFlags = keep.map(item => item.required);
+    }
+    chosenGroups = chosenGroups.filter(group => group.windows.length);
+    for (let index = issues.length - 1; index >= 0; index--) if (issues[index]!.path === path) issues.splice(index, 1);
+    const evidence = byFile.get(path);
+    if (snapshot.status === 'ready' && evidence) {
+      const lines = snapshot.content.split(/\r\n|\n|\r/);
+      for (const [line, hit] of evidence.hits) if (lines[line - 1] !== hit.text) evidence.hits.delete(line);
+      evidence.semanticClues = [];
+      await buildWindowsFrom(path, snapshot, evidence);
+    } else if (snapshot.status !== 'ready') {
+      issues.push({ path, status: snapshot.status, message: snapshot.message });
+    }
+    viewsFrozen = false; notifyProgress();
   };
 
   const applySelection = (
@@ -2630,12 +2696,6 @@ export function createExploreQueryRun(
         gaps.push(`material group ${group.id} contains a required range the Host could not validate`);
         continue;
       }
-      const requiredCount = requiredFlags.filter(Boolean).length;
-      if (requiredCount > excerptLimit) {
-        rejected.push({ groupId: group.id, reason: "required group exceeds excerpt limit" });
-        gaps.push(`material group ${group.id} cannot be presented intact under the excerpt limit`);
-        continue;
-      }
       if (viewIds.length > 0 && windows.length > 0) {
         accepted.push({ groupId: group.id, viewIds });
         built.push({ id: group.id, purpose: group.purpose, windows, requiredFlags });
@@ -2717,7 +2777,7 @@ export function createExploreQueryRun(
   };
 
   /** Locate a real symbol's definitions and attach them as clues (followup/action shared). */
-  const locateSymbolTarget = async (value: string): Promise<void> => {
+  const locateSymbolTarget = async (value: string, dependencies: string[] = []): Promise<void> => {
     symbolsSearched.add(value);
     const lexical = async () => {
       if (launchedExpressions.has(value)) return;
@@ -2742,6 +2802,10 @@ export function createExploreQueryRun(
       });
       byFile.set(hit.path, evidence);
       definitionFiles.add(hit.path);
+    }
+    for (const [path, evidence] of byFile) {
+      if (!evidence.groups.has(`symbol:${value}`) && !hits.some(hit => hit.path === path)) continue;
+      for (const dependency of dependencies) if (dependency !== path) evidence.relatedPaths.add(dependency);
     }
   };
 
@@ -2840,6 +2904,10 @@ export function createExploreQueryRun(
   const readActionTarget = async (action: ExploreQueryAction): Promise<void> => {
     if (!pathInRoots(action.target, input.paths)) return;
     const evidence = byFile.get(action.target) ?? emptyEvidence();
+    for (const dependency of action.dependencies ?? []) {
+      const view = offeredViews.get(dependency.viewId);
+      if (view && view.path !== action.target) evidence.relatedPaths.add(view.path);
+    }
     if (action.locate) {
       attachGraphClue(evidence, {
         source: "action",
@@ -2881,7 +2949,9 @@ export function createExploreQueryRun(
       const range = candidate.startLine !== undefined && candidate.endLine !== undefined
         ? `:${candidate.startLine}-${candidate.endLine}`
         : "";
-      const actionId = `${candidate.kind}:${candidate.target}${range}`;
+      const base = `${candidate.kind}:${candidate.target}${range}`;
+      const generation = actionGenerations.get(base);
+      const actionId = generation ? `${base}@${generation}` : base;
       if (offered.has(actionId)) return;
       offered.add(actionId);
       if (scheduledActions.has(actionId)) return;
@@ -2909,16 +2979,21 @@ export function createExploreQueryRun(
       const lineCount = snapshot.content.split(/\r\n|\n|\r/).length;
       const width = Math.max(1, window.end - window.start + 1);
       const structure = structureFiles.get(window.path);
+      const dependencies = [{ viewId: stableViewId(window), revision: window.revision }];
+      offeredViews.set(dependencies[0]!.viewId, toView(dependencies[0]!.viewId, window));
       if (structure?.status === 'unavailable') offer({ kind: 'prepare-structure', target: window.path,
+        dependencies,
         why: 'current text is available; explicitly prepare optional structure only if precise navigation is needed' });
       if (window.end < lineCount) offer({ kind: 'read', target: window.path,
+        dependencies,
         startLine: window.end + 1, endLine: Math.min(lineCount, window.end + width), why: 'continue after a read source window' });
       if (window.start > 1) offer({ kind: 'read', target: window.path,
+        dependencies,
         startLine: Math.max(1, window.start - width), endLine: window.start - 1, why: 'context preceding a read source window' });
       for (const match of window.text.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
         const name = match[1]!;
         if (/^(if|for|while|switch|catch|function|return|typeof|sizeof)$/.test(name) || symbolsSearched.has(name)) continue;
-        offer({ kind: 'symbol', target: name, why: `literal call/signature ${name} observed in ${window.path}:${window.start}-${window.end}; relationship not yet verified` });
+        offer({ kind: 'symbol', target: name, dependencies, why: `literal call/signature ${name} observed in ${window.path}:${window.start}-${window.end}; relationship not yet verified` });
       }
     }
     if (!deps.graph) return candidates;
@@ -2930,6 +3005,9 @@ export function createExploreQueryRun(
       }
       const relations = relationFacts.get(path);
       if (!relations) continue;
+      const dependencies = prepared.filter(window => window.path === path).map(window => ({
+        viewId: stableViewId(window), revision: window.revision,
+      }));
       for (const connection of relations.connections) {
         if (linksRequested.has(connection.literal)) continue;
         offer({
@@ -2944,6 +3022,7 @@ export function createExploreQueryRun(
           offer({
             kind: "read",
             target: site.targetPath,
+            dependencies,
             ...(name ? { locate: { text: name, kind: "identifier" as const } } : {}),
             why: `${site.caller ?? path} ${site.targetName ? `calls ${site.targetName}` : "references a symbol"} here`,
           });
@@ -2951,22 +3030,23 @@ export function createExploreQueryRun(
           offer({
             kind: "symbol",
             target: name,
+            dependencies,
             why: `unresolved ${name} referenced in ${path}`,
           });
         }
       }
       if (!importersRequested.has(path)) {
-        offer({ kind: "importers", target: path, why: `files importing ${path}` });
+        offer({ kind: "importers", target: path, dependencies, why: `files importing ${path}` });
       }
       const evidence = byFile.get(path);
       for (const name of evidence?.verifiedCallees ?? []) {
         if (!looksLikeSymbolName(name)) continue;
         if (!symbolsSearched.has(name)) {
-          offer({ kind: "symbol", target: name, why: `verified callee ${name} in ${path}` });
+          offer({ kind: "symbol", target: name, dependencies, why: `verified callee ${name} in ${path}` });
         }
         for (const kind of ["callers", "references", "calls"] as const) {
           if (relationLookupsRequested.has(`${kind}:${name}`)) continue;
-          offer({ kind, target: name, why: `${kind} of verified callee ${name} in ${path}` });
+          offer({ kind, target: name, dependencies, why: `${kind} of verified callee ${name} in ${path}` });
         }
       }
     }
@@ -3034,6 +3114,14 @@ export function createExploreQueryRun(
         actionsRejected.push({ actionId: requested.actionId, reason: "unknown or stale action candidate" });
         continue;
       }
+      if (issued.dependencies?.some(dependency => {
+        const view = offeredViews.get(dependency.viewId);
+        return !view || view.revision !== dependency.revision || snapshots.get(view.path)?.status !== 'ready'
+          || (snapshots.get(view.path) as Extract<ExploreFileSnapshot, { status: 'ready' }>).revision !== dependency.revision;
+      })) {
+        actionsRejected.push({ actionId: requested.actionId, reason: 'action material changed' });
+        continue;
+      }
       if (scheduledActions.has(issued.actionId)) {
         reused.push(issued.actionId);
         continue;
@@ -3043,7 +3131,9 @@ export function createExploreQueryRun(
       launched.push(issued.actionId);
       launchTask(`action:${issued.actionId}`, "followup", true, async () => {
         switch (issued.kind) {
-          case "symbol": await locateSymbolTarget(issued.target); break;
+          case "symbol": await locateSymbolTarget(issued.target, (issued.dependencies ?? []).flatMap(dependency => {
+            const view = offeredViews.get(dependency.viewId); return view ? [view.path] : [];
+          })); break;
           case "connect": await followConnectionLiteral(issued.target); break;
           case "importers": await attachImporterClues(issued.target); break;
           case "callers": case "references": case "calls": await attachRelationSites(issued.kind, issued.target); break;
@@ -3053,7 +3143,6 @@ export function createExploreQueryRun(
             const evidence = byFile.get(issued.target);
             if (snapshot?.status === 'ready' && evidence) {
               await buildWindowsFrom(issued.target, snapshot, evidence, true);
-              await Promise.all(enhancements.values());
             }
             break;
           }
@@ -3075,34 +3164,16 @@ export function createExploreQueryRun(
 
   const packChosenGroups = (): {
     packed: PreparedWindow[];
-    omittedRequired: ExploreResult["omitted"];
     requiredKeys: Set<string>;
-    gaps: string[];
   } => {
     const packed: PreparedWindow[] = [];
-    const omittedRequired: ExploreResult["omitted"] = [];
     const requiredKeys = new Set<string>();
     const packedKeys = new Set<string>();
-    const acceptedGroups: ChosenGroup[] = [];
-    const gaps: string[] = [];
     const keyOf = (window: PreparedWindow): string => `${window.path}@${window.revision}:${window.start}-${window.end}`;
 
-    // Required ranges from every group get first claim on the excerpt cap.
-    // Auxiliary ranges from an early group cannot evict a later required group.
+    // Present required evidence first, retaining supplementary ranges in full.
     for (const group of chosenGroups) {
       const required = group.windows.filter((_, index) => group.requiredFlags[index]);
-      const newRequired = required.filter((window) => !packedKeys.has(keyOf(window)));
-      if (newRequired.length > excerptLimit || packed.length + newRequired.length > excerptLimit) {
-        gaps.push(`material group ${group.id} cannot be presented intact under the excerpt limit`);
-        omittedRequired.push(...group.windows.map((window) => ({
-          path: window.path,
-          startLine: window.start,
-          endLine: window.end,
-          reason: "required group exceeds excerpt limit",
-        })));
-        continue;
-      }
-      acceptedGroups.push(group);
       for (const window of required) {
         const key = keyOf(window);
         requiredKeys.add(key);
@@ -3111,16 +3182,15 @@ export function createExploreQueryRun(
         packed.push(window);
       }
     }
-    for (const group of acceptedGroups) {
+    for (const group of chosenGroups) {
       for (const window of group.windows.filter((_, index) => !group.requiredFlags[index])) {
-        if (packed.length >= excerptLimit) break;
         const key = keyOf(window);
         if (packedKeys.has(key)) continue;
         packedKeys.add(key);
         packed.push(window);
       }
     }
-    return { packed, omittedRequired, requiredKeys, gaps };
+    return { packed, requiredKeys };
   };
 
   const finish = (model?: ExploreModelParticipation): ExploreResult => {
@@ -3195,15 +3265,11 @@ export function createExploreQueryRun(
       ...(chosenPack ? { requiredGroups: chosenGroups.filter(group => group.windows.some((entry, i) => group.requiredFlags[i]
         && windowIdentityKey(entry) === windowIdentityKey(window))).map(group => group.id) } : {}),
     }));
-    const omittedRequiredKeys = new Set(
-      (chosenPack?.omittedRequired ?? []).map((item) => `${item.path}:${item.startLine}-${item.endLine}`),
-    );
     const omitted = [
-      ...(chosenPack?.omittedRequired ?? []),
       ...prepared
         .filter((window) => {
           const key = `${window.path}:${window.start}-${window.end}`;
-          return !packedKeys.has(key) && !omittedRequiredKeys.has(key);
+          return !packedKeys.has(key);
         })
         .map((window) => ({
           path: window.path,
@@ -3211,7 +3277,7 @@ export function createExploreQueryRun(
           endLine: window.end,
           reason: "not selected for complementary pack",
         })),
-      ...[...selectionGaps, ...(chosenPack?.gaps ?? [])].map((gap) => ({
+      ...selectionGaps.map((gap) => ({
         path: "(gap)",
         startLine: 0,
         endLine: 0,
@@ -3230,7 +3296,9 @@ export function createExploreQueryRun(
         semanticReport = { ...semanticReport, status: "incomplete" };
       }
     }
-    const partial = issues.length > 0 || omitted.length > 0 || unread.length > 0 || searchIncomplete || snippets.length < prepared.length || graphPartial || sourceIncomplete;
+    const partial = issues.length > 0 || selectionGaps.length > 0 || graphPartial
+      || sources.some(source => source.status === 'failed' || source.status === 'unavailable')
+      || (!deliveryReason && (searchIncomplete || sourceIncomplete));
     terminal = "finished";
     frozenResult = {
       snippets,
@@ -3249,7 +3317,6 @@ export function createExploreQueryRun(
       details: {
         provenance: [...provenance.values()].sort((left, right) => comparePath(left.path, right.path)),
         anchors: { supplied: suppliedAnchors, used: usedAnchors, truncated: anchorsTruncated },
-        byteBudget: DEFAULT_BYTE_BUDGET,
         ...(structureFiles.size > 0
           ? { structure: { files: [...structureFiles.values()].sort((left, right) => comparePath(left.path, right.path)) } }
           : {}),
@@ -3288,12 +3355,19 @@ export function createExploreQueryRun(
     controller.abort();
   };
 
-  const sourceStates = (): ExploreQuerySourceState[] => [...tasks.values()].map((task) => ({
+  const sourceStates = (): ExploreQuerySourceState[] => [...[...tasks.values()].map((task) => ({
     id: task.id,
     family: task.family,
     status: task.status,
     ...(task.targets ? { targets: [...task.targets] } : {}),
-  }));
+  })), ...[...new Set([...pendingRelations.keys(), ...relationFacts.keys()])].map(path => ({
+    id: `relations:${path}`, family: 'graph' as const,
+    status: pendingRelations.has(path) ? (signal.aborted ? 'incomplete' as const : 'running' as const)
+      : relationFacts.get(path) ? 'ready' as const : 'unavailable' as const, targets: [path],
+  })), ...(started ? [{ id: 'source-context', family: 'lexical' as const,
+    status: driving || pumpPromise || pendingEnhancements.size
+      ? (signal.aborted ? 'incomplete' as const : 'running' as const) : 'ready' as const,
+  }] : [])];
 
   const vocab = (): ExploreQueryVocab => ({
     objects: parsed.objects,
@@ -3321,8 +3395,18 @@ export function createExploreQueryRun(
       notifyProgress();
     },
     selectedViews,
+    view: viewId => offeredViews.get(viewId),
+    refreshSnapshot,
+    evidenceVersion: () => evidenceVersion,
     applyFastDecision,
     finish,
+    requestDelivery: reason => {
+      if (terminal !== 'active' || deliveryReason) return;
+      deliveryReason = reason;
+      abortLeftoverSources();
+      notifyProgress();
+    },
+    deliveryReason: () => deliveryReason,
     cancel,
     refreshVocab,
     parsed,
@@ -3346,62 +3430,6 @@ export async function explore(
   return run.finish();
 }
 
-export type ExploreFormatInput = Pick<
-  ExploreResult,
-  "snippets" | "issues" | "notRequested" | "omitted" | "partial" | "searchIncomplete" | "searched"
-> & {
-  relations?: NonNullable<WireResult["details"]["relations"]>;
-  graph?: ExploreGraphDetails;
-  skippedQueries?: NonNullable<WireResult["details"]["skippedQueries"]>;
-  model?: ExploreModelParticipation;
-  semantic?: ExploreSemanticDetails;
-  sources?: ExploreQuerySourceState[];
-  /** Count/handle projection for staged model calls. Full paths stay in the output store. */
-  omittedCount?: number;
-  summaryOnly?: boolean;
-};
-
-/**
- * Relations are an annotation, so they are capped per file and never printed
- * as current when the graph revision differs from the excerpt: a moved line
- * number is worse than no line number (agent-harness 7.2, D-112).
- */
-const RELATION_LINES_PER_FILE = 12;
-
-function relationLines(relations: NonNullable<WireResult["details"]["relations"]> | undefined, limit = RELATION_LINES_PER_FILE): string[] {
-  if (!relations) return [];
-  const files = relations.files.filter((file) => (
-    file.imports.length > 0
-    || file.connections.length > 0
-    || file.associations.length > 0
-    || (file.references?.length ?? 0) > 0
-    || (file.calls?.length ?? 0) > 0
-  ));
-  const lines: string[] = [];
-  if (relations.status !== "ready") {
-    lines.push(`Relations ${relations.status}.`);
-  }
-  if (files.length === 0) return lines;
-  lines.push("Relations:");
-  for (const file of files) {
-    const where = file.stale
-      ? `${file.path} [stale @${file.documentRevision ?? "unknown"}; line numbers are from that revision]`
-      : file.path;
-    const items = [
-      ...file.connections.map((item) => `connects ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`}`),
-      ...file.imports.map((item) => `imports ${item.specifier}${file.stale ? "" : ` (L${item.line})`}`),
-      ...file.associations.map((item) => `associates ${item.callee}("${item.literal}")${file.stale ? "" : ` (L${item.line})`} [candidate]`),
-      ...(file.references ?? []).map((item) => `references ${item.value}${item.caller ? ` in ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
-      ...(file.calls ?? []).map((item) => `calls ${item.callee}${item.caller ? ` from ${item.caller}` : ""}${item.targetPath ? ` → ${item.targetPath}` : ""}${file.stale ? "" : ` (L${item.line})`}${item.pinned ? "" : " [unpinned]"}${item.staleTarget ? " [stale-target]" : ""}`),
-    ];
-    for (const item of items.slice(0, limit)) lines.push(`- ${where} ${item}`);
-    const dropped = items.length - limit;
-    if (dropped > 0) lines.push(`- ${file.path} … ${dropped} more edge(s) omitted`);
-    if (file.incomplete) lines.push(`- ${file.path} edge extraction was incomplete for this revision`);
-  }
-  return lines;
-}
-
 /** Required groups sharing a range are one atomic delivery component. */
 export function requiredExploreComponents<T extends { requiredGroups?: readonly string[] }>(snippets: readonly T[]): T[][] {
   const pending = new Set(snippets);
@@ -3423,178 +3451,4 @@ export function requiredExploreComponents<T extends { requiredGroups?: readonly 
     components.push(group);
   }
   return components;
-}
-
-/** A delivery plan owns both selected ranges and their exact rendering. */
-function planExploreDelivery(
-  result: ExploreFormatInput,
-  byteBudget: number,
-  prefix = '',
-): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
-  const header: string[] = [
-    ...(prefix ? [prefix] : []),
-    `Excerpts: ${result.snippets.length} · matched files: ${result.searched.files} · partial result`,
-  ];
-  const dropped = result.searched.filesDropped ?? 0;
-  if (dropped > 0) {
-    header.push(`Search incomplete: at least ${dropped} matching files were not examined.`);
-  }
-  const sourceGaps = result.sources?.filter((source) => (
-    source.status === "incomplete" || source.status === "cancelled" || source.status === "failed"
-  )) ?? [];
-  const semanticBuilding = result.semantic?.status === "incomplete"
-    && (result.semantic.index.lifecycle === "building" || result.semantic.index.lifecycle === "rebuilding");
-  if (sourceGaps.length) {
-    const gaps = [...new Set(sourceGaps.map(source => source.family === "semantic" && semanticBuilding
-      ? "semantic index building" : `${source.family} ${source.status}`))];
-    header.push(`Search incomplete: ${gaps.join(", ")}.`);
-  } else if ((result.searchIncomplete || result.searched.incomplete) && dropped === 0) {
-    header.push("Search incomplete: search budget reached; more matches may exist.");
-  }
-  if (result.graph && result.graph.status !== "not-requested" && result.graph.status !== "ready"
-    && !sourceGaps.some(source => source.family === "graph" && source.status === result.graph!.status)) {
-    header.push(`Symbol graph: ${result.graph.status}.`);
-  } else if (result.graph?.status === "ready" && result.graph.partial) {
-    header.push("Graph partial: one or more selected resource roots had no current symbol catalog.");
-  }
-  if (result.semantic?.note && !(semanticBuilding && sourceGaps.some(source => source.family === "semantic"))) header.push(`Semantic index: ${result.semantic.note}`);
-  if (result.model?.note) {
-    header.push(result.model.note);
-  }
-
-  const snippetBlocks = result.snippets.map((snippet) => {
-    const unit = snippet.unit
-      ? ` · ${snippet.unit.name} (${snippet.unit.kind}, lines ${snippet.unit.startLine}-${snippet.unit.endLine})`
-      : "";
-    const source = snippet.source === "surface-draft" ? " · editor draft"
-      : snippet.source === "working-branch" ? " · working branch" : "";
-    return `--- ${snippet.path}:${snippet.startLine}-${snippet.endLine}${unit}${source} ---\n${snippet.text}`;
-  });
-  const issueLines = result.issues.map((issue) => `${issue.path}: ${issue.status} — ${issue.message}`);
-  const omittedLines = result.omitted.map((item) => `- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
-  const unreadLine = result.notRequested.count > 0
-    ? result.summaryOnly
-      ? `Unread candidates (not-requested, ${result.notRequested.count}): listed in output store`
-      : `Unread candidates (not-requested, ${result.notRequested.count}): ${result.notRequested.paths.join(", ")}`
-    : "";
-
-  const graphLines = relationLines(result.relations);
-  const storedHeader = [...header];
-  if (!result.partial) storedHeader[prefix ? 1 : 0] = storedHeader[prefix ? 1 : 0]!.replace(' · partial result', '');
-  const storedParts = [...storedHeader, ...snippetBlocks];
-  if (omittedLines.length > 0) storedParts.push("Omitted supports:", ...omittedLines);
-  if (unreadLine) storedParts.push(unreadLine);
-  storedParts.push(...issueLines);
-  storedParts.push(...relationLines(result.relations, Infinity));
-  const storedBody = storedParts.join("\n");
-
-  const visible: string[] = [...header];
-  const delivered: ExploreSnippet[] = [];
-  const byteOmissions = new Map<ExploreSnippet, ExploreResult['omitted'][number]>();
-  const omitted = [...result.omitted];
-  const pushIfFits = (line: string): boolean => {
-    const next = [...visible, line].join("\n");
-    if (utf8Bytes(next) <= byteBudget) {
-      visible.push(line);
-      return true;
-    }
-    return false;
-  };
-
-  const coveringSnippet = (snippet: ExploreSnippet, candidates: readonly ExploreSnippet[]): ExploreSnippet | undefined =>
-    !snippet.required ? candidates.find(other => other.path === snippet.path
-      && other.revision === snippet.revision && other.source === snippet.source
-      && other.startLine <= snippet.startLine && other.endLine >= snippet.endLine
-      && !other.unit?.omitted?.some(range => range.startLine <= snippet.endLine && range.endLine >= snippet.startLine)
-      && snippet.text.length > 0 && other.text.includes(snippet.text)) : undefined;
-  const markCovered = (snippet: ExploreSnippet, covering: ExploreSnippet): void => {
-    omitted.push({ path: snippet.path, startLine: snippet.startLine, endLine: snippet.endLine,
-      reason: `already shown in ${covering.path}:${covering.startLine}-${covering.endLine}` });
-  };
-
-  for (const group of requiredExploreComponents(result.snippets)) {
-    const requiredGroups = new Set(group.flatMap(member => member.requiredGroups ?? []));
-    const block = group.map(member => snippetBlocks[result.snippets.indexOf(member)]!).join('\n');
-    if (!pushIfFits(block)) {
-      for (const member of group) {
-        const item = { path: member.path, startLine: member.startLine, endLine: member.endLine,
-          reason: member.required ? "required range exceeded output budget" : "over byte budget" };
-        if (!requiredGroups.size) byteOmissions.set(member, item);
-        omitted.push(item);
-      }
-    } else delivered.push(...group);
-  }
-
-  // First preserve the original priority pack. Deduplicating while allocating
-  // could admit an earlier oversized block and evict already-delivered facts.
-  const originalDelivery = [...delivered];
-  delivered.length = 0;
-  visible.splice(header.length);
-  for (const snippet of originalDelivery) {
-    const covering = coveringSnippet(snippet, delivered);
-    if (covering) markCovered(snippet, covering);
-    else {
-      delivered.push(snippet);
-      visible.push(snippetBlocks[result.snippets.indexOf(snippet)]!);
-    }
-  }
-  for (const [snippet, item] of byteOmissions) {
-    const covering = coveringSnippet(snippet, delivered);
-    if (covering || pushIfFits(snippetBlocks[result.snippets.indexOf(snippet)]!)) {
-      omitted.splice(omitted.indexOf(item), 1);
-      if (covering) markCovered(snippet, covering);
-      else delivered.push(snippet);
-    }
-  }
-  const extraOmitted = omitted.filter((item) => (
-    item.reason === "over byte budget" || item.reason === "required range exceeded output budget"
-  ));
-  // These replacements can only shorten the reserved header, so the delivered
-  // complete blocks still fit. Metadata must describe the actual text pack.
-  const headerIndex = prefix ? 1 : 0;
-  visible[headerIndex] = `Excerpts: ${delivered.length} · matched files: ${result.searched.files}${result.partial || extraOmitted.length ? ' · partial result' : ''}`;
-  if (omitted.length > 0 || (result.summaryOnly === true && (result.omittedCount ?? 0) > 0)) {
-    if (result.summaryOnly) {
-      const count = (result.omittedCount ?? result.omitted.length) + omitted.length - result.omitted.length;
-      pushIfFits(`Omitted supports (${count}): full list in output store`);
-    } else {
-      pushIfFits("Omitted supports:");
-      for (const item of omitted) {
-        pushIfFits(`- ${item.path}:${item.startLine}-${item.endLine} (${item.reason})`);
-      }
-    }
-  }
-  if (unreadLine && !pushIfFits(unreadLine) && result.notRequested.count > 0) {
-    pushIfFits(`Unread candidates (not-requested, ${result.notRequested.count}): listed in output store`);
-  }
-  for (const line of issueLines) pushIfFits(line);
-  for (const line of graphLines) pushIfFits(line);
-
-  let visibleText = visible.join("\n");
-  if (utf8Bytes(visibleText) > byteBudget) {
-    const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);
-    visibleText = raw.toString("utf8").replace(/\uFFFD$/u, "");
-  }
-  const showHandle = storedBody !== visibleText
-    || extraOmitted.length > 0
-    || (result.omittedCount ?? result.omitted.length) > 0
-    || result.notRequested.count > 0 && (result.summaryOnly === true || !visibleText.includes(result.notRequested.paths[0] ?? "\0"));
-  return { visibleText, storedBody, showHandle, omitted, snippets: delivered };
-}
-
-export function formatExploreOutput(
-  result: ExploreFormatInput,
-  options?: { byteBudget?: number; handle?: string; prefix?: string },
-): { visibleText: string; storedBody: string; showHandle: boolean; omitted: ExploreResult["omitted"]; snippets: ExploreSnippet[] } {
-  const byteBudget = options?.byteBudget ?? DEFAULT_BYTE_BUDGET;
-  const packed = planExploreDelivery(result, byteBudget, options?.prefix);
-  const hint = options?.handle && packed.showHandle ? exploreHandleHint(options.handle) : "";
-  if (!hint) return packed;
-  const reserved = planExploreDelivery(result, Math.max(0, byteBudget - utf8Bytes(hint)), options?.prefix);
-  let visibleText = `${reserved.visibleText}${hint}`;
-  if (utf8Bytes(visibleText) > byteBudget) {
-    const raw = Buffer.from(visibleText, "utf8").subarray(0, byteBudget);
-    visibleText = raw.toString("utf8").replace(/\uFFFD$/u, "");
-  }
-  return { ...reserved, visibleText, showHandle: true };
 }

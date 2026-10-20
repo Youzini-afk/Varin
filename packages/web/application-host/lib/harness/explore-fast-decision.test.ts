@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FastDecisionAnswer } from "@varin/protocol";
+import type { FastDecisionAnswer, FastDecisionQuestion } from "@varin/protocol";
 import { createExploreQueryRun } from "./explore.js";
 import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import {
@@ -20,6 +20,13 @@ const binding = {
   modelId: "jev-1.13",
   configurationId: "cfg-1",
 };
+
+
+const choose = (question: FastDecisionQuestion): FastDecisionAnswer => ({
+  id: question.id, kind: 'choose', choice: question.id.startsWith('m:') ? 'keep'
+    : question.kind === 'choose' && question.options.some(option => option.id === 'read:c.ts') ? 'read:c.ts'
+      : question.kind === 'choose' ? question.options.find(option => option.id.startsWith('wait:'))?.id ?? 'deliver' : 'deliver',
+});
 
 const neverSettle = { promise: new Promise<void>(() => {}), requested: () => false };
 
@@ -75,12 +82,7 @@ describe("runExploreFastDecisionLoop", () => {
       binding,
       call: async ({ questions }) => {
         asked.push(questions.map((question) => question.id));
-        const answers: FastDecisionAnswer[] = questions.map((question) => ({
-          id: question.id,
-          kind: "judge",
-          // Only the real expansion and the material are worth keeping.
-          value: question.id === "a:read:c.ts" || question.id.startsWith("m:") ? 0.9 : 0.1,
-        }));
+        const answers = questions.map(choose);
         return { answers, missing: [] };
       },
       signal: new AbortController().signal,
@@ -91,9 +93,9 @@ describe("runExploreFastDecisionLoop", () => {
     expect(details.batches).toBe(asked.length);
     expect(details.actionsExecuted).toBe(1);
     expect(details.executed).toEqual(["read:c.ts"]);
-    expect(details.viewsJudged).toBe(3);
+    expect(details.viewsJudged).toBeGreaterThanOrEqual(3);
     expect(asked[0]?.some((id) => id.startsWith("m:"))).toBe(true);
-    expect(asked.flat()).toContain("a:read:c.ts");
+    expect(asked.flat()).toContain("next");
 
     const views = run.viewsForModel().views;
     expect(views.some((view) => view.path === "c.ts")).toBe(true);
@@ -104,22 +106,24 @@ describe("runExploreFastDecisionLoop", () => {
     expect(result.snippets.some((snippet) => snippet.text.includes("export function inner"))).toBe(true);
   });
 
-  it("treats a missing answer as missing, not as a rejection", async () => {
+  it.each(['missing', 'defer'] as const)("keeps source evidence when all material judgments %s", async answer => {
     const run = newRun();
     run.start();
     const details = await runExploreFastDecisionLoop({
       run,
       binding,
       call: async ({ questions }) => ({
-        answers: [],
-        missing: questions.map((question) => question.id),
+        answers: answer === 'missing' ? [] : questions.map(question => ({
+          id: question.id, kind: 'choose' as const, choice: question.id.startsWith('m:') ? 'defer' : 'deliver',
+        })),
+        missing: answer === 'missing' ? questions.map((question) => question.id) : [],
       }),
       signal: new AbortController().signal,
       deadlineAt: Date.now() + 10_000,
       closing: neverSettle,
     });
     expect(details.status).toBe("used");
-    expect(details.missing).toBeGreaterThan(0);
+    if (answer === 'missing') expect(details.missing).toBeGreaterThan(0);
     expect(details.actionsExecuted).toBe(0);
     // Missing answers selected nothing; the query still finishes on sources.
     const result = run.finish();
@@ -155,8 +159,7 @@ describe("runExploreFastDecisionLoop", () => {
       deadlineAt: Date.now() + 10_000, closing: neverSettle,
       call: async ({ questions }) => {
         batches++;
-        return { answers: questions.map(question => ({ id: question.id, kind: "judge" as const,
-          value: question.id === "a:read:c.ts" || question.id.startsWith("m:") ? 1 : 0 })), missing: [],
+        return { answers: questions.map(choose), missing: [],
           usage: batches === 1 ? { inputTokens: 0 } : { inputTokens: 2, outputTokens: 3 } };
       },
     });
@@ -175,7 +178,7 @@ describe("runExploreFastDecisionLoop", () => {
       deadlineAt: Date.now() + 10_000, closing: neverSettle,
       call: async ({ questions }) => {
         batches++;
-        const answers: FastDecisionAnswer[] = questions.map(question => ({ id: question.id, kind: "judge", value: 1 }));
+        const answers: FastDecisionAnswer[] = questions.map(choose);
         if (batches === 1) return { answers, missing: [], usage: { inputTokens: 0, outputTokens: 5 } };
         firstSelected = run.selectedViews().map(view => view.viewId);
         return { answers, missing: [questions[0]!.id], usage: { inputTokens: 3 },

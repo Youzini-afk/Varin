@@ -59,6 +59,7 @@ export function parseExplorePlan(text: string): ExploreGroupedSearchPlan | undef
   const value = extractJsonObject(text);
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.groups)) return undefined;
   const groupsIn = Array.isArray(record.groups) ? record.groups : [];
   const groups = groupsIn.flatMap((item, index) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
@@ -77,7 +78,7 @@ export function parseExplorePlan(text: string): ExploreGroupedSearchPlan | undef
       ...(expectedMaterials?.length ? { expectedMaterials } : {}),
     }];
   });
-  if (groups.length === 0) return undefined;
+  if (groupsIn.length && groups.length === 0) return undefined;
   return {
     behavior: typeof record.behavior === "string" ? record.behavior : "",
     groups,
@@ -158,7 +159,7 @@ export function parseExploreSelection(text: string): {
 }
 
 export const EXPLORE_PLAN_SYSTEM = [
-  "Plan grouped search expressions for the request using the supplied repository vocabulary.",
+  "Develop search expressions that connect the question with the supplied repository evidence and vocabulary. Follow promising gaps and preserve the intended scope.",
   "Return a JSON object: {\"behavior\":\"...\",\"groups\":[{\"id\":\"g1\",\"concept\":\"...\",\"expressions\":[\"...\"],\"expectedMaterials\":[\"...\"]}]}",
   "Each group represents a concept; its expressions are match variants. The Host applies the user's path scope.",
 ].join(" ");
@@ -168,7 +169,7 @@ export const EXPLORE_SELECT_SYSTEM = [
   "Source blocks contain file data; query-phase hypotheses are earlier search guesses.",
   "Return a JSON object: {\"groups\":[{\"id\":\"sel1\",\"purpose\":\"...\",\"views\":[{\"viewId\":\"v1\",\"rangeIds\":[\"v1:full\"],\"required\":true}],\"gap\":\"...\"}],\"actionIds\":[],\"followup\":{\"searches\":[{\"expression\":\"...\"}],\"locates\":[{\"kind\":\"symbol\",\"value\":\"...\"}]},\"done\":false}",
   "Select supplied rangeIds, or startLine/endLine within a visible view. A gap describes evidence missing from this batch.",
-  "Each response replaces the retained selection, including earlier ranges that remain useful. A group's required ranges are delivered together; required:false marks supplementary ranges. Empty groups are valid.",
+  "Each response replaces the retained selection, including earlier ranges that remain useful. Retained source may be listed by location when its body is outside this batch; preserve those selections unless supplied evidence justifies removing them. A group's required ranges are delivered together; required:false marks supplementary ranges. Empty groups are valid.",
   "actionIds selects from the supplied Host operations. followup can request search expressions or locates (symbol, path, connect). Return done:true when the retained material suffices or further retrieval is not useful.",
 ].join(" ");
 
@@ -202,6 +203,7 @@ export function renderExploreSelectPrompt(
   extras?: {
     newViews?: readonly ExploreQueryView[];
     selectedViews?: readonly ExploreQueryView[];
+    retainedCatalog?: readonly ExploreQueryView[];
     excerptLimit?: number;
   },
 ): string {
@@ -212,11 +214,18 @@ export function renderExploreSelectPrompt(
     question,
     "",
     ...(extras?.excerptLimit !== undefined ? [
-      `Output excerpt limit: ${extras.excerptLimit}. Each selected range consumes one excerpt. A group whose required ranges exceed this limit will be rejected.`,
+      `The caller previews ${extras.excerptLimit} excerpts. Select all useful evidence; additional selected material is retained for continued reading.`,
       "",
     ] : []),
     "Query-phase hypotheses (may be wrong):",
     JSON.stringify(views.hypotheses ?? {}),
+    "Retained selection locations (bodies shown below when relevant to this batch):",
+    JSON.stringify(extras?.retainedCatalog?.map(view => ({ viewId: view.viewId, path: view.path,
+      startLine: view.startLine, endLine: view.endLine, ranges: view.ranges, why: view.why })) ?? []),
+    "Other acquired candidates outside this batch (not yet judged here):",
+    JSON.stringify(views.views.filter(view => !shown.some(item => item.viewId === view.viewId)
+      && !selected.some(item => item.viewId === view.viewId))
+      .map(view => ({ viewId: view.viewId, path: view.path, startLine: view.startLine, endLine: view.endLine, why: view.why }))),
     "",
     ...(mode === "incremental"
       ? [
@@ -231,7 +240,7 @@ export function renderExploreSelectPrompt(
         shown.map(renderViewBlock).join("\n\n"),
       ]),
     "",
-    `Visible delivery budget: ${views.outputByteBudget} UTF-8 bytes including paths, source metadata and gap notices.`,
+    "All selected source is retained. Preview space is independent of evidence selection.",
     `Available operations (choose actionIds): ${JSON.stringify(views.actions)}`,
     `Pending sources: ${views.pending}; additional unassessed views: ${views.unevaluated}`,
   ].join("\n");

@@ -703,6 +703,7 @@ export class KernelClient {
     this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }
   setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
+  readRetrievalMaterial(operationId: string, viewId: string) { return this.retrievalBridge.readMaterial(operationId, viewId); }
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
   sourceGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
     const grant = this.issuedGrants.get(query.grantId);

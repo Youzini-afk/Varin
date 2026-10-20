@@ -142,7 +142,7 @@ const renderRustDto = (name) => {
     const wireName = field.includes("_") ? `    #[serde(rename = ${JSON.stringify(field)})]\n` : "";
     return `${wireName}    pub(crate) ${snakeCase(field)}: ${rendered},`;
   });
-  return `#[derive(Clone, Debug, Deserialize)]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(crate) struct ${name} {\n${fields.join('\n')}\n}`;
+  return `#[derive(Clone, Debug, Deserialize${spec.serialize ? ", serde::Serialize" : ""})]\n#[serde(rename_all = "camelCase", deny_unknown_fields)]\npub(crate) struct ${name} {\n${fields.join('\n')}\n}`;
 };
 const workingDocumentDto = {
   'working.result': 'KernelWorkingResultDocument',

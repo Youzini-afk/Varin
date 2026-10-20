@@ -336,7 +336,7 @@ describe("explore query run", () => {
     expect(followup.newViews.some((view) => view.path === "z.ts")).toBe(false);
   });
 
-  it("rejects a required group that cannot fit the excerpt limit instead of silently slicing it", async () => {
+  it("keeps an oversized required group and freezes the complete selection at delivery", async () => {
     const body = [
       "export function trigger() { return register(\"svc\"); }",
       "export function unusedPadding() { return 1; }",
@@ -364,11 +364,10 @@ describe("explore query run", () => {
         { viewId: view.viewId, startLine: 3, endLine: 3, required: true },
       ],
     }]);
-    expect(selected.accepted).toEqual([]);
-    expect(selected.rejected.some((item) => item.reason.includes("excerpt limit"))).toBe(true);
+    expect(selected.accepted).toHaveLength(1);
+    expect(selected.rejected).toEqual([]);
     const first = run.finish();
-    expect(first.snippets.length).toBeLessThanOrEqual(1);
-    expect(first.omitted.some((item) => item.reason.includes("excerpt limit") || item.reason.includes("cannot be presented"))).toBe(true);
+    expect(first.snippets).toHaveLength(2);
     const late = run.applySelection([{
       id: "late",
       purpose: "after finish",
@@ -379,10 +378,10 @@ describe("explore query run", () => {
     expect(second.snippets.map((snippet) => `${snippet.path}:${snippet.startLine}-${snippet.endLine}`)).toEqual(
       first.snippets.map((snippet) => `${snippet.path}:${snippet.startLine}-${snippet.endLine}`),
     );
-    expect(first.snippets.some((snippet) => snippet.required === true)).toBe(false);
+    expect(first.snippets.every((snippet) => snippet.required === true)).toBe(true);
   });
 
-  it("omits a later required group intact when the excerpt limit is already full", async () => {
+  it("retains later required groups beyond the preview limit", async () => {
     const body = [
       "export function trigger() { return register(\"svc\"); }",
       "export function unusedPadding() { return 1; }",
@@ -407,10 +406,8 @@ describe("explore query run", () => {
       { id: "second", purpose: "b", views: [{ viewId: view.viewId, startLine: 3, endLine: 3, required: true }] },
     ]);
     const result = run.finish();
-    expect(result.snippets).toHaveLength(1);
-    expect(result.omitted.some((item) => (
-      item.reason === "required group exceeds excerpt limit" || item.reason.includes("cannot be presented intact")
-    ))).toBe(true);
+    expect(result.snippets).toHaveLength(2);
+    expect(result.snippets.every(snippet => snippet.required)).toBe(true);
   });
 
   it("packs every accepted required group before optional ranges", async () => {
@@ -442,8 +439,8 @@ describe("explore query run", () => {
     ]);
     expect(selected.accepted).toHaveLength(2);
     const result = run.finish();
-    expect(result.snippets.map((snippet) => snippet.text)).toEqual(["first required", "second required"]);
-    expect(result.snippets.every((snippet) => snippet.required)).toBe(true);
+    expect(result.snippets.map((snippet) => snippet.text)).toEqual(["first required", "second required", "first optional"]);
+    expect(result.snippets.slice(0, 2).every((snippet) => snippet.required)).toBe(true);
   });
 
   it("launches both plan expressions when two groups reuse the same id", async () => {

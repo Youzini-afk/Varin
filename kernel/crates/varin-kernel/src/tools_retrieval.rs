@@ -66,7 +66,7 @@ pub(super) fn schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["question"],"properties":{
         "question":{"type":"string","minLength":1,"description":"Question about code in the selected source view."},
         "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."},
-        "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Maximum number of verified source snippets."}
+        "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Maximum snippets expanded in the preview. All selected evidence is retained and can be read with read_thread."}
     }})
 }
 
@@ -207,6 +207,7 @@ struct Snippet {
     required: bool,
     #[serde(default)]
     required_groups: Vec<String>,
+    why: Option<String>,
     #[serde(rename = "content")]
     _untrusted_content: String,
 }
@@ -222,6 +223,10 @@ struct Reply {
     snippets: Vec<Snippet>,
     omissions: Omissions,
     stages: Vec<Stage>,
+    #[serde(default)]
+    diagnostics: Vec<crate::protocol_generated::CodeRetrievalDiagnostic>,
+    coverage: Option<crate::protocol_generated::CodeRetrievalCoverage>,
+    completion: Option<crate::protocol_generated::CodeRetrievalCompletion>,
 }
 fn required_components(items: &[Snippet]) -> Vec<Vec<usize>> {
     let mut pending: std::collections::BTreeSet<_> = (0..items.len()).collect();
@@ -262,6 +267,11 @@ fn exact_stages<'a>(kinds: impl Iterator<Item = &'a str>) -> bool {
 }
 fn counter(count: &mut u64) {
     *count = count.saturating_add(1).min(MAX_SAFE_INTEGER);
+}
+fn diagnostic(kind: &str, path: &str, message: &str) -> crate::protocol_generated::CodeRetrievalDiagnostic {
+    crate::protocol_generated::CodeRetrievalDiagnostic {
+        kind: kind.into(), path: Some(path.into()), message: message.into(),
+    }
 }
 enum Span {
     Content(String),
@@ -437,7 +447,8 @@ impl KernelToolExecutor {
             return Err(invalid());
         }
         if reply.plan.is_some() != reply.source.is_some()
-            || (content_status && reply.plan.is_none())
+            || (content_status && reply.plan.is_none()
+                && !(reply.snippets.is_empty() && reply.completion.as_ref().is_some_and(|value| value.reason == "user")))
         {
             return Err(invalid());
         }
@@ -483,26 +494,17 @@ impl KernelToolExecutor {
             && reply.plan.as_ref().is_some_and(|plan| plan.stages.iter().any(|stage|
                 stage.kind == "semantic" && stage.status == "unsupported")))
             .then_some("Semantic retrieval is unsupported for this source view. Use keyword and source-local syntax evidence, or select a live source for the configured semantic index."));
-        // Reconstructed spans can be much larger than untrusted Host content. Bound the
-        // complete projection by the existing wire-derived content budget, reserving 64
-        // bytes for three growing safe-integer counters and the final status spelling.
-        let metadata_size = serde_json::to_vec(&json!({"status":&reply.status,"snippets":[],
-            "source":&reply.source,"physicalRoot":&reply.physical_root,"message":source_message,"error":reply.source_failure.map(|code| code.as_str()),"omissions":&reply.omissions}))
-        .map_err(|_| invalid())?
-        .len();
-        let mut output_budget = crate::protocol::MAX_BLOB_RESPONSE_BYTES
-            .checked_sub(metadata_size.saturating_add(64))
-            .ok_or_else(invalid)?;
+        // Complete evidence goes directly into the original durable tool output.
+        // The private Host bridge carries ranges only; model preview is applied
+        // after persistence by the shared output projection.
         let mut snippets = Vec::new();
         if matches!(reply.status.as_str(), "ready" | "partial") {
-            // Cache only the current file: many tiny spans must not retain every full body.
-            let mut observation: Option<(String, language::Observation)> = None;
+            let mut observations = std::collections::HashMap::<String, language::Observation>::new();
             for component in required_components(&reply.snippets) {
                 let required = component.iter().any(|i| {
                     reply.snippets[*i].required || !reply.snippets[*i].required_groups.is_empty()
                 });
                 let original_len = snippets.len();
-                let original_budget = output_budget;
                 let mut rejected = false;
                 for index in component {
                     let item = &reply.snippets[index];
@@ -516,23 +518,14 @@ impl KernelToolExecutor {
                     }
                     if !valid_path(&item.path) || !args.contains(&item.path) {
                         counter(&mut reply.omissions.out_of_scope);
+                        reply.diagnostics.push(diagnostic("out-of-scope", &item.path, "Candidate is outside the admitted retrieval scope."));
                         rejected = true;
                         continue;
                     }
-                    if args
-                        .limit
-                        .is_some_and(|limit| snippets.len() as u64 >= limit)
-                    {
-                        rejected = true;
-                        continue;
-                    }
-                    if observation
-                        .as_ref()
-                        .is_none_or(|(path, _)| path != &item.path)
-                    {
+                    if !observations.contains_key(&item.path) {
                         match self.observe_source_path(context, &item.path, cancel) {
                             Ok(observed) => {
-                                observation = Some((item.path.clone(), observed));
+                                observations.insert(item.path.clone(), observed);
                             }
                             Err(error) => {
                                 if cancel.is_cancelled() {
@@ -545,14 +538,16 @@ impl KernelToolExecutor {
                                 } else {
                                     counter(&mut reply.omissions.unavailable);
                                 }
+                                reply.diagnostics.push(diagnostic(&error.code, &item.path, &error.message));
                                 rejected = true;
                                 continue;
                             }
                         }
                     }
-                    let observed = &observation.as_ref().expect("observed current path").1;
+                    let observed = observations.get(&item.path).expect("observed path");
                     if item.revision != observed.revision {
                         counter(&mut reply.omissions.stale);
+                        reply.diagnostics.push(diagnostic("content-changed", &item.path, "The source changed after this evidence was selected."));
                         rejected = true;
                         continue;
                     }
@@ -560,11 +555,12 @@ impl KernelToolExecutor {
                         &observed.text,
                         item.start_line,
                         item.end_line,
-                        output_budget,
+                        usize::MAX,
                     ) {
                         Span::Content(content) => content,
                         Span::Invalid => {
                             counter(&mut reply.omissions.stale);
+                            reply.diagnostics.push(diagnostic("invalid-range", &item.path, "The selected source range is no longer valid."));
                             rejected = true;
                             continue;
                         }
@@ -575,22 +571,12 @@ impl KernelToolExecutor {
                         }
                     };
                     let snippet = json!({"path":item.path,"revision":observed.revision,
-                    "startLine":item.start_line,"endLine":item.end_line,"content":content});
-                    let encoded_length = serde_json::to_vec(&snippet)
-                        .map_err(|_| invalid())?
-                        .len()
-                        .saturating_add(1);
-                    if encoded_length > output_budget {
-                        counter(&mut reply.omissions.unavailable);
-                        rejected = true;
-                        continue;
-                    }
-                    output_budget -= encoded_length;
+                    "startLine":item.start_line,"endLine":item.end_line,"content":content,
+                    "requiredGroups":item.required_groups,"why":item.why});
                     snippets.push(snippet);
                 }
                 if required && rejected {
                     snippets.truncate(original_len);
-                    output_budget = original_budget;
                     counter(&mut reply.omissions.unavailable);
                 }
                 if cancel.is_cancelled() {
@@ -607,14 +593,13 @@ impl KernelToolExecutor {
             {
                 reply.omissions.stale = 1;
             }
-            if reply.stages.iter().any(|stage| {
-                matches!(
-                    stage.status.as_str(),
-                    "unavailable" | "unsupported" | "failed" | "cancelled" | "partial"
-                )
-            }) && !reply.omissions.any()
-            {
-                reply.omissions.unavailable = 1;
+            for stage in &reply.stages {
+                if matches!(stage.status.as_str(), "unavailable" | "unsupported" | "failed" | "cancelled") {
+                    reply.diagnostics.push(crate::protocol_generated::CodeRetrievalDiagnostic {
+                        kind: stage.status.clone(), path: None,
+                        message: format!("The selected {} source is {}.", stage.kind, stage.status),
+                    });
+                }
             }
             if reply.omissions.any() {
                 reply.status = "partial".into();
@@ -636,7 +621,8 @@ impl KernelToolExecutor {
         // The model needs verified evidence and coverage. Composition and inference bookkeeping
         // remain with the bound pipeline and inference ledger, outside conversation tool content.
         let mut result =
-            json!({"status":reply.status,"snippets":snippets,"omissions":reply.omissions});
+            json!({"status":reply.status,"snippets":snippets,
+                "diagnostics":reply.diagnostics,"coverage":reply.coverage,"completion":reply.completion});
         if let Some(message) = source_message {
             result["message"] = json!(message);
         }

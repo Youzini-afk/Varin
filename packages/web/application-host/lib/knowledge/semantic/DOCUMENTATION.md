@@ -7,7 +7,7 @@ derived store (`../vectors/`); they reuse retained native inference but never th
 ## Purpose-specific Host inference
 
 `runtime-inference.ts` owns retained embedding leases and assembles purpose-specific Host inference.
-Native retrieval's query/document embedding, decision, rerank and Explore generation consume one original
+Native retrieval's query embedding, decision, rerank and optional query expansion consume one original
 query session in `inference-requests.ts`, with one ordinal allocator for actual requests. The
 `HostCredentialAuthority`, global purpose settings, egress and original protocol adapters remain
 their owners. Catalog owns native request admission,
@@ -24,8 +24,7 @@ HTTP/body or local worker work until its receipt or existing unknown-usage barri
 keeps its original execution owner. An unpublished observed receipt remains with its owner for same-identity publication, and prevents
 the SDK from interpreting the persistence failure as permission to send another paid request.
 
-`local-inference.ts` adapts the existing installed encoder for native query and foreground fixed-view
-vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
+`local-inference.ts` adapts the existing installed encoder for native query vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
 invalid or unavailable selections never fall back. The HTTP settings DTO remains unconfigured for index-status consumers when local inference is selected.
 Knowledge-vector recall keeps its separate enrollment and embedding policy.
 Workspace native selection is one tagged HTTP/local lease. Local Catalog bindings carry the component
@@ -71,11 +70,11 @@ Native embedding uses the shared OpenAI-compatible wire with zero automatic retr
 output dimension remains missing. An output-budgeted Goal therefore retains its existing unknown-use
 barrier when this provider supplies no output dimension. Query vector cache hits require the current
 source, binding and captured credential-scope fingerprint; they create no HTTP Operation or usage.
-For native fixed/materialized queries and every managed-Host source mode, foreground document misses use the same session with a distinct
-document-embedding purpose. `beforeDispatch` runs the full source-version fence after acknowledged
-dispatch intent and before the request-started flag/transport. Short authorization guards can repeat
-without repeatedly hashing the same file. A failed fence records the original admitted no-send fact;
-a later candidate rejection does not undo already observed HTTP usage.
+Fixed/materialized and managed source queries use available publications only. Candidate versions are
+checked through the original source; missing source documents do not trigger foreground embedding.
+Background document indexing retains its own owner and admission. The retrieval callback may deliver
+before outstanding inference drains; `inference-requests.ts` keeps its original session and receipt
+responsibility until the actual request has settled.
 Managed sources use the original target SourceView for inventory, structure and document-version
 checks, including live roots. `resourceRoot` is a target coordinate only; `configurationRoot` selects
 the coordinator's global inference settings. Workspace/cache identities include the frozen target
@@ -135,20 +134,13 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   optimal hardware profile. CPU settings apply after Host restart. Length grouping
   restores caller order. Quantized custom exports without `adaptiveBatching` keep
   fixed grains because their vectors may depend on batch composition.
-- Native non-live view: `source-query.ts` uses the original admitted Source owner, `unitsFixed` and
-  packing. Configuration/collection paths remain metadata; the old live directory need not exist.
-  Capture retains an available original publication without inventory or model work. First semantic
-  search lazily enumerates the source, retaining exact revision/recipe/space matches, masking every
-  other base row and preparing only missing source material. A cold view retains an empty backing
-  through the same owner, without copying an index or changing the writer's latest publication.
-  `listDocumentStatesPinned` and `lookupVectorsPinned` read that captured token, never newer writer
-  facts. Completed chunks and vectors share the original cache's byte soft budget. Changing API keys
-  alone does not invalidate compatible document assets; current source/binding/credential checks
-  still apply and query vectors retain their account partition. Concurrent cold invocations remain
-  separate inference owners; cross-query in-flight paid deduplication is not claimed. Release aborts
-  preparation and waits for its actual work before releasing the retained reader. Live background
-  indexing retains its own owner. Transient source coverage, captured publication coverage
-  and binding readiness are separate; materialized reads are versioned per file, not an atomic project.
+- Native non-live view: `source-query.ts` captures an already available publication without inventory,
+  source parsing or document embedding. Query vectors use the original inference session and credential
+  partition. Each returned candidate must match the source owner's actual document revision. Different
+  live rows and missing paths are excluded; no matching source-wide publication means partial or empty
+  semantic coverage, while lexical retrieval still reads the selected source. This also applies to
+  managed sources, whose resource and cache namespaces remain owner-qualified. Releasing a query does
+  not cancel independent indexing. Live sources keep their original published-query path.
 - Overlay: `query-view.ts` pins surface/thread drafts at query start; masked disk paths cannot leak
   old vectors. Thread view is fixed baseline + this branch’s delta.
   An empty index with no searchable fixed-view content returns before query embedding. Remote dimension

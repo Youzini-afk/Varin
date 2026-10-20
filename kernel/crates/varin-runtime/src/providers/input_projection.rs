@@ -1,6 +1,6 @@
 //! Model capabilities affect the outgoing request, never the durable conversation or media store.
 use super::*;
-use super::output_preview::{bounded_output, is_explicit_read};
+use super::output_preview::{bounded_output, is_explicit_read, retrieval_preview_limit};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
@@ -42,11 +42,11 @@ fn text_content(content: &Content) -> Content {
     }
 }
 
-fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bool) -> Option<Content> {
+fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bool, snippet_limit: Option<usize>) -> Option<Content> {
     match content {
-        Content::Output { output } => bounded_output(output, budget, item_id, can_read).map(|output| Content::Output { output }),
+        Content::Output { output } => bounded_output(output, budget, item_id, can_read, snippet_limit).map(|output| Content::Output { output }),
         Content::ToolResult { result } => {
-            let content = bounded_output(completion_output(&result.completion)?, budget, item_id, can_read)?;
+            let content = bounded_output(completion_output(&result.completion)?, budget, item_id, can_read, snippet_limit)?;
             let mut result = result.clone();
             match &mut result.completion {
                 ToolCompletion::Result { content: output, .. } => *output = content,
@@ -70,7 +70,8 @@ pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, re
 }
 
 fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
-    if connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none() { return Cow::Borrowed(view); }
+    if connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none()
+        && !view.history.iter().any(|item| matches!(&item.content, Content::ToolCall { call } if retrieval_preview_limit(call).is_some())) { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
     let can_read = view.binding.tools.iter().any(|tool| tool.name == crate::catalog::family::READ_TOOL);
     let settings = (connection.accepts_images, connection.tool_output_visible_bytes, can_read);
@@ -83,16 +84,16 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
     let mut changed = false;
     let history = view.history.iter().map(|source| {
         if let Content::ToolCall { call } = &source.content {
-            calls.insert(call.call_id.as_str(), is_explicit_read(call));
+            calls.insert(call.call_id.as_str(), (is_explicit_read(call), retrieval_preview_limit(call)));
         }
-        let explicit_read = match &source.content {
-            Content::ToolResult { result } => calls.remove(result.call_id.as_str()).unwrap_or(false),
-            _ => false,
+        let (explicit_read, snippet_limit) = match &source.content {
+            Content::ToolResult { result } => calls.remove(result.call_id.as_str()).unwrap_or_default(),
+            _ => (false, None),
         };
         let key = Arc::as_ptr(source) as usize;
         let item = previous.remove(&key).map(|(_, projected)| projected).unwrap_or_else(|| {
-            let mut content = connection.tool_output_visible_bytes.filter(|_| !explicit_read)
-                .and_then(|budget| bounded_content(&source.content, budget, &source.id, can_read));
+            let mut content = connection.tool_output_visible_bytes.or(snippet_limit.map(|_| usize::MAX)).filter(|_| !explicit_read)
+                .and_then(|budget| bounded_content(&source.content, budget, &source.id, can_read, snippet_limit));
             if connection.accepts_images == Some(false) && source.content.media().iter().any(|media| media.media_type.starts_with("image/")) {
                 content = Some(text_content(content.as_ref().unwrap_or(&source.content)));
             }

@@ -105,7 +105,7 @@ it('retrieval keeps one capture across two real Explore operations and releases 
   });
   const stage = await createRetrievalModelStage({ models: { resolveModel: async () => model.model, rebindModel: vi.fn() },
     readGlobalSettings: async () => settings, inference: { captureDecision: vi.fn(), captureRerank: vi.fn() },
-    kernel: { kernelEpoch: 'epoch', registerCredentialOwner: (...args) => bridge.register(...args), unregisterCredentialOwner: (...args) => bridge.unregister(...args) },
+    kernel: { kernelEpoch: 'epoch', agentRuntimeRequest: vi.fn(async (method: string) => method === 'runtime.tokenizers.open' ? { leaseId: 'counter' } : method === 'runtime.tokenizers.count' ? { counts: [1], tokenizer: 'fixture' } : null) as import('./kernel-client.js').KernelClient['agentRuntimeRequest'], registerCredentialOwner: (...args) => bridge.register(...args), unregisterCredentialOwner: (...args) => bridge.unregister(...args) },
     sources: { validate: async () => {}, read: vi.fn() },
   }).prepare(query, controller.signal, { operationId: 'retrieval', signal: controller.signal, generate } as unknown as InferenceCall);
   try {
@@ -115,7 +115,7 @@ it('retrieval keeps one capture across two real Explore operations and releases 
     const run = { signal: controller.signal, question: query.question, deadlineAt: Infinity, parsed: { objects: [], relation: null, domain: null },
       refreshVocab: async () => {}, vocab: () => ({}), sourceStates: () => [], submitPlan: async () => ({ launched: ['search'] }),
       actionCandidates: async () => [], collect: () => ({ views: [view], pending: false, unevaluated: 0, sequence: 1 }),
-      applySelection: () => ({ accepted: [], rejected: [], selectedViews: [] }) };
+      applySelection: () => ({ accepted: [], rejected: [], selectedViews: [] }), requestDelivery: vi.fn(), evidenceVersion: () => 0, selectedViews: () => [] };
     const result = await implementation.select({ run, validateMaterials: async () => {} } as unknown as Parameters<typeof implementation.select>[0], controller.signal);
     expect(result.model).toMatchObject({ plan: 'used', select: 'used' });
     expect(generate).toHaveBeenCalledTimes(2);

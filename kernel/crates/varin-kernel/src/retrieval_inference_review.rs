@@ -8,7 +8,7 @@ use crate::tools::{
     finish_resource_blob_read, prepare_resource, KernelResourceClient, KernelToolExecutor,
     ResourceCall, ResourceWork, ToolBinding, ToolKind,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 use varin_runtime::catalog::goals::*;
 use varin_runtime::catalog::launches::LaunchSelection;
@@ -100,6 +100,7 @@ struct Review {
     cursor: u64,
     native_release: Option<Arc<dyn Fn() + Send + Sync>>,
     native_events: Option<mpsc::Receiver<Value>>,
+    tokenizers: Arc<Mutex<BTreeMap<String, varin_runtime::token_count::TokenCounter>>>,
 }
 impl Review {
     fn new(mode: &str) -> Self {
@@ -263,6 +264,7 @@ impl Review {
             cursor: 0,
             native_release: None,
             native_events: None,
+            tokenizers: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
     fn pump(&mut self) -> Option<Value> {
@@ -312,9 +314,22 @@ impl Review {
         }
         let runtime = self.f.runtime.clone();
         let credentials = self.credentials.clone();
+        let tokenizers = self.tokenizers.clone();
         let value = self.f.pump_dispatch(
             |frame| {
-                if frame["method"] == "runtime.inference.generate" {
+                if frame["method"] == "runtime.tokenizers.open" {
+                    let id = uuid::Uuid::new_v4().to_string();
+                    tokenizers.lock().unwrap().insert(id.clone(), varin_runtime::token_count::TokenCounter::for_configuration(&frame["params"]["configuration"]));
+                    Some(Ok(json!({"leaseId": id})))
+                } else if frame["method"] == "runtime.tokenizers.close" {
+                    tokenizers.lock().unwrap().remove(frame["params"]["leaseId"].as_str().unwrap());
+                    Some(Ok(Value::Null))
+                } else if frame["method"] == "runtime.tokenizers.count" {
+                    let counters = tokenizers.lock().unwrap();
+                    let counter = counters.get(frame["params"]["leaseId"].as_str().unwrap()).unwrap();
+                    Some(Ok(json!({"counts": frame["params"]["texts"].as_array().unwrap().iter()
+                        .map(|text| counter.count(text.as_str().unwrap())).collect::<Vec<_>>(), "tokenizer": counter.description()})))
+                } else if frame["method"] == "runtime.inference.generate" {
                     let params = frame["params"].clone();
                     validate_method_params("runtime.inference.generate", &params).unwrap();
                     Some(inference_generation_commands::generate(
@@ -684,14 +699,11 @@ fn progressive_decision_keeps_one_query_owner_across_real_actions_and_paid_batch
             );
         }
         let bodies = counts["bodies"].as_array().unwrap();
-        assert!(
-            bodies[0]["questions"]
-                .as_object()
-                .unwrap()
-                .contains_key("a:symbol:hiddenHelper"),
-            "the actual read seed issued this action: {counts}"
-        );
         if requests >= 2 {
+            assert!(
+                bodies.iter().any(|body| body["questions"]["next"]["criteria"].get("symbol:hiddenHelper").is_some()),
+                "the actual read seed issued this action: {counts}"
+            );
             assert!(
                 bodies.iter().skip(1).any(|body| body["state"]["materials"]
                     .to_string()

@@ -445,6 +445,8 @@ export interface ThreadsAPI {
   cancelRun(runId: string): Promise<RunCancellationReceipt>;
   operation(operationId: string): Promise<Operation>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
+  finishRetrieval(operationId: string): Promise<{ accepted: boolean }>;
+  readRetrievalMaterial(operationId: string, viewId: string): Promise<import('@varin/protocol').ExploreQueryView>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
   /** Original-owner requests and RPC-error URL choices remain readable after their Run ends. Pages omit original JSON evidence; read/respond return it. */
   listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;

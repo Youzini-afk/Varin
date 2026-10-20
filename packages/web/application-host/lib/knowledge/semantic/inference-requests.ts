@@ -6,7 +6,7 @@ import type { KernelClient } from '../../kernel/kernel-client.js';
 import type { ExecutorOwner, InferenceBinding, InferenceReceipt, InferenceSettleParams, InferenceStatus, Operation, InferenceGenerateParams, InferenceSessionStatus } from '../../kernel/protocol.generated.js';
 export interface InferenceInvocationAuthority { operationId: string; executorOwner: ExecutorOwner }
 export interface InferenceRequestsOptions {
-  kernel: Pick<KernelClient, 'agentRuntimeRequest'>;
+  kernel: Pick<KernelClient, 'agentRuntimeRequest'> & Partial<Pick<KernelClient, 'kernelEpoch'>>;
   runtime: Pick<AgentRuntimeClient, 'onEvent' | 'onExit' | 'onReady'>;
   egress: Pick<EgressRuntime, 'prepare'>;
   onError?(): void;
@@ -132,7 +132,14 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
   };
   const removers = [options.runtime.onEvent(() => { notify(); void reconcile(); }), options.runtime.onReady(() => { notify(); void reconcile(); }),
     options.runtime.onExit(() => { lostEpoch++; for (const controller of controllers) controller.abort(cancelled()); notify(); })];
-  const run = <T>(invocation: InferenceInvocationAuthority, signal: AbortSignal, execute: (call: InferenceCall) => Promise<T>): Promise<T> => {
+  const run = <T>(invocation: InferenceInvocationAuthority, signal: AbortSignal, execute: (call: InferenceCall) => Promise<T>,
+    delivery?: { deliverBeforeDrain: boolean }): Promise<T> => {
+    let result: { promise: Promise<T>; resolve(value: T): void; reject(error: unknown): void } | undefined;
+    if (delivery?.deliverBeforeDrain) {
+      let resolve!: (value: T) => void, reject!: (error: unknown) => void;
+      const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
+      result = { promise, resolve, reject };
+    }
     const work = (async () => {
       if (closed) throw new Error('Inference requests are closed');
       if (sessions.has(invocation.operationId)) throw new Error('Original inference session is already active');
@@ -362,7 +369,11 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
           } finally { if (active.get(id) === entry) active.delete(id); }
         }); },
       };
-      try { return await execute(call); }
+      try {
+        const value = await execute(call);
+        result?.resolve(value);
+        return value;
+      } catch (error) { result?.reject(error); throw error; }
       finally {
         // Search observers may detach before their actual HTTP body or native generation.
         // Fence late scheduler work, then retain this exact session through real drain.
@@ -374,8 +385,8 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
       }
     })();
     calls.add(work);
-    void work.finally(() => calls.delete(work)).catch(() => {});
-    return work;
+    void work.finally(() => calls.delete(work)).catch(error => { result?.reject(error); });
+    return result?.promise ?? work;
   };
   return { run,
     async close() {

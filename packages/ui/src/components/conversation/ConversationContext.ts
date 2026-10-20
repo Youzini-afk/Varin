@@ -5,6 +5,7 @@ import type { ChatToolCall, ChatToolResultMessage } from './types';
 export interface UiCardProjection { call: ChatToolCall; result?: ChatToolResultMessage; compact: boolean }
 
 export interface ConversationPresentation {
+  readOnly?: boolean;
   api: ThreadsAPI;
   identity: ThreadIdentity;
   head: string | null;

@@ -32,7 +32,7 @@ it("a pending follow-up keeps accepted evidence; a final empty decision clears i
         views: async ({ seen = [] }) => ({
           queryId: "query", question: started.question, views: views.filter(v => !seen.includes(v.viewId)).slice(0, 1),
           sequence: selectionRound, unevaluated: 0, pending: false, sources: [], actions: [],
-          deadlineAt: Infinity, outputByteBudget: 24576,
+          deadlineAt: Infinity,
         }),
         wait: async () => { throw new Error("No pending source"); },
         select: async groups => {

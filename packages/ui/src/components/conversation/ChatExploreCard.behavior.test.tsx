@@ -26,7 +26,8 @@ it.each([false, true])('renders a read-only retrieval from startup through live 
   const container = document.createElement('div'); document.body.append(container);
   const root = createRoot(container);
   const openFile = vi.fn(async () => {});
-  const context = { openFile } as unknown as ConversationPresentation;
+  const finishRetrieval = vi.fn(async () => ({ accepted: true }));
+  const context = { openFile, api: { finishRetrieval } } as unknown as ConversationPresentation;
   const args = { question: 'Where are script frames parsed?' };
   const history: ThreadHistoryItem[] = [{ id: 'call-history', parent: null, thread_id: 'thread', run_id: 'run', source: 'assistant', provider: null,
     content: { id: 'model-item:7:request:call', content: { kind: 'tool_call', call: { call_id: 'call', name: gateway ? 'tool_invoke' : 'code_retrieval',
@@ -54,6 +55,8 @@ it.each([false, true])('renders a read-only retrieval from startup through live 
     expect(container.textContent).toContain('已获得 1 个候选片段');
     expect(container.textContent).toContain('frames.ts');
     expect(container.textContent).toContain('1.2 秒');
+    await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === dict['chat.explore.finish'])!.click());
+    expect(finishRetrieval).toHaveBeenCalledExactlyOnceWith('request:tool:call');
     await act(async () => vi.advanceTimersByTimeAsync(1000));
     expect(container.textContent).toContain('2.2 秒');
     await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.includes('frames.ts'))!.click());

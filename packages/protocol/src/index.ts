@@ -5,6 +5,7 @@ export * from "./harness.js";
 export * from "./harness-mcp.js";
 export * from "./explore-model.js";
 export * from "./explore-model-loop.js";
+export * from "./explore-context.js";
 export * from "./language-id.js";
 export * from "./harness-settings.js";
 export * from "./message-time.js";

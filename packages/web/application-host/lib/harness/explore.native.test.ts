@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explore, formatExploreOutput } from "./explore.js";
+import { explore } from "./explore.js";
 import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import { createStructureSource } from "../structure/source.js";
 import { createTreeSitterStructureProvider } from "../structure/native-provider.test-helper.js";
@@ -783,36 +783,6 @@ describe("explore semantic recall", () => {
     similarity: 0.81,
     rank: 1,
   };
-
-  it("puts a lexical-gap semantic hit in the visible body as primary", async () => {
-    const result = await explore({ question: "how does the runtime discard idle tokens" }, {
-      rgSearch: async () => [],
-      readFile: async (path) => ready(path === "src/reclaim.ts" ? reclaim : ""),
-      structure: createStructureSource([parsingProvider()]),
-      semantic: {
-        search: async () => ({
-          status: "ready",
-          coverage: "complete",
-          lifecycle: "ready",
-          generation: "g1",
-          spaceId: "space",
-          scope: { scopeKind: "workspace", scopeId: "ws" },
-          hits: [semanticHit],
-        }),
-      },
-    });
-    expect(result.snippets.some((snippet) => snippet.text.includes("reclaimLease"))).toBe(true);
-    expect(formatExploreOutput({
-      ...result,
-      ...(result.details.graph ? { graph: result.details.graph } : {}),
-    }).visibleText).toContain("reclaimLease");
-    const window = result.details.windows?.find((item) => item.path === "src/reclaim.ts");
-    expect(window?.arrivals.some((item) => item.kind === "semantic")).toBe(true);
-    expect(window?.arrivals.some((item) => item.kind === "lexical")).toBe(false);
-    expect(window?.purpose).toBe("primary");
-    expect(result.details.semantic?.status).toBe("ready");
-    expect(result.details.semantic?.primary).toBeGreaterThanOrEqual(1);
-  });
 
   it("relocates a shifted block instead of keeping the stale recorded range", async () => {
     const decoy = [

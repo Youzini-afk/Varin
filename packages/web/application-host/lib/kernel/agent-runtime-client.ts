@@ -1950,6 +1950,10 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  finishRetrieval(operationId: string): Promise<{ accepted: boolean }> {
+    return this.kernel.agentRuntimeRequest('runtime.retrieval.finish', { operationId });
+  }
+  readRetrievalMaterial(operationId: string, viewId: string) { return this.kernel.readRetrievalMaterial(operationId, viewId); }
   modelPresentations(requestIds: string[], signal?: AbortSignal): Promise<import('./protocol.generated.js').ModelPresentation[]> {
     return this.kernel.agentRuntimeRequest('runtime.model.presentations', { requestIds }, signal);
   }

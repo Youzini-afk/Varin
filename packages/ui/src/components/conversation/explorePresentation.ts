@@ -29,6 +29,7 @@ export function parseExploreProgress(value: unknown): ExploreToolProgress | unde
   const row = exploreRecord(value);
   if (!row || typeof row.phase !== 'string' || !phases.has(row.phase) || typeof row.elapsedMs !== 'number' || !Number.isFinite(row.elapsedMs) || row.elapsedMs < 0
     || !count(row.receivedFiles) || !count(row.receivedSnippets) || !Array.isArray(row.sources) || !row.sources.every(isSource)
+    || row.selectedViewIds !== undefined && (!Array.isArray(row.selectedViewIds) || !row.selectedViewIds.every(id => typeof id === 'string'))
     || !Array.isArray(row.activities) || !row.activities.every(isActivity)) return undefined;
   return row as unknown as ExploreToolProgress;
 }

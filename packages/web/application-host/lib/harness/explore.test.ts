@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DEFAULT_BYTE_BUDGET, DEFAULT_CANDIDATE_BUDGET, DEFAULT_HITS_PER_FILE, buildRgPatterns, explore, extractIdentifiers, extractQuotedLiterals, formatExploreOutput, type ExploreDeps } from "./explore.js";
+import { DEFAULT_CANDIDATE_BUDGET, DEFAULT_HITS_PER_FILE, buildRgPatterns, explore, extractIdentifiers, extractQuotedLiterals, type ExploreDeps } from "./explore.js";
 import type { ExploreFileSnapshot } from "./file-snapshot.js";
 import type { StructureOutlineResult, StructureSource } from "../structure/types.js";
 
@@ -105,13 +105,13 @@ describe("explore versioned excerpts", () => {
     expect(result.searched.files).toBe(2);
   });
 
-  it("honors the requested excerpt count and marks omitted results", async () => {
+  it("keeps selected source evidence beyond the requested preview count", async () => {
     const result = await explore({ question: "needle", limit: 1 }, {
       rgSearch: async () => [{ path: "a.ts", line: 1, text: "needle" }, { path: "b.ts", line: 1, text: "needle" }],
       readFile: async () => ready("needle"),
     });
-    expect(result.snippets).toHaveLength(1);
-    expect(result.partial).toBe(true);
+    expect(result.snippets).toHaveLength(2);
+    expect(result.omitted).toEqual([]);
   });
 
   it("does not run search after cancellation", async () => {
@@ -152,7 +152,7 @@ describe("explore candidate ranking and materialization", () => {
     });
     expect(result.searched.files).toBe(2);
     expect(result.snippets.some((snippet) => snippet.path === "key.ts")).toBe(true);
-    expect(result.snippets).toHaveLength(1);
+    expect(result.snippets).toHaveLength(2);
   });
 
   it("T3: a full identifier outranks files that only repeat its split words", async () => {
@@ -214,7 +214,7 @@ describe("explore candidate ranking and materialization", () => {
       readFile,
     });
     expect(readFile).toHaveBeenCalledTimes(files.length);
-    expect(result.snippets).toHaveLength(2);
+    expect(result.snippets).toHaveLength(files.length);
     expect(result.notRequested.count).toBe(0);
     expect(result.notRequested.paths.length).toBe(result.notRequested.count);
     expect(result.details.provenance.filter((entry) => entry.status === "empty")).toEqual([]);
@@ -237,58 +237,6 @@ describe("explore candidate ranking and materialization", () => {
     expect(result.snippets.map((snippet) => snippet.path).sort()).toEqual(["first.ts", "second.ts"]);
   });
 
-  it('reclaims duplicate text without evicting an implementation from the original priority pack', () => {
-    const child = 'c'.repeat(1500);
-    const snippets = [
-      { path: 'parent.ts', startLine: 1, endLine: 2, text: `${'p'.repeat(500)}\n${child}`, revision: 'rev', source: 'disk' as const, why: 'parent' },
-      { path: 'parent.ts', startLine: 2, endLine: 2, text: child, revision: 'rev', source: 'disk' as const, why: 'child' },
-      { path: 'large-test.ts', startLine: 1, endLine: 1, text: 't'.repeat(2500), revision: 'rev', source: 'disk' as const, why: 'test' },
-      { path: 'key.cs', startLine: 1, endLine: 1, text: 'key'.repeat(500), revision: 'rev', source: 'disk' as const, why: 'implementation' },
-    ];
-    const packed = formatExploreOutput({ snippets, issues: [], omitted: [], notRequested: { count: 0, paths: [] },
-      partial: false, searchIncomplete: false, searched: { files: 4, patterns: 1, ms: 1, incomplete: false } }, { byteBudget: 6000, prefix: 'Search scope: /workspace' });
-    expect(packed.snippets.map(snippet => snippet.path)).toEqual(['parent.ts', 'key.cs']);
-    expect(packed.visibleText).toContain('Excerpts: 2');
-    expect(packed.visibleText).toContain(snippets[3]!.text);
-    expect(packed.storedBody).toContain(snippets[2]!.text);
-    expect(Buffer.byteLength(packed.visibleText)).toBeLessThanOrEqual(6000);
-  });
-
-  it('does not treat a parent omission or another revision as delivered coverage', () => {
-    const snippets = [
-      { path: 'a.ts', startLine: 1, endLine: 4, text: 'before\n...\nshared\nend', revision: 'rev', source: 'disk' as const, why: 'parent',
-        unit: { name: 'a', kind: 'class', startLine: 1, endLine: 4, omitted: [{ startLine: 2, endLine: 2 }] } },
-      { path: 'a.ts', startLine: 2, endLine: 2, text: 'shared', revision: 'rev', source: 'disk' as const, why: 'omitted source' },
-      { path: 'a.ts', startLine: 3, endLine: 3, text: 'shared', revision: 'new-rev', source: 'disk' as const, why: 'new source' },
-    ];
-    const packed = formatExploreOutput({ snippets, issues: [], omitted: [], notRequested: { count: 0, paths: [] },
-      partial: false, searchIncomplete: false, searched: { files: 1, patterns: 1, ms: 1, incomplete: false } });
-    expect(packed.snippets).toHaveLength(3);
-  });
-
-  it("T8: packs to a byte budget, lists omitted supports, and keeps provenance in details", async () => {
-    const long = "x".repeat(200);
-    const files = Array.from({ length: 8 }, (_, index) => `f${index}.ts`);
-    const result = await explore({ question: "needle", limit: 3 }, {
-      rgSearch: async () => files.map((path) => ({ path, line: 1, text: `needle in ${path}` })),
-      readFile: async (path) => ready(`needle in ${path}\n${long}`),
-    });
-    const packed = formatExploreOutput(result, { byteBudget: 280 });
-    expect(Buffer.byteLength(packed.visibleText, "utf8")).toBeLessThanOrEqual(280);
-    expect(packed.omitted.length).toBeGreaterThan(0);
-    expect(packed.omitted.some((item) => item.reason === "over byte budget")).toBe(true);
-    expect(packed.storedBody).toContain("Omitted supports");
-    expect(packed.showHandle).toBe(true);
-    expect(result.details.provenance.length).toBe(8);
-    expect(result.details.provenance.some((entry) => entry.status === "not-requested")).toBe(false);
-    expect(result.details.byteBudget).toBe(DEFAULT_BYTE_BUDGET);
-    expect(result.snippets[0]?.revision).toBe("rev-1");
-    const withHandle = formatExploreOutput(result, { byteBudget: 280, handle: "out_test" });
-    expect(withHandle.showHandle).toBe(true);
-    expect(withHandle.visibleText).toContain('get_output({handle: "out_test"})');
-    expect(Buffer.byteLength(withHandle.visibleText, "utf8")).toBeLessThanOrEqual(280);
-  });
-
   it("ranks a single anchor file ahead of files that only match three split-word groups", async () => {
     const splitFiles = Array.from({ length: 10 }, (_, index) => `split${index}.ts`);
     const readFile = vi.fn(async (path: string) => ready(path === "anchor.ts" ? "uniqueAnchor" : "Alpha Beta Gamma"));
@@ -307,36 +255,6 @@ describe("explore candidate ranking and materialization", () => {
     expect(readFile.mock.calls.some((call) => call[0] === "anchor.ts")).toBe(true);
   });
 
-  it("reports filesDropped separately from a hit-budget partial", async () => {
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => ({
-        hits: [{ path: "kept.ts", line: 1, text: "needle" }],
-        partial: true,
-        filesDropped: 13,
-      }),
-      readFile: async () => ready("needle"),
-    });
-    expect(result.searched.incomplete).toBe(true);
-    expect(result.searched.filesDropped).toBe(13);
-    const packed = formatExploreOutput(result);
-    expect(packed.visibleText).toMatch(/at least 13 matching files were not examined/);
-    expect(packed.visibleText).not.toMatch(/search budget reached/);
-  });
-
-  it("identifies a building semantic index without claiming the query deadline expired", async () => {
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => [{ path: "small.ts", line: 1, text: "needle" }],
-      readFile: async () => ready("needle"),
-    });
-    const packed = formatExploreOutput({
-      ...result,
-      semantic: { status: "incomplete", coverage: "partial", index: { lifecycle: "building" } },
-      sources: [{ id: "semantic-original", family: "semantic", status: "incomplete" }],
-    });
-    expect(packed.visibleText).toContain("semantic index building");
-    expect(packed.visibleText).not.toContain("shared deadline");
-  });
-
   it("reports filesDropped as a floor instead of summing overlapping query terms", async () => {
     const dropsByPattern = new Map<string, number>();
     const result = await explore({ question: "Alpha Beta", anchors: ["myAnchor"] }, {
@@ -352,112 +270,6 @@ describe("explore candidate ranking and materialization", () => {
     expect(result.searched.filesDropped).toBe(40);
     expect(result.searched.filesDropped).toBeLessThan(summed);
     expect(result.searched.incomplete).toBe(true);
-  });
-
-  it("formats confirmed connections separately from association candidates and counts them against the byte budget", async () => {
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => [{ path: "router.ts", line: 1, text: "needle" }],
-      readFile: async () => ready("needle"),
-    });
-    const withoutGraph = formatExploreOutput(result);
-    const withGraph = formatExploreOutput({
-      ...result,
-      relations: {
-        status: "ready",
-        files: [{
-          path: "router.ts",
-          documentRevision: result.snippets[0]!.revision,
-          stale: false,
-          incomplete: false,
-          imports: [{ specifier: "./protocol", line: 1 }],
-          connections: [{ callee: "register", literal: "explore.search", line: 4 }],
-          associations: [{ callee: "log", literal: "explore.search", line: 5 }],
-        }],
-      },
-    });
-    expect(withoutGraph.visibleText).not.toContain("Relations");
-    expect(withGraph.visibleText).toContain("router.ts imports ./protocol (L1)");
-    expect(withGraph.visibleText).toContain("router.ts connects register(\"explore.search\") (L4)");
-    expect(withGraph.visibleText).toContain("router.ts associates log(\"explore.search\") (L5) [candidate]");
-    const tight = formatExploreOutput({
-      ...result,
-      relations: {
-        status: "ready",
-        files: [{
-          path: "router.ts",
-          documentRevision: result.snippets[0]!.revision,
-          stale: false,
-          incomplete: false,
-          imports: [{ specifier: "./protocol", line: 1 }],
-          connections: [],
-          associations: [],
-        }],
-      },
-    }, { byteBudget: Buffer.byteLength(withoutGraph.visibleText, "utf8") });
-    expect(tight.visibleText).not.toContain("imports ./protocol");
-    expect(Buffer.byteLength(tight.visibleText, "utf8")).toBeLessThanOrEqual(Buffer.byteLength(withoutGraph.visibleText, "utf8"));
-  });
-
-  it("drops relation line numbers when the graph revision is not the excerpt revision", async () => {
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => [{ path: "router.ts", line: 1, text: "needle" }],
-      readFile: async () => ready("needle"),
-    });
-    const formatted = formatExploreOutput({
-      ...result,
-      relations: {
-        status: "ready",
-        files: [{
-          path: "router.ts",
-          documentRevision: "disk-older",
-          stale: true,
-          incomplete: false,
-          imports: [],
-          connections: [{ callee: "register", literal: "gone.handler", line: 3 }],
-          associations: [],
-        }],
-      },
-    });
-    expect(formatted.visibleText).toContain("stale @disk-older");
-    expect(formatted.visibleText).toContain("connects register(\"gone.handler\")");
-    expect(formatted.visibleText).not.toContain("(L3)");
-  });
-
-  it("reports a graph that could not answer, and keeps issues ahead of relations in the budget", async () => {
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => [
-        { path: "router.ts", line: 1, text: "needle" },
-        { path: "broken.ts", line: 1, text: "needle" },
-      ],
-      readFile: async (path) => (path === "broken.ts"
-        ? { status: "failed", message: "disk read failed" }
-        : ready("needle")),
-    });
-    const unavailable = formatExploreOutput({ ...result, relations: { status: "unavailable", files: [] } });
-    expect(unavailable.visibleText).toContain("Relations unavailable");
-
-    const issueLine = result.issues[0]!;
-    const manyEdges = Array.from({ length: 40 }, (_, index) => ({
-      callee: "register", literal: `handler-${index}`, line: index + 1,
-    }));
-    const crowded = formatExploreOutput({
-      ...result,
-      relations: {
-        status: "ready",
-        files: [{
-          path: "router.ts",
-          documentRevision: result.snippets[0]!.revision,
-          stale: false,
-          incomplete: false,
-          imports: [],
-          connections: manyEdges,
-          associations: [],
-        }],
-      },
-    });
-    expect(crowded.visibleText).toContain(issueLine.path);
-    expect(crowded.visibleText).toContain("more edge(s) omitted");
-    expect(crowded.visibleText.split("\n").filter((line) => line.includes("connects register")).length).toBe(12);
   });
 });
 
@@ -488,38 +300,6 @@ describe("explore structure slices", () => {
       structure: { provider: "lsp", status: "ready" },
     });
     expect(result.details.structure?.files).toEqual([{ path: "small.ts", provider: "lsp", status: "ready" }]);
-  });
-
-  it("keeps signature, hit block, omission markers, and a full-unit read entry for a large function", async () => {
-    const body = Array.from({ length: 48 }, (_, index) => index === 23 ? "  const needle = 1;" : `  const pad${index} = ${index};`);
-    const content = ["export function largeTarget() {", ...body, "}"].join("\n");
-    const hitLine = 25;
-    const result = await explore({ question: "needle" }, {
-      rgSearch: async () => [{ path: "large.ts", line: hitLine, text: "  const needle = 1;" }],
-      readFile: async () => ready(content),
-      structure: structureSource({
-        status: "ready",
-        provider: "lsp",
-        revision: "rev-1",
-        symbols: [{
-          name: "largeTarget",
-          kind: "function",
-          range: { startLine: 1, endLine: 50 },
-          signature: { startLine: 1, endLine: 1 },
-        }],
-      }),
-    });
-    const snippet = result.snippets[0];
-    expect(snippet?.structure).toEqual({ provider: "lsp", status: "ready" });
-    expect(snippet?.unit).toMatchObject({ name: "largeTarget", kind: "function", startLine: 1, endLine: 50 });
-    expect(snippet?.unit?.omitted?.length).toBeGreaterThan(0);
-    expect(snippet?.text.startsWith("export function largeTarget() {")).toBe(true);
-    expect(snippet?.text).toContain("const needle = 1;");
-    expect(snippet?.text).toContain("read large.ts:1-50");
-    expect(snippet?.text).toMatch(/… omitted large\.ts:\d+-\d+/);
-    expect(snippet?.endLine).toBeLessThan(50);
-    const packed = formatExploreOutput(result);
-    expect(packed.visibleText).toContain("largeTarget (function, lines 1-50)");
   });
 
   it("falls back to a ±3 window and reports the source status when structure is unavailable", async () => {

@@ -15,11 +15,38 @@ const sourceText = 'export function retrievalNeedle(input: number): number {\n  
 function install(f: Awaited<ReturnType<typeof fixture>>, pipelines: ReturnType<typeof createRetrievalPipelineOwner>) {
   const owner = createRetrievalOwner({ sources: createRetrievalSourceOwner({ documents: f.documents.authority, kernel: f.kernel, validateLiveSource: f.liveSources.validate }), kernel: f.kernel, pipelines });
   const results = new Map<string, RetrievalResult>();
-  f.kernel.setRetrievalOwner(async (query, signal) => {
-    const result = await owner(query, signal); results.set(query.runId, result); return result;
+  f.kernel.setRetrievalOwner(async (...args) => {
+    const result = await owner(...args); results.set(args[0].runId, result); return result;
   });
   return results;
 }
+
+it('finishes an original retrieval Operation through HTTP and retains its source evidence while judgment drains', async () => {
+  const f = await fixture(once); await f.write('module.ts', sourceText);
+  const gate = deferred(), entered = deferred();
+  install(f, createRetrievalPipelineOwner({ configurationId: 'finish-original',
+    model: { providerId: 'held-model', configurationId: 'held', status: 'ready', implementation: {
+      kind: 'progressive', select: async ({ run }) => { await run.waitForViews(); entered.resolve(); await gate.promise; return {}; },
+    } },
+  }));
+  const identity = await f.api.create('finish-retrieval');
+  const liveRoot = await f.liveSources.prepare(f.workspaceId, f.workspaceId, identity.threadId);
+  const receipt = await f.api.submit({ ...identity, key: 'finish-retrieval-input', expectedHead: null,
+    text: 'Find retrievalNeedle', model: { providerId: 'fixture', modelId: 'retrieval-loopback' },
+    source: { mode: 'live_root', resourceOwner: { kind: 'local' }, workspaceId: f.workspaceId,
+      executionWorkspaceId: f.workspaceId, liveRoot, tools: ['code_retrieval'] } });
+  try {
+    await entered.promise;
+    const snapshot = await f.api.snapshot(identity);
+    const operation = snapshot.operations.find(operation => operation.phase !== 'terminal' && operation.id.includes(':tool:'));
+    expect(operation).toBeDefined();
+    expect(await f.api.finishRetrieval(operation!.id)).toEqual({ accepted: true });
+    await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+    expect(latestOutput(f.requests[1]!)).toMatchObject({ outcome: 'succeeded', content: {
+      completion: { reason: 'user' }, snippets: expect.arrayContaining([expect.objectContaining({ content: sourceText.trimEnd() })]),
+    } });
+  } finally { gate.resolve(); }
+}, 20_000);
 function actualStructure(f: Awaited<ReturnType<typeof fixture>>) {
   return { providerId: 'varin.tree-sitter', configurationId: 'bundled-test', status: 'ready' as const,
     implementation: createStructureSource([createTreeSitterStructureProvider({ compute: f.compute, parseBudgetMs: 30_000 })]) };

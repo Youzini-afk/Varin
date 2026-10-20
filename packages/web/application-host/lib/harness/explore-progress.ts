@@ -7,9 +7,10 @@ export function createExploreProgress(emit?: (progress: ExploreToolProgress) => 
   const views = new Set<string>(), files = new Set<string>();
   const activities: ExploreProgressActivity[] = [];
   let phase: ExploreProgressPhase = 'starting';
+  let selectedViewIds: string[] = [];
   const elapsed = () => Math.max(0, Date.now() - started);
   const snapshot = (): ExploreToolProgress => ({ phase, elapsedMs: elapsed(), receivedSnippets: views.size,
-    receivedFiles: files.size, sources: [...sources.values()], activities: [...activities] });
+    receivedFiles: files.size, selectedViewIds: [...selectedViewIds], sources: [...sources.values()], activities: [...activities] });
   const add = (activity: Omit<Extract<ExploreProgressActivity, { kind: 'phase' }>, 'sequence' | 'elapsedMs'>
     | Omit<Extract<ExploreProgressActivity, { kind: 'source' }>, 'sequence' | 'elapsedMs'>
     | Omit<Extract<ExploreProgressActivity, { kind: 'read' }>, 'sequence' | 'elapsedMs'>) => {
@@ -21,8 +22,12 @@ export function createExploreProgress(emit?: (progress: ExploreToolProgress) => 
       if (next === phase && activities.length) return snapshot();
       phase = next; add({ kind: 'phase', phase }); return publish();
     },
-    observe(value: { sources?: ExploreQuerySourceState[]; views?: ExploreQueryView[] }) {
+    observe(value: { sources?: ExploreQuerySourceState[]; views?: ExploreQueryView[]; selected?: ExploreQueryView[] }) {
       let changed = false;
+      if (value.selected) {
+        const next = value.selected.map(view => view.viewId);
+        if (JSON.stringify(next) !== JSON.stringify(selectedViewIds)) { selectedViewIds = next; changed = true; }
+      }
       for (const source of value.sources ?? []) {
         if (sources.get(source.id)?.status === source.status) continue;
         const receipt = { ...source, ...(source.targets ? { targets: [...source.targets] } : {}) };

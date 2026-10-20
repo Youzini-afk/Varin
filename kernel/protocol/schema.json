@@ -12,7 +12,7 @@
     "ramp-mint", "echo-ochre", "lens-lilac", "ledge-aqua", "swell-apricot", "parcel-periwinkle",
     "scoop-pistachio", "beam-coral", "chamfer-jade", "float-butter"
   ],
-  "privateDtos": ["KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
+  "privateDtos": ["CodeRetrievalDiagnostic","CodeRetrievalCoverage","CodeRetrievalCompletion","KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
   "mcpCapabilities": [
   {"name": "mcp_subscribe_resource", "operation": "subscribe_resource", "version": "1", "description": "Observe resource change notifications from the selected MCP server. Use its resources schemaVersion. Notifications are passive facts; this does not read the resource or authorize new model work. Nonexact resource notifications may be unassociated.", "schema": {"type": "object", "properties": {"server": {"type": "string", "minLength": 1}, "schemaVersion": {"type": "string", "minLength": 1}, "uri": {"type": "string", "minLength": 1}}, "required": ["server", "schemaVersion", "uri"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_subscribe", "argument": "server"}},
   {"name": "mcp_unsubscribe_resource", "operation": "unsubscribe_resource", "version": "1", "description": "Stop the resource observer created by an original subscription Operation. Local listener release and the server unsubscribe acknowledgement are reported separately.", "schema": {"type": "object", "properties": {"operationId": {"type": "string", "minLength": 1}}, "required": ["operationId"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_unsubscribe", "argument": "operationId"}},
@@ -351,7 +351,7 @@
     }
   }
 ],
-  "runtimeExports": ["ThreadUsageParams",
+  "runtimeExports": ["CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
   "ModelPresentationParams",
   "ModelPresentation","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
  "FileObservationAuthority",
@@ -1351,6 +1351,10 @@
     "runtime.model.inspect": "RunParams",
     "runtime.status": "KernelEmptyParams",
     "runtime.content.collect": "KernelEmptyParams",
+    "runtime.tokenizers.open": "KernelTokenizerOpenParams",
+    "runtime.retrieval.finish": "OperationParams",
+    "runtime.tokenizers.count": "KernelTokenizerCountParams",
+    "runtime.tokenizers.close": "KernelTokenizerLeaseParams",
     "runtime.tokenizers.references": "KernelEmptyParams",
     "runtime.admission.inspect": "AdmissionInspectParams",
     "runtime.thread.create": "ThreadCreateParams",
@@ -1562,7 +1566,15 @@
 "source.integration.receipt": "SourceIntegrationReceiptParams",
 "source.resource.release": "SourceResourceControlParams"
   },
-  "dto": {"ContextObservationSource":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string"},"anchorId":{"type":"string"},"source":{"type":"LaunchSource"},"epoch":{"type":"number"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationSource"},"ContextObservationSources":{"fields":{"runId":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationSources"},"ContextObservationFact":{"raw":"export interface ContextObservationFact { id:number;kind:\"edit\"|\"command\"|\"diagnostic\"|\"source\";at:number;text:string;source:\"user\"|\"external\";refs?:unknown;data?:unknown; }","rustType":"varin_runtime::catalog::context_observations::ContextObservationFact"},"ContextObservationAdmit":{"fields":{"owner":{"type":"ContextObservationSource"},"events":{"type":"ContextObservationFact[]"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationAdmit"},"ContextObservationReceipt":{"fields":{"id":{"type":"string"},"cursor":{"type":"number"},"state":{"type":"InputState"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationReceipt"},
+  "dto": {
+    "CodeRetrievalDiagnostic": { "serialize": true, "fields": { "kind": { "type": "string" }, "path": { "type": "string", "optional": true }, "message": { "type": "string" } } },
+    "CodeRetrievalSource": { "serialize": true, "fields": { "id": { "type": "string" }, "family": { "type": "string" }, "status": { "type": "string" }, "targets": { "type": "string[]", "optional": true } } },
+    "CodeRetrievalCoverage": { "serialize": true, "fields": { "sources": { "type": "CodeRetrievalSource[]" }, "semantic": { "type": "string" }, "unexamined": { "type": "number" } } },
+    "CodeRetrievalCompletion": { "serialize": true, "fields": { "reason": { "type": "string" } } },
+    "KernelTokenizerOpenParams": { "fields": { "configuration": { "type": "unknown" } } },
+    "KernelTokenizerLeaseParams": { "fields": { "leaseId": { "type": "string" } } },
+    "KernelTokenizerCountParams": { "fields": { "leaseId": { "type": "string" }, "texts": { "type": "string[]" } } },
+    "ContextObservationSource":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"},"runId":{"type":"string"},"anchorId":{"type":"string"},"source":{"type":"LaunchSource"},"epoch":{"type":"number"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationSource"},"ContextObservationSources":{"fields":{"runId":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationSources"},"ContextObservationFact":{"raw":"export interface ContextObservationFact { id:number;kind:\"edit\"|\"command\"|\"diagnostic\"|\"source\";at:number;text:string;source:\"user\"|\"external\";refs?:unknown;data?:unknown; }","rustType":"varin_runtime::catalog::context_observations::ContextObservationFact"},"ContextObservationAdmit":{"fields":{"owner":{"type":"ContextObservationSource"},"events":{"type":"ContextObservationFact[]"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationAdmit"},"ContextObservationReceipt":{"fields":{"id":{"type":"string"},"cursor":{"type":"number"},"state":{"type":"InputState"}},"rustType":"varin_runtime::catalog::context_observations::ContextObservationReceipt"},
 "ModelHttpConfiguration":{"raw":"export interface ModelHttpConfiguration { headers?:Record<string,string>; proxy?:{mode:\"direct\"}|{mode:\"proxy\";url:string} }","rustType":"varin_runtime::providers::connection_options::ModelHttpConfiguration"},
 "ModelAdaptersRetainParams":{"fields":{"bindingId":{"type":"string"},"leaseId":{"type":"string"}}},
 "ModelAdaptersReleaseParams":{"fields":{"leaseId":{"type":"string"}}},
@@ -3129,6 +3141,10 @@
     "runtime.followup.list": "Read durable same-thread follow-up definitions and occurrences",
     "runtime.followup.control": "Pause, resume or cancel an unconsumed follow-up authorization",
     "runtime.content.collect": "Collect unreferenced runtime content on an independent maintenance worker",
+    "runtime.tokenizers.open": "Lease the native tokenizer for a frozen model configuration",
+    "runtime.retrieval.finish": "Deliver available evidence from the original retrieval operation without cancelling its result",
+    "runtime.tokenizers.count": "Count serialized input using a leased native tokenizer on a worker",
+    "runtime.tokenizers.close": "Release a native tokenizer lease",
     "runtime.tokenizers.references": "Read tokenizer bindings retained by execution and continuation metadata on a worker",
     "runtime.admission.inspect": "Agent authority: inspect a Run-owned transient admission",
     "runtime.thread.create": "Agent authority: thread.create",

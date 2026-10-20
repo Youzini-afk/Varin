@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { createExploreQueryRun, formatExploreOutput } from './explore.js';
+import { createExploreQueryRun } from './explore.js';
 
 const ready = (content: string) => ({ status: 'ready' as const, content, revision: 'r1', source: 'disk' as const });
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
 describe('incremental Explore evidence and delivery', () => {
+  it('refreshes changed source evidence without clearing unrelated selected material', async () => {
+    const run = createExploreQueryRun({ question: 'needle' }, {
+      rgSearch: async () => ['a.ts', 'b.ts'].map(path => ({ path, line: 1, text: 'needle' })),
+      readFile: async () => ready('needle'),
+    });
+    await run.waitForViews();
+    const views = run.collect().views;
+    run.applySelection(views.map(view => ({ id: view.path, purpose: 'evidence', views: [{ viewId: view.viewId }] })));
+    await run.refreshSnapshot('a.ts', { ...ready('needle changed'), revision: 'r2' });
+    expect(run.selectedViews().map(view => view.path)).toEqual(['b.ts']);
+    const changed = run.collect().views.find(view => view.path === 'a.ts')!;
+    expect(changed.revision).toBe('r2');
+    expect(changed.text).toContain('changed');
+    expect(run.view(views.find(view => view.path === 'a.ts')!.viewId)?.revision).toBe('r1');
+    run.cancel();
+  });
   it('exposes read evidence while optional structure and another recall source are still blocked', async () => {
     let release!: () => void;
     const blocked = new Promise<void>(resolve => { release = resolve; });
@@ -24,10 +40,10 @@ describe('incremental Explore evidence and delivery', () => {
       const batch = run.collect();
       expect(batch.pending).toBe(true);
       expect(new Set(batch.views.map(view => view.path)).size).toBe(30);
-      expect(run.finish().snippets).toHaveLength(1);
+      expect(run.finish().snippets).toHaveLength(30);
       release();
       await tick();
-      expect(run.finish().snippets).toHaveLength(1); // late completion cannot mutate delivery
+      expect(run.finish().snippets).toHaveLength(30); // late completion cannot mutate delivery
     } finally { release(); run.cancel(); }
   });
 
@@ -52,20 +68,20 @@ describe('incremental Explore evidence and delivery', () => {
       readFile: async () => ready('needle\nresolveTarget();'),
     });
     await run.waitForViews();
-    const first = run.collect({ inputBytes: 1 });
-    expect(first.views).toHaveLength(1);
-    expect(first.unevaluated).toBeGreaterThan(0);
+    const first = run.collect();
+    expect(first.views).toHaveLength(2);
+    expect(first.unevaluated).toBe(0);
     expect(run.applySelection([{ id: 'bad', purpose: 'fabricated', views: [{ viewId: 'not-offered' }] }]).rejected).toHaveLength(1);
-    const next = run.collect({ seen: first.views.map(view => view.viewId), inputBytes: 1 });
+    const next = run.collect({ seen: [first.views[0]!.viewId] });
     expect(next.views[0]?.viewId).not.toBe(first.views[0]?.viewId);
     const actions = await run.actionCandidates();
     expect(actions.some(action => action.kind === 'symbol' && action.target === 'resolveTarget')).toBe(true);
     run.cancel();
   });
 
-  it('keeps a required evidence group atomic under the actual visible budget', async () => {
+  it('retains required evidence together even when the preview limit is smaller', async () => {
     const body = (path: string) => `needle ${path} ${'x'.repeat(500)}`;
-    const run = createExploreQueryRun({ question: 'needle' }, {
+    const run = createExploreQueryRun({ question: 'needle', limit: 1 }, {
       rgSearch: async () => ['a.ts', 'b.ts'].map(path => ({ path, line: 1, text: body(path) })),
       readFile: async path => ready(body(path)),
     });
@@ -74,12 +90,7 @@ describe('incremental Explore evidence and delivery', () => {
     run.applySelection([{ id: 'cause-and-effect', purpose: 'both required', views: views.map(view => ({ viewId: view.viewId })) }]);
     const result = run.finish();
     expect(result.snippets).toHaveLength(2);
-    const packed = formatExploreOutput(result, { byteBudget: 1000, handle: 'out_test', prefix: 'scope: test' });
-    expect(packed.snippets).toEqual([]);
-    expect(packed.visibleText).not.toContain('--- a.ts');
-    expect(packed.visibleText).not.toContain('--- b.ts');
-    expect(packed.omitted.filter(item => item.reason.includes('required'))).toHaveLength(2);
-    expect(Buffer.byteLength(packed.visibleText)).toBeLessThanOrEqual(1000);
+    expect(result.snippets.every(snippet => snippet.requiredGroups?.includes('cause-and-effect'))).toBe(true);
   });
 
   it('honors an explicit empty model selection instead of returning rejected source hits', async () => {

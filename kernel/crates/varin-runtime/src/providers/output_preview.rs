@@ -107,6 +107,7 @@ struct Projection<'a> {
     can_read: bool,
     page_bytes: usize,
     omitted: Vec<Value>,
+    snippet_limit: Option<usize>,
 }
 impl Projection<'_> {
     fn omitted(&mut self, pointer: &str, mut detail: Value, offset: usize) {
@@ -131,7 +132,8 @@ impl Projection<'_> {
         shown.text
     }
     fn value(&mut self, value: &Value, size: usize, budget: usize, pointer: &str) -> Value {
-        if size <= budget {
+        let limit = pointer.ends_with("/snippets").then_some(self.snippet_limit).flatten();
+        if size <= budget && limit.is_none() && !(self.snippet_limit.is_some() && value.is_object()) {
             return value.clone();
         }
         match value {
@@ -159,12 +161,24 @@ impl Projection<'_> {
                 let mut used: usize = 2;
                 let mut shown = Vec::new();
                 for record in records {
+                    if limit.is_some_and(|limit| shown.len() >= limit) { break; }
                     let next = json_bytes(record) + usize::from(!shown.is_empty());
                     if used.saturating_add(next) > budget {
                         break;
                     }
                     shown.push(record.clone());
                     used += next;
+                }
+                // A preview never displays only half of a required evidence group.
+                // The omitted array pointer reads the same intact stored records.
+                if pointer.ends_with("/snippets") {
+                    loop {
+                        let omitted_groups: std::collections::BTreeSet<_> = records[shown.len()..].iter()
+                            .flat_map(|row| row["requiredGroups"].as_array().into_iter().flatten().filter_map(Value::as_str)).collect();
+                        let cut = shown.iter().position(|row| row["requiredGroups"].as_array().is_some_and(|groups|
+                            groups.iter().filter_map(Value::as_str).any(|group| omitted_groups.contains(group))));
+                        if let Some(cut) = cut { shown.truncate(cut); } else { break; }
+                    }
                 }
                 let count = shown.len();
                 if count < records.len() {
@@ -190,6 +204,7 @@ pub(super) fn bounded_output(
     budget: usize,
     item_id: &str,
     can_read: bool,
+    snippet_limit: Option<usize>,
 ) -> Option<OutputBody> {
     let mut sizes = vec![if output.data.is_null() {
         0
@@ -201,7 +216,7 @@ pub(super) fn bounded_output(
         OutputPart::Media { .. } => 0,
     }));
     let original_bytes = sizes.iter().sum::<usize>();
-    if original_bytes <= budget {
+    if original_bytes <= budget && snippet_limit.is_none() {
         return None;
     }
     let budgets = allowances(&sizes, budget);
@@ -210,6 +225,7 @@ pub(super) fn bounded_output(
         can_read,
         page_bytes: budget.max(1),
         omitted: Vec::new(),
+        snippet_limit,
     };
     let data = projection.value(&output.data, sizes[0], budgets[0], "/data");
     let mut parts = output
@@ -232,6 +248,14 @@ pub(super) fn bounded_output(
         "truncated":true,"originalBytes":original_bytes,"historyItemId":item_id,"omitted":projection.omitted
     }}).to_string() });
     Some(OutputBody { data, parts })
+}
+
+pub(super) fn retrieval_preview_limit(call: &ToolCall) -> Option<usize> {
+    let (name, args) = if call.name == crate::tool_disclosure::INVOKE {
+        (call.arguments["reference"]["name"].as_str().unwrap_or(""), &call.arguments["arguments"])
+    } else { (call.name.as_str(), &call.arguments) };
+    (name == "code_retrieval").then(|| args["limit"].as_u64()
+        .and_then(|value| usize::try_from(value).ok())).flatten()
 }
 
 /// Reads with an explicit body range already define what the model asked to see.

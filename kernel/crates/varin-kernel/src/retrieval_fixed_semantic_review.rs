@@ -228,197 +228,34 @@ fn assert_reopen(review: Review, counts: &Value, stopped: bool) {
 }
 
 #[test]
-#[ignore = "actual fixed semantic units, publication, materialized CAS, Catalog and Storage over stdio"]
-fn fixed_and_materialized_semantic_only_results_preserve_source_bytes_and_reuse_assets() {
-    for (source, mode) in [
-        ("fixed_branch", "semantic-fixed-cold"),
-        ("fixed_branch", "semantic-fixed-warm"),
-        ("materialized", "semantic-fixed-chain"),
+#[ignore = "actual published semantic reader, original source and Catalog/Storage over stdio"]
+fn source_queries_use_existing_publications_without_foreground_index_builds() {
+    for (source, mode, expected) in [
+        ("fixed_branch", "semantic-fixed-cold", 0),
+        ("fixed_branch", "semantic-fixed-warm", 2),
+        ("materialized", "semantic-fixed-chain", 0),
     ] {
         let mut review = Review::with_source(mode, source);
         let counts = review.execute(false);
+        assert_eq!(counts["fixedUnits"], 0, "no range-wide foreground structure work: {counts}");
+        assert_eq!(counts["documentRequests"], 0, "queries never build missing document vectors: {counts}");
+        let owner = review.f.runtime.catalog();
+        let db = owner.lock().unwrap();
+        let history = db.execution_history("branch:parent").unwrap();
+        let delivered = results(&history);
         let facts = counts["queryFacts"].as_array().unwrap();
-        let owner = review.f.runtime.catalog();
-        let db = owner.lock().unwrap();
-        let history = db.execution_history("branch:parent").unwrap();
-        let delivered = results(&history);
-        assert_eq!(delivered.len(), facts.len(), "{counts}");
+        assert_eq!(delivered.len(), facts.len());
         for (result, fact) in delivered.iter().zip(facts) {
-            assert_source_result(result, fact, source, 3);
+            assert_source_result(result, fact, source, expected);
+            assert!(result["coverage"]["semantic"] == "empty" || result["coverage"]["semantic"] == "partial");
         }
-        assert!(counts["fixedUnits"].as_u64().unwrap() > 0, "{counts}");
-        assert!(counts["documentRequests"].as_u64().unwrap() > 0, "{counts}");
-        assert!(counts["documentInputs"]
-            .to_string()
-            .contains(if source == "materialized" {
-                "WORKING_MAGENTA_CAPSULE"
-            } else {
-                "PINNED_MAGENTA_CAPSULE"
-            }));
         if mode == "semantic-fixed-warm" {
-            assert!(counts["indexRequests"].as_u64().unwrap() > 0);
-            assert!(!counts["ledgerFacts"].as_array().unwrap().is_empty());
-            assert!(counts["backgroundInputs"]
-                .to_string()
-                .contains("FORBIDDEN_SOURCE"));
-            assert!(counts["backgroundInputs"].to_string().contains("LIVE_ONLY"));
-            assert!(counts["backgroundInputs"]
-                .to_string()
-                .contains("WRONG_LIVE_CAPSULE"));
-            assert_eq!(
-                counts["fixedUnits"], 1,
-                "unchanged b/c reuse the real publication"
-            );
-            assert_eq!(
-                counts["documentRequests"], 1,
-                "only the fixed-only a.ts differs from the publication"
-            );
+            assert!(counts["embeddingRequests"].as_u64().unwrap() > 0);
+            assert!(!delivered[0].to_string().contains("WRONG_LIVE"));
         } else {
-            assert_eq!(counts["indexRequests"], 0);
-            assert!(
-                counts["ledgerFacts"].as_array().unwrap().is_empty(),
-                "foreground documents use Catalog, never index-build"
-            );
+            assert_eq!(counts["embeddingRequests"], 0);
         }
-        assert!(counts["ledgerFacts"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|fact| fact["identity"]["operation"]["kind"] == "index-build"));
-        if mode == "semantic-fixed-chain" {
-            assert_eq!(facts.len(), 4);
-            assert_eq!(
-                facts[1]["fixedUnits"], facts[0]["fixedUnits"],
-                "new question reuses original units"
-            );
-            assert_eq!(
-                facts[1]["documentRequests"], facts[0]["documentRequests"],
-                "new question reuses document assets"
-            );
-            assert_eq!(facts[1]["embeddingRequests"], 2);
-            assert_eq!(
-                facts[2]["fixedUnits"].as_u64().unwrap(),
-                facts[1]["fixedUnits"].as_u64().unwrap() + 1
-            );
-            assert_eq!(
-                facts[2]["documentRequests"].as_u64().unwrap(),
-                facts[1]["documentRequests"].as_u64().unwrap() + 1
-            );
-            assert_eq!(
-                facts[2]["embeddingRequests"], 2,
-                "same-account query vector remains reusable after document edit"
-            );
-            assert_eq!(facts[3]["fixedUnits"], facts[2]["fixedUnits"]);
-            assert_eq!(
-                facts[3]["documentRequests"], facts[2]["documentRequests"],
-                "changing key does not re-embed document assets"
-            );
-            assert_eq!(
-                facts[3]["embeddingRequests"], 3,
-                "query cache retains its account partition"
-            );
-            assert_ne!(
-                facts[0]["expected"]["allowed/a.ts"]["revision"],
-                facts[2]["expected"]["allowed/a.ts"]["revision"]
-            );
-            assert!(delivered[0].to_string().contains("WORKING_MAGENTA_CAPSULE"));
-            assert!(delivered[2].to_string().contains("EDITED_MAGENTA_CAPSULE"));
-        }
-        drop(db);
-        drop(owner);
+        drop(db); drop(owner);
         assert_reopen(review, &counts, false);
     }
-}
-
-#[test]
-#[ignore = "actual pre-model source guard and independent Host-to-Rust reconstruction windows over stdio"]
-fn materialized_semantic_versions_guard_model_dispatch_and_final_projection_separately() {
-    for mode in [
-        "semantic-fixed-guard-stale",
-        "semantic-fixed-projection-stale",
-    ] {
-        let mut review = Review::with_source(mode, "materialized");
-        let counts = review.execute(false);
-        let owner = review.f.runtime.catalog();
-        let db = owner.lock().unwrap();
-        let history = db.execution_history("branch:parent").unwrap();
-        let delivered = results(&history);
-        assert_eq!(delivered.len(), 1, "{history:?}");
-        let result = delivered[0];
-        assert!(!result.to_string().contains("CHANGED_BEFORE_DOCUMENT_MODEL"));
-        assert!(!result.to_string().contains("CHANGED_AFTER_HOST"));
-        if mode == "semantic-fixed-guard-stale" {
-            assert_eq!(counts["guardMutation"], true);
-            assert_eq!(
-                counts["documentRequests"], 2,
-                "only the two unchanged files reach document HTTP"
-            );
-            let changed = counts["guardPath"].as_str().unwrap();
-            let original = counts["queryFacts"][0]["expected"][changed]["content"]
-                .as_str()
-                .unwrap()
-                .trim_end();
-            assert!(
-                !counts["documentInputs"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .flat_map(|batch| batch.as_array().unwrap())
-                    .any(|text| text.as_str().unwrap().contains(original)),
-                "the actual changed path must be rejected before its document HTTP: {counts}"
-            );
-            assert_source_result(result, &counts["queryFacts"][0], "materialized", 2);
-            assert!(result["snippets"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|snippet| snippet["path"] != changed));
-            assert_eq!(result["status"], "partial");
-        } else {
-            assert_source_result(result, &counts["queryFacts"][0], "materialized", 2);
-            assert!(result["snippets"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|snippet| snippet["path"] != "allowed/c.ts"));
-            assert!(result["snippets"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|snippet| snippet["path"] == "allowed/a.ts"));
-            assert_eq!(result["status"], "partial");
-            assert!(result["omissions"]["stale"].as_u64().unwrap() > 0);
-        }
-        drop(db);
-        drop(owner);
-        assert_reopen(review, &counts, false);
-    }
-}
-
-#[test]
-#[ignore = "original foreground document HTTP cancellation, body drainage and both durable stores over stdio"]
-fn stopped_fixed_document_embedding_settles_once_only_after_original_body_drains() {
-    let mut review = Review::with_source("semantic-fixed-stop", "fixed_branch");
-    let counts = review.execute(true);
-    assert_eq!(counts["documentRequests"], 1);
-    assert!(
-        counts["lexicalSearches"].as_u64().unwrap() > 0,
-        "the original keyword compute must enter while the document HTTP is held"
-    );
-    assert_eq!(
-        counts["embeddingRequests"], 0,
-        "held document preparation has not reached the query model"
-    );
-    assert_eq!(counts["indexRequests"], 0);
-    assert_eq!(counts["drained"], true);
-    assert!(counts["ledgerFacts"].as_array().unwrap().is_empty());
-    let owner = review.f.runtime.catalog();
-    let db = owner.lock().unwrap();
-    assert_eq!(db.run(&review.run).unwrap().state, RunState::Cancelled);
-    assert!(results(&db.execution_history("branch:parent").unwrap())
-        .iter()
-        .all(|result| result["snippets"].as_array().is_none_or(Vec::is_empty)));
-    drop(db);
-    drop(owner);
-    assert_reopen(review, &counts, true);
 }

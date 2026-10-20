@@ -153,7 +153,7 @@ impl ToolKind {
                 "Find incoming or outgoing calls at a zero-based UTF-16 source position. Returned call-site ranges belong to the from resource."
             }
             Self::CodeRetrieval => {
-                "Retrieve code context from the admitted source using the selected retrieval service."
+                "Retrieve source excerpts relevant to the question, following useful code relationships to provide the context needed for further work. Results include source locations and any gaps that affect their use."
             }
         }
     }

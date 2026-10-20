@@ -92,10 +92,10 @@ impl HttpTransport for Stream {
         let planning = request
             .body
             .to_string()
-            .contains("Plan grouped search expressions");
+            .contains("Develop search expressions");
         let helper = text.contains("DISCOVERED_HELPER");
         let answer = if planning {
-            json!({"behavior":"Trace actual retrieval dependency","groups":[{"id":"seed","concept":"entry","expressions":["retrievalNeedle"]}]}).to_string()
+            json!({"behavior":"Trace actual retrieval dependency","groups":[{"id":"seed","concept":"entry","expressions":[if self.mode == "llm-auto" { "hiddenHelper" } else { "retrievalNeedle" }]}]}).to_string()
         } else if self.mode == "llm-partial" && helper {
             "invalid later original model response".into()
         } else {
@@ -218,16 +218,18 @@ fn configured_explore_llm_plans_selects_and_accounts_under_the_original_query() 
         let count = requests.len() as u64;
         if mode == "llm-unknown" {
             assert_eq!(count, 1);
+        } else if mode == "llm-auto" {
+            assert_eq!(count, 1, "only requested query expansion uses generation");
         } else {
             assert!(count >= 2);
         }
         assert!(requests[0]
             .to_string()
-            .contains("Plan grouped search expressions"));
+            .contains("Develop search expressions"));
         if mode == "llm-auto" {
             assert!(
                 counts["requests"].as_u64().unwrap() > 0,
-                "ready classifier action duty must coexist"
+                "the classifier owns selection and next-step decisions"
             );
         } else {
             assert_eq!(counts["requests"], 0);
@@ -419,14 +421,14 @@ fn semantic_decision_and_explore_use_one_query_session_with_contiguous_ordinals(
     let (stream, guard) = install("llm-auto", send);
     let counts = review.execute(false);
     assert!(events.try_recv().is_err());
-    assert_eq!(counts["embeddingRequests"], 1);
+    assert!(counts["embeddingRequests"].as_u64().unwrap() >= 1);
     assert!(
         counts["requests"].as_u64().unwrap() > 0,
         "classifier action duty executed"
     );
     assert!(
-        stream.requests.lock().unwrap().len() >= 2,
-        "original Explore planner and selector executed"
+        stream.requests.lock().unwrap().len() == 1,
+        "generation performs only the requested expansion"
     );
     let owner = review.f.runtime.catalog();
     let db = owner.lock().unwrap();

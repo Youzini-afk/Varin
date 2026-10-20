@@ -31,7 +31,7 @@ export interface PipelinePlan {
   readonly semantic?: Readonly<RetrievalSemanticMetadata>;
   readonly selection?: Readonly<{ providerId: string; providerKey: string; artifactId: string; configurationId: string; selectionRevision: number }>;
 }
-export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string; required?: boolean; requiredGroups?: readonly string[] }
+export interface RetrievalSnippet { path: string; revision: string; startLine: number; endLine: number; content: string; why?: string; required?: boolean; requiredGroups?: readonly string[] }
 export interface RetrievalStageBinding<T> {
   providerId: string;
   configurationId: string;

@@ -1322,6 +1322,25 @@ pub(crate) struct ModelSelectParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTokenizerOpenParams {
+    pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTokenizerCountParams {
+    pub(crate) lease_id: String,
+    pub(crate) texts: Vec<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelTokenizerLeaseParams {
+    pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct AdmissionInspectParams {
     pub(crate) parent_operation_id: Option<String>,
     pub(crate) run_id: String,
@@ -2797,6 +2816,28 @@ pub(crate) type SourceHandoffClaimParams = crate::source_resources::SourceHandof
 pub(crate) type SourceIntegrationReceiptParams =
     crate::source_resources::SourceIntegrationReceiptParams;
 
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeRetrievalDiagnostic {
+    pub(crate) kind: String,
+    pub(crate) path: Option<String>,
+    pub(crate) message: String,
+}
+
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeRetrievalCoverage {
+    pub(crate) sources: Vec<CodeRetrievalSource>,
+    pub(crate) semantic: String,
+    pub(crate) unexamined: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeRetrievalCompletion {
+    pub(crate) reason: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelWorkingVerificationDocument {
@@ -3196,6 +3237,15 @@ pub(crate) struct McpTaskResultInput {
     pub(crate) effect: varin_runtime::Effect,
     pub(crate) content: varin_runtime::output::OutputBody<varin_runtime::output::IncomingMedia>,
     pub(crate) kind: varin_runtime::McpTaskResultKind,
+}
+
+#[derive(Clone, Debug, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeRetrievalSource {
+    pub(crate) id: String,
+    pub(crate) family: String,
+    pub(crate) status: String,
+    pub(crate) targets: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4078,6 +4128,24 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.content.collect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.tokenizers.open" => {
+            serde_json::from_value::<KernelTokenizerOpenParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.retrieval.finish" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.tokenizers.count" => {
+            serde_json::from_value::<KernelTokenizerCountParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.tokenizers.close" => {
+            serde_json::from_value::<KernelTokenizerLeaseParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.tokenizers.references" => {
             serde_json::from_value::<KernelEmptyParams>(params.clone())
                 .map(|_| ())

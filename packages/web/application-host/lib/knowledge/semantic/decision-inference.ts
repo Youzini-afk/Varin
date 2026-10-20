@@ -9,15 +9,19 @@ import type { InferenceProviderBinding as HostInferenceProviderBinding } from '.
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
 import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
+import { acquireTokenCounter } from '../../models/token-count.js';
+import { classifierInputTexts } from '../../models/classifier.js';
 
 export interface DecisionInferenceAuthority {
   resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
 }
 export interface DecisionInferenceSession {
-  decide(input: Omit<HarnessFastDecisionParams, 'batchId' | 'configurationId' | 'providerId' | 'modelId' | 'protocol'>, guard?: () => Promise<void>): Promise<HarnessFastDecisionResult>;
+  decide(input: Omit<HarnessFastDecisionParams, 'batchId' | 'configurationId' | 'providerId' | 'modelId' | 'protocol'>,
+    guard?: () => Promise<void>, materialFence?: () => Promise<void>): Promise<HarnessFastDecisionResult>;
 }
 export interface DecisionInferenceLease {
   binding: HarnessResolvedFastDecisionBinding;
+  countInput(input: Pick<HarnessFastDecisionParams, 'goal' | 'context' | 'materials' | 'questions'>): Promise<{ tokens: number; tokenizer: string }>;
   assertAvailable(signal: AbortSignal): Promise<void>;
   run<T>(authority: InferenceInvocationAuthority, signal: AbortSignal, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
   consume<T>(call: InferenceCall, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
@@ -66,9 +70,23 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
       } catch { return { status: 'invalid', message: 'Fast decision settings changed while preparing the connection.' }; }
       const generation = revisions.get(purpose) ?? 0;
       const binding: HarnessResolvedFastDecisionBinding = Object.freeze({ ...selected.binding,
-        ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId });
+        ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId,
+        ...(provider.contextWindow ? { contextWindowTokens: provider.contextWindow } : {}),
+        ...(provider.api === 'llama-cpp-classify' ? { maxChoiceOptions: 62 } : {}) });
+      let counter: Awaited<ReturnType<typeof acquireTokenCounter>> | undefined;
+      let acquiring: Promise<Awaited<ReturnType<typeof acquireTokenCounter>>> | undefined;
+      const countInput: DecisionInferenceLease['countInput'] = async input => {
+        if (released) throw new Error('Decision tokenizer lease was released');
+        counter ??= await (acquiring ??= acquireTokenCounter(options.kernel, {
+          model: provider.requestModelId ?? binding.modelId, ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}),
+        }));
+        const counted = await counter.count(classifierInputTexts(provider.api, provider.requestModelId ?? binding.modelId,
+          { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) }, input.questions));
+        return { tokens: Math.max(0, ...counted.counts), tokenizer: counted.tokenizer };
+      };
       let released = false;
-      const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.(); };
+      const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.();
+        void acquiring?.then(value => value.release()).catch(() => {}); };
       const assertAvailable = async (signal: AbortSignal) => {
         signal.throwIfAborted();
         if (closed || released) throw new ResearchDecisionFailure('The original decision binding was released.');
@@ -79,7 +97,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
       };
       const consumeCall: DecisionInferenceLease['consume'] = async (call, consume) => {
           const combined = call.signal;
-          return consume({ decide: async (input, guard) => {
+          return consume({ decide: async (input, guard, materialFence) => {
             const batchReceipts: InferenceReceipt[] = [];
             const batchId = randomUUID();
             const base: HarnessFastDecisionResult = { batchId, providerId: binding.providerId, modelId: binding.modelId,
@@ -119,6 +137,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                   executor: { kind: 'http', api: provider.api, endpoint: destination, credentialScope: provider.credentialScope } };
                 return call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
                   check: async requestSignal => { await assertAvailable(requestSignal); await guard?.(); requestSignal.throwIfAborted(); },
+                  ...(materialFence ? { beforeDispatch: materialFence } : {}),
                   observe: raw => {
                     const actual = route.requestKind === 'model_compute' ? classifierWireUsage(provider.api, raw) : undefined;
                     return { ...(actual ? { usage: { measurement: 'actual' as const, inputTokens: actual.inputTokens ?? null, outputTokens: actual.outputTokens ?? null } } : {}),
@@ -134,7 +153,9 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                   api: provider.api as 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify' },
                 ...(auth?.auth.apiKey === undefined ? {} : { apiKey: auth.auth.apiKey }),
                 headers: Object.fromEntries(headers),
-                model: provider.requestModelId ?? binding.modelId, state: { goal: input.goal, materials: input.materials }, questions: input.questions, signal: combined, fetchImpl });
+                model: provider.requestModelId ?? binding.modelId,
+                state: { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) },
+                questions: input.questions, signal: combined, fetchImpl });
               if (combined.aborted) throw new ResearchDecisionFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
               const { usage: _usage, ...answers } = result;
               const projected = { ...observed(), ...answers };
@@ -161,7 +182,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
       });
       if (closed) return { status: 'unavailable', message: 'Decision inference is closed.' };
       leases.add(release); transferred = true;
-      return { status: 'ready', lease: { binding, assertAvailable, run, consume: consumeCall, release } };
+      return { status: 'ready', lease: { binding, countInput, assertAvailable, run, consume: consumeCall, release } };
     } finally { if (!transferred) provider.release?.(); }
   };
   return { capture, close() { closed = true; for (const release of [...leases]) release(); } };

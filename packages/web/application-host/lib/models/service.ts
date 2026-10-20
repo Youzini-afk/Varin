@@ -35,6 +35,7 @@ export interface InferenceProviderBinding {
   imageModel?: ImageModelInfo;
   requestModelId?: string;
   contextWindow?: number;
+  tokenizer?: import('../kernel/protocol.generated.js').TokenizerBinding;
   decisionPaths?: ModelDecisionPaths;
   connection?: ModelConnectionOptions;
   headers?: Record<string, string>;
@@ -550,8 +551,12 @@ export class ModelsService {
     };
     const captured = channel.authentication.kind === 'credential' || channel.authentication.kind === 'environment' || channel.authentication.kind === 'none'
       ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
+    let tokenizer: Awaited<ReturnType<ModelsService['acquireTokenizer']>> | undefined;
+    try {
+      if (operation === 'decision' || operation === 'rerank') tokenizer = await this.acquireTokenizer(model.tokenizer);
+    } catch (error) { captured?.release(); throw error; }
     let references = 1, active = 0, baseReleased = false, disposed = false;
-    const dispose = () => { if (!references && !active && !disposed) { disposed = true; captured?.release(); } };
+    const dispose = () => { if (!references && !active && !disposed) { disposed = true; captured?.release(); tokenizer?.release(); } };
     const retain = () => {
       if (!references) throw new Error('The original model binding was released');
       references += 1; let released = false;
@@ -573,6 +578,7 @@ export class ModelsService {
     const egressOverride = modelEgressOverride(channel.connection);
     return { providerId, modelId, requestModelId: model.requestModelId ?? model.id, baseUrl, api, routes, requestUrl: routes[0]!.requestUrl, ...(configuredPath === undefined ? {} : { endpoint: configuredPath }), configurationId,
       ...(model.contextWindow === undefined ? {} : { contextWindow: model.contextWindow }),
+      ...(tokenizer?.tokenizer ? { tokenizer: tokenizer.tokenizer } : {}),
       ...(operation === 'decision' && model.decision?.paths ? { decisionPaths: structuredClone(model.decision.paths) } : {}),
       ...(channel.connection === undefined ? {} : { connection: structuredClone(channel.connection) }),
       ...(channel.connection?.headers === undefined ? {} : { headers: structuredClone(channel.connection.headers) }),

@@ -54,7 +54,12 @@ export const ChatExploreCard: React.FC<{
   const [view] = React.useState(() => views?.get(call.id) ?? { expanded: false, sequence: activities.at(-1)?.sequence ?? -1 });
   const [expanded, setExpanded] = React.useState(view.expanded);
   const [selectedKey, setSelectedKey] = React.useState<string>();
-  const selected = snippets?.find(snippet => snippetKey(snippet) === selectedKey);
+  const [finishing, setFinishing] = React.useState(false);
+  const [finishError, setFinishError] = React.useState<string>();
+  const [liveExcerpt, setLiveExcerpt] = React.useState<ExploreSearchSnippet>();
+  const [materialError, setMaterialError] = React.useState<string>();
+  const materialRequest = React.useRef(0);
+  const selected = snippets?.find(snippet => snippetKey(snippet) === selectedKey) ?? liveExcerpt;
   const reducedMotion = usePrefersReducedMotion();
   const conversation = useConversationPresentation();
   React.useLayoutEffect(() => {
@@ -72,6 +77,31 @@ export const ChatExploreCard: React.FC<{
   const toggle = () => { view.expanded = !expanded; setExpanded(view.expanded); };
   const open = (path: string, line: number) => conversation.openFile(call.id, path, line);
   const seconds = (ms: number) => t('chat.explore.seconds', { count: (ms / 1000).toFixed(1) });
+  const finish = async () => {
+    if (!execution?.operationId || finishing) return;
+    setFinishing(true); setFinishError(undefined);
+    try {
+      const result = await conversation.api.finishRetrieval(execution.operationId);
+      if (!result.accepted) { setFinishing(false); setFinishError(t('chat.explore.finishUnavailable')); }
+    } catch { setFinishing(false); setFinishError(t('chat.explore.finishUnavailable')); }
+  };
+  const diagnostics = Array.isArray(details?.diagnostics) ? details.diagnostics.flatMap(item => {
+    const value = exploreRecord(item);
+    return typeof value?.message === 'string' ? [value] : [];
+  }) : [];
+  const readMaterial = async (viewId: string) => {
+    if (!execution?.operationId) return;
+    const request = ++materialRequest.current;
+    setMaterialError(undefined);
+    try {
+      const view = await conversation.api.readRetrievalMaterial(execution.operationId, viewId);
+      if (request !== materialRequest.current) return;
+      setSelectedKey(undefined);
+      setLiveExcerpt(view as ExploreSearchSnippet);
+    } catch {
+      if (request === materialRequest.current) setMaterialError(t('chat.explore.materialUnavailable'));
+    }
+  };
   const activity = (item: ExploreProgressActivity, recent: boolean) => <motion.li key={item.sequence}
     layout={recent && !reducedMotion ? 'position' : false}
     initial={recent && !reducedMotion && item.sequence > view.sequence ? { opacity: 0, y: 8 } : false}
@@ -94,6 +124,9 @@ export const ChatExploreCard: React.FC<{
         : <>{t(`chat.explore.source.${item.source.family}`)}{item.source.targets?.length ? ` · ${item.source.targets.join(' · ')}` : ''}</>}
     </span>}
     {item.kind === 'source' ? <span className="shrink-0 typography-micro">{t(`chat.explore.sourceStatus.${item.source.status}`)}</span> : null}
+    {item.kind === 'read' && progress?.selectedViewIds?.includes(item.viewId) ? <span className="shrink-0 typography-micro">{t('chat.explore.selected')}</span> : null}
+    {expanded && item.kind === 'read' && execution?.operationId ? <button type="button" className="shrink-0 hover:text-foreground"
+      onClick={() => void readMaterial(item.viewId)}>{t('chat.explore.excerpt')}</button> : null}
   </motion.li>;
 
   return <section className="my-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/20" data-conversation-explore={call.id}>
@@ -120,7 +153,7 @@ export const ChatExploreCard: React.FC<{
             <span className="shrink-0 font-mono typography-micro text-muted-foreground">L{snippet.startLine}–{snippet.endLine}</span>
           </button>
           {expanded ? <button type="button" className="shrink-0 typography-micro text-muted-foreground hover:text-foreground hover:underline"
-            aria-expanded={selected === snippet} onClick={() => setSelectedKey(selected === snippet ? undefined : snippetKey(snippet))}>{t('chat.explore.excerpt')}</button> : null}
+            aria-expanded={selected === snippet} onClick={() => { setLiveExcerpt(undefined); setSelectedKey(selected === snippet ? undefined : snippetKey(snippet)); }}>{t('chat.explore.excerpt')}</button> : null}
         </li>)}
       </ol> : running && visibleActivities.length > 0 ? <div className={cn('overflow-hidden', expanded && 'max-h-72 overflow-auto overscroll-contain')}
         tabIndex={expanded ? 0 : undefined} data-conversation-tool-scroll={expanded || undefined}>
@@ -129,6 +162,7 @@ export const ChatExploreCard: React.FC<{
         </ol>
       </div> : null}
       {phase !== 'cancelled' && typeof details?.error === 'string' ? <p className={cn('break-words px-3 py-2 typography-meta text-[var(--status-error)]', !expanded && 'line-clamp-2')}>{details.error}</p> : null}
+      {materialError ? <p role="status" className="px-3 py-2 typography-meta text-muted-foreground">{materialError}</p> : null}
       {expanded && selected ? <div className="mx-3 my-2 overflow-hidden rounded-lg border border-border/50">
         <div className="break-all bg-muted/20 px-3 py-2 typography-micro text-muted-foreground">
           {selected.path}:{selected.startLine}–{selected.endLine} · {t('chat.explore.snapshot')} · {selected.source} · {selected.revision}
@@ -137,6 +171,9 @@ export const ChatExploreCard: React.FC<{
         {selected.why ? <p className="break-words px-3 pb-2 typography-micro text-muted-foreground">{selected.why}</p> : null}
       </div> : null}
       {expanded ? <div className="space-y-2 px-3 py-2">
+        {diagnostics.map((diagnostic, index) => <p key={index} className="break-words typography-meta text-muted-foreground">
+          {typeof diagnostic.path === 'string' ? `${diagnostic.path} · ` : ''}{String(diagnostic.message)}
+        </p>)}
         {details?.partial === true ? <p className="typography-meta text-[var(--status-warning)]">{t('chat.explore.partialNote')}</p> : null}
         <div className="break-words typography-micro text-muted-foreground">{t('chat.explore.scope')} · {paths.join(' · ')}</div>
         <details><summary className="cursor-pointer typography-micro text-muted-foreground">{t('chat.explore.raw')}</summary><div className="mt-2 space-y-2">{rawDetails}</div></details>
@@ -149,6 +186,11 @@ export const ChatExploreCard: React.FC<{
           : running && progress?.receivedSnippets ? t('chat.explore.received', { snippets: progress.receivedSnippets, files: progress.receivedFiles })
             : !warning && !running ? t(`chat.explore.phase.${phase}`) : null}
       </span>
+      {finishError ? <span role="alert">{finishError}</span> : null}
+      {running && execution?.operationId && !conversation.readOnly ? <button type="button" disabled={finishing}
+        className="shrink-0 hover:text-foreground disabled:opacity-50" onClick={() => void finish()}>
+        {t(finishing ? 'chat.explore.finishing' : 'chat.explore.finish')}
+      </button> : null}
       <button type="button" className="ml-auto inline-flex shrink-0 items-center gap-0.5 hover:text-foreground" onClick={toggle}
         aria-expanded={expanded} aria-controls={contentId}>
         {t(expanded ? 'chat.explore.collapse' : 'chat.explore.expand')}

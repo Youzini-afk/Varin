@@ -5,11 +5,13 @@ import { parseHarnessRerankSettings, type HarnessRerankResult, type HarnessResol
 import { requestHttpRerank, parseHttpRerankScores, RerankResponseError, type HttpRerankScore } from '../../models/rerank.js';
 import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
+import { acquireTokenCounter } from '../../models/token-count.js';
 export interface RerankInferenceAuthority {
   resolveRerankBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
 }
 export interface RerankInferenceLease {
   readonly binding: HarnessResolvedRerankBinding;
+  countDocuments(texts: readonly string[]): Promise<number[]>;
   assertAvailable(signal?: AbortSignal): Promise<void>;
   execute(authority: InferenceInvocationAuthority, input: { query: string; documents: Array<{ id: string; text: string; revision?: string }>; provenance?: unknown },
     signal: AbortSignal, guard?: () => Promise<void>): Promise<HarnessRerankResult>;
@@ -59,7 +61,15 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
         const binding: HarnessResolvedRerankBinding = Object.freeze({ ...selected,
           ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId });
         let released = false;
-        const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.(); };
+        let tokenizer: Promise<Awaited<ReturnType<typeof acquireTokenCounter>>> | undefined;
+        const countDocuments = async (texts: readonly string[]) => {
+          if (released) throw new Error('Rerank tokenizer lease was released');
+          tokenizer ??= acquireTokenCounter(options.kernel, { model: provider.requestModelId ?? binding.modelId,
+            ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}) });
+          return (await (await tokenizer).count(texts)).counts;
+        };
+        const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.();
+          void tokenizer?.then(value => value.release()).catch(() => {}); };
         const assertAvailable = async (signal?: AbortSignal) => {
           signal?.throwIfAborted();
           if (closed || released) throw new Error('Original rerank binding was released');
@@ -104,7 +114,7 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
         };
         if (closed) return { status: 'unavailable', message: 'Rerank inference is closed.' };
         leases.add(release); transferred = true;
-        return { status: 'ready', lease: { binding, assertAvailable, consume, release,
+        return { status: 'ready', lease: { binding, countDocuments, assertAvailable, consume, release,
           execute(invocation, input, signal, guard) {
             return requests.run(invocation, signal, async call => {
               await assertAvailable(call.signal);

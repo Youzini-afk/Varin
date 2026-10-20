@@ -83,6 +83,16 @@ fn failed(code: &str) -> ExecutionError {
     ExecutionError::new(code, code)
 }
 impl RetrievalBridge {
+    pub(crate) fn finish(&self, operation_id: &str) -> Result<bool, ExecutionError> {
+        let state = self.state.lock().map_err(|_| failed("retrieval_channel_failed"))?;
+        let Some(epoch) = &state.epoch else { return Ok(false); };
+        let matches: Vec<_> = state.pending.iter().filter(|(_, pending)| pending.presentation.as_ref()
+            .is_some_and(|value| value["event"]["operationId"] == operation_id)).map(|(id, _)| id.clone()).collect();
+        for id in &matches {
+            self.send(json!({"v":1,"kind":"retrieval-finish","id":id,"kernelEpoch":epoch}))?;
+        }
+        Ok(!matches.is_empty())
+    }
     pub(crate) fn new(output: impl Into<crate::transport::Sender>) -> Self {
         let output = output.into();
         let progress_output = output.clone();
