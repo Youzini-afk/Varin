@@ -33,6 +33,7 @@ let root: Root, container: HTMLDivElement;
 beforeEach(() => {
   const { document, window } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('Element', window.Element); vi.stubGlobal('Node', window.Node);
   Object.defineProperty(window, 'confirm', { configurable: true, value: vi.fn(() => true) });
   mocks.host = 1; mocks.api = undefined;
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -66,7 +67,7 @@ function fixture() {
   });
   const getCombinedOperation = vi.fn<WorkspaceRecoveryAPI['getCombinedOperation']>(async () => ({ status: 'ready', operation: undoOperation }));
   const cancelCombinedOperation = vi.fn<WorkspaceRecoveryAPI['cancelCombinedOperation']>(async () => ({ status: 'ready', operation: { ...undoOperation, state: 'aborted', fileState: 'unchanged', conversationState: 'unchanged' } }));
-  mocks.api = { status: async () => status, listCheckpoints: async () => ({ status: 'ready', page: { checkpoints: [], nextCursor: null } }),
+  mocks.api = { fileRecovery: async () => ({ points: [], operations: [] }), status: async () => status, listCheckpoints: async () => ({ status: 'ready', page: { checkpoints: [], nextCursor: null } }),
     listCombinedOperations: async () => ({ status: 'ready', operations: [...operations] }), prepareCombinedUndo, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation } as unknown as WorkspaceRecoveryAPI;
   return { original, undoOperation, plan, operations, prepareCombinedUndo, applyCombinedRecovery, getCombinedOperation, cancelCombinedOperation };
 }
@@ -89,7 +90,7 @@ it('retains the exact undo attempt across an unavailable readback and a dismisse
   expect(button('contextPanel.recovery.actions.undo').disabled).toBe(true);
   await act(async () => button('sessions.sidebar.dialogs.cancel').click());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
-  await act(async () => button('Check undo recovery status').click());
+  await act(async () => button('contextPanel.recovery.files.checkOperation').click());
   f.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: { ...f.undoOperation, state: 'navigating-conversation', conversationState: 'unchanged' } });
   await act(async () => button('Check recovery status').click());
   expect(f.prepareCombinedUndo).toHaveBeenCalledOnce();
@@ -115,4 +116,28 @@ it('never applies an undo prepared by a previous Host after the user switches Ho
   mocks.host += 1; await act(async () => mocks.listeners.forEach(listener => listener()));
   await act(async () => resolve({ status: 'ready', plan: f.plan }));
   expect(f.applyCombinedRecovery).not.toHaveBeenCalled(); expect(f.cancelCombinedOperation).not.toHaveBeenCalled();
+});
+
+it('inspects the original worktree and reads a lost file-restore reply by its original operation ID', async () => {
+  fixture();
+  const point = { id: 'p-saved', label: 'Saved files', runId: 'named-operation', sourceRunId: 'original-worktree-run',
+    before: 'p-saved', after: 'p-saved', createdAt: '2026-10-20T00:00:00Z', state: 'ready', paths: ['a.ts'], byteLength: 12 };
+  const fileRecovery = vi.fn<WorkspaceRecoveryAPI['fileRecovery']>(async input => {
+    if (input.action === 'list') return { points: [point], currentSourceRunId: 'current-worktree-run' };
+    if (input.action === 'inspect') return { files: [{ path: 'a.ts', target: { kind: 'regular-file' } }] };
+    if (input.action === 'restore') throw new Error('Reply lost');
+    if (input.action === 'operation') return { operation: { operationId: input.operationId!, sourceRunId: input.sourceRunId!,
+      status: 'applied', appliedPaths: ['a.ts'], conflictPaths: [], files: [{ path: 'a.ts', status: 'applied' }] } };
+    throw new Error('Unexpected recovery request');
+  });
+  mocks.api!.fileRecovery = fileRecovery;
+  await act(async () => root.render(<WorkspaceRecoveryPanel />));
+  await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Saved files'))!.click());
+  expect(fileRecovery).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'inspect', sourceRunId: 'original-worktree-run', point: 'p-saved' }));
+  await act(async () => button('contextPanel.recovery.files.restoreSelected').click());
+  const original = fileRecovery.mock.calls.find(([input]) => input.action === 'restore')![0];
+  expect(original).toMatchObject({ sourceRunId: 'original-worktree-run', paths: ['a.ts'], point: 'p-saved' });
+  await act(async () => button('contextPanel.recovery.files.checkOperation').click());
+  expect(fileRecovery.mock.calls.filter(([input]) => input.action === 'restore')).toHaveLength(1);
+  expect(fileRecovery).toHaveBeenCalledWith(expect.objectContaining({ action: 'operation', operationId: original.requestId, sourceRunId: original.sourceRunId }));
 });

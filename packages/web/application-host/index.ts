@@ -10,6 +10,8 @@ import { createSourceGitInventory } from './lib/kernel/source-git-inventory.js';
 import { createThreadNotificationRuntime } from './lib/notifications/thread-runtime.js';
 import { createContextCompaction } from './lib/kernel/context-compaction.js';
 import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
+import { createCheckpointLifecycle } from './lib/recovery/checkpoint-lifecycle.js';
+import { createFileRecoveryService } from './lib/recovery/file-recovery-service.js';
 import { createManagedRecoveryCoordinator, type ManagedRecoveryPort } from './lib/recovery/managed-recovery-coordinator.js';
 import { createManagedRecoveryService } from './lib/kernel/managed-recovery-service.js';
 import { createManagedScheduleService, createManagedScheduleOwner, createKernelManagedScheduleReceipts, createManagedScheduleReconciler } from './lib/kernel/managed-schedule-service.js';
@@ -2086,7 +2088,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }));
   const threadRecoveryOwners = { threads, runtime: agentRuntime, store: kernelRecoveryStore, storage: kernelStorageAdapter, kernel: kernelClient, liveSources };
   const threadRecoveryNavigation = createThreadRecoveryNavigation(threadRecoveryOwners);
+  const recoveryCheckpoints = createCheckpointLifecycle({
+    settleManaged: (turns, signal) => managedRecoveryOwner.current!.settle!(turns, signal),
+    runtime: agentRuntime, store: kernelRecoveryStore,
+    workspaces: () => documentsAuthority.listWorkspaceRegistrations(),
+    onError: (runId, _error) => console.error('[Recovery] Checkpoint settlement requires attention:', runId ?? 'workspace'),
+  });
+  kernelRecoveryStore.bindCheckpointRefresh(recoveryCheckpoints.refresh);
   const localRecoveryFileResolver = createThreadRecoveryFileResolver(threadRecoveryOwners);
+  const fileRecoveryService = createFileRecoveryService({ runtime: agentRuntime, kernel: kernelClient,
+    storage: kernelStorageAdapter, store: kernelRecoveryStore, documents: documentsAuthority, resolveFiles: localRecoveryFileResolver });
   kernelRecoveryContentStore.bindTargetResources(async identity =>
     await targetRecovery.resolveFileResources(identity) ?? localRecoveryFileResolver(identity));
   threads.bindRecoveryReader(async identity => {
@@ -2121,6 +2132,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) },
     reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
+    recoverCheckpoints: recoveryCheckpoints.recover, settleRunCheckpoints: recoveryCheckpoints.settle,
     prepareContext: threadContext,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
@@ -2745,7 +2757,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   );
   const unregisterWorkspaceRecoveryCapability = extensionRuntime.capabilities.register(
     'workspace.recovery-primitives',
-    createWorkspaceRecoveryCapabilityHandler(recoveryEngineForOwner),
+    createWorkspaceRecoveryCapabilityHandler(recoveryEngineForOwner, fileRecoveryService),
   );
   const unregisterSearchCapability = extensionRuntime.capabilities.register(
     'workspace.search',

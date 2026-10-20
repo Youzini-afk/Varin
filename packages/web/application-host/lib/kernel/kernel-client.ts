@@ -392,6 +392,14 @@ export class KernelScopedClient {
     return this.owner.recoveryCheckpointList(params, this.grant, signal);
   }
 
+  recoveryFiles(method: 'recovery.points' | 'recovery.files.restore' | 'recovery.point.create' | 'recovery.point.release',
+    params: KernelMethodParams['recovery.points'], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.recoveryFiles(method, params, this.grant, signal);
+  }
+  recoveryStatistics(workspaceId: string, signal?: AbortSignal): Promise<{ objectCount: number; byteLength: number }> {
+    return this.owner.recoveryStatistics(workspaceId, this.grant, signal);
+  }
+
   recoveryEntryResolve(params: KernelMethodParams["recovery.entry.resolve"], signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.recoveryEntryResolve(params, this.grant, signal);
   }
@@ -1610,6 +1618,14 @@ export class KernelClient {
 
   async recoveryCheckpointList(params: KernelMethodParams["recovery.checkpoint.list"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("recovery.checkpoint.list", params, { signal, grant });
+  }
+
+  async recoveryFiles(method: 'recovery.points' | 'recovery.files.restore' | 'recovery.point.create' | 'recovery.point.release',
+    params: KernelMethodParams['recovery.points'], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw<Record<string, unknown>>(method, params, { signal, grant });
+  }
+  async recoveryStatistics(workspaceId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ objectCount: number; byteLength: number }> {
+    return this.requestRaw('recovery.statistics', { workspaceId }, { signal, grant });
   }
 
   async recoveryEntryResolve(params: KernelMethodParams["recovery.entry.resolve"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

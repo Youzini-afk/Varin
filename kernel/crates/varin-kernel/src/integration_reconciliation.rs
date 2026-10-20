@@ -4,7 +4,7 @@ use crate::{
     tools::{KernelResourceClient, ToolBinding},
 };
 use serde_json::{Value, json};
-use varin_runtime::execution::ToolInvocation;
+use varin_runtime::execution::{ToolExecutionContext, ToolInvocation};
 use varin_runtime::{Effect, ExecutorOwner, ExternalReceipt, Outcome, supervisor::RunSupervisor};
 fn error(value: impl std::fmt::Display) -> KernelError {
     KernelError::Operation(value.to_string())
@@ -68,7 +68,7 @@ pub(crate) fn reconcile(
     let mut data=journal["data"].as_object().ok_or_else(||error("Integration journal data is malformed"))?.clone();
     if let Some(result)=journal["result"].as_object(){data.extend(result.clone());}
     let data=Value::Object(data);
-    let expected=if exchange {
+    let mut expected=if exchange {
         let saved=&data["operationBinding"];
         let db=owner.lock().map_err(error)?;
         let source_run=db.run(saved["sourceRunId"].as_str().ok_or_else(||error("exchange source Run missing"))?).map_err(error)?;
@@ -122,6 +122,19 @@ pub(crate) fn reconcile(
         "origin":invocation.origin,"callId":invocation.call.call_id,"childOperationId":child_id,"childExecutionId":execution_id,"childThreadId":child.child_thread_id,
         "result":{"workspaceId":result.workspace_id,"branchId":result.branch_id,"resultRevision":result.result_revision,"root":result.root,"publicationId":publication},"target":source})
     };
+    if !exchange {
+        if let Some(saved)=data["operationBinding"].get("journal") {
+            let read=owner.lock().map_err(error)?.capture_journal_anchor(&ToolExecutionContext {
+                run_id:run.id.clone(),origin:invocation.origin.clone(),operation_id:operation.id.clone(),
+            }).map_err(error)?;
+            let mut original=serde_json::to_value(read.load().map_err(error)?)?;
+            let mut supplied=saved.clone();
+            original.as_object_mut().unwrap().remove("epoch");
+            supplied.as_object_mut().ok_or_else(||error("Integration recovery anchor is malformed"))?.remove("epoch");
+            if original!=supplied {return Err(KernelError::Authorization("Integration recovery anchor differs from its original input".into()));}
+            expected["journal"]=saved.clone();
+        }
+    }
     if data["operationBinding"] != expected
         || journal["threadId"] != run.thread_id
         || journal["runId"] != run.id
@@ -269,6 +282,7 @@ pub(crate) fn reconcile(
         "needsAttentionPaths":attention,"diffStats":data["diffStats"],"changedFiles":changed,"text":format!("Recorded integration {id}: {state}"),
         "receipt":{"kind":"integration","workspaceId":source.workspace_id,"operationId":id,"revision":journal["revision"],"state":state},
         "effect":effect,"executorStopped":true,"recoveryCoverage":"files-only"});
+    if data["operationBinding"].get("journal").is_some() { projection["fileJournal"]=json!(true); }
     let preserved = if let Some(previous) = &original_receipt {
         if previous.effect != Effect::Unknown {
             if previous.effect != effect || previous.outcome != outcome {

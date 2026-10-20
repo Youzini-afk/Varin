@@ -1835,7 +1835,7 @@ export class KernelStorageAdapter {
     return pending;
   }
   /** Original journal metadata survives a missing physical Source. No physical write capability. */
-  async recoveryMetadataClient(workspaceId: string): Promise<Pick<KernelScopedClient, "recoveryOperationGet" | "recoveryOperationList">> {
+  async recoveryMetadataClient(workspaceId: string): Promise<Pick<KernelScopedClient, "recoveryOperationGet" | "recoveryOperationList" | "recoveryStatistics" | "recoveryTurnGet" | "recoveryTurnSettle" | "recoveryChangeList" | "recoveryCheckpointList">> {
     const key = JSON.stringify({workspaceId,purpose:"recovery-metadata"});
     const grant = this.cachedGrant(key, () => this.client.issueGrant({grantId:`product:${this.options.hostId}:${randomUUID()}`,owningWorkspace:workspaceId,executionWorkspace:workspaceId,pathScopes:[],capabilities:["storage.read","recovery","recovery.maintenance"]}));
     return this.client.scoped(await grant);

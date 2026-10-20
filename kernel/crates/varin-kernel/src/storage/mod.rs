@@ -57,6 +57,7 @@ mod process_resources;
 mod records;
 mod recovery;
 mod recovery_journal;
+pub(crate) mod recovery_points;
 pub(crate) mod result_publication;
 mod state_tree;
 mod source_authorities;

@@ -103,13 +103,20 @@ grant retirement 与 revocation 分开：前者在真实 drain 后关闭旧 call
 
 ## 受影响文件恢复
 
-Recovery 是已知修改的 journal，不是工作区备份。turn 开始只建轻量 checkpoint，不递归扫描项目。
-工具写入在效果前记录 intent/before-state，之后记实际 after-state；同 turn 多次写保留第一次 before 和最后 output。
-普通 shell/外部应用没有可移植 pre-write hook，未知修改明确标为 uncovered，不能承诺全部撤销。
+Recovery 保存工具实际改过的文件。首次写入时创建绑定原始输入的轻量记录，在效果前保存原内容，之后记录实际结果；
+同一输入下重复写入保留第一次 before 和最后 after。Run 结束事件自动完成已有记录，启动恢复及面板读取补齐遗漏的结算，
+只读轮次不创建空恢复点。这些过程读取现有元数据，不递归扫描项目。
+
+文件时间线按完整 Run 聚合，可以选择文件恢复到轮初、轮末或用户命名的位置，并撤销一次文件恢复。
+`recovery_points` 与 `file_restore` 是物理工作区中常驻的工具，随原有读写权限提供。
+`file_restore` 支持 `current:before`、具体恢复点和原恢复操作的 undo；返回逐文件结果，对话继续运行。
+普通 shell、Git 和外部应用的未记录改动显示为覆盖不完整，已记录的文件仍然可以独立恢复。
+命名恢复点保存当时已记录路径的内容，不要求模型管理快照或预先执行一套确认流程。
 
 恢复只折叠所选历史条目影响的路径，计算 expected-current 与目标状态；验证这些路径，保存 safety/redo 对象，再条件应用。
-后来用户编辑保留为冲突。确认脏缓冲恢复使用原 Registry owner、instance、revision；离线或未知 dirty-state 仍可重试，
-不能当作“没有脏缓冲”。
+后来用户编辑按文件返回冲突，可明确选择覆盖该文件。面板的文件恢复通过原 Documents barrier 保留未保存草稿，
+这类文件作为待处理项返回，其余文件继续恢复。带对话导航的联合恢复仍使用原 Registry owner、instance、revision
+保存和恢复已确认的脏缓冲内容。
 
 对话恢复使用真实 Thread/HistoryBranch 导航。导航响应丢失查原 command receipt，不重复导航，不仅比较当前 head，
 也不立即补偿文件。只有明确拒绝才补偿仍等于本操作 output 的路径。Undo/重启继续原 operation/file phase。
@@ -119,13 +126,15 @@ Managed 多 Host 恢复由对话 Host 先持久化 metadata-only coordinator 和
 文件阶段全部确认后才提交原导航。未知响应保持 pending；取消先耐久记录意图，再等待慢观察/原 owner drain。
 这是多个事务的可恢复协调，不是跨 Host 原子事务。
 
-Integration 共用条件文件/对象机制。Agent 触发的整合将效果接到原 parent turn，普通对话撤销无需第二账本。
+Integration 共用条件文件/对象机制。Agent 触发的整合在原 file.apply 事务中记录 parent input 的 before/after，
+包括补偿写入。旧整合缺少这一记录时仍标为覆盖不完整。
 混合 Surface/disk 修改若无法证明已分发效果，则保留耐久 needs-attention；网络失败不能变成安全空结果。
 Undo 在保留执行意图前检查原 Surface owner、回执和新鲜 dirty-state；准入失败仍可用原操作重试。
 多 Surface 的原 undo 回执逐组保存，后续 owner 丢失回复不抹掉已确认补偿，也不借用 apply 的停止证据。
 
-内置 provider 将 Recovery 与 WorkingState 同置于 Host kernel 数据根，目前不提供可迁移存储和 retention/delete-history 控件。
-Host catalog/WAL 是共享大小，不能反复当作每工作区可释放历史。GC 核对全部引用 owner，并如实报告物理删除失败。
+内置 provider 将 Recovery 与 WorkingState 同置于 Host kernel 数据根。工作区统计计算其恢复引用实际占用的去重对象；
+Host 总览另外显示共享 catalog/WAL。移除恢复点后，仅释放其他恢复点不再需要的记录；撤销操作仍持有自己的安全副本。
+GC 核对全部引用 owner 后清理无引用对象。当前没有默认自动保留上限，也不提供内置存储迁移。
 替代 provider 可通过现有服务契约声明自己的存储能力。用户操作见[恢复指南](ops/recovery.md)。
 
 ## Managed Host、排程与科研

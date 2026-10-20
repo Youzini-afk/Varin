@@ -1244,6 +1244,8 @@ impl Storage {
             .as_deref()
             .map(serde_json::from_str::<FileState>)
             .transpose()?;
+        let journalled = self.journal_for_file_reservation(params_value, grant)?;
+        let params_value = journalled.as_ref().unwrap_or(params_value);
         let (_params_hash, committed, resuming) =
             self.begin_file_operation(&params.operation_id, "file.apply", params_value)?;
         if let Some(committed) = committed {

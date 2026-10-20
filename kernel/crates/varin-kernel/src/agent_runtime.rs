@@ -1180,13 +1180,14 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
-                        if method == "runtime.branch.navigation.receipt" || method == "runtime.branch.recovery.workspaces" {
+                        if method == "runtime.branch.navigation.receipt" || method == "runtime.branch.recovery.workspaces" || method == "runtime.branch.recovery.sources" {
                             let p: NavigationReceiptParams = serde_json::from_value(params)?;
                             let catalog=runtime.catalog(); let owner=catalog.lock().map_err(|_|KernelError::Storage("catalog owner failed".into()))?;
                             if method == "runtime.branch.recovery.workspaces" { return Ok(serde_json::to_value(owner.recovery_workspaces(&p.thread_id,&p.branch_id).map_err(domain)?)?); }
+                            if method == "runtime.branch.recovery.sources" { return Ok(serde_json::to_value(owner.recovery_sources(&p.thread_id,&p.branch_id).map_err(domain)?)?); }
                             return Ok(serde_json::to_value(match p.key { Some(key)=>owner.navigation_receipt(&p.thread_id,&p.branch_id,&key), None=>owner.latest_navigation_receipt(&p.thread_id,&p.branch_id) }.map_err(domain)?)?);
                         }
-                        if method == "runtime.branch.navigation.prepare" || method == "runtime.branch.navigate" || method == "runtime.branch.recovery.range" || method == "runtime.operation.recovery.anchor" {
+                        if method == "runtime.branch.navigation.prepare" || method == "runtime.branch.navigate" || method == "runtime.branch.recovery.range" || method == "runtime.operation.recovery.anchor" || method == "runtime.run.recovery" {
                             let method = method.to_string();
                             let catalog = runtime.catalog();
                             let response_id = id.clone();
@@ -1205,6 +1206,11 @@ pub(crate) fn spawn(
                                             let intent = varin_runtime::catalog::tool_content::ToolIntent::from_operation(&operation).map_err(domain)?;
                                             owner.capture_journal_anchor(&varin_runtime::execution::ToolExecutionContext { run_id:operation.run_id, origin:intent.origin().clone(), operation_id:operation.id }).map_err(domain)?
                                         };
+                                        return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+                                    }
+                                    if method == "runtime.run.recovery" {
+                                        let p: RunParams = serde_json::from_value(params)?;
+                                        let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.capture_run_recovery(&p.run_id).map_err(domain)?;
                                         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
                                     }
                                     if method == "runtime.branch.recovery.range" {
@@ -2425,6 +2431,7 @@ pub(crate) fn spawn(
                                             Some(
                                                 "file_write"
                                                     | "file_edit"
+                                                    | "file_restore"
                                                     | "integrate_child"
                                                     | "submit_code"
                                                     | "update"

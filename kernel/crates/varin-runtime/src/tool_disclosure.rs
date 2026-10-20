@@ -82,6 +82,8 @@ pub fn is_always_declared(name: &str) -> bool {
             | "file_list"
             | "file_search"
             | "file_write"
+            | "recovery_points"
+            | "file_restore"
             | "file_edit"
             | "code_retrieval"
             | "language_definition"

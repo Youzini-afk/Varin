@@ -279,11 +279,22 @@ export interface KernelRecoveryContentStoreLike {
 }
 
 export class KernelRecoveryStore {
+  private refreshCheckpoints?: (workspaceId: string) => Promise<void>;
   constructor(
     private readonly adapter: KernelStorageAdapter,
     readonly content: KernelRecoveryContentStoreLike,
     private readonly scopedActor?: ScopedRecoveryActor,
   ) {}
+
+  bindCheckpointRefresh(refresh: (workspaceId: string) => Promise<void>): void {
+    this.refreshCheckpoints = refresh;
+  }
+
+  async getTurn(workspaceId: string, executionId: string): Promise<WorkspaceRecoveryTurnBinding | null> {
+    const client = await this.metadata(workspaceId);
+    const row = await client.recoveryTurnGet({ workspaceId, executionId });
+    return row ? this.turn(row) : null;
+  }
 
   registerObjectOwner(workspaceId: string, hash: string, ownerId: string): void {
     if (!this.content.registerObjectOwner) throw new Error("Recovery candidate object registration is unavailable");
@@ -298,6 +309,14 @@ export class KernelRecoveryStore {
     return this.adapter.context(workspaceId, "recovery-maintenance", {
       owningWorkspace: workspaceId, executionWorkspace: workspaceId, pathScopes: [""], capabilities: ["recovery.maintenance"],
     });
+  }
+
+  private metadata(workspaceId: string) {
+    if (this.scopedActor) {
+      if (workspaceId !== this.scopedActor.identity.workspaceId) throw new Error("Recovery metadata does not match its admitted actor");
+      return Promise.resolve(this.scopedActor.client);
+    }
+    return this.adapter.recoveryMetadataClient(workspaceId);
   }
 
   private summary(value: Record<string, unknown>): WorkspaceRecoveryCheckpointSummary {
@@ -366,12 +385,13 @@ export class KernelRecoveryStore {
     return this.turn(value);
   }
 
-  async listCheckpoints(workspaceId: string): Promise<WorkspaceRecoveryCheckpointSummary[]> {
-    const context = await this.context(workspaceId);
+  async listCheckpoints(workspaceId: string, refresh = true): Promise<WorkspaceRecoveryCheckpointSummary[]> {
+    if (refresh) await this.refreshCheckpoints?.(workspaceId);
+    const client = await this.metadata(workspaceId);
     const result: WorkspaceRecoveryCheckpointSummary[] = [];
     let cursor: number | undefined;
     do {
-      const value = await context.client.recoveryCheckpointList({
+      const value = await client.recoveryCheckpointList({
         workspaceId,
         pageSize: 512,
         ...(cursor === undefined ? {} : { cursor }),
@@ -604,12 +624,11 @@ export class KernelRecoveryStore {
   }
 
   async recordTurnSettled(input: WorkspaceRecoveryTurnSettledInput): Promise<WorkspaceRecoveryTurnBinding> {
-    const lookup = await this.context(input.workspaceId);
-    const row = await lookup.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
+    const client = await this.metadata(input.workspaceId);
+    const row = await client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
     if (!row) throw new Error("checkpoint-missing");
     const conversation = parseRecoveryConversation(row.conversation);
-    const context = await this.context(input.workspaceId);
-    const listed = await context.client.recoveryChangeList({
+    const listed = await client.recoveryChangeList({
       workspaceId: input.workspaceId,
       executionId: input.executionId,
       conversation,
@@ -626,6 +645,7 @@ export class KernelRecoveryStore {
       .filter((value): value is string => Boolean(value) && !/\.varin-(?:tmp|restore|recovery)-/u.test(value)))].sort();
     const unrecorded = [...new Set([...observed.filter((value) => !recordedKeys.has(comparison(value))), ...(Array.isArray(row.unrecordedResourceIds) ? row.unrecordedResourceIds as string[] : [])])];
     const retainedFailure = row.status === "incomplete" && row.failure && typeof row.failure === "object"
+      && (row.failure as Record<string, unknown>).message !== 'Original input work is not settled'
       ? row.failure as Record<string, unknown>
       : undefined;
     const exact = !input.failure
@@ -653,7 +673,7 @@ export class KernelRecoveryStore {
       && isDeepStrictEqual(row.unrecordedResourceIds, unrecorded)
       && isDeepStrictEqual(row.activeWriterScopes, input.activeWriterScopes)
       && isDeepStrictEqual(row.failure ?? null, failure ?? null)) return this.turn(row);
-    const settled = await context.client.recoveryTurnSettle({
+    const settled = await client.recoveryTurnSettle({
       operationId: `recovery-settle:${input.workspaceId}:${input.executionId}:${Number(row.revision)}`,
       workspaceId: input.workspaceId,
       executionId: input.executionId,
@@ -977,6 +997,11 @@ export class KernelRecoveryStore {
   health() {
     return this.adapter.client.health();
   }
+
+  async statistics(workspaceId: string) {
+    const client = this.scopedActor?.client ?? await this.adapter.recoveryMetadataClient(workspaceId);
+    return client.recoveryStatistics(workspaceId);
+  }
 }
 
 /** Reuses the original file/journal implementations with one admitted source authority. */
@@ -1054,21 +1079,21 @@ export const createKernelRecoveryDirectFacade = (
   });
   const storageStatus = async (workspaceId?: string) => {
     const [health, checkpoints] = await Promise.all([
-      store.health(),
+      workspaceId ? store.statistics(workspaceId) : store.health(),
       workspaceId ? store.listCheckpoints(workspaceId) : Promise.resolve([]),
     ]);
     const authorityId = options.authorityId
       ?? (workspaceId ? (await store.workspaceStorageContext(workspaceId)).identity.authorityId : "kernel");
     return {
       authorityId,
-      scope: "host" as const,
-      byteLength: Number(health.catalogBytes ?? 0) + Number(health.walBytes ?? 0),
+      scope: workspaceId ? "workspace" as const : "host" as const,
+      byteLength: 'byteLength' in health ? health.byteLength : Number(health.catalogBytes ?? 0) + Number(health.walBytes ?? 0),
       catalog: { currentSchemaVersion: 1, retiredCatalogCount: 0, state: "ready" as const },
       checkpointCount: checkpoints.length,
       encryption: { available: false, enabled: false },
       location: { mode: "application-data" as const },
       locationSource: "global" as const,
-      objectCount: Number(health.blobs ?? 0),
+      objectCount: 'objectCount' in health ? health.objectCount : Number(health.blobs ?? 0),
       readyCheckpointCount: checkpoints.filter((checkpoint) => checkpoint.state === "ready").length,
       registryRevision: 1,
       state: "ready" as const,

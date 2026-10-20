@@ -2218,6 +2218,25 @@ pub(crate) struct KernelRecoveryCheckpointListParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileRecoveryParams {
+    pub(crate) workspace_id: String,
+    pub(crate) root_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) operation_id: Option<String>,
+    pub(crate) source_run_id: Option<String>,
+    pub(crate) journal: Option<RecoveryAnchor>,
+    pub(crate) source_mode: Option<String>,
+    pub(crate) arguments: std::collections::BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceIdentityParams {
+    pub(crate) workspace_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryEntryResolveParams {
     pub(crate) workspace_id: String,
     pub(crate) conversation: varin_runtime::RecoveryConversation,
@@ -3102,6 +3121,17 @@ pub(crate) type RecoveryConversation = varin_runtime::RecoveryConversation;
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct RecoveryAnchor {
+    pub(crate) execution_id: String,
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) run_id: String,
+    pub(crate) entry_id: String,
+    pub(crate) epoch: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecoveryReference {
     pub(crate) slot: String,
     pub(crate) object_hash: String,
@@ -3818,6 +3848,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.run.recovery" => serde_json::from_value::<RunParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.branch.navigation.prepare" => {
             serde_json::from_value::<NavigationSelectParams>(params.clone())
                 .map(|_| ())
@@ -3832,6 +3865,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.branch.recovery.workspaces" => {
+            serde_json::from_value::<NavigationReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.branch.recovery.sources" => {
             serde_json::from_value::<NavigationReceiptParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -4457,6 +4495,29 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "recovery.checkpoint.list" => {
             serde_json::from_value::<KernelRecoveryCheckpointListParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.points" => serde_json::from_value::<KernelFileRecoveryParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "recovery.statistics" => {
+            serde_json::from_value::<KernelWorkspaceIdentityParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.files.restore" => {
+            serde_json::from_value::<KernelFileRecoveryParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.point.create" => {
+            serde_json::from_value::<KernelFileRecoveryParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "recovery.point.release" => {
+            serde_json::from_value::<KernelFileRecoveryParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

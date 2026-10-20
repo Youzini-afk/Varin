@@ -140,11 +140,6 @@ describe('Web Application Host workspace recovery service', () => {
       conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
       workspaceId: activeHarness.identity.workspaceId,
     })).toMatchObject({ position: 'after', status: 'ready' });
-    const checkpoint = await api.createCheckpoint({
-      name: 'Service checkpoint',
-      workspaceId: activeHarness.identity.workspaceId,
-    });
-    expect(checkpoint).toMatchObject({ status: 'ready', checkpoint: { label: 'Service checkpoint' } });
     expect(await api.listCheckpoints({ workspaceId: activeHarness.identity.workspaceId }))
       .toMatchObject({ status: 'ready', page: { checkpoints: expect.any(Array) } });
     expect(await api.setRetentionPolicy({

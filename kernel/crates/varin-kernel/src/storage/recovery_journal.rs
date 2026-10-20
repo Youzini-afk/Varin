@@ -3,6 +3,28 @@ use super::*;
 use varin_runtime::catalog::journal::JournalAnchor;
 
 impl Storage {
+    /// Integration already owns durable before/after objects. Attach its original
+    /// Catalog input to the same file.apply transaction, including compensation.
+    pub(super) fn journal_for_file_reservation(&mut self, input: &Value, grant: &Grant) -> Result<Option<Value>,KernelError> {
+        let Some(operation)=input["reservationOperationId"].as_str() else {return Ok(None);};
+        let workspace=input["workspaceId"].as_str().ok_or_else(||KernelError::Operation("File workspace is missing".into()))?;
+        let row=self.read_recovery_operation(workspace,operation,Some(&grant.grant_id))?;
+        if row["kind"]!="integration" {return Ok(None);}
+        let binding=&row["data"]["operationBinding"];
+        let Some(journal)=binding.get("journal") else {return Ok(None);};
+        let anchor:JournalAnchor=serde_json::from_value(journal.clone())?;
+        if binding["parentRunId"]!=anchor.run_id || binding["parentThreadId"]!=anchor.thread_id || binding["parentBranchId"]!=anchor.branch_id {
+            return Err(KernelError::Authorization("Integration recovery input differs from its original parent".into()));
+        }
+        let root=input["rootId"].as_str().ok_or_else(||KernelError::Operation("File root is missing".into()))?;
+        let mode=serde_json::from_value(binding["target"]["mode"].clone())?;
+        let turn=self.prepare_journal_turn(workspace,root,&anchor,mode,grant)?;
+        let mut journalled=input.clone();
+        journalled["__recoveryTurn"]=turn;
+        journalled["__recoveryTool"]=json!("integrate_child");
+        Ok(Some(journalled))
+    }
+
     pub(super) fn prepare_journal_turn(
         &mut self,
         workspace: &str,
@@ -11,8 +33,8 @@ impl Storage {
         mode: varin_runtime::SourceMode,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
-        if grant.thread_id.as_deref() != Some(&anchor.thread_id)
-            || grant.run_id.as_deref() != Some(&anchor.run_id)
+        if !grant.capabilities.contains("recovery.maintenance") && (grant.thread_id.as_deref() != Some(&anchor.thread_id)
+            || grant.run_id.as_deref() != Some(&anchor.run_id))
         {
             return Err(KernelError::Authorization(
                 "journal anchor is outside the original Run".into(),
@@ -114,6 +136,11 @@ impl Storage {
             .as_str()
             .ok_or_else(|| KernelError::Storage("journal path missing".into()))?;
         let applied = receipt["status"] == "applied";
+        let (before, previous): (String, Option<String>) = self.conn.query_row(
+            "SELECT before_json,after_json FROM recovery_changes WHERE workspace_id=?1 AND checkpoint_id=?2 AND path=?3",
+            params![workspace,checkpoint,path], |row| Ok((row.get(0)?,row.get(1)?)))?;
+        let before: Value = serde_json::from_str(&before)?;
+        let previous: Option<Value> = previous.map(|v|serde_json::from_str(&v)).transpose()?;
         let state: Value = serde_json::from_str(
             if applied {
                 receipt["stateJson"].as_str()
@@ -126,7 +153,20 @@ impl Storage {
         self.conn.execute("UPDATE recovery_changes SET after_json=?4,state=?5,mutation_id=?6,updated_at=?7,revision=revision+1 WHERE workspace_id=?1 AND checkpoint_id=?2 AND path=?3",params![workspace,checkpoint,path,serde_json::to_string(&state)?,if applied {"after"} else {"unchanged"},operation,chrono_like_now()])?;
         if let Some(hash) = state["objectHash"].as_str() {
             self.conn.execute("INSERT INTO recovery_refs(workspace_id,owner_kind,owner_id,slot,object_hash) VALUES(?1,'change',?2,'after',?3) ON CONFLICT(workspace_id,owner_kind,owner_id,slot) DO UPDATE SET object_hash=excluded.object_hash",params![workspace,format!("change:{checkpoint}:{path}"),hash])?;
+        } else {
+            self.conn.execute("DELETE FROM recovery_refs WHERE workspace_id=?1 AND owner_kind='change' AND owner_id=?2 AND slot='after'", params![workspace,format!("change:{checkpoint}:{path}")])?;
         }
+        let size = |after: Option<&Value>| -> (i64,i64) {
+            match after.filter(|after| **after != before) {
+                Some(after) => (1,before["byteLength"].as_i64().unwrap_or(0).max(after["byteLength"].as_i64().unwrap_or(0))),
+                None => (0,0),
+            }
+        };
+        let old=size(previous.as_ref());
+        let new=size(Some(&state));
+        self.conn.execute(
+            "UPDATE recovery_checkpoints SET changed_path_count=changed_path_count+?3,byte_length=byte_length+?4,revision=revision+1 WHERE workspace_id=?1 AND id=?2",
+            params![workspace,checkpoint,new.0-old.0,new.1-old.1])?;
         Ok(())
     }
 }

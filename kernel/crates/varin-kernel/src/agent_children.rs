@@ -321,7 +321,7 @@ pub(super) fn execute(
                     .filter(|operation| {
                         matches!(
                             operation.executor.as_deref(),
-                            Some("file_write" | "file_edit")
+                            Some("file_write" | "file_edit" | "file_restore")
                         ) && operation.execution_owner == Some(varin_runtime::ExecutorOwner::Kernel)
                     })
                     .map(|operation| catalog.capture_operation_read(operation))

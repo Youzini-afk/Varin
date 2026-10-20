@@ -313,6 +313,12 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
     drop(db);
     let prepared = preparation.load().unwrap();
     owner.lock().unwrap().commit_navigation(prepared).unwrap();
+    let original = owner.lock().unwrap().capture_run_recovery(&first.run_id).unwrap();
+    let original = original.load().unwrap();
+    assert_eq!(original.len(), 2);
+    assert!(original.iter().all(|turn| turn.settled));
+    assert_eq!(original[0].anchor.execution_id, range[0].anchor.execution_id);
+    assert_eq!(original[1].entry_ids, range[1].entry_ids);
     let second = launch("NEW_ONLY", false);
     let serialized = serde_json::to_string(
         &wires

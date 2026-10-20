@@ -77,7 +77,7 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
                 journalTurns.push({ workspaceId, executionId: turn.anchor.executionId, restore: navigation.removedEntryIds.includes(turn.anchor.entryId) });
                 await store.recordTurnStart({ workspaceId, conversation: { kind: "thread", threadId: turn.anchor.threadId, branchId: turn.anchor.branchId }, executionId: turn.anchor.executionId,
                     runId: turn.anchor.runId, userEntryId: turn.anchor.entryId, runtimeGeneration: turn.anchor.epoch, workerId: 'kernel', activeWriterScopes: [], provenance: 'caused-by' });
-                await store.recordTurnSettled({ workspaceId, executionId: turn.anchor.executionId,
+                if (turn.settled) await store.recordTurnSettled({ workspaceId, executionId: turn.anchor.executionId,
                     ...(turn.entryIds.at(-1) ? { assistantEntryId: turn.entryIds.at(-1)! } : {}), activeWriterScopes: turn.uncovered ? ['process/or-external'] : [],
                     mutationObserved: turn.uncovered, observationComplete: !turn.uncovered, observedResourceIds: [], provenance: 'caused-by',
                     ...(!turn.settled || turn.uncovered ? { failure: { code: 'checkpoint-incomplete' as const, message: !turn.settled ? 'Original input work is not settled' : 'Shell or external tool effects do not have complete before-images', retryable: false } } : {}),

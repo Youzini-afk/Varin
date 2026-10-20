@@ -127,6 +127,14 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     return current.key === `${context.owningWorkspaceId}\0${context.rootId}` ? current : undefined;
   }
 
+  async recoveryFiles(identity: RecoveryIdentity, method: Parameters<KernelFileAuthorityContext['client']['recoveryFiles']>[0],
+    input: Omit<Parameters<KernelFileAuthorityContext['client']['recoveryFiles']>[1], 'workspaceId' | 'rootId'>,
+    signal?: AbortSignal): Promise<Record<string, unknown>> {
+    const context = await this.bind(identity);
+    if (context.basePath) throw new Error('Recovery uses the original worktree root');
+    return context.client.recoveryFiles(method, { ...input, workspaceId: identity.workspaceId, rootId: context.rootId }, signal);
+  }
+
   private translated(context: BoundFileContext, resourceId: string): string {
     return joinResource(context.basePath, resourceId);
   }

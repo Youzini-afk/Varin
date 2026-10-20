@@ -22,7 +22,7 @@ export interface IntegrationTargetScope {
   release(): Promise<void>;
 }
 export interface IntegrationToolOwnerOptions {
-  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'childExecution'>;
+  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'childExecution' | 'journalAnchor'>;
   coordinator: Pick<IntegrationCoordinator, 'mergeResult' | 'inspectIntegration'>;
   onCleanupError(operationId: string, error: unknown): void;
   /** Re-admit the original physical source and bind actual file/journal ports to its fresh grant. */
@@ -39,13 +39,13 @@ function readInput(value: JsonValue): { childOperationId: string; executionId: s
   }
   return { childOperationId: value.childOperationId, executionId: value.executionId, publicationId: value.publicationId };
 }
-export const integrationCompletion = (result: IntegrationOperationReceipt): ToolExecutionReceipt => {
+export const integrationCompletion = (result: IntegrationOperationReceipt, fileJournal = false): ToolExecutionReceipt => {
   if (!result.receipt || !result.effect || typeof result.executorStopped !== 'boolean' || result.recoveryCoverage !== 'files-only') {
     throw new Error('Integration did not return its original journal evidence');
   }
   return { completion: { kind: 'result',
     outcome: result.effect === 'unknown' || result.status === 'needs-attention' ? 'indeterminate' : result.status === 'applied' ? 'succeeded' : 'failed',
-    effect: result.effect, content: { data: result, parts: [] } }, executor_stopped: result.executorStopped };
+    effect: result.effect, content: { data: { ...result, ...(fileJournal ? { fileJournal: true } : {}) }, parts: [] } }, executor_stopped: result.executorStopped };
 };
 export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions): HostCapabilityHandler {
   return async (method, params, context) => {
@@ -78,6 +78,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
         target = await options.openTarget(authority, launch, context.signal);
         const result = child.code_result.result;
         const operationBinding = { kind: 'runtime_operation' as const, operationId: authority.operationId,
+          journal: await options.runtime.journalAnchor(authority.operationId, context.signal),
           parentRunId: authority.runId, parentThreadId: authority.threadId, parentBranchId: run.branch_id,
           origin: authority.origin, callId: authority.callId,
           childOperationId: child.child_operation_id, childExecutionId: child.execution_id, childThreadId: child.child_thread_id,
@@ -89,7 +90,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
           parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId } };
         context.signal.throwIfAborted();
         enteredCoordinator = true;
-        return integrationCompletion(await options.coordinator.mergeResult(admitted));
+        return integrationCompletion(await options.coordinator.mergeResult(admitted), true);
       } catch (error) {
         if (enteredCoordinator && admitted) {
           // A failed response may have followed the original journal's successful terminal commit.
@@ -97,7 +98,7 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
             const inspection = { ...admitted };
             delete inspection.signal;
             const original = await options.coordinator.inspectIntegration(inspection);
-            if (original) return integrationCompletion(original);
+            if (original) return integrationCompletion(original, true);
           } catch { /* Preserve unknown rather than inventing rollback or replay. */ }
           return { completion: { kind: 'result', outcome: 'indeterminate', effect: 'unknown',
             content: { data: { status: 'needs-attention', operationId: admitted.operationId, error: error instanceof Error ? error.message : String(error) }, parts: [] } }, executor_stopped: error instanceof UnconfirmedIntegrationCommitError && error.executorStopped };

@@ -26,6 +26,20 @@ fn is_input(source: HistorySource) -> bool {
     )
 }
 impl Catalog {
+    pub fn recovery_sources(&self, thread: &str, branch: &str) -> Result<Vec<Value>> {
+        if self.branch_thread_id(branch)? != thread { return Err(RuntimeError::Conflict("recovery branch owner differs".into())); }
+        let mut query=self.db.prepare("SELECT l.id,json_extract(l.body,'$.selection.source') FROM run_launches l JOIN runs r ON r.id=l.id WHERE json_extract(r.body,'$.thread_id')=?1 AND json_extract(l.body,'$.selection.source') IS NOT NULL ORDER BY l.rowid DESC")?;
+        let rows=query.query_map([thread],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?)))?.collect::<std::result::Result<Vec<_>,_>>()?;
+        let mut seen=std::collections::BTreeSet::new();
+        let mut result=Vec::new();
+        for (run,body) in rows {
+            let source:Value=serde_json::from_str(&body)?;
+            let environment=if source["mode"]=="materialized" {source["environment_run_id"].as_str().unwrap_or(&run)} else {""};
+            let key=json!([source["resource_owner"],source["workspace_id"],source["execution_workspace_id"],source["mode"],source["live_root"],environment]).to_string();
+            if seen.insert(key) {result.push(json!({"runId":run,"source":source}));}
+        }
+        Ok(result)
+    }
     pub fn recovery_workspaces(&self, thread: &str, branch: &str) -> Result<Vec<launches::SourceSelection>> {
         if self.branch_thread_id(branch)? != thread {
             return Err(RuntimeError::Conflict(
@@ -69,8 +83,24 @@ impl Catalog {
         }
         Ok(RecoveryRangeRead {
             thread: thread.into(),
+            run_id: None,
             entry: entry.into(),
             head: self.head(branch)?,
+            database: self.database_path.clone(),
+            epoch: self.epoch,
+            content: self.content.clone(),
+            _publication: self.content.begin_publication(),
+        })
+    }
+    /// Original Run history stays available after branch navigation. Used to
+    /// settle its existing file journal without depending on today's branch head.
+    pub fn capture_run_recovery(&self, run_id: &str) -> Result<RecoveryRangeRead> {
+        let run = self.run(run_id)?;
+        Ok(RecoveryRangeRead {
+            thread: run.thread_id,
+            run_id: Some(run.id),
+            entry: String::new(),
+            head: None,
             database: self.database_path.clone(),
             epoch: self.epoch,
             content: self.content.clone(),
@@ -118,6 +148,7 @@ pub struct RecoveryRangeTurn {
 }
 pub struct RecoveryRangeRead {
     thread: String,
+    run_id: Option<String>,
     entry: String,
     head: Option<String>,
     database: std::path::PathBuf,
@@ -128,32 +159,35 @@ pub struct RecoveryRangeRead {
 impl RecoveryRangeRead {
     pub fn load(self) -> Result<Vec<RecoveryRangeTurn>> {
         let db = history_views::current_history_owner(&self.database, self.epoch)?;
-        let mut cursor = self.head;
         let mut entries = Vec::new();
-        let mut found = false;
-        while let Some(key) = cursor {
-            let item: HistoryItem = record(&db, "history", &key)?;
-            if item.thread_id != self.thread {
-                return Err(RuntimeError::Conflict(
-                    "recovery history owner differs".into(),
-                ));
+        if let Some(run_id) = &self.run_id {
+            let mut query = db.prepare("SELECT body FROM history WHERE run_id=?1 ORDER BY rowid")?;
+            for raw in query.query_map([run_id], |row| row.get::<_, String>(0))? {
+                let item: HistoryItem = serde_json::from_str(&raw?)?;
+                if item.thread_id != self.thread || item.run_id != *run_id {
+                    return Err(RuntimeError::Conflict("recovery history owner differs".into()));
+                }
+                entries.push(item);
             }
-            if key == self.entry {
-                found = true;
+        } else {
+            let mut cursor = self.head;
+            let mut found = false;
+            while let Some(key) = cursor {
+                let item: HistoryItem = record(&db, "history", &key)?;
+                if item.thread_id != self.thread {
+                    return Err(RuntimeError::Conflict("recovery history owner differs".into()));
+                }
+                if key == self.entry { found = true; }
+                cursor = item.parent.clone();
+                let stop = found && is_input(item.source);
+                entries.push(item);
+                if stop { break; }
             }
-            cursor = item.parent.clone();
-            let stop = found && is_input(item.source);
-            entries.push(item);
-            if stop {
-                break;
+            if !found {
+                return Err(RuntimeError::Conflict("recovery entry is no longer on this branch".into()));
             }
+            entries.reverse();
         }
-        if !found {
-            return Err(RuntimeError::Conflict(
-                "recovery entry is no longer on this branch".into(),
-            ));
-        }
-        entries.reverse();
         // Traverse immutable invocation bodies only on this reader, never while holding Catalog.
         let mut external = std::collections::BTreeSet::new();
         let runs = entries
@@ -177,8 +211,11 @@ impl RecoveryRangeRead {
                 if intent.contract().read_only {
                     continue;
                 }
-                if intent.call().name == "integrate_child" && operation.effect == Effect::Confirmed
-                {
+                let integration_journalled=if intent.call().name=="integrate_child" {
+                    operation.result.clone().map(|result|result.load(&self.content)).transpose()?
+                        .is_some_and(|result|result.output().is_ok_and(|output|output.data["fileJournal"]==true))
+                } else {false};
+                if (intent.call().name=="file_restore" || integration_journalled) && matches!(operation.effect, Effect::Confirmed | Effect::Partial) {
                     continue;
                 }
                 let physical_writer = intent.contract().resources.iter().any(|claim| {

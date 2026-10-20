@@ -5,9 +5,11 @@ import {
   parseSetRecoveryStorageLocationInput,
   parseWorkspaceCombinedRecoveryApplyInput,
   parseWorkspaceCombinedRecoveryPrepareInput,
-  parseWorkspaceRecoveryCheckpointInput,
   parseWorkspaceRecoveryCheckpointQuery,
   parseWorkspaceRecoveryEntryTarget,
+  parseFileRecoveryRequest,
+  type FileRecoveryRequest,
+  type FileRecoveryResult,
   type JsonValue,
 } from '@varin/extension-contract';
 import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/extension-host';
@@ -34,17 +36,21 @@ const toJsonValue = (value: unknown): JsonValue => {
 };
 
 export const createWorkspaceRecoveryCapabilityHandler =
-  (engineOrResolver: WorkspaceRecoveryEngine | ((context: HostCapabilityCallContext) => WorkspaceRecoveryEngine | Promise<WorkspaceRecoveryEngine>)): HostCapabilityHandler =>
+  (engineOrResolver: WorkspaceRecoveryEngine | ((context: HostCapabilityCallContext) => WorkspaceRecoveryEngine | Promise<WorkspaceRecoveryEngine>),
+    files?: (input: FileRecoveryRequest) => Promise<FileRecoveryResult>): HostCapabilityHandler =>
   async (method, params, context): Promise<JsonValue> => {
     const engine = typeof engineOrResolver === 'function'
       ? await engineOrResolver(context)
       : engineOrResolver;
     const result = await (async (): Promise<unknown> => {
+    if (method === 'fileRecovery') {
+      if (!files) throw new Error('File recovery is unavailable');
+      return files(parseFileRecoveryRequest(params));
+    }
     if (method === 'status') {
       const input = asRecord(params, 'workspace.recovery-primitives.status');
       return engine.status(requiredText(input.workspaceId, 'workspaceId'));
     }
-    if (method === 'createCheckpoint') return engine.createCheckpoint(parseWorkspaceRecoveryCheckpointInput(params));
     if (['recordTurnStart', 'recordMutationBefore', 'recordMutationAfter', 'recordTurnSettled'].includes(method)) {
       throw new Error('Native recovery anchors and mutations are supplied only by the original runtime owner');
     }

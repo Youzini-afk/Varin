@@ -1,5 +1,6 @@
 import path from "node:path";
-import type { RecoveryConversation, WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
+import type { RecoveryConversation, WorkspaceRecoveryTurnBinding, WorkspaceRecoveryTurnProvenance } from "@varin/extension-contract";
+import { parseWorkspaceRecoveryTurnBinding } from "@varin/extension-contract";
 import type { DurableRecoveryChangeSelection, RecoveryDurableMetadataPort } from "./journal-engine.js";
 import { sameState } from "./journal-files.js";
 import type { RecoveryState } from "./journal-files.js";
@@ -36,6 +37,7 @@ type MemoryChange = DurableRecoveryChangeSelection["changes"][number] & {
 };
 
 export interface InMemoryRecoveryDurablePort extends RecoveryDurableMetadataPort {
+  getTurn(workspaceId: string, executionId: string): Promise<WorkspaceRecoveryTurnBinding | null>;
   snapshot(workspaceId: string, operationId: string): MemoryOperation | null;
   /** Test-only escape hatch: force an operation file's phase (e.g. needs-attention). */
   debugSetFilePhase(workspaceId: string, operationId: string, path: string, phase: string): void;
@@ -378,6 +380,10 @@ export const createInMemoryRecoveryDurablePort = (
         }, 0);
       }
       return turnBinding(next) as never;
+    },
+    async getTurn(workspaceId, executionId) {
+      const turn = turnFor(workspaceId, executionId);
+      return turn ? parseWorkspaceRecoveryTurnBinding(turnBinding(turn)) : null;
     },
     async recordTurnStart(input) {
       const next: MemoryTurn = {

@@ -18,15 +18,16 @@ import type { LaunchSource, SourceAuthorityResult } from './protocol.generated.j
 import { SourceAdmissionError } from './source-admission-error.js';
 import { admitMaterializedRoot } from './source-launch.js';
 import type { KernelStorageAdapter } from './storage-adapter.js';
+import { restoreFilesWithEditors, type RecoveryEditors } from '../recovery/file-recovery-editors.js';
 
 type PhysicalTarget = Extract<RecoveryFileTarget, { kind: 'physical' }>;
 interface AdmittedTarget { source: LaunchSource; target: PhysicalTarget; canDelete: boolean }
 export interface ManagedRecoveryServiceOptions {
   hostId: string;
   kernel: KernelClient;
-  documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'>;
+  documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'> & RecoveryEditors;
   storage: KernelStorageAdapter;
-  store: Pick<KernelRecoveryStore, 'recordTurnStart' | 'recordTurnSettled'>;
+  store: Pick<KernelRecoveryStore, 'recordTurnStart' | 'recordTurnSettled' | 'getTurn'>;
   recovery: RecoveryFileParticipantEngine;
   validateLiveSource: LiveSourceResolver;
 }
@@ -140,15 +141,34 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
     const { operationId, ...originalBinding } = binding;
     const access = { operationId, binding: { principalId: principal.principalId, coordinatorHostId, ...originalBinding } };
     return active.run(targets, async () => {
-      if (action.kind === 'prepare') {
+      if (action.kind === 'files') {
+        const target = targets[0];
+        if (!target || action.input.threadId !== binding.conversation.threadId
+          || action.input.sourceRunId !== target.target.runId || (action.input.operationId && action.input.operationId !== binding.operationId)) {
+          return denied('File recovery differs from its original source');
+        }
+        if (action.input.journal && !turns.some(value => isDeepStrictEqual(value.selection.turn.anchor, action.input.journal)
+          && value.target?.rootId === target.target.rootId)) return denied('File recovery has no original active-round journal');
+        if (action.method === 'recovery.files.restore' && !target.canDelete) return denied('File recovery requires filesystem:delete for removing files created after the point');
+        const files = await fileResources(target, signal);
+        const identity = { authorityId: 'kernel', workspaceId: target.target.workspaceId,
+          canonicalRoot: target.target.canonicalRoot, filesystemProfile: process.platform, fileTarget: target.target };
+        const result = action.method === 'recovery.files.restore'
+          ? await restoreFilesWithEditors(options.documents, files, identity, action.input, signal)
+          : await files.recoveryFiles(identity, action.method, action.input, signal);
+        if (Array.isArray(result.points)) result.points = result.points.map(point => ({ ...point, sourcePath: target.target.canonicalRoot }));
+        return { status: 'files', result };
+      }
+      if (action.kind === 'prepare' || action.kind === 'settle') {
         for (const { selection: { turn }, target } of turns) {
           const { anchor, source } = turn;
+          if (action.kind === 'settle' && (!turn.settled || !await options.store.getTurn(source!.workspace_id, anchor.executionId))) continue;
           await options.store.recordTurnStart({ workspaceId: source!.workspace_id,
             conversation: { kind: 'thread', threadId: anchor.threadId, branchId: anchor.branchId },
             executionId: anchor.executionId, runId: anchor.runId, userEntryId: anchor.entryId,
             runtimeGeneration: anchor.epoch, workerId: 'kernel', activeWriterScopes: [], provenance: 'caused-by',
             ...(target ? { fileTarget: target } : {}) });
-          await options.store.recordTurnSettled({ workspaceId: source!.workspace_id, executionId: anchor.executionId,
+          if (turn.settled) await options.store.recordTurnSettled({ workspaceId: source!.workspace_id, executionId: anchor.executionId,
             ...(turn.entryIds.at(-1) ? { assistantEntryId: turn.entryIds.at(-1)! } : {}),
             activeWriterScopes: turn.uncovered ? ['process/or-external'] : [], mutationObserved: turn.uncovered,
             observationComplete: !turn.uncovered, observedResourceIds: [], provenance: 'caused-by',
@@ -156,6 +176,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
               message: !turn.settled ? 'Original input work is not settled' : 'Shell or external tool effects do not have complete before-images',
               retryable: false } } : {}) });
         }
+        if (action.kind === 'settle') return { status: 'settled' };
         return options.recovery.prepareFileRecovery({ ...access, workspaceId: binding.workspaceId,
           conversation: binding.conversation, entryId: action.entryId, navigation: action.navigation,
           journalTurns: turns.map(({ selection: { turn, restore } }) => ({ workspaceId: turn.source!.workspace_id,

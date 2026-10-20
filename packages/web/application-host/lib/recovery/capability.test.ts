@@ -57,10 +57,10 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       sessionNavigation: navigation,
     });
     const capability = createWorkspaceRecoveryCapabilityHandler(engine as never);
-    const created = await capability('createCheckpoint', {
+    const created = await engine.createCheckpoint({
       name: 'Before refactor',
       workspaceId: harness.identity.workspaceId,
-    }, context);
+    });
     expect(created).toMatchObject({ status: 'ready', checkpoint: { source: 'named' } });
     const listed = parseWorkspaceRecoveryCheckpointListResult(await capability(
       'listCheckpoints',
@@ -81,7 +81,7 @@ describe('workspace.recovery-primitives Web Host capability', () => {
       workspaceId: harness.identity.workspaceId,
     }, context);
     expect(inherited).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
-    await expect(capability('createCheckpoint', { name: 'x', workspaceId: '' }, context)).rejects.toThrow(/workspaceId/);
+    await expect(capability('createCheckpoint', { name: 'x', workspaceId: harness.identity.workspaceId }, context)).rejects.toThrow();
     await expect(capability('recordMutationBefore', {}, context)).rejects.toThrow(/original runtime owner/);
     await expect(capability('prepareCombinedRecovery', {}, context)).rejects.toThrow(/entryId/);
   });

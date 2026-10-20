@@ -184,7 +184,7 @@ pub(crate) fn reconcile(
                         .filter(|operation| {
                             matches!(
                                 operation.executor.as_deref(),
-                                Some("file_write" | "file_edit")
+                                Some("file_write" | "file_edit" | "file_restore")
                             )
                         })
                         .map(|operation| catalog.capture_operation_read(operation))

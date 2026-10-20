@@ -25,7 +25,7 @@ export function createManagedIntegrationOwner(options: Pick<IntegrationTargetOwn
       try {
         const result = await authority.service.service({ ...address, requestId: randomUUID(),
           operation: { kind: 'integration', invocation, child, journal } }, signal) as IntegrationOperationReceipt;
-        return integrationCompletion(result);
+        return integrationCompletion(result, true);
       } catch (error) {
         // The original Host-tool reconciler reads the target's Storage journal. Do not
         // build a second TypeScript effect projection just to classify a lost reply.
@@ -70,6 +70,7 @@ export function createManagedIntegrationService(options: Pick<IntegrationTargetO
       operationId: `integration:${invocation.operationId}`, workspaceId: result.workspace_id,
       threadId: child.child_thread_id, branchId: result.branch_id, resultRevision: result.result_revision,
       operationBinding: { kind: 'runtime_operation', operationId: invocation.operationId,
+        journal,
         parentRunId: invocation.runId, parentThreadId: invocation.threadId, parentBranchId: journal.branchId,
         origin: invocation.origin, callId: invocation.callId, childOperationId: child.child_operation_id,
         childExecutionId: child.execution_id, childThreadId: child.child_thread_id,

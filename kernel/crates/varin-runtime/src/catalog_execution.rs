@@ -2100,6 +2100,7 @@ impl Catalog {
             ExecutionRecord::StateChanged { .. } | ExecutionRecord::ContextPreparationFailed { .. } | ExecutionRecord::ExecutionFailed { .. }
         ) {
             if run.state.terminal() {
+                event(&tx, run_id, run.revision, "run.changed", serde_json::to_value(&run)?)?;
                 goals::settle_run(&tx, &run)?;
             }
         }
@@ -2745,7 +2746,7 @@ impl Catalog {
                 operation.execution_owner == Some(ExecutorOwner::Kernel)
                     && matches!(
                         operation.executor.as_deref(),
-                        Some("file_write" | "file_edit")
+                        Some("file_write" | "file_edit" | "file_restore")
                     )
             })
             .collect::<Vec<_>>();

@@ -56,6 +56,7 @@ export interface ManagedRecoveryParticipant {
   requested?: 'apply' | 'complete' | 'compensate' | 'cancel';
 }
 export interface ManagedRecoveryPort {
+  settle?(turns: RecoveryRangeTurn[], signal?: AbortSignal): Promise<void>;
   prepare(operationId: string, input: WorkspaceCombinedRecoveryPrepareInput, navigation: RecoveryNavigationSelection,
     turns: ManagedRecoveryTurn[]): Promise<ManagedRecoveryParticipant[]>;
   prepareUndo(participant: ManagedRecoveryParticipant, operationId: string, navigation: RecoveryNavigationSelection): Promise<ManagedRecoveryParticipant>;
@@ -86,6 +87,25 @@ export function createManagedRecoveryCoordinator(options: {
     return parseWorkspaceCombinedRecoveryOperationResult(await request(participant, action));
   };
   return {
+    async settle(turns, signal) {
+      const groups = new Map<string, RecoveryRangeTurn[]>();
+      for (const turn of turns) {
+        const owner = turn.source?.resource_owner;
+        if (!owner || owner.kind !== 'managed_host') continue;
+        const key = JSON.stringify([ownerKey(owner), turn.anchor.threadId, turn.source!.workspace_id]);
+        groups.set(key, [...groups.get(key) ?? [], turn]);
+      }
+      for (const selected of groups.values()) {
+        signal?.throwIfAborted();
+        const first = selected[0]!;
+        const client = await options.registry.source(first.source!.resource_owner as ManagedRecoveryParticipant['owner']);
+        const reply = await client.recovery({ coordinatorHostId: options.coordinatorHostId,
+          binding: { operationId: `settle:${first.anchor.runId}`, workspaceId: first.source!.workspace_id,
+            conversation: { kind: 'thread', threadId: first.anchor.threadId, branchId: first.anchor.branchId },
+            turns: selected.map(turn => ({ turn, restore: false })) }, action: { kind: 'settle' } });
+        if (reply.status !== 'settled') throw new Error('Original Host did not settle its recovery checkpoints');
+      }
+    },
     async prepare(operationId, input, navigation, turns) {
       if (input.conversation.kind !== 'thread') throw new Error('Managed file recovery requires its original Thread');
       const groups = new Map<string, ManagedRecoveryTurn[]>();

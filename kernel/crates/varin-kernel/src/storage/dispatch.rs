@@ -58,6 +58,9 @@ impl Storage {
         }
         let storage = self;
         match method {
+            "recovery.statistics" => storage.recovery_statistics(authorized_params, authorized_grant),
+            "recovery.points" | "recovery.files.restore" | "recovery.point.create" | "recovery.point.release" =>
+                storage.dispatch_file_recovery(method, authorized_params, authorized_grant),
             method if method.starts_with("compute.") => {
                 storage.dispatch_compute(method, authorized_params, authorized_grant)
             }

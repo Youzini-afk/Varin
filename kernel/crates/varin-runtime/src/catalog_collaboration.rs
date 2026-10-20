@@ -1993,7 +1993,7 @@ impl ChildWriterBindings {
             (Some(ExecutorOwner::External { identity, .. }), Some(name)) => self
                 .external_writers
                 .contains(&(identity.clone(), name.into())),
-            (Some(ExecutorOwner::Kernel), Some("file_write" | "file_edit")) => include_native_files,
+            (Some(ExecutorOwner::Kernel), Some("file_write" | "file_edit" | "file_restore")) => include_native_files,
             _ => false,
         }
     }

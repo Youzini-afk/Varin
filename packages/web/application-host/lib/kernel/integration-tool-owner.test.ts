@@ -104,7 +104,7 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       return domainReceipt(request.operationId!);
     });
     const inspectIntegration = vi.fn(async (_request: IntegrationPlanInput): Promise<IntegrationOperationReceipt | null> => null);
-    const runtimePort = { run: vi.fn(async () => run), launch: vi.fn(async () => launch), childExecution: vi.fn(async (id: string) => {
+    const runtimePort = { journalAnchor: vi.fn(async () => journalAnchor), run: vi.fn(async () => run), launch: vi.fn(async () => launch), childExecution: vi.fn(async (id: string) => {
       if (id !== child.execution_id) throw new Error('Child does not exist');
       return child;
     }) };
@@ -181,7 +181,7 @@ it('the installed example integrates a fixed publication from a later Run of the
       const receipt = await h.execute(input, policy);
       const admitted = h.mergeResult.mock.lastCall![0];
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: 'succeeded', effect: 'confirmed',
-        content: { data: domainReceipt(admitted.operationId!), parts: [] } }, executor_stopped: true });
+        content: { data: { ...domainReceipt(admitted.operationId!), fileJournal: true }, parts: [] } }, executor_stopped: true });
       expect(admitted).toMatchObject({
         workspaceId: 'workspace', threadId: 'child-thread', branchId: 'child-source', resultRevision: 7,
         parentAuthority: { kind: 'directory', directory: '/fixture/parent-source', workspaceId: 'documents-workspace' },
@@ -234,7 +234,7 @@ it('a successful ordinary callback cannot replace partial, unknown or still-runn
       const receipt = await h.execute();
       expect(h.callbackReplies.at(-1)).toEqual(forged);
       expect(receipt).toEqual({ completion: { kind: 'result', outcome: facts.effect === 'unknown' ? 'indeterminate' : 'failed',
-        effect: facts.effect, content: { data: domainReceipt(h.mergeResult.mock.lastCall![0].operationId!, facts), parts: [] } }, executor_stopped: facts.executorStopped });
+        effect: facts.effect, content: { data: { ...domainReceipt(h.mergeResult.mock.lastCall![0].operationId!, facts), fileJournal: true }, parts: [] } }, executor_stopped: facts.executorStopped });
     }
     h.mergeResult.mockRejectedValueOnce(new Error('Response lost after journal commit'));
     h.inspectIntegration.mockImplementationOnce(async request => domainReceipt(request.operationId!, { status: 'conflict', effect: 'partial' }));

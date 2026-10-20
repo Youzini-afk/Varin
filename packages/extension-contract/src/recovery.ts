@@ -3,6 +3,7 @@ import {
   VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
 } from "./services.js";
 import type { JsonObject, JsonValue, VarinExtensionServiceInvocationRequest } from "./types.js";
+import { parseFileRecoveryRequest, parseFileRecoveryResult, type FileRecoveryRequest, type FileRecoveryResult } from './recovery-files.js';
 
 export const VARIN_WORKSPACE_RECOVERY_CONTRACT_VERSION = 7 as const;
 
@@ -706,11 +707,11 @@ export const parseRecoveryRetentionStatusResult = (value: unknown): RecoveryRete
 };
 
 export interface WorkspaceRecoveryAPI {
+  fileRecovery(input: FileRecoveryRequest): Promise<FileRecoveryResult>;
   applyCombinedRecovery(input: WorkspaceCombinedRecoveryApplyInput): Promise<WorkspaceCombinedRecoveryOperationResult>;
   cancelCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   clearStorageLocationOverride(workspaceId: string): Promise<RecoveryStorageMoveResult>;
   cleanupStorage(input: RecoveryStorageCleanupInput): Promise<RecoveryStorageCleanupOperationResult>;
-  createCheckpoint(input: WorkspaceRecoveryCheckpointInput): Promise<WorkspaceRecoveryCheckpointResult>;
   deleteWorkspaceHistory(workspaceId: string): Promise<RecoveryStorageCleanupOperationResult>;
   getCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   getStorageMove(operationId: string): Promise<RecoveryStorageMoveResult>;
@@ -736,11 +737,11 @@ export type WorkspaceRecoveryServiceInvoker = (request: VarinExtensionServiceInv
 export const createWorkspaceRecoveryAPI = (invokeService: WorkspaceRecoveryServiceInvoker): WorkspaceRecoveryAPI => {
   const call = (method: string, args: JsonValue[]) => invokeService({ args, method, serviceId: VARIN_WORKSPACE_RECOVERY_SERVICE_ID, version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION });
   return {
+    fileRecovery: async input => parseFileRecoveryResult(await call('fileRecovery', [parseFileRecoveryRequest(input) as unknown as JsonValue])),
     applyCombinedRecovery: async (input) => parseWorkspaceCombinedRecoveryOperationResult(await call("applyCombinedRecovery", [parseWorkspaceCombinedRecoveryApplyInput(input) as unknown as JsonValue])),
     cancelCombinedOperation: async (id) => parseWorkspaceCombinedRecoveryOperationResult(await call("cancelCombinedOperation", [text(id, "operationId")])),
     clearStorageLocationOverride: async (id) => parseRecoveryStorageMoveResult(await call("clearStorageLocationOverride", [text(id, "workspaceId")])),
     cleanupStorage: async (input) => parseRecoveryStorageCleanupOperationResult(await call("cleanupStorage", [parseRecoveryStorageCleanupInput(input) as unknown as JsonValue])),
-    createCheckpoint: async (input) => parseWorkspaceRecoveryCheckpointResult(await call("createCheckpoint", [parseWorkspaceRecoveryCheckpointInput(input) as unknown as JsonValue])),
     deleteWorkspaceHistory: async (id) => parseRecoveryStorageCleanupOperationResult(await call("deleteWorkspaceHistory", [text(id, "workspaceId")])),
     getCombinedOperation: async (id) => parseWorkspaceCombinedRecoveryOperationResult(await call("getCombinedOperation", [text(id, "operationId")])),
     getStorageMove: async (id) => parseRecoveryStorageMoveResult(await call("getStorageMove", [text(id, "operationId")])),

@@ -17,6 +17,9 @@ export interface ManagedRecoveryNavigation {
   removedEntryIds: string[];
 }
 export type ManagedRecoveryAction =
+  | { kind: 'settle' }
+  | { kind: 'files'; method: 'recovery.points' | 'recovery.files.restore' | 'recovery.point.create' | 'recovery.point.release';
+      input: Omit<import('../kernel/protocol.generated.js').KernelFileRecoveryParams, 'workspaceId' | 'rootId'> }
   | { kind: 'prepare'; entryId: string; navigation: ManagedRecoveryNavigation }
   | { kind: 'prepare_undo'; undoOf: string; navigation: ManagedRecoveryNavigation }
   | { kind: 'apply'; input: WorkspaceCombinedRecoveryApplyInput }
@@ -26,4 +29,4 @@ export interface ManagedRecoveryRequest {
   binding: ManagedRecoveryBinding;
   action: ManagedRecoveryAction;
 }
-export type ManagedRecoveryReply = WorkspaceCombinedRecoveryPrepareResult | WorkspaceCombinedRecoveryOperationResult;
+export type ManagedRecoveryReply = WorkspaceCombinedRecoveryPrepareResult | WorkspaceCombinedRecoveryOperationResult | { status: 'settled' } | { status: 'files'; result: Record<string, unknown> };

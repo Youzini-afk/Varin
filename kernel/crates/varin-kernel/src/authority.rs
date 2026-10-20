@@ -53,6 +53,9 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.capture"
         | "file.captureBatch"
         | "file.apply"
+        | "recovery.files.restore"
+        | "recovery.point.create"
+        | "recovery.point.release"
         | "file.mkdir"
         | "file.remove"
         | "file.rename"
@@ -70,6 +73,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.materializedView.prepare" | "file.materializedView.release" => "storage.maintenance",
         "storage.gc" => "storage.gc",
         "storage.object.rebindOwner"
+        | "recovery.statistics"
         | "recovery.operation.conflicts"
         | "recovery.operation.get"
         | "recovery.turn.start"

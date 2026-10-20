@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import type { LaunchSource, ToolOrigin } from "../kernel/protocol.generated.js";
 
 interface IntegrationBinding {
+  journal?: import('../kernel/protocol.generated.js').RecoveryAnchor;
   operationId: string;
   parentRunId: string;
   parentThreadId: string;

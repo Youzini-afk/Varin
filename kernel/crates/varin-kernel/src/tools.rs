@@ -27,6 +27,7 @@ mod retrieval;
 use discovery::FileQueryArgs;
 use language::LanguageQueryArgs;
 use retrieval::RetrievalQueryArgs;
+use crate::storage::recovery_points::{RecoveryPointsArgs, FileRestoreArgs};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +37,8 @@ pub(crate) enum ToolKind {
     FileSearch,
     FileWrite,
     FileEdit,
+    RecoveryPoints,
+    FileRestore,
     ProcessInspect,
     ProcessRead,
     ProcessSpawn,
@@ -58,6 +61,8 @@ impl ToolKind {
             Self::FileSearch => "file_search",
             Self::FileWrite => "file_write",
             Self::FileEdit => "file_edit",
+            Self::RecoveryPoints => "recovery_points",
+            Self::FileRestore => "file_restore",
             Self::ProcessInspect => "process_inspect",
             Self::ProcessRead => "process_read",
             Self::ProcessSpawn => "process_spawn",
@@ -111,6 +116,8 @@ impl ToolKind {
             Self::FileEdit => {
                 "Apply exact text edits against a file read version in the admitted writable workspace."
             }
+            Self::RecoveryPoints => "Find file recovery points by conversation round, or inspect a point and its affected paths.",
+            Self::FileRestore => "Restore recorded files to a recovery point or undo a restore. Use current:before for the start of this round; paths selects files. Returns per-file results and keeps the conversation active.",
             Self::ProcessInspect => {
                 "Inspect a retained process owned by the admitted execution environment."
             }
@@ -157,6 +164,8 @@ impl ToolKind {
             Self::FileSearch,
             Self::FileWrite,
             Self::FileEdit,
+            Self::RecoveryPoints,
+            Self::FileRestore,
             Self::ProcessInspect,
             Self::ProcessRead,
             Self::ProcessSpawn,
@@ -209,9 +218,10 @@ pub(crate) fn source_capabilities(
             continue;
         }
         let mut caps = vec!["filesystem:read"];
-        if matches!(kind, ToolKind::FileWrite | ToolKind::FileEdit) {
+        if matches!(kind, ToolKind::FileWrite | ToolKind::FileEdit | ToolKind::FileRestore) {
             caps.push("filesystem:write");
         }
+        if kind == ToolKind::FileRestore { caps.push("filesystem:delete"); }
         if kind.requirements().process {
             caps.extend(["terminal:use", "process:control"]);
         }
@@ -405,6 +415,9 @@ enum ResourceOperation {
         cursor: u64,
     },
     FileMutation(TextMutation),
+    RecoveryPoints(RecoveryPointsArgs),
+    FileRestore(FileRestoreArgs),
+    ReconcileFileRestore(FileRestoreArgs),
     ReconcileMutation {
         mutation: TextMutation,
         executor: String,
@@ -451,6 +464,8 @@ impl ResourceOperation {
                     Self::FileQuery(args)
                 })
             }
+            ToolKind::RecoveryPoints => serde_json::from_value(args.clone()).map(Self::RecoveryPoints),
+            ToolKind::FileRestore => serde_json::from_value(args.clone()).map(Self::FileRestore),
             ToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
             ToolKind::FileWrite => serde_json::from_value::<FileWriteArgs>(args.clone())
                 .map(|args| Self::FileMutation(TextMutation::Write(args))),
@@ -645,6 +660,9 @@ impl ResourceOperation {
                 json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
                     "path":mutation.path(),"operationId":context.operation_id}),
             ),
+            Self::RecoveryPoints(args) => ("recovery.points", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"threadId":binding.thread_id,"arguments":args})),
+            Self::FileRestore(args) => ("recovery.files.restore", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"threadId":binding.thread_id,"operationId":context.operation_id,"arguments":args})),
+            Self::ReconcileFileRestore(args) => ("recovery.files.restore", json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,"threadId":binding.thread_id,"operationId":context.operation_id,"arguments":args})),
             Self::FileMutation(mutation) => (
                 "file.apply",
                 json!({"workspaceId":binding.workspace_id,"rootId":binding.root_id,
@@ -1444,7 +1462,7 @@ impl KernelResourceClient {
         let journal = if !authorize_only
             && matches!(
                 operation,
-                ResourceOperation::FileMutation(_) | ResourceOperation::ProcessSpawn(_)
+                ResourceOperation::FileMutation(_) | ResourceOperation::FileRestore(_) | ResourceOperation::RecoveryPoints(_) | ResourceOperation::ProcessSpawn(_)
             ) {
             self.source_journal
                 .clone()
@@ -1601,6 +1619,8 @@ impl KernelToolExecutor {
                     kind,
                     ToolKind::FileWrite
                         | ToolKind::FileEdit
+                        | ToolKind::FileRestore
+                        | ToolKind::RecoveryPoints
                         | ToolKind::ProcessSpawn
                         | ToolKind::ProcessWrite
                         | ToolKind::ProcessResize
@@ -1713,6 +1733,7 @@ impl KernelToolExecutor {
                 ToolKind::FileRead
                 | ToolKind::FileList
                 | ToolKind::FileSearch
+                | ToolKind::RecoveryPoints
                 | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
@@ -1720,6 +1741,7 @@ impl KernelToolExecutor {
                 ),
                 ToolKind::FileWrite
                 | ToolKind::FileEdit
+                | ToolKind::FileRestore
                 | ToolKind::ProcessSpawn
                 | ToolKind::ProcessInspect
                 | ToolKind::ProcessRead
@@ -1788,6 +1810,7 @@ impl KernelToolExecutor {
         let read_only = !matches!(
             operation,
             ResourceOperation::FileMutation(_)
+                | ResourceOperation::FileRestore(_)
                 | ResourceOperation::ProcessSpawn(_)
                 | ResourceOperation::ProcessWrite(_)
                 | ResourceOperation::ProcessResize(_)
@@ -1804,6 +1827,7 @@ impl KernelToolExecutor {
             | ResourceOperation::ChildStorageReceipt { .. }
             | ResourceOperation::ChildRootIdle
             | ResourceOperation::ReconcileMutation { .. }
+            | ResourceOperation::ReconcileFileRestore(_)
             | ResourceOperation::ComputeControl { .. }
             | ResourceOperation::ObserveCompute { .. } => {
                 unreachable!("private receipt queries have no model contract")
@@ -1835,6 +1859,10 @@ impl KernelToolExecutor {
                     self.binding.file_source
                 ])),
                 Access::Read,
+            ),
+            ResourceOperation::RecoveryPoints(_) | ResourceOperation::FileRestore(_) => (
+                key(json!(["recovery-files", self.binding.execution_workspace_id, self.binding.root_id])),
+                if read_only { Access::Read } else { Access::Write },
             ),
             ResourceOperation::FileMutation(mutation) => (
                 key(json!(["unresolved-file", mutation.path()])),
@@ -2128,7 +2156,7 @@ impl KernelToolExecutor {
         let journal = if phase == "execute"
             && matches!(
                 call.name.as_str(),
-                "file_write" | "file_edit" | "process_spawn"
+                "file_write" | "file_edit" | "file_restore" | "recovery_points" | "process_spawn"
             ) {
             self.resources
                 .journal_catalog
@@ -2305,6 +2333,7 @@ impl KernelToolExecutor {
         }
         let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
+        let restore = matches!(operation, ResourceOperation::FileRestore(_));
         let result = if let ResourceOperation::FileQuery(args) = &operation {
             self.resources.query(&self.binding, context, args, cancel)
         } else {
@@ -2353,6 +2382,14 @@ impl KernelToolExecutor {
                     reason: "File version conflict; read the current file to obtain its readVersion before retrying.".into(),
                 }
             }
+            Ok(result) if restore && result["status"] == "failed" => ToolCompletion::NotDispatched { reason: result.to_string() },
+            Ok(result) if restore => ToolCompletion::Result {
+                outcome: if result["status"] == "pending" { Outcome::Indeterminate } else if result["status"] == "applied" { Outcome::Succeeded } else { Outcome::Failed },
+                effect: if result["status"] == "pending" { Effect::Unknown } else if result["appliedPaths"].as_array().is_some_and(|v| !v.is_empty()) {
+                    if result["status"] == "applied" { Effect::Confirmed } else { Effect::Partial }
+                } else { Effect::Confirmed },
+                content: result.into(),
+            },
             Ok(result) if mutation => ToolCompletion::Result {
                 outcome: if result["status"] == "applied" {
                     Outcome::Succeeded
@@ -2375,14 +2412,14 @@ impl KernelToolExecutor {
                 reason: failure.error.to_string(),
             },
             Err(failure) => ToolCompletion::Result {
-                outcome: if spawn || mutation {
+                outcome: if spawn || mutation || restore {
                     Outcome::Indeterminate
                 } else if matches!(&failure.error, KernelError::Cancelled) {
                     Outcome::Cancelled
                 } else {
                     Outcome::Failed
                 },
-                effect: if spawn || mutation {
+                effect: if spawn || mutation || restore {
                     Effect::Unknown
                 } else {
                     Effect::None
@@ -2539,6 +2576,12 @@ fn tool_schema(kind: ToolKind) -> Value {
         ToolKind::FileList | ToolKind::FileSearch => {
             return discovery::schema(kind == ToolKind::FileSearch);
         }
+        ToolKind::RecoveryPoints => (
+            json!({"point":{"type":"string"},"operation":{"type":"string","description":"Inspect an original file restore operation."},"paths":{"type":"array","items":{"type":"string"}},"cursor":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}}), vec![],
+        ),
+        ToolKind::FileRestore => (
+            json!({"point":{"type":"string","description":"Recovery point reference, or current:before."},"undo":{"type":"string","description":"Operation ID of the restore to undo."},"paths":{"type":"array","items":{"type":"string"}},"overwritePaths":{"type":"array","items":{"type":"string"},"description":"Restore these files even if their current content differs from the recorded changes."}}), vec![],
+        ),
         ToolKind::FileWrite => (
             json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Version for replacing an existing file. Omit to create a new file."},"content":{"type":"string"}}),
             vec!["path", "content"],
@@ -2927,6 +2970,26 @@ fn serve_resource_immediate(
             storage.clear_cancellation();
             return result.and_then(|receipt| serde_json::to_value(receipt).map_err(Into::into));
         }
+        if let ResourceOperation::RecoveryPoints(args) = &request.operation {
+            if request.authorize_only { return Ok(Value::Null); }
+            return storage.file_recovery_points(&request.binding.workspace_id,
+                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
+                args, request.journal.as_ref(), &grant);
+        }
+        if let ResourceOperation::ReconcileFileRestore(args) = &request.operation {
+            return storage.file_restore_receipt(&request.binding.workspace_id,
+                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
+                &request.context.operation_id, args, &grant).and_then(|receipt|serde_json::to_value(receipt).map_err(Into::into));
+        }
+        if let ResourceOperation::FileRestore(args) = &request.operation {
+            if request.authorize_only { return Ok(Value::Null); }
+            storage.set_cancellation(request.cancellation.shared_flag());
+            let result = storage.restore_recorded_files(&request.binding.workspace_id,
+                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
+                &request.context.operation_id, args, request.journal.as_ref(), request.binding.source_mode, &grant, &mut dispatched);
+            storage.clear_cancellation();
+            return result;
+        }
         if let ResourceOperation::FileMutation(mutation) = &request.operation {
             storage.set_cancellation(request.cancellation.shared_flag());
             let result = storage.file_mutate(
@@ -3090,6 +3153,7 @@ pub(crate) fn managed_read_receipt_tool(name: &str) -> bool {
     matches!(
         serde_json::from_value::<ToolKind>(json!(name)),
         Ok(ToolKind::FileRead
+            | ToolKind::RecoveryPoints
             | ToolKind::FileList
             | ToolKind::FileSearch
             | ToolKind::ProcessRead

@@ -14,15 +14,15 @@ original draft; it does not replay a batch to recover a lost HTTP response.
 
 ## Normal turn path
 
-1. A bound user turn creates one lightweight checkpoint row. No workspace path is read.
-2. Native `write`/`edit` first resolve an isolated branch or the admitted
-   `document.surfaceWrite` path; `apply_patch` shares that authority.
-3. The Host records intent and before-state, then applies through Rust disk operations or the fixed
-   Registry owner/revision. It records the actual final state before returning the mutation result.
-4. An unavailable mutation backend fails instead of allowing a parallel Host disk writer.
-   The generic journal-only native-tool wrapper is not this production disk path.
-5. Repeated writes preserve the first before-image and last after-image. Settlement compares actual
-   watcher observations with the journal; uncontrolled shell/Git/external writes remain uncovered.
+1. The first controlled write creates a lightweight checkpoint bound to its original Catalog input.
+2. Native `file_write`/`file_edit` resolve the admitted physical Source, then Rust retains the
+   before-image and commits `file.apply` intent and receipt under that same owner.
+3. Repeated writes preserve the first before-image and last after-image.
+4. `checkpoint-lifecycle.ts` follows existing terminal `run.changed` events and startup discovery.
+   Original Run history is readable after branch navigation; visible metadata reads also repair
+   unsettled records. Read-only inputs create no empty checkpoint.
+5. Settlement uses original tool effects to identify uncovered external writes. It does not scan
+   workspace files or add a polling loop.
 
 Thread tools use the same Storage checkpoint/change tables. The original invocation's frozen history
 range binds a write to its latest real input; Environment/Agent input is not relabelled as a user or
@@ -36,6 +36,25 @@ New sessions, ordinary prompts, and unchanged turns therefore perform no recursi
 with the files actually written by the journalled tools.
 
 ## Restore path
+
+`storage/recovery_points.rs` provides the native file-only path. `recovery_points` and `file_restore`
+are resident tools in eligible physical Sources. Points group input checkpoints by Run and expose
+stable before/after references plus `current:before`. Each path is compared and applied independently,
+using existing `file.apply` and recovery object ownership. A restore retains safety objects for undo;
+its own writes enter the active input journal, or a separate user-restore record outside an active Run.
+Lost replies resolve through the original operation ID and per-file receipts.
+
+The public `fileRecovery` API resolves original Source launch records, including managed Hosts and
+materialized worktrees. Naming a point captures current states of previously recorded paths into
+existing recovery operation/object tables. Removing a point hides it immediately; shared journal
+records stay until older retained points and named points no longer need them. The old public
+label-only `createCheckpoint` endpoint is retired.
+
+`FileRecoveryTimeline` uses this API for selected paths, naming, undo and original-operation readback.
+The Host uses Documents barriers for the affected registered paths, preserves unsaved drafts as
+per-file results, and lets clean files proceed. File-only recovery keeps the conversation active.
+
+Combined conversation/file recovery continues through the following navigation transaction:
 
 Conversation navigation reports the entry IDs that will leave the selected branch. Varin loads the
 turn checkpoints bound to those entries and folds their path operations into:
@@ -83,9 +102,9 @@ conditional apply/compensation phases, and workspace lease through a trusted Hos
 `expected`, `target`, and `safety` states reference readable objects before `apply-intent` is committed.
 Startup reconciles both conversation recovery and integration operations through these shared primitives;
 integration does not create a second catalog under the workspace root.
-For an agent-triggered merge, the final integration state and its safety-to-target changes are appended to
-the active parent turn checkpoint in the same SQLite transaction. Normal conversation undo therefore uses
-the existing checkpoint path; a missing parent binding prevents any integration write.
+For an agent-triggered merge, the original parent input anchor travels in the integration binding.
+Each `file.apply`, including compensation, records its before/after state in the same transaction.
+New receipts mark that journal coverage; older integrations retain their original incomplete coverage.
 
 Native Integration and ordinary workspace edits retain their own durable operation kinds, before/target identities, Surface dispatch receipts and conditional compensation. Retired `agent-mutation` operations have no native execution owner. Recovery reports unresolved records as `storage-schema-retired` and leaves their records and resources unchanged; it never replays them or fabricates Thread ownership.
 
@@ -115,12 +134,11 @@ doing so would split recovery references from the WorkingState/object transactio
 made authoritative. The Recovery settings UI therefore exposes location and migration controls only when the
 selected replacement provider advertises `storageManagement: true`.
 
-The built-in storage status marks its size/object metrics as `scope: "host"`: catalog and WAL bytes
-are shared by kernel domains and are not reclaimable-history bytes for each workspace. The history
-inventory contains only registrations with actual checkpoints or durable recovery operations;
-workspace size/object attribution remains unknown rather than repeating the host totals. The UI
-shows shared database size once and runs shared GC once, without unsupported delete-history or
-retention controls. A zero-reclaim result is distinct from cleanup failure. GC receipts include
+Storage status with a workspace reports `scope: "workspace"` and counts distinct blobs reachable
+through that workspace's recovery references. Host-wide status retains shared catalog/WAL totals.
+The history inventory contains registrations with actual checkpoints or durable recovery operations.
+Point removal releases unshared records; undo operations retain their own references. Shared GC
+reclaims objects after all owners release them. A zero-reclaim result is distinct from cleanup failure. GC receipts include
 deleted object-file lengths from both prior/orphan cleanup and the committed release pass; the
 Host propagates physical deletion failures instead of reporting successful zero-byte cleanup.
 

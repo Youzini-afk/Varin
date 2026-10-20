@@ -1,17 +1,26 @@
 # Recovery and rollback
 
-Varin exposes conversation-only recovery and, where affected-file coverage is available, combined
-conversation/file recovery. Native Threads navigate their original HistoryBranch; file recovery
-retains the original resource owner and conditional mutation receipts. Historical stores are not imported.
+Varin provides a file timeline alongside conversation-only and combined conversation/file recovery.
+Every file operation uses its original resource Host and worktree. Native conversation recovery navigates
+the original HistoryBranch.
 
 ## Choose the scope
 
 - **Conversation only** changes the selected history branch and restores the relevant editable input.
 - **Conversation and files** also prepares the recorded path changes for entries leaving that branch.
   The preview shows real conflicts, incomplete coverage and unavailable owners.
+- **Files only**, in the Recovery panel, restores all or selected recorded paths to a round's start,
+  its end, or a named point. The conversation stays active. Naming a point saves the current content
+  of paths already recorded by that conversation.
 
-The default can be conversation only, conversation and files, or always ask. A new turn creates only
-an affected-file checkpoint; it does not scan, copy, reset or clean the whole workspace.
+The conversation navigation default can be conversation only, conversation and files, or always ask.
+The file timeline groups internal input records into complete conversation rounds and updates when
+the Run ends. Read-only rounds add no empty point.
+
+Agents receive `recovery_points` and `file_restore` as resident tools in physical workspaces with
+the corresponding file permissions. The former lists points, inspects affected paths and observes
+an original restore operation. The latter accepts a point, `current:before`, or an operation to undo.
+It returns per-file outcomes; a conflicting file does not prevent other files from being restored.
 
 Controlled file tools retain before/after evidence. Arbitrary commands, Git or external applications
 can change unjournalled files, so their file coverage can be incomplete. Conversation-only recovery
@@ -19,10 +28,11 @@ remains available; a broad workspace scan cannot manufacture missing before-imag
 
 ## Conflicts, drafts and undo
 
-Recovery compares each affected path with the output it recorded. Later user edits are conflicts,
-not permission to overwrite. Connected editors publish/fence their actual dirty revision. Confirmed
-buffer recovery retains its text and disk base through the original Surface transaction. A disconnected
-or unknown dirty state remains unavailable even if the user is willing to proceed.
+Recovery compares each affected path with the output it recorded. Later user edits are reported
+per file and can be explicitly overwritten. Connected editors publish/fence their actual dirty revision.
+File-only recovery leaves unsaved drafts intact and reports those paths for attention, while other
+files proceed. Combined recovery retains confirmed buffer text and its disk base through the original
+Surface transaction.
 
 Before applying, the owner saves safety/redo objects for affected paths. A completed operation can be
 undone when its retained evidence and current path conditions allow. Interrupted or unknown operations
@@ -36,10 +46,11 @@ operation pending or needing attention.
 
 ## Storage capabilities
 
-The built-in provider shares the Host kernel data root with WorkingState. It reports application-data
-storage and does not currently provide relocation, retention settings or delete-history controls.
-Shared catalog/WAL totals are not per-workspace reclaimable history. GC respects other retained result,
-branch and operation owners and reports actual cleanup failures.
+The built-in provider shares the Host kernel data root with WorkingState. The panel reports the
+workspace's deduplicated retained recovery objects; Host-wide catalog/WAL totals remain in global
+storage information. Remove a point from its menu to release its history. Records still needed by
+older points or undo operations stay referenced until those owners are removed. GC then reclaims
+unreferenced objects. There is no automatic retention cap or built-in storage relocation.
 
 Replacement recovery providers can advertise other storage modes and management capabilities; the UI
 shows controls only when the selected provider supports them. The original journal and resource owners

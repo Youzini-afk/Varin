@@ -20,11 +20,11 @@ export default defineHostExtension({
       multiple: true,
       version: VARIN_WORKSPACE_RECOVERY_SERVICE_VERSION,
     }, {
+      fileRecovery: ([input = missingArgument()]) => call("fileRecovery", input),
       applyCombinedRecovery: ([input = missingArgument()]) => call("applyCombinedRecovery", input),
       cancelCombinedOperation: ([operationId = missingArgument()]) => call("cancelCombinedOperation", { operationId }),
       clearStorageLocationOverride: ([workspaceId = missingArgument()]) => call("clearStorageLocationOverride", { workspaceId }),
       cleanupStorage: ([input = missingArgument()]) => call("cleanupStorage", input),
-      createCheckpoint: ([input = missingArgument()]) => call("createCheckpoint", input),
       deleteWorkspaceHistory: ([workspaceId = missingArgument()]) => call("deleteWorkspaceHistory", { workspaceId }),
       getCombinedOperation: ([operationId = missingArgument()]) => call("getCombinedOperation", { operationId }),
       getStorageMove: ([operationId = missingArgument()]) => call("getStorageMove", { operationId }),

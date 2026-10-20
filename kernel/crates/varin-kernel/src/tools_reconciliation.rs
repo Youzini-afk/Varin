@@ -43,7 +43,7 @@ impl KernelResourceClient {
                 ));
             }
             if !binding.resource_owner.is_local() {
-                if !matches!(admitted.call.name.as_str(), "file_write" | "file_edit") {
+                if !matches!(admitted.call.name.as_str(), "file_write" | "file_edit" | "file_restore") {
                     return Err(KernelError::Authorization(
                         "Managed receipt is not a text mutation".into(),
                     ));
@@ -97,19 +97,16 @@ impl KernelResourceClient {
                     "mutation source or contract changed before recovery".into(),
                 ));
             }
-            let ResourceOperation::FileMutation(mutation) = original else {
-                return Err(KernelError::Authorization(
-                    "operation is not an admitted text mutation".into(),
-                ));
+            let observation = match original {
+                ResourceOperation::FileMutation(mutation) => ResourceOperation::ReconcileMutation { mutation, executor: admitted.call.name },
+                ResourceOperation::FileRestore(args) => ResourceOperation::ReconcileFileRestore(args),
+                _ => return Err(KernelError::Authorization("operation is not an admitted file mutation".into())),
             };
             let result = self
                 .call(
                     &binding,
                     &context,
-                    ResourceOperation::ReconcileMutation {
-                        mutation,
-                        executor: admitted.call.name,
-                    },
+                    observation,
                     false,
                     &cancellation,
                 )

@@ -4,13 +4,11 @@ import type {
   WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryOperation,
   WorkspaceCombinedRecoveryPlan,
-  WorkspaceRecoveryCheckpointSummary,
   WorkspaceRecoveryStatus,
 } from '@varin/extension-contract';
 import { Icon } from '@/components/icon/Icon';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { useI18n } from '@/lib/i18n';
 import {
   getWorkspaceRecoveryAPI,
@@ -22,6 +20,7 @@ import { useThreadStore } from '@/stores/useThreadStore';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
 import { useUIStore } from '@/stores/useUIStore';
 import { RecoveryDialog } from '@/components/recovery/RecoveryDialog';
+import { FileRecoveryTimeline } from '@/components/recovery/FileRecoveryTimeline';
 import { applyCombinedRecoveryAndRead, assertCombinedRecoveryIdentity, combinedRecoveryStatus, isCombinedRecoverySettled } from '@/components/recovery/combinedRecoveryResult';
 import { shouldOpenRecoveryDialog } from '@/components/recovery/recoveryPolicy';
 
@@ -34,23 +33,18 @@ const operationTone = (operation: WorkspaceCombinedRecoveryOperation): string =>
   return 'text-[var(--status-info)]';
 };
 
-const checkpointTitle = (checkpoint: WorkspaceRecoveryCheckpointSummary): string => (
-  checkpoint.label?.trim() || checkpoint.source
-);
-
 export const WorkspaceRecoveryPanel: React.FC = () => {
   const { t } = useI18n();
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const identity = useThreadStore(state => state.selectedIdentity);
   const sessionId = identity?.threadId;
-  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
-  const setSettingsPage = useUIStore((state) => state.setSettingsPage);
+  const branchId = identity?.branchId;
   const preference = useUIStore(state => state.recoveryPreference);
   const workspaceId = useWorkbenchWorkspaceId();
   const [status, setStatus] = React.useState<WorkspaceRecoveryStatus | null>(null);
-  const [checkpoints, setCheckpoints] = React.useState<WorkspaceRecoveryCheckpointSummary[]>([]);
   const [operations, setOperations] = React.useState<WorkspaceCombinedRecoveryOperation[]>([]);
-  const [checkpointName, setCheckpointName] = React.useState('');
+  const [refreshKey, setRefreshKey] = React.useState(0);
+  const conversation = React.useMemo(() => sessionId && branchId ? { kind: 'thread' as const, threadId: sessionId, branchId } : null, [sessionId, branchId]);
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [undoIntent, setUndoIntent] = React.useState<{ plan: WorkspaceCombinedRecoveryPlan; attempt?: WorkspaceCombinedRecoveryApplyInput }>();
@@ -63,14 +57,13 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
   React.useEffect(() => {
     latestScope.current = scope;
     setUndoIntent(undefined); setUndoDialogOpen(false); undoInFlight.current = false;
-    setStatus(null); setCheckpoints([]); setOperations([]); setError(null);
+    setStatus(null); setOperations([]); setError(null);
     return () => { if (latestScope.current === scope) latestScope.current = ''; };
   }, [scope]);
 
   const refresh = React.useCallback(async () => {
     if (!workspaceId) {
       setStatus(null);
-      setCheckpoints([]);
       setOperations([]);
       return;
     }
@@ -78,44 +71,24 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
     setError(null);
     try {
       const api = getWorkspaceRecoveryAPI();
-      const [nextStatus, nextCheckpoints, nextOperations] = await Promise.all([
+      const [nextStatus, nextOperations] = await Promise.all([
         api.status(workspaceId),
-        api.listCheckpoints({ workspaceId }),
         api.listCombinedOperations(workspaceId),
       ]);
       if (!current()) return;
       dataScope.current = scope;
       setStatus(requireWorkspaceRecoveryResult(nextStatus));
-      setCheckpoints(requireWorkspaceRecoveryResult(nextCheckpoints).page.checkpoints);
-      setOperations(requireWorkspaceRecoveryResult(nextOperations).operations);
+      setOperations(requireWorkspaceRecoveryResult(nextOperations).operations.filter(operation => operation.conversation.threadId === identity?.threadId));
     } catch (cause) {
       if (current()) setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
       if (current()) setBusy(null);
     }
-  }, [current, scope, workspaceId]);
+  }, [current, scope, workspaceId, identity?.threadId]);
 
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  const createCheckpoint = React.useCallback(async () => {
-    if (!workspaceId || !checkpointName.trim() || busy) return;
-    setBusy('checkpoint');
-    try {
-      requireWorkspaceRecoveryResult(await getWorkspaceRecoveryAPI().createCheckpoint({
-        name: checkpointName.trim(),
-        workspaceId,
-      }));
-      setCheckpointName('');
-      toast.success(t('contextPanel.recovery.toast.applied', { provider: 'varin.builtin.recovery' }));
-      await refresh();
-    } catch (cause) {
-      toast.error(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setBusy(null);
-    }
-  }, [busy, checkpointName, refresh, t, workspaceId]);
 
   const acceptUndoResult = React.useCallback(async (operation: WorkspaceCombinedRecoveryOperation) => {
     if (!current()) return;
@@ -140,10 +113,14 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
         if (!current()) return;
         assertCombinedRecoveryIdentity(operation, original);
       }
-      await acceptUndoResult(operation);
+      if (operation.undoOf) await acceptUndoResult(operation);
+      else {
+        setOperations(items => items.map(item => item.id === operation.id ? operation : item));
+        await refresh();
+      }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (current()) { setBusy(null); undoInFlight.current = false; } }
-  }, [acceptUndoResult, busy, current, scope, undoIntent]);
+  }, [acceptUndoResult, busy, current, refresh, scope, undoIntent]);
 
   const undo = React.useCallback(async (operation: WorkspaceCombinedRecoveryOperation) => {
     if (!current() || dataScope.current !== scope || !workspaceId || busy || undoInFlight.current || typeof window === 'undefined') return;
@@ -183,7 +160,7 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
     }
   }, [acceptUndoResult, busy, current, host, operations, preference, resumeUndo, scope, t, undoIntent, workspaceId]);
 
-  if (!workspaceId) {
+  if (!identity) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
         <Icon name="history" className="size-10 text-muted-foreground/50" />
@@ -207,7 +184,7 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
           type="button"
           variant="ghost"
           size="icon"
-          onClick={() => void refresh()}
+          onClick={() => { setRefreshKey(value => value + 1); void refresh(); }}
           disabled={busy !== null}
           aria-label={t('settings.varin.recovery.actions.refresh')}
           title={t('settings.varin.recovery.actions.refresh')}
@@ -217,32 +194,21 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
       </div>
 
       <div className="space-y-6 px-4 py-5">
+        {conversation && <FileRecoveryTimeline key={scope} conversation={conversation} refreshKey={refreshKey} onChanged={refresh} />}
         {status ? (
           <section className="rounded-xl border border-border/60 bg-muted/15 p-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="typography-ui-label font-medium text-foreground">varin.builtin.recovery</p>
+                <p className="typography-ui-label font-medium text-foreground">{t('contextPanel.recovery.files.storageTitle')}</p>
                 <p className="mt-1 typography-micro text-muted-foreground">
-                  {status.storage.location.mode} · {status.storage.state}
+                  {t('contextPanel.recovery.files.storageScope')}
                 </p>
+                <p className="mt-1 truncate typography-micro text-muted-foreground" title={status.identity.canonicalRoot}>{status.identity.canonicalRoot}</p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                onClick={() => {
-                  setSettingsPage('sessions');
-                  setSettingsDialogOpen(true);
-                }}
-              >
-                {t('settings.varin.recovery.actions.configure')}
-              </Button>
+
             </div>
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div>
-                <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.checkpoints')}</p>
-                <p className="mt-1 typography-ui-label tabular-nums">{status.storage.checkpointCount}</p>
-              </div>
+            <div className="mt-3 grid grid-cols-2 gap-2">
+
               <div>
                 <p className="typography-micro text-muted-foreground">{t('settings.varin.recovery.storage.objects')}</p>
                 <p className="mt-1 typography-ui-label tabular-nums">{status.storage.objectCount}</p>
@@ -266,43 +232,11 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
           </section>
         ) : null}
 
-        <section>
-          <h3 className="typography-ui-label font-medium text-foreground">
-            {t('contextPanel.recovery.actions.checkpoint')}
-          </h3>
-          <p className="mt-1 typography-meta text-muted-foreground">
-            {t('contextPanel.recovery.native.checkpointDescription')}
-          </p>
-          <div className="mt-3 flex gap-2">
-            <Input
-              value={checkpointName}
-              onChange={(event) => setCheckpointName(event.target.value)}
-              placeholder={t('contextPanel.recovery.checkpoint.placeholder')}
-              disabled={busy !== null}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter') return;
-                event.preventDefault();
-                void createCheckpoint();
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={busy !== null || !checkpointName.trim()}
-              onClick={() => void createCheckpoint()}
-            >
-              <Icon name="save-3" className="size-4" />
-              {t('contextPanel.recovery.actions.checkpoint')}
-            </Button>
-          </div>
-        </section>
-
-        <section className="border-t border-border/60 pt-5">
+        {(operations.length > 0 || undoIntent) && <section className="border-t border-border/60 pt-5">
           <h3 className="typography-ui-label font-medium text-foreground">
             {t('contextPanel.recovery.native.operations')}
           </h3>
-          {undoIntent && !undoDialogOpen && <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setUndoDialogOpen(true)}>Check undo recovery status</Button>}
+          {undoIntent && !undoDialogOpen && <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setUndoDialogOpen(true)}>{t('contextPanel.recovery.files.checkOperation')}</Button>}
           <div className="mt-3 space-y-2">
             {operations.map((operation) => (
               <div key={operation.id} className="rounded-xl border border-border/60 p-3">
@@ -314,7 +248,11 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
                         : t('contextPanel.recovery.native.combinedOperation')}
                     </p>
                     <p className={cn('mt-1 typography-micro', operationTone(operation))}>
-                      {operation.state} · {operation.fileState} · {operation.conversationState}
+                      {t(operation.state === 'complete' ? 'contextPanel.recovery.files.applied'
+                        : operation.state === 'compensated' ? 'contextPanel.recovery.files.compensated'
+                        : operation.state === 'aborted' ? 'contextPanel.recovery.files.cancelled'
+                        : operation.state === 'planned' ? 'contextPanel.recovery.files.prepared'
+                        : operation.state === 'needs-attention' ? 'contextPanel.recovery.files.notRestored' : 'contextPanel.recovery.files.pending')}
                     </p>
                   </div>
                   {operation.state === 'complete' ? (
@@ -328,8 +266,8 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
                       {t('contextPanel.recovery.actions.undo')}
                     </Button>
                   ) : null}
-                  {operation.undoOf && !isCombinedRecoverySettled(operation) && <Button type="button" variant="outline" size="xs"
-                    disabled={busy !== null || Boolean(undoIntent)} onClick={() => void resumeUndo(operation)}>Check original undo</Button>}
+                  {operation.state !== 'planned' && !isCombinedRecoverySettled(operation) && <Button type="button" variant="outline" size="xs"
+                    disabled={busy !== null || Boolean(undoIntent)} onClick={() => void resumeUndo(operation)}>{t('contextPanel.recovery.files.checkOperation')}</Button>}
                 </div>
                 {operation.failure ? (
                   <p className="mt-2 typography-meta text-[var(--status-error)]">{operation.failure.message}</p>
@@ -342,38 +280,7 @@ export const WorkspaceRecoveryPanel: React.FC = () => {
               </p>
             ) : null}
           </div>
-        </section>
-
-        <section className="border-t border-border/60 pt-5">
-          <h3 className="typography-ui-label font-medium text-foreground">
-            {t('contextPanel.recovery.native.timeline')}
-          </h3>
-          <div className="mt-3 space-y-2">
-            {checkpoints.map((item) => (
-              <div key={item.id} className="rounded-xl border border-border/60 p-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate typography-ui-label text-foreground">{checkpointTitle(item)}</p>
-                    <p className="mt-1 typography-micro text-muted-foreground">
-                      {item.source} · {item.state} · {new Date(item.createdAt).toLocaleString()}
-                    </p>
-                  </div>
-                  <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
-                    {formatWorkspaceArchiveBytes(item.byteLength)}
-                  </span>
-                </div>
-                <p className="mt-2 typography-micro text-muted-foreground">
-                  {item.changedPathCount} {t('chat.recoveryDialog.filesAffected')}
-                </p>
-              </div>
-            ))}
-            {checkpoints.length === 0 ? (
-              <p className="py-2 typography-meta text-muted-foreground">
-                {t('contextPanel.recovery.native.noCheckpoints')}
-              </p>
-            ) : null}
-          </div>
-        </section>
+        </section>}
 
         {error ? (
           <div className="rounded-xl border border-[var(--status-error-border)] bg-[var(--status-error-background)] p-3 typography-meta text-[var(--status-error)]">

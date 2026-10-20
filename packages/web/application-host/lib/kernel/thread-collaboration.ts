@@ -29,6 +29,8 @@ export interface ThreadCollaborationOwners {
   continueRun(runId: string, signal: AbortSignal): Promise<void>;
   canExecuteThread?(threadId: string): Promise<boolean>;
   recoverLaunches(signal: AbortSignal): Promise<void>;
+  recoverCheckpoints?(signal: AbortSignal): Promise<void>;
+  settleRunCheckpoints?(runId: string, signal: AbortSignal): Promise<void>;
   prepareContext: ContextPreparer;
   prepareSkillInput?: ThreadSkillInputPreparer;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
@@ -205,6 +207,7 @@ export class ThreadCollaboration {
       // Capture before discovery so a resume or follow-up admitted during discovery is replayed.
       const cursor = (await runtime.status(signal)).eventCursor;
       await this.owners.recoverLaunches(signal);
+      await this.owners.recoverCheckpoints?.(signal);
       signal.throwIfAborted();
       this.launchCursor = cursor;
     }
@@ -220,6 +223,12 @@ export class ThreadCollaboration {
           for (const task of this.tasks.values()) task.recheck = true;
         }
         if (event.kind === 'run.cancel_requested') this.owners.kernel.cancelRunPreparation(event.subject);
+        if (event.kind === 'run.changed' || event.kind === 'run.failed'
+          || event.kind === 'execution.committed' && ['state_changed', 'context_preparation_failed', 'execution_failed'].includes(String((event.data as { kind?: string })?.kind))) {
+          void this.owners.settleRunCheckpoints?.(event.subject, signal).catch(error => {
+            if (!signal.aborted) this.owners.onError(event.subject, error);
+          });
+        }
         const data = event.data as { run_id?: unknown } | null;
         if ((event.kind === 'policy.resumed' || event.kind === 'ingress.run_ready' || event.kind === 'goal.run_ready' || event.kind === 'observation.run_ready') && data && typeof data.run_id === 'string') {
           void this.owners.continueRun(data.run_id, signal).catch(error => {

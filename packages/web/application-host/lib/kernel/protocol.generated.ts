@@ -118,10 +118,12 @@ export type KernelMethod =
   | "runtime.host_tool.reconcile"
   | "source.handoff.claim"
   | "runtime.branch.recovery.range"
+  | "runtime.run.recovery"
   | "runtime.branch.navigation.prepare"
   | "runtime.branch.navigate"
   | "runtime.branch.navigation.receipt"
   | "runtime.branch.recovery.workspaces"
+  | "runtime.branch.recovery.sources"
   | "runtime.operation.recovery.anchor"
   | "runtime.branch.fork"
   | "runtime.plan.view"
@@ -298,6 +300,11 @@ export type KernelMethod =
   | "recovery.turn.settle"
   | "recovery.checkpoint.create"
   | "recovery.checkpoint.list"
+  | "recovery.points"
+  | "recovery.statistics"
+  | "recovery.files.restore"
+  | "recovery.point.create"
+  | "recovery.point.release"
   | "recovery.entry.resolve"
   | "recovery.change.before"
   | "recovery.change.get"
@@ -4330,6 +4337,21 @@ export interface KernelPinReadParams {
 
 export type RecoveryConversation = {kind:"thread";threadId:string;branchId:string};
 
+export interface KernelFileRecoveryParams {
+  workspaceId: string;
+  rootId: string;
+  threadId: string;
+  operationId?: string;
+  sourceRunId?: string;
+  journal?: RecoveryAnchor;
+  sourceMode?: string;
+  arguments: Record<string, unknown>;
+}
+
+export interface KernelWorkspaceIdentityParams {
+  workspaceId: string;
+}
+
 export interface KernelRecoveryReference {
   slot: string;
   objectHash: string;
@@ -5988,10 +6010,12 @@ export type KernelMethodParams = {
   "runtime.followup.occurrence": FollowupOccurrenceGetParams;
   "runtime.followup.control": FollowupControlParams;
   "runtime.branch.recovery.range": NavigationSelectParams;
+  "runtime.run.recovery": RunParams;
   "runtime.branch.navigation.prepare": NavigationSelectParams;
   "runtime.branch.navigate": NavigationParams;
   "runtime.branch.navigation.receipt": NavigationReceiptParams;
   "runtime.branch.recovery.workspaces": NavigationReceiptParams;
+  "runtime.branch.recovery.sources": NavigationReceiptParams;
   "runtime.operation.recovery.anchor": OperationInspectParams;
   "runtime.branch.fork": BranchForkParams;
   "runtime.plan.view": PlanViewParams;
@@ -6154,6 +6178,11 @@ export type KernelMethodParams = {
   "recovery.turn.settle": KernelRecoveryTurnSettleParams;
   "recovery.checkpoint.create": KernelRecoveryCheckpointCreateParams;
   "recovery.checkpoint.list": KernelRecoveryCheckpointListParams;
+  "recovery.points": KernelFileRecoveryParams;
+  "recovery.statistics": KernelWorkspaceIdentityParams;
+  "recovery.files.restore": KernelFileRecoveryParams;
+  "recovery.point.create": KernelFileRecoveryParams;
+  "recovery.point.release": KernelFileRecoveryParams;
   "recovery.entry.resolve": KernelRecoveryEntryResolveParams;
   "recovery.change.before": KernelRecoveryChangeBeforeParams;
   "recovery.change.get": KernelRecoveryChangeGetParams;
@@ -7309,6 +7338,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.run.recovery";
+      params: RunParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.branch.navigation.prepare";
       params: NavigationSelectParams;
       epoch?: string;
@@ -7337,6 +7375,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.branch.recovery.workspaces";
+      params: NavigationReceiptParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.branch.recovery.sources";
       params: NavigationReceiptParams;
       epoch?: string;
       grantId?: string;
@@ -8796,6 +8843,51 @@ export type KernelRequest =
       id: string;
       method: "recovery.checkpoint.list";
       params: KernelRecoveryCheckpointListParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.points";
+      params: KernelFileRecoveryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.statistics";
+      params: KernelWorkspaceIdentityParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.files.restore";
+      params: KernelFileRecoveryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.point.create";
+      params: KernelFileRecoveryParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "recovery.point.release";
+      params: KernelFileRecoveryParams;
       epoch?: string;
       grantId?: string;
     }
