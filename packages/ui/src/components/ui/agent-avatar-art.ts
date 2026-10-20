@@ -58,6 +58,22 @@ const bodies = {
   twin: 'M9 19Q10 11 20 11L38 14Q46 15 46 24L43 47Q42 57 32 56L14 53Q6 52 7 43Z',
   arc: 'M14 9Q37 8 50 23Q62 37 52 49Q42 60 16 58Q8 58 8 50V17Q8 9 14 9Z',
   tuck: 'M15 8H43Q52 8 54 17L59 43Q61 53 51 55L32 58Q27 59 24 54L21 50Q19 47 14 48Q7 49 6 41L5 20Q4 8 15 8Z',
+  plate: 'M17 15H47Q51 15 54 20L61 30Q63 34 60 38L53 49Q50 54 44 54H18Q12 54 9 49L3 38Q1 34 4 29L11 19Q13 15 17 15Z',
+  drop: 'M23 10Q26 5 32 10Q50 21 57 36Q65 53 45 58Q26 62 13 53Q1 44 8 30Q12 21 23 10Z',
+  ribbon: 'M13 12L38 8Q43 7 47 12L57 24Q61 29 57 34L51 41Q48 44 51 48Q55 55 46 56L20 58Q14 58 11 51L5 29Q2 18 13 12Z',
+  cove: 'M19 9H42Q56 9 58 23L59 42Q60 56 45 58H21Q7 58 6 46Q6 39 13 36Q19 32 13 26Q7 20 11 14Q13 9 19 9Z',
+  terrace: 'M20 15Q20 9 27 9H42Q48 9 48 16V20Q48 23 53 24Q59 25 59 32V47Q59 56 49 56H15Q5 56 5 47V30Q5 23 13 23H15Q20 23 20 18Z',
+  slide: 'M20 7Q25 4 30 9L54 27Q61 32 56 39L45 55Q42 60 35 58L12 51Q5 49 6 41L10 20Q12 12 20 7Z',
+  ramp: 'M14 10Q19 7 26 12L53 29Q59 33 59 41V48Q59 56 49 56H14Q5 56 5 47L8 20Q9 13 14 10Z',
+  echo: 'M9 31Q9 21 19 21H42Q52 21 52 31V45Q52 56 41 56H20Q9 56 9 45Z',
+  lens: 'M26 10Q32 5 38 10Q52 19 58 29Q61 34 57 40Q48 53 37 58Q32 61 27 58Q13 50 6 39Q2 33 7 27Q15 16 26 10Z',
+  ledge: 'M15 10H44Q56 10 56 22V35Q56 41 49 41H47Q43 41 43 46V50Q43 57 35 57H15Q6 57 6 47V21Q6 10 15 10Z',
+  swell: 'M14 11Q32 7 50 12Q59 15 55 24L51 31Q49 35 53 40Q61 50 50 55Q33 61 15 55Q5 52 10 42L13 36Q15 32 11 27Q3 15 14 11Z',
+  parcel: 'M12 20L39 16Q46 15 49 22L54 43Q57 53 47 55L19 59Q10 60 8 51L4 31Q2 22 12 20Z',
+  scoop: 'M12 10Q16 8 22 13Q32 21 42 13Q50 7 54 14L59 36Q63 54 45 57Q30 60 16 55Q3 50 5 36L8 18Q9 12 12 10Z',
+  beam: 'M13 23L44 18Q53 17 57 27L61 38Q64 48 53 50L20 55Q12 56 9 48L4 36Q0 25 13 23Z',
+  chamfer: 'M22 6H42Q48 6 50 12L58 30Q60 35 57 40L49 54Q46 59 40 59H24Q18 59 15 54L7 40Q4 35 7 29L15 12Q17 6 22 6Z',
+  float: 'M6 35Q10 23 26 23H40Q56 23 59 38L60 45Q61 56 49 56H16Q3 56 4 45Z',
 };
 const eyes = {
   dash: 'M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z',
@@ -77,6 +93,7 @@ const eyes = {
   tilted: 'M19 34L23 31Q25 29 27 31Q28 33 26 35L22 38Q19 40 18 38Q17 36 19 34ZM39 29L43 26Q45 24 47 26Q48 28 46 30L42 33Q39 35 38 33Q37 31 39 29Z',
   wide: 'M18 29H21Q24 29 24 32V34Q24 37 21 37H18Q15 37 15 34V32Q15 29 18 29ZM43 29H46Q49 29 49 32V34Q49 37 46 37H43Q40 37 40 34V32Q40 29 43 29Z',
   smallDash: 'M22 31H25Q27 31 27 33Q27 35 25 35H22Q20 35 20 33Q20 31 22 31ZM39 31H42Q44 31 44 33Q44 35 42 35H39Q37 35 37 33Q37 31 39 31Z',
+  sidelong: 'M19 28H25Q27 28 27 30Q27 32 25 32H19Q17 32 17 30Q17 28 19 28ZM44 35A3 3 0 1 1 38 35A3 3 0 1 1 44 35Z',
 };
 
 const arcs = {
@@ -138,6 +155,25 @@ export const AGENT_AVATAR_ART: Readonly<Record<AgentAvatarId, AgentAvatarArt>> =
     accent: { path: 'M32 14L50 18Q59 20 58 29L56 49Q55 57 46 56L29 53Z', color: '#8C9FC9' } },
   'arc-apricot': { body: bodies.arc, color: '#D9B08C', eyes: eyes.curious },
   'tuck-jade': { body: bodies.tuck, color: '#A0BBA2', eyes: '', eyeStroke: arcs.rest },
+  'plate-lavender': { body: bodies.plate, color: '#BEB2D9', eyes: eyes.dots },
+  'drop-melon': { body: bodies.drop, color: '#E4B19D', eyes: eyes.sidelong },
+  'ribbon-blue': { body: bodies.ribbon, color: '#99B9D5', eyes: eyes.dash },
+  'cove-sage': { body: bodies.cove, color: '#B2C1A2', eyes: eyes.side },
+  'terrace-ivory': { body: bodies.terrace, color: '#E1D7C6', eyes: eyes.offset },
+  'slide-rose': { body: bodies.slide, color: '#D7ADBE', eyes: eyes.smallDash },
+  'ramp-mint': { body: bodies.ramp, color: '#9DC6B6', eyes: eyes.low },
+  'echo-ochre': { body: bodies.echo, color: '#E5C588', eyes: eyes.square,
+    accent: { path: 'M26 8H46Q57 8 57 20V38Q57 48 47 48H26Q16 48 16 38V19Q16 8 26 8Z', color: '#B99C65' } },
+  'lens-lilac': { body: bodies.lens, color: '#B8AED9', eyes: eyes.leftWink, eyeStroke: arcs.leftWink },
+  'ledge-aqua': { body: bodies.ledge, color: '#98BFBF', eyes: eyes.upward },
+  'swell-apricot': { body: bodies.swell, color: '#DEB48F', eyes: eyes.inward },
+  'parcel-periwinkle': { body: bodies.parcel, color: '#ABBADF', eyes: eyes.tilted,
+    accent: { path: 'M26 7H47Q55 7 56 16L57 39Q58 49 48 49H26Q17 49 17 40V16Q17 7 26 7Z', color: '#8499C5' } },
+  'scoop-pistachio': { body: bodies.scoop, color: '#C3CBA1', eyes: '', eyeStroke: arcs.smile },
+  'beam-coral': { body: bodies.beam, color: '#DFA495', eyes: eyes.low },
+  'chamfer-jade': { body: bodies.chamfer, color: '#9DBCA9', eyes: eyes.attentive },
+  'float-butter': { body: bodies.float, color: '#E9D49A', eyes: eyes.low,
+    accent: { path: 'M25 8Q42 5 49 18L53 33Q56 44 45 47H26Q16 47 15 37L13 24Q12 11 25 8Z', color: '#C3AE7D' } },
 };
 
 /** Standalone exports and preview boards use the same paths as the application. */

@@ -7,7 +7,10 @@
     "step-blue", "offset-peach", "orbit-sage", "cushion-ochre", "curve-mint", "bevel-rose",
     "drift-blue", "stack-ivory", "tilt-pistachio", "fan-coral", "mound-lavender", "tab-butter",
     "span-jade", "ripple-peach", "facet-blue", "comma-lilac", "inset-sage", "pocket-rose",
-    "rise-ivory", "sweep-aqua", "bend-ochre", "twin-periwinkle", "arc-apricot", "tuck-jade"
+    "rise-ivory", "sweep-aqua", "bend-ochre", "twin-periwinkle", "arc-apricot", "tuck-jade",
+    "plate-lavender", "drop-melon", "ribbon-blue", "cove-sage", "terrace-ivory", "slide-rose",
+    "ramp-mint", "echo-ochre", "lens-lilac", "ledge-aqua", "swell-apricot", "parcel-periwinkle",
+    "scoop-pistachio", "beam-coral", "chamfer-jade", "float-butter"
   ],
   "privateDtos": ["KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
   "mcpCapabilities": [
