@@ -25,7 +25,6 @@ import { ComputerAutomationSection } from '@/components/thread/ComputerAutomatio
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ThreadExecutions } from './ThreadExecutions';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
-import { ThreadPlan } from './ThreadPlan';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadResearch } from './ThreadResearch';
@@ -39,7 +38,7 @@ import { ThreadMcpInteractions } from './ThreadMcpInteraction';
 import { ThreadSourcePicker } from './ThreadSourcePicker';
 import { useThreadRecovery } from './useThreadRecovery';
 import { ThreadRecovery } from './ThreadRecovery';
-import type { ImageAttachment, InferenceBinding, InferenceReceipt } from '@varin/protocol';
+import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
 import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
@@ -55,18 +54,15 @@ import { useThreadWorkFocus } from './useThreadWorkFocus';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
-import type { OverviewPeekRow, OverviewPeekSection } from './WorkOverviewControl';
-import { ThreadWorkOverview, ThreadWorkOverviewSection } from './ThreadWorkOverview';
+import type { OverviewPeekSection } from './WorkOverviewControl';
+import { ThreadOverview } from './ThreadOverview';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
-import { ThreadOutput } from './ThreadMedia';
 import { ThreadInputQueue } from './ThreadQueuedInput';
-import { ChildTasks } from '../conversation/ChildTasks';
-import { childEnded, childTaskRows } from '../conversation/childTaskRows';
 
 // Presentation of owner-defined failure codes; unknown codes keep the owner's safe message.
 const runFailureKeys = new Map<string, I18nKey>([
@@ -78,109 +74,6 @@ const runFailureKeys = new Map<string, I18nKey>([
   ['context_preparation_failed', 'harness.threads.failure.context_preparation_failed'],
   ['execution_failed', 'harness.threads.failure.execution_failed'],
 ]);
-
-const operationCancelLabel = (operation: ThreadSnapshot['operations'][number]): string => {
-  if ((operation.intent as { kind?: string } | null)?.kind === 'inference_request_v1') return 'Stop inference request';
-  if (operation.mcp_resource_subscription) return 'Stop resource observation';
-  if (operation.host_job?.mcpTask) return 'Request remote task cancellation';
-  if (operation.executor === 'dispatch') return 'Cancel child task';
-  if (operation.waiting_on?.startsWith('host-job-wait:')
-    || (operation.execution_owner?.kind === 'kernel' && (operation.executor === 'wait_child'
-      || operation.executor === 'wait_process' || (operation.executor === 'send' && operation.waiting_on !== null)))) {
-    return 'Cancel observation wait';
-  }
-  return 'Cancel operation';
-};
-
-function InferenceStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
-  const intent = operation.intent as { kind?: string; binding?: InferenceBinding } | null;
-  if (intent?.kind !== 'inference_request_v1' || !intent.binding) return null;
-  const state = operation.result?.kind === 'control'
-    ? operation.result.value as { dispatched: boolean; recovered: boolean; receipt?: InferenceReceipt } : undefined;
-  const receipt = state?.receipt;
-  const problem = receipt?.problem;
-  const preparation = intent.binding.requestKind === 'preparation';
-  const explanation = problem === 'receipt_pending' ? preparation
-    ? 'The preparation transport has stopped, but its original response is awaiting durable publication.'
-    : 'The transport has stopped, but its original response is awaiting durable publication. Usage remains unknown until that receipt is stored.'
-    : problem === 'owner_interrupted' ? preparation
-      ? 'The original preparation executor was interrupted; this request will not be replayed.'
-      : 'The original executor was interrupted. Remote usage is unconfirmed; this request will not be replayed.'
-    : problem === 'invalid_response' ? 'The provider response was stored, but its model result was invalid. Check the selected protocol.'
-    : problem === 'http_rejected' ? 'The provider rejected this request. Check the original connection and account.'
-    : problem === 'transport_failed' ? 'The transport stopped without a complete response. Check the original service before requesting another inference.'
-    : problem === 'not_dispatched' ? 'This request was not sent. Check its parent operation, Goal and current access before starting a new inference.'
-    : problem === 'cancelled' ? 'Cancellation was requested. Any usage already received remains accounted.' : null;
-  return <section aria-label="Inference request" className="space-y-1 text-xs text-muted-foreground">
-    <p>{intent.binding.purpose} · {intent.binding.providerId} / {intent.binding.modelId} · {preparation ? 'Preparation' : 'Model compute'}</p>
-    <p>{receipt?.requestStarted === false ? 'Not sent' : receipt?.requestStarted === true ? 'Transport started' : state?.dispatched ? 'Dispatch recorded; sending unconfirmed' : 'Awaiting dispatch'}
-      {' · '}{receipt?.localExecutorStopped ? 'Local executor stopped' : 'Local executor stop unconfirmed'}</p>
-    {preparation ? <p>Tokenization or template preparation; no model inference usage.</p>
-      : <p>Input tokens: {receipt?.usage.inputTokens ?? 'unknown'} · Output tokens: {receipt?.usage.outputTokens ?? 'unknown'}</p>}
-    {!preparation && receipt?.providerCompleted && receipt.usage.measurement === 'missing'
-      && <p>The response does not establish input/output token usage or cost.</p>}
-    {explanation && <p role="status">{explanation}</p>}
-  </section>;
-}
-
-function McpTaskStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
-  const job = operation.host_job;
-  const link = job?.mcpTask;
-  if (!link || job.binding.subject.kind !== 'mcp') return null;
-  const problem = link.problem;
-  const problemText = problem?.kind === 'owner' ? 'The original MCP connection or account is unavailable. Restore that connection to observe this task.'
-    : problem?.kind === 'expired' ? 'The remote task retention period has elapsed. Its execution may still be running.'
-    : problem?.kind === 'unsupported' ? problem.stage === 'cancel' ? 'This server does not support task cancellation. Check the original service.'
-      : problem.stage === 'interaction' ? 'This task needs an interaction that this client does not support. Check the original service.'
-      : 'The original service does not support this task operation. Check its task capabilities before retrying.'
-    : problem?.kind === 'protocol' ? 'The server could not provide a valid task response. Check the original service; the task identity is retained.'
-    : problem?.kind === 'transport' ? 'The original MCP connection could not be reached. Check its connection; observation can resume when it is available.' : null;
-  return <section aria-label="Remote MCP task" className="space-y-1 text-xs text-muted-foreground">
-    <p>{job.binding.subject.endpoint.server} · remote task {link.task.taskId}</p>
-    <p>Remote status: {link.task.status.replaceAll('_', ' ')} · {link.resultReady ? 'Result stored' : 'Result not received'}</p>
-    <p>{operation.external_receipt?.executor_stopped ? 'Executor stop confirmed' : 'Executor stop unconfirmed'}
-      {operation.cancel_requested && ' · Cancellation requested'}</p>
-    {link.task.status === 'cancelled' && !operation.external_receipt?.executor_stopped && <p>The server acknowledged cancellation. This does not prove execution has stopped.</p>}
-    {link.task.status === 'input_required' && <p>The server is waiting for an interaction on the original task result stream.</p>}
-    {link.availability === 'unavailable' && <p>Current task observation unavailable</p>}
-    {problemText && <p role="status">{problemText} · {problem!.stage}{problem!.rpcCode !== undefined ? ` · RPC ${problem!.rpcCode}` : ''}</p>}
-  </section>;
-}
-
-function McpResourceStatus({ operation }: { operation: ThreadSnapshot['operations'][number] }) {
-  const subscription = operation.mcp_resource_subscription;
-  if (!subscription) return null;
-  const availability = {
-    pending: 'Subscription acknowledgement pending',
-    active: 'Resource observation active',
-    gap: 'Resource observation gap: some updates may have been missed',
-    unavailable: 'Resource observation unavailable',
-    closed: 'Resource observation closed',
-  }[subscription.availability];
-  const cleanup = {
-    not_requested: 'Remote cleanup not requested',
-    shared: 'Remote subscription retained for other observers',
-    acknowledged: 'Remote unsubscribe acknowledged',
-    unknown: 'Remote cleanup unconfirmed',
-  }[subscription.remoteCleanup];
-  return <section aria-label="MCP resource observation" className="space-y-1 text-xs text-muted-foreground">
-    <p>{subscription.binding.endpoint.server} · {subscription.binding.uri}</p>
-    <p>{availability}</p>
-    <p>{subscription.localReleased ? 'Local observation released' : 'Local observation retained'} · {cleanup}</p>
-    {subscription.availability === 'gap' && <p>Read the resource explicitly if you need its current contents.</p>}
-    {subscription.problem && <p role="status">{subscription.availability === 'closed' && subscription.localReleased
-      ? 'Observation has ended locally. Check the original service if remote cleanup needs attention.'
-      : 'Check the original MCP connection and resource access. Updates do not read the resource automatically.'}</p>}
-  </section>;
-}
-
-function canCancelOperation(operation: ThreadSnapshot['operations'][number], waitingOn?: string | null): boolean {
-  const subscription = operation.mcp_resource_subscription;
-  if (subscription) return subscription.availability !== 'closed' || !subscription.localReleased;
-  const task = operation.host_job?.mcpTask;
-  return task ? !operation.cancel_requested && (task.task.status === 'working' || task.task.status === 'input_required')
-    : operation.phase !== 'terminal' && (operation.executor !== 'ask_user' || waitingOn === operation.waiting_on);
-}
 
 const resourceErrorMessages = new Map([
   ['resource-missing', 'This skill or resource is missing from the current snapshot. Refresh instructions and skills, then try again.'],
@@ -485,103 +378,32 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const overviewKey = draftKey;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const contentOwner = `${host}:${draftKey}`;
-  const [overviewContent, setOverviewContent] = React.useState<{ owner: string; plan?: boolean; followups?: boolean; research?: boolean; memory?: boolean }>({ owner: '' });
   const [focusedOverview, setFocusedOverview] = React.useState<{ owner: string; section: OverviewPeekSection }>();
-  const reportOverviewContent = React.useMemo(() => {
-    const report = (key: 'plan' | 'followups' | 'research' | 'memory') => (present: boolean) => setOverviewContent(previous => {
-      const current = previous.owner === contentOwner ? previous : { owner: contentOwner };
-      return current[key] === present ? current : { ...current, [key]: present };
-    });
-    return { plan: report('plan'), followups: report('followups'), research: report('research'), memory: report('memory') };
-  }, [contentOwner]);
-  const content = overviewContent.owner === contentOwner ? overviewContent : undefined;
-  const focused = focusedOverview?.owner === contentOwner ? focusedOverview.section : undefined;
+  const [questionReveal, setQuestionReveal] = React.useState(0);
+  const permissions = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => { if (questionReveal) permissions.current?.scrollIntoView({ block: 'nearest' }); }, [questionReveal]);
   const showOverview = (section: OverviewPeekSection) => {
     setFocusedOverview({ owner: contentOwner, section });
-    disclosure(overviewKey, 'overview', true); disclosure(overviewKey, section, true);
+    disclosure(overviewKey, 'overview', true);
   };
-  const checkpoint = snapshot?.context.checkpoint;
-  const resources = checkpoint?.resources?.snapshot;
-  const visibleOperations = snapshot?.operations.filter(operation => operation.id !== pause?.action_id) ?? [];
-  const hasRecovery = Boolean(recovery.notice || recovery.error || recovery.unavailable || recovery.combinedUnavailable
-    || recovery.operation || recovery.canRetry || recovery.canUndo || recovery.savedOperations.length);
-  const hasSummaries = Boolean(checkpoint?.proposal.summary.trim() || snapshot?.context.jobs.length);
-  const sections = {
-    plan: Boolean(snapshot?.goals.length || content?.plan),
-    threads: Boolean(api.collaboration || snapshot?.thread.parent_thread_id),
-    outputs: Boolean(visibleOperations.length || snapshot?.followups.some(item => item.actor.kind !== 'goal') || content?.followups || hasRecovery),
-    sources: Boolean(preparedSource || draft.workspacePath || launch?.selection.source || content?.research || resources?.system
-      || resources?.appendSystem || resources?.instructions.length || resources?.instructionScopes.some(scope => scope.instructions.length)
-      || resources?.skills.length || resources?.diagnostics.length),
-    memory: Boolean(content?.memory || checkpoint?.personalization?.memorySnapshot.memories.length || hasSummaries),
-    computer: hasComputer,
-  };
-  const overviewRows: OverviewPeekRow[] = [];
-  if (sections.plan) overviewRows.push({ id: 'plan', section: 'plan', icon: 'task', label: t('harness.overview.plan') });
-  if (sections.threads) overviewRows.push({ id: 'children', section: 'threads', icon: 'git-branch', label: t('harness.overview.threads'), value: snapshot ? (snapshot.childDirectory?.members.length??childTaskRows(snapshot.children??[],snapshot.childExecutions??[],snapshot.childActivity).filter(row=>!childEnded(row.state)).length) || undefined : undefined });
-  if (sections.outputs) overviewRows.push({ id: 'operations', section: 'outputs', icon: 'list-check-2', label: t('harness.overview.outputs'), value: visibleOperations.length || undefined });
-  if (sections.sources) overviewRows.push({ id: 'sources', section: 'sources', icon: 'folder', label: t('harness.overview.sources') });
-  if (sections.memory) overviewRows.push({ id: 'memory', section: 'memory', icon: 'book-open', label: t('harness.overview.memory') });
-  if (sections.computer) overviewRows.push({ id: 'computer', section: 'computer', icon: 'computer', label: t('computer.automation.title') });
+  const hasSummaries = Boolean(snapshot?.context.checkpoint?.proposal.summary.trim() || snapshot?.context.jobs.length);
   const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
   const emptyWorkspacePath = preparedSource?.path ?? draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot;
-
-  const overview = <ThreadWorkOverview sessionKey={overviewKey}
-    attention={Boolean(run?.waiting_on || recovery.unavailable || error)} rows={overviewRows}
-    onViewChange={() => setFocusedOverview(undefined)}
-    onSelect={section => showOverview(section)}>
-    <div className="border-b border-border/50 px-4 py-3 typography-ui-label font-medium">{t('harness.overview.title')}</div>
-    <div className="thread-work-overview min-h-0 overflow-y-auto">
-      {!overviewRows.length && !focused && <p className="px-3 py-4 typography-meta text-muted-foreground">{t('harness.overview.empty')}</p>}
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="plan" visible={sections.plan || focused === 'plan'} title={t('harness.overview.plan')} icon="task">
-      {!readOnly && snapshot && <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} />}
-      {!readOnly && api.plan && <ThreadPlan api={api.plan} identity={identity} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={reportOverviewContent.plan} />}
-      </ThreadWorkOverviewSection>
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="threads" visible={sections.threads || focused === 'threads'} title={t('harness.overview.threads')} icon="git-branch">
-      {snapshot && <ChildTasks key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} children={snapshot.children ?? []}
-        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending} readOnly={readOnly}
-        onChanged={async () => { await projection.current?.refresh(); }}
-        cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
-    {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
-      </ThreadWorkOverviewSection>
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="outputs" visible={sections.outputs || focused === 'outputs'} title={t('harness.overview.outputs')} icon="list-check-2">
-      {visibleOperations.map(operation => <div key={operation.id} className="mx-auto max-w-3xl rounded border p-2 text-sm">
-        <div>Background operation · {operation.phase} · {operation.outcome ?? 'In progress'} · effect: {operation.effect}</div>
-        <InferenceStatus operation={operation} />
-        <McpTaskStatus operation={operation} />
-        <McpResourceStatus operation={operation} />
-        {operation.host_job?.mcpTaskResult && <details><summary>Remote task result</summary><ThreadOutput api={api} identity={identity}
-          holder={{ kind: 'operation', operationId: operation.id, output: 'mcp_task_result' }} output={operation.host_job.mcpTaskResult} messageId={`${operation.id}:mcp-task-result`} /></details>}
-        {!readOnly && api.processes && operation.executor === 'process_spawn' && operation.call_completion?.kind === 'job_accepted'
-          && (operation.intent as { call?: { arguments?: { mode?: string } } } | null)?.call?.arguments?.mode === 'pty'
-          && <Button variant="outline" size="sm" disabled={pending} onClick={() => void act(() => openProcessTerminal(operation.id))}>Open process terminal</Button>}
-        {operation.external_receipt && <div className="text-xs text-muted-foreground">{operation.external_receipt.executor} · {operation.external_receipt.outcome}</div>}
-        {operation.call_completion && operation.call_completion.kind !== 'not_dispatched' && operation.call_completion.content && <details>
-          <summary>Call output</summary><ThreadOutput api={api} identity={identity} holder={{ kind: 'operation', operationId: operation.id, output: 'completion' }} output={operation.call_completion.content} messageId={`${operation.id}:completion`} />
-        </details>}
-        {operation.result?.kind === 'output' && <details><summary>Operation output</summary><ThreadOutput api={api} identity={identity}
-          holder={{ kind: 'operation', operationId: operation.id, output: 'result' }} output={operation.result.output} messageId={`${operation.id}:result`} /></details>}
-        {operation.external_receipt && <details><summary>External receipt output</summary><ThreadOutput api={api} identity={identity}
-          holder={{ kind: 'operation', operationId: operation.id, output: 'external_receipt' }} output={operation.external_receipt.result} messageId={`${operation.id}:external-receipt`} /></details>}
-        {!readOnly && canCancelOperation(operation, run?.waiting_on) && <Button variant="ghost" size="sm" onClick={() => void act(() => api.cancelOperation(operation.id), true)}>{operationCancelLabel(operation)}</Button>}
-      </div>)}
-      {!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
-        run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
-        cancelObservation={operationId => act(() => api.cancelOperation(operationId))} onContentChange={reportOverviewContent.followups} />}
-    {!readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}
-      </ThreadWorkOverviewSection>
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="sources" visible={sections.sources || focused === 'sources'} title={t('harness.overview.sources')} icon="folder">
-    {!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
+  const overview = <ThreadOverview key={contentOwner} api={api} identity={identity} sessionKey={overviewKey} snapshot={snapshot}
+    request={focusedOverview?.owner === contentOwner ? focusedOverview : undefined} pending={pending} readOnly={readOnly}
+    workspacePath={emptyWorkspacePath} hasComputer={hasComputer} error={error}
+    recoveryAttention={recovery.error || recovery.unavailable || undefined}
+    onAttention={() => { setQuestionReveal(value => value + 1); disclosure(overviewKey, 'overview', false); disclosure(overviewKey, 'compact', false); }}
+    refresh={async () => { await projection.current?.refresh(); }} act={act} openProcess={openProcessTerminal}
+    details={{
+      goals: !readOnly && snapshot ? <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} /> : undefined,
+      sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
       onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, preparedSource: null, sourceSelection: undefined }); }}
-      active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}
-    {!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
+      active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}</>,
+      context: <>{!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
       onAddSkill={addSkill}
       onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
-      {!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} onContentChange={reportOverviewContent.research} />}
-      </ThreadWorkOverviewSection>
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="memory" visible={sections.memory || focused === 'memory'} title={t('harness.overview.memory')} icon="book-open">
-    {snapshot && <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} onContentChange={reportOverviewContent.memory} />}
-    {snapshot && hasSummaries && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
+{snapshot && hasSummaries && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
       <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
       {snapshot.context.checkpoint?.proposal.through_id && <div className="my-2" aria-label="Active context summary">
         <MarkdownRenderer messageId={snapshot.context.checkpoint.id} content={snapshot.context.checkpoint.proposal.summary} />
@@ -598,16 +420,18 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           {!readOnly && !terminal && ['accepted', 'preparing', 'runnable', 'waiting', 'recovering'].includes(jobRun.state) && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.resumeContext(identity, jobRun.id))}>Resume summary preparation</Button>}
         </div>;
       })}
-    </details>}
-      </ThreadWorkOverviewSection>
-      <ThreadWorkOverviewSection sessionKey={overviewKey} section="computer" visible={sections.computer} title={t('computer.automation.title')} icon="computer">
-    {!readOnly && hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
-      <h3 className="typography-meta">{t('computer.automation.title')}</h3>
+    </details>}</>,
+      memory: snapshot && (snapshot.thread.bot_id || snapshot.context.checkpoint?.personalization) ? <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} /> : undefined,
+      research: <>{!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}</>,
+      followups: <>{!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
+        run={run ?? undefined} operations={snapshot.operations} followups={snapshot.followups} pending={pending} act={act}
+        cancelObservation={operationId => act(() => api.cancelOperation(operationId))} />}</>,
+      recovery: <>{!readOnly && <ThreadRecovery recovery={recovery} disabled={active || actionPending} />}</>,
+      computer: <>{!readOnly && hasComputer && <section className="mx-auto w-full max-w-3xl px-4" aria-label={t('computer.automation.title')}>
       <ComputerAutomationSection view={computer} directory={initialWorkspacePath ?? ''} />
-    </section>}
-      </ThreadWorkOverviewSection>
-    </div>
-  </ThreadWorkOverview>;
+    </section>}</>,
+      threads: <>{delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}</>,
+    }} />;
   return <ThreadMaterials api={api.materials} identity={identity} onAddRegion={readOnly ? undefined : region => {
     if (pendingAction.current) throw new Error('Wait for the current message before adding a PDF selection.');
     addContentReference(identity, { ref: `document-selection:${crypto.randomUUID()}`, title: region.title, image: region.image,
@@ -623,8 +447,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
     {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
-      onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('outputs'); void recovery.recover(entry.id); }} />}
-    {!readOnly && snapshot && <ThreadQuestions key={draftKey} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
+      onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('recovery'); void recovery.recover(entry.id); }} />}
+    {!readOnly && snapshot && <ThreadQuestions key={draftKey} revealKey={questionReveal} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
       onCancel={operation => act(() => api.cancelOperation(operation.id))} onAnswer={(operation, answer) => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
@@ -637,10 +461,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
       onFork={!readOnly && snapshot && !history.connecting && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
-      onRecover={!readOnly && !history.connecting && !pending && !active && snapshot ? id => { showOverview('outputs'); void recovery.recover(id); } : undefined}
-      footer={<>      {snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
+      onRecover={!readOnly && !history.connecting && !pending && !active && snapshot ? id => { showOverview('recovery'); void recovery.recover(id); } : undefined}
+      footer={<><div ref={permissions}>{snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
         <ThreadPermission operation={operation} enabled={!readOnly && !pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
-      </div>)}
+      </div>)}</div>
       {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
         models={models} selectedModel={samplingModel} modelError={modelError} />}
 </>} />
@@ -650,7 +474,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {empty && <div className="min-h-6 flex-1" />}
     {!readOnly && <div className="shrink-0 space-y-5 pb-4">
     {empty && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
-    {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('plan')} onFollowups={() => showOverview('outputs')} />}
+    {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
     <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}
       api={api} identity={identity} inputs={snapshot.inputs} pending={pending}
       onSave={async (input, text, images) => {
@@ -758,7 +582,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         agentControls={!snapshot?.thread.bot_id && !delegated ? <ThreadAgentControls workFocus={workFocus} pending={active} disabled={pending || Boolean(draft.firstSend || draft.pendingInput)}
           onWorkFocusChange={workFocus => useThreadDraftStore.getState().patch(draftKey, { workFocus })} /> : undefined}
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
-        onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('memory'); void compactThrough(branch.head!); } : undefined}
+        onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('context'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
@@ -766,7 +590,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         delivery={inputMode} onDeliveryChange={setInputMode} allowNextRun={!delegated}
         onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
         goalArmed={draft.goalArmed} onGoal={() => {
-          if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('plan');
+          if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('goals');
           else if (!draft.pendingInput) useThreadDraftStore.getState().patch(draftKey, { goalArmed: !draft.goalArmed });
         }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
         attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename)]}

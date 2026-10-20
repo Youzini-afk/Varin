@@ -14,17 +14,19 @@ import { ChildState, ChildFileResult } from './childPresentation';
 import { childEnded, childTaskRows } from './childTaskRows';
 
 /** A row follows the newest execution; each report still uses its own immutable owner. */
-export function ChildTasks({ api, identity, children, executions, activity, directory, pending, cancel, readOnly = false, onChanged }: {
+export function ChildTasks({ api, identity, children, executions, activity, directory, pending, cancel, readOnly = false, onChanged, selectedId, onSelect }: {
   api: ThreadsAPI; identity: ThreadIdentity; children: ChildTask[]; executions: DelegatedExecution[];
   pending: boolean; cancel?: (operationId: string) => Promise<unknown>;
   readOnly?: boolean; onChanged?: () => Promise<void>;
+  selectedId?: string; onSelect?(operationId: string | undefined): void;
   activity?: ThreadSnapshot['childActivity'];
   directory?:ThreadSnapshot['childDirectory'];
 }) {
   const { t } = useI18n();
   const [error, setError] = React.useState<string>();
   const [showEnded,setShowEnded]=React.useState(false);
-  const [opened,setOpened]=React.useState<Set<string>>(()=>new Set());
+  const [localOpened,setOpened]=React.useState<Set<string>>(()=>new Set());
+  const opened = onSelect ? new Set(selectedId ? [selectedId] : []) : localOpened;
   const [historyPage,setHistoryPage]=React.useState<import('@varin/application-client').ThreadChildPage>();
   const [cursor,setCursor]=React.useState<string>();
   const [historyLoading,setHistoryLoading]=React.useState(false);
@@ -68,10 +70,10 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
     setCursor(undefined); setHistoryVersion(value => value + 1);
     await onChanged?.();
   };
-  const toggle = (operationId: string, open: boolean) => setOpened(previous => {
+  const toggle = (operationId: string, open: boolean) => { if (onSelect) { onSelect(open ? operationId : undefined); return; } setOpened(previous => {
     if (previous.has(operationId) === open) return previous;
     const next = new Set(previous); if (open) next.add(operationId); else next.delete(operationId); return next;
-  });
+  }); };
   const renderRow = ({ child, latest, state, task }: typeof rows[number]) => {
     const report = latest?.report ?? (latest ? null : child.report);
     const result = latest?.code_result ?? child.code_result;
@@ -84,8 +86,8 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
         expanded={expanded} stopping={stopping} pending={pending} readOnly={readOnly} cancel={cancel} onError={setError} onChanged={changed}
         onToggle={() => toggle(child.operation_id, !expanded)}>{menuButton => <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 hover:bg-interactive-hover [&::-webkit-details-marker]:hidden">
         <AgentAvatar identity={child.child_thread_id} avatar={child.avatar} size={22} />
-        <span className="min-w-0 flex-1 truncate typography-meta font-medium" title={task}>{child.name || child.input.name || task}</span>
-        <ChildState state={stopping ? 'stopping' : state} />{menuButton}
+        <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="min-w-0 truncate typography-meta font-medium" title={task}>{child.name || child.input.name || task}</span><ChildState state={stopping ? 'stopping' : state} /></span>
+          {!expanded && <span className="mt-1 block truncate typography-micro text-muted-foreground">{latest && activity?.[latest.execution_id]?.reason || report?.detail?.split('\n').find(line => line.trim())?.replace(/^#+\s*/, '') || task}</span>}</span>{menuButton}
       </summary>}</ChildTaskMenu>
       {opened.has(child.operation_id)&&<div className="space-y-3 border-l border-border/50 py-2 pl-3 ml-3">
         <p className="whitespace-pre-wrap break-words typography-meta">{task}</p>
@@ -100,10 +102,10 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
   };
   return <div className="space-y-1" aria-label={t('harness.threads.title')}>
     {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
-    {[...active.map(renderRow),<button key="ended" className="flex items-center gap-1 py-1 typography-meta text-muted-foreground" aria-expanded={showEnded} onClick={()=>setShowEnded(value=>!value)}>
+    {selectedId ? rows.filter(row => row.child.operation_id === selectedId).map(renderRow) : [...active.map(renderRow),<button key="ended" className="flex items-center gap-1 py-1 typography-meta text-muted-foreground" aria-expanded={showEnded} onClick={()=>setShowEnded(value=>!value)}>
       <Icon name="arrow-right-s" className={showEnded?'size-3.5 rotate-90':'size-3.5'} />{t('chat.family.history')}
     </button>,...ended.map(renderRow)]}
-    {showEnded&&historyPage?.directory.nextCursor&&<Button size="sm" variant="ghost" disabled={historyLoading} onClick={()=>setCursor(historyPage.directory.nextCursor!)}>{t('chat.family.more')}</Button>}
+    {!selectedId&&showEnded&&historyPage?.directory.nextCursor&&<Button size="sm" variant="ghost" disabled={historyLoading} onClick={()=>setCursor(historyPage.directory.nextCursor!)}>{t('chat.family.more')}</Button>}
   </div>;
 }
 
@@ -114,6 +116,6 @@ function PreviousExecutions({api,identity,child,executionId}:{api:ThreadsAPI;ide
   React.useEffect(()=>{if(!open||!api.collaboration)return;const controller=new AbortController();
     void api.collaboration.executions(identity,child.operation_id,controller.signal).then(value=>{if(!controller.signal.aborted)setExecutions(value.slice(0,-1));},error=>{if(!controller.signal.aborted)setError(String(error));});
     return()=>controller.abort();},[api.collaboration,identity.threadId,identity.branchId,child.operation_id,executionId,open]);
-  return <details open={open} onToggle={event=>setOpen(event.currentTarget.open)}><summary className="cursor-pointer typography-meta text-muted-foreground">{t('chat.children.previousExecutions')}</summary>
+  return <details open={open} onToggle={event=>{if(event.target===event.currentTarget)setOpen(event.currentTarget.open);}}><summary className="cursor-pointer typography-meta text-muted-foreground">{t('chat.children.previousExecutions')}</summary>
     {error&&<p role="alert">{error}</p>}{executions&&<ThreadExecutions api={api} identity={identity} executions={executions}/>}</details>;
 }

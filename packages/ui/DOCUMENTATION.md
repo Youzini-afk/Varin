@@ -81,6 +81,21 @@ their original keys. Source Host discovery is available before creation and gran
 
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.
+The work overview projects current execution, plan steps, child tasks and saved outputs. Its quick view
+floats over the conversation; its docked view has a resizable width and one main scroll region. Opening
+or resizing it does not update the streaming timeline. Empty capability categories are not shown.
+Workspace, goal, follow-up, memory, research and recovery editors mount on first inspection and retain
+their drafts across panel navigation. Context resources and compression jobs share the context detail.
+The plan reader stays subscribed to its existing branch events, while tool/operation bodies are read
+only in their detail view. Full execution controls remain available from the overview menu.
+
+Saved file changes and interactive HTML are projected from native calls and receipts. The overview
+uses its own disposable history reader, so timeline virtualization cannot remove its entries. It finishes
+the current Run's page boundary for file counts and reads older pages as the output list is browsed.
+Failed writes are excluded; editor drafts, committed working-copy changes and applied files keep their
+different labels. File navigation retains the original history item; HTML opens the saved content ref
+with its original Thread/branch. Neither view substitutes the current project's Git changes.
+
 The overview's child section is a task list. Row context menus and hover buttons share actions for
 opening, inspecting, renaming, copying, sending another instruction and stopping the selected task.
 Completed tasks offer continuation through the existing message request path; read-only views hide

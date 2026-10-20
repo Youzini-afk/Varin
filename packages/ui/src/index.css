@@ -442,8 +442,8 @@ div[data-chat-input-footer="true"] {
 /* Remixicon puts fill="currentColor" on root SVG which WebKit renders as background */
 button svg.remixicon,
 [role="button"] svg.remixicon,
-button svg,
-[role="button"] svg {
+button svg:not([data-agent-avatar]),
+[role="button"] svg:not([data-agent-avatar]) {
   background: none !important;
   background-color: transparent !important;
   /* Override inline fill attribute on SVG root */
@@ -460,10 +460,10 @@ button svg:not(.animate-spin),
 }
 
 /* Fix SVG elements inside buttons - remove any rect/circle backgrounds */
-button svg rect,
-button svg circle,
-[role="button"] svg rect,
-[role="button"] svg circle {
+button svg:not([data-agent-avatar]) rect,
+button svg:not([data-agent-avatar]) circle,
+[role="button"] svg:not([data-agent-avatar]) rect,
+[role="button"] svg:not([data-agent-avatar]) circle {
   fill: none !important;
 }
 
@@ -472,8 +472,8 @@ button svg.remixicon path,
 button svg.remixicon circle[fill],
 [role="button"] svg.remixicon path,
 [role="button"] svg.remixicon circle[fill],
-button svg path,
-[role="button"] svg path {
+button svg:not([data-agent-avatar]) path,
+[role="button"] svg:not([data-agent-avatar]) path {
   fill: currentColor !important;
 }
 

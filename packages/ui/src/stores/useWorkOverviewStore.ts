@@ -2,10 +2,12 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 
-type OverviewDisclosure = 'overview' | 'mobile' | 'compact' | 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'endedThreads' | 'sources' | 'memory' | 'computer';
+type OverviewDisclosure = 'overview' | 'mobile' | 'compact' | 'questions' | 'review' | 'plan' | 'outputs' | 'threads' | 'endedThreads' | 'sources' | 'memory' | 'computer' | 'context' | 'goals' | 'followups' | 'recovery' | 'research' | 'operations';
 type OverviewChoices = Partial<Record<OverviewDisclosure, boolean>>;
 
 interface WorkOverviewStore {
+  width: number;
+  setWidth(width: number): void;
   bySession: Record<string, OverviewChoices>;
   parentBySession: Record<string, { sessionId: string; directory?: string }>;
   setDisclosure: (key: string, disclosure: OverviewDisclosure, open: boolean) => void;
@@ -20,6 +22,8 @@ export const EMPTY_WORK_OVERVIEW_CHOICES: OverviewChoices = {};
 export const useWorkOverviewStore = create<WorkOverviewStore>()(
   persist(
     (set) => ({
+      width: 320,
+      setWidth: width => set({ width }),
       bySession: {},
       parentBySession: {},
       setDisclosure: (key, disclosure, open) => set((state) => {
@@ -33,7 +37,7 @@ export const useWorkOverviewStore = create<WorkOverviewStore>()(
     {
       name: 'varin.workOverview.v1',
       storage: createDeferredSafeJSONStorage(),
-      partialize: (state) => ({ bySession: state.bySession }),
+      partialize: (state) => ({ bySession: state.bySession, width: state.width }),
     },
   ),
 );

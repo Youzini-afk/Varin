@@ -208,64 +208,25 @@
   .conversation-composer-models { column-gap: 0; }
 }
 
-.workbench-overview-heading {
-  transition: color 180ms ease, background-color 180ms ease;
-  font-variant-numeric: tabular-nums;
-}
-.workbench-overview-launcher { isolation: isolate; }
-.workbench-overview-launcher::before {
-  content: '';
-  position: absolute;
-  inset: -4px -4px -14px;
-  z-index: -2;
-}
-.workbench-overview-peek-trigger {
-  position: absolute;
-  top: calc(100% - 2px);
-  left: 2px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 16px;
-  z-index: -1;
-  padding-top: 2px;
-  border: 1px solid var(--border);
-  border-top: 0;
-  border-radius: 0 0 8px 8px;
-  background: var(--surface-elevated);
-  color: var(--muted-foreground);
-  opacity: 0;
-  transform: translateY(-7px);
-  pointer-events: none;
-  transition: transform var(--wb-state-duration) var(--wb-ease), opacity var(--wb-state-duration) ease;
-}
-.workbench-overview-launcher:hover .workbench-overview-peek-trigger,
-.workbench-overview-launcher:has(button:focus-visible) .workbench-overview-peek-trigger,
-.workbench-overview-launcher[data-peek-open="true"] .workbench-overview-peek-trigger {
-  opacity: 1;
-  transform: translateY(0);
-  pointer-events: auto;
-}
-.workbench-overview-peek-trigger:hover,
-.workbench-overview-peek-trigger:focus-visible { color: var(--foreground); }
-.workbench-overview-peek-trigger:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.workbench-overview-control { width: 0; transition: width var(--wb-panel-duration) var(--wb-ease); }
-.workbench-overview-control[data-view="compact"] { width: calc(var(--wb-overview-compact-width) + 1.5rem); }
-.workbench-overview-control[data-view="full"] { width: calc(var(--wb-overview-full-width) + 1.5rem); }
-.workbench-overview-peek {
-  width: calc(100% - 1.5rem);
-  margin: 3.5rem .75rem .75rem;
-  background: var(--surface-elevated);
-}
-.workbench-overview-full { width: 100%; }
-.workbench-overview-peek-progress > span { transition: width var(--wb-state-duration) ease; }
+.workbench-overview-control { width: 0; transition: width var(--wb-panel-duration) var(--wb-ease); z-index: 30; }
+.workbench-overview-control[data-view="full"] { width: var(--wb-overview-full-width); max-width: 60%; }
+.workbench-overview-full { border-left: 1px solid var(--border); }
+.workbench-overview-full[hidden], .workbench-overview-launcher[hidden] { display: none; }
+.workbench-overview-peek { width: min(304px, calc(100cqw - 24px)); background: var(--surface-elevated); }
+.workbench-overview-resizer { position: absolute; top: 0; bottom: 0; left: -3px; width: 7px; cursor: col-resize; touch-action: none; }
+.workbench-overview-resizer:hover, .workbench-overview-resizer:focus-visible { background: color-mix(in srgb, var(--primary-base) 20%, transparent); }
+.thread-overview-section { margin-top: 24px; }
+.thread-overview-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.thread-overview-action { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 4px; text-align: left; border-radius: 6px; }
+.thread-overview-action:hover { background: var(--interactive-hover); }
+.thread-overview-detail { padding-bottom: 16px; }
+.thread-overview-detail > details { max-height: none; overflow: visible; }
 @container (max-width: 600px) {
-  .thread-conversation-layout { flex-direction: column-reverse; }
-  .workbench-overview-control { height: 0; }
-  .workbench-overview-control[data-view="compact"],
-  .workbench-overview-control[data-view="full"] { width: 100%; height: auto; max-height: 45%; }
+  .workbench-overview-control[data-view="full"] { width: 100%; max-width: none; }
+  .thread-conversation-layout:has(.workbench-overview-control[data-view="full"]) > div:first-child { display: none; }
+  .workbench-overview-resizer { display: none; }
 }
+@media (prefers-reduced-motion: reduce) { .workbench-overview-control { transition: none; } }
 
 @keyframes wb-action-arrive {
   from { opacity: 0; transform: translateY(3px) scale(.65); }

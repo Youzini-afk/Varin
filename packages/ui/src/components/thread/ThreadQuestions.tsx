@@ -6,13 +6,15 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 
 /** Pending native Operations stay answerable after the popup is folded. */
-export function ThreadQuestions({ operations, enabled, onAnswer, onCancel }: {
+export function ThreadQuestions({ operations, enabled, onAnswer, onCancel, revealKey }: {
+  revealKey?: number;
   operations: Operation[]; enabled(operation: Operation): boolean;
   onCancel(operation: Operation): Promise<unknown>;
   onAnswer(operation: Operation, answer: string): Promise<unknown>;
 }) {
   const { t } = useI18n();
   const [hidden, setHidden] = React.useState<Set<string>>(() => new Set());
+  React.useEffect(() => { if (revealKey) setHidden(new Set()); }, [revealKey]);
   const questions = operations.filter(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal');
   const open = questions.filter(operation => !hidden.has(operation.id));
   if (!questions.length) return null;

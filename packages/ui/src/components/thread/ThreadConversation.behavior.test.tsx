@@ -118,6 +118,19 @@ vi.mock('@/components/ui/context-menu', async () => {
   };
 });
 
+// Drive the same menu selection semantics; browser checks cover floating geometry.
+vi.mock('@/components/ui/dropdown-menu', async () => {
+  const { createContext, useContext, useState, cloneElement } = await import('react');
+  const State = createContext({ open: false, setOpen: (_value: boolean) => {} });
+  return {
+    DropdownMenu: ({ children }: React.PropsWithChildren) => { const [open, setOpen] = useState(false); return <State.Provider value={{ open, setOpen }}>{children}</State.Provider>; },
+    DropdownMenuTrigger: ({ children }: { children: React.ReactElement<React.HTMLAttributes<HTMLElement>> }) => { const state = useContext(State); return cloneElement(children, { onClick: () => state.setOpen(!state.open) }); },
+    DropdownMenuContent: ({ children }: React.PropsWithChildren) => useContext(State).open ? <div role="menu">{children}</div> : null,
+    DropdownMenuItem: ({ children, onSelect, onClick, disabled }: React.PropsWithChildren<{ onSelect?(): void; onClick?(): void; disabled?: boolean }>) => { const state = useContext(State); return <button role="menuitem" disabled={disabled} onClick={() => { onSelect?.(); onClick?.(); state.setOpen(false); }}>{children}</button>; },
+    DropdownMenuSeparator: () => <hr />,
+  };
+});
+
 // This suite tests native conversation ownership and its real message controls. The
 // virtual viewport's geometry and scrolling require a browser, so render its rows here.
 vi.mock('@legendapp/list/react', () => ({ LegendList: React.forwardRef((props: {
@@ -241,6 +254,20 @@ const choosePdfs = async (...files: File[]) => {
   });
 };
 const composerForm = () => container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!;
+const openOverview = async (section: string) => {
+  const root = container.querySelector<HTMLElement>('.workbench-overview-control')!;
+  if (root.dataset.view !== 'full') await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="harness.overview.more"]')!.click());
+  const key = section.startsWith('computer.') ? section : `harness.overview.${section}`;
+  const label = translations.dictionary[key] ?? key;
+  const item = [...document.querySelector<HTMLElement>('[role="menu"]')!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label);
+  expect(item, `Overview detail ${section}`).toBeDefined();
+  await act(async () => item!.click());
+};
+const openOperation = async (id: string) => {
+  await openOverview('operations');
+  await act(async () => container.querySelector<HTMLButtonElement>(`[data-operation-id="${id}"]`)!.click());
+};
 
 it('opens and closes the work overview during streaming without redrawing the conversation for disclosure', async () => {
   const f = fixture(true);
@@ -294,6 +321,21 @@ it('waits for the original snapshot before choosing submit or enqueue for a rest
   await submitForm(composerForm());
   expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ text: 'Restored draft', mode: 'boundary' }));
   expect(f.submit).not.toHaveBeenCalled();
+});
+
+it('loads workspace details only when opened and retains the editor across overview navigation', async () => {
+  const f = fixture();
+  const list = vi.fn(f.api.sources.list); f.api.sources.list = list;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(list).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="harness.threads.title"]')).toBeNull();
+  await openOverview('workspace');
+  expect(list).toHaveBeenCalledTimes(1);
+  await edit('[aria-label="Workspace folder"]', '/workspace/draft');
+  await openOverview('context');
+  await openOverview('workspace');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Workspace folder"]')!.value).toBe('/workspace/draft');
+  expect(list).toHaveBeenCalledTimes(1);
 });
 
 it('sends a new conversation from its captured project workspace, independent of later navigation', async () => {
@@ -396,7 +438,9 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   f.api.cancelOperation = cancelOperation;
   f.view.inputs.push({ id: 'queued-existing', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'ui-run', mode: 'boundary', state: 'queued', revision: 3, content: { text: 'original queued text' }, cursor: 1 });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await openOperation(job.id);
   expect(button('Cancel operation')).toBeDefined();
+  await openOperation(observation.id);
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation.mock.calls).toEqual([[observation.id]]);
   expect(job.cancel_requested).toBe(false);
@@ -456,7 +500,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
     ? expect(container.textContent).not.toMatch(/chat.children.(filesPublished|noChanges|settling|filesUnavailable)/)
     : expect(container.textContent).toContain('chat.children.settling');
   assertFileResult();
-  expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
+  await openOperation(observation.id);
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
   expect(cancelChild).not.toHaveBeenCalled();
@@ -468,7 +512,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   expect(cancelChild).toHaveBeenCalledExactlyOnceWith(identity, 'original-child');
   // A short admission ACK is not a process-stop or file-publication fact.
   assertFileResult();
-  expect(container.textContent).toContain('Background operation · running · In progress · effect: unknown');
+  expect(container.textContent).toContain('harness.threads.state.running');
   expect(container.textContent).not.toContain('The original child report');
   child.state = finalState; child.report = report;
   await act(async () => f.emit({ cursor: 4, subject: child.operation_id, revision: 4, kind: 'child.completed', data: {} }));
@@ -553,6 +597,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
   const resumeRun = vi.fn(f.api.resume); f.api.resume = resumeRun;
   f.api.followups = { ...f.api.followups, register, control, get, list: async () => f.view.followups };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'process_stopped', 'change');
   await edit('[aria-label="Follow-up process"]', 'process:original', 'change');
@@ -598,6 +643,7 @@ it('retains an exact absolute time across an uncertain retry and exposes explici
     followup.trigger = { kind: 'at', at_ms: input.trigger.kind === 'at' ? input.trigger.atMs : 0 }; f.view.followups = [followup]; return followup;
   }); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   const chosen = '2030-02-03T04:05:06'; await edit('[aria-label="Follow-up time"]', chosen);
   await edit('[aria-label="Follow-up instruction"]', '  Check the original output.\nKeep the dependency blocked.  ');
@@ -628,6 +674,7 @@ it.each(['any', 'all'] as const)('registers %s conditions as one retained intent
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
   f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', kind, 'change');
   await edit('[aria-label="Condition 1 time"]', chosen);
@@ -1146,6 +1193,7 @@ it('adds a hidden skill command and retains the draft and image through a resour
     reference: { ...skill.reference, canonicalId: 'resource:spaced-name', path: '.pi/skills/spaced/SKILL.md' } });
   f.view.context.checkpoint = checkpoint;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('context');
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   expect(container.textContent).toContain('Hidden from automatic model discovery');
   expect(button('Add /skill:review-code extra to draft').disabled).toBe(true);
@@ -1261,6 +1309,7 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
   f.api.resources.refresh = refresh;
   const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('context');
   const resources = () => container.querySelector('[aria-label="Instructions and skills"]')!;
   expect(resources().textContent).toContain('resources:original');
   expect(resources().textContent).toContain('review-code');
@@ -1341,6 +1390,7 @@ it('prepares a real source selection, preserves it and the draft on uncertain se
   f.api.prepareSource = vi.fn().mockRejectedValueOnce(new Error('capture unavailable')).mockResolvedValue(prepared);
   f.submit.mockRejectedValueOnce(new Error('send uncertain'));
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await openOverview('workspace');
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'preserve this draft');
   await act(async () => { button('Prepare workspace').click(); });
@@ -1367,9 +1417,11 @@ it('discards in-flight source preparation when the API owner changes', async () 
   let resolvePrepare!: (value: Awaited<ReturnType<ThreadsAPI['prepareSource']>>) => void;
   f.api.prepareSource = () => new Promise(resolve => { resolvePrepare = resolve; });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/old-host/project" />); });
+  await openOverview('workspace');
   await act(async () => { button('Prepare workspace').click(); });
   const next = fixture();
   await act(async () => { root.render(<ThreadConversation api={next.api} identity={identity} initialWorkspacePath="/new-host/project" />); });
+  await openOverview('workspace');
   await act(async () => { resolvePrepare({ path: '/old-host/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'old-host-workspace', executionWorkspaceId: 'old-host-workspace', branchId: 'old-host-source', revision: 0, mode: 'fixed_branch', tools: ['file_read'] } }); });
   expect(container.querySelector('[aria-label="Prepared workspace"]')).toBeNull();
   expect(button('Preparing workspace snapshot')).toBeUndefined();
@@ -1379,6 +1431,7 @@ it('does not silently discard a prepared workspace when a live run appears befor
   const f = fixture();
   f.api.prepareSource = vi.fn().mockResolvedValue({ path: '/workspace/project', source: { resourceOwner: { kind: 'local' as const }, workspaceId: 'prepared-ws', executionWorkspaceId: 'prepared-ws', branchId: 'prepared-source', revision: 0, mode: 'materialized', tools: ['file_read', 'file_write'] } });
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await openOverview('workspace');
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await edit('[aria-label="Message thread"]', 'run on prepared workspace');
   await act(async () => { button('Prepare workspace').click(); });
@@ -1471,6 +1524,7 @@ it('requires an explicit live workspace choice and discloses direct effects befo
     liveRoot: { hostId: 'selected-host', canonicalRoot: '/workspace/project', rootId: 'registered-root' }, tools: ['file_read' as const, 'file_write' as const] } };
   f.api.prepareSource = vi.fn().mockResolvedValue(prepared);
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await openOverview('workspace');
   expect(container.querySelector<HTMLSelectElement>('[aria-label="Workspace access"]')!.value).toBe('fixed_branch');
   expect(f.api.prepareSource).not.toHaveBeenCalled();
   await edit('[aria-label="Workspace access"]', 'live_root', 'change');
@@ -1495,6 +1549,7 @@ it.each(['fixed_branch', 'materialized'] as const)('reprepares %s and submits th
     mode, tools: mode === 'fixed_branch' ? ['file_read' as const] : [...live.source.tools, 'file_write' as const] } };
   f.api.prepareSource = vi.fn().mockResolvedValueOnce(live).mockResolvedValueOnce(fixed);
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/workspace/project" />); });
+  await openOverview('workspace');
   await edit('[aria-label="Workspace access"]', 'live_root', 'change');
   await act(async () => { button('Prepare workspace').click(); });
   expect(f.api.prepareSource).toHaveBeenLastCalledWith(expect.objectContaining({ mode: 'live_root' }), expect.any(AbortSignal));
@@ -1651,6 +1706,7 @@ it('starts an explicit goal from the latest finished Run and keeps Stop run avai
   const start = vi.fn<ThreadsAPI['goals']['start']>(() => new Promise(resolve => { finish = resolve; }));
   f.api.goals.start = start;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('goals');
   await act(async () => button('Create goal').click());
   await edit('[aria-label="New goal objective"]', 'Continue the finished work');
   await act(async () => button('Start goal').click());
@@ -1680,6 +1736,7 @@ it.each([
   const result = { sessionId: 'original-terminal', cwd: '/original-workspace', resourceOwner, operationId: operation.id, processId: operation.id };
   const open = vi.fn(async () => result); f.api.processes = { openTerminal: open };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await openOperation(f.view.operations[0]!.id);
   await act(async () => { button('Open process terminal').click(); });
   expect(open).toHaveBeenCalledWith({ ...identity, operationId: operation.id });
   expect(attachProcessTerminal).toHaveBeenCalledWith(result.cwd, result.sessionId, 'Agent process', resourceOwner, {
@@ -1730,6 +1787,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   f.api.collaboration = { integration: vi.fn(), continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
     readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  await openOverview('threads');
   expect(container.querySelector<HTMLSelectElement>('[aria-label="Registered model"]')?.disabled).toBe(true);
   if (sourceFree) expect(container.textContent).not.toContain('chat.children.filesPublished');
   else expect(container.textContent).toContain('chat.children.filesPublished');
@@ -1782,6 +1840,7 @@ it('retains an original file condition after a lost reply and displays unavailab
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
   f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'file', 'change');
   await edit('[aria-label="Follow-up file path"]', 'results/output.txt');
@@ -1813,6 +1872,7 @@ it('discovers retained unconfirmed file resources and retries their explicit can
   cancel.mockRejectedValueOnce(new Error('cancellation reply unavailable'));
   f.api.followups.cancelRegistration = cancel;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(container.textContent).toContain('File resources were accepted, but this follow-up has not been registered.');
   expect(container.textContent).toContain('results/exact.txt');
   await act(async () => button('Cancel unconfirmed registration').click());
@@ -1838,6 +1898,7 @@ it.each(['job_stopped', 'any', 'all'] as const)('registers %s from accepted fami
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('accepted response lost')).mockRejectedValueOnce(new Error('still uncertain'));
   f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   expect(f.view.operations).toEqual([]);
   await edit('[aria-label="Follow-up trigger"]', kind, 'change');
@@ -1868,6 +1929,7 @@ it('discards a late accepted-job query from the previous work Run and keeps a fa
   let release: ((value: Awaited<ReturnType<ThreadsAPI['followups']['jobSources']>>) => void) | undefined;
   f.api.followups.jobSources = vi.fn<ThreadsAPI['followups']['jobSources']>().mockImplementationOnce(() => new Promise(resolve => { release = resolve; })).mockRejectedValue(new Error('original source unavailable'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'job_stopped', 'change');
   f.view.activeRun = { ...f.view.activeRun!, id: 'new-work' };
@@ -1903,6 +1965,7 @@ it('requires legal repeat conditions and keeps the original repeated authorizati
     .mockImplementation(async () => { f.view.followups = [followup]; return followup; });
   f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
   await edit('[aria-label="Follow-up time"]', '2030-02-03T04:05:06');
@@ -1955,6 +2018,7 @@ it('keeps repeating controls after delivery and reads each historical occurrence
     nextCursor: null, scanned: 1, scanComplete: true, hasEarlier: false, hasLater: false }));
   f.api.family = { read, list: vi.fn(), runs: vi.fn(), item: vi.fn() };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(button('Cancel follow-up')).toBeDefined(); expect(button('Pause follow-up')).toBeDefined(); expect(occurrences).not.toHaveBeenCalled();
   await act(async () => button('Read occurrence history').click());
   const history = () => container.querySelector('[aria-label="Follow-up occurrence history"]')!;
@@ -2000,6 +2064,7 @@ it('aborts occurrence reads on close, Host and branch changes and ignores late p
   const occurrences = vi.fn<ThreadsAPI['followups']['occurrences']>(() => new Promise(resolve => releases.push(resolve)));
   const control = vi.fn(f.api.followups.control); f.api.followups = { ...f.api.followups, occurrences, control };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Read occurrence history').click());
   const closed = occurrences.mock.calls[0]![3]!;
   await act(async () => button('Hide occurrence history').click()); expect(closed.aborted).toBe(true);
@@ -2008,6 +2073,7 @@ it('aborts occurrence reads on close, Host and branch changes and ignores late p
   await act(async () => button('Read occurrence history').click());
   const oldHost = occurrences.mock.calls[1]![3]!;
   await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
+  await openOverview('followups');
   expect(oldHost.aborted).toBe(true);
   await act(async () => releases[1]!({ occurrences: [repeatedOccurrence('late-host', 20, true)], nextCursor: null }));
   expect(container.textContent).not.toContain('late-host');
@@ -2016,6 +2082,7 @@ it('aborts occurrence reads on close, Host and branch changes and ignores late p
   const nextIdentity = { ...identity, branchId: 'branch:new' };
   const next = fixture(true); next.view.identity = nextIdentity; next.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
   await act(async () => root.render(<ThreadConversation api={next.api} identity={nextIdentity} />));
+  await openOverview('followups');
   expect(oldBranch.aborted).toBe(true);
   await act(async () => releases[2]!({ occurrences: [repeatedOccurrence('late-branch', 30, true)], nextCursor: null }));
   expect(container.textContent).not.toContain('late-branch'); expect(control).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
@@ -2030,6 +2097,7 @@ it('offers the original definition retry when an older occurrence failed and the
   f.api.followups.occurrences = vi.fn(async () => ({ occurrences: [older, followup.occurrence!], nextCursor: null }));
   const control = vi.fn<ThreadsAPI['followups']['control']>(async () => followup); f.api.followups.control = control;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(container.querySelector('[aria-label="Latest follow-up occurrence"]')!.textContent).toContain('input:latest-delivered');
   await act(async () => button('Retry undelivered occurrences').click());
   expect(control).toHaveBeenCalledExactlyOnceWith({ ...identity, followupId: followup.id, expectedRevision: followup.revision, action: 'resume' });
@@ -2065,6 +2133,7 @@ it.each(['any', 'artifactId', 'name', 'collection'] as const)('registers exact r
   f.api.followups.jobSources = vi.fn(async () => [job, { ...unsupported, observationKinds: [...unsupported.observationKinds] }]);
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('acceptance reply lost')); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', selector === 'collection' ? 'collection' : 'artifact', 'change');
   const picker = container.querySelector('[aria-label="Follow-up job"]')!;
@@ -2099,6 +2168,7 @@ it('allows repeatable artifact and collection in Any and FIFO All while keeping 
   const f = fixture(true); const job = researchJob(); f.api.followups.jobSources = async () => [job];
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('uncertain')); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
   await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
@@ -2124,6 +2194,7 @@ it('reads frozen O1 research metadata on demand with distinct source cursors whi
   const detail = vi.fn<ThreadsAPI['followups']['occurrence']>(async (_identity, _followup, id) => researchDetail(id === first.id ? first : second));
   f.api.followups.occurrence = detail; f.api.followups.occurrences = async () => ({ occurrences: [first], nextCursor: null });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(detail).not.toHaveBeenCalled();
   await act(async () => button('Read occurrence history').click());
   const history = () => container.querySelector('[aria-label="Follow-up occurrence history"]')!;
@@ -2150,6 +2221,7 @@ it('rejects wrong occurrence or mismatched accepted-source metadata and retries 
     .mockResolvedValueOnce(wrongCursor).mockResolvedValueOnce(good);
   f.api.followups.occurrence = detail;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Read occurrence metadata').click());
   for (let retry = 0; retry < 3; retry++) {
     expect(container.textContent).toContain('Original occurrence metadata could not be read');
@@ -2169,15 +2241,18 @@ it('discards late occurrence metadata after close, a newer occurrence, Host repl
   const open = async () => { await act(async () => button('Read occurrence metadata').click()); return detail.mock.calls.at(-1)![3]!; };
   const late = async (index: number, original: typeof first) => { await act(async () => releases[index]!(researchDetail(original))); expect(container.textContent).not.toContain('"byteLength"'); };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   const closed = await open(); await act(async () => button('Hide occurrence metadata').click()); expect(closed.aborted).toBe(true); await late(0, first);
   const previous = await open(); followup.occurrence = second;
   await act(async () => f.emit({ cursor: 50, subject: followup.id, revision: 2, kind: 'followup.changed', data: {} }));
   expect(previous.aborted).toBe(true); await late(1, first);
   const oldHost = await open(); await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
+  await openOverview('followups');
   expect(oldHost.aborted).toBe(true); await late(2, second);
   const oldBranch = await open(); const nextIdentity = { ...identity, branchId: 'branch:other' }; const next = fixture(true);
   next.view.identity = nextIdentity; next.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
   await act(async () => root.render(<ThreadConversation api={next.api} identity={nextIdentity} />));
+  await openOverview('followups');
   expect(oldBranch.aborted).toBe(true); await late(3, second);
   expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
 });
@@ -2189,6 +2264,7 @@ it('keeps failed collection with no records distinct from a genuinely empty comp
     { source_index: 1, accepted_cursor: 20, trigger_cursor: 80, evidence: { kind: 'collection', binding, completion_revision: 7, outcome: 'failed', counts: { available: 0, failed: 0, expired: 0, pending: 0 }, gap: true } },
   ] } }; f.view.followups = [followup];
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   const latest = () => container.querySelector('[aria-label="Latest follow-up occurrence"]')!;
   expect(latest().textContent).toContain('source file absence is unproven'); expect(latest().textContent).toContain('collection failed');
   expect(latest().textContent).toContain('observation gap'); expect(latest().textContent).not.toContain('empty collection');
@@ -2229,6 +2305,7 @@ it('registers exact log bytes on accepted task-family work and preserves the com
       f.view.followups = [followup]; return followup;
     }); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'log_literal', 'change');
   expect(container.querySelector('[aria-label="Follow-up job"]')?.textContent).toContain('attempt:historical-research');
@@ -2265,6 +2342,7 @@ it('defaults log matching to published history, accepts whitespace literals and 
   const f = fixture(true); const job = logJob(); f.api.followups.jobSources = async () => [job];
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValue(new Error('uncertain')); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'any', 'change');
   await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
@@ -2300,6 +2378,7 @@ it('keeps frozen log occurrence evidence while the source advances and controls 
     return structuredClone(followup);
   }); f.api.followups = { ...f.api.followups, occurrences: history, occurrence: details, get, control };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(container.textContent).toContain('stderr literal match · bytes 2–5 (end exclusive) · 8 published bytes · job revision 4');
   await act(async () => button('Read occurrence history').click());
   followup.occurrence = second; followup.sources[0]!.log!.offset = 21;
@@ -2330,8 +2409,10 @@ it('discards late literal reads after close, Host replacement and branch navigat
   const open = async () => { await act(async () => button('Read follow-up instruction and literal').click()); return get.mock.calls.at(-1)![2]!; };
   const late = async (index: number) => { await act(async () => releases[index]!(result)); expect(container.textContent).not.toContain('OLD-LITERAL'); };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   const closed = await open(); await act(async () => button('Hide follow-up instruction and literal').click()); expect(closed.aborted).toBe(true); await late(0);
   const host = await open(); await act(async () => { endpoint.generation++; for (const listener of endpoint.listeners) listener(); });
+  await openOverview('followups');
   expect(host.aborted).toBe(true); await late(1);
   const branch = await open(); const nextIdentity = { ...identity, branchId: 'branch:next' }; const next = fixture(true);
   next.view.identity = nextIdentity; next.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
@@ -2339,6 +2420,7 @@ it('discards late literal reads after close, Host replacement and branch navigat
   const currentResult = { ...result, followup: nextFollowup, registration_trigger: { kind: 'log_literal' as const, operationId: logJob().binding.operationId, stream: 'stderr' as const, literal: '<img src=x>' } };
   next.api.followups.get = vi.fn<ThreadsAPI['followups']['get']>().mockRejectedValueOnce(new Error('read unavailable')).mockResolvedValue(currentResult);
   await act(async () => root.render(<ThreadConversation api={next.api} identity={nextIdentity} />));
+  await openOverview('followups');
   expect(branch.aborted).toBe(true); await late(2);
   await act(async () => button('Read follow-up instruction and literal').click());
   expect(container.textContent).toContain('The original follow-up could not be read.');
@@ -2355,6 +2437,7 @@ it('moves exhausted logs into history only after pending deliveries finish, with
   followup.observation = { wait_id: 'wait:log-observation', operation_id: 'operation:log-observation', run_id: 'ui-run', state: 'exhausted', delivered: false, delivery_pending: true };
   f.view.followups = [followup];
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(container.querySelector('[aria-label="Pending follow-up"]')).not.toBeNull();
   expect(container.textContent).toContain('Log ended without satisfying the condition');
   expect(container.textContent).toContain('Stream ended without a literal match');
@@ -2401,6 +2484,7 @@ it('registers a single stream end and shows its fixed empty-stream evidence sepa
   followup.sources[0]!.observed = { accepted_cursor: 10, trigger_cursor: 10, evidence: occurrence.evidence };
   const register = vi.fn<ThreadsAPI['followups']['register']>(async () => { f.view.followups = [followup]; return followup; }); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'log_end', 'change');
   await edit('[aria-label="Follow-up job"]', job.binding.operationId, 'change');
@@ -2453,6 +2537,7 @@ it.each([
   const f = fixture(true); const resources = withMetricResources(f);
   const register = vi.fn<ThreadsAPI['followups']['register']>(async () => metricFollowup()); f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   expect(resources).not.toHaveBeenCalled();
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', kind, 'change');
@@ -2500,6 +2585,7 @@ it('requires a finite threshold and stable GPU UUID, then retains the complete u
   const register = vi.fn<ThreadsAPI['followups']['register']>().mockRejectedValueOnce(new Error('reply lost')).mockResolvedValue(metricFollowup());
   f.api.followups.register = register;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   await act(async () => button('Schedule a follow-up').click());
   await edit('[aria-label="Follow-up trigger"]', 'metric', 'change');
   await edit('[aria-label="Follow-up repetition"]', 'each', 'change');
@@ -2549,6 +2635,7 @@ it('shows original metric evidence and unknown holding without inventing occurre
   const details = vi.fn(f.api.followups.occurrence); f.api.followups.occurrence = details;
   const resources = withMetricResources(f);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   const latest = () => container.querySelector('[aria-label="Latest follow-up occurrence"]')!;
   expect(latest().textContent).toContain('CPU usage 80 %'); expect(latest().textContent).toContain('sample revision 9');
   expect(latest().textContent).toContain('machine revision 4'); expect(latest().textContent).toContain('1970-01-01T00:00:01.000Z');
@@ -2580,6 +2667,7 @@ it('discards late machine reads after closing, changing Run, Host or Thread/bran
   const releases: Array<(result: Directory) => void> = [];
   resources.mockImplementation(() => new Promise(resolve => releases.push(resolve)));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('followups');
   const open = async () => {
     await act(async () => button('Schedule a follow-up').click());
     await edit('[aria-label="Follow-up trigger"]', 'metric', 'change');
@@ -2600,12 +2688,14 @@ it('discards late machine reads after closing, changing Run, Host or Thread/bran
   const oldHost = resources.mock.calls.at(-1)![1]!;
   await act(async () => { endpoint.generation += 1; for (const listener of endpoint.listeners) listener(); });
   expect(oldHost.aborted).toBe(true); await late(2);
+  await openOverview('followups');
   const oldBranch = await open();
   const nextIdentity = { ...identity, threadId: 'thread:metric-next', branchId: 'branch:metric-next' };
   f.view.identity = nextIdentity; f.view.thread.thread_id = nextIdentity.threadId;
   f.view.thread.branches[0]!.branch_id = nextIdentity.branchId;
   f.view.activeRun = { ...f.view.activeRun!, thread_id: nextIdentity.threadId, branch_id: nextIdentity.branchId };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={nextIdentity} />));
+  await openOverview('followups');
   expect(oldBranch.aborted).toBe(true); await late(3);
   resources.mockRejectedValueOnce(new Error('connection unavailable'));
   await open();
@@ -2627,6 +2717,7 @@ it('shows Native Computer owner state and stops the exact displayed execution wi
   vi.mocked(f.api.computer.stop).mockResolvedValue({ state: { ...computerState, currentExecution: null, currentRootExecution: null,
     status: 'cancel-unconfirmed', cleanups: [{ execution, desktopId: 'desktop', status: 'cancel-unconfirmed' }] } });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('computer.automation.title');
   expect(f.api.computer.state).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
   await act(async () => button('computer.automation.stop').click());
   expect(f.api.computer.stop).toHaveBeenCalledWith(identity, { runId: 'computer-run', desktopId: undefined });
@@ -2672,6 +2763,7 @@ it('reads actual operation completion, result and external receipt images throug
     call_completion: { kind: 'result', outcome: 'failed', effect: 'partial', content: output }, result: { kind: 'output', output },
     external_receipt: { executor: 'script', identity: 'receipt', epoch: 'epoch', outcome: 'failed', effect: 'partial', result: output, executor_stopped: true } }];
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(f.view.operations[0]!.id);
   expect(f.api.mediaRead).not.toHaveBeenCalled();
   expect(container.textContent).toContain('failed'); expect(container.textContent).toContain('partial');
   for (const view of [...document.querySelectorAll<HTMLButtonElement>('button')].filter(value => value.textContent === 'chat.media.view')) {
@@ -2707,6 +2799,7 @@ it('keeps accepted remote task control after its Run ends and distinguishes canc
     return structuredClone(operation);
   }); f.api.cancelOperation = cancel;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(f.view.operations[0]!.id);
   const card = () => container.querySelector('[aria-label="Remote MCP task"]')!;
   expect(card().textContent).toContain('original-server · remote task remote:receiver-task');
   expect(card().textContent).toContain('Result not received');
@@ -2764,12 +2857,13 @@ it('stops the original live resource observation after its subscribe RPC and Run
   });
   f.api.cancelOperation = cancel;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(f.view.operations[0]!.id);
   const card = () => container.querySelector('[aria-label="MCP resource observation"]')!;
   expect(card().textContent).toContain('original-resource-server · file:///opaque/server-resource?revision=original');
   expect(card().querySelector('a')).toBeNull();
   expect(card().textContent).toContain('Resource observation active');
   expect(card().textContent).toContain('Local observation retained · Remote cleanup not requested');
-  expect(container.textContent).toContain('terminal · indeterminate · effect: unknown');
+  expect(container.textContent).toContain('terminal · indeterminate · unknown');
   expect(container.textContent).toContain('Original subscribe RPC response');
   await act(async () => button('Stop resource observation').click());
   expect(cancel).toHaveBeenCalledExactlyOnceWith(operation.id);
@@ -2777,7 +2871,7 @@ it('stops the original live resource observation after its subscribe RPC and Run
   expect(card().textContent).toContain('Local observation released · Remote cleanup unconfirmed');
   expect(card().textContent).toContain('Check the original service');
   expect(card().textContent).not.toContain('Remote error with private data');
-  expect(container.textContent).toContain('terminal · indeterminate · effect: unknown');
+  expect(container.textContent).toContain('terminal · indeterminate · unknown');
   expect(container.textContent).toContain('Original subscribe RPC response');
   expect(button('Stop resource observation')).toBeUndefined();
   expect(f.cancelRun).not.toHaveBeenCalled();
@@ -2792,6 +2886,7 @@ it('keeps resource observation state separate from RPC completion and shows each
   operation.outcome = 'succeeded'; operation.effect = 'confirmed';
   operation.call_completion = { kind: 'result', outcome: 'succeeded', effect: 'confirmed', content: { data: {}, parts: [] } };
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(f.view.operations[0]!.id);
   const card = () => container.querySelector('[aria-label="MCP resource observation"]')!;
   for (const [index, [availability, text]] of ([
     ['pending', 'Subscription acknowledgement pending'],
@@ -2805,7 +2900,7 @@ it('keeps resource observation state separate from RPC completion and shows each
     expect(card().textContent).toContain(text);
     expect(card().textContent).toContain('Check the original MCP connection and resource access');
     expect(card().textContent).not.toContain('Do not disclose');
-    expect(container.textContent).toContain('terminal · succeeded · effect: confirmed');
+    expect(container.textContent).toContain('terminal · succeeded · confirmed');
     expect(button('Stop resource observation')).toBeDefined();
   }
   operation.mcp_resource_subscription!.localReleased = true;
@@ -2836,6 +2931,7 @@ it('allows retrying Stop until local resource observation is released, even if c
     });
   f.api.cancelOperation = cancel;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(operation.id);
   await act(async () => button('Stop resource observation').click());
   expect(button('Stop resource observation')).toBeDefined();
   await act(async () => button('Stop resource observation').click());
@@ -2994,6 +3090,7 @@ it('projects a delegated rerank request independently of its cheap query, preser
   });
   f.api.cancelOperation = cancel;
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOperation(f.view.operations[0]!.id);
   expect(container.textContent).toContain('code-retrieval-rerank');
   expect(container.textContent).toContain('Local executor stop unconfirmed');
   await act(async () => button('Stop inference request').click());
@@ -3093,6 +3190,7 @@ function combinedFixture(f: ReturnType<typeof navigationFixture>, patch: Partial
 it('thread recovery restores the owner-selected head and original image draft, then undoes the same branch without running work', async () => {
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} onBranchCreated={vi.fn()} />));
+  await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'Current draft');
   await act(async () => button('Restore before this message').click());
   expect(f.prepareNavigation).toHaveBeenCalledWith({ ...identity, entryId: f.user.id });
@@ -3111,6 +3209,7 @@ it('thread recovery restores the owner-selected head and original image draft, t
 it('thread recovery retains assistant content and current draft while respecting the owner-selected boundary', async () => {
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'Keep this draft');
   await act(async () => button('Open conversation history').click());
   const assistant = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(value => value.textContent?.includes('Retained assistant answer'))!;
@@ -3124,6 +3223,7 @@ it('thread recovery retains assistant content and current draft while respecting
 it('thread recovery freezes an uncertain navigation and retries the original key and head after reading its receipt', async () => {
   const f = navigationFixture(); f.navigate.mockRejectedValueOnce(new Error('Response lost'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'Unsaved current draft');
   await act(async () => button('Restore before this message').click());
   expect(container.querySelectorAll('article')).toHaveLength(2);
@@ -3144,6 +3244,7 @@ it('thread recovery reads an applied receipt after a lost response without sendi
     throw new Error('Reply lost after commit');
   });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(f.navigationReceipt).toHaveBeenCalledOnce();
   expect(container.querySelectorAll('article')).toHaveLength(1);
@@ -3154,6 +3255,7 @@ it.each(['thread', 'host'] as const)('thread recovery cannot submit a late prepa
   const f = navigationFixture(); let resolve!: (selection: Awaited<ReturnType<ThreadsAPI['prepareNavigation']>>) => void;
   f.prepareNavigation.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   const next = { ...identity, threadId: changed === 'thread' ? 'another-thread' : identity.threadId };
   if (changed === 'host') { endpoint.generation += 1; await act(async () => endpoint.listeners.forEach(listener => listener())); }
@@ -3167,6 +3269,7 @@ it.each(['local', 'managed_host'] as const)('thread recovery uses the actual %s 
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
   if (kind === 'managed_host') f.recoverySource.mockResolvedValue({ resourceOwner: { kind, hostId: 'resource-host', connectionId: 'paired-resource', endpointIdentity: 'https://resource-host.test' }, workspaceId: 'actual-source-owner', mode: 'materialized', runId: 'finished-run' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/unrelated-sidebar" />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(recovery.prepareCombinedRecovery).toHaveBeenCalledWith({ workspaceId: 'actual-source-owner', conversation: { kind: 'thread', threadId: identity.threadId, branchId: identity.branchId }, entryId: f.user.id });
   expect(recovery.applyCombinedRecovery).toHaveBeenCalledWith({ operationId: recovery.plan.id, expectedRevision: recovery.plan.revision, conflictPolicy: 'abort', confirmedConflicts: [] });
@@ -3181,6 +3284,7 @@ it('thread recovery keeps fixed-branch sources conversation-only even when combi
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
   f.recoverySource.mockResolvedValue({ resourceOwner: { kind: 'local' }, workspaceId: 'read-only-source', mode: 'fixed_branch', runId: 'finished-run' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(f.navigate).toHaveBeenCalledOnce(); expect(recovery.prepareCombinedRecovery).not.toHaveBeenCalled();
 });
@@ -3190,6 +3294,7 @@ it('thread recovery observes the original combined operation after uncertain fil
   recovery.applyCombinedRecovery.mockRejectedValueOnce(new Error('Connection lost'));
   recovery.getCombinedOperation.mockRejectedValueOnce(new Error('Offline'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(container.querySelectorAll('article')).toHaveLength(2);
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('');
@@ -3205,6 +3310,7 @@ it('thread recovery previews the exact dirty buffer and cancels the unused file 
   const f = navigationFixture(); const recovery = combinedFixture(f, { conflicts: [{ kind: 'dirty-buffer', path: 'result.txt', message: 'Unsaved editor', fingerprint: 'dirty-revision' }] });
   useUIStore.setState({ recoveryPreference: 'both' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(container.textContent).toContain('result.txt: Unsaved editor');
   expect(container.textContent).toContain('They are preserved for undo');
@@ -3223,6 +3329,7 @@ it('thread recovery retains its key when a kernel disconnect is returned as HTTP
   f.navigate.mockRejectedValueOnce(new ThreadRequestError(400, 'kernel-response-discarded'));
   f.navigationReceipt.mockRejectedValueOnce(new Error('Kernel unavailable'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(button('Retry conversation recovery')).toBeDefined();
   expect(button('Send').disabled).toBe(true);
@@ -3235,6 +3342,7 @@ it('thread recovery preserves incomplete combined operation facts without moving
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
   recovery.applyCombinedRecovery.mockResolvedValueOnce({ status: 'ready', operation: { ...recovery.operation, state: 'needs-attention', fileState: 'needs-attention', conversationState: 'unchanged', appliedPathCount: 1 } });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(container.textContent).toContain('needs-attention');
   expect(container.textContent).toContain('conversation: unchanged');
@@ -3249,6 +3357,7 @@ it('thread recovery freezes a confirmed conflict acknowledgement and observes th
   recovery.applyCombinedRecovery.mockRejectedValueOnce(new Error('Reply lost'));
   recovery.getCombinedOperation.mockRejectedValueOnce(new Error('Offline'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(container.textContent).toContain('shell.txt');
   const apply = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.both.label'))!;
@@ -3268,6 +3377,7 @@ it('thread recovery refuses conversation-only navigation when cancellation of it
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'ask' });
   recovery.cancelCombinedOperation.mockRejectedValueOnce(new Error('Cancellation unconfirmed'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
@@ -3279,6 +3389,7 @@ it('thread recovery keeps an uncertain conversation-only choice after its file d
   const f = navigationFixture(); combinedFixture(f); useUIStore.setState({ recoveryPreference: 'ask' });
   f.navigate.mockRejectedValueOnce(new Error('Navigation response lost'));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   const conversation = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('settings.varin.recovery.preference.conversation.label'))!;
   await act(async () => conversation.click());
@@ -3306,9 +3417,11 @@ it('thread recovery does not publish a late committed navigation into another co
   const f = navigationFixture(); let resolve!: (receipt: Awaited<ReturnType<ThreadsAPI['navigate']>>) => void;
   f.navigate.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   const request = f.navigate.mock.calls[0]![0];
   await act(async () => root.render(<ThreadConversation api={f.api} identity={{ ...identity, threadId: 'new-conversation' }} />));
+  await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'New conversation draft');
   await act(async () => resolve({ threadId: request.threadId, branchId: request.branchId, key: request.key, previousHeadId: request.expectedHeadId, headId: request.targetHeadId, alreadyApplied: false }));
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('New conversation draft');
@@ -3320,6 +3433,7 @@ it('thread recovery never sends an old operation readback to a newly selected Ho
   let reject!: (error: Error) => void;
   recovery.applyCombinedRecovery.mockImplementationOnce(() => new Promise((_done, fail) => { reject = fail; }));
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   endpoint.generation += 1; await act(async () => endpoint.listeners.forEach(listener => listener()));
   await edit('[aria-label="Message thread"]', 'New Host draft');
@@ -3335,6 +3449,7 @@ it('thread recovery resumes a stopped nonterminal combined operation using its o
   recovery.applyCombinedRecovery.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
   recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(container.querySelectorAll('article')).toHaveLength(2);
   await act(async () => button('Check recovery status').click());
@@ -3346,11 +3461,13 @@ it('thread recovery resumes a stopped nonterminal combined operation using its o
 it.each([false, true])('thread recovery rebuilds independent navigation Undo after reopening with combined recovery unavailable=%s', async combinedUnavailable => {
   const f = navigationFixture();
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   const receipt = await f.navigate.mock.results[0]!.value;
   f.view.recovery = { navigation: receipt, operations: [], ...(combinedUnavailable ? { combinedUnavailable: 'Managed file recovery is unavailable. Conversation navigation remains available.' } : {}) };
   await act(async () => { root.unmount(); }); root = createRoot(container);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   expect(f.navigate).toHaveBeenCalledOnce();
   await edit('[aria-label="Message thread"]', 'Fresh draft after reopening');
@@ -3362,10 +3479,12 @@ it.each([false, true])('thread recovery rebuilds independent navigation Undo aft
 it('thread recovery reopens combined recovery through its original operation and never offers a conversation-only undo for it', async () => {
   const f = navigationFixture(); const recovery = combinedFixture(f); useUIStore.setState({ recoveryPreference: 'both' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   f.view.recovery = { navigation: null, operations: [recovery.operation] };
   await act(async () => { root.unmount(); }); root = createRoot(container);
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   expect(button('Undo conversation recovery')).toBeUndefined();
   expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('Original user instruction');
   await act(async () => button('Undo saved conversation and file recovery').click());
@@ -3379,6 +3498,7 @@ it('thread recovery rediscovers and reconciles an interrupted combined operation
   f.view.recovery = { navigation: null, operations: [interrupted] };
   recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: interrupted });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await edit('[aria-label="Message thread"]', 'New draft while reviewing recovery');
   expect(button('Send').disabled).toBe(true);
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled();
@@ -3395,6 +3515,7 @@ it('thread recovery never applies a rediscovered inert file plan without its con
   f.view.recovery = { navigation: null, operations: [planned] };
   recovery.getCombinedOperation.mockResolvedValueOnce({ status: 'ready', operation: planned });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Check saved recovery').click());
   expect(recovery.applyCombinedRecovery).not.toHaveBeenCalled(); expect(f.navigate).not.toHaveBeenCalled();
   expect(container.textContent).toContain('This plan has not been applied.');
@@ -3405,6 +3526,7 @@ it('thread recovery never applies a rediscovered inert file plan without its con
 it('thread recovery offers an explicit conversation-only choice when file preparation is unavailable', async () => {
   const f = navigationFixture(); useUIStore.setState({ recoveryPreference: 'both' });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await openOverview('recovery');
   await act(async () => button('Restore before this message').click());
   expect(f.navigate).not.toHaveBeenCalled(); expect(container.textContent).toContain('Recovery unavailable');
   await act(async () => button('Restore conversation only').click());
