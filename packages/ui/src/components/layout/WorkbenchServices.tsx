@@ -236,7 +236,7 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         align="end"
         className="w-[min(27rem,calc(100vw-2rem))] max-h-[75vh] overflow-y-auto bg-[var(--surface-elevated)] p-0"
       >
-        <div className="sticky top-0 z-20 px-2 pt-1.5 pb-px">
+        <div className="sticky top-0 z-20 border-b border-border/40 bg-[var(--surface-elevated)] px-2 pb-1.5 pt-1.5">
           <div className="h-9">
             <SortableTabsStrip
               items={servicesTabItems}
@@ -291,10 +291,10 @@ const DesktopServicesMenu = React.memo(function DesktopServicesMenu({
         ) : null}
 
         {desktopServicesTab === 'mcp' ? (
-          <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} />
+          <McpDropdownContent active={isDesktopServicesOpen && desktopServicesTab === 'mcp'} hostLabel={currentInstanceLabel} onNavigate={() => setIsDesktopServicesOpen(false)} />
         ) : null}
 
-        {desktopServicesTab === 'usage' ? <ThreadTokenUsage active={isDesktopServicesOpen} /> : null}
+        {desktopServicesTab === 'usage' ? <ThreadTokenUsage active={isDesktopServicesOpen} hostLabel={currentInstanceLabel} /> : null}
 
         {showDevShutdown ? (
           <>

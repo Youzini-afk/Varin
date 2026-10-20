@@ -5,6 +5,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { switchRuntimeEndpoint, type ThreadIdentity } from '@varin/application-client';
 import type { ThreadUsage } from '@varin/protocol';
 const api = vi.hoisted(() => ({ usage: vi.fn(), observe: vi.fn() }));
+vi.mock('@/components/sections/harness/ConfigurationModels', () => ({ useModelChannels: () => ({ channels: [
+  { id: 'channel:a', name: 'First channel', models: [{ id: 'shared', name: 'Shared model' }] },
+  { id: 'channel:b', name: 'Second channel', models: [{ id: 'shared', name: 'Shared model' }] },
+] }) }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ threads: api }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ children, variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props}>{children}</button> }));
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -31,10 +35,31 @@ it('renders original branch measurements without zero-filling missing values or 
   await render();
   expect(api.usage).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
   expect(api.observe).toHaveBeenCalledWith(42, expect.any(Function), expect.objectContaining({ signal: expect.any(AbortSignal) }));
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
   expect(container.textContent).toContain(BigInt('18446744073709551616').toLocaleString());
   const counts = [...container.querySelectorAll('dd')].map(value => value.textContent);
-  expect(counts).toContain('0 + ?'); expect(counts.filter(value => value === '—')).toHaveLength(6);
-  expect(container.textContent).toContain('Estimated usage'); expect(container.textContent).toContain('1 pending');
+  expect(counts).toContain('0 + ?'); expect(counts).not.toContain('—');
+  expect(container.textContent).toContain('Estimated usage'); expect(container.textContent).toContain('2 pending');
+});
+
+it('groups purposes by channel and model while keeping estimates and unreported requests distinct', async () => {
+  const base = snapshot().rows[0]!;
+  api.usage.mockResolvedValue({ ...snapshot(), rows: [
+    { ...base, modelId: 'shared', providerId: 'channel:a', requests: 1, pendingRequests: 0, inputTokens: { known: '1200', missing: 0 } },
+    { ...base, modelId: 'shared', providerId: 'channel:a', kind: 'context', requests: 1, pendingRequests: 0, inputTokens: { known: '300', missing: 0 } },
+    { ...base, modelId: 'shared', providerId: 'channel:b', measurement: 'estimated', requests: 1, pendingRequests: 0, inputTokens: { known: '500', missing: 0 } },
+    { ...base, modelId: 'silent', providerId: 'channel:a', measurement: 'missing', requests: 1, pendingRequests: 0, inputTokens: { known: null, missing: 1 }, outputTokens: { known: null, missing: 1 } },
+  ] });
+  await render();
+  const groups = [...container.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')];
+  expect(groups).toHaveLength(3);
+  expect(groups[0]!.textContent).toContain('First channel'); expect(groups[0]!.textContent).toContain('1.5K');
+  expect(groups[1]!.textContent).toContain('Second channel'); expect(groups[1]!.textContent).toContain('Estimated usage');
+  expect(container.textContent).not.toContain('channel:a'); expect(container.textContent).not.toContain('native-family');
+  expect(container.textContent).toContain('4 requests'); expect(container.textContent).toContain('1 unreported');
+  expect(container.querySelector('[title="1,500"]')).not.toBeNull();
+  await act(async () => groups[0]!.click());
+  expect(container.textContent).toContain('Context work'); expect(container.textContent).toContain('1,500');
 });
 it('retains the last same-branch snapshot after observation failure and refresh reconnects', async () => {
   api.usage.mockResolvedValue(snapshot()); api.observe.mockRejectedValueOnce(new Error('Host unavailable'));

@@ -50,10 +50,14 @@ const catalogFor = (generation: number) => {
   return sharedCatalog.catalog;
 };
 const getEmptyCatalog = () => emptyCatalog;
-export function useConfigurationModels() {
+const noSubscription = () => () => {};
+export function useModelChannels(active = true) {
   const key = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const catalog = catalogFor(key);
-  const { channels, error } = React.useSyncExternalStore(catalog.subscribe, catalog.getSnapshot, getEmptyCatalog);
+  return React.useSyncExternalStore(active ? catalog.subscribe : noSubscription, active ? catalog.getSnapshot : getEmptyCatalog, getEmptyCatalog);
+}
+export function useConfigurationModels() {
+  const { channels, error } = useModelChannels();
   const providers = channels.filter(channel => channel.enabled).map(channel => ({ id: channel.id, name: channel.name }));
   const modelsFor = (id: string, operation: ModelOperation): Array<{ id: string; name?: string; requestModelId?: string }> => channels.find(channel => channel.id === id)?.models.filter(model => model.enabled && model.operations.includes(operation)).map(model => ({ id: model.id, name: model.name, requestModelId: model.requestModelId })) ?? [];
   return { runtime: 'agent' as const, providers, modelsFor, error };

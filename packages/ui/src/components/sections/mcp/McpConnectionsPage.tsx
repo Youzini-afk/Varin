@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useMcpSettingsTarget } from '@/components/mcp/mcp-settings-navigation';
 
 export function McpConnectionsPage() {
   const { t } = useI18n();
@@ -87,17 +88,40 @@ export function McpConnectionsPage() {
     finally { if (request === revision.current) setBusy(false); }
   }, [api, path]);
   React.useEffect(() => { if (!preservedDraft.current) void load(); }, [load, snapshot?.view]);
-  const run = async (action: (current: NonNullable<typeof active.current>) => Promise<void>) => {
+  const run = React.useCallback(async (action: (current: NonNullable<typeof active.current>) => Promise<void>) => {
     const current = active.current; if (!current) return;
     setBusy(true); setError('');
     try { await action(current); return true; } catch (error) { if (!current.signal.aborted) setError(error instanceof Error ? error.message : String(error)); return false; }
     finally { if (active.current === current) setBusy(false); }
-  };
+  }, []);
+  const signIn = React.useCallback(async (current: NonNullable<typeof active.current>, name: string) => {
+    const state = await api.signIn(current.view, name, current.signal);
+    if (active.current !== current) return;
+    authId.current = state.id;
+    const next = await api.authorization(current.view, state.id, current.signal);
+    if (active.current === current && authId.current === state.id) setAuthorization(next);
+  }, [api]);
   const select = (next: typeof selection, nextPath = path) => requestSettingsNavigation(() => {
     if (nextPath !== path) preservedDraft.current = false;
     setSelection(next); setPath(nextPath); setShowDetail(true); setRaw(false);
   });
   const selectedServer = selection.mode === 'server' ? snapshot?.servers.find(server => server.name === selection.name) : undefined;
+  const navigation = useMcpSettingsTarget(state => state.target);
+  React.useEffect(() => {
+    if (!snapshot || !navigation) return;
+    if (navigation.host !== host || navigation.directory !== cwd) { useMcpSettingsTarget.setState({ target: undefined }); return; }
+    const server = navigation.selection.mode === 'server' ? snapshot.servers.find(server => server.name === navigation.selection.name) : undefined;
+    if (navigation.selection.mode === 'server' && !server) { useMcpSettingsTarget.setState({ target: undefined }); return; }
+    const nextPath = server?.source ?? snapshot.sources[0]?.path ?? '';
+    setSelection(previous => previous.mode === navigation.selection.mode && previous.name === navigation.selection.name ? previous : navigation.selection);
+    setPath(nextPath);
+    setShowDetail(true); setRaw(false);
+    if (navigation.selection.signIn && server) {
+      if (busy || document?.path !== nextPath) return;
+      useMcpSettingsTarget.setState({ target: undefined });
+      if (server.canSignIn && server.enabled) void run(current => signIn(current, server.name));
+    } else useMcpSettingsTarget.setState({ target: undefined });
+  }, [navigation, snapshot, host, cwd, busy, document?.path, run, signIn]);
   const save = () => !document ? Promise.resolve(false) : run(async current => {
     const saved = await api.saveDocument(current.view, document.path, draft, document.revision, current.signal);
     if (active.current === current) {
@@ -132,7 +156,7 @@ export function McpConnectionsPage() {
           <div className="mb-3 flex flex-wrap items-center gap-2"><span className="mr-auto rounded-full bg-muted px-2.5 py-1 typography-meta">{text(`settings.mcp.status.${selectedServer.status}`)}</span>
             <Button size="sm" disabled={busy || !selectedServer.canConnect || selectedServer.status === 'connecting'} onClick={() => { void run(async current => { const next = await api.command(current.view, selectedServer.name, selectedServer.holdsConnection ? 'reconnect' : 'connect', current.signal); if (active.current === current) setSnapshot(next); }); }}>{t(selectedServer.status === 'connecting' ? 'settings.mcp.status.connecting' : selectedServer.holdsConnection ? 'settings.mcp.reconnect' : selectedServer.status === 'connected' ? 'settings.mcp.useConnection' : 'settings.mcp.connect')}</Button>
             {selectedServer.holdsConnection ? <Button size="sm" variant="outline" disabled={busy} onClick={() => { void run(async current => { const next = await api.command(current.view, selectedServer.name, 'disconnect', current.signal); if (active.current === current) setSnapshot(next); }); }}>{t('settings.mcp.disconnect')}</Button> : null}
-            {selectedServer.canSignIn ? <Button size="sm" variant="outline" disabled={busy || !selectedServer.enabled || selectedServer.status === 'connecting' || authorization?.status === 'pending'} onClick={() => { void run(async current => { const state = await api.signIn(current.view, selectedServer.name, current.signal); if (active.current !== current) return; authId.current = state.id; const next = await api.authorization(current.view, state.id, current.signal); if (active.current === current && authId.current === state.id) setAuthorization(next); }); }}>{t(selectedServer.signInRequired ? 'settings.mcp.signIn' : 'settings.mcp.trySignIn')}</Button> : null}
+            {selectedServer.canSignIn ? <Button size="sm" variant="outline" disabled={busy || !selectedServer.enabled || selectedServer.status === 'connecting' || authorization?.status === 'pending'} onClick={() => { void run(current => signIn(current, selectedServer.name)); }}>{t(selectedServer.signInRequired ? 'settings.mcp.signIn' : 'settings.mcp.trySignIn')}</Button> : null}
             {selectedServer.canSignOut ? <Button size="sm" variant="ghost" disabled={busy} onClick={() => { void run(async current => { const next = await api.command(current.view, selectedServer.name, 'sign-out', current.signal); if (active.current === current) setSnapshot(next); }); }}>{t('settings.mcp.signOut')}</Button> : null}
           </div>
           {selectedServer.holdsConnection ? <p className="typography-meta text-muted-foreground">{t('settings.mcp.disconnectHint')}</p> : null}

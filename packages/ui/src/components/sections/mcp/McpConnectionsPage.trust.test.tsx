@@ -10,6 +10,7 @@ vi.mock('@/lib/projectTrust', () => ({ getProjectTrustGeneration: () => fixture.
 vi.mock('@/components/sections/shared/ProjectTrustSettings', () => ({ ProjectTrustSettings: () => <div>Trust controls</div> }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: '/project' }) }));
+vi.mock('@/stores/useUIStore', () => ({ useUIStore: { getState: () => ({ setSettingsPage: vi.fn(), setSettingsDialogOpen: vi.fn() }) } }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('../shared/SettingsPageLayout', () => ({ SettingsPageLayout: ({ children }: React.PropsWithChildren) => <div>{children}</div> }));
@@ -23,12 +24,14 @@ vi.mock('@/components/ui/select', () => {
     SelectItem: ({ children, value }: React.PropsWithChildren<{ value: string }>) => { const select = React.useContext(Selection); return <button onClick={() => select(value)}>{children}</button>; } };
 });
 import { McpConnectionsPage } from './McpConnectionsPage';
+import { useMcpSettingsTarget } from '@/components/mcp/mcp-settings-navigation';
 import { SettingsNavigationContext } from '../shared/settings-context';
 import { finishSettingsNavigation, stayInSettings } from '@/lib/settings/drafts';
 let root: Root, container: HTMLDivElement, viewNumber: number;
 let servers: McpConfigurationServer[];
 const snapshot = (view = `view:${viewNumber}`): McpConfigurationSnapshot => ({ view, sources: fixture.trust ? [{ path: '/project/.mcp.json', scope: 'project' }, ...(fixture.multisource ? [{ path: '/user/mcp.json', scope: 'global' as const }] : [])] : [{ path: '/user/mcp.json', scope: 'global' }], servers, issues: [] });
 beforeEach(() => {
+  useMcpSettingsTarget.setState({ target: undefined });
   servers = []; fixture.trust = true; fixture.multisource = false; fixture.version += 1; fixture.host += 1; viewNumber = 0; vi.clearAllMocks();
   fixture.api.open.mockImplementation(async () => snapshot(`view:${++viewNumber}`)); fixture.api.close.mockResolvedValue(undefined);
   fixture.api.read.mockImplementation(async (view: string) => snapshot(view));
@@ -155,4 +158,15 @@ it('blocks credential-dependent actions when credentials are unknown but can sti
   expect(button('settings.mcp.disconnect').disabled).toBe(false);
   expect(button('settings.mcp.signIn')).toBeUndefined(); expect(button('settings.mcp.signOut')).toBeUndefined();
   expect(container.textContent).toContain('MCP credentials are unavailable.');
+});
+
+it('opens the requested connection and starts its sign-in through the settings owner', async () => {
+  servers = [server(), server({ name: 'notion', status: 'needs-auth', signInRequired: true })];
+  useMcpSettingsTarget.setState({ target: { host: fixture.host, directory: '/project', selection: { mode: 'server', name: 'notion', signIn: true } } });
+  fixture.api.signIn.mockResolvedValue({ id: 'auth:notion', status: 'pending' });
+  fixture.api.authorization.mockResolvedValue({ id: 'auth:notion', status: 'pending', authorizationUrl: 'https://notion.test/sign-in' });
+  await act(async () => root.render(<McpConnectionsPage />));
+  expect(fixture.api.signIn).toHaveBeenCalledExactlyOnceWith('view:1', 'notion', expect.any(AbortSignal));
+  expect(fixture.api.authorization).toHaveBeenCalledWith('view:1', 'auth:notion', expect.any(AbortSignal));
+  expect(useMcpSettingsTarget.getState().target).toBeUndefined();
 });
