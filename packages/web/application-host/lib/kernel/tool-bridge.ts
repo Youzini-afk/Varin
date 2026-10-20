@@ -974,7 +974,7 @@ export class ToolBridge {
         await this.#reply(request, {
           ok: false,
           error: error instanceof HostToolAdmissionError
-            ? { code: error.code, admission: true }
+            ? { code: error.code, admission: true, ...(error.message !== error.code ? { message: error.message } : {}) }
             : { code: 'host_tool_authorization_failed' },
         });
       }

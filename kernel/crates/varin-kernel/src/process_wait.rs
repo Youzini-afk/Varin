@@ -1,4 +1,4 @@
-//! Durable observation of one process from the same Run, including legal launch rebinds.
+//! Observation and control of managed processes across Runs of the same Thread/branch.
 use crate::tools::{KernelResourceClient, ToolBinding, ToolKind};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use varin_runtime::catalog::process_wait::WAIT_TOOL;
 use varin_runtime::execution::*;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
+const STOP_TOOL: &str = "process_stop";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -26,7 +27,7 @@ fn observes(name: &str) -> bool {
     matches!(name, "process_inspect" | "process_read")
 }
 fn error(value: impl ToString) -> ExecutionError {
-    ExecutionError::new("process_wait", value.to_string())
+    ExecutionError::new("process", value.to_string())
 }
 pub(crate) fn builtin_schemas(
     mut tools: Vec<crate::run_tools::BuiltinSchema>,
@@ -47,11 +48,19 @@ pub(crate) fn builtin_schemas(
     tools
 }
 pub(crate) fn schemas(mut tools: Vec<ToolSchema>) -> Vec<ToolSchema> {
-    tools.retain(|tool| tool.name != WAIT_TOOL);
+    tools.retain(|tool| tool.name != WAIT_TOOL && tool.name != STOP_TOOL);
     if tools.iter().any(|tool| tool.name == "process_inspect") {
         tools.push(ToolSchema { requirements: None, description: "Wait durably for an original managed process. Use the processId returned by process_spawn or the environmentId returned by script_open. Script environments remain bound to their original Run. This parks model execution until an observed terminal fact; cancelling this observation does not stop the process. Read output separately with process_read.".into(), output_schema: None, metadata: None, name: WAIT_TOOL.into(), version: "1".into(), schema: json!({"type":"object",
             "properties":{"processId":{"type":"string","minLength":1}}, "required":["processId"], "additionalProperties":false
         }) });
+    }
+    if tools.iter().any(|tool| tool.name == "process_spawn") {
+        tools.push(ToolSchema {
+            requirements: None, name: STOP_TOOL.into(), version: "1".into(),
+            description: "Stop a process started with process_spawn, including its child processes. Use its processId. Returns the cancellation request and observed stop status; wait_process can wait for exit, and process_read retains output.".into(),
+            output_schema: None, metadata: None,
+            schema: json!({"type":"object","properties":{"processId":{"type":"string","minLength":1}},"required":["processId"],"additionalProperties":false}),
+        });
     }
     tools
 }
@@ -69,7 +78,7 @@ pub(crate) fn declarations(
     schemas(selected)
         .into_iter()
         .filter(|schema| {
-            schema.name == WAIT_TOOL || observes(&schema.name) || interacts(&schema.name)
+            schema.name == WAIT_TOOL || schema.name == STOP_TOOL || observes(&schema.name) || interacts(&schema.name)
         })
         .map(|schema| {
             varin_runtime::composition::tools::ToolDeclaration::new(schema, endpoint.clone())
@@ -91,10 +100,10 @@ impl ProcessWaitTools {
             || !self
                 .binding
                 .enabled_tools
-                .contains(&ToolKind::ProcessInspect)
+                .contains(&if call.name == STOP_TOOL { ToolKind::ProcessSpawn } else { ToolKind::ProcessInspect })
         {
             return Err(error(
-                "process wait requires the bound Run and process observation capability",
+                "process control requires the bound Run and selected process capability",
             ));
         }
         let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
@@ -102,6 +111,13 @@ impl ProcessWaitTools {
             return Err(error("processId required"));
         }
         self.check_owner(context, &handle.process_id)?;
+        if call.name == STOP_TOOL {
+            let owner = self.catalog.lock().map_err(error)?;
+            let process = owner.operation(&handle.process_id).map_err(error)?;
+            if process.managed_process.as_ref().is_some_and(|binding| binding.is_environment()) {
+                return Err(error("Use script_close to close a script environment"));
+            }
+        }
         Ok(handle.process_id)
     }
     fn check_owner(&self, c: &ToolExecutionContext, id: &str) -> Result<String, ExecutionError> {
@@ -131,11 +147,11 @@ impl ProcessWaitTools {
                 .process_observation_contract(c, call)?
         } else {
             ToolContract {
-                name: WAIT_TOOL.into(),
+                name: call.name.clone(),
                 schema_version: "1".into(),
-                read_only: true,
-                completion: CompletionKind::Job,
-                lifetime: Lifetime::Thread,
+                read_only: call.name != STOP_TOOL,
+                completion: if call.name == STOP_TOOL { CompletionKind::Result } else { CompletionKind::Job },
+                lifetime: if call.name == STOP_TOOL { Lifetime::Run } else { Lifetime::Thread },
                 resources: vec![],
             }
         };
@@ -414,21 +430,21 @@ impl ToolExecutor for ProcessWaitTools {
             &self.binding.enabled_tools,
         ))
         .into_iter()
-        .find(|tool| tool.name == WAIT_TOOL)
-        .ok_or_else(|| error("process wait is not selected"))?;
+        .find(|tool| tool.name == call.name)
+        .ok_or_else(|| error("process control or wait is not selected"))?;
         if call.schema_version != "1" || !frozen.tools.contains(&schema) {
-            return Err(error("process wait schema is not frozen"));
+            return Err(error("process tool schema is not frozen"));
         }
         let handle: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
         if handle.process_id.is_empty() {
             return Err(error("processId required"));
         }
         Ok(ToolContract {
-            name: WAIT_TOOL.into(),
+            name: call.name.clone(),
             schema_version: "1".into(),
-            read_only: true,
-            completion: CompletionKind::Job,
-            lifetime: Lifetime::Thread,
+            read_only: call.name != STOP_TOOL,
+            completion: if call.name == STOP_TOOL { CompletionKind::Result } else { CompletionKind::Job },
+            lifetime: if call.name == STOP_TOOL { Lifetime::Run } else { Lifetime::Thread },
             resources: vec![],
         })
     }
@@ -478,8 +494,11 @@ impl ToolExecutor for ProcessWaitTools {
         }
         self.validate_contract(c, call, contract)?;
         let id = self.handle(c, call)?;
+        let source_run_id = self.check_owner(c, &id)?;
+        let lineage = self.catalog.lock().map_err(error)?.process_result_lineage(&c.run_id, &id).map_err(error)?;
         self.resources
-            .authorize_process_observation(&self.binding, c, &id, cancel)
+            .observe_process(&self.binding, c, &id, &source_run_id, lineage, None, true, cancel)
+            .map(|_| ())
     }
     fn execute(
         &self,
@@ -527,6 +546,24 @@ impl ToolExecutor for ProcessWaitTools {
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
             self.authorize(c, call, contract, cancel)?;
             let id = self.handle(c, call)?;
+            if call.name == STOP_TOOL {
+                let operation = self.catalog.lock().map_err(error)?
+                    .request_cancel_operation(&id).map_err(error)?;
+                let already_stopped = operation.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
+                let delivery = if already_stopped { Ok(true) } else {
+                    self.resources.cancel_process(&id, &operation.run_id)
+                };
+                let observed = self.catalog.lock().map_err(error)?.operation(&id).map_err(error)?;
+                let stopped = observed.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
+                return Ok(ToolCompletion::Result {
+                    outcome: if delivery.is_ok() { Outcome::Succeeded } else { Outcome::Failed },
+                    effect: Effect::Confirmed,
+                    content: json!({"processId":id,"cancelRequested":observed.cancel_requested,
+                        "status":if stopped {"stopped"} else {"stop_requested"},"stopConfirmed":stopped,
+                        "signalDelivered":if already_stopped { Some(false) } else { delivery.as_ref().ok().copied() },
+                        "outcome":observed.outcome,"message":delivery.err().map(|error|error.to_string())}).into(),
+                });
+            }
             self.catalog
                 .lock()
                 .map_err(error)?

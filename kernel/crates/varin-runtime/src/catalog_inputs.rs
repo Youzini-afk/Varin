@@ -457,6 +457,7 @@ impl Catalog {
                     launch.bound_epoch = None;
                     launch.requires_rebind = true;
                     launch.preparation_failure = None;
+                    launch.preparation_failure_detail = None;
                     tx.execute(
                         "INSERT INTO run_launches(id,body) VALUES(?1,?2)",
                         params![next.id, encode(&launch)?],

@@ -305,7 +305,7 @@ impl Review {
                             owner
                                 .lock()
                                 .unwrap()
-                                .fail_launch_metadata(&p.run_id, &p.code)
+                                .fail_launch_metadata(&p.run_id, &p.code, p.detail.as_deref())
                                 .map_err(domain)?;
                             let read = owner
                                 .lock()

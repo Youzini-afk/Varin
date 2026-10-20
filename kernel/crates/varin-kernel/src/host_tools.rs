@@ -754,7 +754,7 @@ impl ToolExecutor for HostTools {
                             || matches!(value, b'_' | b'-')
                     })
             }) {
-                return Err(failed(&error.code));
+                return Err(ExecutionError::new(&error.code, error.message.as_deref().unwrap_or(&error.code)));
             }
             return Err(failed("host_tool_authorization_failed"));
         }

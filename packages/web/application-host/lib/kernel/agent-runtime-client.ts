@@ -721,11 +721,12 @@ export class AgentRuntimeClient {
       | SourceFailureCode
       | 'credentials_unavailable'
       | 'binding_changed',
+    detail?: string,
     signal?: AbortSignal,
   ): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.fail',
-      { executionId, code },
+      { executionId, code, ...(detail ? { detail } : {}) },
       signal,
     );
   }
@@ -1164,11 +1165,12 @@ export class AgentRuntimeClient {
       | SourceFailureCode
       | 'credentials_unavailable'
       | 'binding_changed',
+    detail?: string,
     signal?: AbortSignal,
   ): Promise<LaunchIntent> {
     return this.kernel.agentRuntimeRequest(
       'runtime.launch.fail',
-      { runId, code },
+      { runId, code, ...(detail ? { detail } : {}) },
       signal,
     );
   }

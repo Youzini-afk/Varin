@@ -1152,6 +1152,7 @@ pub(crate) struct RunReconcileParams {
 pub(crate) struct LaunchFailedParams {
     pub(crate) run_id: String,
     pub(crate) code: String,
+    pub(crate) detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2555,6 +2556,7 @@ pub(crate) struct ChildPrepareParams {
 pub(crate) struct ChildFailParams {
     pub(crate) execution_id: String,
     pub(crate) code: String,
+    pub(crate) detail: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2854,6 +2856,7 @@ pub(crate) struct ContextObservationReceipt {
 pub(crate) struct HostToolErrorMarker {
     pub(crate) code: String,
     pub(crate) admission: Option<bool>,
+    pub(crate) message: Option<String>,
 }
 
 pub(crate) type SourceResourceAction = crate::source_resources::SourceResourceAction;

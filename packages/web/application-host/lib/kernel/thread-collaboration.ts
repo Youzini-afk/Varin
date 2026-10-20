@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { releaseManagedChildDerivations } from './managed-child-mcp-preparation.js';
 import { releaseManagedChildDependencies } from './managed-mcp-child-retention.js';
-import { sourceFailureCode } from './source-admission-error.js';
+import { preparationFailure } from './preparation-failure.js';
 import { parseExplicitSkillCommand } from '../agent-resources/activation.js';
 import { ResourceScopeError } from './thread-resource-scope.js';
 import type { ThreadSkillInputPreparer } from './thread-skill-input.js';
@@ -529,9 +529,11 @@ export class ThreadCollaboration {
   private async advance(admitted: DelegatedExecution, signal: AbortSignal, ownerSignal: AbortSignal): Promise<void> {
     const { runtime, prepareContext } = this.owners;
     let child = admitted;
+    let stage = 'Preparing child source';
     try {
       if (child.state === 'preparing' && !child.receipt && !child.report) {
         child = await this.prepareSource(child, signal);
+        stage = 'Preparing child context';
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
         const checkpoint = child.trigger.kind !== 'dispatch' ? await runtime.context(child.child_branch_id, signal) : null;
@@ -551,12 +553,14 @@ export class ThreadCollaboration {
           }
         }
         signal.throwIfAborted();
+        stage = 'Admitting child execution';
         child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { resourceOwner: source.resourceOwner, mode: source.mode, liveRoot: source.liveRoot ?? null,
           workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
           ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) } : null,
           context, expectedContextCheckpoint: checkpoint?.id ?? null, ...(inputPreparation ? { inputPreparation } : {}) }, signal);
       }
       if (child.receipt && child.state === 'ready') {
+        stage = 'Starting child execution';
         const launch = await runtime.launch(child.receipt.run_id, signal);
         // A recorded preparation failure is the Retry boundary. Its own durable event
         // must not repeatedly re-enter the same failed launch.
@@ -570,7 +574,10 @@ export class ThreadCollaboration {
       if (!signal.aborted) {
         const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
-        if (!current.receipt && !current.report) child = await runtime.failChild(child.execution_id, sourceFailureCode(error) ?? 'preparation_failed');
+        if (!current.receipt && !current.report) {
+          const { code, detail } = preparationFailure(error, stage);
+          child = await runtime.failChild(child.execution_id, code, detail);
+        }
       }
       throw error;
     } finally {

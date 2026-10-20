@@ -60,7 +60,8 @@ vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surf
 vi.mock('@/lib/extensions/workbench-registry', async original => ({ ...await original<typeof import('@/lib/extensions/workbench-registry')>(), useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
 
 vi.mock('@/lib/i18n', () => {
-  const t = (key: string) => translations.dictionary[key] ?? key;
+  const t = (key: string, values: Record<string, unknown> = {}) => (translations.dictionary[key] ?? key)
+    .replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] === undefined ? placeholder : String(values[name]));
   return { useI18n: () => ({ t }) };
 });
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => <span /> }));
@@ -1609,6 +1610,7 @@ it('targets the displayed strategy candidate without clearing Pause or submittin
 });
 
 it('shows the core Pause reason and exact resume control while input remains queued', async () => {
+  translations.dictionary['chat.run.preparationFailed'] = 'Could not prepare this run: {reason}';
   const f = fixture(true); pauseView(f.view);
   const resume = vi.fn<ThreadsAPI['resume']>(); f.api.resume = resume;
   f.api.retryPreparation = vi.fn();
@@ -1639,9 +1641,11 @@ it('shows the core Pause reason and exact resume control while input remains que
   expect(button('Retry preparation')).toBeUndefined();
   await act(async () => {
     f.view.launch!.preparation_failure = 'preparation_failed';
+    f.view.launch!.preparation_failure_detail = 'Preparing agent execution: model credentials are missing';
     f.emit({ cursor: 3, subject: 'ui-run', revision: 3, kind: 'run.preparation_failed', data: { code: 'preparation_failed' } });
   });
   expect(button('Retry preparation')).toBeDefined();
+  expect(container.textContent).toContain('model credentials are missing');
   await act(async () => { button('Retry preparation').click(); });
   expect(f.api.retryPreparation).toHaveBeenCalledExactlyOnceWith('ui-run');
   expect(resume).toHaveBeenCalledOnce();

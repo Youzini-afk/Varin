@@ -8,15 +8,19 @@ import { permissionService } from './permission-service.js';
 import { MCP_CAPABILITIES, type HostToolCall } from './protocol.generated.js';
 import type { KernelClient } from './kernel-client.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
+import { KernelRequestError } from './kernel-error.js';
 
 describe('Task management tools use original permission admission',()=>{
   for(const action of ['get','wait','cancel'] as const)it(`${action} obeys explicit deny, one-shot ask and policy changes`,async()=>{
     const root=await mkdtemp(join(tmpdir(),'varin-task-permission-')),authority=new McpAuthority();
     const schema=MCP_CAPABILITIES.find(entry=>entry.route.kind==='task_control'&&entry.route.action===action)!;
-    let decision:'deny'|'ask'='deny',controls=0,opened=0,consumed=0;
+    let decision:'deny'|'ask'='deny',controls=0,opened=0,consumed=0,missing=false;
     const decisions:Promise<unknown>[]=[];
     const kernel={subscribeExit(){return()=>{};},async agentRuntimeRequest(method:string,params:Record<string,unknown>){
-      if(method==='runtime.host_job.access')return{id:'original-job'};
+      if(method==='runtime.host_job.access'){
+        if(missing)throw new KernelRequestError({code:'not-found',message:'not found: missing-job'},method,'response');
+        return{id:'original-job'};
+      }
       if(method==='runtime.permission.open'){
         opened++;
         queueMicrotask(()=>{decisions.push(permissionService(kernel).decide(String(params.operationId),String(params.permissionId),'allow_once'));});
@@ -40,6 +44,10 @@ describe('Task management tools use original permission admission',()=>{
       decision='ask';const next={...call,operationId:'second-call',callId:'second-call'};
       await lease.authorize(next,signal);await lease.execute(next,signal,owner);
       expect(opened).toBe(2);expect(consumed).toBe(2);expect(controls).toBe(1);
+      missing=true;
+      await expect(lease.authorize({...call,operationId:'missing-call',callId:'missing-call',arguments:{operationId:'missing-job'}},signal))
+        .rejects.toMatchObject({code:'mcp_task_not_found',message:'No MCP task exists for operationId missing-job.'});
+      expect(opened).toBe(2);expect(controls).toBe(1);
       await Promise.all(decisions);
     }finally{lease.release();await authority.close();await rm(root,{recursive:true,force:true});}
   });

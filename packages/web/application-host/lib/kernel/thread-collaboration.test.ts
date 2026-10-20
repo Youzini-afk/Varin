@@ -3,6 +3,8 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { DelegatedExecution, LaunchSource } from './protocol.generated.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
+import { preparationFailure } from './preparation-failure.js';
+import { SourceAdmissionError } from './source-admission-error.js';
 
 // Exercise the real discovery/cleanup coordinator and managed handoff wrapper.
 // Preparation, context readers and native process transport are outside this test.
@@ -53,11 +55,18 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     inspectScope: vi.fn(async () => []),
   };
   const runtime = {
+    thread: vi.fn(async () => ({bot_id:null})),
     launch: vi.fn(async () => ({ selection: child.launch })),
     operation: vi.fn(async () => ({ id: child.child_operation_id, run_id: child.parent_run_id, execution_owner: { kind: 'host', host_id: 'coordinator-A', incarnation: 'A-epoch' }, epoch: 2 })),
     coordinatorHostId: 'coordinator-A', onEvent: () => () => {}, onExit: () => () => {}, onReady: () => () => {},
     reconcileObservations: async () => [], children: async () => [], unacceptedChildDependencies: async () => [],
     childExecutions: async () => [structuredClone(child)], childExecution: async () => structuredClone(child),
+    failChild: vi.fn(async (_executionId: string, code: string, detail?: string) => {
+      child.state = 'failed';
+      child.code_result = {kind:'unavailable',code,effect:'none'};
+      child.report = {outcome:'failed',sender_thread_id:child.child_thread_id,run_id:null,history_ids:[],detail:detail ?? code};
+      return structuredClone(child);
+    }),
     status: async () => ({ eventCursor: 0 }), events: async () => [],
     managedSource: vi.fn(async () => service), releaseMcpResourceSource: vi.fn(async () => { trace.push('observers-released'); }),
     retireSourceGrants: vi.fn(async (_runId: string) => { trace.push('run-grants-retired'); }),
@@ -71,8 +80,9 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     claimChildSource: vi.fn(async () => ({ grantId: 'original-cleanup-grant' })), scoped: () => scoped,
     revokeGrant: vi.fn(async () => { trace.push('cleanup-authority-retired'); }) };
   const continueRun = vi.fn(async () => {});
+  const prepareContext = vi.fn();
   const open = (reconcileDomainReceipts?: (signal: AbortSignal) => Promise<void>) => new ThreadCollaboration({ kernel: kernel as never, runtime: runtime as unknown as AgentRuntimeClient,
-    storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: vi.fn() as never,
+    storageAdapter: {} as never, sourceCaptureOwners: {} as never, prepareContext: prepareContext as never,
     resolveLiveSource: async () => { throw new Error('Must not reacquire a live source'); }, continueRun,
     ...(reconcileDomainReceipts ? { reconcileDomainReceipts } : {}),
     recoverLaunches: async () => {}, onError: (_id, error) => errors.push(error) });
@@ -83,10 +93,31 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
       workspace_id: source.workspace_id, branch_id: childSource.branch_id!, result_revision: 4,
       root: 'original-published-result', base_root: pin.root, record_id: 'original-result-record' } };
   };
-  return { child, source, trace, errors, service, runtime, kernel, scoped, continueRun, open, complete };
+  return { child, source, trace, errors, service, runtime, kernel, scoped, continueRun, prepareContext, open, complete };
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
+it('keeps the original cause when a source owner wraps a preparation failure', () => {
+  const failure = preparationFailure(new SourceAdmissionError('source_unavailable',
+    {cause:new Error('Cannot capture workspace: D:/work/source no longer exists')}), 'Preparing child source');
+  expect(failure.code).toBe('source_unavailable');
+  expect(failure.detail).toContain('Preparing child source:');
+  expect(failure.detail).toContain('D:/work/source no longer exists');
+});
+
+it('records the original context preparation error in the child report', async () => {
+  const f = fixture('local');
+  f.child.state = 'preparing'; f.child.receipt = null;
+  f.prepareContext.mockRejectedValue(new Error('Cannot read selected instruction file: access denied'));
+  const collaboration = f.open();
+  try {
+    await collaboration.recover();
+    await vi.waitFor(() => expect(f.runtime.failChild).toHaveBeenCalledWith(f.child.execution_id, 'preparation_failed',
+      'Preparing child context: Cannot read selected instruction file: access denied'));
+    expect(f.child.report?.detail).toContain('Cannot read selected instruction file');
+    expect(f.child.code_result).toMatchObject({kind:'unavailable',code:'preparation_failed'});
+  } finally { collaboration.stop(); }
+});
 it.each(['local', 'managed'] as const)('%s child stays discoverable from launch through failed terminal retirement and reopen', async owner => {
   const f = fixture(owner);
   let collaboration = f.open();

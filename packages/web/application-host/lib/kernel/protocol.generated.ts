@@ -2398,6 +2398,7 @@ export type SourceFailureCode = 'source_unavailable' | 'source_registration_miss
 export interface LaunchFailedParams {
   runId: string;
   code: string;
+  detail?: string;
 }
 
 export interface ThreadParams {
@@ -2745,6 +2746,7 @@ export interface McpProvenance {
 export interface HostToolErrorMarker {
   code: string;
   admission?: boolean;
+  message?: string;
 }
 
 export type McpRoute = {kind:"direct"} | {kind:"server_argument";argument:string} | {kind:"discovery";argument:string} | {kind:"direct_task"} | {kind:"server_task_argument";argument:string} | {kind:"task_control";argument:string;action:McpTaskAction} | {kind:"resource_subscribe";argument:string} | {kind:"resource_unsubscribe";argument:string};
@@ -2803,6 +2805,7 @@ export interface LaunchIntent {
   policy_generation: number;
   policy_target: PolicyTarget;
   preparation_failure: string | null;
+  preparation_failure_detail?: string;
   run_id: string;
   revision: number;
   selection: LaunchSelection;
@@ -4872,6 +4875,7 @@ export interface ChildPrepareParams {
 export interface ChildFailParams {
   executionId: string;
   code: string;
+  detail?: string;
 }
 
 export interface ChildWaitParams {

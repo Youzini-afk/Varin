@@ -44,6 +44,29 @@ fn first(f: &mut Fixture) -> ChildTask {
     f.db.prepare_child(&child.execution_id, source, proposal, basis)
         .unwrap()
 }
+#[test]
+fn launch_failure_retains_diagnostic_and_successful_rebind_clears_it() {
+    let mut f = Fixture::new();
+    let child = first(&mut f);
+    let run = &child.receipt.as_ref().unwrap().run_id;
+    let original = f.db.launch_intent(run).unwrap().unwrap();
+    let supervisor = varin_runtime::supervisor::RunSupervisor::new(f.db);
+    let handle = supervisor.prepare_start(run, |_| Err(ExecutionError::new("credentials_unavailable", "account was removed"))).unwrap();
+    assert_eq!(handle.wait().unwrap_err().message, "account was removed");
+    let owner = supervisor.catalog();
+    let mut db = owner.lock().unwrap();
+    let failed = db.launch_intent(run).unwrap().unwrap();
+    assert_eq!(failed.preparation_failure.as_deref(), Some("preparation_failed"));
+    assert_eq!(failed.preparation_failure_detail.as_deref(), Some("Preparing agent execution: account was removed (credentials_unavailable)"));
+    let rebound = db.bind_launch(run, original.selection).unwrap();
+    assert!(rebound.preparation_failure.is_none());
+    assert!(rebound.preparation_failure_detail.is_none());
+    drop(db);
+    supervisor.shutdown().unwrap();
+    drop(owner);
+    drop(supervisor);
+    std::fs::remove_dir_all(f.root).unwrap();
+}
 fn finish(db: &mut Catalog, child: &ChildTask, text: Option<&str>) {
     let run = &child.receipt.as_ref().unwrap().run_id;
     db.commit_execution(
@@ -349,8 +372,10 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
     };
     assert_eq!(member(&f.db).state, "preparing");
     assert_eq!(member(&f.db).task, Some("again".into()));
-    f.db.fail_delegated_preparation(&accepted.execution_id, "source_unavailable")
+    f.db.fail_delegated_preparation(&accepted.execution_id, "source_unavailable", Some("Preparing child source: directory was removed"))
         .unwrap();
+    let failure = f.db.delegated_execution(&accepted.execution_id).unwrap();
+    assert_eq!(failure.report.unwrap().detail.as_deref(), Some("Preparing child source: directory was removed (source_unavailable)"));
     assert_eq!(member(&f.db).state, "failed");
     let later = accept(&mut f.db, other);
     assert_ne!(later.execution_id, accepted.execution_id);
@@ -413,7 +438,7 @@ fn isolated_continuation_uses_exact_published_root_without_rewriting_unknown_eff
     let source = ready_source(&mut f.db, &cold);
     let cold_child = prepare(&mut f.db, &cold, source);
     let failed =
-        f.db.fail_delegated_preparation(&cold.execution_id, "credentials_unavailable")
+        f.db.fail_delegated_preparation(&cold.execution_id, "credentials_unavailable", None)
             .unwrap();
     assert!(matches!(
         failed.code_result,

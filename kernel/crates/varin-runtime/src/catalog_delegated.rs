@@ -1119,6 +1119,7 @@ impl Catalog {
         &mut self,
         id: &str,
         reason: &str,
+        detail: Option<&str>,
     ) -> Result<DelegatedExecution> {
         let mut execution = self.delegated_execution(id)?;
         if execution.report.is_some() {
@@ -1153,7 +1154,10 @@ impl Catalog {
             sender_thread_id: relation.child_thread_id,
             run_id: execution.receipt.as_ref().map(|r| r.run_id.clone()),
             history_ids: vec![],
-            detail: Some(reason.into()),
+            detail: Some(match detail.filter(|text| !text.trim().is_empty() && *text != reason) {
+                Some(detail) => format!("{detail} ({reason})"),
+                None => reason.into(),
+            }),
         });
         execution.revision += 1;
         let tx = self.db.transaction()?;

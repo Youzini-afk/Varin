@@ -467,7 +467,8 @@ impl RunSupervisor {
                                     .is_none_or(|id| id == format!("preparation:{}", identity))
                                 && catalog.launch_metadata(&identity)?.is_some();
                             if preparation {
-                                catalog.fail_launch_metadata(&identity, "preparation_failed")?;
+                                let detail = format!("Preparing agent execution: {} ({})", error.message, error.code);
+                                catalog.fail_launch_metadata(&identity, "preparation_failed", Some(&detail))?;
                                 Ok(())
                             } else {
                                 catalog.pause_failed_execution(

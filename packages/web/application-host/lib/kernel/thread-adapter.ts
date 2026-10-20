@@ -3,7 +3,7 @@ import type { ContextCompactionOwner } from './context-compaction.js';
 import type { ContextAgentOwner } from './context-agent.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { SourceDirectory } from './thread-sources.js';
-import { sourceFailureCode } from './source-admission-error.js';
+import { preparationFailure } from './preparation-failure.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams, MessageFeedParams } from '@varin/protocol';
@@ -1019,7 +1019,7 @@ export class ThreadAdapter {
     await Promise.all([...latestExecutions.values()].filter(execution => execution.state === 'ready' && execution.receipt).map(async execution => {
       const runId = execution.receipt!.run_id;
       const [run, launch] = await Promise.all([this.runtime.run(runId), this.runtime.launch(runId)]);
-      childActivity[execution.execution_id] = launch?.preparation_failure ? { state: 'preparation_failed', reason: launch.preparation_failure }
+      childActivity[execution.execution_id] = launch?.preparation_failure ? { state: 'preparation_failed', reason: launch.preparation_failure_detail ?? launch.preparation_failure }
         : run.waiting_on?.startsWith('preparation:') ? { state: 'preparing' }
           : ['completed', 'failed', 'cancelled'].includes(run.state) ? { state: 'settling' }
             : run.state === 'waiting' && launch?.pause ? { state: 'waiting' } : { state: 'running' };
@@ -1079,10 +1079,8 @@ export class ThreadAdapter {
   }
 
   private async recordLaunchFailure(runId: string, error: unknown): Promise<void> {
-    const errorCode = error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : '';
-    const code = sourceFailureCode(error) ?? (['credential-scope-changed', 'model-configuration-changed'].includes(errorCode) ? 'binding_changed'
-      : errorCode.startsWith('credential-') ? 'credentials_unavailable' : 'preparation_failed');
-    try { await this.runtime.failLaunch(runId, code); }
+    const { code, detail } = preparationFailure(error, 'Preparing agent execution');
+    try { await this.runtime.failLaunch(runId, code, detail); }
     catch (recordError) { this.onLaunchError(runId, recordError); }
     this.onLaunchError(runId, error);
   }

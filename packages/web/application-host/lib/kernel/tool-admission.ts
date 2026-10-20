@@ -1,8 +1,8 @@
-/** A trusted local owner may report a short rejection marker. Never wrap remote error text. */
+/** A trusted local owner may report a rejection code and user-facing explanation. */
 export class HostToolAdmissionError extends Error {
-  constructor(readonly code: string) {
+  constructor(readonly code: string, message = code) {
     if (!/^[a-z][a-z0-9_-]*$/u.test(code)) throw new Error('host_tool_admission_marker_invalid');
-    super(code);
+    super(message);
     this.name = 'HostToolAdmissionError';
   }
 }

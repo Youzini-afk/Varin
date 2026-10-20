@@ -95,6 +95,9 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 工具结果未确认时，默认策略将原结果交回模型，允许继续调用工具与回答。原 owner 通过已有回执通道更新原操作，
 维护仍在执行的资源；对话的推进与原操作的完成分别处理。
 关闭终端视图不杀 Job，取消 Wait 不杀被观察进程。stdin 与 resize 分别有序，使阻塞输入不拖住窗口调整。
+`process_stop` 随进程启动能力常驻，使用 `processId` 请求原 guardian 停止进程及其子进程。同一 Thread/branch
+在相同来源上的后续 Run 也可停止原进程。回执区分已请求停止与已确认退出；`wait_process` 等待原退出回执，
+`process_read` 继续读取保留的输出。
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。

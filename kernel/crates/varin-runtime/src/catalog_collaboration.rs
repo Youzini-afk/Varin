@@ -1065,7 +1065,7 @@ impl Catalog {
         execution_id: &str,
         reason: &str,
     ) -> Result<ChildTask> {
-        self.fail_delegated_preparation(execution_id, reason)?;
+        self.fail_delegated_preparation(execution_id, reason, None)?;
         self.execution_task(execution_id)
     }
     pub fn cancel_child(&mut self, operation_id: &str) -> Result<ChildTask> {

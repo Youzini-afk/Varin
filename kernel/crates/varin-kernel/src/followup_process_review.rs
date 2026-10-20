@@ -220,6 +220,8 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let storage_root = root.join("storage");
     let mut storage = Storage::open(&storage_root, HOST).unwrap();
     storage.set_test_process_worker_executable(executable);
+    let controls = crate::process::ProcessControlRegistry::default();
+    storage.set_process_controls(controls.clone());
     issue(&mut storage, &storage_root, "setup", "setup", EPOCH);
     let registered = dispatch(
         &mut storage,
@@ -233,7 +235,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
         ToolKind::ProcessInspect,
         ToolKind::ProcessRead,
     ]);
-    let mut tools = KernelToolExecutor::selected_schemas(&kinds);
+    let mut tools = crate::process_wait::schemas(KernelToolExecutor::selected_schemas(&kinds));
     tools.push(crate::followup_tools::schema());
     let mut binding = ToolBinding {
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
@@ -300,7 +302,7 @@ grant_id: "source".into(),
             }
         },
         |_| Ok(()),
-        crate::process::ProcessControlRegistry::default(),
+        controls,
     );
     let executor = Arc::new(
         varin_runtime::composition::tools::ToolDirectory::assemble(
@@ -312,12 +314,12 @@ grant_id: "source".into(),
     );
     let token = CancellationToken::default();
     let mut processes = Vec::new();
-    for (index, marker) in ["followup-original-output", "unrelated-process-output"]
+    for (index, marker) in ["followup-original-output", "unrelated-process-output", "stoppable-output"]
         .into_iter()
         .enumerate()
     {
         let (command, args) = if cfg!(windows) {
-            ("cmd.exe", vec!["/c".to_owned(), format!("echo {marker}")])
+            ("cmd.exe", vec!["/c".to_owned(), if index == 2 { format!("echo {marker} & pause >nul") } else { format!("echo {marker}") }])
         } else {
             (
                 "/bin/sh",
@@ -327,6 +329,8 @@ grant_id: "source".into(),
                         "printf '{marker}\\n'; {}",
                         if index == 0 {
                             "while [ ! -f finish-original ]; do sleep 0.02; done"
+                        } else if index == 2 {
+                            "read ignored"
                         } else {
                             "true"
                         }
@@ -385,7 +389,7 @@ grant_id: "source".into(),
             "real process acceptance: {completion:?}"
         );
         close_call(&owner, &context, &call, completion, false);
-        if index != 0 || cfg!(windows) {
+        if index == 1 || (index == 0 && cfg!(windows)) {
             let terminal = terminal_rx
                 .recv_timeout(Duration::from_secs(20))
                 .expect("original guardian terminal receipt");
@@ -449,6 +453,7 @@ grant_id: "source".into(),
         .unwrap(),
     );
     let check_call = check_directory
+        .clone()
         .bind_call(&read, &check_frozen, &token)
         .unwrap();
     let check_contract = check_call.prepare(&token).unwrap();
@@ -492,6 +497,26 @@ grant_id: "source".into(),
         assert_eq!(content.data["process"]["writerActive"], true);
     }
     close_call(&owner, &check_context, &read, checked, true);
+    // A later Run on the same live source can stop the original Thread process.
+    let stop = ToolCall { call_id: "stop".into(), name: "process_stop".into(), schema_version: "1".into(),
+        arguments: json!({"processId":processes[2]}) };
+    let (stop_context, stop_frozen) = model_call(&owner, &check_run, "stop-original", &stop, &tools);
+    let stop_call = check_directory.bind_call(&stop, &stop_frozen, &token).unwrap();
+    let stop_contract = stop_call.prepare(&token).unwrap();
+    assert!(!stop_contract.read_only);
+    record(&owner, &check_run, ExecutionRecord::ToolAdmitted { context: stop_context.clone(),
+        tool: AdmittedTool { call: stop.clone(), contract: stop_contract.clone() } });
+    stop_call.authorize(&stop_context, &stop_contract, &token).unwrap();
+    record(&owner, &check_run, ExecutionRecord::ToolDispatched { context: stop_context.clone(), executor_owner: ExecutorOwner::Kernel });
+    let stopped = stop_call.execute(&stop_context, &stop_contract, &token).completion;
+    assert!(matches!(&stopped, ToolCompletion::Result { outcome: varin_runtime::Outcome::Succeeded, content, .. }
+        if content.data["processId"] == processes[2] && content.data["cancelRequested"] == true), "{stopped:?}");
+    close_call(&owner, &stop_context, &stop, stopped, true);
+    let terminal = terminal_rx.recv_timeout(Duration::from_secs(20)).expect("process_stop must reach the real guardian");
+    assert_eq!(terminal.process_id, processes[2]);
+    apply_process_terminal(&runtime, &terminal).unwrap();
+    assert!(owner.lock().unwrap().operation(&processes[2]).unwrap().external_receipt.unwrap().executor_stopped);
+    drop(stop_call);
     // The actual successor tool registers against the original accepted Thread process owner.
     let follow = ToolCall {
         call_id: "on-stop".into(),

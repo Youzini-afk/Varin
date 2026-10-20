@@ -476,15 +476,31 @@ impl ToolExecutor for CollaborationTools {
                     .map_err(error)?;
                 Ok(accepted(c, "awaiting_child"))
             } else {
-                let projection =
-                    |execution: &varin_runtime::catalog::delegated::DelegatedExecution| json!({"execution_id":execution.execution_id,"child_operation_id":execution.child_operation_id,"trigger":execution.trigger,"state":execution.state(),"receipt":execution.receipt,"report":execution.report,"code_result":execution.code_result,"resources_released":execution.resources_released});
+                let projection = |execution: &varin_runtime::catalog::delegated::DelegatedExecution| -> Result<serde_json::Value, ExecutionError> {
+                    let mut value = json!({"execution_id":execution.execution_id,"child_operation_id":execution.child_operation_id,"trigger":execution.trigger,"state":execution.state(),"receipt":execution.receipt,"report":execution.report,"code_result":execution.code_result,"resources_released":execution.resources_released});
+                    if execution.report.is_none() {
+                        if let Some(receipt) = &execution.receipt {
+                            if let Some(launch) = db.launch_metadata(&receipt.run_id).map_err(error)? {
+                                if let Some(code) = launch.preparation_failure {
+                                    value["preparationFailure"] = json!({"code":code,"message":launch.preparation_failure_detail});
+                                }
+                            }
+                        }
+                    }
+                    Ok(value)
+                };
                 let content = if handle.execution_id.is_some() {
-                    projection(&execution)
+                    projection(&execution)?
                 } else {
                     let executions = db
                         .delegated_executions(Some(&child.operation_id))
                         .map_err(error)?;
-                    json!({"operation_id":child.operation_id,"child_thread_id":child.child_thread_id,"child_branch_id":child.child_branch_id,"state":child.state,"receipt":child.receipt,"report":child.report,"code_result":child.code_result,"executions":executions.iter().map(projection).collect::<Vec<_>>()})
+                    let projected = executions.iter().map(projection).collect::<Result<Vec<_>, _>>()?;
+                    let failure = projected.iter().find(|item| item["execution_id"] == execution.execution_id)
+                        .and_then(|item| item.get("preparationFailure")).cloned();
+                    let mut value = json!({"operation_id":child.operation_id,"child_thread_id":child.child_thread_id,"child_branch_id":child.child_branch_id,"state":child.state,"receipt":child.receipt,"report":child.report,"code_result":child.code_result,"executions":projected});
+                    if let Some(failure) = failure { value["preparationFailure"] = failure; }
+                    value
                 };
                 drop(db);
                 Ok(ToolCompletion::Result {

@@ -28,6 +28,7 @@ import { McpAuthorityError, requiresMcpTask } from '../mcp/authority.js';
 import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import { HostToolAdmissionError } from './tool-admission.js';
+import { KernelClientError } from './kernel-error.js';
 
 const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validate: compileToolJsonSchema(value.schema) }]));
 export const MCP_DISCOVER = MCP_CAPABILITIES.find(value => value.operation === 'discover')!.name;
@@ -227,7 +228,14 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     }
     if(selected.kind === 'control') {
       if(!options.tasks)throw new HostToolAdmissionError('mcp_task_owner_unavailable');
-      await options.kernel.agentRuntimeRequest('runtime.host_job.access',{runId:call.runId,targetOperationId:selected.operationId,control:selected.action === 'cancel'},signal);
+      try {
+        await options.kernel.agentRuntimeRequest('runtime.host_job.access',{runId:call.runId,targetOperationId:selected.operationId,control:selected.action === 'cancel'},signal);
+      } catch (error) {
+        if (error instanceof KernelClientError && error.code === 'not-found') {
+          throw new HostToolAdmissionError('mcp_task_not_found', `No MCP task exists for operationId ${selected.operationId}.`);
+        }
+        throw error;
+      }
       return {...selected,permissionName:call.name,args:call.arguments as Record<string,unknown>};
     }
     if (selected.kind === 'direct') return selected.target;

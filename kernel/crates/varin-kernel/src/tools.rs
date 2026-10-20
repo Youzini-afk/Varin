@@ -959,25 +959,6 @@ impl KernelResourceClient {
             ExecutionError::new(error_code(&failure.error), failure.error.to_string())
         })
     }
-    pub(crate) fn authorize_process_observation(
-        &self,
-        binding: &ToolBinding,
-        context: &ToolExecutionContext,
-        process_id: &str,
-        cancel: &CancellationToken,
-    ) -> Result<(), ExecutionError> {
-        self.observe_process(
-            binding,
-            context,
-            process_id,
-            &context.run_id,
-            None,
-            None,
-            true,
-            cancel,
-        )
-        .map(|_| ())
-    }
     pub(crate) fn with_integration_receipts(
         mut self,
         send: impl Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync + 'static,

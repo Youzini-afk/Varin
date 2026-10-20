@@ -561,6 +561,7 @@ impl Catalog {
                 bound_epoch: None,
                 requires_rebind: true,
                 preparation_failure: None,
+                preparation_failure_detail: None,
             };
             tx.execute(
                 "INSERT INTO run_launches(id,body) VALUES(?1,?2)",

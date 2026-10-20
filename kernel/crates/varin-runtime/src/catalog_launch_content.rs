@@ -40,6 +40,8 @@ pub struct LaunchMetadata {
     pub policy_generation: u64,
     pub policy_target: super::policy_switch::PolicyTargetMetadata,
     pub preparation_failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation_failure_detail: Option<String>,
     pub run_id: String,
     pub revision: u64,
     pub selection: LaunchSelectionMetadata,
@@ -246,6 +248,7 @@ impl LaunchRead {
             bound_epoch: self.metadata.bound_epoch,
             requires_rebind: self.metadata.requires_rebind,
             preparation_failure: self.metadata.preparation_failure,
+            preparation_failure_detail: self.metadata.preparation_failure_detail,
         })
     }
     pub fn load_policy_models(self) -> Result<Vec<PolicyModelCapability>> {

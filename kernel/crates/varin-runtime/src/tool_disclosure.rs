@@ -98,6 +98,7 @@ pub fn is_always_declared(name: &str) -> bool {
             | "process_write"
             | "process_inspect"
             | "process_resize"
+            | "process_stop"
             | "wait_process"
             | "script_open"
             | "script_run"

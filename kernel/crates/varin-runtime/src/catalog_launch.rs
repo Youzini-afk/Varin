@@ -716,6 +716,8 @@ pub struct LaunchIntent {
     pub pause: Option<super::policy_control::PolicyPauseInfo>,
     #[serde(default)]
     pub preparation_failure: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation_failure_detail: Option<String>,
     pub run_id: String,
     pub revision: u64,
     pub selection: LaunchSelection,
@@ -945,6 +947,7 @@ impl Catalog {
                 }
                 intent.revision += 1;
                 intent.preparation_failure = None;
+                intent.preparation_failure_detail = None;
                 intent.bound_epoch = Some(self.epoch);
                 intent.requires_rebind = false;
                 put(&tx, "run_launches", run_id, &intent)?;
@@ -956,6 +959,7 @@ impl Catalog {
                     policy_generation: 0,
                     policy_target: super::policy_switch::PolicyTargetMetadata::Default,
                     preparation_failure: None,
+                    preparation_failure_detail: None,
                     run_id: run_id.into(),
                     revision: 1,
                     selection,
@@ -1000,10 +1004,10 @@ impl Catalog {
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
     pub fn fail_launch(&mut self, run_id: &str, code: &str) -> Result<LaunchIntent> {
         let _synchronous = self.content.begin_synchronous()?;
-        let metadata = self.fail_launch_metadata(run_id, code)?;
+        let metadata = self.fail_launch_metadata(run_id, code, None)?;
         self.launch_read(metadata)?.load()
     }
-    pub fn fail_launch_metadata(&mut self, run_id: &str, code: &str) -> Result<LaunchMetadata> {
+    pub fn fail_launch_metadata(&mut self, run_id: &str, code: &str, detail: Option<&str>) -> Result<LaunchMetadata> {
         if !valid_preparation_failure(code) {
             return Err(RuntimeError::Invalid(
                 "unknown preparation failure code".into(),
@@ -1045,6 +1049,7 @@ impl Catalog {
         };
         tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET body=excluded.body",params![wait_id,run_id,encode(&wait)?])?;
         intent.preparation_failure = Some(code.into());
+        intent.preparation_failure_detail = detail.filter(|text| !text.trim().is_empty()).map(str::to_owned);
         intent.bound_epoch = None;
         intent.requires_rebind = true;
         intent.revision += 1;
@@ -1058,7 +1063,7 @@ impl Catalog {
             run_id,
             run.revision,
             "run.preparation_failed",
-            json!({"code":code}),
+            json!({"code":code,"detail":intent.preparation_failure_detail}),
         )?;
         tx.commit()?;
         Ok(intent)
