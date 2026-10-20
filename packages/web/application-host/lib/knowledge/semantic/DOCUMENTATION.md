@@ -288,6 +288,12 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   tombstones so an unchanged project folder is not silently re-added. Existing on-disk caches are
   listed without enrolling their source roots in background indexing; cleanup also works for missing
   source directories. Cache-directory removal and per-folder cleanup share the management write queue.
+  Failed generation shutdown retains its workspace owner for another cleanup attempt. Explicit cache
+  removal can retire the private semantic process when native close cannot release a damaged or
+  externally deleted database: admitted IPC drains, the worker closes its stores and exits, and only
+  then may a replacement open the same files. Other semantic stores and the inference ledger reopen
+  on their next operation; in-flight failures are not replayed. Knowledge, plans and source files
+  remain with their separate owners. Ordinary store shutdown still reports persistence failures.
   Native inventory reports the actual Git root and whether an empty selected directory is ignored.
   Each selected directory can opt into `includeIgnoredDirectories`; the override is clipped to
   the selected indexing scope and applies to subsequent mutation eligibility as well as scans.

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,6 +11,7 @@ import { createRequire } from "node:module";
 import { blockIdentity, semanticSpaceDir, spaceIdOf, workspaceScope } from "./identity.js";
 import { createSemanticGenerationStore } from "./store.js";
 import type { SemanticChunk } from "./chunker.js";
+import { createSemanticInferenceLedger, semanticInferenceOperationKey } from "./inference-ledger.js";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -32,6 +34,50 @@ const chunk = (documentId: string, body: string, startLine = 1, endLine = 3): Se
 });
 
 describe("semantic generation store", () => {
+  it("retires externally deleted cache handles and reopens sibling indexes and the inference ledger", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-missing-cache-"));
+    dirs.push(dataDir);
+    const embedder = createHashEmbedder();
+    const open = (id: string) => createSemanticGenerationStore({ dataDir, hostId: "host", scope: workspaceScope(id), embedder });
+    const removed = open("removed");
+    const sibling = open("sibling");
+    const ledger = createSemanticInferenceLedger({ dataDir, hostId: "host" });
+    const hash = (value: string) => createHash("sha256").update(value).digest("hex");
+    const identity = {
+      providerId: "test", modelId: "test", protocol: "openai-compatible" as const,
+      configurationId: "test", endpointHash: hash("endpoint"), credentialScopeHash: hash("scope"), maxTokens: 256,
+      operation: { kind: "index-build" as const, hostId: "host", workspaceId: "sibling", recipeId: "recipe", stage: "document-embedding" as const },
+      inputHashes: [hash("original-input")],
+    };
+    const receipt = { batchId: "original-batch", providerId: "test", modelId: "test", configurationId: "test",
+      purpose: "index-document-embedding" as const, inputItems: 1, inputBytes: 5, attempts: 0, attemptsKnown: false,
+      state: "indeterminate" as const, usage: { status: "unknown" as const } };
+    const key = semanticInferenceOperationKey(identity, receipt.purpose);
+    try {
+      await removed.publishDocument({ documentId: "a.ts", revision: "r1", chunks: [chunk("a.ts", "alpha")] });
+      await sibling.publishDocument({ documentId: "b.ts", revision: "r2", chunks: [chunk("b.ts", "beta")] });
+      await ledger.admit({ key, identity, receipt });
+      const originalFacts = await ledger.list();
+      const directory = semanticSpaceDir(dataDir, "host", workspaceScope("removed"), removed.spaceId);
+      expect(directory.startsWith(dataDir + "\\") || directory.startsWith(dataDir + "/")).toBe(true);
+      rmSync(directory, { recursive: true, force: true });
+      await expect(removed.close()).rejects.toThrow();
+      await removed.close({ discard: true });
+      expect(await sibling.publishedRevision("b.ts")).toEqual({ revision: "r2", recipeId: sibling.recipeId });
+      expect(await ledger.list()).toEqual(originalFacts);
+      const rebuilt = open("removed");
+      try {
+        expect(await rebuilt.publishedRevision("a.ts")).toBeNull();
+        await rebuilt.publishDocument({ documentId: "a.ts", revision: "r3", chunks: [chunk("a.ts", "rebuilt")] });
+        expect(await rebuilt.publishedRevision("a.ts")).toEqual({ revision: "r3", recipeId: rebuilt.recipeId });
+      } finally { await rebuilt.close(); }
+    } finally {
+      await removed.close({ discard: true });
+      await sibling.close();
+      await ledger.close();
+    }
+  });
+
   it("ranks whole documents in the owner, preserving revision scope and numeric knowledge ties", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "varin-semantic-document-scores-"));
     dirs.push(dataDir);

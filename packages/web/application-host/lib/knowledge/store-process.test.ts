@@ -7,7 +7,7 @@ import {
   KnowledgeMutationError,
   openWorkspaceKnowledge, type KnowledgeStore,
 } from "./store.js";
-import { knowledgeStoreProcess } from "./store-process.js";
+import { KnowledgeStoreProcess, knowledgeStoreProcess } from "./store-process.js";
 import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance.js";
 import type { PlanView } from "@varin/protocol";
 import type { StoreRequest } from "./store-protocol.js";
@@ -39,6 +39,23 @@ afterEach(async () => {
 });
 
 describe("knowledge storage process", () => {
+  it("drains already admitted requests before retiring a cache process", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-semantic-retirement-"));
+    roots.push(root);
+    const owner = new KnowledgeStoreProcess();
+    const id = owner.register({ revision: () => {}, notify: () => {} });
+    const admitted = owner.request(id, "semantic", ["purge", {
+      semanticDirectory: join(root, "semantic"), workspaceId: "workspace", resourceRoot: root, removedDirectory: root,
+    }]);
+    const retired = owner.retire();
+    try {
+      await expect(admitted).resolves.toBeUndefined();
+      await retired;
+      expect(owner.child.exitCode).toBe(0);
+      await expect(owner.request(id, "semantic", ["purge", {}])).rejects.toThrow("closing");
+    } finally { await owner.release(id); }
+  });
+
   it("serves plans and observations between association files and converges after a source changes", async () => {
     const { store } = await fixture();
     await store.replaceFileSymbols("producer.ts", "typescript", [], "p1", [

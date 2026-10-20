@@ -1194,14 +1194,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     }
   };
 
-  const dispose = async (): Promise<void> => {
+  const dispose = async (closeOptions?: { discard?: boolean }): Promise<void> => {
     disposed = true;
     lifecycleController.abort();
     for (const controller of scanControllers.values()) controller.abort();
     scanControllers.clear();
     await drain();
     const closing = await Promise.allSettled([...stores].map(async ([key, store]) => {
-      await store.close(); stores.delete(key);
+      await store.close(closeOptions); stores.delete(key);
     }));
     const failures = closing.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
     if (failures.length) throw new AggregateError(failures.map(result => result.reason), 'Semantic store shutdown failed');

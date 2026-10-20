@@ -40,6 +40,20 @@ export function createSemanticGenerationStore(options: {
   let closing: Promise<void> | null = null;
 
   const open = (): Promise<void> => {
+    if (owner?.failed) {
+      const previous = owner;
+      owner = null;
+      openTask = null;
+      initialized = false;
+      initializationFailed = false;
+      retainedReaders.clear();
+      checkpoint = null;
+      openTask = previous.exited.then(async () => {
+        openTask = null;
+        await open();
+      });
+      return openTask;
+    }
     if (openTask) return openTask;
     owner = knowledgeStoreProcess("semantic");
     storeId = owner.register({ revision: () => {}, notify: message => {
@@ -151,7 +165,8 @@ export function createSemanticGenerationStore(options: {
   const retainReader = (empty: boolean, signal?: AbortSignal): Promise<SemanticPublishedReader | null> => {
     const acquisition = track(async () => {
       signal?.throwIfAborted();
-      if (initializationFailed || owner?.failed) throw new Error("Semantic storage owner is unavailable");
+      if (owner?.failed) await open();
+      if (initializationFailed) throw new Error("Semantic storage owner is unavailable");
       // Initialization may recover and checkpoint existing data. Only the
       // background/explicit ready path may start or await that work; a query
       // acquires the currently available publication or reports a cold source.
@@ -231,20 +246,31 @@ export function createSemanticGenerationStore(options: {
     searchDocumentScores: (query: number[], documents: readonly SemanticDocumentExpectation[], limit: number,
       signal?: AbortSignal): Promise<SemanticDocumentScores> =>
       track(() => call("searchDocumentScores", [query, documents, limit], signal)),
-    close: (): Promise<void> => {
+    close: (options?: { discard?: boolean }): Promise<void> => {
       if (closed) return Promise.resolve();
       if (closing) return closing;
       retainedReaders.clear();
       closing = (async () => {
         await Promise.allSettled([...pending]);
         if (openTask && !initializationFailed) {
+          const active = owner;
+          if (active?.failed) {
+            await active.release(storeId);
+            await active.exited;
+            closed = true;
+            return;
+          }
           try {
             await openTask;
             await call("close", []);
           } catch (error) {
-            if (owner?.failed) {
+            if (owner && options?.discard) {
+              // Native close checkpoints first and can never succeed after its
+              // backing files were removed. Process exit releases those mappings.
+              await owner.retire();
               closed = true;
               await owner.release(storeId);
+              return;
             }
             throw error;
           }

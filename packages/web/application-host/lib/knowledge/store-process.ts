@@ -32,6 +32,8 @@ export class KnowledgeStoreProcess {
   #nextStore = 0;
   #ready = false;
   #ending = false;
+  #retiring = false;
+  #predecessorReady = true;
   #failure: Error | null = null;
   #queue: Pending[] = [];
   #batch: Pending[] | null = null;
@@ -39,8 +41,12 @@ export class KnowledgeStoreProcess {
   #observers = new Map<number, StoreObserver>();
   #onEmpty: () => void;
 
-  constructor(onEmpty: () => void = () => {}) {
+  constructor(onEmpty: () => void = () => {}, predecessor?: Promise<void>) {
     this.#onEmpty = onEmpty;
+    if (predecessor) {
+      this.#predecessorReady = false;
+      void predecessor.then(() => { this.#predecessorReady = true; this.#pump(); });
+    }
     const source = import.meta.url.endsWith(".ts");
     const entry = source ? new URL("./store-worker.ts", import.meta.url) : new URL("./store-worker.js", import.meta.url);
     // The packaged Host and addon are already staged outside app.asar. A Node
@@ -101,11 +107,11 @@ export class KnowledgeStoreProcess {
     });
   }
 
-  get failed(): boolean { return this.#failure !== null || this.#ending; }
+  get failed(): boolean { return this.#failure !== null || this.#ending || this.#retiring; }
 
   register(observer: StoreObserver): number {
     if (this.#failure) throw this.#failure;
-    if (this.#ending) throw new Error("Knowledge storage process is closing");
+    if (this.#ending || this.#retiring) throw new Error("Knowledge storage process is closing");
     const id = ++this.#nextStore;
     this.#observers.set(id, observer);
     return id;
@@ -113,7 +119,7 @@ export class KnowledgeStoreProcess {
 
   request(storeId: number, method: StoreRequest["method"], args: unknown[], signal?: AbortSignal): Promise<unknown> {
     if (this.#failure) return Promise.reject(this.#failure);
-    if (this.#ending) return Promise.reject(new Error("Knowledge storage process is closing"));
+    if (this.#ending || this.#retiring) return Promise.reject(new Error("Knowledge storage process is closing"));
     if (signal?.aborted) return Promise.reject(signal.reason);
     // Snapshot arguments at admission so caller mutation cannot change a queued write.
     let cloned: unknown[];
@@ -142,12 +148,27 @@ export class KnowledgeStoreProcess {
   async release(storeId: number): Promise<void> {
     this.#observers.delete(storeId);
     if (this.#observers.size > 0) return;
+    await this.retire();
+  }
+
+  /** Explicit cache retirement drains admitted IPC before closing native handles.
+   * A successor waits for this process to exit before opening any database. */
+  retire(): Promise<void> {
+    this.#retiring = true;
+    this.child.ref();
+    this.child.channel?.ref();
+    if (!this.#batch && !this.#queue.length) this.#disconnect();
+    else this.#pump();
+    return this.exited;
+  }
+
+  #disconnect(): void {
+    if (this.#ending || !this.#predecessorReady) return;
     this.#ending = true;
-    this.#onEmpty();
     this.child.ref();
     this.child.channel?.ref();
     if (this.child.connected) this.child.disconnect();
-    await this.exited; // Windows mmap lifetime ends before the final close resolves.
+    void this.exited.then(this.#onEmpty);
   }
 
   activity() {
@@ -169,12 +190,13 @@ export class KnowledgeStoreProcess {
   }
 
   #pump(): void {
-    if (!this.#ready || this.#batch || this.#scheduled || this.failed) return;
+    if (!this.#ready || !this.#predecessorReady || this.#batch || this.#scheduled || this.#failure || this.#ending) return;
     this.#scheduled = setImmediate(() => {
       this.#scheduled = null;
-      if (this.failed) return;
+      if (this.#failure || this.#ending) return;
       this.#queue = this.#queue.filter(item => !item.cancelled);
       if (this.#queue.length === 0) {
+        if (this.#retiring) { this.#disconnect(); return; }
         this.child.unref();
         this.child.channel?.unref();
         return;
@@ -241,7 +263,8 @@ export const knowledgeStorageActivity = () => [...shared].map(([domain, owner]) 
 export function knowledgeStoreProcess(domain: "knowledge" | "semantic" = "knowledge"): KnowledgeStoreProcess {
   let owner = shared.get(domain);
   if (!owner || owner.failed) {
-    owner = new KnowledgeStoreProcess(() => { if (shared.get(domain) === owner) shared.delete(domain); });
+    const predecessor = owner?.exited;
+    owner = new KnowledgeStoreProcess(() => { if (shared.get(domain) === owner) shared.delete(domain); }, predecessor);
     shared.set(domain, owner);
   }
   return owner;

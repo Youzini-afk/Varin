@@ -81,6 +81,7 @@ export function createWorkspaceSemanticRuntime(options: WorkspaceSemanticRuntime
   // generations leave this shutdown-owner set after their actual work drains.
   const localEmbedders = new Set([localEmbedder]);
   const states = new Map<string, WorkspaceState>();
+  const retiringStates = new Map<string, WorkspaceState>();
   const loads = new Map<string, Promise<WorkspaceState>>();
   const maintenance = new Map<string, Promise<unknown>>();
   const pending = new Set<Promise<unknown>>();
@@ -317,6 +318,7 @@ return;
   const getWorkspace = async (workspaceId: string, autoScan = true, queryOnly = false, configurationRoot?: string): Promise<WorkspaceState> => {
     await maintenance.get(workspaceId);
     assertActive();
+    if (retiringStates.has(workspaceId)) throw new Error('Semantic index cleanup needs to be retried');
     const loading = loads.get(workspaceId);
     if (loading) return loading;
     const existing = states.get(workspaceId);
@@ -575,15 +577,17 @@ return;
     withIndexMaintenance: async <T>(workspaceId: string, work: () => Promise<T>): Promise<T> => {
       const prior = maintenance.get(workspaceId);
       const task = (async () => {
-        await prior;
-        await loads.get(workspaceId);
-        const state = states.get(workspaceId);
+        await prior?.catch(() => undefined);
+        await loads.get(workspaceId)?.catch(() => undefined);
+        const state = retiringStates.get(workspaceId) ?? states.get(workspaceId);
         states.delete(workspaceId);
         if (state) {
+          retiringStates.set(workspaceId, state);
           state.documentWatch?.close();
-          await state.runtime.dispose();
-          state.queryInference?.lease.release();
           await state.refreshTail;
+          await state.runtime.dispose({ discard: true });
+          state.queryInference?.lease.release();
+          retiringStates.delete(workspaceId);
         }
         return work();
       })();
@@ -632,7 +636,8 @@ return;
       epoch++;
       if (reconcileTimer) clearTimeout(reconcileTimer);
       reconcileTimer = null;
-      for (const state of states.values()) {
+      const allStates = new Set([...states.values(), ...retiringStates.values()]);
+      for (const state of allStates) {
         state.documentWatch?.close();
         state.queryInference?.lease.release(); delete state.queryInference;
       }
@@ -640,17 +645,18 @@ return;
       // scans/query callbacks whose aborted observers cannot stop native forward.
       const localShutdown = Promise.allSettled([...localEmbedders].map(embedder => embedder.dispose?.()));
       const closedStates = new Set<WorkspaceState>();
-      const closeResults = await Promise.allSettled([...states.values()].map(async state => {
+      const closeResults = await Promise.allSettled([...allStates].map(async state => {
         await state.runtime.dispose(); closedStates.add(state);
       }));
       await Promise.allSettled([...loads.values(), ...pending]);
-      await Promise.allSettled([...states.values()].map(async (state) => {
+      await Promise.allSettled([...allStates].map(async (state) => {
         await state.refreshTail;
       }));
       for (const [id, state] of states) {
         state.queryInference?.lease.release();
         if (closedStates.has(state)) states.delete(id);
       }
+      for (const [id, state] of retiringStates) if (closedStates.has(state)) retiringStates.delete(id);
       await localShutdown;
       localEmbedders.clear();
       const failed = closeResults.filter((result): result is PromiseRejectedResult => result.status === 'rejected');

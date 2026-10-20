@@ -34,6 +34,23 @@ const render = (status: SemanticIndexStatus) => parseHTML('<html><body>' + rende
 ) + '</body></html>').document;
 
 describe('index progress presentation', () => {
+  it('keeps cleanup retry enabled after failure and hides stale scan failures during cleanup', () => {
+    const status = snapshot();
+    const entry = status.directories.entries[0]!;
+    entry.state = 'deleting';
+    entry.error = 'Semantic store shutdown failed';
+    const failed = render(status);
+    const retry = [...failed.querySelectorAll('button')].find(button => button.textContent?.includes('index.directories.retryRemoval'));
+    expect(retry?.hasAttribute('disabled')).toBe(false);
+    expect(failed.querySelector('[role="alert"]')?.textContent).toContain(entry.error);
+    entry.busy = true;
+    status.roots[0]!.progress!.error = entry.error;
+    const running = render(status);
+    expect(running.querySelector('[role="alert"]')).toBeNull();
+    expect(running.body.textContent).not.toContain('index.directories.retryRemoval');
+    expect(running.querySelector('progress')).toBeNull();
+  });
+
   it('shows the saved index completion separately from the current check counter', () => {
     const document = render(snapshot());
     expect(document.body.textContent).toContain('Indexed 50/100 documents');

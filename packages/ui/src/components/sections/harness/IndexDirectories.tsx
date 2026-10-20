@@ -59,7 +59,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
         const deleting = entry.state === 'deleting';
         const semanticProcessing = (entry.state === 'active' || entry.checking) && ['enumerating', 'processing'].includes(root?.progress?.phase ?? '');
         const processing = entry.checking || semanticProcessing;
-        const failure = processing ? undefined : entry.error ?? root?.progress?.error;
+        const failure = deleting ? entry.busy ? undefined : entry.error : processing ? undefined : entry.error ?? root?.progress?.error;
         const failureMessage = failure ? indexFailureMessage(failure, t) : undefined;
         const indexedDocuments = root?.status.publishedDocuments ?? root?.progress?.publishedDocuments;
         const totalFiles = root?.progress?.totalFiles ?? 0;
@@ -74,9 +74,9 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                   : entry.checking && root?.progress?.phase === 'ready' ? t('index.directories.updatingRelations')
                   : processing ? t('index.directories.checking') : entry.cacheOnly ? t('index.directories.cached') : paused ? t('index.directories.paused')
                   : t('settings.page.harness.index.phase.ready')}
-                {root ? ` · ${t(root.status.coverage === 'complete' ? 'settings.page.harness.index.coverage.complete'
+                {root && !deleting ? ` · ${t(root.status.coverage === 'complete' ? 'settings.page.harness.index.coverage.complete'
                   : root.status.coverage === 'partial' ? 'settings.page.harness.index.coverage.partial' : 'settings.page.harness.index.coverage.empty')}` : ''}
-                {indexedDocuments !== undefined ? ` · ${totalFiles > 0
+                {indexedDocuments !== undefined && !deleting ? ` · ${totalFiles > 0
                   ? t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })
                   : t('settings.page.harness.index.progress.documents', { count: indexedDocuments })}` : ''}
               </p>
@@ -89,7 +89,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
               </p> : null}
             </div>
           </div>
-          {totalFiles > 0 && indexedDocuments !== undefined ? <progress className="h-1 w-full" value={indexedDocuments} max={totalFiles}
+          {!deleting && totalFiles > 0 && indexedDocuments !== undefined ? <progress className="h-1 w-full" value={indexedDocuments} max={totalFiles}
             aria-label={t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })} /> : null}
           <div className="flex flex-wrap items-center gap-1">
             {!deleting ? <>
@@ -101,8 +101,11 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                 <RiRefreshLine className={processing ? 'size-3.5 animate-spin' : 'size-3.5'} />{t(failure ? 'index.directories.retry' : 'index.directories.check')}
               </Button>
             </> : null}
-            <Button size="xs" variant="ghost" disabled={pending.has(entry.path) || (deleting && entry.busy)} onClick={() => setRemoving(entry.path)}>
-              <RiDeleteBinLine className="size-3.5" />{t(deleting ? 'index.directories.retryRemoval' : 'index.directories.remove')}
+            <Button size="xs" variant="ghost" disabled={pending.has(entry.path) || (deleting && entry.busy)} onClick={() => {
+              if (deleting) void act('remove', entry.path);
+              else setRemoving(entry.path);
+            }}>
+              <RiDeleteBinLine className="size-3.5" />{t(deleting ? entry.busy ? 'index.directories.deleting' : 'index.directories.retryRemoval' : 'index.directories.remove')}
             </Button>
             {!deleting ? <label className="ml-auto flex items-center gap-2 typography-micro text-muted-foreground">
               <Checkbox checked={(draft?.includeIgnoredDirectories ?? []).includes(entry.path)} onChange={(checked) => edit({

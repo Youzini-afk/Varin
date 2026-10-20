@@ -15,6 +15,16 @@ export function createSemanticInferenceLedger(options: SemanticInferenceLedgerOp
   let closing: Promise<void> | null = null;
   const pending = new Set<Promise<unknown>>();
   const open = (): Promise<void> => {
+    if (owner?.failed) {
+      const previous = owner;
+      owner = null;
+      opening = previous.exited.then(async () => {
+        opening = null;
+        initializationFailed = false;
+        await open();
+      });
+      return opening;
+    }
     if (opening) return opening;
     owner = knowledgeStoreProcess("semantic");
     storeId = owner.register({ revision: () => {}, notify: () => {} });
@@ -50,6 +60,12 @@ export function createSemanticInferenceLedger(options: SemanticInferenceLedgerOp
       closing = (async () => {
         await Promise.allSettled([...pending]);
         if (opening && !initializationFailed) {
+          if (owner?.failed) {
+            await owner.release(storeId);
+            await owner.exited;
+            closed = true;
+            return;
+          }
           try { await call("close", []); }
           catch (error) {
             if (owner?.failed) { closed = true; await owner.release(storeId); }
