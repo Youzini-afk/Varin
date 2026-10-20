@@ -81,6 +81,11 @@ their original keys. Source Host discovery is available before creation and gran
 
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.
+The overview's child section is a task list. Row context menus and hover buttons share actions for
+opening, inspecting, renaming, copying, sending another instruction and stopping the selected task.
+Completed tasks offer continuation through the existing message request path; read-only views hide
+mutations. Agent profile settings, family browsing and message-directory controls do not sit below
+the list. Renaming uses the Thread catalog owner, and an uncertain instruction retry retains its key.
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 

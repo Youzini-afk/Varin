@@ -12,6 +12,7 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, FetchResult } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
@@ -93,6 +94,29 @@ vi.mock('@/components/chat/DraftPresetChips', () => ({ DraftPresetChips: () => n
 vi.mock('@/components/ui/VarinLogo', () => ({ VarinLogo: () => null }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={onChange as React.FormEventHandler<HTMLInputElement>} /> }));
 vi.mock('@/components/ui/textarea', () => ({ Textarea: ({ onChange, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) => <textarea {...props} onInput={onChange as React.FormEventHandler<HTMLTextAreaElement>} /> }));
+
+// Floating geometry is checked in the browser. Keep menu opening/closing here so the
+// conversation tests exercise the real per-task actions and their native targets.
+vi.mock('@/components/ui/context-menu', async () => {
+  const { createContext, useContext, useState, cloneElement } = await import('react');
+  const State = createContext({ open: false, setOpen: (_value: boolean) => {} });
+  return {
+    ContextMenu: ({ children }: React.PropsWithChildren) => {
+      const [open, setOpen] = useState(false);
+      return <State.Provider value={{ open, setOpen }}>{children}</State.Provider>;
+    },
+    ContextMenuTrigger: ({ children }: { children: React.ReactElement<React.HTMLAttributes<HTMLElement>> }) => {
+      const state = useContext(State);
+      return cloneElement(children, { onContextMenu: event => { event.preventDefault(); state.setOpen(true); } });
+    },
+    ContextMenuContent: ({ children }: React.PropsWithChildren) => useContext(State).open ? <div role="menu">{children}</div> : null,
+    ContextMenuItem: ({ children, onClick, disabled }: React.PropsWithChildren<{ onClick(): void; disabled?: boolean }>) => {
+      const state = useContext(State);
+      return <button role="menuitem" disabled={disabled} onClick={() => { onClick(); state.setOpen(false); }}>{children}</button>;
+    },
+    ContextMenuSeparator: () => <hr />,
+  };
+});
 
 // This suite tests native conversation ownership and its real message controls. The
 // virtual viewport's geometry and scrolling require a browser, so render its rows here.
@@ -437,7 +461,10 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   expect(cancelOperation).toHaveBeenCalledExactlyOnceWith(observation.id);
   expect(cancelChild).not.toHaveBeenCalled();
   assertFileResult();
-  await act(async () => { button('Stop child subtree').click(); });
+  await act(async () => {
+    container.querySelector('[aria-label="harness.threads.title"] summary')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true }));
+  });
+  await act(async () => { [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'harness.threads.stop')!.click(); });
   expect(cancelChild).toHaveBeenCalledExactlyOnceWith(identity, 'original-child');
   // A short admission ACK is not a process-stop or file-publication fact.
   assertFileResult();
@@ -455,8 +482,51 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   await act(async () => { button('Read report').click(); });
   expect(readReport).toHaveBeenCalledExactlyOnceWith(identity, child.operation_id, 'original-report', 0, undefined, expect.any(AbortSignal));
   expect(container.textContent).toContain('Original bytes');
-  await act(async () => { button('Stop task and children').click(); });
-  expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
+  expect(container.textContent).not.toContain('harness.threads.stopAll');
+  expect(container.textContent).not.toContain('chat.children.profiles');
+  expect(container.textContent).not.toContain('harness.threads.viewAll');
+  expect(container.textContent).not.toContain('chat.children.messages');
+  expect(cancelTree).not.toHaveBeenCalled();
+});
+
+it('task menus reuse the selected Agent, retain uncertain send identity and rename through the Thread owner', async () => {
+  const f = fixture();
+  const unused = async (): Promise<never> => { throw new Error('unused message read'); };
+  const send = vi.fn<NonNullable<ThreadsAPI['messages']>['send']>().mockRejectedValueOnce(new Error('reply lost'))
+    .mockResolvedValue({ messageId: 'accepted' } as Awaited<ReturnType<NonNullable<ThreadsAPI['messages']>['send']>>);
+  f.api.messages = { send, get: unused, list: unused };
+  const child = { child_thread_id: 'child:chosen', child_branch_id: 'branch:chosen', operation_id: 'dispatch:chosen', agent_id: 'ABC12345' } as ChildTask;
+  const changed = vi.fn(async () => {}), cancel = vi.fn(async () => {});
+  const openMenu = async () => act(async () => {
+    container.querySelector('summary')!.dispatchEvent(new window.Event('contextmenu', { bubbles: true, cancelable: true }));
+  });
+  const menuItem = (label: string) => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label);
+  const render = async (readOnly = false) => act(async () => root.render(<details><ChildTaskMenu api={f.api} identity={identity} child={child}
+    name="File review" task="Review files" state="failed" expanded={false} stopping={false} pending={false} readOnly={readOnly}
+    onToggle={() => {}} onChanged={changed} onError={() => {}} cancel={cancel}>{menu => <summary>File review{menu}</summary>}</ChildTaskMenu></details>));
+  await render(); await openMenu();
+  expect(menuItem('harness.threads.stop')).toBeUndefined();
+  await act(async () => menuItem('chat.children.continueTask')!.click());
+  await edit('[aria-label="chat.children.instruction"]', 'Check the new change');
+  await submitForm(container.querySelector('form')!);
+  expect(container.textContent).toContain('reply lost');
+  await submitForm(container.querySelector('form')!);
+  expect(send).toHaveBeenCalledTimes(2);
+  expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+  expect(send.mock.calls[0]).toEqual([identity, expect.objectContaining({ kind: 'request', text: 'Check the new change', targetThreadId: 'child:chosen', targetBranchId: 'branch:chosen' })]);
+  expect(changed).toHaveBeenCalledOnce();
+  const resolve = vi.spyOn(useThreadStore.getState(), 'resolveThread').mockResolvedValue({ identity: { runtime: 'agent', threadId: 'child:chosen', branchId: 'branch:chosen' }, botId: null });
+  const rename = vi.spyOn(useThreadStore.getState(), 'updateThread').mockResolvedValue(undefined);
+  await openMenu(); await act(async () => menuItem('chat.children.rename')!.click());
+  await edit('[aria-label="chat.children.taskName"]', 'File fixes');
+  await submitForm(container.querySelector('form')!);
+  expect(resolve).toHaveBeenCalledWith({ threadId: 'child:chosen' });
+  expect(rename).toHaveBeenCalledExactlyOnceWith('child:chosen', { title: 'File fixes' });
+  await render(true); await openMenu();
+  expect(menuItem('chat.children.continueTask')).toBeUndefined();
+  expect(menuItem('chat.children.rename')).toBeUndefined();
+  expect(menuItem('chat.children.copyTask')).toBeDefined();
+  expect(cancel).not.toHaveBeenCalled();
 });
 
 it('registers a process follow-up through an uncertain reply and preserves the actual delivery and observation owners', async () => {
@@ -1693,8 +1763,8 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
   expect(f.api.mediaRead).toHaveBeenCalledWith(expect.objectContaining({ holder: { kind: 'child_report', operationId: 'original-dispatch', executionId: 'old-execution', itemId: 'old-report' }, partIndex: 1 }), expect.any(AbortSignal));
   expect(container.querySelector('[aria-label="chat.children.report"] img')?.getAttribute('src')).toBe('blob:test-image');
   expect(f.view.activeRun).toBeNull();
-  await act(async () => { button('Stop task and children').click(); });
-  expect(cancelTree).toHaveBeenCalledExactlyOnceWith(identity);
+  expect(container.textContent).not.toContain('harness.threads.stopAll');
+  expect(cancelTree).not.toHaveBeenCalled();
 });
 
 

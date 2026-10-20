@@ -24,10 +24,7 @@ import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ThreadExecutions } from './ThreadExecutions';
-import { ThreadMessages } from './ThreadMessages';
-import { ThreadFamily } from './ThreadFamily';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
-import { ThreadChildProfiles } from './ThreadChildProfiles';
 import { ThreadPlan } from './ThreadPlan';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
@@ -542,13 +539,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </ThreadWorkOverviewSection>
       <ThreadWorkOverviewSection sessionKey={overviewKey} section="threads" visible={sections.threads || focused === 'threads'} title={t('harness.overview.threads')} icon="git-branch">
       {snapshot && <ChildTasks key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} children={snapshot.children ?? []}
-        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending}
+        executions={snapshot.childExecutions ?? []} activity={snapshot.childActivity} directory={snapshot.childDirectory} pending={pending} readOnly={readOnly}
+        onChanged={async () => { await projection.current?.refresh(); }}
         cancel={!readOnly && api.collaboration ? operationId => act(() => api.collaboration!.cancelChild(identity, operationId)) : undefined} />}
-      {!readOnly && snapshot && api.collaboration && (run || snapshot.children?.length || delegated) && <Button variant="ghost" size="sm" disabled={pending}
-        onClick={() => void act(() => api.collaboration!.cancelTree(identity), true)}>{t('harness.threads.stopAll')}</Button>}
-      {launch && <ThreadChildProfiles launch={launch.selection} />}
-      {api.family && <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} observe={api.observe} />}
-      {!readOnly && api.messages && <ThreadMessages api={api.messages} family={api.family} identity={identity} eventCursor={snapshot?.eventCursor} cancelObservation={pending ? undefined : operationId => act(() => api.cancelOperation(operationId), true)} />}
     {delegated && <div className="mx-auto w-full max-w-3xl px-4"><ThreadExecutions key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} executions={snapshot?.delegatedExecutions ?? []} /></div>}
       </ThreadWorkOverviewSection>
       <ThreadWorkOverviewSection sessionKey={overviewKey} section="outputs" visible={sections.outputs || focused === 'outputs'} title={t('harness.overview.outputs')} icon="list-check-2">
