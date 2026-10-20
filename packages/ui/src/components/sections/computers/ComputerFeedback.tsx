@@ -26,6 +26,8 @@ export const ComputerFeedback = React.forwardRef<ComputerFeedbackHandle, { bound
       for (const gesture of pending.current.splice(0)) if (Date.now() - Date.parse(gesture.at) < 1800) ref.current?.contentWindow?.postMessage({ type: 'gesture', gesture }, '*');
     }
   }, [ready, bounds, configuration, disabled, clear]);
-  return <iframe ref={ref} srcDoc={COMPUTER_FEEDBACK_HTML} sandbox="allow-scripts" tabIndex={-1} title={t('computer.feedback.title')}
+  // Match srcdoc's normal color scheme: Chromium paints an opaque canvas when
+  // the iframe inherits a dark scheme but its transparent document uses light.
+  return <iframe ref={ref} srcDoc={COMPUTER_FEEDBACK_HTML} sandbox="allow-scripts" tabIndex={-1} title={t('computer.feedback.title')} style={{ colorScheme: 'normal' }}
     aria-hidden="true" onLoad={() => setReady(true)} className="pointer-events-none absolute inset-0 h-full w-full border-0" />;
 });
