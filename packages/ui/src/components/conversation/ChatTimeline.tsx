@@ -15,6 +15,7 @@ import {
   DEFAULT_CHAT_TIMELINE_VIEW,
   getChatAnchoredTurnCorrection,
   getChatTimelineFollowOffset,
+  getChatTimelineEndOffset,
   isChatTimelineAtEnd,
   isChatTimelineEntryCurrent,
   CHAT_TIMELINE_ANCHOR_OFFSET_PX,
@@ -256,7 +257,10 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const scrollToContentEnd = React.useCallback((animated: boolean) => (
     listRef.current?.scrollToEnd({
       animated,
-      viewOffset: endSpaceRef.current?.getBoundingClientRect().height ?? 0,
+      viewOffset: getChatTimelineEndOffset(
+        listRef.current?.getState().scrollLength ?? 0,
+        endSpaceRef.current?.getBoundingClientRect().height ?? 0,
+      ),
     })
   ), []);
 
@@ -462,6 +466,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const extraData = React.useMemo(() => ({
     projection,
+    activeRunId: props.activeRunId,
     assistantWaiting: props.assistantWaiting,
     assistantWaitingTurnId,
     forkBusyEntryId: props.forkBusyEntryId,
@@ -475,6 +480,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     threadBusyEntryId: props.threadBusyEntryId,
   }), [
     projection,
+    props.activeRunId,
     props.assistantWaiting,
     assistantWaitingTurnId,
     props.forkBusyEntryId,
@@ -494,6 +500,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         ? { assistantWaiting: props.assistantWaiting }
         : {})}
       cwd={props.cwd}
+      activeRunId={props.activeRunId}
       forkBusyEntryId={props.forkBusyEntryId}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
       block={block} projection={projection} sorted={sortedMessages}
@@ -513,6 +520,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     props.assistantWaiting,
     waitingGroupId,
     props.cwd,
+    props.activeRunId,
     props.forkBusyEntryId,
     props.hiddenThinkingLabel,
     sortedMessages,

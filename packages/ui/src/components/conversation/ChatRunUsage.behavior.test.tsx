@@ -50,7 +50,7 @@ it('shows one summed footer after an ended Run even when every paginated message
   }
 });
 
-it('keeps changed files hidden during a Run and attaches each summary to its ended Run', async () => {
+it('keeps turn actions and changed files hidden while running and retains earlier completed footers', async () => {
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
   const container = document.createElement('div'); document.body.append(container);
@@ -73,29 +73,33 @@ it('keeps changed files hidden during a Run and attaches each summary to its end
   };
   const ended = (runId: string): ThreadRunUsage => ({ runId, throughId: `${runId}:answer`, requests: [{ requestId: `${runId}:request`, usage }] });
   const projector = new HistoryPresentation('thread');
-  const render = async (history: ThreadHistoryItem[], usage: ThreadRunUsage[]) => {
+  const render = async (history: ThreadHistoryItem[], usage: ThreadRunUsage[], activeRunId?: string) => {
     const view = projector.project(history, undefined, usage);
     const projection = projectChatTimeline(view.entries);
     const blocks = projectChatTimelineBlocks(projection, { sorted: useUIStore.getState().chatRenderMode === 'sorted', expanded: () => false });
     await act(async () => root.render(<>{blocks.items.flatMap(block => block.kind === 'footer' ? [
       <section key={block.id} data-run={block.group.runId}><ChatTimelineEntryList cwd="/workspace" sessionId="thread" entries={block.group.entries}
-        part="footer" projectedResultByCallId={projection.resultByCallId} toolExecutions={view.toolExecutions} /></section>,
+        part="footer" turnActive={activeRunId === block.group.runId} projectedResultByCallId={projection.resultByCallId} toolExecutions={view.toolExecutions} /></section>,
     ] : [])}</>));
   };
   const summaries = () => [...container.querySelectorAll('details')].filter(node => node.querySelector('summary')?.textContent?.includes('chat.changedFiles.title'));
   try {
     useUIStore.setState({ chatRenderMode: 'live', showTurnChangedFiles: true });
     const first = runHistory('first', null), second = runHistory('second', 'first:answer');
-    await render(first.slice(0, 3), []); // Applied edit, between model steps: no live message.
+    await render(first.slice(0, 3), [], 'first'); // Applied edit, between model steps: no live message.
     expect(summaries()).toHaveLength(0);
-    await render(first, []); // Persisted assistant text alone does not end the Run.
+    await render(first, [], 'first'); // Persisted assistant text alone does not end the Run.
     expect(summaries()).toHaveLength(0);
+    expect(container.querySelector('[aria-label="chat.messageBody.actions.copyAnswer"]')).toBeNull();
     await render(first, [ended('first')]);
     expect(summaries()).toHaveLength(1);
+    expect(container.querySelector('[data-run="first"] [aria-label="chat.messageBody.actions.copyAnswer"]')).not.toBeNull();
     expect(summaries()[0].textContent).toContain('first.ts');
     await act(async () => useUIStore.setState({ chatRenderMode: 'sorted' }));
-    await render([...first, ...second.slice(0, 3)], [ended('first')]);
+    await render([...first, ...second], [ended('first')], 'second');
     expect(summaries()).toHaveLength(1);
+    expect(container.querySelector('[data-run="first"] [aria-label="chat.messageBody.actions.copyAnswer"]')).not.toBeNull();
+    expect(container.querySelector('[data-run="second"] [aria-label="chat.messageBody.actions.copyAnswer"]')).toBeNull();
     expect(summaries()[0].closest('[data-run]')?.getAttribute('data-run')).toBe('first');
     await render([...first, ...second], [ended('first'), ended('second')]);
     expect(summaries()).toHaveLength(2);

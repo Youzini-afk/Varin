@@ -81,6 +81,7 @@ export interface ChatTimelineProps {
   footer?: React.ReactNode;
   compactionStatus?: 'requested' | 'running' | 'retrying' | 'ready' | 'applying' | 'failed';
   assistantWaiting?: ChatAssistantWaitingPresentation;
+  activeRunId?: string;
   cwd: string;
   entries: readonly ChatSessionEntry[];
   forkBusyEntryId?: string | null;
@@ -934,6 +935,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
   outputDurationsMs?: Readonly<Record<string, number>>;
   projectedResultByCallId?: ReadonlyMap<string, ChatToolResultMessage>;
   part?: 'body' | 'footer';
+  turnActive?: boolean;
   /** A physical body row uses its logical Run's sorted projection. Activity
    * has its own virtual rows; it must not be mounted again inside the body. */
   sortedPresentation?: ChatSortedTurnProjection;
@@ -954,6 +956,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
   threadBusyEntryId,
   toolExecutions,
   part,
+  turnActive = liveAssistant?.stopReason === 'pending',
   sortedPresentation,
   extensionPresentation,
 }) => {
@@ -1239,7 +1242,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
           usages={footerUsage?.usages}
           liveAssistant={projection.liveAssistant}
           outputDurationsMs={outputDurationsMs}
-          actions={turnText ? (
+          actions={turnText && !turnActive ? (
             <div className="flex h-6 shrink-0 items-center">
               <Tooltip>
                 <TooltipTrigger asChild>

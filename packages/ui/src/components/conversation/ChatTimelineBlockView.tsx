@@ -37,6 +37,7 @@ export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, ex
     content = <ChatTimelineEntryList {...props} toolExecutions={toolExecutions} outputDurationsMs={presentation.outputDurationsMs}
       entries={block.kind === 'entry' ? [block.entry] : block.kind === 'footer' ? group.entries : []}
       liveAssistant={block.kind === 'footer' || block.kind === 'live-assistant' ? liveAssistant : undefined}
+      turnActive={props.activeRunId === group.runId || assistantWaiting !== undefined || liveAssistant?.stopReason === 'pending'}
       projectedResultByCallId={projection.resultByCallId} part={block.kind === 'footer' ? 'footer' : 'body'} sortedPresentation={sortedPresentation} extensionPresentation={extensionPresentation} />;
   }
   return <div className="chat-message-column py-1.5" data-turn-entry={block.id} data-turn-id={block.ownerId}

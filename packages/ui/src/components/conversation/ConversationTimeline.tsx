@@ -140,6 +140,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     [api, identity, head, onQuote, openFile, fileTarget, memory, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
+    activeRunId={working ? snapshot?.activeRun?.id : undefined}
     assistantWaiting={working ? {} : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />
   </ConversationContext.Provider>;

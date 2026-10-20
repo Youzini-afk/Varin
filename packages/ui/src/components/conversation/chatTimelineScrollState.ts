@@ -216,13 +216,23 @@ export const CHAT_TIMELINE_ANCHOR_OFFSET_PX = 16;
 // Browser scroll metrics can differ by a fractional device pixel.
 export const CHAT_TIMELINE_EDGE_EPSILON_PX = 2;
 
+// Keep the live text above the composer; scale down in short panes and mobile.
+export const getChatTimelineReadingGap = (viewportHeight: number): number => (
+  Math.min(96, Math.max(0, viewportHeight) * 0.16)
+);
+
+/** Only the remaining, manually revealable space is excluded from following. */
+export const getChatTimelineEndOffset = (viewportHeight: number, endSpaceHeight: number): number => (
+  Math.max(0, endSpaceHeight - getChatTimelineReadingGap(viewportHeight))
+);
+
 export const isChatTimelineAtEnd = (
   contentHeight: number,
   scrollOffset: number,
   viewportHeight: number,
   endSpaceHeight = 0,
 ): boolean => (
-  contentHeight - endSpaceHeight - (scrollOffset + viewportHeight) <= CHAT_TIMELINE_EDGE_EPSILON_PX
+  contentHeight - getChatTimelineEndOffset(viewportHeight, endSpaceHeight) - (scrollOffset + viewportHeight) <= CHAT_TIMELINE_EDGE_EPSILON_PX
 );
 
 /** Leave manually revealed end space in place until new content fills it. */
@@ -231,7 +241,7 @@ export const getChatTimelineFollowOffset = (
   scrollOffset: number,
   viewportHeight: number,
   endSpaceHeight: number,
-): number => Math.max(scrollOffset, 0, contentHeight - endSpaceHeight - viewportHeight);
+): number => Math.max(scrollOffset, 0, contentHeight - getChatTimelineEndOffset(viewportHeight, endSpaceHeight) - viewportHeight);
 
 export type ChatTimelineScrollIntent = 'toward-end' | 'away-from-end';
 
@@ -278,7 +288,7 @@ export const getChatAnchoredTurnCorrection = (
   const lastSize = state.sizeAtIndex(lastIndex);
   if (![anchorTop, lastTop, lastSize].every(Number.isFinite)) return null;
   const lastBottom = lastTop + Math.max(1, lastSize);
-  const usableViewportHeight = Math.max(0, state.scrollLength - anchorOffset);
+  const usableViewportHeight = Math.max(0, state.scrollLength - Math.max(anchorOffset, getChatTimelineReadingGap(state.scrollLength)));
   const turnHeight = Math.max(0, lastBottom - anchorTop);
   const targetScroll = Math.max(0, lastBottom - usableViewportHeight);
   return {
