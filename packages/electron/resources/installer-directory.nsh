@@ -10,13 +10,24 @@
 Function VarinResolveInstallDirectory
   Push $0
   Push $1
+  ClearErrors
   StrLen $0 "$VarinDesiredDirectory"
   StrCpy $1 "$VarinDesiredDirectory" 1 1
   ${If} $0 == 2
   ${AndIf} $1 == ":"
     StrCpy $VarinDesiredDirectory "$VarinDesiredDirectory\"
   ${EndIf}
-  GetFullPathName $VarinDesiredDirectory "$VarinDesiredDirectory"
+  ; NSIS GetFullPathName can reject a missing final component. Installation
+  ; targets normally don't exist yet; the Windows API only resolves the path.
+  System::Call 'kernel32::GetFullPathNameW(w "$VarinDesiredDirectory", i ${NSIS_MAX_STRLEN}, w .r0, p 0) i.r1'
+  ${If} $1 == 0
+  ${OrIf} $1 >= ${NSIS_MAX_STRLEN}
+    Pop $1
+    Pop $0
+    SetErrors
+    Return
+  ${EndIf}
+  StrCpy $VarinDesiredDirectory "$0"
   varin_trim:
     StrLen $0 "$VarinDesiredDirectory"
     IntCmp $0 3 varin_trim_done varin_trim_done
@@ -37,6 +48,7 @@ Function VarinResolveInstallDirectory
   StrCpy $INSTDIR "$VarinDesiredDirectory"
   Pop $1
   Pop $0
+  ClearErrors
 FunctionEnd
 !macroend
 !endif

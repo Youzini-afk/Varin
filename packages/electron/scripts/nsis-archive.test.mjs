@@ -42,6 +42,8 @@ test('install locations preserve drive roots instead of using the installer work
     const script = path.join(root, 'directories.nsi');
     const program = path.join(root, 'directories.exe');
     const output = path.join(root, 'locations.txt');
+    const freshParent = path.join(root, '尚未创建的安装目录');
+    const icon = path.join(resources, 'icons/icon.ico');
     await writeFile(script, '\uFEFF' + [
       'Unicode true', 'RequestExecutionLevel user', 'SilentInstall silent', 'SetCompress off',
       'Name "Varin install directory regression"', `OutFile "${nsisPath(program)}"`,
@@ -54,13 +56,20 @@ test('install locations preserve drive roots instead of using the installer work
         'Call VarinResolveInstallDirectory',
         'FileWriteUTF16LE $9 "$INSTDIR$\\r$\\n"',
       ]),
-      'FileClose $9', 'SectionEnd',
+      'FileClose $9',
+      `StrCpy $VarinDesiredDirectory "${nsisPath(freshParent)}"`,
+      'Call VarinResolveInstallDirectory',
+      'IfErrors 0 +3', 'SetErrorLevel 1', 'Quit',
+      'SetOutPath $INSTDIR',
+      `File /oname=uninstallerIcon.ico "${nsisPath(icon)}"`,
+      'SectionEnd',
     ].join('\n'));
     const compiler = await getMakeNsisPath();
     await exec(compiler.path, ['/V2', script], { env: { ...process.env, ...compiler.env }, windowsHide: true });
-    // No files are installed: only run the production resolver and record its output.
+    // Write the first installer asset only inside this test's temporary directory.
     await exec(program, [], { cwd: root, windowsHide: true });
     assert.deepEqual((await readFile(output, 'utf16le')).trimEnd().split('\r\n'), cases.map(([, expected]) => expected));
+    assert.deepEqual(await readFile(path.join(freshParent, 'Varin/uninstallerIcon.ico')), await readFile(icon));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -35,6 +35,10 @@ Function VarinDirectoryBrowse
   ${AndIf} $0 != ""
     StrCpy $VarinDesiredDirectory "$0"
     Call VarinResolveInstallDirectory
+    ${If} ${Errors}
+      MessageBox MB_ICONEXCLAMATION "$(VarinPathError)"
+      Return
+    ${EndIf}
     ${NSD_SetText} $VarinDirectoryInput "$INSTDIR"
     Call VarinReadyState
   ${EndIf}
@@ -190,6 +194,10 @@ Function VarinReadyLeave
   ${EndIf}
   ${If} $VarinIsUpgrade != "1"
     Call VarinResolveInstallDirectory
+    ${If} ${Errors}
+      MessageBox MB_ICONEXCLAMATION "$(VarinPathError)"
+      Abort
+    ${EndIf}
     ${NSD_GetState} $VarinShortcutControl $VarinShortcut
   ${EndIf}
   StrCpy $VarinDesiredDirectory "$INSTDIR"
