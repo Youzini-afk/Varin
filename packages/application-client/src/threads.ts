@@ -3,7 +3,7 @@ import type { DocumentReadRequest, FetchResult } from '@varin/protocol';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpInteractionPage, McpInteractionView, McpSamplingRequestReviewParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from '@varin/protocol';
 import type { ComputerAutomationProjection, ComputerAutomationState } from '@varin/protocol';
-import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView } from '@varin/protocol';
+import type { MessageSendParams, MessageListParams, MessageReceipt, MessagePage, MessageView, MessageFeedParams, MessageFeedPage } from '@varin/protocol';
 import type { FamilyList, FamilyListParams, FamilyRuns, FamilyRead, FamilyItem, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { PlanSnapshot, PlanMutationResult, ChildReportPage, ChildTask, DelegatedExecution, ChildWait, TreeCancellationReceipt, Followup, FollowupView, FollowupRegisterParams, LiveRoot, ContextPersonalization, ContextResources, ResourceActivation, RuntimeEvent, HistoryItem, InputMode, InputReceipt, QueuedInput, InputSubmitReceipt, Run, Operation, RunCancellationReceipt, OperationCancellationReceipt, AgentRuntimeStreamEvent, ThreadSummary, LaunchIntent, PolicyResumeReceipt, ImageAttachment } from '@varin/protocol';
 
@@ -153,8 +153,10 @@ export interface ThreadFamilyAPI {
   item(identity: ThreadIdentity, request: Omit<FamilyItemParams, 'callerThreadId'>, signal?: AbortSignal): Promise<FamilyItem>;
 }
 /** Durable same-family messages. Acceptance, history delivery, request activation and Agent reply
- * observations are distinct facts. User sends do not create a Run or an observation. */
+ * observations are distinct facts. Native ingress owns request activation. */
 export interface ThreadMessagesAPI {
+  /** Original family messages, including peer exchanges; reading never activates a participant. */
+  feed(identity: ThreadIdentity, request: Omit<MessageFeedParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessageFeedPage>;
   send(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal): Promise<MessageReceipt>;
   list(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MessagePage>;
   get(identity: ThreadIdentity, messageId: string, signal?: AbortSignal): Promise<MessageView>;
@@ -171,6 +173,7 @@ export interface ThreadChildContinuation extends ThreadIdentity {
   materials?: ThreadMaterialAttachment[];
 }
 export interface ThreadCollaborationAPI {
+  exchange(identity: ThreadIdentity, request: ThreadCodeExchangeRequest, signal?: AbortSignal): Promise<ThreadCodeExchange>;
   page?(identity: ThreadIdentity, options?: Omit<FamilyListParams,'callerThreadId'>, signal?:AbortSignal):Promise<ThreadChildPage>;
   integration(input: ThreadIntegrationCommand, signal?: AbortSignal): Promise<ThreadIntegrationState>;
   /** Explicit User input, retaining this child's exact previous execution configuration. */
@@ -183,6 +186,22 @@ export interface ThreadCollaborationAPI {
   cancelWait(identity: ThreadIdentity, waitId: string): Promise<ChildWait>;
   cancelTree(identity: ThreadIdentity): Promise<TreeCancellationReceipt>;
 }
+export interface ThreadCodeExchangeRequest {
+  messageId: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  path?: string;
+}
+export interface ThreadCodeExchange {
+  operationId: string;
+  sourceThreadId: string;
+  targetThreadId: string;
+  state: string;
+  targetDirectory?: string;
+  files: Array<{ path: string; state: 'applied' | 'conflict' | 'compensated' | 'needs_attention' | 'unchanged'; target: 'disk' | 'surface' | 'branch' }>;
+  file?: { path: string; before: ThreadExchangeFileContent; after: ThreadExchangeFileContent };
+}
+export type ThreadExchangeFileContent = { kind: 'text'; text: string } | { kind: 'missing' } | { kind: 'binary'; byteLength: number } | { kind: 'directory' | 'unsupported' } | { kind: 'symlink'; target: string };
 export interface ThreadChildPage {
   directory:FamilyList;
   children:ChildTask[];

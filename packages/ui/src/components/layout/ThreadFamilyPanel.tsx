@@ -1,8 +1,11 @@
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useThreadStore } from '@/stores/useThreadStore';
-import { ThreadFamily } from '@/components/thread/ThreadFamily';
-export function ThreadFamilyPanel() {
+import { ThreadCollaboration } from '@/components/thread/ThreadCollaboration';
+import { useI18n } from '@/lib/i18n';
+export function ThreadFamilyPanel({ active = true }: { active?: boolean }) {
+  const { t } = useI18n();
   const api = useRuntimeAPIs().threads;
   const identity = useThreadStore(state => state.selectedIdentity);
-  return identity && api?.family ? <ThreadFamily api={api.family} mediaRead={api.mediaRead} identity={identity} observe={api.observe} /> : <p className="p-4 text-sm">Open a conversation to browse its task family.</p>;
+  if (!active) return null;
+  return identity && api?.family && api.messages && api.collaboration ? <ThreadCollaboration api={api} identity={identity} /> : <p className="p-4 typography-meta text-muted-foreground">{t('collaboration.openConversation')}</p>;
 }

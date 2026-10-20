@@ -21,7 +21,7 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus }: {
+export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus, viewId }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
@@ -32,9 +32,12 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
   header?: React.ReactNode; footer?: React.ReactNode;
+  /** Independent viewport for an embedded conversation; content identity stays with its Thread. */
+  viewId?: string;
 }) {
   const { t } = useI18n();
   const key = threadComposerKey(threadHostKey(), identity);
+  const timelineKey = viewId ? `${key}:${viewId}` : key;
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
   const head = history.at(-1)?.id ?? null;
@@ -91,12 +94,12 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
   React.useLayoutEffect(() => {
-    const entryKey = `${key}:${historyReset}`;
+    const entryKey = `${timelineKey}:${historyReset}`;
     if (!snapshot && !historyReady || entering.current === entryKey) return;
     const preserveReading = entering.current === undefined && Boolean(historyReady);
     entering.current = entryKey;
-    useTimelineViewStore.getState().enter(key, head, working, preserveReading);
-  }, [snapshot, historyReady, historyReset, key, head, working]);
+    useTimelineViewStore.getState().enter(timelineKey, head, working, preserveReading);
+  }, [snapshot, historyReady, historyReset, timelineKey, head, working]);
   const nativeItems = React.useMemo(() => new Map(history.map(item => [item.id, item])), [history]);
   const renderExtras = React.useCallback((itemId: string) => {
     const item = nativeItems.get(itemId); if (!item) return null;
@@ -135,7 +138,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   }, [fileTarget, identity]);
   const context = React.useMemo(() => ({ api, identity, head, quote: onQuote, openFile, fileTarget, memory, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
     [api, identity, head, onQuote, openFile, fileTarget, memory, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
-  return <ConversationContext.Provider value={context}><ChatTimeline key={`${key}:${historyReset}`} sessionId={key} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
+  return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     assistantWaiting={working ? {} : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />

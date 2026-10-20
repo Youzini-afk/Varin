@@ -5,7 +5,7 @@ import type { OperationCallCompletion, IncomingMedia, OutputPart } from './proto
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
 import type * as CalendarProtocol from './protocol.generated.js';
 import type { ChildContinuationAcceptParams, DelegatedExecution } from './protocol.generated.js';
-import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView } from './protocol.generated.js';
+import type { MessageSendParams, MessageListParams, MessageGetParams, MessageReceipt, MessagePage, MessageView, MessageFeedParams, MessageFeedPage } from './protocol.generated.js';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams, FamilyList, FamilyRuns, FamilyRead, FamilyItem } from './protocol.generated.js';
 import type { ChildCapabilityDescriptor, ChildDispatchCatalog, TreeCancelTarget, TreeCancellationReceipt, McpBinding, LiveMcpBinding } from './protocol.generated.js';
 import { savedSourceLaunch } from './source-launch.js';
@@ -622,6 +622,9 @@ export class AgentRuntimeClient {
   }
   listMessages(input: MessageListParams, signal?: AbortSignal): Promise<MessagePage> {
     return this.kernel.agentRuntimeRequest('runtime.messages.list', input, signal);
+  }
+  messageFeed(input: MessageFeedParams, signal?: AbortSignal): Promise<MessageFeedPage> {
+    return this.kernel.agentRuntimeRequest('runtime.messages.feed', input, signal);
   }
   getMessage(input: MessageGetParams, signal?: AbortSignal): Promise<MessageView> {
     return this.kernel.agentRuntimeRequest('runtime.messages.get', input, signal);

@@ -12,6 +12,8 @@ use serde::Deserialize;
 pub const SEND_TOOL: &str = "send";
 #[path = "catalog_reply_wait.rs"]
 pub mod reply_wait;
+#[path = "catalog_message_feed.rs"]
+pub mod feed;
 pub use reply_wait::ReplyWaitView;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -198,40 +200,51 @@ fn route(
     sender: &str,
     branch: &str,
     input: &MessageInput,
+    actor: &MessageActor,
 ) -> Result<(String, String)> {
     branch_owner(db, sender, branch)?;
     let (target, target_branch) = if let Some(reply) = &input.reply_to {
         let original: QueuedInputMetadata = record(db, "input_queue", reply)?;
         let original = message_identity(&original)?;
-        if original.target_thread_id != sender || original.target_branch_id != branch {
+        if matches!(actor, MessageActor::Agent { .. })
+            && (original.target_thread_id != sender || original.target_branch_id != branch) {
             return Err(RuntimeError::Conflict(
                 "replyTo was not received by this exact Thread and branch".into(),
             ));
         }
+        if super::scheduling::thread_family(db, &original.sender_thread_id)?
+            != super::scheduling::thread_family(db, sender)? {
+            return Err(RuntimeError::Conflict("reply is outside the caller's task family".into()));
+        }
+        let (reply_thread, reply_branch) = if matches!(actor, MessageActor::User)
+            && input.target_thread_id.as_ref().map(|target| super::threads::resolve(db, target)).transpose()?
+                .is_some_and(|target| target == original.target_thread_id) {
+            (&original.target_thread_id, &original.target_branch_id)
+        } else { (&original.sender_thread_id, &original.sender_branch_id) };
         if input
             .target_thread_id
             .as_ref()
                 .map(|v| super::threads::resolve(db,v)).transpose()?
-                .is_some_and(|v| v != original.sender_thread_id)
+                .is_some_and(|v| v != *reply_thread)
             || input
                 .target_branch_id
                 .as_ref()
-                .is_some_and(|v| v != &original.sender_branch_id)
+                .is_some_and(|v| v != reply_branch)
         {
             return Err(RuntimeError::Conflict(
                 "reply target differs from the original sender".into(),
             ));
         }
         (
-            original.sender_thread_id.clone(),
-            original.sender_branch_id.clone(),
+            reply_thread.clone(),
+            reply_branch.clone(),
         )
     } else {
         let target = super::threads::resolve(db,input.target_thread_id.as_deref().ok_or_else(|| RuntimeError::Invalid("target Agent required".into()))?)?;
         let branch = input.target_branch_id.clone().map(Ok).unwrap_or_else(||super::threads::branch(db,&target))?;
         (target,branch)
     };
-    if sender == target {
+    if sender == target && matches!(actor, MessageActor::Agent { .. }) {
         return Err(RuntimeError::Invalid(
             "messages must target another task-family member".into(),
         ));
@@ -341,7 +354,7 @@ impl Catalog {
         let identity = if let Some((_, receipt)) = &existing {
             receipt.identity.clone()
         } else {
-            let (target_thread_id, target_branch_id) = route(&self.db, &sender, &branch, &input)?;
+            let (target_thread_id, target_branch_id) = route(&self.db, &sender, &branch, &input, &actor)?;
             MessageIdentity {
                 source_agent: input.source_agent.clone(),
                 message_id: match &actor {
@@ -439,6 +452,7 @@ impl Catalog {
             &identity.sender_thread_id,
             &identity.sender_branch_id,
             &routing,
+            &identity.actor,
         )?;
         if let Some(captured) = &prepared.operation {
             let current: Operation = record(&tx, "operations", &captured.id)?;

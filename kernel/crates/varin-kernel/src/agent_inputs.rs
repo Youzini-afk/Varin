@@ -285,6 +285,15 @@ pub(super) fn execute(
                     .map_err(domain)?,
             )?)
         }
+        "runtime.messages.feed" => {
+            let p: MessageFeedParams = serde_json::from_value(params)?;
+            let limit = p.limit.map(usize::try_from).transpose().map_err(|_| KernelError::Protocol("message page size must be positive".into()))?;
+            let before = p.before.map(u64::try_from).transpose().map_err(|_| KernelError::Protocol("message cursor must be non-negative".into()))?;
+            let after = p.after.map(u64::try_from).transpose().map_err(|_| KernelError::Protocol("message cursor must be non-negative".into()))?;
+            let read = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+                .capture_message_feed(p.thread_id, p.branch_id, before, after, limit).map_err(domain)?;
+            Ok(serde_json::to_value(read.load(&|| cancelled.load(Ordering::Acquire)).map_err(domain)?)?)
+        }
         "runtime.messages.get" => {
             let p: MessageGetParams = serde_json::from_value(params)?;
             let read = catalog

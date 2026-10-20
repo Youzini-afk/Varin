@@ -452,6 +452,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       capabilities: (input, signal) => request('capabilities', input, signal),
       handoff: (input, signal) => request('handoff', input, signal),
       integrationReceipt: (input, signal) => request('integrationReceipt', input, signal),
+      codeExchange: (input, signal) => request('codeExchange', input, signal),
       resolve: (input, signal) => request('resolve', input, signal),
       prepare: (input, signal) => request('prepare', input, signal),
       bind: (input, signal) => request('bind', input, signal),

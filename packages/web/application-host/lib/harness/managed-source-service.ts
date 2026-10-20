@@ -29,6 +29,7 @@ export interface ManagedSourceServiceOptions {
   /** The target's local original preparer, never the coordinator's remote dispatcher. */
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   serviceOperation?: ManagedSourceServiceHandler;
+  readCodeExchange?(input: import('./managed-remote-types.js').ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   recovery?(principal: ManagedSourcePrincipal, input: ManagedRecoveryRequest, signal?: AbortSignal): Promise<ManagedRecoveryReply>;
   releaseMcpView?(scope: ManagedSourceCleanupScope,
     action: Extract<import('./managed-mcp-contract.js').ManagedMcpAction, { kind: 'release' }>): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
@@ -290,6 +291,15 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       requirePrincipal(principal, input.coordinatorHostId);
       await kernel.start();
       return kernel.sourceRequest('source.integration.receipt', { ...input, principalId: principal.principalId }, signal);
+    },
+    async codeExchange(principal, input, signal) {
+      requireReadPrincipal(principal, input.coordinatorHostId);
+      if (!options.readCodeExchange) throw new Error('The original file exchange reader is unavailable');
+      await kernel.start();
+      const { path, ...receipt } = input;
+      // Authenticate the original receipt after the run has ended, without reopening its source.
+      await kernel.sourceRequest('source.integration.receipt', { ...receipt, principalId: principal.principalId }, signal);
+      return options.readCodeExchange({ ...receipt, ...(path === undefined ? {} : { path }) }, signal);
     },
     async resolve(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);

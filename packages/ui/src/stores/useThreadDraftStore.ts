@@ -68,6 +68,13 @@ export interface ThreadDraft {
   firstMessageReceipt?: Pick<ThreadFirstSend, 'key' | 'text' | 'images'> & { inputId: string };
   sendError?: string;
   sourceSelection?: DraftSourceSelection;
+  /** Unsent collaboration input and exact per-recipient attempts, retained in memory only. */
+  collaboration?: {
+    targets: ThreadIdentity[];
+    reply?: import('@varin/protocol').MessageFeedEntry;
+    attempts?: Array<{ request: Parameters<NonNullable<ThreadsAPI['messages']>['send']>[1]; receipt?: import('@varin/protocol').MessageReceipt; error?: string }>;
+    sending?: boolean;
+  };
 }
 export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], inputMode: 'boundary', preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */

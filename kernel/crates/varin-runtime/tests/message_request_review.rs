@@ -64,6 +64,26 @@ fn candidate(db: &mut Catalog) -> PreparedRequestActivation {
         .unwrap()
 }
 #[test]
+fn user_message_from_collaboration_continues_the_same_main_thread() {
+    let mut f = Fixture::new();
+    f.accept();
+    f.settle_exchange();
+    finish(&mut f, RunState::Completed);
+    let original = f.db.launch_intent(&f.context.run_id).unwrap().unwrap();
+    let prepared = f.db.prepare_user_message("collaboration-main".into(), "thread:parent".into(), "branch:parent".into(), MessageInput {
+        source_agent: None, name: None, wait: None, target_thread_id: Some("thread:parent".into()), target_branch_id: Some("branch:parent".into()),
+        reply_to: None, kind: MessageKind::Request, text: "Continue with these findings".into(),
+    }).unwrap().load().unwrap();
+    let receipt = f.db.admit_message(prepared).unwrap().receipt;
+    let pending = candidate(&mut f.db);
+    let RequestActivationAdmission::Bound(run) = f.db.admit_request_activation(pending).unwrap() else { panic!("bound main Run") };
+    assert_ne!(run, f.context.run_id);
+    assert_eq!(f.db.run(&run).unwrap().thread_id, "thread:parent");
+    assert_eq!(f.db.launch_intent(&run).unwrap().unwrap().selection, original.selection);
+    assert_eq!(view(&f.db, &receipt).summary.delivered_run_id.as_deref(), Some(run.as_str()));
+    assert_eq!(f.db.history("branch:parent").unwrap().last().unwrap().id, receipt.identity.message_id);
+}
+#[test]
 fn active_request_binds_once_joins_closed_boundary_and_cancel_cannot_reopen_it() {
     let mut f = Fixture::new();
     f.accept();

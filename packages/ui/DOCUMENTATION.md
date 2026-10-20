@@ -104,6 +104,14 @@ the list. Renaming uses the Thread catalog owner, and an uncertain instruction r
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
+The right-hand Collaboration surface reads the native family message feed, including exchanges between
+peers. Its virtual list prefetches older messages and merges new arrivals by original message identity.
+Member selection mounts one original Thread history/progress reader with a separate viewport key; main
+conversation scroll state stays independent. Completed members are paged through the native history
+directory. User replies and per-recipient send attempts use the original message admission API, with
+drafts and uncertain keys retained in the existing in-memory draft store. File cards read immutable
+Integration journal versions on inspection; current working files are never substituted for an old diff.
+
 `HistoryPresentation` projects semantic history into the timeline without replacing its IDs. Model
 labels and token receipts come from the original frozen request, not today's selected model; usage is
 counted once per request even when it produced several visible items. Tool-call identity includes its

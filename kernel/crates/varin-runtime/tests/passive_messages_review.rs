@@ -57,6 +57,35 @@ fn finished(f: &mut Fixture, state: RunState) {
     .unwrap();
 }
 #[test]
+fn family_feed_reads_peer_and_user_messages_once_and_pages_across_new_acceptance() {
+    let mut f = Fixture::new();
+    let child = f.accept();
+    f.settle_exchange();
+    f.db.create_thread("unrelated", "unrelated-branch").unwrap();
+    let first = parent_message(&mut f, "feed-first", "first body");
+    let second = send(&mut f, "feed-second", "thread:parent", "branch:parent", input(&child.child_thread_id, &child.child_branch_id, "second body"));
+    let page = f.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, None, Some(1)).unwrap().load(&|| false).unwrap();
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].message.summary.receipt, second);
+    assert_eq!(page.messages[0].message.text, "second body");
+    assert_eq!(page.participants.len(), 2);
+    let third = send(&mut f, "feed-self", "thread:parent", "branch:parent", input("thread:parent", "branch:parent", "user to main agent"));
+    let older = f.db.capture_message_feed(child.child_thread_id.clone(), child.child_branch_id.clone(), page.before, None, Some(1)).unwrap().load(&|| false).unwrap();
+    assert_eq!(older.messages[0].message.summary.receipt, first);
+    assert!(older.before.is_none());
+    let tail = f.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, Some(second.accepted_cursor), Some(1)).unwrap().load(&|| false).unwrap();
+    assert_eq!(tail.messages[0].message.summary.receipt, third);
+    assert!(tail.after.is_none());
+    assert!(f.db.capture_message_feed("unrelated".into(), "unrelated-branch".into(), None, None, None).unwrap().load(&|| false).unwrap().messages.is_empty());
+    assert!(f.db.capture_message_feed("thread:parent".into(), "unrelated-branch".into(), None, None, None).is_err());
+    assert!(f.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, None, None).unwrap().load(&|| true).is_err());
+    let mut reply = input(&child.child_thread_id, &child.child_branch_id, "user follows up an outgoing message");
+    reply.reply_to = Some(second.identity.message_id.clone());
+    let replied = send(&mut f, "feed-reply", "thread:parent", "branch:parent", reply);
+    assert_eq!(replied.identity.target_thread_id, child.child_thread_id);
+    assert_eq!(replied.identity.actor, MessageActor::User);
+}
+#[test]
 fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact() {
     let mut f = Fixture::new();
     let child = f.accept();

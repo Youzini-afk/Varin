@@ -78,6 +78,13 @@ An uncertain creation retry keeps its original key and input. Update/control con
 the current revision before a new explicit action. Ordinary message submission and conversation fork
 are not Goal creation commands. Goal-owned followups are controlled through their Goal.
 
+`ThreadsAPI.messages.feed` reads a chronological page of the selected Thread's task-family messages,
+including peer traffic. Numeric before/after bounds refer to immutable native acceptance cursors;
+the result includes the original actor, delivery state and compact participant identities. Reading has
+no activation effect. User messages can address the main Thread or reply to a visible family exchange;
+Agent messages retain their original directed reply rules. `collaboration.exchange` resolves a message
+to its original Integration operation and reads recorded file versions from that resource owner.
+
 `ThreadsAPI.followups` registers one explicit instruction for an absolute `at` instant, accepted
 `process_stopped`/`job_stopped` operation, original-source file condition, research `artifact`/`collection`,
 original-job `log_literal`/`log_end`, original-machine `metric`, or flat `any`/`all` combination. Register retains a stable key and

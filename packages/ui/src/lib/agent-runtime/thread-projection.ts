@@ -40,7 +40,8 @@ export class ThreadProjection {
     private readonly report: (error: unknown) => void,
     private readonly publishProgress: (parts: StreamingTextPart[]) => void = () => {},
     private readonly publishTools: (calls: StreamingToolCall[]) => void = () => {},
-    private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {}) {}
+    private readonly publishToolProgress: (progress: ToolExecutionProgress[]) => void = () => {},
+    private readonly options: { contextInspection?: boolean } = {}) {}
 
   async refresh(): Promise<void> {
     this.dirty = true;
@@ -82,8 +83,10 @@ export class ThreadProjection {
           }
           this.publishCurrentProgress();
           this.publish(snapshot);
-          this.contextSnapshot = snapshot;
-          void this.refreshContext();
+          if (this.options.contextInspection !== false) {
+            this.contextSnapshot = snapshot;
+            void this.refreshContext();
+          }
         }
       }
     } catch (error) { if (!this.abort.signal.aborted) this.report(error); }

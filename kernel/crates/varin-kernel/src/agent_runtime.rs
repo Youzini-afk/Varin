@@ -1155,6 +1155,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.list"
                                 | "runtime.messages.send"
                                 | "runtime.messages.list"
+                                | "runtime.messages.feed"
                                 | "runtime.messages.get"
                                 | "runtime.child.prepare"
                         ) {

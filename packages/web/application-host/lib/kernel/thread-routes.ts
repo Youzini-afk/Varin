@@ -115,6 +115,8 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'context/publish': ['runtime', 'threadId', 'branchId', 'runId'], 'context/cancel': ['runtime', 'threadId', 'branchId', 'runId'], 'context/resume': ['runtime', 'threadId', 'branchId', 'runId'],
     'messages/send': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/list': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/feed': ['runtime', 'threadId', 'branchId', 'request'],
+    'messages/exchange': ['runtime', 'threadId', 'branchId', 'request'],
     'messages/get': ['runtime', 'threadId', 'branchId', 'messageId'],
     'family/list': ['runtime', 'threadId', 'branchId', 'includeSelf', 'scope', 'query', 'cursor', 'limit', 'parentThreadId', 'parentBranchId', 'workspaceId', 'updatedAfterMs', 'updatedBeforeMs', 'filePath'],
     'family/runs': ['runtime', 'threadId', 'branchId', 'request'],
@@ -309,6 +311,21 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       ...(request.limit === undefined ? {} : { limit: revision(request.limit) }) }, signal);
   });
   post('messages/get', (body, signal) => adapter.getMessage(identity(body), text(body.messageId), signal));
+  post('messages/feed', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['before', 'after', 'limit'].includes(key))) throw new Error('Invalid message feed field');
+    return adapter.messageFeed(identity(body), {
+      ...(request.before === undefined ? {} : { before: revision(request.before) }),
+      ...(request.after === undefined ? {} : { after: revision(request.after) }),
+      ...(request.limit === undefined ? {} : { limit: revision(request.limit) }),
+    }, signal);
+  });
+  post('messages/exchange', (body, signal) => {
+    const request = object(body.request);
+    if (Object.keys(request).some(key => !['messageId', 'senderThreadId', 'senderBranchId', 'path'].includes(key))) throw new Error('Invalid file exchange read field');
+    return adapter.codeExchange(identity(body), { messageId: text(request.messageId), senderThreadId: text(request.senderThreadId), senderBranchId: text(request.senderBranchId),
+      ...(request.path === undefined ? {} : { path: text(request.path) }) }, signal);
+  });
   post('family/list', (body, signal) => {
     if (body.includeSelf !== undefined && typeof body.includeSelf !== 'boolean') throw new Error('includeSelf must be boolean');
     return adapter.familyList(identity(body), { ...(body.includeSelf===undefined?{}:{includeSelf:body.includeSelf}),

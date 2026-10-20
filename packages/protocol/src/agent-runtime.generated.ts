@@ -776,6 +776,34 @@ export interface MessagePage {
   nextCursor: string | null;
 }
 
+export interface MessageFeedParams {
+  threadId: string;
+  branchId: string;
+  before?: number;
+  after?: number;
+  limit?: number;
+}
+
+export interface MessageFeedEntry extends MessageView {
+  codeExchangeOperationId?: string;
+}
+
+export interface MessageParticipant {
+  threadId: string;
+  name: string;
+  agentId: string;
+  avatar: string | null;
+}
+
+export interface MessageFeedPage {
+  rootThreadId: string;
+  messages: MessageFeedEntry[];
+  participants: MessageParticipant[];
+  before: number | null;
+  after: number | null;
+  eventCursor: number;
+}
+
 export type LogStream = 'stdout' | 'stderr';
 
 export interface FollowupLogState {
@@ -1449,7 +1477,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 53; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 54; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

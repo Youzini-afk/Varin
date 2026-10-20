@@ -67,6 +67,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       sources: (selection, request = {}, signal) => post('research/sources', { ...selection, request }, signal),
     },
     messages: {
+      feed: (identity, request, signal) => post('messages/feed', { ...identity, request }, signal),
       send: (identity, request, signal) => post('messages/send', { ...identity, request }, signal),
       list: (identity, request, signal) => post('messages/list', { ...identity, request }, signal),
       get: (identity, messageId, signal) => post('messages/get', { ...identity, messageId }, signal),
@@ -80,6 +81,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     processes: { openTerminal: input => post('process/terminal', input) },
     plan: { read: identity => post('plan/read', identity), update: input => post('plan/update', input) },
     collaboration: {
+      exchange: (identity, request, signal) => post('messages/exchange', { ...identity, request }, signal),
       integration: (input, signal) => post('child/integration', input, signal),
       continueChild: (input, signal) => post('child/continue', withClientTime(input), signal),
       executions: (identity, operationId, signal) => post('child/executions', { ...identity, ...(operationId ? { operationId } : {}) }, signal),

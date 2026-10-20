@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ThreadPrepareSource, ThreadSource } from '@varin/application-client';
 import type { KernelClient, KernelGrantHandle, KernelGrantIssueInput } from '../kernel/kernel-client.js';
-import type { SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthorityResult, SourceHandoffClaimParams } from '../kernel/protocol.generated.js';
+import type { LaunchSource, SourceAuthorityOpenParams, SourceAuthorityBindParams, SourceAuthorityResult, SourceHandoffClaimParams } from '../kernel/protocol.generated.js';
 import { createManagedSourceService } from './managed-source-service.js';
 import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { createSourceQueryService } from '../kernel/source-query-service.js';
@@ -29,7 +29,7 @@ function fixture() {
     const grant = { grantId: input.grantId, threadId: input.scope.threadId, kernelEpoch: 'target-epoch' } as KernelGrantHandle;
     grants.set(input.grantId, grant); return grant;
   });
-  const sourceRequest = vi.fn(async (method: string, input: unknown) => {
+  const sourceRequest = vi.fn(async (method: string, input: unknown): Promise<unknown> => {
     events.push(method);
     if (method === 'source.capabilities') return { tools: [], grantCapabilities: ['storage.read'], clientCapabilities: ['filesystem:read'], unavailable: [] };
     if (method === 'source.authority.open') {
@@ -66,13 +66,14 @@ function fixture() {
   const releaseMcpView = vi.fn(async () => ({ ok: true as const, value: null, executorStopped: true as const }));
   const recovery = vi.fn(async () => ({ status: 'failed' as const,
     failure: { code: 'operation-not-found' as const, message: 'Original journal is unavailable', retryable: false } }));
+  const readCodeExchange = vi.fn(async () => ({ operationId: 'exchange', sourceThreadId: 'sender', targetThreadId: 'target', state: 'applied', files: [] }));
   const service = createManagedSourceService({ kernel, hostId: 'target', releaseMcpView, mcpInteractionContinuation, documents: {
     admitWorkspaceRegistration: async () => {
       events.push('registration'); if (!state.trusted) throw new Error('Trust withdrawn');
       return { workspaceId: 'workspace', canonicalPath: '/target/project', hostId: 'target' };
     },
-  } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource, recovery });
-  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation, recovery };
+  } as never, validateLiveSource: async () => {}, prepareSource, serviceOperation, releaseSource, recovery, readCodeExchange });
+  return { service, kernel, state, events, sourceRequest, issueGrant, claimManagedChildSource, readBranch, fileMaterialize, fileRootRegister, prepareSource, serviceOperation, releaseSource, releaseMcpView, mcpInteractionContinuation, recovery, readCodeExchange };
 }
 
 async function bindMcp(f: ReturnType<typeof fixture>) {
@@ -84,6 +85,26 @@ async function bindMcp(f: ReturnType<typeof fixture>) {
 }
 
 describe('managed Source target admission orchestration', () => {
+  it('reads a completed file exchange through its original receipt with read permission and no new source grant', async () => {
+    const f = fixture();
+    const originalSource: LaunchSource = { resource_owner: source.resourceOwner, workspace_id: 'workspace', execution_workspace_id: 'workspace',
+      mode: 'fixed_branch', branch_id: 'branch', revision: 0, live_root: null };
+    const receipt = { coordinatorHostId: 'coordinator', source: originalSource, threadId: 'sender', runId: 'finished-run', operationId: 'exchange' };
+    const input = { ...receipt, path: 'search.ts' };
+    f.sourceRequest.mockResolvedValueOnce({ state: 'applied' });
+    expect(await f.service.codeExchange(principal, input)).toMatchObject({ operationId: 'exchange' });
+    expect(f.sourceRequest).toHaveBeenCalledWith('source.integration.receipt', { ...receipt, principalId: principal.principalId }, undefined);
+    expect(f.readCodeExchange).toHaveBeenCalledWith(input, undefined);
+    expect(f.issueGrant).not.toHaveBeenCalled();
+    expect(f.prepareSource).not.toHaveBeenCalled();
+    expect(f.serviceOperation).not.toHaveBeenCalled();
+    f.readCodeExchange.mockClear();
+    await expect(f.service.codeExchange({ ...principal, capabilities: [] }, input)).rejects.toThrow();
+    f.sourceRequest.mockRejectedValueOnce(new Error('No matching original source authority'));
+    await expect(f.service.codeExchange(principal, { ...input, operationId: 'another' })).rejects.toThrow('original source authority');
+    expect(f.readCodeExchange).not.toHaveBeenCalled();
+  });
+
   it('routes a newly authorized Recovery to its original owner without reopening an execution Source', async () => {
     const f = fixture();
     const input = { coordinatorHostId: 'coordinator', binding: { operationId: 'original-recovery', workspaceId: 'workspace',

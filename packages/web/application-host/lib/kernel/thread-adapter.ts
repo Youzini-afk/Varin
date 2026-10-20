@@ -6,7 +6,7 @@ import type { SourceDirectory } from './thread-sources.js';
 import { sourceFailureCode } from './source-admission-error.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
 import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
-import type { MessageSendParams, MessageListParams } from '@varin/protocol';
+import type { MessageSendParams, MessageListParams, MessageFeedParams } from '@varin/protocol';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
 import type { ThreadToolInspection, ThreadMcpSamplingRequestReview } from '@varin/application-client';
@@ -98,6 +98,13 @@ export class ThreadAdapter {
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
+  private codeExchangeReader?: import('./thread-code-exchange.js').ThreadCodeExchangeReader;
+  bindCodeExchangeReader(reader: import('./thread-code-exchange.js').ThreadCodeExchangeReader): void { this.codeExchangeReader = reader; }
+  async codeExchange(identity: ThreadIdentity, request: import('@varin/application-client').ThreadCodeExchangeRequest, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    if (!this.codeExchangeReader) throw new Error('File exchange reader is unavailable');
+    return this.codeExchangeReader(identity, request, signal);
+  }
   bindFileResolver(resolver: import('./thread-file-target.js').ThreadFileTargetResolver): void { this.fileResolver = resolver; }
   async fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal) {
     const entry = await this.recoveryEntry({ ...input, entryId: input.itemId }, signal);
@@ -307,6 +314,10 @@ export class ThreadAdapter {
   async listMessages(identity: ThreadIdentity, request: Omit<MessageListParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
     return this.runtime.listMessages({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
+  }
+  async messageFeed(identity: ThreadIdentity, request: Omit<MessageFeedParams, 'threadId' | 'branchId'>, signal?: AbortSignal) {
+    await this.requireIdentity(identity, signal);
+    return this.runtime.messageFeed({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
   }
   async getMessage(identity: ThreadIdentity, messageId: string, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);

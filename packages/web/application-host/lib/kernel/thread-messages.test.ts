@@ -106,6 +106,15 @@ it('requires Host authentication and preserves User ingress against forged actor
   expect(await response.json()).toEqual({ code: 'thread-conflict', error: 'Thread request could not be completed' });
 });
 
+it('reads the family feed through the authenticated identity and preserves chronological page boundaries', async () => {
+  const f = fixture();
+  f.facts.reply = { rootThreadId: 'root', messages: [], participants: [], before: 21, after: null, eventCursor: 40 };
+  expect(await f.api.feed(identity, { before: 22, limit: 30 })).toEqual(f.facts.reply);
+  expect(f.requests.mock.calls.at(-1)!.slice(0, 2)).toEqual(['runtime.messages.feed', { threadId: identity.threadId, branchId: identity.branchId, before: 22, limit: 30 }]);
+  expect((await f.request('/api/threads/messages/feed', { ...identity, request: { threadId: 'another' } })).status).toBe(400);
+  expect((await f.request('/api/threads/messages/feed', { ...identity, request: {} }, false)).status).toBe(401);
+});
+
 it('aborts only the original read when the view closes and preserves uncertain message keys on public retries', async () => {
   const f = fixture(); f.facts.block = true;
   const controller = new AbortController();

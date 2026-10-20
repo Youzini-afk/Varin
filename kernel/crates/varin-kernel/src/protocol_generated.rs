@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 53;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 54;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2627,6 +2627,16 @@ pub(crate) struct MessageGetParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MessageFeedParams {
+    pub(crate) thread_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) before: Option<i64>,
+    pub(crate) after: Option<i64>,
+    pub(crate) limit: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostJobTaskUpdateParams {
     pub(crate) binding: varin_runtime::catalog::host_jobs::HostJobBinding,
     pub(crate) expected_revision: i64,
@@ -4657,6 +4667,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.messages.get" => serde_json::from_value::<MessageGetParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.messages.feed" => serde_json::from_value::<MessageFeedParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.host_job.task.update" => {

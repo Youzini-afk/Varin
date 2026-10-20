@@ -24,6 +24,7 @@ export interface ManagedSourceCapabilityRequest {
   enabledTools?: string[];
 }
 export interface ManagedSourceIntegrationReceiptRequest { coordinatorHostId: string; source: LaunchSource; runId: string; threadId: string; operationId: string }
+export interface ManagedSourceCodeExchangeRequest extends ManagedSourceIntegrationReceiptRequest { path?: string }
 export interface ManagedSourceHandoffRequest { coordinatorHostId: string; operationId: string; parentRunId: string; parentThreadId: string; source: LaunchSource }
 export interface ManagedSourceResolveRequest { coordinatorHostId: string; path: string }
 export interface ManagedSourceResolveReceipt { workspaceId: string; canonicalRoot: string; hostId: string }
@@ -170,6 +171,7 @@ export interface ManagedSourceService {
   fileObservation(principal:ManagedSourcePrincipal,input:ManagedFileObservationRequest,signal?:AbortSignal):Promise<unknown>;
   capabilities(principal: ManagedSourcePrincipal, input: ManagedSourceCapabilityRequest, signal?: AbortSignal): Promise<ManagedSourceCapabilities>;
   integrationReceipt(principal: ManagedSourcePrincipal, input: ManagedSourceIntegrationReceiptRequest, signal?: AbortSignal): Promise<unknown>;
+  codeExchange(principal: ManagedSourcePrincipal, input: ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;
   resolve(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<ManagedSourceResolveReceipt>;
   prepare(principal: ManagedSourcePrincipal, input: ManagedSourcePrepareRequest, signal?: AbortSignal): Promise<ThreadPreparedSource>;

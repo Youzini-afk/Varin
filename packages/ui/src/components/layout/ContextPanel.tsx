@@ -140,7 +140,7 @@ const getModeLabel = (
   t: TranslateFn
 ): string => {
   if (mode === 'chat') return t('contextPanel.mode.chat');
-  if (mode === 'threads') return t('harness.overview.threads');
+  if (mode === 'threads') return t('collaboration.title');
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
@@ -1661,7 +1661,7 @@ export const ContextPanel: React.FC = () => {
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent active={isOpen} />
         : activeTab?.mode === 'threads'
-            ? <ThreadFamilyPanel />
+            ? <ThreadFamilyPanel active={isOpen} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
             ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'recovery'

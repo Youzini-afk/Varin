@@ -953,6 +953,14 @@ html:not(.dark) .chat-scroll {
   line-height: inherit;
 }
 
+/* Directed collaboration messages use the panel's reading scale. The selected
+   member conversation keeps its normal message typography. */
+.collaboration-feed [data-message-id] .markdown-content {
+  font-size: var(--text-meta);
+  line-height: 1.7;
+  --markdown-paragraph-spacing: 0.65em;
+}
+
 ::highlight(varin-chat-selection) {
   background: color-mix(in srgb, var(--interactive-border-focus) 25%, transparent);
   color: var(--surface-foreground);

@@ -72,6 +72,7 @@ import { createManagedSourceService } from './lib/harness/managed-source-service
 import { createManagedChildSourceService } from './lib/kernel/managed-source-collaboration.js';
 import { createManagedIntegrationService, createManagedIntegrationOwner } from './lib/kernel/managed-source-integration.js';
 import { createThreadIntegrations, createUserIntegrationService } from './lib/kernel/thread-integrations.js';
+import { createThreadCodeExchangeReader, createManagedCodeExchangeReader } from './lib/kernel/thread-code-exchange.js';
 import { createThreadContext } from './lib/kernel/thread-context.js';
 import { createThreadResourceScope } from './lib/kernel/thread-resource-scope.js';
 import { createThreadSkillInputPreparer } from './lib/kernel/thread-skill-input.js';
@@ -2030,6 +2031,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     documents: documentsAuthority, recovery: foundationalRecoveryEngine, metadataReader: kernelRecoveryStore,
     coordinator: threadIntegrationCoordinator, resolveLiveSource: liveSources.validate };
   const targetUserIntegrations = createUserIntegrationService(userIntegrationOwners);
+  const exchangeJournalOwners = { journal: kernelRecoveryStore, files: kernelRecoveryContentStore };
+  const targetExchangeReader = createManagedCodeExchangeReader(exchangeJournalOwners);
+  threads.bindCodeExchangeReader(createThreadCodeExchangeReader({ ...exchangeJournalOwners, runtime: agentRuntime }));
   const userIntegrations = createThreadIntegrations({ ...userIntegrationOwners, requireIdentity: identity => threads.requireIdentity(identity),
     onError: () => console.error('[Integration] Original source cleanup requires attention') });
   const targetRecovery = createManagedRecoveryService({ kernel: kernelClient, hostId, documents: documentsAuthority,
@@ -2056,6 +2060,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
     recovery: targetRecovery.handle,
+    readCodeExchange: targetExchangeReader,
     releaseMcpView: (scope, action) => targetMcpService.releaseView(scope, action),
     mcpTaskContinuation: (scope, action, signal) => targetMcpService.taskContinuation(scope, action, signal),
     mcpResourceContinuation: (scope, action, signal) => targetMcpService.resourceContinuation(scope, action, signal),

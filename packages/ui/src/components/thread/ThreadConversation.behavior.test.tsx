@@ -489,7 +489,7 @@ it.each(['file-backed', 'source-free'] as const)('keeps the original report, wai
   }));
   const cancelChild = vi.fn(async (_identity: ThreadIdentity, operationId: string) => ({ target: { kind: 'child' as const, operation_id: operationId }, cursor: 4, run_count: 1, child_count: 1, process_count: 1 }));
   const cancelTree = vi.fn(async () => ({ target: { kind: 'thread' as const, thread_id: identity.threadId }, cursor: 5, run_count: 2, child_count: 1, process_count: 1 }));
-  f.api.collaboration = { integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
+  f.api.collaboration = { exchange: vi.fn(), integration: vi.fn(), continueChild: async () => { throw new Error('No continuation'); }, executions: async () => [], readExecutionReport: async () => { throw new Error('No report'); }, children: async () => [child], readReport, cancelWait: async () => { throw new Error('No wait'); }, cancelChild, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await act(async () => {
     const details = container.querySelector<HTMLDetailsElement>('[aria-label="harness.threads.title"] details')!;
@@ -538,7 +538,7 @@ it('task menus reuse the selected Agent, retain uncertain send identity and rena
   const unused = async (): Promise<never> => { throw new Error('unused message read'); };
   const send = vi.fn<NonNullable<ThreadsAPI['messages']>['send']>().mockRejectedValueOnce(new Error('reply lost'))
     .mockResolvedValue({ messageId: 'accepted' } as Awaited<ReturnType<NonNullable<ThreadsAPI['messages']>['send']>>);
-  f.api.messages = { send, get: unused, list: unused };
+  f.api.messages = { send, get: unused, list: unused, feed: unused };
   const child = { child_thread_id: 'child:chosen', child_branch_id: 'branch:chosen', operation_id: 'dispatch:chosen', agent_id: 'ABC12345' } as ChildTask;
   const changed = vi.fn(async () => {}), cancel = vi.fn(async () => {});
   const openMenu = async () => act(async () => {
@@ -1784,7 +1784,7 @@ it.each(['file-backed', 'source-free'] as const)('continues a completed %s child
     total_bytes: new TextEncoder().encode(reportBody).length, text: reportBody }));
   const cancelTree = vi.fn<NonNullable<ThreadsAPI['collaboration']>['cancelTree']>(async target => ({ target: { kind: 'thread', thread_id: target.threadId }, cursor: 15, run_count: 0, child_count: 1, process_count: 0 }));
   const unused = async (): Promise<never> => { throw new Error('unused collaboration control'); };
-  f.api.collaboration = { integration: vi.fn(), continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
+  f.api.collaboration = { exchange: unused, integration: vi.fn(), continueChild, readExecutionReport, executions: async () => f.view.delegatedExecutions!, children: async () => [],
     readReport: unused, cancelChild: unused, cancelWait: unused, cancelTree };
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   await openOverview('threads');
