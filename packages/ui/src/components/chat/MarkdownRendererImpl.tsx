@@ -730,7 +730,6 @@ const mermaidColorsFromTheme = (theme: Theme) => ({
 const useDecorateContext = (
   currentTheme: Theme,
   deferCodeLineNumberSync: boolean,
-  onPreviewLoopback?: (url: string) => void,
   mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
 ): DecorateContext => {
   const { t } = useI18n();
@@ -746,8 +745,6 @@ const useDecorateContext = (
     zoomInDiagram: t('markdownRenderer.mermaid.actions.zoomInTitle'),
     zoomOutDiagram: t('markdownRenderer.mermaid.actions.zoomOutTitle'),
     resetDiagramView: t('markdownRenderer.mermaid.actions.resetViewTitle'),
-    previewLabel: t('terminalView.preview.open'),
-    previewTitle: t('terminalView.preview.openTitle'),
   }), [t]);
 
   const codeBlockLineWrap = useUIStore((state) => state.codeBlockLineWrap);
@@ -770,8 +767,8 @@ const useDecorateContext = (
           return {};
         }
       });
-    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid, onPreviewLoopback };
-  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, mermaidRenderingMode, deferCodeLineNumberSync, toggleCodeBlockLineWrap, onPreviewLoopback]);
+    return { labels, mermaidControls, codeBlockLineWrap, deferCodeLineNumberSync, onToggleCodeBlockLineWrap: toggleCodeBlockLineWrap, renderMermaid };
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, mermaidRenderingMode, deferCodeLineNumberSync, toggleCodeBlockLineWrap]);
 };
 
 // Runs the async render pipeline into the container and keeps a stable
@@ -967,13 +964,6 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
-
-  const handlePreviewLoopback = React.useCallback((url: string) => {
-    if (!effectiveDirectory) return;
-    openContextPreview(effectiveDirectory, url);
-  }, [effectiveDirectory, openContextPreview]);
-
   const live = isStreaming && !disableStreamAnimation;
   const pacedText = usePacedText(content, live);
 
@@ -992,7 +982,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   usePdfMaterialLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, live, effectiveDirectory ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
+  const ctx = useDecorateContext(currentTheme, live, DEFAULT_MERMAID_CONTROLS);
   const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   useMorphdomMarkdown({
@@ -1085,7 +1075,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   usePdfMaterialLinkInteractions({ containerRef });
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
-  const ctx = useDecorateContext(currentTheme, false, undefined, mermaidControls);
+  const ctx = useDecorateContext(currentTheme, false, mermaidControls);
 
   useMorphdomMarkdown({
     containerRef,

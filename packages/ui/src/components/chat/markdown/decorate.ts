@@ -1,5 +1,5 @@
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { getExternalFaviconUrl, isExternalHttpUrl, isLoopbackHttpUrl } from '@/lib/url';
+import { getExternalFaviconUrl, isExternalHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
 import { getMermaidViewerController } from './mermaidViewer';
@@ -22,8 +22,6 @@ export type DecorateLabels = {
   zoomInDiagram: string;
   zoomOutDiagram: string;
   resetDiagramView: string;
-  previewLabel: string;
-  previewTitle: string;
 };
 
 export type MermaidControlOptions = {
@@ -40,7 +38,6 @@ export type DecorateContext = {
   onToggleCodeBlockLineWrap?: () => void;
   // Renders a mermaid block source to svg/ascii using current theme colors.
   renderMermaid: (source: string) => MermaidRender;
-  onPreviewLoopback?: (url: string) => void;
 };
 
 // Reference the app's icon sprite (injected into <body> by the shared Icon
@@ -442,10 +439,10 @@ const decorateMermaid = (root: HTMLElement, ctx: DecorateContext): void => {
 };
 
 // ---------------------------------------------------------------------------
-// External links: favicon + loopback preview button
+// External links: favicon
 // ---------------------------------------------------------------------------
 
-const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
+const decorateLinks = (root: HTMLElement): void => {
   const anchors = root.querySelectorAll<HTMLAnchorElement>('a[href]');
   for (const anchor of Array.from(anchors)) {
     if (anchor.getAttribute('data-md-link-decorated') === 'true') continue;
@@ -471,17 +468,7 @@ const decorateLinks = (root: HTMLElement, ctx: DecorateContext): void => {
       anchor.parentNode?.insertBefore(favWrap, anchor);
     }
 
-    if (ctx.onPreviewLoopback && isLoopbackHttpUrl(href)) {
-      const preview = document.createElement('button');
-      preview.type = 'button';
-      preview.className = `ml-1 align-middle ${ICON_BTN_CLASS}`;
-      preview.setAttribute('data-md-action', 'preview-loopback');
-      preview.setAttribute('data-md-url', href);
-      preview.setAttribute('title', ctx.labels.previewTitle);
-      preview.setAttribute('aria-label', ctx.labels.previewLabel);
-      setIconHtml(preview, ICONS.download);
-      anchor.parentNode?.insertBefore(preview, anchor.nextSibling);
-    }
+
   }
 };
 
@@ -491,11 +478,11 @@ export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void 
   decorateMermaid(root, ctx);
   decorateCodeBlocks(root, ctx);
   decorateTables(root, ctx.labels);
-  decorateLinks(root, ctx);
+  decorateLinks(root);
 };
 
 // ---------------------------------------------------------------------------
-// Delegated interactions (copy/download/menus/preview)
+// Delegated interactions (copy/download/menus)
 // ---------------------------------------------------------------------------
 
 const downloadBlob = (filename: string, content: string, mime: string): void => {
@@ -518,7 +505,7 @@ const closeAllMenus = (container: HTMLElement): void => {
 
 /**
  * Attach a single delegated click listener for all in-markdown actions: code
- * copy, table copy/download menus, mermaid copy/download, loopback preview.
+ * copy, table copy/download menus, mermaid copy/download.
  * Returns a cleanup function.
  */
 export const attachMarkdownInteractions = (
@@ -616,13 +603,6 @@ export const attachMarkdownInteractions = (
       return;
     }
 
-    // Loopback preview
-    if (action === 'preview-loopback') {
-      event.preventDefault();
-      const url = actionEl.getAttribute('data-md-url') ?? '';
-      if (url) ctx.onPreviewLoopback?.(url);
-      return;
-    }
   };
 
   container.addEventListener('click', handleClick);

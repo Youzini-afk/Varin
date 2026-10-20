@@ -7,6 +7,24 @@ beforeEach(() => {
 });
 
 describe('useUIStore context panel tabs', () => {
+  test('restores supported tabs and discards the retired preview surface', () => {
+    const directory = '/repo';
+    useUIStore.getState().openContextBrowser(directory, 'http://localhost:3000');
+    const current = useUIStore.getState();
+    const browser = current.contextPanelByDirectory[directory]!.tabs[0]!;
+    const restored = useUIStore.persist.getOptions().merge!({
+      contextRailOrder: ['preview', 'browser'],
+      contextPanelByDirectory: {
+        [directory]: { isOpen: true, activeTabId: 'preview:old', tabs: [browser, { mode: 'preview', targetPath: 'http://localhost:5173' }] },
+        '/empty': { isOpen: true, activeTabId: 'preview:empty', tabs: [{ mode: 'preview' }] },
+      },
+    }, current);
+    expect(restored.contextPanelByDirectory[directory]?.tabs).toEqual([browser]);
+    expect(restored.contextPanelByDirectory[directory]?.activeTabId).toBe(browser.id);
+    expect(restored.contextPanelByDirectory['/empty']).toMatchObject({ isOpen: false, activeTabId: null, tabs: [] });
+    expect(restored.contextRailOrder).toEqual(['browser']);
+  });
+
   test('updates readOnly when an existing chat tab is reopened', () => {
     const directory = '/repo';
 
@@ -119,15 +137,6 @@ describe('useUIStore openContextSurface', () => {
     useUIStore.getState().openContextSurface(directory, 'chat');
 
     expect(useUIStore.getState().contextPanelByDirectory[directory]).toBe(undefined);
-  });
-
-  test('opens the preview launcher and replaces it when the server URL arrives', () => {
-    useUIStore.getState().openContextSurface(directory, 'preview');
-    expect(useUIStore.getState().contextPanelByDirectory[directory]?.tabs[0]?.targetPath).toBe(null);
-    useUIStore.getState().openContextPreview(directory, 'http://localhost:3000');
-    const tabs = useUIStore.getState().contextPanelByDirectory[directory]?.tabs ?? [];
-    expect(tabs).toHaveLength(1);
-    expect(tabs[0]?.targetPath).toBe('http://localhost:3000');
   });
 
   test('opens an empty editor tab that a real file later replaces', () => {

@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import type { SidebarSection } from '@/constants/sidebar';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
-import { getContextRailMode } from '@/lib/surfaces/registry';
+import { CONTEXT_SURFACES, getContextRailMode } from '@/lib/surfaces/registry';
 import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey } from '@/lib/typography';
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
@@ -22,7 +22,7 @@ import {
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
-export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'preview' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui';
+export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -184,7 +184,7 @@ const buildDefaultContextPanelTabDedupeKey = (mode: ContextPanelMode, targetPath
     return targetPath || mode;
   }
 
-  if (mode === 'preview' || mode === 'browser') {
+  if (mode === 'browser') {
     return targetPath || mode;
   }
 
@@ -284,7 +284,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'preview' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui') {
+    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui') {
       continue;
     }
 
@@ -363,8 +363,8 @@ const upsertContextPanelTab = (
   descriptor: ContextPanelTabDescriptor,
 ): ContextPanelDirectoryState => {
   const nextTab = createContextPanelTab(descriptor);
-  // Replace the empty editor/preview launcher when its first resource opens.
-  const baseTabs = (nextTab.mode === 'file' || nextTab.mode === 'preview') && nextTab.targetPath
+  // Replace the empty editor launcher when its first resource opens.
+  const baseTabs = nextTab.mode === 'file' && nextTab.targetPath
     ? current.tabs.filter((tab) => !(tab.mode === nextTab.mode && !tab.targetPath))
     : current.tabs;
   const existingIndex = baseTabs.findIndex((tab) => tab.id === nextTab.id);
@@ -643,7 +643,6 @@ interface UIStore {
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, resourceDirectory?: string) => void;
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
-  openContextPreview: (directory: string, url: string) => void;
   openContextBrowser: (directory: string, url?: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
@@ -1046,7 +1045,7 @@ export const useUIStore = create<UIStore>()(
             return;
           }
 
-          // Split chat needs a real session; editor and preview have empty launchers.
+          // Split chat needs a real session; the editor has an empty launcher.
           if (mode === 'chat') {
             return;
           }
@@ -1138,31 +1137,6 @@ export const useUIStore = create<UIStore>()(
           }
 
           get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
-        },
-
-        openContextPreview: (directory, url) => {
-          const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
-          const normalizedUrl = (url || '').trim();
-          if (!normalizedDirectory || !normalizedUrl) {
-            return;
-          }
-
-          let label: string | null = null;
-          try {
-            const parsed = new URL(normalizedUrl);
-            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-              label = parsed.host || parsed.hostname || 'Preview';
-            }
-          } catch {
-            // ignore invalid URL
-          }
-
-          get().openContextPanelTab(normalizedDirectory, {
-            mode: 'preview',
-            targetPath: normalizedUrl,
-            dedupeKey: normalizedUrl,
-            label,
-          });
         },
 
         openContextBrowser: (directory, url = '') => {
@@ -2242,6 +2216,19 @@ export const useUIStore = create<UIStore>()(
           return {
             ...current,
             ...saved,
+            contextPanelByDirectory: Object.fromEntries(
+              Object.entries(saved.contextPanelByDirectory ?? current.contextPanelByDirectory).map(([directory, panel]) => {
+                const tabs = sanitizeContextPanelTabs(panel?.tabs);
+                return [directory, {
+                  ...panel,
+                  tabs,
+                  activeTabId: resolveActiveContextPanelTabID(tabs, panel?.activeTabId ?? null),
+                  isOpen: Boolean(panel?.isOpen && tabs.length),
+                }];
+              }),
+            ),
+            contextRailOrder: (saved.contextRailOrder ?? current.contextRailOrder)
+              .filter(id => CONTEXT_SURFACES.some(surface => surface.id === id)),
             chatContentWidth: isChatContentWidth(saved.chatContentWidth) ? saved.chatContentWidth : DEFAULT_CHAT_CONTENT_WIDTH,
             fileEditorSettings: normalizeFileEditorSettings(
               saved.fileEditorSettings,

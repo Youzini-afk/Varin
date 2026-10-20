@@ -1,18 +1,8 @@
-export type PreviewConsoleEvent = {
-  id: number;
-  level: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'resource' | 'runtime';
-  message: string;
-  details?: string;
-  ts: number;
-};
-
-export type PreviewConsoleFilter = 'all' | 'errors' | 'warnings' | 'logs';
-
 export type PreviewBridgeMessage = {
   source?: string;
   version?: number;
   type?: string;
-  level?: PreviewConsoleEvent['level'];
+  level?: 'log' | 'info' | 'warn' | 'error' | 'debug' | 'resource' | 'runtime';
   args?: unknown[];
   message?: unknown;
   stack?: unknown;
@@ -187,33 +177,6 @@ export type PreviewProxyState =
   | { status: 'loading' }
   | { status: 'ready'; proxyBasePath: string; previewToken?: string; expiresAt: number }
   | { status: 'error'; message: string };
-
-export const getPreviewProxyOrigin = (proxySrc: string): string => {
-  if (typeof window === 'undefined') return '';
-  try {
-    return new URL(proxySrc || window.location.href, window.location.href).origin;
-  } catch {
-    return window.location.origin;
-  }
-};
-
-export const postPreviewBridgeMessage = (frameWindow: Window, proxySrc: string, payload: Record<string, unknown>): void => {
-  const targetOrigin = getPreviewProxyOrigin(proxySrc);
-  frameWindow.postMessage(payload, targetOrigin);
-};
-
-export const stripPreviewTokenFromUrl = (value: string): string => {
-  if (!value) return value;
-  try {
-    const parsed = new URL(value);
-    parsed.searchParams.delete('varin_preview_token');
-    parsed.searchParams.delete('varin_client_token');
-    parsed.searchParams.delete('varin_url_token');
-    return parsed.toString();
-  } catch {
-    return value;
-  }
-};
 
 export const stripPreviewQueryParams = (value: string): string => {
   if (!value) return value;

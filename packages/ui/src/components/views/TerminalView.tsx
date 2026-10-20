@@ -18,7 +18,6 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { Icon } from "@/components/icon/Icon";
 import { useDeviceInfo } from '@/lib/device';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
-import { extractTerminalPreviewUrl, isTerminalPreviewUrlAvailable } from '@/lib/terminalPreview';
 import { useI18n } from '@/lib/i18n';
 import { PROJECT_ACTION_ICON_MAP, type ProjectActionIconKey } from '@/lib/projectActions';
 import { applyTerminalModifier, terminalControlCharacter, terminalSequenceForKey, type TerminalModifier as Modifier, type TerminalQuickKey as MobileKey } from '@/lib/terminalInput';
@@ -64,9 +63,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
     const setConnecting = useTerminalStore((s) => s.setConnecting);
     const appendToBuffer = useTerminalStore((s) => s.appendToBuffer);
     const replaceBuffer = useTerminalStore((s) => s.replaceBuffer);
-    const setTabPreviewUrl = useTerminalStore((s) => s.setTabPreviewUrl);
 
-    const openContextPreview = useUIStore((state) => state.openContextPreview);
 
     const activeTabId = React.useMemo(() => {
         if (!directoryTerminalState) return null;
@@ -107,7 +104,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         effectiveDirectory && activeTabId ? s.getBuffer(effectiveDirectory, activeTabId).chunks : EMPTY_TERMINAL_BUFFER.chunks
     ));
     const isConnecting = activeTab?.isConnecting ?? false;
-    const previewUrl = attachedOnly || activeTab?.source?.resourceOwner.kind === 'managed_host' ? null : activeTab?.previewUrl ?? null;
 
     const [connectionError, setConnectionError] = React.useState<string | null>(null);
     const [isFatalError, setIsFatalError] = React.useState(false);
@@ -124,9 +120,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
     const lastViewportSizeRef = React.useRef<{ cols: number; rows: number } | null>(null);
     const pendingTerminalCreatesRef = React.useRef(new Set<string>());
     const isTerminalVisibleRef = React.useRef(false);
-    const previewScanTailRef = React.useRef('');
-    const pendingPreviewProbeUrlsRef = React.useRef<Set<string>>(new Set());
-    const previewProbeGenerationRef = React.useRef(0);
     const processReconnectRef = React.useRef<object | null>(null);
 
     React.useEffect(() => {
@@ -134,12 +127,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         setIsRestarting(false);
         return () => { processReconnectRef.current = null; };
     }, [activeTabId, effectiveDirectory]);
-
-    const resetTerminalPreviewScan = React.useCallback(() => {
-        previewScanTailRef.current = '';
-        pendingPreviewProbeUrlsRef.current.clear();
-        previewProbeGenerationRef.current += 1;
-    }, []);
 
     const focusTerminalWhenWindowActive = React.useCallback(() => {
         if (useTouchTerminalInput) {
@@ -188,8 +175,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
 
     React.useEffect(() => {
         activeTabIdRef.current = activeTabId;
-        resetTerminalPreviewScan();
-    }, [activeTabId, resetTerminalPreviewScan]);
+    }, [activeTabId]);
 
     React.useEffect(() => {
         directoryRef.current = effectiveDirectory;
@@ -220,51 +206,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
             terminalIdRef.current = null;
         },
         [disconnectStream]
-    );
-
-    const scanTerminalPreviewOutput = React.useCallback(
-        (directory: string, tabId: string, data: string) => {
-            if (!data) {
-                return;
-            }
-            const source = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find(tab => tab.id === tabId)?.source;
-            // The probe and preview services belong to the coordinating Host.
-            // A loopback URL emitted by B cannot be resolved as an A service.
-            if (attachedOnly || source?.resourceOwner.kind === 'managed_host') return;
-
-            const combined = `${previewScanTailRef.current}${data}`.replace(/\r\n|\r/g, '\n');
-            const lines = combined.split('\n');
-            const completeText = combined.endsWith('\n')
-                ? lines.join('\n')
-                : lines.slice(0, -1).join('\n');
-            previewScanTailRef.current = combined.endsWith('\n') ? '' : (lines[lines.length - 1] ?? '').slice(-1024);
-
-            if (!completeText) {
-                return;
-            }
-
-            const candidate = extractTerminalPreviewUrl(completeText);
-            if (!candidate || pendingPreviewProbeUrlsRef.current.has(candidate)) {
-                return;
-            }
-
-            const probeGeneration = previewProbeGenerationRef.current;
-            pendingPreviewProbeUrlsRef.current.add(candidate);
-            void isTerminalPreviewUrlAvailable(candidate).then((available) => {
-                pendingPreviewProbeUrlsRef.current.delete(candidate);
-                if (!available || previewProbeGenerationRef.current !== probeGeneration) {
-                    return;
-                }
-
-                const currentTab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.find((tab) => tab.id === tabId);
-                if (!currentTab || currentTab.source?.resourceOwner.kind === 'managed_host' || currentTab.previewUrlLocked || currentTab.previewUrl === candidate) {
-                    return;
-                }
-
-                setTabPreviewUrl(directory, tabId, candidate, { locked: false, autoOpened: false });
-            });
-        },
-        [attachedOnly, setTabPreviewUrl]
     );
 
     const startStream = React.useCallback(
@@ -301,7 +242,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
                                 focusTerminalWhenWindowActive();
 
                                 replaceBuffer(directory, tabId, event.data ?? '', event.sequence ?? 0);
-                                scanTerminalPreviewOutput(directory, tabId, event.data ?? '');
                                 if (event.status === 'exited') setTabLifecycle(directory, tabId, 'exited');
                                 break;
                             }
@@ -315,7 +255,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
                             case 'data': {
                                 if (event.data) {
                                     appendToBuffer(directory, tabId, event.data, event.sequence, event.replayData);
-                                    scanTerminalPreviewOutput(directory, tabId, event.data);
                                 }
                                 break;
                             }
@@ -406,7 +345,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
             replaceBuffer,
             disconnectStream,
             focusTerminalWhenWindowActive,
-            scanTerminalPreviewOutput,
             setConnecting,
             setTabLifecycle,
             setTabSessionId,
@@ -673,7 +611,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         setIsReconnectPending(false);
 
         disconnectStream();
-        resetTerminalPreviewScan();
 
         try {
             const size = lastViewportSizeRef.current ?? FALLBACK_TERMINAL_SIZE;
@@ -702,7 +639,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
         } finally {
             setIsRestarting(false);
         }
-    }, [activeTabId, attachedOnly, disconnectStream, effectiveDirectory, enableTabs, isRestarting, resetTerminalPreviewScan, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell, threads]);
+    }, [activeTabId, attachedOnly, disconnectStream, effectiveDirectory, enableTabs, isRestarting, setTabLifecycle, setTabSessionId, startStream, t, terminal, terminalLoginShell, terminalShell, threads]);
 
     const handleHardRestart = React.useCallback(async () => {
         // Keep semantics: “close tab -> new clean tab”.
@@ -1139,22 +1076,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directoryOv
                             >
                                 <Icon name="attachment-2" className="h-4 w-4" />
                             </Button> : null}
-                            {previewUrl ? (
-                                <Button
-                                    type="button"
-                                    size="xs"
-                                    variant="outline"
-                                    className="h-6 shrink-0 gap-1 px-2"
-                                    onClick={() => {
-                                        if (!effectiveDirectory) return;
-                                        openContextPreview(effectiveDirectory, previewUrl);
-                                    }}
-                                    title={t('terminalView.preview.openTitle')}
-                                >
-                                    <Icon name="global" className="h-3.5 w-3.5 shrink-0" />
-                                    <span className="whitespace-nowrap">{t('terminalView.preview.open')}</span>
-                                </Button>
-                            ) : null}
                         </div>
                     </div>
                 ) : null}

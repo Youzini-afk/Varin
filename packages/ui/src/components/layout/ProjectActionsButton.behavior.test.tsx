@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   subscriptions: new Map<string, TerminalHandlers>(),
   createSession: vi.fn(),
   sendInput: vi.fn(),
+  openExternal: vi.fn(),
   translate: (key: string) => key,
 }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
@@ -21,10 +22,7 @@ vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } 
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: mocks.mobile }) }));
 vi.mock('@/lib/desktop', () => ({ isDesktopShell: () => false, canUseElectronDesktopIPC: () => false }));
 vi.mock('@/lib/project-config', () => ({ getProjectActionsState: mocks.readActions }));
-vi.mock('@/lib/detectDevServer', () => ({
-  readPackageJsonScripts: async () => ({ dev: 'vite' }),
-  detectDevServerCommand: async () => ({ command: 'bun run dev' }),
-}));
+vi.mock('@/lib/url', () => ({ openExternalUrl: mocks.openExternal }));
 vi.mock('@/contexts/useThemeSystem', () => ({
   useThemeSystem: () => ({ currentTheme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#111' }, syntax: { base: { foreground: '#eee' } } } } }),
 }));
@@ -91,6 +89,7 @@ describe('project menu actions', () => {
     mocks.readActions.mockReset().mockResolvedValue({ actions: [] });
     mocks.createSession.mockReset().mockImplementation(async ({ sessionId }: { sessionId: string }) => ({ sessionId }));
     mocks.sendInput.mockReset().mockResolvedValue(undefined);
+    mocks.openExternal.mockReset().mockResolvedValue(undefined);
     useTerminalStore.setState({ sessions: new Map(), buffers: new Map(), projectActionRuns: {} });
     useUIStore.setState({ contextPanelByDirectory: {} });
   });
@@ -100,8 +99,8 @@ describe('project menu actions', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps project navigation visible on mobile without configured commands', async () => {
-    mocks.mobile = true;
+  it.each([true, false])('keeps project navigation visible without configured commands (mobile: %s)', async (mobile) => {
+    mocks.mobile = mobile;
     await render();
     expect(container.textContent).toContain('Project');
     expect(mocks.readActions).not.toHaveBeenCalled();
@@ -110,11 +109,12 @@ describe('project menu actions', () => {
     expect(container.textContent).toContain('projectActions.actions.addNewAction');
   });
 
-  it('starts preview from the menu and still discovers its URL after the menu closes', async () => {
+  it('opens the configured action output URL once after the menu closes', async () => {
+    mocks.readActions.mockResolvedValue({ actions: [{ id: 'dev', name: 'Dev server', command: 'bun run dev', autoOpenUrl: true }] });
     await render();
     expect(mocks.readActions).not.toHaveBeenCalled();
     await openMenu();
-    const launch = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'contextPanel.preview.startPreview');
+    const launch = Array.from(container.querySelectorAll('button')).find((button) => button.textContent === 'Dev server');
     expect(launch).toBeDefined();
     await act(async () => { launch!.click(); });
     expect(container.querySelector('[role="menu"]')).toBeNull();
@@ -123,14 +123,17 @@ describe('project menu actions', () => {
     await act(async () => {
       mocks.subscriptions.get(run!.sessionId)!.onEvent({ type: 'data', data: 'Local: http://localhost:5173\n', sequence: 1 });
     });
-    const tabs = useUIStore.getState().contextPanelByDirectory['/repo']?.tabs;
-    expect(tabs?.some((tab) => tab.targetPath === 'http://localhost:5173')).toBe(true);
+    expect(mocks.openExternal).toHaveBeenCalledExactlyOnceWith('http://localhost:5173');
+    await act(async () => {
+      mocks.subscriptions.get(run!.sessionId)!.onEvent({ type: 'data', data: 'Local: http://localhost:5173\n', sequence: 2 });
+    });
+    expect(mocks.openExternal).toHaveBeenCalledTimes(1);
     expect(useTerminalStore.getState().projectActionRuns[run!.key]?.status).toBe('running');
     await act(async () => { mocks.subscriptions.get(run!.sessionId)!.onEvent({ type: 'exit', exitCode: 0 }); });
     expect(useTerminalStore.getState().projectActionRuns[run!.key]).toBeUndefined();
   });
 
-  it('offers configured commands alongside preview and project management', async () => {
+  it('runs configured commands alongside project management', async () => {
     mocks.readActions.mockResolvedValue({ actions: [{ id: 'check', name: 'Check types', command: 'bun run type-check', icon: 'play' }] });
     await render();
     await openMenu();
@@ -140,5 +143,19 @@ describe('project menu actions', () => {
     expect(mocks.sendInput).toHaveBeenCalledWith(expect.any(String), 'bun run type-check\r');
     const [run] = Object.values(useTerminalStore.getState().projectActionRuns);
     await act(async () => { mocks.subscriptions.get(run!.sessionId)!.onEvent({ type: 'exit', exitCode: 0 }); });
+  });
+
+  it('opens a configured URL in the existing browser surface', async () => {
+    mocks.readActions.mockResolvedValue({ actions: [{ id: 'dev', name: 'Dev server', command: 'bun run dev', autoOpenUrl: true, openUrl: 'http://localhost:4321' }] });
+    await render();
+    await openMenu();
+    const launch = Array.from(container.querySelectorAll('button')).find(button => button.textContent === 'Dev server')!;
+    await act(async () => launch.click());
+    expect(useUIStore.getState().contextPanelByDirectory['/repo']?.tabs).toEqual([
+      expect.objectContaining({ mode: 'browser', targetPath: 'http://localhost:4321/' }),
+    ]);
+    expect(mocks.openExternal).not.toHaveBeenCalled();
+    const [run] = Object.values(useTerminalStore.getState().projectActionRuns);
+    await act(async () => mocks.subscriptions.get(run!.sessionId)!.onEvent({ type: 'exit', exitCode: 0 }));
   });
 });

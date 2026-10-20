@@ -50,9 +50,6 @@ export type TerminalTab = {
   iconKey: string | null;
   isConnecting: boolean;
   createdAt: number;
-  previewUrl: string | null;
-  previewAutoOpened: boolean;
-  previewUrlLocked: boolean;
 };
 
 export type DirectoryTerminalState = {
@@ -66,7 +63,8 @@ export type TerminalProjectActionRun = {
   actionId: string;
   tabId: string;
   sessionId: string;
-  status: 'running' | 'waiting-for-preview' | 'stopping';
+  status: 'running' | 'stopping';
+  urlHandled?: boolean;
 };
 
 interface TerminalStore {
@@ -94,8 +92,6 @@ interface TerminalStore {
   setConnecting: (directory: string, tabId: string, isConnecting: boolean) => void;
   replaceBuffer: (directory: string, tabId: string, content: string, sequence: number) => void;
   appendToBuffer: (directory: string, tabId: string, chunk: string, sequence?: number, replayData?: string) => void;
-  setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options?: { locked?: boolean; autoOpened?: boolean }) => void;
-  markPreviewAutoOpened: (directory: string, tabId: string) => void;
   setProjectActionRun: (run: TerminalProjectActionRun) => void;
   updateProjectActionRunStatus: (runKey: string, status: TerminalProjectActionRun['status']) => void;
   removeProjectActionRun: (runKey: string) => void;
@@ -193,9 +189,6 @@ const createEmptyTab = (id: string, label: string): TerminalTab => ({
   iconKey: null,
   isConnecting: false,
   createdAt: Date.now(),
-  previewUrl: null,
-  previewAutoOpened: false,
-  previewUrlLocked: false,
 });
 
 const createEmptyDirectoryState = (firstTab: TerminalTab): DirectoryTerminalState => ({
@@ -683,65 +676,6 @@ export const useTerminalStore = create<TerminalStore>()(
           });
         },
 
-        setTabPreviewUrl: (directory: string, tabId: string, url: string | null, options = {}) => {
-          const key = normalizeDirectory(directory);
-          set((state) => {
-            const newSessions = new Map(state.sessions);
-            const existing = newSessions.get(key);
-            if (!existing) {
-              return state;
-            }
-
-            const idx = findTabIndex(existing, tabId);
-            if (idx < 0) {
-              return state;
-            }
-
-            const tab = existing.tabs[idx];
-            const nextPreviewAutoOpened = options.autoOpened ?? tab.previewAutoOpened;
-            const nextPreviewUrlLocked = options.locked ?? tab.previewUrlLocked;
-            if (tab.previewUrl === url && tab.previewAutoOpened === nextPreviewAutoOpened && tab.previewUrlLocked === nextPreviewUrlLocked) {
-              return state;
-            }
-
-            const nextTabs = [...existing.tabs];
-            nextTabs[idx] = {
-              ...tab,
-              previewUrl: url,
-              previewAutoOpened: nextPreviewAutoOpened,
-              previewUrlLocked: nextPreviewUrlLocked,
-            };
-            newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
-          });
-        },
-
-        markPreviewAutoOpened: (directory: string, tabId: string) => {
-          const key = normalizeDirectory(directory);
-          set((state) => {
-            const newSessions = new Map(state.sessions);
-            const existing = newSessions.get(key);
-            if (!existing) {
-              return state;
-            }
-
-            const idx = findTabIndex(existing, tabId);
-            if (idx < 0) {
-              return state;
-            }
-
-            const tab = existing.tabs[idx];
-            if (!tab.previewUrl || tab.previewAutoOpened) {
-              return state;
-            }
-
-            const nextTabs = [...existing.tabs];
-            nextTabs[idx] = { ...tab, previewAutoOpened: true };
-            newSessions.set(key, { ...existing, tabs: nextTabs });
-            return { sessions: newSessions };
-          });
-        },
-
         setProjectActionRun: (run: TerminalProjectActionRun) => {
           set((state) => {
             const existing = state.projectActionRuns[run.key];
@@ -750,7 +684,8 @@ export const useTerminalStore = create<TerminalStore>()(
               && existing.actionId === run.actionId
               && existing.tabId === run.tabId
               && existing.sessionId === run.sessionId
-              && existing.status === run.status) {
+              && existing.status === run.status
+              && existing.urlHandled === run.urlHandled) {
               return state;
             }
             return { projectActionRuns: { ...state.projectActionRuns, [run.key]: run } };
@@ -862,9 +797,6 @@ export const useTerminalStore = create<TerminalStore>()(
                 source: null,
                 createdAt: typeof rawTab.createdAt === 'number' ? rawTab.createdAt : Date.now(),
                 isConnecting: false,
-                previewUrl: null,
-                previewAutoOpened: false,
-                previewUrlLocked: false,
               });
             }
 

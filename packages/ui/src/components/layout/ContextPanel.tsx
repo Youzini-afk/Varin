@@ -2,7 +2,6 @@ import React from 'react';
 import { InteractiveUiPanel } from '@/components/interactive-ui/InteractiveUiCard';
 import { ContextBrowserView } from '@/components/workbench/ContextBrowserView';
 import { BrowserMaterialAction } from '@/components/workbench/MaterialViewActions';
-import { getPreviewProxyOrigin, postPreviewBridgeMessage, stripPreviewTokenFromUrl, type PreviewConsoleEvent, type PreviewConsoleFilter, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
 import { lazyWithChunkRecovery } from '@/lib/chunkLoadRecovery';
 
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
@@ -11,30 +10,19 @@ import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { TerminalView } from '@/components/views/TerminalView';
 import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkspaceRecoveryPanel } from './WorkspaceRecoveryPanel';
-import { ProjectActionsButton } from './ProjectActionsButton';
-import { useProjectActionsContext } from '@/hooks/useProjectActionsContext';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { ContextPanelGitNavigation } from './ContextPanelGitNavigation';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
-import { openExternalUrl } from '@/lib/url';
-import { copyTextToClipboard } from '@/lib/clipboard';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore, type ContextPanelMode, type PendingDiffScope } from '@/stores/useUIStore';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import type { ThreadIdentity, ThreadSummary } from '@varin/application-client';
-import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
-import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { contextPanelGitDirectoryScopeKey, useContextPanelGitDirectoryStore } from '@/stores/useContextPanelGitDirectoryStore';
 import { ContextPanelContent } from './ContextSidebarTab';
-import { toast } from '@/components/ui';
-import { runtimeFetch } from '@varin/application-client';
-import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, refreshRuntimeUrlAuthToken } from '@varin/application-client';
-import { getRuntimeUrlResolver } from '@varin/application-client';
-import { getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
+import { getRuntimeBearerTokenSync, getRuntimeExtraHeadersSync, getRuntimeApiBaseUrl, getRuntimeKey } from '@varin/application-client';
 import { getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
-import { getPreviewTargetRecoveryAction } from '@/lib/preview/proxy-response';
 import { Icon } from "@/components/icon/Icon";
 import {
   EMBEDDED_RUNTIME_BOOTSTRAP_REQUEST,
@@ -48,14 +36,6 @@ import { availableContextSurfaces, getContextRailMode, getContextSurfaceWidthFra
 import { useFeatureFlagsStore } from '@/stores/useFeatureFlagsStore';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { isTerminalEventTarget } from '@/lib/terminalFocus';
-import {
-  type PreviewElementMetadata,
-  isPreviewElementMetadata,
-  formatPreviewAnnotationMarkdown,
-  renderPreviewScreenshot,
-  getCachedProxyTarget,
-  previewProxyTargetCache,
-} from '@/lib/preview/screenshot-capture';
 
 // The context panel itself is part of the desktop shell. Keep its optional
 // surfaces outside that eager graph; each remains mounted only while its tab
@@ -76,16 +56,6 @@ const RESIZE_FOLLOW_INTERVAL_MS = 100;
 const CONTEXT_TAB_LABEL_MAX_CHARS = 24;
 type TranslateFn = ReturnType<typeof useI18n>['t'];
 const EMPTY_SESSION_TITLE_MAP = new Map<string, string>();
-
-const PREVIEW_CONSOLE_EVENT_LIMIT = 200;
-
-const getPreviewConsoleFilterMatch = (event: PreviewConsoleEvent, filter: PreviewConsoleFilter): boolean => {
-  if (filter === 'all') return true;
-  if (filter === 'errors') return event.level === 'error' || event.level === 'runtime' || event.level === 'resource';
-  if (filter === 'warnings') return event.level === 'warn';
-  return event.level === 'log' || event.level === 'info' || event.level === 'debug';
-};
-
 
 const normalizeDirectoryKey = (value: string): string => {
   if (!value) return '';
@@ -144,7 +114,6 @@ const getModeLabel = (
   if (mode === 'file') return t('contextPanel.mode.files');
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
-  if (mode === 'preview') return t('contextPanel.mode.preview');
   if (mode === 'ui') return t('ui.content.title');
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
@@ -204,19 +173,6 @@ const getTabLabel = (
     return getFileNameFromPath(tab.targetPath) || t('contextPanel.mode.files');
   }
 
-  if (tab.mode === 'preview') {
-    const url = tab.targetPath;
-    if (url) {
-      try {
-        const parsed = new URL(url);
-        return parsed.host || parsed.hostname || t('contextPanel.mode.preview');
-      } catch {
-        // ignore invalid URL
-      }
-    }
-    return t('contextPanel.mode.preview');
-  }
-
   if (tab.mode === 'diff') {
     return t('contextPanel.mode.diff');
   }
@@ -266,10 +222,6 @@ const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targ
 
   if (tab.mode === 'chat') {
     return <Icon name="chat-4" className="h-3.5 w-3.5" />;
-  }
-
-  if (tab.mode === 'preview') {
-    return <Icon name="global" className="h-3.5 w-3.5 text-[var(--status-info)]" />;
   }
 
   if (tab.mode === 'browser') {
@@ -435,784 +387,8 @@ const truncateTabLabel = (value: string, maxChars: number): string => {
   return `${value.slice(0, maxChars - 3)}...`;
 };
 
-type PreviewPaneProps = {
-  rawUrl: string;
-  onNavigate: (url: string) => void;
-};
-
-const PreviewPane: React.FC<PreviewPaneProps> = ({ rawUrl, onNavigate }) => {
-  const { t } = useI18n();
-  const { currentTheme } = useThemeSystem();
-  const [reloadNonce, bumpReload] = React.useReducer((x: number) => x + 1, 0);
-  const [proxyRegistrationNonce, bumpProxyRegistration] = React.useReducer((x: number) => x + 1, 0);
-  const [proxyState, setProxyState] = React.useState<PreviewProxyState>({ status: 'idle' });
-  const [urlAuthReadyKey, setUrlAuthReadyKey] = React.useState('');
-  const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
-  const nextConsoleEventIdRef = React.useRef(1);
-  const [bridgeReady, setBridgeReady] = React.useState(false);
-  const [consoleOpen, setConsoleOpen] = React.useState(false);
-  const [consoleFilter, setConsoleFilter] = React.useState<PreviewConsoleFilter>('all');
-  const [consoleEvents, setConsoleEvents] = React.useState<PreviewConsoleEvent[]>([]);
-  const [inspectMode, setInspectMode] = React.useState(false);
-  const [hoverTarget, setHoverTarget] = React.useState<PreviewElementMetadata | null>(null);
-  const currentSessionId = useThreadStore(state => state.selectedIdentity);
-  const effectiveDirectory = useEffectiveDirectory();
-
-  let parsedUrl: URL | null = null;
-  try {
-    parsedUrl = rawUrl ? new URL(rawUrl) : null;
-  } catch {
-    parsedUrl = null;
-  }
-
-  const isLoopback = parsedUrl
-    ? (parsedUrl.hostname === 'localhost'
-        || parsedUrl.hostname === '127.0.0.1'
-        || parsedUrl.hostname === '::1'
-        || parsedUrl.hostname === '[::1]'
-        || parsedUrl.hostname === '0.0.0.0')
-    : false;
-
-  const normalizedUrl = parsedUrl
-    ? (parsedUrl.hostname === '0.0.0.0'
-        ? new URL(parsedUrl.toString().replace('0.0.0.0', '127.0.0.1'))
-        : parsedUrl)
-    : null;
-
-  const targetKey = normalizedUrl ? normalizedUrl.toString() : '';
-  const proxyCacheKey = targetKey ? `${getRuntimeApiBaseUrl() || 'same-origin'}|${targetKey}` : '';
-  const previewColorScheme = currentTheme.metadata.variant;
-
-  React.useEffect(() => {
-    if (!targetKey || !isLoopback) {
-      setProxyState({ status: 'idle' });
-      return;
-    }
-
-    const cached = getCachedProxyTarget(proxyCacheKey);
-    if (cached?.previewToken) {
-      setProxyState({ status: 'ready', proxyBasePath: cached.proxyBasePath, previewToken: cached.previewToken, expiresAt: cached.expiresAt });
-      return;
-    }
-    if (cached) {
-      previewProxyTargetCache.delete(proxyCacheKey);
-    }
-
-    let cancelled = false;
-    setProxyState({ status: 'loading' });
-
-    void (async () => {
-      try {
-        const response = await runtimeFetch('/api/preview/targets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ url: targetKey }),
-        });
-
-        if (!response.ok) {
-          previewProxyTargetCache.delete(proxyCacheKey);
-          const errorBody = await response.json().catch(() => ({}));
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          if (!cancelled) {
-            setProxyState({ status: 'error', message });
-          }
-          return;
-        }
-
-        const body = await response.json() as { proxyBasePath?: unknown; previewToken?: unknown; expiresAt?: unknown };
-        const proxyBasePath = typeof body.proxyBasePath === 'string' ? body.proxyBasePath : '';
-        const previewToken = typeof body.previewToken === 'string' ? body.previewToken : '';
-        const expiresAt = typeof body.expiresAt === 'number' ? body.expiresAt : 0;
-        if (!proxyBasePath || !previewToken) {
-          previewProxyTargetCache.delete(proxyCacheKey);
-          if (!cancelled) {
-            setProxyState({ status: 'error', message: t('contextPanel.preview.proxyError') });
-          }
-          return;
-        }
-
-        previewProxyTargetCache.set(proxyCacheKey, { proxyBasePath, previewToken, expiresAt });
-        if (!cancelled) {
-          setProxyState({ status: 'ready', proxyBasePath, previewToken, expiresAt });
-        }
-      } catch (error) {
-        previewProxyTargetCache.delete(proxyCacheKey);
-        if (!cancelled) {
-          const message = error instanceof Error ? error.message : String(error);
-          setProxyState({ status: 'error', message });
-        }
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isLoopback, proxyCacheKey, proxyRegistrationNonce, t, targetKey]);
-
-  const directSrc = normalizedUrl
-    && (normalizedUrl.protocol === 'http:' || normalizedUrl.protocol === 'https:')
-    ? normalizedUrl.toString()
-    : '';
-
-  const proxyUrlAuthKey = isLoopback && proxyState.status === 'ready'
-    ? `${proxyState.proxyBasePath}|${proxyState.previewToken || ''}|${reloadNonce}`
-    : '';
-
-  React.useEffect(() => {
-    if (!proxyUrlAuthKey) {
-      setUrlAuthReadyKey('');
-      return;
-    }
-
-    let cancelled = false;
-    setUrlAuthReadyKey('');
-    void refreshRuntimeUrlAuthToken(getRuntimeApiBaseUrl())
-      .then((token) => {
-        if (!cancelled && token) setUrlAuthReadyKey(proxyUrlAuthKey);
-      })
-      .catch(() => {});
-
-    return () => {
-      cancelled = true;
-    };
-  }, [proxyUrlAuthKey]);
-
-  const proxySrc = isLoopback && proxyState.status === 'ready' && normalizedUrl && urlAuthReadyKey === proxyUrlAuthKey
-    ? (() => {
-      const path = normalizedUrl.pathname || '/';
-      const searchParams = new URLSearchParams(normalizedUrl.search);
-      searchParams.delete('varin_url_token');
-      searchParams.delete('varin_client_token');
-      searchParams.set('ocPreview', String(reloadNonce));
-      searchParams.set('varin_preview_token', proxyState.previewToken || '');
-      const search = searchParams.toString();
-      const hash = normalizedUrl.hash || '';
-      return getRuntimeUrlResolver().authenticatedAsset(`${proxyState.proxyBasePath}${path}${search ? `?${search}` : ''}${hash}`);
-    })()
-    : '';
-
-  const effectiveSrc = isLoopback ? proxySrc : directSrc;
-  const headerSrc = isLoopback ? stripPreviewTokenFromUrl(proxySrc) : directSrc;
-  const showLoading = isLoopback && (proxyState.status === 'loading' || proxyState.status === 'idle' || urlAuthReadyKey !== proxyUrlAuthKey);
-  const showError = isLoopback && proxyState.status === 'error';
-
-  const attachPreviewAnnotation = React.useCallback((target: PreviewElementMetadata) => {
-    const sessionKey = currentSessionId;
-    if (!sessionKey || !effectiveDirectory) {
-      toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-      return;
-    }
-
-    const pageUrl = rawUrl || effectiveSrc || '';
-    const viewport = typeof window !== 'undefined'
-      ? { width: window.innerWidth, height: window.innerHeight }
-      : { width: 0, height: 0 };
-    const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
-
-    void (async () => {
-      let attachedScreenshot = false;
-      try {
-        const iframe = iframeRef.current;
-        const screenshot = iframe ? await renderPreviewScreenshot(iframe, target) : null;
-        if (screenshot) {
-          await addThreadDraftImage(sessionKey, screenshot);
-          attachedScreenshot = true;
-        }
-      } catch {
-        attachedScreenshot = false;
-      }
-
-      appendThreadDraftText(sessionKey, formatPreviewAnnotationMarkdown({
-          pageUrl,
-          viewport,
-          devicePixelRatio,
-          target,
-          screenshotAttached: attachedScreenshot,
-          intro: t('contextPanel.preview.inspect.attachAnnotation'),
-        }));
-      toast.success(t('contextPanel.preview.inspect.attached'));
-    })();
-  }, [currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
-
-  React.useEffect(() => {
-    setBridgeReady(false);
-    setConsoleEvents([]);
-    setConsoleOpen(false);
-    setConsoleFilter('all');
-    setInspectMode(false);
-    setHoverTarget(null);
-    nextConsoleEventIdRef.current = 1;
-  }, [effectiveSrc]);
-
-  React.useEffect(() => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!bridgeReady || !frameWindow) {
-      return;
-    }
-    postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'varin-preview-parent',
-      version: 1,
-      type: 'set-inspect-mode',
-      enabled: inspectMode,
-    });
-  }, [bridgeReady, inspectMode, proxySrc]);
-
-  React.useEffect(() => {
-    const frameWindow = iframeRef.current?.contentWindow;
-    if (!bridgeReady || !frameWindow) {
-      return;
-    }
-    postPreviewBridgeMessage(frameWindow, proxySrc, {
-      source: 'varin-preview-parent',
-      version: 1,
-      type: 'set-color-scheme',
-      scheme: previewColorScheme,
-    });
-  }, [bridgeReady, previewColorScheme, proxySrc]);
-
-  React.useEffect(() => {
-    if (!inspectMode || typeof window === 'undefined') return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        setInspectMode(false);
-      }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [inspectMode]);
-
-  React.useEffect(() => {
-    if (!isLoopback || typeof window === 'undefined') {
-      return;
-    }
-
-    const stringify = (value: unknown): string => {
-      if (typeof value === 'string') return value;
-      if (value === null || value === undefined) return '';
-      try {
-        return JSON.stringify(value);
-      } catch {
-        return String(value);
-      }
-    };
-
-    const pushConsoleEvent = (event: Omit<PreviewConsoleEvent, 'id'>) => {
-      const id = nextConsoleEventIdRef.current;
-      nextConsoleEventIdRef.current += 1;
-      setConsoleEvents((current) => {
-        const next = [...current, { ...event, id }];
-        return next.length > PREVIEW_CONSOLE_EVENT_LIMIT
-          ? next.slice(next.length - PREVIEW_CONSOLE_EVENT_LIMIT)
-          : next;
-      });
-    };
-
-    const handler = (event: MessageEvent<PreviewBridgeMessage>) => {
-      if (event.source !== iframeRef.current?.contentWindow) {
-        return;
-      }
-      const data = event.data;
-      if (!data || data.source !== 'varin-preview-bridge' || data.version !== 1) {
-        return;
-      }
-
-      if (data.type === 'ready') {
-        setBridgeReady(true);
-        return;
-      }
-
-      if (data.type === 'console') {
-        const level = data.level === 'error' || data.level === 'warn' || data.level === 'info' || data.level === 'debug'
-          ? data.level
-          : 'log';
-        const args = Array.isArray(data.args) ? data.args.map(stringify).filter(Boolean) : [];
-        pushConsoleEvent({
-          level,
-          message: args.join(' '),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'runtime-error') {
-        const filename = stringify(data.filename);
-        const line = typeof data.line === 'number' ? data.line : null;
-        const column = typeof data.column === 'number' ? data.column : null;
-        const location = filename
-          ? `${filename}${line !== null ? `:${line}${column !== null ? `:${column}` : ''}` : ''}`
-          : '';
-        const stack = stringify(data.stack);
-        pushConsoleEvent({
-          level: 'runtime',
-          message: stringify(data.message) || t('contextPanel.preview.console.runtimeError'),
-          details: [location, stack].filter(Boolean).join('\n'),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'resource-error') {
-        const tag = stringify(data.tag) || 'resource';
-        const url = stringify(data.url);
-        pushConsoleEvent({
-          level: 'resource',
-          message: url ? `${tag}: ${url}` : tag,
-          details: stringify(data.outerHTML),
-          ts: typeof data.ts === 'number' ? data.ts : Date.now(),
-        });
-        return;
-      }
-
-      if (data.type === 'hover') {
-        setHoverTarget(isPreviewElementMetadata(data.target) ? data.target : null);
-        return;
-      }
-
-      if (data.type === 'select' && isPreviewElementMetadata(data.target)) {
-        setHoverTarget(data.target);
-        setInspectMode(false);
-        attachPreviewAnnotation(data.target);
-        return;
-      }
-
-      if (data.type === 'navigate-preview') {
-        const nextUrl = typeof data.url === 'string' ? data.url : '';
-        const navigation = data.navigation === 'external' ? 'external' : 'proxy';
-        if (nextUrl && navigation === 'external') {
-          void openExternalUrl(nextUrl);
-          return;
-        }
-        if (nextUrl) {
-          onNavigate(nextUrl);
-        }
-      }
-    };
-
-    window.addEventListener('message', handler);
-    return () => {
-      window.removeEventListener('message', handler);
-    };
-  }, [attachPreviewAnnotation, isLoopback, onNavigate, t]);
-
-  const consoleErrorCount = consoleEvents.filter((event) => event.level === 'error' || event.level === 'runtime' || event.level === 'resource').length;
-  const filteredConsoleEvents = consoleEvents.filter((event) => getPreviewConsoleFilterMatch(event, consoleFilter));
-
-  const copyConsoleEvents = React.useCallback(() => {
-    const header = [
-      `Preview URL: ${rawUrl || effectiveSrc || ''}`,
-      `Events: ${consoleEvents.length}`,
-      '',
-    ].join('\n');
-    const text = consoleEvents.map((event) => {
-      const timestamp = new Date(event.ts).toISOString();
-      const details = event.details ? `\n${event.details}` : '';
-      return `[${timestamp}] [${event.level}] ${event.message}${details}`;
-    }).join('\n');
-
-    void copyTextToClipboard(`${header}${text}`).then((result) => {
-      if (result.ok) {
-        toast.success(t('contextPanel.preview.console.copied'));
-      } else {
-        toast.error(t('contextPanel.preview.console.copyFailed'));
-      }
-    });
-  }, [consoleEvents, effectiveSrc, rawUrl, t]);
-
-  const attachConsoleEvents = React.useCallback(() => {
-    const sessionKey = currentSessionId;
-    if (!sessionKey || !effectiveDirectory) {
-      toast.error(t('contextPanel.preview.console.attachNoSession'));
-      return;
-    }
-
-    const header = [
-      `Preview URL: ${rawUrl || effectiveSrc || ''}`,
-      `Events: ${consoleEvents.length}`,
-      '',
-    ].join('\n');
-    const text = consoleEvents.map((event) => {
-      const timestamp = new Date(event.ts).toISOString();
-      const details = event.details ? `\n${event.details}` : '';
-      return `[${timestamp}] [${event.level}] ${event.message}${details}`;
-    }).join('\n');
-
-    appendThreadDraftText(
-      sessionKey,
-      `${t('contextPanel.preview.console.attachAnnotation')}\n\n\`\`\`text\n${header}${text}\n\`\`\``,
-    );
-    toast.success(t('contextPanel.preview.console.attached'));
-  }, [consoleEvents, currentSessionId, effectiveDirectory, effectiveSrc, rawUrl, t]);
-
-  // Out-of-band upstream probe: iframes don't expose HTTP status to the parent,
-  // so when the proxy returns a 502 (upstream dev server is offline) the iframe
-  // would just render the raw JSON error body. Probe the proxy URL with a GET
-  // request and surface a friendly overlay when the upstream is unreachable.
-  type UpstreamState = 'unknown' | 'starting' | 'reachable' | 'unreachable';
-  const [upstreamState, setUpstreamState] = React.useState<UpstreamState>('unknown');
-  const upstreamProbeStartedAtRef = React.useRef<number>(0);
-  const upstreamProbeAttemptRef = React.useRef<number>(0);
-  const upstreamProbeKeyRef = React.useRef<string>('');
-  const proxyRecoveryAttemptedKeyRef = React.useRef<string>('');
-  const PREVIEW_STARTUP_GRACE_MS = 15_000;
-
-  React.useEffect(() => {
-    if (!proxySrc) {
-      setUpstreamState('unknown');
-      upstreamProbeKeyRef.current = '';
-      upstreamProbeStartedAtRef.current = 0;
-      upstreamProbeAttemptRef.current = 0;
-      return;
-    }
-
-    let cancelled = false;
-    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
-    if (upstreamProbeKeyRef.current !== proxyCacheKey) {
-      upstreamProbeKeyRef.current = proxyCacheKey;
-      upstreamProbeStartedAtRef.current = Date.now();
-      upstreamProbeAttemptRef.current = 0;
-    }
-    const scheduleRetry = (delay: number) => {
-      retryTimeout = setTimeout(() => {
-        if (!cancelled) bumpReload();
-      }, delay);
-    };
-    setUpstreamState('unknown');
-
-    void (async () => {
-      const probe = async (): Promise<Response | null> => {
-        try {
-          return await runtimeFetch(proxySrc, {
-            method: 'GET',
-            credentials: 'include',
-            cache: 'no-store',
-            redirect: 'manual',
-          });
-        } catch {
-          return null;
-        }
-      };
-
-      const response = await probe();
-
-      if (cancelled) return;
-
-      if (!response) {
-        setUpstreamState('unreachable');
-        scheduleRetry(5000);
-        return;
-      }
-
-      const recoveryAction = getPreviewTargetRecoveryAction(
-        response.headers,
-        proxyRecoveryAttemptedKeyRef.current === proxyCacheKey,
-      );
-      if (recoveryAction !== 'none') {
-        previewProxyTargetCache.delete(proxyCacheKey);
-        if (recoveryAction === 'retry-registration') {
-          proxyRecoveryAttemptedKeyRef.current = proxyCacheKey;
-          setProxyState({ status: 'loading' });
-          bumpProxyRegistration();
-        } else {
-          const errorBody = await response.json().catch(() => ({}));
-          if (cancelled) return;
-          const message = typeof errorBody?.error === 'string'
-            ? errorBody.error
-            : `HTTP ${response.status}`;
-          setProxyState({ status: 'error', message });
-        }
-        return;
-      }
-
-      // The proxy emits 502 when the upstream is unreachable. Anything else
-      // (including 4xx from the upstream) means the upstream answered.
-      if (response.status !== 502) {
-        proxyRecoveryAttemptedKeyRef.current = '';
-        setUpstreamState('reachable');
-        return;
-      }
-
-      const startedAt = upstreamProbeStartedAtRef.current || Date.now();
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < PREVIEW_STARTUP_GRACE_MS) {
-        // Dev servers can take a moment to bind. During the grace window,
-        // keep retrying and show a softer "starting" state.
-        setUpstreamState('starting');
-        upstreamProbeAttemptRef.current += 1;
-        const attempt = upstreamProbeAttemptRef.current;
-        const delay = Math.min(2000, 250 * Math.pow(2, Math.min(4, attempt)));
-        scheduleRetry(delay);
-        return;
-      }
-
-      setUpstreamState('unreachable');
-      scheduleRetry(5000);
-    })();
-
-    return () => {
-      cancelled = true;
-      if (retryTimeout) clearTimeout(retryTimeout);
-    };
-  }, [proxyCacheKey, proxySrc, reloadNonce]);
-
-  const showUpstreamStarting = isLoopback
-    && proxyState.status === 'ready'
-    && (upstreamState === 'unknown' || upstreamState === 'starting');
-
-  const showUpstreamUnreachable = isLoopback
-    && proxyState.status === 'ready'
-    && upstreamState === 'unreachable';
-
-  const handlePreviewFrameLoad = React.useCallback((event: React.SyntheticEvent<HTMLIFrameElement>) => {
-    if (!isLoopback || proxyState.status !== 'ready') {
-      return;
-    }
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const frameWindow = event.currentTarget.contentWindow;
-    if (!frameWindow) {
-      return;
-    }
-
-    try {
-      const location = frameWindow.location;
-      const proxyOrigin = getPreviewProxyOrigin(proxySrc);
-      if (location.origin !== proxyOrigin) {
-        return;
-      }
-      if (location.pathname.startsWith(proxyState.proxyBasePath)) {
-        return;
-      }
-
-      const nextPath = `${proxyState.proxyBasePath}${location.pathname}${location.search}${location.hash}`;
-      frameWindow.location.replace(nextPath);
-    } catch {
-      // Cross-origin frames are expected for non-loopback/direct previews.
-    }
-  }, [isLoopback, proxySrc, proxyState]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col">
-      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
-        <div className="min-w-0 flex-1 truncate typography-micro text-muted-foreground" title={headerSrc || rawUrl}>
-          {headerSrc || rawUrl || t('contextPanel.preview.empty')}
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0"
-          onClick={() => bumpReload()}
-          title={t('contextPanel.preview.actions.reload')}
-          aria-label={t('contextPanel.preview.actions.reload')}
-          disabled={!effectiveSrc}
-        >
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="h-7 w-7 p-0"
-          onClick={() => {
-            if (!directSrc) return;
-            void openExternalUrl(directSrc);
-          }}
-          title={t('contextPanel.preview.actions.openExternal')}
-          aria-label={t('contextPanel.preview.actions.openExternal')}
-          disabled={!directSrc}
-        >
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-        {isLoopback ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={inspectMode ? 'secondary' : 'ghost'}
-            className="h-7 gap-1 px-2"
-            onClick={() => setInspectMode((value) => !value)}
-            title={t('contextPanel.preview.inspect.toggle')}
-            aria-label={t('contextPanel.preview.inspect.toggle')}
-            disabled={!bridgeReady}
-          >
-            <Icon name="cursor" className="h-3.5 w-3.5" />
-          </Button>
-        ) : null}
-        {isLoopback ? (
-          <Button
-            type="button"
-            size="sm"
-            variant={consoleOpen ? 'secondary' : 'ghost'}
-            className="h-7 gap-1 px-2"
-            onClick={() => setConsoleOpen((value) => !value)}
-            title={bridgeReady ? t('contextPanel.preview.console.open') : t('contextPanel.preview.console.waiting')}
-            aria-label={bridgeReady ? t('contextPanel.preview.console.open') : t('contextPanel.preview.console.waiting')}
-            disabled={!bridgeReady && consoleEvents.length === 0}
-          >
-            <Icon name="terminal-box" className="h-3.5 w-3.5" />
-            {consoleErrorCount > 0 ? (
-              <span className="typography-micro text-status-error">{consoleErrorCount}</span>
-            ) : null}
-          </Button>
-        ) : null}
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        {showUpstreamStarting ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.startingServer')}</div>
-            <div className="text-xs opacity-70">{t('contextPanel.preview.startingServerHint')}</div>
-          </div>
-        ) : showUpstreamUnreachable ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.upstreamUnreachable')}</div>
-            <div className="text-xs opacity-70">{t('contextPanel.preview.upstreamUnreachableHint')}</div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => bumpReload()}
-            >
-              {t('contextPanel.preview.actions.retry')}
-            </Button>
-          </div>
-        ) : effectiveSrc && (!isLoopback || upstreamState === 'reachable') ? (
-          <div className="relative h-full w-full">
-            <iframe
-              ref={iframeRef}
-              key={`${effectiveSrc}:${reloadNonce}`}
-              src={effectiveSrc}
-              title={t('contextPanel.preview.iframeTitle')}
-              className="h-full w-full border-0"
-              style={{ colorScheme: previewColorScheme }}
-              onLoad={handlePreviewFrameLoad}
-              sandbox={isLoopback
-                ? 'allow-scripts allow-same-origin allow-forms allow-popups allow-downloads'
-                : 'allow-scripts allow-forms'}
-            />
-            {inspectMode && hoverTarget ? (
-              <div
-                className="pointer-events-none absolute rounded-sm border-2 border-[var(--interactive-focus-ring)] bg-[var(--interactive-focus-ring)]/35"
-                style={{
-                  left: hoverTarget.bounds.x,
-                  top: hoverTarget.bounds.y,
-                  width: hoverTarget.bounds.width,
-                  height: hoverTarget.bounds.height,
-                }}
-              >
-                <div className="absolute -top-6 left-0 max-w-64 truncate rounded bg-[var(--surface-elevated)] px-2 py-0.5 typography-micro text-foreground shadow">
-                  {hoverTarget.tag}{hoverTarget.text ? ` · ${hoverTarget.text}` : ''}
-                </div>
-              </div>
-            ) : null}
-          </div>
-        ) : showLoading ? (
-          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {t('contextPanel.preview.loading')}
-          </div>
-        ) : showError ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-sm text-muted-foreground">
-            <div>{t('contextPanel.preview.proxyError')}</div>
-            {proxyState.status === 'error' ? (
-              <div className="text-center text-xs opacity-70">{proxyState.message}</div>
-            ) : null}
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center px-6 text-sm text-muted-foreground">
-            {t('contextPanel.preview.invalidUrl')}
-          </div>
-        )}
-        {consoleOpen ? (
-          <div className="absolute inset-x-3 bottom-3 z-10 max-h-[45%] overflow-hidden rounded-xl border border-border/70 bg-[var(--surface-elevated)] shadow-lg">
-            <div className="flex items-center justify-between border-b border-border/50 px-3 py-2">
-              <div className="typography-ui-label text-foreground">{t('contextPanel.preview.console.title')}</div>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={attachConsoleEvents}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.attach')}
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={copyConsoleEvents}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.copy')}
-                </Button>
-                <Button
-                  type="button"
-                  size="xs"
-                  variant="ghost"
-                  onClick={() => setConsoleEvents([])}
-                  disabled={consoleEvents.length === 0}
-                >
-                  {t('contextPanel.preview.console.clear')}
-                </Button>
-              </div>
-            </div>
-            <div className="flex items-center gap-1 border-b border-border/30 px-3 py-1.5">
-              {(['all', 'errors', 'warnings', 'logs'] as const).map((filter) => (
-                <Button
-                  key={filter}
-                  type="button"
-                  size="xs"
-                  variant={consoleFilter === filter ? 'secondary' : 'ghost'}
-                  onClick={() => setConsoleFilter(filter)}
-                >
-                  {filter === 'all'
-                    ? t('contextPanel.preview.console.filter.all')
-                    : filter === 'errors'
-                      ? t('contextPanel.preview.console.filter.errors')
-                      : filter === 'warnings'
-                        ? t('contextPanel.preview.console.filter.warnings')
-                        : t('contextPanel.preview.console.filter.logs')}
-                </Button>
-              ))}
-            </div>
-            <div className="max-h-64 overflow-auto p-2 typography-code text-xs">
-              {consoleEvents.length === 0 ? (
-                <div className="px-2 py-3 text-muted-foreground">{t('contextPanel.preview.console.empty')}</div>
-              ) : filteredConsoleEvents.length === 0 ? (
-                <div className="px-2 py-3 text-muted-foreground">{t('contextPanel.preview.console.noFilteredEvents')}</div>
-              ) : filteredConsoleEvents.map((event) => (
-                <div key={event.id} className="border-b border-border/30 px-2 py-1 last:border-b-0">
-                  <div className="flex gap-2">
-                    <span className={cn(
-                      'shrink-0 uppercase',
-                      event.level === 'error' || event.level === 'runtime' || event.level === 'resource'
-                        ? 'text-status-error'
-                        : event.level === 'warn'
-                          ? 'text-status-warning'
-                          : 'text-muted-foreground'
-                    )}>
-                      {event.level}
-                    </span>
-                    <span className="min-w-0 break-words text-foreground">{event.message}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
 export const ContextPanel: React.FC = () => {
   const { t } = useI18n();
-  const projectActionsContext = useProjectActionsContext();
   const effectiveDirectory = useEffectiveDirectory() ?? '';
   const directoryKey = React.useMemo(() => normalizeDirectoryKey(effectiveDirectory), [effectiveDirectory]);
   const currentSessionId = useThreadStore(state => state.selectedIdentity);
@@ -1249,7 +425,6 @@ export const ContextPanel: React.FC = () => {
   const setContextPanelWidth = useUIStore((state) => state.setContextPanelWidth);
   const setActiveContextPanelTab = useUIStore((state) => state.setActiveContextPanelTab);
   const reorderContextPanelTabs = useUIStore((state) => state.reorderContextPanelTabs);
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
   const contextEditorTreeVisible = useUIStore((state) => state.contextEditorTreeVisible);
   const toggleContextEditorTree = useUIStore((state) => state.toggleContextEditorTree);
   const { themeMode, setThemeMode, lightThemeId, darkThemeId, currentTheme } = useThemeSystem();
@@ -1638,8 +813,8 @@ export const ContextPanel: React.FC = () => {
 
   // The rail switches between surfaces (modes); the in-panel strip only lists
   // instances of the active multi-instance surface (open files, split chats,
-  // preview targets).
-  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'preview' || activeTab?.mode === 'ui';
+  // interactive content).
+  const isMultiInstanceMode = activeTab?.mode === 'file' || activeTab?.mode === 'chat' || activeTab?.mode === 'ui';
   const activeModeTabs = React.useMemo(
     () => (activeTab ? tabs.filter((tab) => tab.mode === activeTab.mode) : []),
     [activeTab, tabs],
@@ -1686,18 +861,7 @@ export const ContextPanel: React.FC = () => {
             ? <ComputerWorkSurface directory={effectiveDirectory} tabID={activeTab.id} />
         : activeTab?.mode === 'plan'
             ? <PlanView targetPath={activeTab.targetPath} />
-            : activeTab?.mode === 'preview' && activeTab.targetPath
-                ? <PreviewPane rawUrl={activeTab.targetPath ?? ''} onNavigate={(url) => openContextPreview(effectiveDirectory, url)} />
-                : (
-                  <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-                    <Icon name="global" className="h-12 w-12 text-muted-foreground/50" />
-                    <div className="typography-ui-header text-foreground">{t('contextPanel.preview.title')}</div>
-                    <div className="max-w-sm typography-micro text-muted-foreground">{t('contextPanel.preview.description')}</div>
-                    {projectActionsContext ? (
-                      <ProjectActionsButton projectRef={projectActionsContext.projectRef} directory={effectiveDirectory} previewOnly />
-                    ) : null}
-                  </div>
-                );
+            : null;
 
   const browserTabs = React.useMemo(
     () => tabs.filter((tab) => tab.mode === 'browser'),

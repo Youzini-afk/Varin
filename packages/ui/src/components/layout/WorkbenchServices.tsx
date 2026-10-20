@@ -4,7 +4,6 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { SortableTabsStrip, type SortableTabsStripItem } from '@/components/ui/sortable-tabs-strip';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitHubAuthStore } from '@/stores/useGitHubAuthStore';
-import { useTerminalStore } from '@/stores/useTerminalStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { UpdateDialog } from '@/components/ui/UpdateDialog';
@@ -568,33 +567,11 @@ export const WorkbenchServices = React.memo(function WorkbenchServices() {
     setIsDevShutdownInFlight(true);
     setIsDesktopServicesOpen(false);
 
-    const previewUrls: string[] = [];
     let shutdownRequested = false;
     try {
       try {
-        for (const [, dirState] of useTerminalStore.getState().sessions.entries()) {
-          for (const tab of dirState.tabs) {
-            if (tab.previewUrl) {
-              previewUrls.push(tab.previewUrl);
-            }
-          }
-        }
-      } catch {
-        // ignore
-      }
-
-      try {
-        // Ensure preview/dev terminals don't linger.
-        await runtimeApis.terminal.forceKill?.({});
-      } catch {
-        // ignore
-      }
-
-      try {
         const devRes = await runtimeFetch('/api/system/dev-shutdown', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ previewUrls }),
         });
         if (devRes.ok) {
           shutdownRequested = true;
@@ -610,7 +587,7 @@ export const WorkbenchServices = React.memo(function WorkbenchServices() {
         setIsDevShutdownInFlight(false);
       }
     }
-  }, [isDevShutdownInFlight, runtimeApis.terminal, setIsDesktopServicesOpen]);
+  }, [isDevShutdownInFlight, setIsDesktopServicesOpen]);
 
 
 

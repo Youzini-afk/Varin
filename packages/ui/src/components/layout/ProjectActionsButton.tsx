@@ -33,14 +33,12 @@ import {
   resolveProjectActionDesktopForwardUrl,
   toProjectActionRunKey,
 } from '@/lib/projectActions';
-import { detectDevServerCommand, readPackageJsonScripts } from '@/lib/detectDevServer';
 import { waitForTerminalExit } from '@/lib/projectActionTerminal';
 
 type UrlWatchEntry = {
   lastSeenChunkId: number | null;
   openedUrl: boolean;
   tail: string;
-  openInPreview: boolean;
 };
 
 interface ProjectActionsButtonProps {
@@ -51,15 +49,11 @@ interface ProjectActionsButtonProps {
   allowMobile?: boolean;
   contextMenu?: { trigger: React.ReactElement; leading?: React.ReactNode; children: React.ReactNode };
   menuTrigger?: React.ReactElement;
-  previewOnly?: boolean;
 }
 
 const ANSI_ESCAPE_PREFIX = String.fromCharCode(27);
 const ANSI_ESCAPE_PATTERN = new RegExp(`${ANSI_ESCAPE_PREFIX}\\[[0-9;?]*[ -/]*[@-~]`, 'g');
 const URL_GLOBAL_PATTERN = /https?:\/\/[^\s<>'"`]+/gi;
-const AUTO_DISCOVER_ACTION_ID = '__varin_auto_discover_preview__';
-const AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS = 15_000;
-// The project menu and preview pane can both launch the same action.
 const startingRunKeys = new Set<string>();
 
 const stripControlChars = (value: string): string => {
@@ -156,7 +150,6 @@ export const ProjectActionsButton = ({
   allowMobile = false,
   contextMenu,
   menuTrigger,
-  previewOnly = false,
 }: ProjectActionsButtonProps) => {
   const { t } = useI18n();
   const { currentTheme } = useThemeSystem();
@@ -171,7 +164,7 @@ export const ProjectActionsButton = ({
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const setSettingsProjectsSelectedId = useUIStore((state) => state.setSettingsProjectsSelectedId);
-  const openContextPreview = useUIStore((state) => state.openContextPreview);
+  const openContextBrowser = useUIStore((state) => state.openContextBrowser);
 
   const ensureDirectory = useTerminalStore((state) => state.ensureDirectory);
   const setTabLabel = useTerminalStore((state) => state.setTabLabel);
@@ -179,7 +172,6 @@ export const ProjectActionsButton = ({
   const setActiveTab = useTerminalStore((state) => state.setActiveTab);
   const setConnecting = useTerminalStore((state) => state.setConnecting);
   const setTabSessionId = useTerminalStore((state) => state.setTabSessionId);
-  const setTabPreviewUrl = useTerminalStore((state) => state.setTabPreviewUrl);
   const projectActionRuns = useTerminalStore((state) => state.projectActionRuns);
   const setProjectActionRun = useTerminalStore((state) => state.setProjectActionRun);
   const updateProjectActionRunStatus = useTerminalStore((state) => state.updateProjectActionRunStatus);
@@ -192,7 +184,6 @@ export const ProjectActionsButton = ({
   const tabByKeyRef = React.useRef<Record<string, string>>({});
   const urlWatchByRunKeyRef = React.useRef<Record<string, UrlWatchEntry>>({});
   const streamCleanupByRunKeyRef = React.useRef<Record<string, () => void>>({});
-  const previewWaitTimeoutByRunKeyRef = React.useRef<Record<string, number>>({});
   const loadRequestIdRef = React.useRef(0);
 
   const projectId = projectRef?.id ?? null;
@@ -233,9 +224,6 @@ export const ProjectActionsButton = ({
       const filtered = state.actions;
       setActions(filtered);
       setSelectedActionId((current) => {
-        if (current === AUTO_DISCOVER_ACTION_ID) {
-          return current;
-        }
         if (current && filtered.some((entry) => entry.id === current)) {
           return current;
         }
@@ -263,20 +251,6 @@ export const ProjectActionsButton = ({
     }
     return actions.find((entry) => entry.id === selectedActionId) ?? null;
   }, [actions, selectedActionId]);
-
-  const autoDiscoverAction = React.useMemo<VarinProjectAction>(() => ({
-    id: AUTO_DISCOVER_ACTION_ID,
-    name: t('contextPanel.preview.startPreview'),
-    command: '',
-    icon: 'play',
-    autoOpenUrl: true,
-  }), [t]);
-
-  const canUseAutoDiscover = !isMobile;
-  const displayActions = React.useMemo(
-    () => canUseAutoDiscover ? [autoDiscoverAction, ...actions] : actions,
-    [actions, autoDiscoverAction, canUseAutoDiscover]
-  );
 
   React.useEffect(() => {
     if (!menuActivated) return;
@@ -310,13 +284,10 @@ export const ProjectActionsButton = ({
     if (!selectedActionId) {
       return;
     }
-    if (selectedActionId === AUTO_DISCOVER_ACTION_ID && canUseAutoDiscover) {
-      return;
-    }
     if (!actions.some((entry) => entry.id === selectedActionId)) {
       setSelectedActionId(null);
     }
-  }, [actions, canUseAutoDiscover, selectedActionId]);
+  }, [actions, selectedActionId]);
 
   React.useEffect(() => {
     if (!menuActivated) return;
@@ -333,11 +304,11 @@ export const ProjectActionsButton = ({
           continue;
         }
 
-        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: tab.previewAutoOpened, tail: '', openInPreview: entry.actionId === AUTO_DISCOVER_ACTION_ID };
+        const watch = urlWatchByRunKeyRef.current[runKey] ?? { lastSeenChunkId: null, openedUrl: Boolean(entry.urlHandled), tail: '' };
         urlWatchByRunKeyRef.current[runKey] = watch;
-        const action = displayActions.find((item) => item.id === entry.actionId);
+        const action = actions.find((item) => item.id === entry.actionId);
         const bufferChunks = terminalStore.getBuffer(entry.directory, entry.tabId).chunks;
-        if (!action || bufferChunks.length === 0 || tab.previewAutoOpened) continue;
+        if (!action?.autoOpenUrl || bufferChunks.length === 0 || entry.urlHandled) continue;
 
         const nextChunks = bufferChunks.filter((chunk) => watch.lastSeenChunkId === null || chunk.id > watch.lastSeenChunkId);
         if (nextChunks.length === 0) continue;
@@ -352,20 +323,9 @@ export const ProjectActionsButton = ({
 
         if (maybeUrl) {
           watch.openedUrl = true;
-          if (watch.openInPreview) {
-            const run = currentRuns[runKey];
-            if (run) {
-              setTabPreviewUrl(run.directory, run.tabId, maybeUrl, { locked: false, autoOpened: true });
-              if (run.status === 'waiting-for-preview') updateProjectActionRunStatus(runKey, 'running');
-              window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-              delete previewWaitTimeoutByRunKeyRef.current[runKey];
-              openContextPreview(run.directory, maybeUrl);
-            }
-          } else {
-            setTabPreviewUrl(entry.directory, entry.tabId, maybeUrl, { locked: false, autoOpened: true });
-            void openExternal(maybeUrl);
-            toast.success(t('projectActions.toast.openedUrlFromOutput'));
-          }
+          setProjectActionRun({ ...entry, urlHandled: true });
+          void openExternal(maybeUrl);
+          toast.success(t('projectActions.toast.openedUrlFromOutput'));
         }
         urlWatchByRunKeyRef.current[runKey] = watch;
       }
@@ -373,8 +333,6 @@ export const ProjectActionsButton = ({
       for (const runKey of Object.keys(urlWatchByRunKeyRef.current)) {
         if (!currentRuns[runKey]) {
           delete urlWatchByRunKeyRef.current[runKey];
-          window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-          delete previewWaitTimeoutByRunKeyRef.current[runKey];
         }
       }
     };
@@ -383,7 +341,7 @@ export const ProjectActionsButton = ({
     return useTerminalStore.subscribe((state, previousState) => {
       if (state.sessions !== previousState.sessions || state.buffers !== previousState.buffers) monitorRuns();
     });
-  }, [displayActions, menuActivated, normalizedDirectory, openContextPreview, openExternal, projectActionRuns, removeProjectActionRun, setTabPreviewUrl, t, updateProjectActionRunStatus]);
+  }, [actions, menuActivated, normalizedDirectory, openExternal, projectActionRuns, removeProjectActionRun, setProjectActionRun, t]);
 
   const getOrCreateActionTab = React.useCallback(async (action: VarinProjectAction, options: { revealTerminal?: boolean } = {}) => {
     if (!normalizedDirectory) {
@@ -449,32 +407,9 @@ export const ProjectActionsButton = ({
     startingRunKeys.add(startingKey);
 
     try {
-      const discovered = action.id === AUTO_DISCOVER_ACTION_ID
-        ? await (async (): Promise<VarinProjectAction> => {
-          const [actionsState, scripts] = await Promise.all([
-            getProjectActionsState({ id: stableProjectRef?.id ?? '', path: normalizedDirectory }),
-            readPackageJsonScripts(normalizedDirectory),
-          ]);
-          const devServer = await detectDevServerCommand(normalizedDirectory, actionsState.actions, scripts);
-          if (!devServer) {
-            throw new Error(t('contextPanel.preview.noDevServer'));
-          }
-          return {
-            id: AUTO_DISCOVER_ACTION_ID,
-            name: t('contextPanel.preview.startPreview'),
-            command: devServer.command,
-            icon: 'play',
-            autoOpenUrl: true,
-            openUrl: devServer.previewUrlHint || '',
-          };
-        })()
-        : action;
-
-      const hasCustomOpenUrl = discovered.autoOpenUrl === true && (discovered.openUrl || '').trim().length > 0;
-      const revealTerminal = !hasCustomOpenUrl && action.id !== AUTO_DISCOVER_ACTION_ID;
-      const { key, tabId, sessionId } = await getOrCreateActionTab(discovered, { revealTerminal });
-      // Clear a prior run before output can arrive; never erase a URL discovered by sendInput.
-      setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: false, autoOpened: false });
+      const hasCustomOpenUrl = action.autoOpenUrl === true && (action.openUrl || '').trim().length > 0;
+      const revealTerminal = !hasCustomOpenUrl;
+      const { key, tabId, sessionId } = await getOrCreateActionTab(action, { revealTerminal });
       let activeSessionId = sessionId;
 
       if (!activeSessionId) {
@@ -519,8 +454,6 @@ export const ProjectActionsButton = ({
               delete urlWatchByRunKeyRef.current[key];
               streamCleanupByRunKeyRef.current[key]?.();
               delete streamCleanupByRunKeyRef.current[key];
-              window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[key]);
-              delete previewWaitTimeoutByRunKeyRef.current[key];
             }
           }, onError: (_error, fatal) => {
             useTerminalStore.getState().setConnecting(normalizedDirectory, tabId, false);
@@ -533,60 +466,41 @@ export const ProjectActionsButton = ({
         );
       streamCleanupByRunKeyRef.current[key] = subscription.close;
 
-      const hasDesktopForwardSelection = discovered.autoOpenUrl === true
+      const hasDesktopForwardSelection = action.autoOpenUrl === true
         && isDesktopShellApp
-        && (discovered.desktopOpenSshForward || '').trim().length > 0;
-      const manualOpenUrl = discovered.autoOpenUrl ? normalizeManualOpenUrl(discovered.openUrl) : null;
-      const desktopForwardUrl = discovered.autoOpenUrl && isDesktopShellApp
-        ? resolveProjectActionDesktopForwardUrl(discovered.desktopOpenSshForward, desktopSshInstances)
+        && (action.desktopOpenSshForward || '').trim().length > 0;
+      const manualOpenUrl = action.autoOpenUrl ? normalizeManualOpenUrl(action.openUrl) : null;
+      const desktopForwardUrl = action.autoOpenUrl && isDesktopShellApp
+        ? resolveProjectActionDesktopForwardUrl(action.desktopOpenSshForward, desktopSshInstances)
         : null;
 
       setProjectActionRun({
         key,
         directory: normalizedDirectory,
-        actionId: discovered.id,
+        actionId: action.id,
         tabId,
         sessionId: activeSessionId,
-        status: discovered.id === AUTO_DISCOVER_ACTION_ID && !manualOpenUrl ? 'waiting-for-preview' : 'running',
+        status: 'running',
+        urlHandled: Boolean(desktopForwardUrl || manualOpenUrl || hasCustomOpenUrl || hasDesktopForwardSelection),
       });
-      window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[key]);
-      delete previewWaitTimeoutByRunKeyRef.current[key];
-      if (discovered.id === AUTO_DISCOVER_ACTION_ID && !manualOpenUrl) {
-        previewWaitTimeoutByRunKeyRef.current[key] = window.setTimeout(() => {
-          const store = useTerminalStore.getState();
-          const run = store.projectActionRuns[key];
-          store.updateProjectActionRunStatus(key, 'running');
-          if (run) {
-            store.setActiveTab(run.directory, run.tabId);
-            useUIStore.getState().openContextPanelTab(run.directory, { mode: 'terminal' });
-          }
-          delete previewWaitTimeoutByRunKeyRef.current[key];
-        }, AUTO_DISCOVER_PREVIEW_WAIT_TIMEOUT_MS);
-      }
-
       urlWatchByRunKeyRef.current[key] = {
         lastSeenChunkId: null,
-        openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl,
+        openedUrl: Boolean(desktopForwardUrl) || Boolean(manualOpenUrl) || hasCustomOpenUrl || hasDesktopForwardSelection,
         tail: '',
-        openInPreview: discovered.id === AUTO_DISCOVER_ACTION_ID,
       };
 
-      const normalizedCommand = stripControlChars(discovered.command.trim().replace(/\r\n|\r/g, '\n'));
+      const normalizedCommand = stripControlChars(action.command.trim().replace(/\r\n|\r/g, '\n'));
       await terminal.sendInput(activeSessionId, `${normalizedCommand}\r`);
 
       if (desktopForwardUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         void openExternal(desktopForwardUrl);
         toast.success(t('projectActions.toast.openedForwardedUrl'));
       } else if (manualOpenUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, manualOpenUrl, { locked: true, autoOpened: true });
-        openContextPreview(normalizedDirectory, manualOpenUrl);
+        openContextBrowser(normalizedDirectory, manualOpenUrl);
         toast.success(t('projectActions.toast.openedActionUrl'));
       } else if (hasCustomOpenUrl) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         toast.error(t('projectActions.error.invalidCustomUrlFormat'));
       } else if (hasDesktopForwardSelection) {
-        setTabPreviewUrl(normalizedDirectory, tabId, null, { locked: true });
         toast.error(t('projectActions.error.selectedDesktopSshForwardUnavailable'));
       }
 
@@ -595,8 +509,6 @@ export const ProjectActionsButton = ({
       delete urlWatchByRunKeyRef.current[runKey];
       streamCleanupByRunKeyRef.current[runKey]?.();
       delete streamCleanupByRunKeyRef.current[runKey];
-      window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-      delete previewWaitTimeoutByRunKeyRef.current[runKey];
       toast.error(error instanceof Error ? error.message : t('projectActions.error.failedToRunAction'));
     } finally {
       startingRunKeys.delete(startingKey);
@@ -614,14 +526,12 @@ export const ProjectActionsButton = ({
     terminalLoginShell,
     terminalShell,
     openExternal,
-    openContextPreview,
+    openContextBrowser,
     projectActionRuns,
     removeProjectActionRun,
     setConnecting,
     setProjectActionRun,
-    setTabPreviewUrl,
     setTabSessionId,
-    stableProjectRef?.id,
     t,
     terminal,
   ]);
@@ -671,12 +581,10 @@ export const ProjectActionsButton = ({
     delete urlWatchByRunKeyRef.current[runKey];
     streamCleanupByRunKeyRef.current[runKey]?.();
     delete streamCleanupByRunKeyRef.current[runKey];
-    window.clearTimeout(previewWaitTimeoutByRunKeyRef.current[runKey]);
-    delete previewWaitTimeoutByRunKeyRef.current[runKey];
   }, [normalizedDirectory, projectActionRuns, removeProjectActionRun, setTabSessionId, terminal, updateProjectActionRunStatus]);
 
   const handlePrimaryClick = React.useCallback(() => {
-    const action = selectedAction ?? displayActions[0];
+    const action = selectedAction ?? actions[0];
     if (!action) {
       return;
     }
@@ -690,7 +598,7 @@ export const ProjectActionsButton = ({
       return;
     }
     void runAction(action);
-  }, [displayActions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
+  }, [actions, normalizedDirectory, runAction, projectActionRuns, selectedAction, stopAction]);
 
   const handleSelectAction = React.useCallback((action: VarinProjectAction, toggleStopIfRunning = false) => {
     setSelectedActionId(action.id);
@@ -721,55 +629,33 @@ export const ProjectActionsButton = ({
     setSettingsDialogOpen(true);
   }, [setSettingsDialogOpen, setSettingsPage, setSettingsProjectsSelectedId, stableProjectRef?.id]);
 
-  const previewAction = previewOnly ? autoDiscoverAction : selectedAction ?? displayActions[0] ?? null;
-  const previewRun = previewAction ? projectActionRuns[toProjectActionRunKey(normalizedDirectory, previewAction.id)] : null;
-  const selectedRunPreviewUrl = useTerminalStore((state) => {
-    if (!previewRun) return null;
-    return state.sessions.get(previewRun.directory)?.tabs.find((tab) => tab.id === previewRun.tabId)?.previewUrl ?? null;
-  });
-
   if ((!allowMobile && isMobile) || !stableProjectRef || !normalizedDirectory) {
     return null;
   }
 
-  const resolvedSelected = previewAction ?? ((contextMenu || menuTrigger) ? autoDiscoverAction : null);
-  if (!resolvedSelected) {
-    return null;
-  }
+  const resolvedSelected = selectedAction ?? actions[0];
 
-  const selectedIconKey = (resolvedSelected.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
-  const selectedIconName = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID
-    ? 'play'
-    : PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
-  const selectedRunKey = toProjectActionRunKey(normalizedDirectory, resolvedSelected.id);
+  const selectedIconKey = (resolvedSelected?.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP;
+  const selectedIconName = PROJECT_ACTION_ICON_MAP[selectedIconKey] || 'play';
+  const selectedRunKey = resolvedSelected ? toProjectActionRunKey(normalizedDirectory, resolvedSelected.id) : '';
   const selectedRunning = projectActionRuns[selectedRunKey];
   const isStoppingSelected = selectedRunning?.status === 'stopping';
-  const isWaitingForSelectedPreview = selectedRunning?.status === 'waiting-for-preview';
-  const showSelectedPreviewButton = Boolean(selectedRunning && selectedRunPreviewUrl);
-  const handleOpenSelectedPreview = () => {
-    if (!selectedRunning || !selectedRunPreviewUrl) {
-      return;
-    }
-    openContextPreview(selectedRunning.directory, selectedRunPreviewUrl);
-  };
-  const isAutoDiscoverSelected = resolvedSelected.id === AUTO_DISCOVER_ACTION_ID;
-
   const MenuItem = contextMenu ? ContextMenuItem : DropdownMenuItem;
   const MenuSeparator = contextMenu ? ContextMenuSeparator : DropdownMenuSeparator;
   const menuItems = (
     <>
-      {displayActions.map((entry) => {
+      {actions.map((entry) => {
         const run = projectActionRuns[toProjectActionRunKey(normalizedDirectory, entry.id)];
-        const waiting = run?.status === 'stopping' || run?.status === 'waiting-for-preview';
-        const iconName = entry.id === AUTO_DISCOVER_ACTION_ID ? 'play' : PROJECT_ACTION_ICON_MAP[(entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP] || 'play';
+        const waiting = run?.status === 'stopping';
+        const iconName = PROJECT_ACTION_ICON_MAP[(entry.icon || 'play') as keyof typeof PROJECT_ACTION_ICON_MAP] || 'play';
         return (
           <MenuItem key={entry.id} disabled={isLoading || run?.status === 'stopping'} onClick={() => handleSelectAction(entry, true)}>
             <Icon name={waiting ? 'loader-4' : run ? 'stop' : iconName} className={cn('mr-2 size-4 shrink-0', waiting && 'animate-spin')} />
-            <span className="truncate">{run ? t('projectActions.actions.stopNamedAria', { name: entry.id === AUTO_DISCOVER_ACTION_ID ? t('contextPanel.preview.title') : entry.name }) : entry.name}</span>
+            <span className="truncate">{run ? t('projectActions.actions.stopNamedAria', { name: entry.name }) : entry.name}</span>
           </MenuItem>
         );
       })}
-      <MenuSeparator />
+      {actions.length > 0 && <MenuSeparator />}
       <MenuItem onClick={openProjectActionsSettings}>
         <Icon name="add" className="mr-2 size-4" />
         {t('projectActions.actions.addNewAction')}
@@ -802,18 +688,13 @@ export const ProjectActionsButton = ({
     );
   }
 
-  if (previewOnly) {
-    return (
-      <button
-        type="button"
-        disabled={isLoading || isStoppingSelected || isWaitingForSelectedPreview}
-        onClick={() => handleSelectAction(autoDiscoverAction, true)}
-        className="inline-flex h-8 items-center gap-2 rounded-md bg-primary px-3 typography-ui-label text-primary-foreground disabled:opacity-50"
-      >
-        <Icon name={isWaitingForSelectedPreview || isStoppingSelected ? 'loader-4' : selectedRunning ? 'stop' : 'play'} className={cn('size-4', (isWaitingForSelectedPreview || isStoppingSelected) && 'animate-spin')} />
-        {isWaitingForSelectedPreview ? t('contextPanel.preview.starting') : selectedRunning ? t('projectActions.actions.stopNamedAria', { name: t('contextPanel.preview.title') }) : t('contextPanel.preview.startPreview')}
-      </button>
-    );
+  if (!resolvedSelected) {
+    return <button type="button" onClick={openProjectActionsSettings}
+      className={cn('inline-flex items-center gap-2 rounded-lg p-2 typography-ui-label text-muted-foreground hover:bg-interactive-hover', className)}
+      aria-label={t('projectActions.actions.addNewAction')}>
+      <Icon name="add" className="size-4" />
+      {!compact && t('projectActions.actions.addNewAction')}
+    </button>;
   }
 
   if (compact) {
@@ -836,32 +717,15 @@ export const ProjectActionsButton = ({
                 ? t('projectActions.actions.stopNamedAria', { name: resolvedSelected.name })
                 : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
             >
-              {isStoppingSelected || isWaitingForSelectedPreview
+              {isStoppingSelected
                 ? <Icon name="loader-4" className="h-5 w-5 animate-spin text-[var(--status-warning)]" />
                 : selectedRunning
                   ? <Icon name="stop" className="h-5 w-5 text-[var(--status-warning)]" />
                   : <Icon name={selectedIconName} className="h-5 w-5" />}
             </button>
           </TooltipTrigger>
-          {isAutoDiscoverSelected ? (
-            <TooltipContent sideOffset={6}>{t('contextPanel.preview.startPreview')}</TooltipContent>
-          ) : null}
+          <TooltipContent sideOffset={6}>{resolvedSelected.name}</TooltipContent>
         </Tooltip>
-        {showSelectedPreviewButton ? (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                className="app-region-no-drag -ml-1 inline-flex h-9 w-7 items-center justify-center rounded-[10px] text-muted-foreground hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                aria-label={t('projectActions.actions.openPreview')}
-                onClick={handleOpenSelectedPreview}
-              >
-                <Icon name="global" className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
-          </Tooltip>
-        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
@@ -906,7 +770,7 @@ export const ProjectActionsButton = ({
               : t('projectActions.actions.runNamedAria', { name: resolvedSelected.name })}
           >
             <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
-              {isStoppingSelected || isWaitingForSelectedPreview
+              {isStoppingSelected
                 ? <Icon name="loader-4" className="h-4 w-4 animate-spin text-[var(--status-warning)]" />
                 : selectedRunning
                   ? <Icon name="stop" className="h-4 w-4 text-[var(--status-warning)]" />
@@ -914,30 +778,9 @@ export const ProjectActionsButton = ({
             </span>
           </button>
         </TooltipTrigger>
-        {isAutoDiscoverSelected ? (
-          <TooltipContent sideOffset={6}>{t('contextPanel.preview.startPreview')}</TooltipContent>
-        ) : null}
+          <TooltipContent sideOffset={6}>{resolvedSelected.name}</TooltipContent>
       </Tooltip>
 
-      {showSelectedPreviewButton ? (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              type="button"
-              onClick={handleOpenSelectedPreview}
-              className={cn(
-                compact ? 'inline-flex h-full w-8 items-center justify-center' : 'inline-flex h-full w-7 items-center justify-center',
-                'border-l border-[var(--interactive-border)] text-foreground',
-                'hover:bg-interactive-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-              )}
-              aria-label={t('projectActions.actions.openPreview')}
-            >
-              <Icon name="global" className="h-4 w-4" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent sideOffset={6}>{t('projectActions.actions.openPreview')}</TooltipContent>
-        </Tooltip>
-      ) : null}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>

@@ -11,7 +11,7 @@ surfaces — the desktop workspaces selected from the collapsible right icon rai
 
 - A surface maps 1:1 to a `ContextPanelMode` tab mode in `useUIStore`.
 - `availability: 'always'` surfaces are always present on the rail when expanded.
-  `availability: 'has-content'` surfaces (preview, chat) are hidden from the
+  `availability: 'has-content'` surfaces (interactive content, chat) are hidden from the
   rail until a tab of their mode exists, and stay visible for as long as one
   does — they must not disappear while in use.
 - `defaultWidthFraction` is the panel width as a fraction of the content area,
@@ -20,6 +20,10 @@ surfaces — the desktop workspaces selected from the collapsible right icon rai
 - The rail honors the draggable order persisted in `useUIStore.contextRailOrder`;
   `sortContextSurfaces` applies it on top of the registry's default order and
   appends any missing surfaces. `isContextRailOpen` defaults to false and is persisted.
+
+The browser is the web-page surface. Saved project actions can open a configured URL
+there; automatic URL opening is scoped to actions explicitly configured for it.
+Restored layouts retain supported surfaces and discard retired tabs and rail entries.
 
 ## Adding a surface
 
@@ -46,8 +50,8 @@ the `openContext*` actions in `useUIStore`.
 - Multi-instance and session-holding surfaces (file/editor, chat, diff,
   browser, terminal) are keep-alive panes in `ContextPanel.tsx`: switching
   surfaces must not reset their state (open tabs, xterm session, scroll
-  positions). Singleton surfaces (git, pr, notes, plan, context) and preview
-  tabs intentionally remount on switch and must restore themselves from
+  positions). Singleton surfaces (git, pr, notes, plan, context)
+  intentionally remount on switch and must restore themselves from
   their stores/snapshots instead.
 - Recovery is a singleton surface. `WorkspaceRecoveryPanel` follows the current workspace and
   selected native Thread/branch. The versioned recovery service owns checkpoints and combined

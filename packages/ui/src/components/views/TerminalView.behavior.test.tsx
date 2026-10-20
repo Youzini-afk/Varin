@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   threads: { processes: { openTerminal: vi.fn<ThreadProcessesAPI['openTerminal']>() } },
   endpointGeneration: 1,
   directory: '/coordinator',
-  probe: vi.fn(), t: (key: string) => key,
+  t: (key: string) => key,
   theme: { metadata: { variant: 'dark' }, colors: { surface: { background: '#000000' }, syntax: { base: { foreground: '#ffffff' } } } },
 }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ terminal: mocks.terminal, threads: mocks.threads, runtime: { platform: 'web' } }) }));
@@ -34,7 +34,6 @@ vi.mock('@/contexts/useThemeSystem', () => ({ useThemeSystem: () => ({ currentTh
 vi.mock('@/hooks/useFontPreferences', () => ({ useFontPreferences: () => ({ monoFont: 'monospace' }) }));
 vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false, isTablet: false, hasTouchOnlyPointer: false }) }));
 vi.mock('@/lib/terminalTheme', () => ({ convertThemeToXterm: () => ({ background: '#000000' }) }));
-vi.mock('@/lib/terminalPreview', async original => ({ ...await original<typeof import('@/lib/terminalPreview')>(), isTerminalPreviewUrlAvailable: mocks.probe }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.t }) }));
 vi.mock('@/lib/utils', () => ({ cn: (...values: unknown[]) => values.filter(value => typeof value === 'string').join(' ') }));
 vi.mock('@/stores/useInlineCommentDraftStore', () => ({ useInlineCommentDraftStore: () => vi.fn() }));
@@ -80,7 +79,6 @@ beforeEach(() => {
   mocks.endpointGeneration = 1;
   mocks.directory = '/coordinator';
   mocks.threads.processes.openTerminal.mockResolvedValue(originalTerminal);
-  mocks.probe.mockResolvedValue(true);
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
 });
 afterEach(async () => {
@@ -94,15 +92,13 @@ const attachManaged = () => useTerminalStore.getState().attachExistingSession('/
 });
 const tab = () => useTerminalStore.getState().getActiveTab('/coordinator');
 
-it('attaches the owned session and never probes a managed loopback URL against the coordinator', async () => {
+it('attaches the owned remote session while preserving its host and source', async () => {
   attachManaged();
   await act(async () => root.render(<TerminalView visible />));
   expect(mocks.terminal.connect).toHaveBeenCalledWith('original-managed-session', expect.any(Object));
   await act(async () => handlers.onEvent({ type: 'snapshot', status: 'running', sequence: 0, data: 'Server ready: http://localhost:3456/\n' }));
   await act(async () => handlers.onEvent({ type: 'data', sequence: 1, data: 'Local: http://127.0.0.1:7890/\n' }));
-  expect(mocks.probe).not.toHaveBeenCalled();
   expect(mocks.terminal.createSession).not.toHaveBeenCalled();
-  expect(tab()?.previewUrl).toBeNull();
   expect(container.querySelector('[title="Agent process · host-b · /only-on-host-b"]')).not.toBeNull();
   await act(async () => container.querySelector<HTMLButtonElement>('[title="Agent process · host-b · /only-on-host-b"]')!.click());
   expect(detach).toHaveBeenCalled();
@@ -175,15 +171,6 @@ it('displays an unavailable snapshot without inventing an exit or replacing the 
   expect(container.textContent).toContain('terminalView.error.connectionFailed');
   expect(tab()).toMatchObject({ lifecycle: 'running', terminalSessionId: 'original-managed-session' });
   expect(mocks.terminal.createSession).not.toHaveBeenCalled();
-});
-
-it('keeps localhost preview discovery for ordinary local terminals', async () => {
-  const id = useTerminalStore.getState().createTab('/coordinator');
-  useTerminalStore.getState().setTabSessionId('/coordinator', id, 'local-session');
-  await act(async () => root.render(<TerminalView visible />));
-  await act(async () => handlers.onEvent({ type: 'data', sequence: 1, data: 'Server ready: http://localhost:3456/\n' }));
-  expect(mocks.probe).toHaveBeenCalledExactlyOnceWith('http://localhost:3456/');
-  expect(tab()?.previewUrl).toBe('http://localhost:3456/');
 });
 
 it('opens, retries, dismisses and reopens a remote-only process without a local workspace or shell', async () => {

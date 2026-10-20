@@ -45,30 +45,6 @@ const errorMessage = (error: unknown, fallback: string): string => (
   error instanceof Error && error.message ? error.message : fallback
 );
 
-const parseLoopbackUrl = (rawUrl: unknown): URL | null => {
-  if (typeof rawUrl !== 'string') {
-    return null;
-  }
-
-  let url;
-  try {
-    url = new URL(rawUrl);
-  } catch {
-    return null;
-  }
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return null;
-  }
-
-  const host = url.hostname;
-  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '0.0.0.0') {
-    return null;
-  }
-
-  return url;
-};
-
 const getRequestPathname = (req: Request): string => {
   const rawUrl = req?.originalUrl || req?.url || '';
   if (typeof rawUrl !== 'string' || rawUrl.length === 0) return '';
@@ -166,30 +142,6 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     return cachedServerId;
   };
 
-  const allocateLoopbackPort = async (): Promise<number> => {
-    const net = await import('node:net');
-    return await new Promise<number>((resolve, reject) => {
-      const server = net.createServer();
-      server.on('error', reject);
-      server.listen(0, '127.0.0.1', () => {
-        try {
-          const address = server.address();
-          const port = address && typeof address === 'object' ? address.port : 0;
-          server.close(() => {
-            resolve(port);
-          });
-        } catch (error) {
-          try {
-            server.close();
-          } catch {
-            // The temporary server may already be closed.
-          }
-          reject(error);
-        }
-      });
-    });
-  };
-
   const compatibility = {
     apiVersion: 1,
     minClientApiVersion: 1,
@@ -242,73 +194,6 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
       return Number.isFinite(pgid) && pgid > 0 ? pgid : null;
     } catch {
       return null;
-    }
-  };
-
-  const parseLoopbackPort = (rawUrl: unknown): number | null => {
-    if (typeof rawUrl !== 'string') {
-      return null;
-    }
-    let url;
-    try {
-      url = new URL(rawUrl);
-    } catch {
-      return null;
-    }
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return null;
-    }
-    const host = url.hostname;
-    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '0.0.0.0') {
-      return null;
-    }
-    const port = url.port ? Number.parseInt(url.port, 10) : (url.protocol === 'https:' ? 443 : 80);
-    if (!Number.isFinite(port) || port <= 0 || port > 65535) {
-      return null;
-    }
-    return port;
-  };
-
-  const killListenPort = async (port: number): Promise<void> => {
-    if (!Number.isFinite(port) || port <= 0) {
-      return;
-    }
-    if (processLike.platform === 'win32') {
-      return;
-    }
-
-    try {
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-      const result = await execFileAsync('lsof', ['-nP', '-t', `-iTCP:${Math.trunc(port)}`, '-sTCP:LISTEN'], {
-        timeout: 2500,
-      });
-      const pids = String(result.stdout || '')
-        .split(/\s+/)
-        .map((value) => Number.parseInt(value, 10))
-        .filter((pid) => Number.isFinite(pid) && pid > 0 && pid !== processLike.pid);
-
-      for (const pid of pids) {
-        try {
-          processLike.kill(pid, 'SIGTERM');
-        } catch {
-          // The listener process may already have exited.
-        }
-      }
-      if (pids.length > 0) {
-        setTimeout(() => {
-          for (const pid of pids) {
-            try {
-              processLike.kill(pid, 'SIGKILL');
-            } catch {
-              // The listener process may already have exited.
-            }
-          }
-        }, 1200).unref?.();
-      }
-    } catch {
-      // ignore (no lsof, no permission, etc.)
     }
   };
 
@@ -379,16 +264,6 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
     // Terminate the entire dev process group so `bun run dev` leaves no orphans.
     // Run graceful shutdown first so terminals, workers, and sockets are closed.
     try {
-      const rawPreviewUrls = Array.isArray(req.body?.previewUrls) ? req.body.previewUrls : [];
-      const previewPorts = Array.from(new Set<number>(
-        rawPreviewUrls
-          .map((value: unknown) => parseLoopbackPort(value))
-          .filter((port: number | null): port is number => typeof port === 'number')
-      ));
-      // Attempt to stop preview servers that may have daemonized away from the PTY.
-      // This is dev-only and limited to loopback ports supplied by the UI.
-      await Promise.all(previewPorts.map((port) => killListenPort(port)));
-
       const pgid = await resolveProcessGroupId(processLike.pid);
       const ppid = typeof processLike.ppid === 'number' ? processLike.ppid : null;
       const parentPgid = ppid ? await resolveProcessGroupId(ppid) : null;
@@ -447,20 +322,6 @@ export const registerServerStatusRoutes = (app: Express, rawDependencies: unknow
         ? rawTunnelUrl.trim()
         : null,
     });
-  });
-
-  // Allocates a best-effort free TCP port hint on 127.0.0.1.
-  // Another process can still claim it before the preview server binds.
-  app.get('/api/system/free-port', async (_req, res) => {
-    try {
-      const port = await allocateLoopbackPort();
-      if (!Number.isFinite(port) || port <= 0) {
-        return res.status(500).json({ error: 'Failed to allocate port' });
-      }
-      return res.json({ port });
-    } catch (error) {
-      return res.status(500).json({ error: errorMessage(error, 'Failed to allocate port') });
-    }
   });
 
 };
@@ -1162,30 +1023,6 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
       return res.redirect(302, '/');
     } catch {
       return res.status(500).type('text/plain').send('Failed to process connect request.');
-    }
-  });
-
-  app.post('/api/system/probe-url', express.json({ limit: '16kb' }), async (req, res, next) => {
-    try {
-      await requireApiAuth(req, res, async () => {
-        const url = parseLoopbackUrl(req.body?.url);
-        if (!url) {
-          return res.status(400).json({ ok: false, error: 'Invalid loopback URL' });
-        }
-
-        try {
-          const response = await fetch(url.toString(), {
-            method: 'GET',
-            redirect: 'manual',
-            signal: AbortSignal.timeout(1500),
-          });
-          return res.json({ ok: response.status >= 200 && response.status < 600, status: response.status });
-        } catch (error) {
-          return res.json({ ok: false, error: errorMessage(error, 'Probe failed') });
-        }
-      });
-    } catch (error) {
-      next(error);
     }
   });
 

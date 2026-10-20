@@ -197,20 +197,6 @@
           }
         },
         {
-          "label": "Preview & Dev Servers",
-          "link": "/preview/",
-          "translations": {
-            "zh-CN": "预览与开发服务器",
-            "uk": "Перегляд і dev-сервери",
-            "es": "Vista previa y servidores de desarrollo",
-            "pt-BR": "Preview e Servidores de Desenvolvimento",
-            "ko": "미리보기 및 개발 서버",
-            "pl": "Podgląd i serwery deweloperskie",
-            "fr": "Aperçu et serveurs de dev",
-            "ja": "プレビューと開発サーバー"
-          }
-        },
-        {
           "label": "Worktree Sessions",
           "link": "/worktrees/",
           "translations": {
