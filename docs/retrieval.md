@@ -6,6 +6,8 @@
 [Agent runtime](runtime.md) 拥有不可变 request/context 与后台 inference，消费既有 Host 领域服务；
 执行适配器不另造文件、文档或知识权威。
 
+快速检索的后续调整见[快速检索设计](design/fast-code-retrieval.md)。该方案待实现，本文继续描述当前机制。
+
 ## 证据先绑定来源
 
 文件命中与 excerpt 属于实际读取的来源：准入 live root 及观察 revision、固定 branch/revision，或显式捕获的草稿。

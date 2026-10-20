@@ -31,3 +31,7 @@
 - [application-client](../packages/application-client/README.md)、[protocol](../packages/protocol/README.md)、[extension-host](../packages/extension-host/README.md)
 
 具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。
+
+## 进行中的设计
+
+- [快速检索设计](design/fast-code-retrieval.md)：决策模型驱动的多轮补查、充分上下文、来源复用与及时交付。方案待实现，当前行为见[检索与上下文](retrieval.md)。
