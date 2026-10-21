@@ -1624,7 +1624,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     const workspaceId = `mcp-host:${hostId}`;
     return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
   } });
-  registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch);
+  registerModelRoutes(app, modelsService, uiAuthController?.requireAuth ?? ((_request, _response, next) => next()), egressRuntime.fetch as typeof globalThis.fetch, kernelClient);
   const unsubscribeModelSettings = modelsService.settings.subscribe((scope, _cwd, revision) => {
     for (const listener of extensionConfigurationListeners) listener();
     for (const client of uiVarinEventClients) {
@@ -1699,7 +1699,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.onToolReleased(releaseAgentMcpScope);
   kernelClient.subscribeExit(() => { for (const runId of agentMcpScopes.keys()) releaseAgentMcpScope(runId); });
   const prepareAgentPolicy = createAgentPolicy(extensionRuntime);
-  const modelAuthority = createModelAuthority(modelsService, { outputVisibleBytes: async () => (await modelsService.settings.harness()).output.visibleBytes });
+  const modelAuthority = createModelAuthority(modelsService, { retrySettings: async () => (await modelsService.readGlobalInferenceSettings()).retry, outputVisibleBytes: async () => (await modelsService.settings.harness()).output.visibleBytes });
   const botAgentModel = async (bot: import('@varin/application-client').BotSummary) => {
     const global = (await modelsService.settings.snapshot()).global;
     const selection = bot.model ?? (typeof global.defaultProvider === 'string' && typeof global.defaultModel === 'string'

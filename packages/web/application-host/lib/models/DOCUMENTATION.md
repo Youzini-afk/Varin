@@ -19,6 +19,16 @@ requests or transfer their original execution/usage owners to another kernel.
 
 ## Entry points and storage
 
+Host-wide `retry` settings live in `agent-settings.json` and are captured in each native model
+configuration. The defaults page edits enabled/maxRetries/initialDelayMs/maxDelayMs and ordered
+status/code/message rules (exact, contains, or regex; retry/stop). `/api/models/retry/test` validates
+and evaluates drafts through `runtime.retry.evaluate` without provider I/O. Native `model_retry.rs`
+owns matching and delay decisions, including the linear-time regex dialect. Execution owners retain
+attempt evidence, cancellation and authority checks; protocol SDKs do not stack another retry loop.
+Conversation and compaction retain separate ModelSteps. Native auxiliary inference retains attempt
+outputs in its original Operation and accounts each attempt against the original Goal before retrying.
+Unknown usage is preserved, and server Retry-After may exceed the configured exponential delay cap.
+
 | Responsibility | Entry |
 | --- | --- |
 | Channel types, validation, discovery and captured selections | `channel-types.ts`, `service.ts` |

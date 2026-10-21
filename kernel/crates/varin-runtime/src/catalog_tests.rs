@@ -4151,6 +4151,7 @@ fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay(
         pricing_version: Some("original-price".into()),
     };
     let output = GenerationOutput {
+        attempts: vec![],
         finish_reason: None,
         events: vec![
             ProviderEvent::ItemCompleted { item: item.clone() },
@@ -4223,6 +4224,42 @@ fn native_inference_checkpoint_reopens_original_usage_and_opaque_without_replay(
             .usage,
         usage
     );
+}
+
+#[test]
+fn native_inference_retry_accounts_each_attempt_and_respects_unknown_goal_usage() {
+    use crate::execution::*;
+    use inference::{InferenceReceipt, InferenceUsage, InferenceProblem};
+    for known in [false, true] {
+        let fixture = Fixture::new();
+        let mut db = fixture.open();
+        let (_scope, _delegation, _params, id) = admitted_native_query(&mut db);
+        db.dispatch_inference_generation(&id).unwrap();
+        let first = if known { UsageReceipt { measurement:UsageMeasurement::Actual, input_tokens:Some(3), output_tokens:Some(1), ..Default::default() } } else { UsageReceipt::default() };
+        let receipt = InferenceReceipt { request_started:Some(true), provider_completed:false, local_executor_stopped:true,
+            usage:InferenceUsage::from(&first), http_status:Some(503), problem:Some(InferenceProblem::TransportFailed) };
+        let body = db.prepare_inference_content().write(&json!({"attempt":1})).unwrap();
+        db.finish_inference_attempt(&id, body, receipt.clone()).unwrap();
+        if known {
+            db.dispatch_inference_retry(&id).unwrap();
+            let last = UsageReceipt { measurement:UsageMeasurement::Actual, input_tokens:Some(7), output_tokens:Some(2), ..Default::default() };
+            let total = crate::model_retry::total_usage([&first, &last]);
+            let body = db.prepare_inference_content().write(&json!({"attempt":2})).unwrap();
+            db.settle_inference_generation(&id, body, InferenceReceipt { usage:InferenceUsage::from(&total), provider_completed:true,
+                problem:None, ..receipt }, Some(last)).unwrap();
+            let usage = db.capture_goal("native-inference-goal").unwrap().load().unwrap().usage;
+            assert_eq!(usage.pending_inferences, 0);
+            assert_eq!(usage.actual.input_tokens.known, 10);
+            assert_eq!(usage.actual.output_tokens.known, 3);
+        } else {
+            assert!(db.dispatch_inference_retry(&id).is_err());
+            let body = db.prepare_inference_content().write(&json!({"attempt":1,"stopped":true})).unwrap();
+            db.settle_inference_generation(&id, body, receipt, Some(first)).unwrap();
+            let usage = db.capture_goal("native-inference-goal").unwrap().load().unwrap().usage;
+            assert_eq!(usage.pending_inferences, 0);
+            assert_eq!(usage.missing_inferences, 1);
+        }
+    }
 }
 
 #[path = "catalog_bot_tests.rs"]

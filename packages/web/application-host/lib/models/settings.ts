@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import {
   mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
   parseHarnessImageSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
-  type HarnessSettingsInput, type JsonValue,
+  type HarnessSettingsInput, type JsonValue, parseModelRetrySettings,
 } from '@varin/protocol';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { parseCompactionSettings } from './compaction-settings.js';
@@ -18,6 +18,7 @@ export function validateAgentSettings(document: Record<string, unknown>): Record
     }
   }
   parseCompactionSettings(document.compaction);
+  try { parseModelRetrySettings(document.retry); } catch (error) { throw new ModelConfigurationError('invalid_settings', (error as Error).message); }
   try { readResourceSettings(document); } catch (error) { throw new ModelConfigurationError('invalid_settings', (error as Error).message); }
   if (document.harness !== undefined && !object(document.harness)) throw new ModelConfigurationError('invalid_settings', 'harness must be an object');
   const harness = (document.harness ?? {}) as HarnessSettingsInput;

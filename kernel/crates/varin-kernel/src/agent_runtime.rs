@@ -713,6 +713,14 @@ pub(crate) fn spawn(
                                 .map(|accepted| json!({"accepted": accepted}))
                                 .map_err(|error| KernelError::Operation(error.to_string()));
                         }
+                        if method == "runtime.retry.evaluate" {
+                            let p: ModelRetryEvaluateParams = serde_json::from_value(params)?;
+                            let policy = varin_runtime::model_retry::RetryPolicy::new(Some(&p.settings))
+                                .map_err(|e| KernelError::Operation(e.to_string()))?;
+                            let failure = serde_json::from_value(p.failure)?;
+                            let retries_used = u64::try_from(p.retries_used).map_err(|_| KernelError::Operation("Invalid retry count".into()))?;
+                            return Ok(serde_json::to_value(policy.decide(&failure, retries_used))?);
+                        }
                         if method == "runtime.tokenizers.open" {
                             let p: KernelTokenizerOpenParams = serde_json::from_value(params)?;
                             let lease_id = uuid::Uuid::new_v4().to_string();

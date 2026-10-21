@@ -328,8 +328,12 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   choice affects the code-semantic index, not the authoritative knowledge database, symbol graph,
   or installed local encoder component.
 - Remote embedding: `runtime-inference.ts` sends OpenAI-compatible requests through the original
-  retained binding and Catalog receipt. The native path uses zero automatic HTTP retries; a failed or
-  unknown dispatched request is not replayed to repair observation. Results retain input order and
+  retained binding and Catalog receipt. The request owner applies the Host-wide retry policy after
+  draining and publishing each attempt; each HTTP retry gets a new Catalog ordinal. SDK retries are
+  disabled. Loss of admission/settlement acknowledgement still reconciles the original identity.
+  Background index requests keep individual status, request ID and usage in their existing semantic
+  ledger before retrying the identical batch. Missing usage stays unknown in aggregate totals.
+  Results retain input order and
   vector-space identity, and incomplete batches remain partial/failed rather than successful empty
   coverage. Rerank returns scores against the caller's original material IDs.
 - Optional component (D-288): `local-component.ts` owns explicit download/import, manifest and file

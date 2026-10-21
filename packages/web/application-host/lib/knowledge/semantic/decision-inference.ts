@@ -148,6 +148,14 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                   requestKind: route.requestKind, configurationId: binding.configurationId,
                   executor: { kind: 'http', api: provider.api, endpoint: destination, credentialScope: provider.credentialScope } };
                 const response = await call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
+                  prepareHeaders: async active => {
+                    await assertAvailable(active);
+                    const current = await provider.getAuth();
+                    const fresh = new Headers(provider.headers); fresh.set('content-type', 'application/json');
+                    if (current?.auth.apiKey) fresh.set('authorization', `Bearer ${current.auth.apiKey}`);
+                    for (const [name, value] of Object.entries(current?.auth.headers ?? {})) if (value !== null) fresh.set(name, value);
+                    await assertAvailable(active); return fresh;
+                  },
                   check: async requestSignal => { await assertAvailable(requestSignal); await guard?.(); requestSignal.throwIfAborted(); },
                   ...(materialFence ? { beforeDispatch: materialFence } : {}),
                   observe: raw => {

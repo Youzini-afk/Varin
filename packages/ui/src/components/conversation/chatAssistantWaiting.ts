@@ -1,5 +1,5 @@
 import { resolveChatTimelineItem, type ChatTimelineItem, type ChatTimelineLiveItem, type ChatTimelineRow } from './chatTimelineProjection';
-export interface ChatAssistantWaitingPresentation { model?: { id: string; provider: string } }
+export interface ChatAssistantWaitingPresentation { model?: { id: string; provider: string }; retry?: { attempt: number; retryAt: number } }
 
 const turnHasPersistedAssistant = (item: Extract<ChatTimelineItem, { kind: 'turn' }>): boolean => (
   item.turn.entries.some((entry) => (

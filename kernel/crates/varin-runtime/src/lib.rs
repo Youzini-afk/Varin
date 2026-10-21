@@ -17,6 +17,7 @@ pub mod providers;
 pub mod supervisor;
 
 pub mod model_session;
+pub mod model_retry;
 
 pub mod content;
 pub mod output;

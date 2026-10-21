@@ -268,6 +268,8 @@ fn execute_node(
     binding.instruction_sources = context.instruction_sources;
     binding.memory_checkpoint = context.memory_checkpoint;
     binding.resource_checkpoint_id = context.resource_checkpoint_id;
+    let retry_policy = engine.provider.retry_policy();
+    let mut retries_used = 0;
     loop {
     if cancel.is_cancelled(){return Err(error("summary query cancelled"));}
     let id = format!("{}:node:{}:{}", input.run_id, node, uuid::Uuid::new_v4());
@@ -385,6 +387,14 @@ fn execute_node(
             failure: result.as_ref().err().cloned(),
         },
     )?;
+    if let Err(failed) = &result {
+        let decision = retry_policy.decide(&failed.into(), retries_used);
+        if !cancel.is_cancelled() && decision.retry && crate::model_retry::wait(cancel, decision.delay_ms) {
+            retries_used += 1;
+            continue;
+        }
+    }
+    retries_used = 0;
     let finish=result.map_err(|failure| ExecutionError::new(failure.code, failure.message))?;
     if finish==FinishReason::ToolCalls {
         let calls=items.iter().filter_map(|item|match &item.content{Content::ToolCall{call}=>Some(call.clone()),_=>None}).collect();

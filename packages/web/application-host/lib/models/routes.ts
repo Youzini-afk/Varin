@@ -3,6 +3,9 @@ import type { ModelsService } from './service.js';
 import { object, ModelConfigurationError } from './configuration.js';
 import { EgressError, type EgressErrorKind, type EgressFetch } from '../harness/egress.js';
 import type { ModelConnectionDraft } from '@varin/application-client';
+import type { KernelClient } from '../kernel/kernel-client.js';
+import { evaluateRetry } from './retry.js';
+import type { ModelRetryFailure } from '@varin/protocol';
 
 // Keep the owner classification, but never project raw dependency messages or causes.
 const networkMessages: Record<EgressErrorKind, string> = {
@@ -20,7 +23,12 @@ const networkMessages: Record<EgressErrorKind, string> = {
   unknown: 'The model network request failed.',
 };
 
-export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch) {
+export function registerModelRoutes(app: Express, models: ModelsService, requireAuth: RequestHandler, fetchImpl: EgressFetch, kernel?: Pick<KernelClient, 'agentRuntimeRequest'>) {
+  const validateRetry = async (settings: unknown, failure: ModelRetryFailure = {}) => {
+    if (!kernel) throw new ModelConfigurationError('retry-owner-unavailable', 'Retry matching is unavailable', 503);
+    try { return await evaluateRetry(kernel, settings, failure); }
+    catch (error) { throw new ModelConfigurationError('invalid_retry_settings', error instanceof Error ? error.message : 'Invalid retry settings'); }
+  };
   const actions = {
     read: () => models.read(),
     directory: (input: Record<string, unknown>) => models.directorySnapshot(input.type as string, input.channelId as string | undefined),
@@ -36,7 +44,11 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     'authorization/reply': (input: Record<string, unknown>) => { models.authorizations.reply(input.id as string, input.redirect as string); return {}; },
     'authorization/cancel': (input: Record<string, unknown>) => { models.authorizations.cancel(input.id as string); return {}; },
     'settings/read': (input: Record<string, unknown>) => models.settings.snapshot(input.cwd as string | undefined),
-    'settings/update': (input: Record<string, unknown>) => models.settings.update(input as Parameters<ModelsService['settings']['update']>[0]),
+    'settings/update': async (input: Record<string, unknown>) => {
+      if (object(input.set) && input.set.retry !== undefined) await validateRetry(input.set.retry);
+      return models.settings.update(input as Parameters<ModelsService['settings']['update']>[0]);
+    },
+    'retry/test': (input: Record<string, unknown>) => validateRetry(input.settings, input.failure as ModelRetryFailure),
   };
   for (const [name, action] of Object.entries(actions)) app.post(`/api/models/${name}`, requireAuth, async (request, response) => {
     const controller = new AbortController();

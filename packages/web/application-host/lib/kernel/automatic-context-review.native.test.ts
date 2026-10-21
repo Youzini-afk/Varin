@@ -26,6 +26,7 @@ function answer(response:ServerResponse,text:string,inputTokens=12):void {
   response.end(`data: ${JSON.stringify({type:'response.completed',response:{output:[{id:crypto.randomUUID(),type:'message',content:[{type:'output_text',text}]}],usage:{input_tokens:inputTokens,output_tokens:8}}})}\n\n`);
 }
 it.each([
+  {cancel:false,block:false,fail:false,retry:true},
   {cancel:false,block:false,fail:false},
   {cancel:true,block:false,fail:false},
   {cancel:false,block:true,fail:false},
@@ -33,24 +34,28 @@ it.each([
   {cancel:false,block:true,fail:true},
   {cancel:false,block:true,fail:false,restart:'completed'},
   {cancel:false,block:true,fail:false,restart:'dispatched'},
-])('automatic context preserves ownership and continuation ($cancel, $block, $fail, $restart)',async({cancel,block,fail,restart})=>{
+])('automatic context preserves ownership and continuation ($cancel, $block, $fail, $restart, retry=$retry)',async({cancel,block,fail,restart,retry})=>{
   await fs.access(kernelPath);
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'varin-automatic-context-'));
   cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
   const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
   await fs.writeFile(path.join(agentDir,'agent-settings.json'),JSON.stringify({compaction:{enabled:true,reserveRatio:0.1,keepRecentTokens:1000,
-    modelOverrides:{'fixture/fixture-model':{reserveRatio:128/(block?12000:24000),keepRecentTokens:96}}},harness:{context:{backgroundPreparation:true,preparationWaterline:0.5}}}));
+    modelOverrides:{'fixture/fixture-model':{reserveRatio:128/(block?12000:24000),keepRecentTokens:96}}},harness:{context:{backgroundPreparation:!retry,preparationWaterline:0.5}}}));
   const projectRoot=path.join(root,'untrusted-project');await fs.mkdir(path.join(projectRoot,'.varin'),{recursive:true});
   await fs.writeFile(path.join(projectRoot,'.varin','settings.json'),'untrusted invalid configuration must not be read');
   const main:Array<{body:Record<string,unknown>;response:ServerResponse}>=[];
   const summaries:Array<ServerResponse>=[];
   const summaryBodies:Array<Record<string,unknown>>=[];
+  let retriedBody: Record<string,unknown> | undefined;
   const server=createServer((request,response)=>{
     const chunks:Buffer[]=[];
     request.on('data',(bytes:Buffer)=>chunks.push(bytes));
     request.on('end',guardProviderReply(response, ()=>{
       const body=JSON.parse(Buffer.concat(chunks).toString()) as Record<string,unknown>;
-      if(isSummaryRequest(body)) {summaries.push(response);summaryBodies.push(body);}
+      if(isSummaryRequest(body)) {
+        if (retry && !retriedBody) { retriedBody=body; response.writeHead(503, {'content-type':'application/json'}); response.end('{"error":{"message":"Temporary summary failure"}}'); return; }
+        summaries.push(response);summaryBodies.push(body);
+      }
       else {main.push({body,response});if(main.length===1) answer(response,'ACK: old source read',14_000);}
     }));
   });
@@ -82,7 +87,7 @@ it.each([
     };
   }
   const configuration={providerId:'fixture',providerFamily:'openai-responses',model:'fixture-model',endpoint:`http://127.0.0.1:${address.port}/responses`,allowAnonymous:true,
-    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens:block?12000:24000};
+    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens:block?12000:24000,retry:{initialDelayMs:0}};
   const threadId='thread:automatic-context',branchId='branch:automatic-context';
   await runtime.createThread(threadId,branchId);
   const originalText='OLD_EVIDENCE '.repeat(4200);
@@ -92,6 +97,14 @@ it.each([
   expect(policies[0]).toMatchObject({enabled:true,reserveTokens:128,keepRecentTokens:96});
   const original=await runtime.history(branchId);
   const before=await runtime.context(branchId);
+  if (retry) {
+    // Start this scenario's background job on the second Run deterministically, so
+    // the retry assertion does not depend on when the first Run's observer wins.
+    const file=path.join(agentDir,'agent-settings.json');
+    const settings=JSON.parse(await fs.readFile(file,'utf8'));
+    settings.harness.context.backgroundPreparation=true;
+    await fs.writeFile(file,JSON.stringify(settings));
+  }
   const second=await runtime.submit({key:'second',threadId,branchId,expectedHead:original.at(-1)!.id,input:{text:'Continue the work'},configuration});
   await runtime.startRun(second.run_id);
   await expect.poll(()=>[summaries.length,main.length]).toEqual([1,block?1:2]);
@@ -200,4 +213,5 @@ it.each([
     await expect.poll(async()=>(await runtime.run(next.run_id)).state).toBe('completed');
   }
   expect((await runtime.history(branchId)).find(item=>item.id===first.input_id)?.content).toEqual({text:originalText});
+  if (retry) expect(summaryBodies[0]).toEqual(retriedBody);
 },30_000);

@@ -27,33 +27,16 @@ export function answerFromProbabilities(q: Question, keys: string[], probabiliti
   return q.type === 'score' ? { type: 'score', score: probabilities.reduce((sum, value, i) => sum + value * i, 0), confidence }
     : { type: 'choice', choice: keys[best]!, probabilities: Object.fromEntries(keys.map((key, i) => [key, probabilities[i]!])), confidence };
 }
-/** Retries remain real transports, so the caller admits and records every attempt. */
+/** The inference owner admits, retries and records actual transports. */
 async function postJson(url: string, body: unknown, options: Parameters<ClassifierFunction>[2]): Promise<unknown> {
-  for (let attempt = 0; ; attempt++) {
-    options.signal?.throwIfAborted();
-    const response = await options.fetch(url, {
-      method: 'POST', headers: { 'content-type': 'application/json', ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}), ...options.headers },
-      body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}),
-    });
-    if (response.ok) return response.json();
-    // Consume the original error body before another attempt. No error body is exposed.
-    await response.text();
-    const retry = response.headers.get('x-should-retry');
-    if (attempt >= 2 || retry === 'false' || retry !== 'true' && ![408, 409, 429].includes(response.status) && response.status < 500) {
-      throw new Error(`Classifier HTTP ${response.status}`);
-    }
-    const milliseconds = response.headers.get('retry-after-ms'), after = response.headers.get('retry-after');
-    const requested = milliseconds !== null ? Number(milliseconds)
-      : after !== null ? (/^\d+(?:\.\d+)?$/.test(after) ? Number(after) * 1000 : Date.parse(after) - Date.now()) : NaN;
-    const delay = Number.isFinite(requested) ? Math.max(0, requested) : 500 * 2 ** attempt;
-    if (delay > 60_000) throw new Error('Classifier retry delay exceeds the request retry policy');
-    await new Promise<void>((resolve, reject) => {
-      options.signal?.throwIfAborted();
-      const aborted = () => { clearTimeout(timer); reject(options.signal!.reason); };
-      const timer = setTimeout(() => { options.signal?.removeEventListener('abort', aborted); resolve(); }, delay);
-      options.signal?.addEventListener('abort', aborted, { once: true });
-    });
-  }
+  options.signal?.throwIfAborted();
+  const response = await options.fetch(url, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(options.apiKey ? { authorization: `Bearer ${options.apiKey}` } : {}), ...options.headers },
+    body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (response.ok) return response.json();
+  await response.text();
+  throw new Error(`Classifier HTTP ${response.status}`);
 }
 const classifySystem: ClassifierFunction = async (model, context, options) => {
   const input = { state: context.state, questions: Object.fromEntries(Object.entries(context.questions).map(([id, q]) => [id, { ...q, type: q.type === 'bool' ? 'noul' : q.type }])) };

@@ -418,7 +418,7 @@ mod tests {
             .prepare_inference_content()
             .write(&json!({"text":"Original answer"}))
             .unwrap();
-        db.settle_inference_generation(id, body, receipt).unwrap();
+        db.settle_inference_generation(id, body, receipt, None).unwrap();
     }
     #[test]
     fn standalone_admission_has_no_conversation_and_freezes_the_original_request() {

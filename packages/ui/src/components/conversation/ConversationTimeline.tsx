@@ -88,7 +88,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     }
   }, [uiCards, key, view.toolExecutions]);
   const liveAssistant = React.useMemo(() => progress.length || streamingTools.length ? { ...assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
-    ...progress,
+    ...progress.filter(part => part.type !== 'retry'),
     ...streamingTools.filter(call => call.name === 'render_ui').map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name, arguments: {}, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
   ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
@@ -141,7 +141,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
-    assistantWaiting={working ? {} : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
+    assistantWaiting={working ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />
   </ConversationContext.Provider>;
 }

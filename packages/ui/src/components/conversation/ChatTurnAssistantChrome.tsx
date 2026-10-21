@@ -15,6 +15,13 @@ export const ChatTurnAssistantChrome: React.FC<{
   liveAssistant?: ChatAssistantMessage;
 }> = ({ turn, entries = turn?.entries ?? [], liveAssistant = turn?.liveAssistant, waiting }) => {
   const { t } = useI18n();
+  const [now, setNow] = React.useState(Date.now);
+  React.useEffect(() => {
+    if (!waiting?.retry) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [waiting?.retry]);
   const assistants = entries.flatMap((entry) => (
     entry.type === 'message' && entry.message.role === 'assistant' ? [entry.message] : []
   ));
@@ -43,7 +50,7 @@ export const ChatTurnAssistantChrome: React.FC<{
       {modelLabel ? <span className="flex min-w-0 items-center gap-1.5" title={modelLabel}><ModelLogo requestModelId={last?.responseModel || configured?.requestModelId} modelId={modelId} displayName={configured?.name} /><span className="truncate">{configured?.name || last?.responseModel || modelId}</span></span> : null}
       {working ? (
         <span className="min-w-0 truncate text-muted-foreground/80">
-          · {t('chat.assistant.working')}<BusyDots />
+          · {waiting?.retry ? t(waiting.retry.retryAt > now ? 'settings.retry.waiting' : 'settings.retry.running', { attempt: waiting.retry.attempt, seconds: Math.max(0, Math.ceil((waiting.retry.retryAt - now) / 1000)) }) : t('chat.assistant.working')}<BusyDots />
         </span>
       ) : null}
     </header>

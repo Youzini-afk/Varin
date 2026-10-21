@@ -3,7 +3,7 @@ import type { ThreadIdentity, ThreadSnapshot, ThreadsAPI } from '@varin/applicat
 import { KERNEL_PROTOCOL_VERSION } from '../../../../web/application-host/lib/kernel/protocol.generated.js';
 import { ThreadProjection, type StreamingTextPart } from './thread-projection';
 
-const textOf = (parts: StreamingTextPart[]) => parts.map(part => part.type === 'text' ? part.text : part.thinking).join('\n');
+const textOf = (parts: StreamingTextPart[]) => parts.map(part => part.type === 'text' ? part.text : part.type === 'thinking' ? part.thinking : '').join('\n');
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:projection', branchId: 'branch:projection' };
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
@@ -68,6 +68,18 @@ async function startProjection(snapshot: ThreadsAPI['snapshot']) {
   await vi.advanceTimersByTimeAsync(0);
   return { projection, listener, progress, parts, report, publish, tools, toolProgress };
 }
+
+it('shows retry waiting separately and replaces it when the next attempt starts', async () => {
+  const view = snapshotView();
+  const h = await startProjection(async () => structuredClone(view));
+  try {
+    h.listener(delta(1, 'unfinished'));
+    h.listener({ ...delta(2, ''), event: { kind: 'batch', events: [{ kind: 'retry_scheduled', data: { attempt: 1, delay_ms: 5000 } }] } });
+    expect(h.parts.mock.lastCall?.[0]).toMatchObject([{ type: 'text', text: 'unfinished' }, { type: 'retry', attempt: 1 }]);
+    h.listener(delta(3, 'fresh answer', 'run', 'request:retry:1'));
+    expect(h.parts.mock.lastCall?.[0]).toEqual([{ type: 'text', text: 'fresh answer' }]);
+  } finally { h.projection.close(); }
+});
 
 it('keeps retrieval progress after the model call commits and ends it at the tool receipt', async () => {
   const view = snapshotView();

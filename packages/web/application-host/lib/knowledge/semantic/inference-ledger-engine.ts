@@ -47,7 +47,16 @@ function receiptOf(input: SemanticInferenceReceipt, identity: SemanticInferenceL
     : input.usage.status === "known" ? { status: "known" as const,
       ...(input.usage.inputTokens === undefined ? {} : { inputTokens: integer(input.usage.inputTokens) }),
       ...(input.usage.totalTokens === undefined ? {} : { totalTokens: integer(input.usage.totalTokens) }) } : invalid();
-  return { batchId: text(input.batchId), providerId: identity.providerId, modelId: identity.modelId,
+  const attemptDetails = input.attemptDetails?.map(attempt => ({
+    ...(attempt.status === undefined ? {} : { status: integer(attempt.status, 100) }),
+    ...(attempt.code === undefined ? {} : { code: text(attempt.code) }),
+    ...(attempt.requestId === undefined ? {} : { requestId: text(attempt.requestId) }),
+    ...(attempt.usage === undefined ? {} : { usage: {
+      ...(attempt.usage.inputTokens === undefined ? {} : { inputTokens: integer(attempt.usage.inputTokens) }),
+      ...(attempt.usage.totalTokens === undefined ? {} : { totalTokens: integer(attempt.usage.totalTokens) }),
+    } }),
+  }));
+  return { ...(attemptDetails ? { attemptDetails } : {}), batchId: text(input.batchId), providerId: identity.providerId, modelId: identity.modelId,
     configurationId: identity.configurationId, purpose: input.purpose, inputItems: input.inputItems,
     inputBytes: integer(input.inputBytes), attempts: integer(input.attempts), attemptsKnown: input.attemptsKnown,
     state: input.state, usage, ...(input.httpStatus === undefined ? {} : { httpStatus: integer(input.httpStatus, 100) }) };

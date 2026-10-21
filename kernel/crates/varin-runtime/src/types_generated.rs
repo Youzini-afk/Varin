@@ -282,6 +282,7 @@ pub struct ContentCollectionReport {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ModelSessionConfiguration {
+    pub retry: Option<serde_json::Value>,
     pub tokenizer: Option<crate::token_count::TokenizerBinding>,
     pub catalog_model_id: Option<String>,
     pub provider_id: Option<String>,

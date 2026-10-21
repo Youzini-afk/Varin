@@ -1,3 +1,5 @@
+import { parseModelRetrySettings, type ModelRetryFailure } from '@varin/protocol';
+import { responseRetryFailure, waitForRetry } from '../../models/retry.js';
 /** Actual HTTP inference lifetime and receipt publication. Catalog is the sole durable owner. */
 import { isDeepStrictEqual } from 'node:util';
 import type { EgressRuntime } from '../../harness/egress.js';
@@ -10,6 +12,7 @@ export interface InferenceRequestsOptions {
   runtime: Pick<AgentRuntimeClient, 'onEvent' | 'onExit' | 'onReady'>;
   egress: Pick<EgressRuntime, 'prepare'>;
   onError?(): void;
+  readRetrySettings?(): Promise<unknown>;
 }
 interface InferenceRequest {
   binding: InferenceBinding;
@@ -18,6 +21,7 @@ interface InferenceRequest {
   init: RequestInit;
   connection: Awaited<ReturnType<EgressRuntime['prepare']>>;
   check(signal: AbortSignal): Promise<void>;
+  prepareHeaders?(signal: AbortSignal): Promise<NonNullable<RequestInit['headers']>>;
   /** Exact source-byte fence after durable dispatch intent, immediately before transport. */
   beforeDispatch?(signal: AbortSignal): Promise<void>;
   onReceipt?(receipt: InferenceReceipt): void;
@@ -297,6 +301,9 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
         request(input) { return own(async () => {
           if (input.binding.executor.kind !== 'http') throw new Error('HTTP inference requires an HTTP executor');
           const requestSignal = input.init.signal ? AbortSignal.any([combined, input.init.signal]) : combined;
+          const retrySettings = parseModelRetrySettings(await options.readRetrySettings?.());
+          for (let retriesUsed = 0; ; retriesUsed++) {
+          let retryFailure: ModelRetryFailure | undefined;
           requestSignal.throwIfAborted();
           await input.check(requestSignal);
           requestSignal.throwIfAborted();
@@ -326,14 +333,16 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             observeStatus(ready);
             if (!ready.live) throw new Error('inference-dispatch-cancelled');
             requestSignal.throwIfAborted();
+            // Egress alone owns the dispatcher; SDK hints cannot replace its route.
+            const { dispatcher: _dispatcher, ...requestInit }: RequestInit & { dispatcher?: unknown } = input.init;
+            if (input.prepareHeaders) requestInit.headers = await input.prepareHeaders(requestSignal);
+            requestSignal.throwIfAborted();
             if (input.beforeDispatch) {
               await input.beforeDispatch(requestSignal);
               await input.check(requestSignal);
               requestSignal.throwIfAborted();
             }
             started = true;
-            // Egress alone owns the dispatcher; SDK transport hints cannot replace its route.
-            const { dispatcher: _dispatcher, ...requestInit }: RequestInit & { dispatcher?: unknown } = input.init;
             response = await input.connection.fetch(input.destination, { ...requestInit, redirect: 'manual', signal: requestSignal });
             httpStatus = response.status;
             const bytes = new Uint8Array(await response.arrayBuffer());
@@ -345,8 +354,11 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
             const receipt: InferenceReceipt = { requestStarted: true, providerCompleted: true, localExecutorStopped: true,
               usage, httpStatus, problem: !response.ok ? 'http_rejected' : raw === null || !observed.valid ? 'invalid_response' : null };
             if (selectedBinding.requestKind === 'model_compute') input.onReceipt?.(receipt);
-            try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: observed.rawUsage } }); }
+            try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: observed.rawUsage,
+              providerRequestId: response.headers.get('x-request-id') ?? response.headers.get('request-id') } }); }
             catch (error) { controller.abort(cancelled()); throw error; }
+            if ((!response.ok || !observed.valid) && await waitForRetry(options.kernel, retrySettings,
+              { ...responseRetryFailure(response, raw), ...(response.ok ? { code: 'invalid_response' } : {}) }, retriesUsed, requestSignal)) continue;
             // The SDK receives exactly these already drained bytes. Cancellation cannot erase their usage.
             return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
           } catch (error) {
@@ -362,11 +374,14 @@ export function createInferenceRequests(options: InferenceRequestsOptions) {
                 usage, httpStatus, problem: requestSignal.aborted ? 'cancelled' : started ? 'transport_failed' : 'not_dispatched' };
               if (selectedBinding.requestKind === 'model_compute' && started) input.onReceipt?.(receipt);
               try { await publish({ operationId: id, executionOwner, receipt, response: { bodyBase64: responseBody, rawUsage: selectedBinding.requestKind === 'model_compute' ? input.observe(raw).rawUsage : null } }); }
-              catch { report(); }
+              catch { report(); throw error; }
+              if (started && !requestSignal.aborted) retryFailure = { code: 'transport_failed', message: error instanceof Error ? error.message : String(error) };
             }
             if (requestSignal.aborted) throw cancelled();
+            if (retryFailure && await waitForRetry(options.kernel, retrySettings, retryFailure, retriesUsed, requestSignal)) continue;
             throw error;
           } finally { if (active.get(id) === entry) active.delete(id); }
+          }
         }); },
       };
       try {

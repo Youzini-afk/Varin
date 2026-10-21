@@ -36,7 +36,7 @@ it.each([false, true])('uses custom llama.cpp paths with shared endpoint=%s whil
   expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 13, outputTokens: 1 } });
 });
 
-it('keeps each 503 retry and deeper probability readout in original transport usage', async () => {
+it('keeps deeper probability readout usage while leaving transport retries to its owner', async () => {
   const depths: number[] = [];
   const result = await requestClassifier({ ...request, fetchImpl: async (url, init) => {
     const body = bodyOf(init);
@@ -44,11 +44,10 @@ it('keeps each 503 retry and deeper probability readout in original transport us
     if (String(url).endsWith('/tokenize')) return tokenize(body);
     if (String(url).endsWith('/apply-template')) return Response.json({ prompt: body.messages[1]!.content });
     expect(body.post_sampling_probs).toBe(false); depths.push(body.n_probs);
-    if (depths.length === 1) return Response.json({ tokens_evaluated: 5, tokens_predicted: 1 }, { status: 503, headers: { 'retry-after': '0' } });
     return completion(body.n_probs === 256 ? 11 : 7, body.n_probs === 256 ? ['0'] : ['0', '1']);
   } });
-  expect(depths).toEqual([256, 256, 4096]);
-  expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 23, outputTokens: 3 } });
+  expect(depths).toEqual([256, 4096]);
+  expect(result).toMatchObject({ answers: [{ id: 'one', score: 0 }], missing: [], usage: { inputTokens: 18, outputTokens: 2 } });
 });
 
 it.each([false, true])('waits for original preparation drain after cancellation=%s or sibling failure', async cancelled => {

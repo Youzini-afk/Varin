@@ -21,3 +21,5 @@ tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "net", "ma
 tiktoken-rs = "0.12.1"
 tokenizers = { version = "0.23.1", default-features = false, features = ["fancy-regex"] }
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+regex = "1"
+httpdate = "1"

@@ -96,6 +96,14 @@ export function createRerankInference(authority: RerankInferenceAuthority, setti
                     providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
                     executor: { kind: 'http', api: 'http-rerank', endpoint: destination, credentialScope: provider.credentialScope } },
                     request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
+                  prepareHeaders: async active => {
+                    await assertAvailable(active);
+                    const current = await provider.getAuth();
+                    const fresh = new Headers(provider.headers); fresh.set('content-type', 'application/json');
+                    if (current?.auth.apiKey) fresh.set('authorization', `Bearer ${current.auth.apiKey}`);
+                    for (const [name, value] of Object.entries(current?.auth.headers ?? {})) if (value !== null) fresh.set(name, value);
+                    await assertAvailable(active); return fresh;
+                  },
                     check: async active => { await assertAvailable(active); await guard?.(); active.throwIfAborted(); },
                     observe: raw => {
                       let valid = false;

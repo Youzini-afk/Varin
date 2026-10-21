@@ -116,12 +116,16 @@ impl Catalog {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         drop(statement);
-        if steps.iter().any(|(_, state)| {
-            !matches!(state.as_str(), "completed" | "not_dispatched" | "prepared")
-        }) {
-            return Err(RuntimeError::Conflict(
-                "summary contains an unsuccessful or unknown original model request".into(),
-            ));
+        for (id, state) in &steps {
+            if matches!(state.as_str(), "completed" | "not_dispatched" | "prepared") { continue; }
+            // A later completed exchange of this same frozen node proves that its live
+            // owner already handled the failure. Recovery never restarts an unfinished attempt.
+            let replaced = matches!(state.as_str(), "failed" | "interrupted") && self.db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id JOIN context_job_steps n ON n.run_id=c.run_id AND n.node_id=c.node_id JOIN model_steps next ON next.id=n.request_id WHERE c.request_id=?1 AND next.rowid>s.rowid AND next.state='completed')",
+                [id], |row| row.get::<_, bool>(0))?;
+            if !replaced {
+                return Err(RuntimeError::Conflict("summary contains an unsuccessful or unknown original model request".into()));
+            }
         }
         let tx = self.db.transaction()?;
         for (id, state) in &steps {
@@ -1577,7 +1581,7 @@ fn completed_outputs<'a>(
     outputs: &'a [ContextNodeOutput],
 ) -> Result<std::collections::BTreeMap<String, &'a ContextNodeOutput>> {
     let mut completed = std::collections::BTreeMap::new();
-    for output in outputs {
+    for (index, output) in outputs.iter().enumerate() {
         if output.plan_hash != recipe.plan_hash
             || !recipe
                 .compaction
@@ -1599,6 +1603,8 @@ fn completed_outputs<'a>(
                 }
             }
             "not_dispatched" | "querying" => (),
+            "failed" | "interrupted" if outputs[index + 1..].iter().any(|later|
+                later.node_id == output.node_id && later.body.is_some() && matches!(later.state.as_str(), "completed" | "querying")) => (),
             _ => {
                 return Err(RuntimeError::Conflict(
                     "summary node has an unsettled or unsuccessful original ModelStep".into(),
@@ -1650,7 +1656,7 @@ pub(super) fn record_step(
             "summary request changed its plan or node".into(),
         ));
     };
-    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n, json_each(n.dependencies) dependency WHERE n.run_id=?1 AND n.node_id=?2 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=dependency.value AND s.state='completed' AND c.is_final=1)) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state!='not_dispatched' AND NOT (s.state='completed' AND c.is_final=0 AND NOT EXISTS(SELECT 1 FROM tool_calls t WHERE t.request_id=c.request_id AND t.receipt IS NULL)))",params![run_id,step.node_id],|row|row.get(0))?;
+    let invalid:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM context_job_nodes n, json_each(n.dependencies) dependency WHERE n.run_id=?1 AND n.node_id=?2 AND NOT EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=n.run_id AND c.node_id=dependency.value AND s.state='completed' AND c.is_final=1)) OR EXISTS(SELECT 1 FROM context_job_steps c JOIN model_steps s ON s.id=c.request_id WHERE c.run_id=?1 AND c.node_id=?2 AND s.state NOT IN ('not_dispatched','failed','interrupted') AND NOT (s.state='completed' AND c.is_final=0 AND NOT EXISTS(SELECT 1 FROM tool_calls t WHERE t.request_id=c.request_id AND t.receipt IS NULL)))",params![run_id,step.node_id],|row|row.get(0))?;
     if invalid {
         return Err(RuntimeError::Conflict(
             "summary node is already dispatched or dependencies are incomplete".into(),

@@ -22,7 +22,7 @@ interface ControlledResponse {
   end(body: string): void;
   destroy(error?: Error): void;
 }
-async function fixture(reply: (body: { input: string[]; model: string }, response: ControlledResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void) {
+async function fixture(reply: (body: { input: string[]; model: string }, response: ControlledResponse, before: Awaited<ReturnType<ReturnType<typeof createSemanticInferenceLedger>['list']>>) => void, autoRetry = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-inference-ledger-review-')); cleanups.push(() => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const agentDir = path.join(root, 'agent'); await fs.mkdir(agentDir);
   const authority = new ModelsService(agentDir, { projectTrusted: () => false });
@@ -51,7 +51,11 @@ async function fixture(reply: (body: { input: string[]; model: string }, respons
     models: ['a', 'b'].map(id => ({ id, name: id, enabled: true, operations: ['embedding'] })),
   }, (await authority.read()).revision);
   await settings(); await models();
-  let inference = createSemanticInference(authority, undefined, { ledger, fetchImpl });
+  let inference = createSemanticInference(authority, undefined, { ledger, fetchImpl, ...(autoRetry ? { requests: {
+    kernel: { agentRuntimeRequest: async (method: string) => { expect(method).toBe('runtime.retry.evaluate'); return { retry: true, delayMs: 0, reason: 'transient', ruleIndex: null }; } } as never,
+    runtime: { onEvent: () => () => {}, onReady: () => () => {}, onExit: () => () => {} },
+    egress: { prepare: async () => ({ fetch: fetchImpl }) } as never,
+  } } : {}) });
   cleanups.push(() => inference.close());
   const reopen = async () => { await inference.close(); ledger = createSemanticInferenceLedger({ dataDir: root, hostId: 'ledger-review' });
     inference = createSemanticInference(new ModelsService(agentDir, { projectTrusted: () => false }), undefined, { ledger, fetchImpl }); };
@@ -63,6 +67,22 @@ function input(lease: SemanticInferenceLease, operationIdentity = indexOperation
     guard: async () => {}, items: [{ id: 'stable-position-0', text }], operationIdentity };
 }
 const success = (body: { input: string[] }, response: ControlledResponse) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data: body.input.map((_text, index) => ({ index, embedding: [1, 0] })), usage: { prompt_tokens: 7, total_tokens: 7 } }));
+
+it('retries an index batch with durable per-attempt evidence and keeps missing usage unknown', async () => {
+  let attempt = 0;
+  const f = await fixture((body, response, before) => {
+    if (++attempt === 1) response.writeHead(503, { 'content-type': 'application/json', 'x-request-id': 'index-first' }).end(JSON.stringify({ error: { code: 'busy', message: 'Later' } }));
+    else { expect(before[0]?.receipt.attemptDetails).toMatchObject([{ status: 503, requestId: 'index-first' }]); success(body, response); }
+  }, true);
+  const lease = await f.inference().capture();
+  try {
+    const result = await lease.embed(input(lease));
+    expect(f.requests()).toBe(2);
+    expect(result.receipt).toMatchObject({ state: 'succeeded', attempts: 2, usage: { status: 'unknown' },
+      attemptDetails: [{ status: 503, code: 'busy', requestId: 'index-first' }, { status: 200, usage: { inputTokens: 7 } }] });
+    expect((await f.ledger().list())[0]?.receipt).toEqual(result.receipt);
+  } finally { lease.release(); }
+});
 
 it('completed index vectors survive restart without another HTTP, while changed credentials cannot inherit them', async () => {
   const f = await fixture(success);

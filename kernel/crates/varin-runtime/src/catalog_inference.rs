@@ -657,13 +657,14 @@ impl Catalog {
         p: &InferenceSettleParams,
         body: InferenceBody,
     ) -> Result<InferenceStatus> {
-        self.settle_inference_executor(p, body, false)
+        self.settle_inference_executor(p, body, false, None)
     }
     fn settle_inference_executor(
         &mut self,
         p: &InferenceSettleParams,
         body: InferenceBody,
         native: bool,
+        attempt_usage: Option<&UsageReceipt>,
     ) -> Result<InferenceStatus> {
         let mut op = self.operation(&p.operation_id)?;
         if native {
@@ -691,12 +692,12 @@ impl Catalog {
             return Err(conflict());
         }
         if let Some(previous) = &s.receipt {
-            if (!s.recovered && !s.receipt_pending)
+            if (!s.recovered && !s.receipt_pending && !(native && s.accounted))
                 || previous.provider_completed
                 || previous
                     .request_started
                     .is_some_and(|started| Some(started) != p.receipt.request_started)
-                || !p.receipt.usage.refines(&previous.usage)
+                || !attempt_usage.map(InferenceUsage::from).unwrap_or_else(|| p.receipt.usage.clone()).refines(&previous.usage)
             {
                 return Err(conflict());
             }
@@ -710,7 +711,7 @@ impl Catalog {
                         i.goal.as_ref(),
                         &s.receipt.as_ref().ok_or_else(conflict)?.usage.receipt(),
                         (p.receipt.request_started != Some(false))
-                            .then(|| p.receipt.usage.receipt())
+                            .then(|| attempt_usage.cloned().unwrap_or_else(|| p.receipt.usage.receipt()))
                             .as_ref(),
                     )?;
                 }
@@ -718,7 +719,7 @@ impl Catalog {
                 if p.receipt.request_started == Some(false) {
                     goals::not_dispatched(&tx, i.goal.as_ref())?;
                 } else {
-                    goals::measured(&tx, i.goal.as_ref(), &p.receipt.usage.receipt())?;
+                    goals::measured(&tx, i.goal.as_ref(), &attempt_usage.cloned().unwrap_or_else(|| p.receipt.usage.receipt()))?;
                 }
                 s.accounted = true;
             }

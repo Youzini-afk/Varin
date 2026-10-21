@@ -483,6 +483,56 @@ fn interrupted_partial_tool_arguments_never_execute_and_remain_nonzero_unknown_u
 }
 
 #[test]
+fn model_retry_keeps_partial_attempt_and_never_replays_completed_tools() {
+    struct RetryProvider { inner: Provider, calls: AtomicUsize, failed_body: Mutex<Option<Vec<u8>>> }
+    impl ModelProvider for RetryProvider {
+        fn retry_policy(&self) -> crate::model_retry::RetryPolicy {
+            crate::model_retry::RetryPolicy::new(Some(&json!({"initialDelayMs":0}))).unwrap()
+        }
+        fn serialize(&self, view: &RequestView, reuse: Option<&mut RequestCompileReuse>) -> Result<RequestBody, ExecutionError> {
+            self.inner.serialize(view, reuse)
+        }
+        fn generate(&self, request: &RequestSnapshot, cancel: &CancellationToken,
+            emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>) -> Result<FinishReason, ModelFailure> {
+            let attempt = self.calls.fetch_add(1, Ordering::SeqCst);
+            if attempt == 1 {
+                *self.failed_body.lock().unwrap() = Some(request.serialized.wire_bytes().to_vec());
+                emit(ProviderEvent::TextDelta { item_id:"partial".into(), text:"unfinished answer".into() }).unwrap();
+                emit(ProviderEvent::Usage { receipt: UsageReceipt { measurement:UsageMeasurement::Actual,
+                    input_tokens:Some(7), output_tokens:Some(2), ..Default::default() } }).unwrap();
+                return Err(ModelFailure { code:"stream_interrupted".into(), message:"lost stream".into(),
+                    retry_after_ms:None, provider_request_id:Some("failed-provider-request".into()) });
+            }
+            if attempt == 2 {
+                assert_eq!(request.serialized.wire_bytes().as_ref(), self.failed_body.lock().unwrap().as_ref().unwrap().as_slice());
+                assert!(!request.view.history.iter().any(|item|matches!(&item.content,Content::Text{text} if text=="unfinished answer")));
+            }
+            self.inner.generate(request, cancel, emit)
+        }
+    }
+    let fixture = Fixture::new();
+    let db = fixture.catalog();
+    let input = input(&db);
+    let failed_id = format!("{}:{}:2", input.run_id, input.owner_generation);
+    let cancel = CancellationToken::default();
+    let engine = ExecutionEngine {
+        persistence:db.clone(), context_preparation:Arc::new(NoopContextPreparation),
+        provider:Arc::new(RetryProvider { inner:Provider { calls:AtomicUsize::new(0), mode:Mode::ToolThenAnswer, cancel:cancel.clone() },
+            calls:AtomicUsize::new(0), failed_body:Mutex::new(None) }),
+        tools:Arc::new(Tools::default()), policy:Arc::new(DefaultAgentPolicy), progress:ProgressSink::default(),
+    };
+    assert_eq!(engine.run(input, cancel).unwrap().state, RunState::Completed);
+    assert_eq!(engine.provider.calls.load(Ordering::SeqCst), 3);
+    assert_eq!(engine.tools.calls.load(Ordering::SeqCst), 1);
+    let catalog = db.lock().unwrap();
+    let failed = catalog.model_step(&failed_id).unwrap();
+    assert_eq!(failed.state, crate::ModelStepState::Interrupted);
+    assert_eq!(failed.usage.unwrap()["input_tokens"], 7);
+    assert_eq!(catalog.model_step(&format!("{failed_id}:retry:1")).unwrap().state, crate::ModelStepState::Completed);
+    assert!(matches!(&catalog.execution_history("main").unwrap().last().unwrap().content,Content::Text{text} if text=="done"));
+}
+
+#[test]
 fn supervisor_control_reaches_provider_while_catalog_is_locked() {
     struct WaitingProvider {
         started: std::sync::mpsc::Sender<()>,

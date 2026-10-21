@@ -202,7 +202,7 @@ fn original_generation_receipt_and_batch_survive_consumption_and_observer_ack_re
         Some("original response"),
     );
     let body = db.prepare_inference_content().write(&response).unwrap();
-    db.settle_inference_generation(&inference.operation_id, body, receipt)
+    db.settle_inference_generation(&inference.operation_id, body, receipt, None)
         .unwrap();
     let ack = MemoryWorkUpdate {
         work_id: id.clone(),
@@ -268,7 +268,7 @@ fn explicit_selection_retry_requires_original_stopped_failure() {
         .prepare_inference_content()
         .write(&json!({"error":"known no send"}))
         .unwrap();
-    db.settle_inference_generation(&op.operation_id, body, receipt)
+    db.settle_inference_generation(&op.operation_id, body, receipt, None)
         .unwrap();
     let mut retry = admission("stopped-retry", MemoryWorkMode::Selection, 0);
     retry.retry_of = Some(id);
@@ -386,7 +386,7 @@ fn explicit_retry_after_confirmed_local_drain_keeps_original_unknown_charge() {
         .prepare_inference_content()
         .write(&json!({"original":"incomplete transport evidence"}))
         .unwrap();
-    db.settle_inference_generation(&op.operation_id, body, receipt)
+    db.settle_inference_generation(&op.operation_id, body, receipt, None)
         .unwrap();
     assert_eq!(
         db.operation(&op.operation_id).unwrap().effect,

@@ -66,6 +66,7 @@ export interface SemanticInferenceReceipt {
   state: 'not-started' | 'succeeded' | 'failed' | 'indeterminate' | 'delivery-blocked';
   usage: { status: 'unknown' } | ({ status: 'known' } & EmbeddingUsage);
   httpStatus?: number;
+  attemptDetails?: Array<{ status?: number; code?: string; requestId?: string; usage?: EmbeddingUsage }>;
 }
 export interface SemanticInferenceRequest extends HarnessEmbedParams {
   operationIdentity: SemanticInferenceOperation;
@@ -139,7 +140,7 @@ export function createSemanticInference(
   settingsOwner: SemanticInferenceSettingsOwner = { readGlobalSettings: () => authority.readGlobalInferenceSettings() },
   options: { requests?: InferenceRequestsOptions; ledger?: SemanticInferenceLedger; fetchImpl?: typeof fetch; onReceipt?(receipt: SemanticInferenceReceipt): void } = {},
 ) {
-  const requests = options.requests ? createInferenceRequests(options.requests) : undefined;
+  const requests = options.requests ? createInferenceRequests({ ...options.requests, readRetrySettings: async () => { const settings = await settingsOwner.readGlobalSettings(); return record(settings) ? settings.retry : undefined; } }) : undefined;
   const rerank = options.requests && requests && authority.resolveRerankBinding ? createRerankInference({ resolveRerankBinding: authority.resolveRerankBinding.bind(authority) },
     () => settingsOwner.readGlobalSettings(), options.requests, requests) : undefined;
   const decision = options.requests && requests && authority.resolveDecisionBinding ? createDecisionInference({ resolveDecisionBinding: authority.resolveDecisionBinding.bind(authority) },
@@ -291,6 +292,11 @@ export function createSemanticInference(
                   providerId: binding.providerId, modelId: binding.modelId, configurationId: binding.configurationId,
                   executor: { kind: 'http', api: binding.protocol, endpoint: destination, credentialScope: identity.credentialScope } },
                   request: { purpose: params.purpose, wire: JSON.parse(init.body) }, destination, init, connection,
+                  prepareHeaders: async active => {
+                    const auth = await credentials.resolve(identity.credentialScope, active, { method: 'POST', endpoint: destination, payloadSha256: digest(String(init.body)) });
+                    await validate();
+                    return { 'content-type': 'application/json', ...provider.headers, ...auth.headers };
+                  },
                   check: validate,
                   ...(params.beforeDispatch ? { beforeDispatch: params.beforeDispatch } : {}),
                   observe: raw => {
@@ -391,23 +397,68 @@ export function createSemanticInference(
                   return connection.fetch(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url, requestInit);
                 }
                 : undefined);
+              const settings = await readGlobalSettings();
+              const retrySettings = parseModelRetrySettings(record(settings) ? settings.retry : undefined);
+              const attemptDetails: NonNullable<SemanticInferenceReceipt['attemptDetails']> = [];
+              const updateUsage = () => {
+                const known = attemptDetails.length > 0 && attemptDetails.every(attempt => attempt.usage);
+                const inputKnown = known && attemptDetails.every(attempt => attempt.usage?.inputTokens !== undefined);
+                const totalKnown = known && attemptDetails.every(attempt => attempt.usage?.totalTokens !== undefined);
+                receipt = { ...receipt, attemptDetails: attemptDetails.map(attempt => ({ ...attempt })),
+                  usage: inputKnown || totalKnown ? { status: 'known',
+                    ...(inputKnown ? { inputTokens: attemptDetails.reduce((sum, attempt) => sum + attempt.usage!.inputTokens!, 0) } : {}),
+                    ...(totalKnown ? { totalTokens: attemptDetails.reduce((sum, attempt) => sum + attempt.usage!.totalTokens!, 0) } : {}) } : { status: 'unknown' } };
+              };
               transportConstructed = true;
-              const request = requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
-                ...(provider.headers ? { headers: provider.headers } : {}),
-                ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
-                input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
-                signal, maxRetries: 0, redirect: 'error', ...(fetchImpl ? { fetchImpl } : {}),
-                beforeDispatch: async request => {
-                  await assertAvailable(signal);
-                  const auth = await credentials.resolve(identity.credentialScope, signal, { method: 'POST', endpoint: request.url,
-                    payloadSha256: digest(request.body) });
-                  await validateDelivery();
-                  return auth.headers;
-                },
-                onDispatch: attempt => { if (!finished) { receipt = { ...receipt, attempts: attempt, attemptsKnown: true, state: 'indeterminate' }; publish(); } },
-                onResponse: response => { receivedResponse = true; receipt = { ...receipt, httpStatus: response.status }; if (!finished) publish(); },
-                onUsage: usage => { receipt = { ...receipt, usage: { status: 'known', ...usage } }; if (!finished) publish(); },
-              });
+              const request = (async () => {
+                for (let retriesUsed = 0; ; retriesUsed++) {
+                  let retryFailure: ModelRetryFailure | undefined;
+                  receivedResponse = false;
+                  try {
+                    return await requestOpenAICompatibleEmbeddings({ baseUrl: provider.baseUrl,
+                        ...(provider.headers ? { headers: provider.headers } : {}),
+                        ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), model: provider.requestModelId ?? binding.modelId,
+                        input: params.items.map(item => item.text), ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),
+                        signal, maxRetries: 0, redirect: 'error', fetchImpl: async (url, init) => {
+                          let response: Response;
+                          let bytes: ArrayBuffer;
+                          try { response = await (fetchImpl ?? fetch)(url, init); bytes = await response.arrayBuffer(); }
+                          catch (error) {
+                            retryFailure = { code: 'transport_failed', message: error instanceof Error ? error.message : String(error) };
+                            attemptDetails.push({ code: 'transport_failed' }); updateUsage(); throw error;
+                          }
+                          let raw: unknown; try { raw = JSON.parse(new TextDecoder().decode(bytes)); } catch { /* Keep invalid response diagnosis with the original parser. */ }
+                          retryFailure = response.ok ? undefined : responseRetryFailure(response, raw);
+                          const code = retryFailure?.code;
+                          const requestId = response.headers.get('x-request-id') ?? response.headers.get('request-id');
+                          const usage = embeddingWireUsage(raw);
+                          attemptDetails.push({ status: response.status, ...(code && /^[a-z0-9._-]+$/i.test(code) ? { code } : {}),
+                            ...(requestId ? { requestId } : {}), ...(usage ? { usage } : {}) });
+                          updateUsage();
+                          return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
+                        },
+                        beforeDispatch: async request => {
+                          await assertAvailable(signal);
+                          const auth = await credentials.resolve(identity.credentialScope, signal, { method: 'POST', endpoint: request.url,
+                            payloadSha256: digest(request.body) });
+                          await validateDelivery();
+                          return auth.headers;
+                        },
+                        onDispatch: () => { if (!finished) { receipt = { ...receipt, attempts: receipt.attempts + 1, attemptsKnown: true, state: 'indeterminate' }; publish(); } },
+                        onResponse: response => { receivedResponse = true; receipt = { ...receipt, httpStatus: response.status }; if (!finished) publish(); },
+                        onUsage: () => { updateUsage(); if (!finished) publish(); },
+                      });
+                  } catch (error) {
+                    if (!retryFailure || !options.requests || signal.aborted) throw error;
+                    // Keep this original token live across attempts. Each drained attempt is
+                    // durable before waiting; unknown usage remains unknown in the total.
+                    await settle({ ...receipt, state: 'indeterminate', attemptsKnown: true });
+                    if (!await waitForRetry(options.requests.kernel, retrySettings, retryFailure, retriesUsed, signal)) throw error;
+                    await validateDelivery();
+                    await settle({ ...receipt, state: 'indeterminate', attemptsKnown: false });
+                  }
+                }
+              })();
               // The transport, not the cancelled waiter, owns its eventual receipt. A late
               // real response settles cost/result facts without delivering to a cancelled Run.
               const observed = request.then(async result => {
@@ -537,3 +588,5 @@ export function createSemanticInference(
   };
 }
 export type SemanticInference = ReturnType<typeof createSemanticInference>;
+import { parseModelRetrySettings, type ModelRetryFailure } from '@varin/protocol';
+import { responseRetryFailure, waitForRetry } from '../../models/retry.js';

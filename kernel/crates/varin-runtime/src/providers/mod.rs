@@ -285,14 +285,16 @@ impl ReqwestTransport {
             let mut response = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Err(failure("cancelled", "generation cancelled")),
-                response = send => response.map_err(|_| failure("transport_error", "model connection failed; no automatic retry"))?,
+                response = send => response.map_err(|_| failure("transport_error", "model connection failed"))?,
             };
             let request_id = response.headers().get("x-request-id").or_else(|| response.headers().get("request-id")).or_else(|| response.headers().get("x-amzn-requestid"))
                 .and_then(|v| v.to_str().ok()).map(str::to_owned);
             if !response.status().is_success() {
                 let status = response.status().as_u16();
                 let retry_after_ms = response.headers().get("retry-after-ms").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok())
-                    .or_else(|| response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).and_then(|s| s.checked_mul(1000)));
+                    .or_else(|| response.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v|
+                        v.parse::<f64>().ok().filter(|n| n.is_finite() && *n >= 0.0).map(|s| (s * 1000.0) as u64)
+                        .or_else(|| httpdate::parse_http_date(v).ok().map(|date| date.duration_since(std::time::SystemTime::now()).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64))));
                 let body = tokio::select! {
                     biased;
                     _ = cancel.cancelled() => None,
@@ -319,7 +321,7 @@ impl ReqwestTransport {
                     _ = cancel.cancelled() => return Err(ModelFailure {
                         provider_request_id: request_id.clone(), ..failure("cancelled", "generation cancelled") }),
                     chunk = response.chunk() => chunk.map_err(|_| ModelFailure {
-                        provider_request_id: request_id.clone(), ..failure("stream_interrupted", "model stream interrupted; no automatic retry") })?,
+                        provider_request_id: request_id.clone(), ..failure("stream_interrupted", "model stream interrupted") })?,
                 };
                 match chunk {
                     Some(bytes) => {

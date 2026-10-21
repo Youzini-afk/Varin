@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 56;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 57;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1326,6 +1326,14 @@ pub(crate) struct ModelSelectParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelTokenizerOpenParams {
     pub(crate) configuration: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ModelRetryEvaluateParams {
+    pub(crate) settings: Value,
+    pub(crate) failure: Value,
+    pub(crate) retries_used: i64,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2925,6 +2933,7 @@ pub(crate) struct ModelAdapterContribution {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelSessionConfiguration {
+    pub(crate) retry: Option<Value>,
     pub(crate) tokenizer: Option<varin_runtime::token_count::TokenizerBinding>,
     pub(crate) catalog_model_id: Option<String>,
     pub(crate) provider_id: Option<String>,
@@ -4145,6 +4154,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.retrieval.finish" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.retry.evaluate" => {
+            serde_json::from_value::<ModelRetryEvaluateParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.tokenizers.count" => {
             serde_json::from_value::<KernelTokenizerCountParams>(params.clone())
                 .map(|_| ())

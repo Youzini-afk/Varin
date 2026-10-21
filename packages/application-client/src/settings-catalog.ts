@@ -866,6 +866,12 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['delete', 'confirmation'] },
   },
   {
+    id: 'sessions.retry', category: 'model', owner: 'agent-settings',
+    field: { path: 'retry', kind: 'json', scope: 'user', note: 'Automatic model request retries: enabled, maxRetries, initialDelayMs, maxDelayMs, ordered matching rules' },
+    apply: 'next-run',
+    ui: { page: 'sessions', titleKey: 'settings.retry.title', descriptionKey: 'settings.retry.description', keywords: ['retry', '重试', 'backoff', 'network'] },
+  },
+  {
     id: 'sessions.small-model', category: 'model', owner: 'agent-settings',
     field: { path: 'utilityModel', kind: 'json', scope: 'user', note: '{providerId,modelId}; reset inherits the native default model' },
     apply: 'next-run',

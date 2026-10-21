@@ -33,3 +33,4 @@ export * from "./permission-gate.js";
 export * from "./types.js";
 
 export * from "./agent-runtime.generated.js";
+export * from './model-retry.js';

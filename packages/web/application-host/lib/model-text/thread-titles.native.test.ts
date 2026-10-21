@@ -18,7 +18,7 @@ const buildVersion = JSON.parse(await readFile(path.join(repository, 'package.js
 const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 
-async function fixture() {
+async function fixture(failFirst = false) {
   const root = await mkdtemp(path.join(tmpdir(), 'varin-title-native-'));
   cleanups.push(() => rm(root, { recursive: true, force: true }));
   const requests: Array<{ model: string }> = [];
@@ -27,6 +27,10 @@ async function fixture() {
     request.on('data', chunk => chunks.push(chunk));
     request.on('end', () => {
       requests.push(JSON.parse(Buffer.concat(chunks).toString()));
+      if (failFirst && requests.length === 1) {
+        response.writeHead(503, { 'content-type': 'application/json', 'x-request-id': 'title-attempt-1' });
+        response.end(JSON.stringify({ error: { message: 'Temporarily unavailable' } })); return;
+      }
       response.writeHead(200, { 'content-type': 'text/event-stream' });
       response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: 'title', type: 'message', content: [{ type: 'output_text', text: '仓库启动流程分析' }] }] } })}\n\n`);
     });
@@ -40,7 +44,7 @@ async function fixture() {
   const runtime = new AgentRuntimeClient(kernel);
   const models = { resolveModel: async (selection: { providerId: string; modelId: string }) => {
     const configuration = { providerId: selection.providerId, providerFamily: 'openai-responses', model: selection.modelId,
-      endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 1024 };
+      endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 1024, retry: { initialDelayMs: 0 } };
     const credentialOwner = new ExistingHostCredentialOwner({ providerId: selection.providerId, providerFamily: configuration.providerFamily,
       endpoint, bindingIdentity: modelCredentialBindingIdentity(configuration),
       currentScope: async () => ({ reference: 'fixture', authority: 'host', account: 'fixture-account', generation: 1 }),
@@ -71,6 +75,20 @@ it('dispatches the configured auxiliary model and persists its title through rea
   await expect.poll(async () => (await f.runtime.thread('conversation')).title).toBe('仓库启动流程分析');
   expect(f.requests[0]?.model).toBe('auxiliary-title-model');
   expect(f.errors).toEqual([]);
+});
+
+it('automatically retries an auxiliary title within its original operation and keeps failed evidence', async () => {
+  const f = await fixture(true);
+  const decision = await f.kernel.agentRuntimeRequest('runtime.retry.evaluate', { settings: { rules: [
+    { field: 'message', match: 'regex', pattern: '(?i)temporar.*', action: 'retry' },
+  ] }, failure: { status: 400, message: 'Temporarily unavailable' }, retriesUsed: 0 });
+  expect(decision).toMatchObject({ retry: true, reason: 'rule', ruleIndex: 0 });
+  const result = await f.modelText.generate({ key: 'retry-title', purpose: 'title', prompt: 'Name this conversation.' });
+  expect(result.text).toBe('仓库启动流程分析');
+  expect(f.requests).toHaveLength(2);
+  expect(f.requests[1]).toEqual(f.requests[0]);
+  const original = await f.kernel.agentRuntimeRequest('runtime.operation.inspect', { operationId: 'inference:model-text:retry-title:1' }) as { result: { value: { response: { providerOutput: { attempts: unknown[] } } } } };
+  expect(original.result.value.response.providerOutput.attempts).toMatchObject([{ failure: { code: 'http_503', provider_request_id: 'title-attempt-1' }, usage: { measurement: 'missing' } }]);
 });
 
 it.each([false, true])('recovers an originally unsent title without overwriting a manual rename (%s)', async renamed => {

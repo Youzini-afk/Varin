@@ -2,7 +2,7 @@
 //!
 //! A worker owns one engine invocation. Its cloneable cancellation control has no dependency on
 //! persistence or the data stream. Adapters must observe that control during blocking I/O. This
-//! module never retries a dispatched model request or an ambiguous external effect.
+//! retries retain each model attempt; completed tools and ambiguous external effects are not replayed.
 
 pub use crate::output::{
     IncomingMedia, OutputBody, OutputPart, OutputSource, ResolvedMedia, StoredMedia,
@@ -622,6 +622,9 @@ pub struct ModelFailure {
 }
 
 pub trait ModelProvider: Send + Sync {
+    fn retry_policy(&self) -> crate::model_retry::RetryPolicy {
+        crate::model_retry::RetryPolicy::new(None).expect("default retry policy")
+    }
     /// Called only at a closed conversation exchange, before compiling the next request.
     /// The returned provider is retained by that ModelStep; subsequent selection cannot mutate it.
     fn select_for_request(
@@ -1584,6 +1587,7 @@ pub struct InputBatch {
 pub enum ExecutionEvent {
     Provider(ProviderEvent),
     ToolCompleted(ToolResult),
+    RetryScheduled { attempt: u64, delay_ms: u64 },
 }
 
 /// Presentation batches. A slow consumer coalesces adjacent deltas instead of losing text;
@@ -2653,7 +2657,13 @@ impl<
                     }
                     // All outer configuration is complete; prepared storage and dispatch share these bytes.
                     let _ = serialized.wire_bytes();
-                    let snapshot = Arc::new(RequestSnapshot { view, serialized });
+                    let mut retry_view = view;
+                    let root_request_id = retry_view.request_id.clone();
+                    let retry_policy = selected_model.as_ref().map_or_else(|| self.provider.retry_policy(), |selected| selected.provider.retry_policy());
+                    let mut retries_used = 0;
+                    let (snapshot, items, calls, reason) = loop {
+                    let model_cancel = cancel.child(&format!("model:{}", retry_view.request_id));
+                    let snapshot = Arc::new(RequestSnapshot { view: retry_view.clone(), serialized: serialized.clone() });
                     match self.commit(
                         &input,
                         ExecutionRecord::RequestPrepared {
@@ -2681,7 +2691,7 @@ impl<
                             },
                         )?;
                         policy_state = previous_policy_state;
-                        continue;
+                        continue 'agent;
                     }
                     state = RunState::Generating;
                     self.commit(
@@ -2793,16 +2803,34 @@ impl<
                         },
                     )?;
                     if stopping {
-                        continue;
+                        continue 'agent;
                     }
                     if interrupted {
                         interrupted_generation = true;
-                        continue;
+                        continue 'agent;
                     }
                     let reason = match result {
                         Ok(reason) => reason,
-                        Err(failure) => finish!('agent, RunState::Failed, None,
-                            Some(ExecutionError::new(failure.code, failure.message))),
+                        Err(failure) => {
+                            let decision = retry_policy.decide(&(&failure).into(), retries_used);
+                            if decision.retry {
+                                self.progress.emit(&input.run_id, &snapshot.view.request_id,
+                                    ExecutionEvent::RetryScheduled { attempt: retries_used + 1, delay_ms: decision.delay_ms });
+                                if !crate::model_retry::wait(&model_cancel, decision.delay_ms) {
+                                    interrupted_generation = !cancel.is_cancelled();
+                                    continue 'agent;
+                                }
+                                retries_used += 1;
+                                steps += 1;
+                                retry_view.request_id = format!("{root_request_id}:retry:{retries_used}");
+                                if let RequestOrigin::Conversation { step, .. } = &mut retry_view.origin { *step = steps; }
+                                continue;
+                            }
+                            finish!('agent, RunState::Failed, None,
+                                Some(ExecutionError::new(failure.code, failure.message)))
+                        }
+                    };
+                    break (snapshot, items, calls, reason);
                     };
                     let committed: Vec<_> = items
                         .iter()

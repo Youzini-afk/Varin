@@ -18,11 +18,21 @@ pub struct InferenceGenerateParams {
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct GenerationOutput {
+    #[serde(default)]
+    pub attempts: Vec<GenerationAttempt>,
     pub events: Vec<ProviderEvent>,
     pub items: Vec<ProviderItem>,
     pub usage: UsageReceipt,
     #[serde(rename = "finishReason")]
     pub finish_reason: Option<crate::execution::FinishReason>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationAttempt {
+    pub request_id: String,
+    pub events: Vec<ProviderEvent>,
+    pub items: Vec<ProviderItem>,
+    pub usage: UsageReceipt,
+    pub failure: crate::execution::ModelFailure,
 }
 impl From<&UsageReceipt> for InferenceUsage {
     fn from(value: &UsageReceipt) -> Self {
@@ -62,6 +72,42 @@ impl GenerationRead {
     }
 }
 impl Catalog {
+    /// Commit the finished attempt before another paid boundary. A failed Goal check keeps
+    /// this accounting intact; the original worker then publishes its final receipt.
+    pub fn finish_inference_attempt(&mut self, id: &str, body: InferenceBody, receipt: InferenceReceipt) -> Result<()> {
+        let mut op = self.operation(id)?;
+        kernel_owned(&op, self.epoch)?;
+        let i = intent(&op)?;
+        let mut s = state(&op)?;
+        if !s.dispatched || s.accounted || s.recovered || op.phase == OperationPhase::Terminal { return Err(conflict()); }
+        let tx = self.db.transaction()?;
+        goals::measured(&tx, i.goal.as_ref(), &receipt.usage.receipt())?;
+        s.accounted = true;
+        s.receipt = Some(receipt);
+        s.response_ref = Some(body.reference);
+        publish(&tx, &mut op, &s, "inference.attempt_finished")?;
+        tx.commit()?;
+        Ok(())
+    }
+    pub fn dispatch_inference_retry(&mut self, id: &str) -> Result<()> {
+        let mut op = self.operation(id)?;
+        kernel_owned(&op, self.epoch)?;
+        let i = intent(&op)?;
+        let mut s = state(&op)?;
+        if !s.dispatched || !s.accounted || s.recovered || op.phase == OperationPhase::Terminal { return Err(conflict()); }
+        // Also revalidate the nested query's live source owner.
+        if !self.inference_status(id, &i.caller_owner)?.live { return Err(RuntimeError::DispatchCancelled); }
+        let tx = self.db.transaction()?;
+        parent_live(&tx, &op, &i, self.epoch)?;
+        if !matches!(i.caller, InferenceCaller::ModelText | InferenceCaller::Knowledge) { goals::check_dispatch(&tx, &op.run_id, i.goal.as_ref())?; }
+        if let Some(goal) = &i.goal { goals::dispatched(&tx, goal)?; }
+        s.accounted = false;
+        s.receipt = None;
+        s.checkpoint_usage = InferenceUsage::default();
+        publish(&tx, &mut op, &s, "inference.retry_dispatched")?;
+        tx.commit()?;
+        Ok(())
+    }
     pub fn admit_inference_generation(
         &mut self,
         p: &InferenceGenerateParams,
@@ -192,6 +238,7 @@ impl Catalog {
         id: &str,
         body: InferenceBody,
         receipt: InferenceReceipt,
+        attempt_usage: Option<UsageReceipt>,
     ) -> Result<InferenceStatus> {
         let op = self.operation(id)?;
         kernel_owned(&op, self.epoch)?;
@@ -201,7 +248,7 @@ impl Catalog {
             receipt,
             response: Value::Null,
         };
-        self.settle_inference_executor(&p, body, true)
+        self.settle_inference_executor(&p, body, true, attempt_usage.as_ref())
     }
 }
 /// Request and complete provider evidence remain one ContentStore body, outside Catalog.

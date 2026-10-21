@@ -2,7 +2,7 @@
 use super::*;
 use crate::credential_bridge::CredentialBridge;
 use varin_runtime::catalog::inference::generation::{
-    GenerationOutput, InferenceGenerateParams, generation_body,
+    GenerationAttempt, GenerationOutput, InferenceGenerateParams, generation_body,
 };
 use varin_runtime::catalog::inference::{InferenceProblem, InferenceReceipt, InferenceUsage};
 use varin_runtime::execution::*;
@@ -70,7 +70,7 @@ fn publish(
             owner
                 .lock()
                 .map_err(|e| varin_runtime::RuntimeError::Conflict(e.to_string()))?
-                .settle_inference_generation(id, saved, receipt.clone())
+                .settle_inference_generation(id, saved, receipt.clone(), body.get("providerOutput").and_then(|v| v.get("usage")).and_then(|v| serde_json::from_value(v.clone()).ok()))
         })();
         match result {
             Ok(_) => return Ok(()),
@@ -154,7 +154,7 @@ fn run(
         prepare(runtime, credentials, id, cancel)
     }))
     .unwrap_or_else(|_| Err(failure("Auxiliary provider preparation panicked")));
-    let (provider, snapshot) = match prepared {
+    let (provider, mut snapshot) = match prepared {
         Ok(value) => value,
         Err(error) => return settle_preparation_failure(runtime, id, error),
     };
@@ -170,6 +170,11 @@ fn run(
         return settle_preparation_failure(runtime, id, failure(error));
     }
     let mut output = GenerationOutput::default();
+    let policy = provider.retry_policy();
+    let root_request_id = snapshot.view.request_id.clone();
+    let mut retries_used = 0;
+    let mut retry_accounted = false;
+    let generated = loop {
     let generated = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         provider.generate(&snapshot, cancel, &mut |event| {
             let is_usage = matches!(event, ProviderEvent::Usage { .. });
@@ -208,6 +213,26 @@ fn run(
             provider_request_id: None,
         })
     });
+    let Some(failed) = generated.as_ref().err() else { break generated; };
+    let decision = policy.decide(&failed.into(), retries_used);
+    if cancel.is_cancelled() || !decision.retry { break generated; }
+    let receipt = InferenceReceipt { request_started: Some(true), provider_completed: false,
+        local_executor_stopped: true, usage: InferenceUsage::from(&output.usage), http_status: None,
+        problem: Some(InferenceProblem::TransportFailed) };
+    let prep = owner.lock().map_err(failure)?.prepare_inference_content();
+    let body = prep.write(&generation_body(Some(&snapshot), &output, Some(&receipt), Some(failed), None)).map_err(failure)?;
+    owner.lock().map_err(failure)?.finish_inference_attempt(id, body, receipt).map_err(failure)?;
+    retry_accounted = true;
+    if !varin_runtime::model_retry::wait(cancel, decision.delay_ms) { break generated; }
+    // Original query/Run/Goal and credential owners still fence every paid attempt.
+    if owner.lock().map_err(failure)?.dispatch_inference_retry(id).is_err() { break generated; }
+    retry_accounted = false;
+    output.attempts.push(GenerationAttempt { request_id: snapshot.view.request_id.clone(),
+        events: std::mem::take(&mut output.events), items: std::mem::take(&mut output.items),
+        usage: std::mem::take(&mut output.usage), failure: failed.clone() });
+    retries_used += 1;
+    snapshot.view.request_id = format!("{root_request_id}:retry:{retries_used}");
+    };
     let forbidden = output.items.iter().any(|item| {
         matches!(
             item.content,
@@ -250,10 +275,11 @@ fn run(
     };
     let receipt = InferenceReceipt {
         // Adapter success/events prove transport entry. A failure before any event does not.
-        request_started: (generated.is_ok() || !output.events.is_empty()).then_some(true),
+        request_started: (generated.is_ok() || retry_accounted || !output.events.is_empty() || !output.attempts.is_empty()
+            || generated.as_ref().err().is_some_and(|e| e.code.starts_with("http_"))).then_some(true),
         provider_completed: generated.is_ok(),
         local_executor_stopped: true,
-        usage: InferenceUsage::from(&output.usage),
+        usage: InferenceUsage::from(&varin_runtime::model_retry::total_usage(output.attempts.iter().map(|a| &a.usage).chain(std::iter::once(&output.usage)))),
         http_status: None,
         problem,
     };

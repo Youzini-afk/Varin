@@ -30,6 +30,7 @@ export type ModelProtocolCall = {kind:'serialize';configuration:ModelSessionConf
 export type ModelProtocolResult = {kind:'body';body:unknown} | {kind:'parsed';events:ProviderEvent[];state:unknown;finish:FinishReason|null};
 
 export interface ModelSessionConfiguration {
+  retry?: unknown;
   tokenizer?: TokenizerBinding;
   catalogModelId?: string;
   providerId?: string;

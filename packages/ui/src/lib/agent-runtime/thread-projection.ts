@@ -12,11 +12,12 @@ interface ProgressView {
   items: Map<string, StreamingTextPart>;
   calls: Map<string, StreamingToolCall>;
   readers: Map<string, PartialJson>;
+  retry?: { type: 'retry'; attempt: number; retryAt: number };
 }
 export interface StreamingToolCall { id: string; name: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean }
 export interface ToolExecutionProgress { runId: string; operationId: string; toolName: string; details: unknown }
-export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string };
-interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string } }
+export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string } | { type: 'retry'; attempt: number; retryAt: number };
+interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string; attempt?: number; delay_ms?: number } }
 
 /** Rebuildable view only. No model history or running state is written by the UI. */
 export class ThreadProjection {
@@ -123,7 +124,7 @@ export class ThreadProjection {
 
   private publishCurrentProgress(): void {
     const current = this.activeRunId ? this.progress.get(this.activeRunId) : undefined;
-    this.publishProgress(current ? [...current.items.values()] : []);
+    this.publishProgress(current ? [...current.items.values(), ...(current.retry ? [current.retry] : [])] : []);
     this.publishTools(current ? [...current.calls.values()] : this.interruptedTools);
   }
 
@@ -154,7 +155,8 @@ export class ThreadProjection {
               this.publishToolProgress([...this.toolProgress.values()]);
               return;
             }
-            if (this.committedRequests.has(event.requestId)) return;
+            const retryEvent = (event.event as { events?: ProviderProgress[] }).events?.some(part => part.kind === 'retry_scheduled');
+            if (this.committedRequests.has(event.requestId) && !retryEvent) return;
             const observed = ++this.progressObservation;
             const stream = `${event.kernelEpoch}:${event.streamId}`;
             let progress = this.progress.get(event.runId);
@@ -175,6 +177,9 @@ export class ThreadProjection {
             if (batch.kind !== 'batch' || !Array.isArray(batch.events)) return;
             for (const payload of batch.events) {
               const data = payload?.data;
+              if (payload.kind === 'retry_scheduled' && typeof data?.attempt === 'number' && typeof data.delay_ms === 'number') {
+                progress.retry = { type: 'retry', attempt: data.attempt, retryAt: Date.now() + data.delay_ms };
+              }
               if (payload?.kind === 'provider' && typeof data?.call_id === 'string') {
                 const old = progress.calls.get(data.call_id);
                 if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {

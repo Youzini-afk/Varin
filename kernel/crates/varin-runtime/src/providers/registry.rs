@@ -220,6 +220,7 @@ impl SelectedAdapter {
         Ok(Arc::new(PinnedProvider {
             lease: self.lease,
             inner,
+            retry: crate::model_retry::RetryPolicy::new(configuration.retry.as_ref())?,
         }))
     }
 }
@@ -229,8 +230,10 @@ fn composition_error(error: crate::composition::CompositionError) -> ExecutionEr
 struct PinnedProvider {
     lease: CallLease<ModelAdapterRegistration>,
     inner: Arc<dyn ModelProvider>,
+    retry: crate::model_retry::RetryPolicy,
 }
 impl ModelProvider for PinnedProvider {
+    fn retry_policy(&self) -> crate::model_retry::RetryPolicy { self.retry.clone() }
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         self.inner.request_budget_protocol()
     }

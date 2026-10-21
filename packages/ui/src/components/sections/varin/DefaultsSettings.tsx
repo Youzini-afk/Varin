@@ -1,4 +1,5 @@
 import React from 'react';
+import { RetrySettings } from './RetrySettings';
 import { toast } from '@/components/ui';
 import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
 import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
@@ -79,6 +80,7 @@ export const DefaultsSettings: React.FC = () => {
     </SettingsFieldRow>}
     {scope === 'project' && <p className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.projectInheritance')}</p>}
   </SettingsSection>
+  {scope === 'global' && snapshot && <RetrySettings key={`${host}:${JSON.stringify(snapshot.global.retry)}`} value={snapshot.global.retry} disabled={saving} api={api} onSave={save} />}
   <SettingsSection title={t('settings.defaults.clientPreferences')}>
     <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label={t('thread.settings.confirmDelete')} />
   </SettingsSection></>;

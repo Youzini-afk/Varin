@@ -126,6 +126,8 @@ export function createModelConnectionsHttpAPI(generation = getRuntimeEndpointGen
     replyAuthorization: (id: string, redirect: string) => post<void>('authorization/reply', { id, redirect }),
     cancelAuthorization: (id: string) => post<void>('authorization/cancel', { id }),
     readSettings: (cwd?: string, signal?: AbortSignal) => post<AgentSettingsSnapshot>('settings/read', { cwd }, signal),
+    testRetry: (settings: ModelRetrySettings, failure: ModelRetryFailure, signal?: AbortSignal) => post<ModelRetryDecision>('retry/test', { settings, failure }, signal),
     updateSettings: (input: { cwd?: string; scope: 'global' | 'project'; expectedRevision: string; set: Record<string, JsonValue>; remove: string[] }, signal?: AbortSignal) => post<AgentSettingsSnapshot>('settings/update', input, signal),
   };
 }
+import type { ModelRetrySettings, ModelRetryFailure, ModelRetryDecision } from '@varin/protocol';
