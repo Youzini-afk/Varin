@@ -89,7 +89,7 @@ Catalog 事务保存短元数据和不可变内容引用。历史正文、请求
 文本以 UTF-8 字节分页，数组以完整记录分页；单条记录超过页预算时仍完整返回，以保证翻页推进。
 首个读取返回固定锚点，后续沿该锚点和 `nextOffset` 续读。预览提供的数组读取位置接在已展示记录之后；
 读取完本次结果的省略记录，再使用原工具游标获取下一页。`item` 查询仍可读取整条原始历史 JSON。
-显式 `file_read.length`、`process_read` 页面和 `read_thread` 的原文页面按原请求返回，模型输入不会再二次裁剪；
+显式 `file_read.length` 或完整起止行范围、`process_read` 页面和 `read_thread` 的原文页面按原请求返回，模型输入不会再二次裁剪；
 这也适用于经 `tool_invoke` 调用的读取。UI 与持久历史继续使用原文。
 `threads` 的 `current` 字段直接给出调用方 Thread、branch 和 Run；完整自身条目仍由 `includeSelf` 控制。
 
@@ -188,6 +188,10 @@ Source cut 合成一份 child 派生证明。这是现有资源映射边界，�
 child 受理固定真实父调用、模型/凭据、profile、工具子集和 Source，随后独立准备。
 它不继承父策略私有 checkpoint 或任意私有记忆。所选能力不依赖物理来源时可以 source-free。
 每个 child 仍使用普通运行时执行与权限检查。
+准备进度由原执行记录保存，区分文件列表、捕获、核对、工作区、上下文和启动阶段；已知数量时显示完成数。
+本地目录观察失效后在批次边界尽早终止，保留变化路径并释放临时快照；这不替代最终的一致性验证。
+`child_cancel` 随协作工具常驻，模型可停止本会话派发的子任务及后代，包括准备阶段；它和界面复用同一取消与清理所有者。
+取消回执只确认请求已受理，最终状态仍从原 `child_status`、报告和资源释放事实读取。
 
 child report、固定 WorkingResult 和 executor-stop 分别记录。相关 writer 真正停止后，
 原 Storage 才能按结果合同捕获/pin。父 Wait 观察该记录；取消观察不会取消独立受理的 child。

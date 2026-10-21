@@ -5,6 +5,7 @@ import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { preparationFailure } from './preparation-failure.js';
 import { SourceAdmissionError } from './source-admission-error.js';
+import { SourceCaptureError } from '../harness/working-state/source-preparation.js';
 
 // Exercise the real discovery/cleanup coordinator and managed handoff wrapper.
 // Preparation, context readers and native process transport are outside this test.
@@ -55,6 +56,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
     inspectScope: vi.fn(async () => []),
   };
   const runtime = {
+    childPreparationProgress: vi.fn(async () => ({ updated: true })),
     thread: vi.fn(async () => ({bot_id:null})),
     launch: vi.fn(async () => ({ selection: child.launch })),
     operation: vi.fn(async () => ({ id: child.child_operation_id, run_id: child.parent_run_id, execution_owner: { kind: 'host', host_id: 'coordinator-A', incarnation: 'A-epoch' }, epoch: 2 })),
@@ -98,6 +100,8 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 
 it('keeps the original cause when a source owner wraps a preparation failure', () => {
+  expect(preparationFailure(new SourceCaptureError('new-file.txt'), 'Preparing child source'))
+    .toMatchObject({ code: 'source_changed', detail: expect.stringContaining('new-file.txt') });
   const failure = preparationFailure(new SourceAdmissionError('source_unavailable',
     {cause:new Error('Cannot capture workspace: D:/work/source no longer exists')}), 'Preparing child source');
   expect(failure.code).toBe('source_unavailable');

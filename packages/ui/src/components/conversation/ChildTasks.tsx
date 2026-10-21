@@ -10,7 +10,7 @@ import { ThreadExecutions } from '../thread/ThreadExecutions';
 import { ThreadIntegrationPanel } from '../thread/ThreadIntegrationPanel';
 import { ChildTaskMenu } from './ChildTaskMenu';
 import { useI18n } from '@/lib/i18n';
-import { ChildState, ChildFileResult } from './childPresentation';
+import { ChildState, ChildFileResult, ChildPreparation } from './childPresentation';
 import { childEnded, childTaskRows } from './childTaskRows';
 
 /** A row follows the newest execution; each report still uses its own immutable owner. */
@@ -87,7 +87,8 @@ export function ChildTasks({ api, identity, children, executions, activity, dire
         onToggle={() => toggle(child.operation_id, !expanded)}>{menuButton => <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-2 py-2 hover:bg-interactive-hover [&::-webkit-details-marker]:hidden">
         <AgentAvatar identity={child.child_thread_id} avatar={child.avatar} size={22} />
         <span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="min-w-0 truncate typography-meta font-medium" title={task}>{child.name || child.input.name || task}</span><ChildState state={stopping ? 'stopping' : state} /></span>
-          {!expanded && <span className="mt-1 block truncate typography-micro text-muted-foreground">{latest && activity?.[latest.execution_id]?.reason || report?.detail?.split('\n').find(line => line.trim())?.replace(/^#+\s*/, '') || task}</span>}</span>{menuButton}
+          {state === 'preparing' && !stopping && latest?.preparation ? <ChildPreparation progress={latest.preparation} />
+            : !expanded && <span className="mt-1 block truncate typography-micro text-muted-foreground">{latest && activity?.[latest.execution_id]?.reason || report?.detail?.split('\n').find(line => line.trim())?.replace(/^#+\s*/, '') || task}</span>}</span>{menuButton}
       </summary>}</ChildTaskMenu>
       {opened.has(child.operation_id)&&<div className="space-y-3 border-l border-border/50 py-2 pl-3 ml-3">
         <p className="whitespace-pre-wrap break-words typography-meta">{task}</p>

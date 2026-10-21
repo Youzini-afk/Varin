@@ -61,7 +61,7 @@ mod input_commands;
 #[path = "agent_children.rs"]
 mod child_commands;
 #[path = "agent_controls.rs"]
-mod control_commands;
+pub(crate) mod control_commands;
 #[path = "agent_bot_scope.rs"]
 mod bot_scope_commands;
 #[path = "agent_operations.rs"]
@@ -1156,6 +1156,7 @@ pub(crate) fn spawn(
                                 | "runtime.child.inspect"
                                 | "runtime.child.release"
                                 | "runtime.child.fail"
+                                | "runtime.child.progress"
                                 | "runtime.child.report.read"
                                 | "runtime.child.source.ready"
                                 | "runtime.child.settle"

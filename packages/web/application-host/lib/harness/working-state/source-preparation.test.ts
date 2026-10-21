@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CaptureInventoryChangedError } from '../../documents/capture-inventory.js';
+import { CaptureInventoryChangedError, createCaptureInventory } from '../../documents/capture-inventory.js';
 import { captureStableDirectoryBaseline, captureStableSourceBaseline, type SourceCaptureDocuments } from './source-preparation.js';
 import type { BaselineInventory } from './workspace-baseline.js';
 import type { RecoveryState, WorkingStateRootStore } from './types.js';
@@ -17,8 +17,9 @@ function fixture(initial: Record<string, RecoveryState> = { 'file.txt': { kind: 
     readSourcePreparation: vi.fn(async () => null),
     listWorkspaceBaselinePaths: vi.fn(async () => Object.keys(disk).sort()),
     listCaptureScopePaths: vi.fn(async (_directory: string, scopes: readonly string[]) => Object.keys(disk).filter(file => scopes.some(scope => file === scope || file.startsWith(`${scope}/`))).sort()),
-    captureDirectory: vi.fn(async (_directory: string, paths?: string[]) => {
+    captureDirectory: vi.fn(async (_directory: string, paths?: string[], options?: Parameters<WorkingStateRootStore['captureDirectory']>[2]) => {
       hooks.capture?.(++pass);
+      options?.onProgress?.(1, (paths ?? Object.keys(disk)).length);
       return Object.fromEntries((paths ?? Object.keys(disk)).map(file => [file, structuredClone(disk[file] ?? { kind: 'missing' })]));
     }),
     releaseCapturedStates: release,
@@ -47,6 +48,21 @@ function fixture(initial: Record<string, RecoveryState> = { 'file.txt': { kind: 
 }
 
 describe('shared stable source capture', () => {
+  it('stops verification on an invalidated namespace and releases the captured snapshot', async () => {
+    const f = fixture();
+    const inventory = createCaptureInventory();
+    const position = { epoch: 1, sourceId: 'source', generation: 1, complete: true };
+    const candidate = await inventory.prepare({ ...position, scan: async () => ['file.txt'] });
+    f.hooks.capture = pass => { if (pass === 2) inventory.invalidate('new-file.txt'); };
+    const verify = vi.fn(async () => undefined);
+    await expect(captureStableDirectoryBaseline({ ...f.input, inspectInventory: f.inspectInventory,
+      directoryInventory: { read: async () => candidate.paths, assertCurrent: () => inventory.assertCurrent(candidate), verify },
+    })).rejects.toThrow('new-file.txt');
+    expect(verify).not.toHaveBeenCalled();
+    expect(f.release).toHaveBeenCalledOnce();
+    expect(f.create).not.toHaveBeenCalled();
+  });
+
   it('keeps saved bytes for dirty paths and exposes omitted overlays separately', async () => {
     const f = fixture();
     vi.mocked(f.documents.inspectDirtyBuffers).mockResolvedValue([{ ownerId: 'editor', generation: 1, registrationId: 'registration', workspaceId: 'workspace', updatedAt: 'now',

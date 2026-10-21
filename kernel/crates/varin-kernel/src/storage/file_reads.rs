@@ -63,7 +63,8 @@ impl FileReadTask {
         let from = self.start.saturating_sub(3);
         let to = self.end.saturating_add(3).min(self.before.len());
         let mut bytes = Vec::new();
-        bytes.try_reserve_exact((to - from) as usize).map_err(|_| {
+        let mut lines = super::line_reads::LineRead::from_params(&self.params)?;
+        bytes.try_reserve_exact(if lines.is_some() { 0 } else { (to - from) as usize }).map_err(|_| {
             KernelError::Operation("Insufficient memory for the requested file range".into())
         })?;
         let mut buffer = [0u8; 128 * 1024];
@@ -78,7 +79,8 @@ impl FileReadTask {
             let next = position + count as u64;
             let left = from.max(position);
             let right = to.min(next);
-            if left < right {
+            if let Some(lines) = &mut lines { lines.push(&buffer[..count])?; }
+            else if left < right {
                 bytes.extend_from_slice(
                     &buffer[(left - position) as usize..(right - position) as usize],
                 );
@@ -106,6 +108,10 @@ impl FileReadTask {
             &self.resource_path,
             &state,
         )?;
+        if let Some(lines) = lines {
+            return Ok(PreparedFileRead { value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
+                "missing":false,"readVersion":version,"content":lines.content(position)}), state, after });
+        }
         let left = (self.start - from) as usize;
         let right = (self.end - from) as usize;
         let mut start = left;
@@ -196,7 +202,7 @@ impl Storage {
             })
             .transpose()?
             .unwrap_or(before.len().saturating_sub(start));
-        if response && length > MAX_BLOB_RESPONSE_BYTES as u64 {
+        if response && super::line_reads::LineRead::from_params(params)?.is_none() && length > MAX_BLOB_RESPONSE_BYTES as u64 {
             return Err(KernelError::Operation(
                 "file is larger than one response frame; request a byte range".into(),
             ));

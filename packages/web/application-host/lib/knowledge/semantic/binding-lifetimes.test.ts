@@ -51,7 +51,8 @@ it('reports the failed decision route and uses a corrected path without exposing
   const signal = new AbortController().signal;
   const call = { signal, cancelled: false, request: async (input: Parameters<InferenceCall['request']>[0]) => {
     await input.check(signal);
-    return input.connection.fetch(input.destination, input.init);
+    const { dispatcher: _dispatcher, ...requestInit }: RequestInit & { dispatcher?: unknown } = input.init;
+    return input.connection.fetch(input.destination, requestInit);
   } } as unknown as InferenceCall;
   const decide = async () => {
     const captured = await owner.capture('explore');

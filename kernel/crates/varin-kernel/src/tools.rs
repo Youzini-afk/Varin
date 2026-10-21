@@ -342,6 +342,8 @@ struct FileReadArgs {
     #[serde(default)]
     offset: u64,
     length: Option<u64>,
+    start_line: Option<u64>,
+    end_line: Option<u64>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -436,6 +438,7 @@ enum ResourceOperation {
 }
 impl ResourceOperation {
     fn parse(kind: ToolKind, args: &Value) -> Result<Self, ExecutionError> {
+        let explicit_offset = args.get("offset").is_some();
         if args
             .as_object()
             .is_some_and(|object| object.values().any(Value::is_null))
@@ -516,6 +519,13 @@ impl ResourceOperation {
             Self::FileRead(args) => {
                 normalize_separators(&mut args.path);
                 normalized_path(&args.path, false)?;
+                if args.start_line.is_some() || args.end_line.is_some() {
+                    if explicit_offset || args.length.is_some()
+                        || args.start_line.is_none_or(|line| line == 0)
+                        || args.end_line.is_some_and(|line| line < args.start_line.unwrap_or(1)) {
+                        return Err(ExecutionError::new("invalid_tool_arguments", "Use positive, inclusive startLine/endLine without offset or length"));
+                    }
+                }
             }
             Self::FileMutation(mutation) => {
                 normalize_separators(match mutation {
@@ -679,6 +689,8 @@ impl ResourceOperation {
                 if let Some(length) = args.length {
                     params["length"] = json!(length);
                 }
+                if let Some(line) = args.start_line { params["startLine"] = json!(line); }
+                if let Some(line) = args.end_line { params["endLine"] = json!(line); }
                 ("file.read", params)
             }
             Self::FileRead(args) => {
@@ -783,6 +795,7 @@ pub(crate) fn fixed_read_fixture(
     binding: ToolBinding,
     path: &str,
     cancellation: CancellationToken,
+    lines: bool,
 ) -> (ResourceCall, mpsc::Receiver<Result<Value, ResourceFailure>>) {
     let (sender, receiver) = mpsc::channel();
     (
@@ -799,8 +812,10 @@ pub(crate) fn fixed_read_fixture(
             binding,
             operation: ResourceOperation::FileRead(FileReadArgs {
                 path: path.into(),
-                offset: 1,
-                length: Some(3),
+                offset: if lines { 0 } else { 1 },
+                length: if lines { None } else { Some(3) },
+                start_line: lines.then_some(2),
+                end_line: lines.then_some(2),
             }),
             authorize_only: false,
             expected_resource_key: None,
@@ -2593,7 +2608,9 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["path", "readVersion", "edits"],
         ),
         ToolKind::FileRead => (
-            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0}}),
+            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0},
+                "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use with optional inclusive endLine instead of offset/length."},
+                "endLine":{"type":"integer","minimum":1,"description":"Last line, inclusive. Requires startLine."}}),
             vec!["path"],
         ),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
@@ -2743,6 +2760,8 @@ pub(crate) fn prepare_resource(
         if let Some(length) = args.length {
             params["length"] = json!(length);
         }
+        if let Some(line) = args.start_line { params["startLine"] = json!(line); }
+        if let Some(line) = args.end_line { params["endLine"] = json!(line); }
         let (grant, authorized) = storage.authorize(
             Some(&request.binding.grant_id),
             epoch,
@@ -3309,6 +3328,8 @@ impl ResourceOperation {
                 path: args.path.clone(),
                 offset: args.offset,
                 length: args.length,
+                start_line: args.start_line,
+                end_line: args.end_line,
             },
             Self::LanguageQuery(args) => A::LanguageSource {
                 path: args.path.clone(),
@@ -3358,10 +3379,14 @@ impl ResourceOperation {
                 path,
                 offset,
                 length,
+                start_line,
+                end_line,
             } => Self::FileRead(FileReadArgs {
                 path,
                 offset,
                 length,
+                start_line,
+                end_line,
             }),
             A::LanguageSource { path, derived_view } => {
                 Self::LanguageQuery(LanguageQueryArgs::source_descriptor(path, derived_view))

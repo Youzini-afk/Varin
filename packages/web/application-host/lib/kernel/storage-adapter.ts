@@ -1375,8 +1375,10 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
           }
           result[file] = state;
           done += 1;
-          options?.onProgress?.(done, uniqueFiles.length);
         }
+        // Own every receipt in the returned batch before notifying observers:
+        // a stale capture or cancellation can throw from this callback.
+        options?.onProgress?.(done, uniqueFiles.length);
       }
       const states = applyIndexModes(result, options?.indexModes);
       this.captureOwners.set(states, acquired);

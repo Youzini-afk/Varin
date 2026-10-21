@@ -18,7 +18,7 @@ import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { ContextPreparer } from './thread-context.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate } from './protocol.generated.js';
+import type { ChildPreparationProgress, DelegatedExecution, InputResourcePreparation, KernelWorkingResultCandidate } from './protocol.generated.js';
 
 export interface ThreadCollaborationOwners {
   kernel: KernelClient;
@@ -295,7 +295,7 @@ export class ThreadCollaboration {
       branchId: fixed.branch_id, revision: fixed.revision, tools,
       ...(fixed.environment_run_id ? { environmentRunId: fixed.environment_run_id } : {}) };
   }
-  private async prepareSource(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
+  private async prepareSource(child: DelegatedExecution, signal: AbortSignal, onProgress?: (progress: ChildPreparationProgress) => void): Promise<DelegatedExecution> {
     if (child.source?.kind === 'ready' || child.source?.kind === 'shared' || child.source?.kind === 'absent') return child;
     const original = child.trigger.kind === 'dispatch' ? child.source?.handoff?.source : child.source_basis?.source;
     if (original?.resource_owner.kind === 'managed_host') {
@@ -320,7 +320,7 @@ export class ThreadCollaboration {
     try {
       const context = await storageAdapter.contextFromBranchGrant({ grant, owningWorkspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id });
       const prepared = await prepareChildSourceStore(child, {
-        store: new KernelWorkingStateRootStore(context), capture: sourceCaptureOwners,
+        store: new KernelWorkingStateRootStore(context), capture: sourceCaptureOwners, ...(onProgress ? { onProgress } : {}),
         physical: async root => new KernelWorkingStateRootStore(await storageAdapter.contextFromSourceGrant({
           grant, owningWorkspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id,
           rootId: root.rootId, canonicalRoot: root.canonicalRoot,
@@ -530,10 +530,33 @@ export class ThreadCollaboration {
     const { runtime, prepareContext } = this.owners;
     let child = admitted;
     let stage = 'Preparing child source';
+    let pendingProgress: ChildPreparationProgress | undefined;
+    let writingProgress: Promise<void> | undefined;
+    let progressKey = '';
+    const drainProgress = (): Promise<void> => {
+      if (writingProgress) return writingProgress;
+      writingProgress = (async () => {
+        while (pendingProgress && !signal.aborted) {
+          const value = pendingProgress; pendingProgress = undefined;
+          try { await runtime.childPreparationProgress(admitted.execution_id, value, signal); }
+          catch (error) { if (!signal.aborted) this.owners.onError(admitted.execution_id, error); }
+        }
+      })().finally(() => { writingProgress = undefined; if (pendingProgress && !signal.aborted) void drainProgress(); });
+      return writingProgress;
+    };
+    const progress = (value: ChildPreparationProgress) => {
+      // Persist visible percentage changes and phase boundaries, coalescing fast
+      // file batches into the latest observation instead of one event per file.
+      const key = `${value.phase}:${value.total === undefined ? '' : value.total ? Math.floor(100 * value.completed! / value.total) : 100}`;
+      if (key === progressKey || signal.aborted) return;
+      progressKey = key; pendingProgress = value; void drainProgress();
+    };
     try {
       if (child.state === 'preparing' && !child.receipt && !child.report) {
-        child = await this.prepareSource(child, signal);
+        progress({ phase: 'inventory' });
+        child = await this.prepareSource(child, signal, progress);
         stage = 'Preparing child context';
+        progress({ phase: 'context' });
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
         const checkpoint = child.trigger.kind !== 'dispatch' ? await runtime.context(child.child_branch_id, signal) : null;
@@ -554,6 +577,8 @@ export class ThreadCollaboration {
         }
         signal.throwIfAborted();
         stage = 'Admitting child execution';
+        progress({ phase: 'admission' });
+        while (writingProgress || pendingProgress && !signal.aborted) await drainProgress();
         child = await runtime.prepareChild({ executionId: child.execution_id, source: source ? { resourceOwner: source.resourceOwner, mode: source.mode, liveRoot: source.liveRoot ?? null,
           workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, branchId: source.branchId ?? null, revision: source.revision ?? null,
           ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) } : null,
@@ -581,6 +606,8 @@ export class ThreadCollaboration {
       }
       throw error;
     } finally {
+      pendingProgress = undefined;
+      await writingProgress;
       if (!ownerSignal.aborted) {
         child = await runtime.childExecution(child.execution_id, ownerSignal);
         if (child.report && child.trigger.kind === 'dispatch') this.owners.kernel.releaseChildToolHandoff(child.parent_run_id, child.child_operation_id);

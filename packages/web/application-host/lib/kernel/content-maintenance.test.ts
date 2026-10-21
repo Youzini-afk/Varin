@@ -2,6 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createContentMaintenance } from './content-maintenance.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { AgentRuntimeStreamEvent, ContentCollectionReport } from './protocol.generated.js';
+import { KERNEL_PROTOCOL_VERSION } from './protocol.generated.js';
 
 afterEach(() => vi.useRealTimers());
 const report = (extra: Partial<ContentCollectionReport> = {}): ContentCollectionReport => ({
@@ -18,7 +19,7 @@ function fixture() {
   const onError = vi.fn();
   const maintenance = createContentMaintenance({ runtime, onError });
   return { maintenance, collectContent, onError, removed,
-    activity: () => event({ v: 54, kind: 'runtime-event', kernelEpoch: 'test', stream: 'durable', cursor: 1 }) };
+    activity: () => event({ v: KERNEL_PROTOCOL_VERSION, kind: 'runtime-event', kernelEpoch: 'test', stream: 'durable', cursor: 1 }) };
 }
 
 it('coalesces deletion requests and resumes after original execution produces its completion event', async () => {

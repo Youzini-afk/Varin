@@ -25,8 +25,8 @@ interface CandidateState {
 }
 
 export class CaptureInventoryChangedError extends Error {
-  constructor() {
-    super('Directory capture inventory changed during capture');
+  constructor(path?: string) {
+    super(`Directory capture inventory changed during capture${path ? `: ${path}` : ''}`);
     this.name = 'CaptureInventoryChangedError';
   }
 }
@@ -78,11 +78,13 @@ export const createCaptureInventory = () => {
   let revision = 0;
   let sequence = 0;
   let committedSequence = 0;
+  let lastChangedPath: string | undefined;
   const dirty = new Set<string>();
   const candidates = new WeakMap<CaptureInventoryCandidate, CandidateState>();
 
   const reset = (): void => {
     revision += 1;
+    lastChangedPath = undefined;
     baseline = undefined;
     dirty.clear();
   };
@@ -94,7 +96,7 @@ export const createCaptureInventory = () => {
 
   const assertCurrent = (state: CandidateState): void => {
     if (state.revision !== revision || state.sequence <= committedSequence || !owner || !sameOwner(state.owner, owner)) {
-      throw changed();
+      throw new CaptureInventoryChangedError(lastChangedPath);
     }
   };
 
@@ -114,6 +116,7 @@ export const createCaptureInventory = () => {
       catch { reset(); return; }
       if (!file) { reset(); return; }
       if (excluded(file)) return;
+      lastChangedPath = file;
       revision += 1;
       // A cold capture already scans the entire namespace. Only a committed
       // baseline needs dirty scopes retained between capture attempts.
@@ -142,6 +145,8 @@ export const createCaptureInventory = () => {
       candidates.set(candidate, state);
       return candidate;
     },
+
+    assertCurrent(candidate: CaptureInventoryCandidate): void { stateFor(candidate); },
 
     async verify(candidate: CaptureInventoryCandidate, position: CaptureInventoryPosition, scan: CaptureInventoryScan): Promise<void> {
       const state = stateFor(candidate);

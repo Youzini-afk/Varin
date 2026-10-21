@@ -478,6 +478,10 @@ pub(crate) enum SourceResourceAction {
         path: String,
         offset: u64,
         length: Option<u64>,
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        start_line: Option<u64>,
+        #[serde(default, skip_serializing_if="Option::is_none")]
+        end_line: Option<u64>,
     },
     LanguageSource {
         path: String,

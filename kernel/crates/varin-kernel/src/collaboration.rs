@@ -478,6 +478,7 @@ impl ToolExecutor for CollaborationTools {
             } else {
                 let projection = |execution: &varin_runtime::catalog::delegated::DelegatedExecution| -> Result<serde_json::Value, ExecutionError> {
                     let mut value = json!({"execution_id":execution.execution_id,"child_operation_id":execution.child_operation_id,"trigger":execution.trigger,"state":execution.state(),"receipt":execution.receipt,"report":execution.report,"code_result":execution.code_result,"resources_released":execution.resources_released});
+                    if execution.state() == "preparing" { value["preparation"] = json!(execution.preparation); }
                     if execution.report.is_none() {
                         if let Some(receipt) = &execution.receipt {
                             if let Some(launch) = db.launch_metadata(&receipt.run_id).map_err(error)? {

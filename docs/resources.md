@@ -73,6 +73,8 @@ Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory
 Agent 的物理文件读取在后台流式哈希，只保留所请求的片段；完整读取和部分读取都返回原文件的 `readVersion`。
 该版本由根、路径与内容状态决定，同一文件跨 Run 保持稳定；读写权限由原 grant 独立校验。UTF-8 文本的片段边界会扩展到完整字符，
 翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。
+`file_read` 也接受从 1 开始、包含末行的 `startLine` / `endLine`，可直接承接搜索命中的行号；省略末行读取至文件末尾。
+行范围与字节范围互斥，保留原换行与完整文件版本，返回实际字节位置和下一行。物理文件与固定来源使用相同的行选择语义。
 文件工具入口将 Windows 反斜杠转换为资源路径分隔符。缺失文件的版本记录“目标不存在”这一条件；
 目录读取返回 `not_a_file`，目录内容通过 `file_list` 获取。
 `file_write` 创建新文件时可省略 `readVersion`；替换已有文件与文本编辑使用读取所得版本。文本修改准备在一次读取中
@@ -98,6 +100,8 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 `process_stop` 随进程启动能力常驻，使用 `processId` 请求原 guardian 停止进程及其子进程。同一 Thread/branch
 在相同来源上的后续 Run 也可停止原进程。回执区分已请求停止与已确认退出；`wait_process` 等待原退出回执，
 `process_read` 继续读取保留的输出。
+输出块保留精确的 `bytesBase64` 和游标；完整 UTF-8 文本块同时返回 `text`，二进制或跨字符边界的块由原始字节重组。
+进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。

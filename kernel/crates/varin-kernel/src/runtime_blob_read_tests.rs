@@ -279,8 +279,12 @@ fn kernel_drop_joins_blob_reader_before_releasing_storage_lock() {
 
 #[test]
 fn fixed_resource_read_uses_real_blob_worker_and_original_reply() {
+    fixed_resource_read(false);
+    fixed_resource_read(true);
+}
+fn fixed_resource_read(lines: bool) {
     let mut f = Fixture::new();
-    let body = b"fixed body";
+    let body = "fixed body\r\n中文🙂\r\nlast".as_bytes();
     fs::write(f.work().join("body"), body).unwrap();
     let captured = f.capture("body", true, "fixed-read");
     let state: Value = serde_json::from_str(captured["stateJson"].as_str().unwrap()).unwrap();
@@ -298,7 +302,7 @@ fn fixed_resource_read_uses_real_blob_worker_and_original_reply() {
     f.short("authority.grant.issue", json!({"grantId":"fixed-reader","hostGeneration":GENERATION,"capabilities":["storage.read"],"pathScopes":[""],"storageIdentity":fs::canonicalize(f.directory.0.join("store")).unwrap(),"owningWorkspace":"workspace","executionWorkspace":"workspace","runId":"run","threadId":"thread"}), None);
     let binding: tools::ToolBinding = serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"fixed-reader","runId":"run","threadId":"thread","workspaceId":"workspace","executionWorkspaceId":"workspace","rootId":null,"fileSource":{"branchId":"fixed","revision":branch["headRevision"]},"sourceMode":"fixed_branch","materializedSource":null,"liveRoot":null,"environmentRunId":null,"enabledTools":["file_read"]})).unwrap();
     let cancel = varin_runtime::execution::CancellationToken::default();
-    let (call, reply) = tools::fixed_read_fixture(binding, "body", cancel);
+    let (call, reply) = tools::fixed_read_fixture(binding, "body", cancel, lines);
     let task = match tools::prepare_resource(
         f.kernel.storage.as_mut().unwrap(),
         EPOCH,
@@ -346,8 +350,8 @@ fn fixed_resource_read_uses_real_blob_worker_and_original_reply() {
         .recv_timeout(WAIT)
         .unwrap()
         .unwrap_or_else(|failure| panic!("{}", failure.error));
-    assert_eq!(value["content"]["text"], "ixe");
+    assert_eq!(value["content"]["text"], if lines { "中文🙂\r\n" } else { "ixe" });
     assert!(value["content"].get("bytesBase64").is_none());
-    assert_eq!(value["content"]["offset"], 1);
-    assert_eq!(value["content"]["nextOffset"], 4);
+    assert_eq!(value["content"]["offset"], if lines { 12 } else { 1 });
+    assert_eq!(value["content"]["nextOffset"], if lines { 24 } else { 4 });
 }

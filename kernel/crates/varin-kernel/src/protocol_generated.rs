@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 54;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 55;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2580,6 +2580,13 @@ pub(crate) struct ChildFailParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ChildProgressParams {
+    pub(crate) execution_id: String,
+    pub(crate) progress: varin_runtime::catalog::delegated::ChildPreparationProgress,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct TreeCancelParams {
     pub(crate) target: varin_runtime::catalog::dispatch::TreeCancelTarget,
     pub(crate) expected_parent_thread_id: Option<String>,
@@ -4767,6 +4774,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.fail" => serde_json::from_value::<ChildFailParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.child.progress" => serde_json::from_value::<ChildProgressParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.child.cancel" => serde_json::from_value::<OperationParams>(params.clone())

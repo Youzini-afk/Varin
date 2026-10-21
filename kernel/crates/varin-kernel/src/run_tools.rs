@@ -179,6 +179,7 @@ pub(crate) fn builtin_definitions(
     );
     tools = crate::questions::builtin_schemas(tools);
     tools.extend(crate::collaboration::builtin_schemas());
+    tools.push(crate::child_cancel::builtin());
     tools.extend(crate::capability_tools::definitions());
     tools.extend(crate::family_tools::builtin_schemas());
     tools.extend([

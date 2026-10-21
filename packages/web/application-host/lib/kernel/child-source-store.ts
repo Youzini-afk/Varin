@@ -1,6 +1,6 @@
 /** Storage-side child preparation. The caller has already admitted the original source
  * owner; these functions neither create a Catalog Run nor mint a resource grant. */
-import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource } from './protocol.generated.js';
+import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource, ChildPreparationProgress } from './protocol.generated.js';
 import type { WorkingStateRootStore, WorkingStatePin } from '../harness/working-state/types.js';
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
@@ -15,6 +15,7 @@ export interface ChildSourcePreparation {
 export interface ChildSourceStoreOwners {
   store: WorkingStateRootStore;
   capture: StableSourcePreparationOwners;
+  onProgress?(progress: ChildPreparationProgress): void;
   /** The original physical handoff, checked by the source owner before opening it. */
   physical(root: { rootId: string; canonicalRoot: string }): Promise<WorkingStateRootStore>;
 }
@@ -54,9 +55,12 @@ export async function prepareChildSourceStore(
         throw new Error('Child source Documents authority changed');
       }
       store = await owners.physical(physical);
+      let phase: ChildPreparationProgress['phase'] = 'inventory';
       const captured = await captureStableSourceBaseline({ store, workspaceId: workspace,
         captureWorkspaceId: resolved.workspaceId, branchId: sourceBranch, directory,
-        captureScopes: [], content: { mode: 'saved-files' }, signal }, owners.capture);
+        captureScopes: [], content: { mode: 'saved-files' }, signal,
+        onPhase: value => { phase = value; owners.onProgress?.({ phase }); },
+        onProgress: (completed, total) => owners.onProgress?.({ phase, completed, total }) }, owners.capture);
       provenance = captured.provenance;
     }
   }

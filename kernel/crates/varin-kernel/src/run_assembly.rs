@@ -399,6 +399,9 @@ impl RunAssembly {
                 resources.clone(),
                 self.tools.bridge(),
             ));
+            declarations.push(crate::child_cancel::declaration(crate::agent_runtime::control_commands::ControlCommands {
+                runtime: runtime.clone(), resources: resources.clone(), models: self.models.clone(), tools: self.tools.clone(),
+            }));
             if let Some(source) = collaboration_source {
                 declarations.extend(crate::process_wait::declarations(
                     runtime.catalog(),

@@ -3205,7 +3205,11 @@ export function createExploreQueryRun(
     const packWeights = weightByGroupId(groups, buildTermWeightTable(groups, byFile, launchedCoverage, searchVariantsOf));
     const locatingDone = !allSites && locating && hasVerifiedRegister(prepared);
     const bothEndsDone = !allSites && wantsBothEnds && hasBothConnectsEnds(prepared);
-    const chosenPack = selectionApplied ? packChosenGroups() : undefined;
+    // A selected decision owner must actually select evidence. Failure, missing
+    // answers and deferral cannot turn every collected candidate into an answer.
+    // Explicit user delivery still permits the source-only material projection.
+    const chosenPack = selectionApplied || (options.guided || fastDecisionDetails) && deliveryReason !== 'user'
+      ? packChosenGroups() : undefined;
     const packed = chosenPack
       ? chosenPack.packed
       : packComplementary(

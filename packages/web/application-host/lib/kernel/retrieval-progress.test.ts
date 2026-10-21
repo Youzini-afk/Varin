@@ -13,6 +13,9 @@ it.each([false, true])('publishes evidence and can finish it while model work is
     await run.waitForViews();
     progress?.phase('selecting');
     await gate;
+    if (!run.deliveryReason()) run.applySelection([{ id: 'selected-frame', purpose: 'direct evidence',
+      views: run.collect().views.map(view => ({ viewId: view.viewId, required: false })),
+    }]);
     return {};
   });
   const pipelines = createRetrievalPipelineOwner({ configurationId: 'test', model: {

@@ -37,7 +37,7 @@ async function fixture() {
   await host.start();
   const context = await adapter.context('workspace', 'capture-review');
   const store = new KernelWorkingStateRootStore(context);
-  return { root, workspace, storageRoot, host, context, store, requests, replies, captureRequest };
+  return { root, workspace, storageRoot, host, context, store, requests, replies, captureRequest, probe };
 }
 
 it('real captureDirectory batches files through capture and retains publishable object owners', async () => {
@@ -63,6 +63,21 @@ it('real captureDirectory batches files through capture and retains publishable 
   await fs.writeFile(path.join(f.workspace, 'one.txt'), 'changed bytes');
   await expect(f.store.captureDirectory(f.workspace, ['one.txt'], { store: false, indexModes, verifyCaptured: states })).rejects.toThrow(/changed/);
 }, 30_000);
+
+it('a rejected progress observation releases every owner in the returned capture batch', async () => {
+  const f = await fixture();
+  for (const file of ['a', 'b', 'c']) await fs.writeFile(path.join(f.workspace, file), `body ${file}`);
+  await expect(f.store.captureDirectory(f.workspace, ['a', 'b', 'c'], {
+    onProgress: () => { throw new Error('source changed during capture'); },
+  })).rejects.toThrow('source changed during capture');
+  const request = await f.captureRequest;
+  const result = f.probe.received.find(value => value.id === request.id)?.result as { entries: Array<{ ownerId: string; stateJson: string }> };
+  expect(result.entries).toHaveLength(3);
+  for (const entry of result.entries) {
+    expect(f.requests.some(value => value.method === 'storage.blob.release' && value.params.ownerId === entry.ownerId)).toBe(true);
+    await expect(f.context.client.getBlob(JSON.parse(entry.stateJson).objectHash, { ownerId: entry.ownerId }, { offset: 0, length: 100 })).rejects.toThrow();
+  }
+});
 
 it('captureDirectory copy/hash work allows the Storage health request to finish before capture receipt', async () => {
   const f = await fixture();

@@ -714,6 +714,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  childPreparationProgress(executionId: string, progress: import('./protocol.generated.js').ChildPreparationProgress, signal?: AbortSignal): Promise<{ updated: boolean }> {
+    return this.kernel.agentRuntimeRequest('runtime.child.progress', { executionId, progress }, signal);
+  }
   failChild(
     executionId: string,
     code:

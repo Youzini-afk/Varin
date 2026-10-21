@@ -105,6 +105,7 @@ pub fn is_always_declared(name: &str) -> bool {
             | "script_close"
             | "dispatch"
             | "child_status"
+            | "child_cancel"
             | "child_report"
             | "wait_child"
             | "threads"

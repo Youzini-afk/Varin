@@ -264,6 +264,32 @@ fn partial_utf8_read_has_the_full_file_version_and_advances_on_character_boundar
 }
 
 #[test]
+fn line_reads_preserve_original_bytes_and_full_file_version() {
+    let mut f = Fixture::new();
+    let body = "first\r\n中文🙂\r\nlast\n";
+    fs::write(f.root.join("work/body"), body).unwrap();
+    let full = f.read(json!({"path":"body"}));
+    let selected = f.read(json!({"path":"body","startLine":2,"endLine":2}));
+    assert_eq!(selected["content"]["text"], "中文🙂\r\n");
+    assert_eq!(selected["content"]["offset"], 7);
+    assert_eq!(selected["content"]["nextOffset"], 19);
+    assert_eq!(selected["content"]["nextLine"], 3);
+    assert_eq!(selected["readVersion"], full["readVersion"]);
+    let tail = f.read(json!({"path":"body","startLine":3}));
+    assert_eq!(tail["content"]["text"], "last\n");
+    assert_eq!(tail["content"]["eof"], true);
+    let missing = f.read(json!({"path":"body","startLine":8,"endLine":9}));
+    assert_eq!(missing["content"]["text"], "");
+    assert_eq!(missing["content"]["offset"], body.len());
+    for args in [json!({"path":"body","startLine":0}),json!({"path":"body","endLine":2}),
+        json!({"path":"body","startLine":3,"endLine":2}),json!({"path":"body","startLine":1,"offset":0})] {
+        assert!(f.try_call("file_read", args).is_err());
+    }
+    fs::write(f.root.join("work/body"), "changed\r\n中文🙂\r\nlast\n").unwrap();
+    assert_ne!(f.read(json!({"path":"body","startLine":2,"endLine":2}))["readVersion"], full["readVersion"]);
+}
+
+#[test]
 fn directory_pages_cover_the_remaining_paths_without_entering_excluded_copies() {
     let mut f = Fixture::new();
     fs::create_dir_all(f.root.join("work/a/sub")).unwrap();

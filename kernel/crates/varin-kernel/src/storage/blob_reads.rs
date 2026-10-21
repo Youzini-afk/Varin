@@ -147,6 +147,23 @@ impl ImmutableReadTask {
             }
         }
         self.checkpoint(BlobReadPhase::Read)?;
+        if let Some(mut lines) = super::line_reads::LineRead::from_params(&self.params)? {
+            file.seek(SeekFrom::Start(0))?;
+            let mut buffer = [0u8; 128 * 1024];
+            while !lines.complete() {
+                self.check_cancelled()?;
+                let count = file.read(&mut buffer)?;
+                if count == 0 { break; }
+                lines.push(&buffer[..count])?;
+            }
+            let mut value = lines.content(self.byte_length);
+            value["hash"] = json!(self.hash);
+            if let Some((path, source)) = &self.file_output {
+                value = json!({"path":path,"source":source,"missing":false,"content":value});
+            }
+            self.checkpoint(BlobReadPhase::Encoded)?;
+            return Ok(PreparedImmutableRead { value, verified: self.verify });
+        }
         file.seek(SeekFrom::Start(self.offset))?;
         let mut bytes = vec![0u8; self.length];
         for part in bytes.chunks_mut(128 * 1024) {
@@ -222,12 +239,13 @@ impl Storage {
             })?,
             None => byte_length.saturating_sub(offset),
         };
-        if byte_length > MAX_BLOB_RESPONSE_BYTES as u64 && params.get("length").is_none() {
+        let line_read = super::line_reads::LineRead::from_params(params)?.is_some();
+        if !line_read && byte_length > MAX_BLOB_RESPONSE_BYTES as u64 && params.get("length").is_none() {
             return Err(KernelError::Operation(
                 "content object is larger than one response frame; request a byte range".into(),
             ));
         }
-        if length > MAX_BLOB_RESPONSE_BYTES as u64 {
+        if !line_read && length > MAX_BLOB_RESPONSE_BYTES as u64 {
             return Err(KernelError::Operation(
                 "requested byte range is larger than one response frame".into(),
             ));

@@ -13,7 +13,7 @@ import { directoryBaselineFingerprint, gitBaselineFingerprint, withAncestorDirec
 export class SourceCaptureError extends Error {
   readonly retryable = true;
   constructor(message: string) {
-    super(`Source baseline is unavailable (baseline-changed): ${message}`);
+    super(`Source changed while preparing its snapshot: ${message}. Retry after the writes finish, or select a narrower project folder.`);
     this.name = 'SourceCaptureError';
   }
 }
@@ -29,9 +29,10 @@ export interface StableDirectoryCaptureInput {
   /** A caller may already have inspected Git for the immutable-baseline reuse path. */
   inventory?: BaselineInventory;
   /** Original Documents observation may prove namespace continuity, never file bytes. */
-  directoryInventory?: { read(): Promise<readonly string[]>; verify(): Promise<void> };
+  directoryInventory?: { read(): Promise<readonly string[]>; verify(): Promise<void>; assertCurrent?(): void };
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
+  onPhase?: (phase: 'inventory' | 'capture' | 'verify' | 'publish') => void;
   changed?: (detail: string) => Error;
 }
 
@@ -46,6 +47,7 @@ export interface StableDirectoryCapture {
 export async function captureStableDirectoryBaseline(input: StableDirectoryCaptureInput): Promise<StableDirectoryCapture> {
   const { store, directory, signal } = input;
   const changed = input.changed ?? (detail => new SourceCaptureError(detail));
+  input.onPhase?.('inventory');
   const inventory = input.inventory ?? await input.inspectInventory(directory, signal);
   const scopes = [...new Set(input.captureScopes)].sort();
   signal?.throwIfAborted();
@@ -71,10 +73,17 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
   let captured: Record<string, RecoveryState> | undefined;
   try {
     const options = { ...(signal ? { signal } : {}), ...(inventory.kind === 'git' && inventory.indexModes ? { indexModes: inventory.indexModes } : {}) };
-    captured = await store.captureDirectory(directory, paths, { ...options, ...(input.onProgress ? { onProgress: input.onProgress } : {}) });
+    const onProgress = (completed: number, total: number) => {
+      if (inventory.kind !== 'git') input.directoryInventory?.assertCurrent?.();
+      input.onProgress?.(completed, total);
+    };
+    input.onPhase?.('capture');
+    captured = await store.captureDirectory(directory, paths, { ...options, onProgress });
     signal?.throwIfAborted();
     const capturedPaths = Object.keys(captured).sort();
-    const observed = capturedPaths.length ? await store.captureDirectory(directory, capturedPaths, { ...options, store: false, verifyCaptured: captured }) : {};
+    input.onPhase?.('verify');
+    const observed = capturedPaths.length ? await store.captureDirectory(directory, capturedPaths, { ...options, store: false, verifyCaptured: captured,
+      onProgress }) : {};
     const different = capturedPaths.filter(file => stateIdentity(captured![file] ?? { kind: 'missing' }) !== stateIdentity(observed[file] ?? { kind: 'missing' }));
     if (different.length) throw changed(`captured content or metadata: ${different.slice(0, 8).join(',')}`);
     // Inventory follows the complete verification pass. An insertion during the
@@ -139,6 +148,7 @@ export interface StableSourceCaptureInput {
   editorDrafts?: readonly { path: string; content: Buffer }[];
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
+  onPhase?: NonNullable<StableDirectoryCaptureInput['onPhase']>;
 }
 
 export interface StableSourceCaptureResult {
@@ -221,6 +231,7 @@ export async function captureStableSourceBaseline(
       ...(resources ? { resources: { ...resources.resources, coverage: captured.consistency === 'stable-capture' ? { kind: 'complete' as const }
         : { kind: 'selected' as const, paths: [...new Set([...Object.keys(effective.effectiveState), ...resources.observedPaths])].sort(),
           subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || effective.effectiveState[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
+    input.onPhase?.('publish');
     const branch = await store.createBranch(input.workspaceId, input.branchId, effective.effectiveState, captured.baseRef,
       effective.changedPaths, scopes, { sourceProvenance: provenance });
     result = { branch, provenance };

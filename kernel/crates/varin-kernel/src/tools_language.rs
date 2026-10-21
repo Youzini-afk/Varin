@@ -172,6 +172,8 @@ impl KernelToolExecutor {
             path: path.into(),
             offset: 0,
             length: None,
+            start_line: None,
+            end_line: None,
         });
         let value = self
             .resources
@@ -223,6 +225,8 @@ impl KernelToolExecutor {
                         path: path.into(),
                         offset,
                         length: Some(crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64),
+                        start_line: None,
+                        end_line: None,
                     }),
                     false,
                     cancel,
@@ -277,6 +281,8 @@ impl KernelToolExecutor {
                     path: path.into(),
                     offset: 0,
                     length: None,
+                    start_line: None,
+                    end_line: None,
                 }),
                 false,
                 Some(key),

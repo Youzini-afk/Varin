@@ -382,7 +382,8 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
         const incomplete = explored.issues.length > 0 || Object.values(result.omissions).some(count => count > 0)
           || result.stages.some(entry => !['ready','empty','disabled'].includes(entry.status));
         result.status = incomplete ? 'partial' : result.snippets.length ? 'ready' : 'empty';
-        if (!result.snippets.length && result.stages.find(entry => entry.kind === 'keyword')?.status === 'failed') result.status = 'failed';
+        if (!result.snippets.length && result.stages.some(entry => entry.status === 'failed'
+          && (entry.kind === 'keyword' || entry.kind === 'model'))) result.status = 'failed';
         return structuredClone(result);
       } catch (error) {
         const failure = signal.aborted ? undefined : sourceFailureCode(error);

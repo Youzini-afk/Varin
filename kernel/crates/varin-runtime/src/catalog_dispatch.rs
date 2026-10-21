@@ -471,6 +471,9 @@ impl ChildDispatchSelection {
     /// are still assembled and checked by their owning tool directory in the kernel.
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
+        let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none())
+            .map(|preset| preset.id.as_str()).collect::<Vec<_>>().join(", ");
+        let available = if available.is_empty() { "none" } else { &available };
         let (mut tools, mode, instructions, model, avatar) = if let Some(id) = &input.preset {
             let preset = self
                 .catalog
@@ -478,13 +481,13 @@ impl ChildDispatchSelection {
                 .iter()
                 .find(|preset| &preset.id == id)
                 .ok_or_else(|| {
-                    RuntimeError::Invalid(format!("child preset {id} is not selected"))
+                    RuntimeError::Invalid(format!("child preset {id} is not selected. Available presets: {available}. Configure child agents in Settings > Agents, or omit preset to use the default delegation."))
                 })?;
             if let Some(failure) = &preset.unavailable {
                 return Err(RuntimeError::Invalid(format!(
-                    "child preset unavailable: {} ({})",
-                    failure.code,
-                    failure.capabilities.join(", ")
+                    "child preset {id} unavailable: {}{}. Available presets: {available}. Configure this child agent in Settings > Agents, or omit preset to use the default delegation.",
+                    failure.code, if failure.capabilities.is_empty() { String::new() }
+                        else { format!("; unavailable capabilities: {}", failure.capabilities.join(", ")) }
                 )));
             }
             if preset
@@ -584,9 +587,10 @@ impl ChildDispatchSelection {
             ));
         }
         if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
-            return Err(RuntimeError::Invalid(
-                "selected child tools require a private physical source; select isolated_write or source-compatible tools".into(),
-            ));
+            let physical = tools.iter().filter(|name| self.physical_tool(name)).cloned().collect::<Vec<_>>();
+            return Err(RuntimeError::Invalid(format!(
+                "selected child tools require a private physical source: {}. Use workMode=isolated_write, or exclude these tools for read_only.", physical.join(", ")
+            )));
         }
         tools.sort();
         model.connection_identity()?;

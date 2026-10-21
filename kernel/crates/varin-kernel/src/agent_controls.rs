@@ -1,7 +1,7 @@
 //! User answers and executor teardown wait on their own worker, never on the Agent actor.
 use super::*;
 
-pub(super) struct ControlCommands {
+pub(crate) struct ControlCommands {
     pub runtime: Arc<RunSupervisor>,
     pub resources: crate::tools::KernelResourceClient,
     pub models: Arc<crate::run_models::RunModels>,
@@ -93,7 +93,7 @@ impl ControlCommands {
         }
         Ok(None)
     }
-    fn admit_tree_cancel(
+    pub(crate) fn admit_tree_cancel(
         &self,
         target: varin_runtime::catalog::dispatch::TreeCancelTarget,
         expected_parent_thread_id: Option<&str>,

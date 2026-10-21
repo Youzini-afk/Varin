@@ -134,6 +134,17 @@ pub struct DelegatedExecution {
     pub terminal_head: Option<String>,
     pub resources_released: bool,
     pub cancel_requested: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preparation: Option<ChildPreparationProgress>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+pub struct ChildPreparationProgress {
+    pub phase: String,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub completed: Option<u64>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    pub total: Option<u64>,
 }
 impl DelegatedExecution {
     pub fn state(&self) -> &'static str {
@@ -267,6 +278,7 @@ pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
         terminal_head: None,
         resources_released: child.resources_released,
         cancel_requested: false,
+        preparation: None,
     };
     insert_execution(db, &execution, None)
 }
@@ -313,6 +325,8 @@ pub struct DelegatedExecutionView {
     pub terminal_head: Option<String>,
     pub resources_released: bool,
     pub cancel_requested: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preparation: Option<ChildPreparationProgress>,
 }
 pub struct DelegatedExecutionRead {
     agent_id: String,
@@ -386,6 +400,7 @@ impl DelegatedExecutionRead {
             terminal_head: execution.terminal_head,
             resources_released: execution.resources_released,
             cancel_requested: execution.cancel_requested,
+            preparation: execution.preparation,
         })
     }
 }
@@ -404,6 +419,24 @@ pub(super) fn hydrate_source(
     Ok(value)
 }
 impl Catalog {
+    pub fn child_preparation_progress(&mut self, id: &str, progress: ChildPreparationProgress) -> Result<bool> {
+        if !matches!(progress.phase.as_str(), "inventory" | "capture" | "verify" | "publish" | "context" | "admission")
+            || progress.completed.is_some() != progress.total.is_some()
+            || progress.completed.zip(progress.total).is_some_and(|(done,total)| done > total) {
+            return Err(RuntimeError::Invalid("invalid child preparation progress".into()));
+        }
+        let mut execution = execution(&self.db, id)?;
+        if execution.receipt.is_some() || execution.report.is_some() || execution.cancel_requested
+            || execution.preparation.as_ref() == Some(&progress) { return Ok(false); }
+        execution.preparation = Some(progress);
+        execution.revision += 1;
+        let tx = self.db.transaction()?;
+        execution.cursor = event(&tx, id, execution.revision, "child.preparation_progress",
+            json!({"child_operation_id":execution.child_operation_id}))?;
+        write_execution(&tx, &execution)?;
+        tx.commit()?;
+        Ok(true)
+    }
     pub fn delegated_execution(&self, id: &str) -> Result<DelegatedExecution> {
         execution(&self.db, id)
     }
@@ -946,6 +979,7 @@ impl Catalog {
             terminal_head: None,
             resources_released: false,
             cancel_requested: false,
+            preparation: None,
         };
         next.cursor = event(
             &tx,

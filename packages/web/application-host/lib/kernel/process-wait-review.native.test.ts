@@ -213,9 +213,10 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       readResult = responsesMetadataText(output?.output);
       // New observation registration must obey the same explicit revoke as reads.
       if (revoked !== 'none') tool(response, 'wait_process', { processId }, 4);
-      else done(response);
+      else tool(response, 'process_resize', { processId, cols: 100, rows: 30 }, 4);
     } else {
-      expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched',
+      if (revoked === 'none') expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched', reason: expect.stringContaining('The process has exited') });
+      else expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched',
         reason: revoked === 'original'
           ? expect.stringContaining('original process authority was revoked')
           : expect.stringContaining('process observation cancelled') });
@@ -245,6 +246,7 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     if (revoked === 'none') {
       expect(JSON.parse(readResult)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
       expect(readResult).toContain(Buffer.from('process-wait-real-output').toString('base64'));
+      expect(readResult).toContain('"text":"process-wait-real-output"');
       const history = await f.runtime.history(identity.branchId);
       expect(history.filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
       foreign = true;

@@ -206,8 +206,11 @@ impl ProcessWaitTools {
                 "Script environment input is private to its admitted cell",
             ));
         }
+        if process.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped) {
+            return Err(ExecutionError::new("process_exited", "The process has exited; input and terminal resize are no longer available. Use process_read to read its retained output."));
+        }
         if process.cancel_requested {
-            return Err(error("original process cancellation was requested"));
+            return Err(ExecutionError::new("process_stopping", "The process is stopping; input and terminal resize are no longer available. Use process_inspect or wait_process to observe its exit."));
         }
         Ok((id, input))
     }

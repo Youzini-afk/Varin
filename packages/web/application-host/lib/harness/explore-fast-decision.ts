@@ -96,7 +96,7 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
     if (result.failure) {
       details.status = result.failure.status;
       if (result.failure.note) details.note = result.failure.note;
-      throw new Error(result.failure.note ?? 'Selected decision request failed');
+      input.run.requestDelivery('failed');
     }
     const answers = new Map(result.answers.map(answer => [answer.id, answer]));
     judgments.set(id, answers);
@@ -128,28 +128,28 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
       const partition = await partitionExploreViews(all, retained, views => fits(selectionBatch(views)));
       details.unevaluatedMaterials = partition.oversized.length;
       if (partition.oversized.length) details.note = `Complete source views exceed the selected model input capacity: ${partition.oversized.map(view => `${view.path}:${view.startLine}-${view.endLine}`).join(', ')}.`;
-      let answeredSelection = false;
       for (const batch of partition.batches) {
         if (input.run.deliveryReason() || input.closing.requested()) break;
         const answers = await call(selectionBatch(batch));
         details.viewsJudged += batch.length;
+        let answeredSelection = false;
         for (const view of batch) {
           const answer = answers.get(`m:${view.viewId}`);
           if (answer?.kind !== 'choose' || !['keep', 'omit', 'defer'].includes(answer.choice ?? '')) continue;
           if (answer.choice !== 'defer') answeredSelection = true;
           decisions.set(view.viewId, answer.choice as 'keep' | 'omit' | 'defer');
         }
-      }
-      if (answeredSelection) {
-        const selected = new Map(retained.map(view => [view.viewId, view]));
-        for (const view of all) {
-          if (decisions.get(view.viewId) === 'keep') selected.set(view.viewId, view);
-          else if (decisions.get(view.viewId) === 'omit') selected.delete(view.viewId);
+        if (answeredSelection) {
+          const selected = new Map(input.run.selectedViews().map(view => [view.viewId, view]));
+          for (const view of all) {
+            if (decisions.get(view.viewId) === 'keep') selected.set(view.viewId, view);
+            else if (decisions.get(view.viewId) === 'omit') selected.delete(view.viewId);
+          }
+          input.run.applySelection([...selected.values()].map(view => ({
+            id: `material:${view.viewId}`, purpose: view.why,
+            views: [{ viewId: view.viewId, required: false }],
+          })));
         }
-        input.run.applySelection([...selected.values()].map(view => ({
-          id: `material:${view.viewId}`, purpose: view.why,
-          views: [{ viewId: view.viewId, required: false }],
-        })));
       }
       if (input.closing.requested() || input.run.deliveryReason()) break;
       const actions = await input.run.actionCandidates();
@@ -215,6 +215,7 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
             const choices = [...entries, deliver];
             const context = await contextFor(choices);
             const answer = (await call(nextBatch(context, choices))).get('next');
+            if (input.run.deliveryReason() || input.closing.requested()) return undefined;
             if (answer?.kind === 'choose' && choices.some(option => option.id === answer.choice)) winners.add(answer.choice!);
           }
           if (groups.length === 1) return [...winners][0];
@@ -228,6 +229,7 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
       details.actionsOffered += actions.length;
       const choice = await chooseNext();
       input.run.setJudgmentPending(false);
+      if (input.run.deliveryReason() || input.closing.requested()) break;
       if (materialsArrived()) continue;
       if (!choice) break;
       if (choice === 'deliver') { input.run.requestDelivery('decision'); break; }
@@ -253,6 +255,7 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
   } catch (error) {
     details.status = input.signal.aborted ? 'cancelled' : 'failed';
     details.note ??= error instanceof Error ? error.message : String(error);
+    input.run.requestDelivery('failed');
   } finally { input.run.setJudgmentPending(false); }
   details.executed = input.run.completedActionIds().filter(id => accepted.has(id));
   details.actionsExecuted = details.executed.length;

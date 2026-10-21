@@ -1418,6 +1418,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         tracked.inventory = { record, candidate };
         return candidate.paths;
       },
+      assertCurrent: (): void => {
+        current();
+        if (!tracked.inventory) throw new Error('Capture inventory was not prepared');
+        record.inventory.assertCurrent(tracked.inventory.candidate);
+      },
       verify: async (): Promise<void> => {
         current();
         const candidate = tracked.inventory?.candidate;

@@ -1506,7 +1506,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 54; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 55; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2627,6 +2627,13 @@ export interface ChildPrepareParams {
   inputPreparation?: InputResourcePreparation;
 }
 
+export interface ChildPreparationProgress { phase: 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission'; completed?: number; total?: number; }
+
+export interface ChildProgressParams {
+  executionId: string;
+  progress: ChildPreparationProgress;
+}
+
 export interface ChildFailParams {
   executionId: string;
   code: string;
@@ -2800,6 +2807,7 @@ export type DelegatedExecutionTrigger = { kind: 'dispatch' } | { kind: 'user_con
 export type ChildSourceBasis = { kind: 'refreshed'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef | null; incoming: { run_id: string; source: LaunchSource } } | { kind: 'working_result'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; result: ChildWorkingResultRef } | { kind: 'immutable_source'; source: LaunchSource; root: string; provenance: ChildSourceProvenance; pin: ChildSourcePin };
 
 export interface DelegatedExecution {
+  preparation?: ChildPreparationProgress;
   name?: string;
   agent_id?: string;
   execution_id: string;

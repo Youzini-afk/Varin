@@ -106,7 +106,7 @@ describe("runExploreFastDecisionLoop", () => {
     expect(result.snippets.some((snippet) => snippet.text.includes("export function inner"))).toBe(true);
   });
 
-  it.each(['missing', 'defer'] as const)("keeps source evidence when all material judgments %s", async answer => {
+  it.each(['missing', 'defer'] as const)("does not promote unselected candidates when all material judgments %s", async answer => {
     const run = newRun();
     run.start();
     const details = await runExploreFastDecisionLoop({
@@ -125,12 +125,13 @@ describe("runExploreFastDecisionLoop", () => {
     expect(details.status).toBe("used");
     if (answer === 'missing') expect(details.missing).toBeGreaterThan(0);
     expect(details.actionsExecuted).toBe(0);
-    // Missing answers selected nothing; the query still finishes on sources.
+    expect(run.collect().views.length).toBeGreaterThan(0);
+    run.applyFastDecision(details);
     const result = run.finish();
-    expect(result.snippets.length).toBeGreaterThan(0);
+    expect(result.snippets).toEqual([]);
   });
 
-  it("reports a provider failure honestly and leaves source-ranked material usable", async () => {
+  it("reports a provider failure without flooding delivery with unjudged candidates", async () => {
     const run = newRun();
     run.start();
     const details = await runExploreFastDecisionLoop({
@@ -145,9 +146,10 @@ describe("runExploreFastDecisionLoop", () => {
     });
     expect(details.status).toBe("failed");
     expect(details.note).toContain("503");
-    await run.waitForViews();
+    run.applyFastDecision(details);
     const result = run.finish();
-    expect(result.snippets.length).toBeGreaterThan(0);
+    expect(result.snippets).toEqual([]);
+    expect(run.deliveryReason()).toBe('failed');
   });
 
   it("keeps unknown usage dimensions unknown across progressive batches, including real zero", async () => {
@@ -168,7 +170,7 @@ describe("runExploreFastDecisionLoop", () => {
     run.cancel();
   });
 
-  it("records an accounted partial failure without using its judgments or losing earlier selections", async () => {
+  it("records a failed next-step response without executing it or losing earlier selections", async () => {
     const run = newRun();
     run.start();
     let batches = 0;
@@ -190,6 +192,30 @@ describe("runExploreFastDecisionLoop", () => {
     expect(firstSelected.length).toBeGreaterThan(0);
     expect(run.selectedViews().map(view => view.viewId)).toEqual(firstSelected);
     run.cancel();
+  });
+
+  it("retains the first selected partition when the next material partition fails", async () => {
+    const run = createExploreQueryRun({ question: "find the handlers" }, {
+      rgSearch: async () => ['a.ts', 'b.ts'].map(path => ({ path, line: 1, text: 'handler();' })),
+      readFile: async () => ready('handler();'),
+    });
+    run.start();
+    let calls = 0;
+    const details = await runExploreFastDecisionLoop({
+      run, binding: { ...binding, contextWindowTokens: 100 }, signal: new AbortController().signal,
+      countInput: async batch => ({ tokens: batch.materials.length * 60, tokenizer: 'fixture' }),
+      deadlineAt: Date.now() + 10_000, closing: neverSettle,
+      call: async ({ questions }) => {
+        if (++calls > 1) throw new Error('Provider unavailable');
+        return { answers: questions.map(choose), missing: [] };
+      },
+    });
+    run.applyFastDecision(details);
+    const packed = run.finish();
+    expect(calls).toBe(2);
+    expect(details.status).toBe('failed');
+    expect(packed.snippets).toHaveLength(1);
+    expect(packed.snippets[0]?.path).toBe('a.ts');
   });
 
   it("cancels with the query instead of reporting a failure", async () => {

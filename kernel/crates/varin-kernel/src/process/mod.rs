@@ -1019,7 +1019,13 @@ fn read_output(
         file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
         let mut bytes = vec![0u8; count];
         file.read_exact(&mut bytes)?;
-        chunks.push(json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(bytes)}));
+        let mut chunk = json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(&bytes)});
+        // Raw bytes and cursors remain exact. Only complete UTF-8 chunks have a
+        // text projection; split codepoints and binary output retain their bytes.
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            if !text.contains('\0') { chunk["text"] = json!(text); }
+        }
+        chunks.push(chunk);
         next += count as u64;
         remaining -= count;
         if skip + count == length {

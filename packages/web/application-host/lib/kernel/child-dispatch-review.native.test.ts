@@ -79,7 +79,7 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
-  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
@@ -675,13 +675,20 @@ it('the shipped worker preset writes a private child from a fixed read-only pare
   expect(parentSteps).toBe(3); expect(childSteps).toBe(5);
 }, 30_000);
 
-it('parent final survives independently; cancelling preparing child fences late context and releases its real pin', async () => {
+it.each(['user', 'model'] as const)('%s cancellation of a preparing child fences late context and releases its real pin', async mode => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
-  const f = await fixture(({ body, response }) => {
+  const f = await fixture(async ({ body, response }) => {
     if (!isParent(body)) { childSteps++; complete(response, [answer('unexpected child launch', 'unexpected')]); return; }
     if (++parentSteps === 1) complete(response, [tool('dispatch', dispatch, 'dispatch')]);
-    else { operationId = job(body); complete(response, [answer('Parent is final while child is preparing', 'parent-final')]); }
+    else if (parentSteps === 2) {
+      operationId = job(body);
+      if (mode === 'model') { await entered.promise; complete(response, [tool('child_cancel', { operationId }, 'cancel')]); }
+      else complete(response, [answer('Parent is final while child is preparing', 'parent-final')]);
+    } else {
+      expect(JSON.stringify(result(body, 'child_cancel'))).toContain('"cancelRequested":true');
+      complete(response, [answer('Child cancellation accepted', 'parent-final')]);
+    }
   });
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const identity = await h.api.create('child-review-cancel');
@@ -689,8 +696,11 @@ it('parent final survives independently; cancelling preparing child fences late 
   const receipt = await h.api.submit({ ...identity, key: 'parent-input', expectedHead: null, text: 'dispatch and finish', model, source: prepared.source });
   await entered.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
-  expect((await h.runtime.child(operationId)).state).toBe('preparing');
-  await h.runtime.cancelChild(operationId);
+  if (mode === 'user') {
+    expect((await h.runtime.child(operationId)).state).toBe('preparing');
+    await expect.poll(async () => (await h.runtime.childExecutions(operationId)).at(-1)?.preparation?.phase).toBe('context');
+    await h.runtime.cancelChild(operationId);
+  }
   release.release();
   await expect.poll(async () => (await h.runtime.child(operationId)).resources_released).toBe(true);
   const child = await h.runtime.child(operationId);
@@ -701,7 +711,7 @@ it('parent final survives independently; cancelling preparing child fences late 
       { root: originalSourcePin(child).root, revision: originalSourcePin(child).source.revision!, writeRevision: originalSourcePin(child).source.revision! })).rejects.toThrow();
   }, 'shared', { threadId: child.child_thread_id });
   expect((await h.runtime.run(receipt.run_id)).state).toBe('completed');
-  expect(parentSteps).toBe(2);
+  expect(parentSteps).toBe(mode === 'user' ? 2 : 3);
 }, 20_000);
 
 it('a saved runtime-specific preset stays frozen across a later edit and Host/kernel reopen', async () => {

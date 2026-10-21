@@ -6,6 +6,7 @@ mod authority;
 mod child_capabilities;
 mod capability_tools;
 mod collaboration;
+mod child_cancel;
 mod compute;
 mod context;
 mod continuation_wake;
