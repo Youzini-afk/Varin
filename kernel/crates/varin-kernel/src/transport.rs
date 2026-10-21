@@ -271,25 +271,28 @@ struct Shared {
 }
 impl Shared {
     fn fail(&self, failure: Option<(&'static str, io::Error)>) {
-        let _scheduler = self.scheduled.lock().unwrap();
-        if !self.stopped.swap(true, Ordering::AcqRel) {
-            if let Some((stage, error)) = failure {
-                // Only our static protocol reasons and OS error numbers are
-                // diagnostic material. Never emit a frame or arbitrary error text.
-                let reason = error
-                    .get_ref()
-                    .and_then(|inner| inner.downcast_ref::<ProtocolFailure>())
-                    .map(|error| error.0);
-                eprintln!(
-                    "[VarinKernelTransport] {}",
-                    json!({
-                        "stage": stage, "kind": format!("{:?}", error.kind()),
-                        "osError": error.raw_os_error(), "reason": reason,
-                    })
-                );
-            }
+        {
+            let _scheduler = self.scheduled.lock().unwrap();
+            if self.stopped.swap(true, Ordering::AcqRel) { return; }
             self.changed.notify_all();
             let _ = self.incoming.send(Incoming::Disconnected);
+        }
+        if let Some((stage, error)) = failure {
+            // The dead Host may also have closed stderr. Reporting must never
+            // panic before disconnect delivery or poison the stream scheduler.
+            // Keep the existing content-free diagnostic contract.
+            use std::io::Write;
+            let reason = error
+                .get_ref()
+                .and_then(|inner| inner.downcast_ref::<ProtocolFailure>())
+                .map(|error| error.0);
+            let _ = writeln!(
+                io::stderr().lock(), "[VarinKernelTransport] {}",
+                json!({
+                    "stage": stage, "kind": format!("{:?}", error.kind()),
+                    "osError": error.raw_os_error(), "reason": reason,
+                })
+            );
         }
     }
     fn control(&self, value: Value) -> io::Result<()> {

@@ -80,7 +80,7 @@ it('the ordinary scheduled task example edits its admitted project and returns n
     expect(runCalendar).toHaveBeenCalledWith('project', stored!.id, 'policy:node:schedule-2');
     expect(await execute({ action: 'list' })).toMatchObject({ completion: { effect: 'none', content: { data: { tasks: [expect.objectContaining({ id: stored!.id })] } } } });
     expect(workspaceRoot.mock.calls.every(([id]) => id === 'original-workspace')).toBe(true);
-    await expect(execute({ action: 'run', taskId: stored!.id, directory: '/another-project' })).rejects.toThrow('input_schema');
+    await expect(execute({ action: 'run', taskId: stored!.id, directory: '/another-project' })).rejects.toMatchObject({ code: 'extension_tool_input_schema_invalid' });
     managementArguments = { action: 'remove', taskId: stored!.id };
     expect(await execute({ action: 'run', taskId: stored!.id })).toMatchObject({ completion: { kind: 'not_dispatched' } });
     managementArguments = undefined;

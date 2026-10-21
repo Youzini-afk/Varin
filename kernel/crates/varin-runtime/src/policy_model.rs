@@ -52,6 +52,9 @@ pub struct WithPolicyModels {
     pub models: BTreeMap<String, BoundPolicyModel>,
 }
 impl ModelProvider for WithPolicyModels {
+    fn retry_policy(&self) -> crate::model_retry::RetryPolicy {
+        self.primary.retry_policy()
+    }
     fn select_for_request(
         &self,
         run_id: &str,

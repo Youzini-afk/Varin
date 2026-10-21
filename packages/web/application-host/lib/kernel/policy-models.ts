@@ -26,6 +26,7 @@ const optionalConfigurationFields = new Set<keyof ModelSessionConfiguration>([
   'azureApiVersion', 'legacyMaxTokens', 'includeStreamUsage', 'reasoningEffort', 'anthropicOauth',
   'adapterId', 'adapterVersion', 'contextWindowTokens', 'thinkingLevel', 'modelOptions',
   'catalogModelId', 'awsRegion', 'adapterIdentity', 'adapterBindingId', 'connection',
+  'retry', 'tokenizer', 'toolOutputVisibleBytes',
 ]);
 function configurationIdentity(configuration: ModelSessionConfiguration, scope: CredentialScope): string {
   const normalized = Object.fromEntries(Object.entries(configuration).filter(([key, value]) =>

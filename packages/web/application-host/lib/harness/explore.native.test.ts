@@ -315,7 +315,7 @@ describe("explore ranking and verification", () => {
 
 describe("explore query-internal distinctiveness", () => {
 
-  it("lists generated windows so a packed-out match is distinguishable from a missing window", async () => {
+  it("retains generated windows independently of the model preview limit", async () => {
     const content = [
       "function decoy() { return needle; }",
       ...Array.from({ length: 20 }, (_, index) => `const pad${index} = ${index};`),
@@ -338,8 +338,8 @@ describe("explore query-internal distinctiveness", () => {
     });
     const windows = result.details.windows ?? [];
     expect(windows.length).toBeGreaterThan(1);
-    expect(windows.some((window) => window.packed)).toBe(true);
-    expect(windows.some((window) => !window.packed)).toBe(true);
+    expect(windows.every((window) => window.packed)).toBe(true);
+    expect(result.snippets.length).toBeGreaterThan(1);
     expect(windows.every((window) => typeof window.why === "string")).toBe(true);
     expect(windows.some((window) => window.hits.some((hit) => hit.includes("extra")))).toBe(true);
   });
@@ -448,7 +448,8 @@ describe("explore local evidence and packing", () => {
     expect(result.notRequested.paths).not.toContain("src/weak.ts");
     expect(result.snippets.some((snippet) => snippet.text.includes("elapsed > parseBudget"))).toBe(true);
     expect(result.snippets.some((snippet) => snippet.text.includes("tree-sitter"))).toBe(true);
-    expect(result.snippets.every((snippet) => snippet.path !== "src/weak.ts")).toBe(true);
+    expect(result.snippets.slice(0, 2).every((snippet) => snippet.path === "src/provider.ts")).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path === "src/weak.ts")).toBe(true);
   });
 
   it("packs a same-file implementation function ahead of another file that only repeats covered terms", async () => {
@@ -497,7 +498,8 @@ describe("explore local evidence and packing", () => {
       structure: createStructureSource([parsingProvider()]),
     });
     expect(result.snippets.some((snippet) => snippet.text.includes("capabilitiesFromSpec"))).toBe(true);
-    expect(result.snippets.every((snippet) => snippet.path !== "src/other.ts")).toBe(true);
+    expect(result.snippets.slice(0, 2).every((snippet) => snippet.path === "src/languages.ts")).toBe(true);
+    expect(result.snippets.some((snippet) => snippet.path === "src/other.ts")).toBe(true);
   });
 
   it("rescans a snapshot so a dropped content-word hit still becomes a window", async () => {

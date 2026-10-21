@@ -859,7 +859,7 @@ test('shipped Computer broker binds lifecycle and application declarations, keep
     await assert.rejects(execute('browser', { op: 'act', act: { kind: 'evaluate', expression: '1' } }, true), /permission_changed/);
     assert.equal(f.calls.length, count);
     permission = 'allow';
-    await assert.rejects(execute('browser_read', { op: 'act', act: { kind: 'evaluate', expression: '1' } }, true), /input_schema/);
+    await assert.rejects(execute('browser_read', { op: 'act', act: { kind: 'evaluate', expression: '1' } }, true), { code: 'extension_tool_input_schema_invalid' });
     const environment = await execute('environment', {});
     if (environment.completion.kind === 'result') assert.equal((environment.completion.content?.data as { defaultDesktopId: string }).defaultDesktopId, 'local-console');
     assert.equal(f.calls.filter(tool => tool === 'open').length, 1);

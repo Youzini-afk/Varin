@@ -675,7 +675,11 @@ const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   setActiveTunnelController: (value) => { activeTunnelController = value; },
   tunnelAuthController,
 });
-const gracefulShutdown = gracefulShutdownRuntime.gracefulShutdown;
+let stopHostResources: WebUiServerController['stop'] | undefined;
+const gracefulShutdown: typeof gracefulShutdownRuntime.gracefulShutdown = (options = {}) =>
+  stopHostResources
+    ? stopHostResources({ exitProcess: options.exitProcess ?? exitOnShutdown })
+    : gracefulShutdownRuntime.gracefulShutdown(options);
 const startupPipelineRuntime = createStartupPipelineRuntime({
   createTerminalRuntime,
   createDictationRuntime,
@@ -2976,7 +2980,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const relayReconcileTimer = setInterval(() => void relayService.reconcile(), 60_000);
   relayReconcileTimer.unref?.();
 
-  return {
+  let stopTask: Promise<void> | undefined;
+  const controller: WebUiServerController = {
     expressApp: app,
     connections,
     httpServer: server,
@@ -2987,7 +2992,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       scheduledTasks: await scheduledTasksRuntime.getStatus(),
     }),
     isReady: () => kernelClient.isReady,
-    stop: async (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => {
+    stop: (shutdownOptions: { exitProcess?: boolean | undefined } = {}) => stopTask ??= (async () => {
       observations.stop();
       unsubscribeTokenizerKernel();
       await stopTokenizerCollection?.();
@@ -3131,11 +3136,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       clearInterval(relayReconcileTimer);
       relayService.stop();
       dictationRuntime?.stop?.();
-      const stopped = await gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
+      const stopped = await gracefulShutdownRuntime.gracefulShutdown({ exitProcess: shutdownOptions.exitProcess ?? false });
       if (processShutdownErrors.length) throw new AggregateError(processShutdownErrors, 'Native process shutdown requires attention');
       return stopped;
-    },
+    })(),
   };
+  stopHostResources = controller.stop;
+  return controller;
 }
 
 runCliEntryIfMain({

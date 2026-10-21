@@ -373,6 +373,9 @@ struct ConfiguredProvider {
     fields: Value,
 }
 impl ModelProvider for ConfiguredProvider {
+    fn retry_policy(&self) -> crate::model_retry::RetryPolicy {
+        self.inner.retry_policy()
+    }
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         self.inner.request_budget_protocol()
     }

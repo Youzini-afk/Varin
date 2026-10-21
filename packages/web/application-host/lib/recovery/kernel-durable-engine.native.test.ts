@@ -104,7 +104,7 @@ it.skipIf(!hasReleaseKernel)("runs combined recovery and undo across a Rust-kern
   let runtime = await open("cache-first");
   expect(await runtime.engine.storageStatus(workspaceId)).toMatchObject({
     status: "ready",
-    storage: { scope: "host", location: { mode: "application-data" }, locationSource: "global", state: "ready" },
+    storage: { scope: "workspace", workspaceId, location: { mode: "application-data" }, locationSource: "global", state: "ready" },
   });
   expect(await runtime.engine.listStorageWorkspaces()).toEqual({ status: "ready", workspaces: [] });
   expect(await runtime.engine.status(workspaceId)).toMatchObject({

@@ -217,8 +217,13 @@ it('cached query vectors do not bypass source authorization after a symlink esca
   const first = await f.run('semantic-cache-first', ['allowed']); const firstHistory = JSON.stringify(await f.completed(first));
   expect(firstHistory).toContain('ALLOWED_SEMANTIC_MARKER'); expect(firstHistory).not.toContain('PRIVATE_SEMANTIC_SECRET');
   const queryCount = f.wires.filter(wire => wire.input.includes(question)).length; expect(queryCount).toBe(1);
-  const outside = path.join(f.documents.root, 'outside-secret.ts'); await fs.writeFile(outside, 'export const outside = "SYMLINK_PRIVATE_SECRET";\n');
-  await fs.unlink(path.join(f.documents.workspaceRoot, 'allowed/entry.ts')); await fs.symlink(outside, path.join(f.documents.workspaceRoot, 'allowed/entry.ts'));
+  const outside = path.join(f.documents.root, 'outside-source'); await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'entry.ts'), 'export const outside = "SYMLINK_PRIVATE_SECRET";\n');
+  await fs.unlink(path.join(f.documents.workspaceRoot, 'allowed/entry.ts'));
+  await fs.rmdir(path.join(f.documents.workspaceRoot, 'allowed'));
+  // A directory junction exercises the same canonical-root escape on Windows
+  // without requiring the machine's optional file-symlink privilege.
+  await fs.symlink(outside, path.join(f.documents.workspaceRoot, 'allowed'), process.platform === 'win32' ? 'junction' : 'dir');
   const reads = vi.spyOn(f.documents.authority, 'readSnapshot');
   const second = await f.run('semantic-cache-symlink', ['allowed']); const history = JSON.stringify(await f.completed(second));
   expect(f.wires.filter(wire => wire.input.includes(question))).toHaveLength(queryCount);
@@ -263,7 +268,8 @@ it('unknown dimensions are learned from an authorized document build with a dura
   expect(f.wires.length).toBeGreaterThan(0);
   expect(f.wires.every(wire => wire.dimensions === undefined && wire.input.every(text => /ALPHA_SEMANTIC_EVIDENCE|BETA_SEMANTIC_EVIDENCE/.test(text)))).toBe(true);
   const beforeQuery = await f.ledger.list({ scopeId: f.workspaceId });
-  expect(beforeQuery.length).toBeGreaterThan(0); expect(beforeQuery.every(fact => fact.receipt.purpose === 'index-document-embedding' && fact.hasResult)).toBe(true);
+  expect(f.receipts.some(receipt => receipt.purpose === 'index-document-embedding' && receipt.state === 'succeeded')).toBe(true);
+  expect(beforeQuery).toEqual([]); // Published vectors no longer need duplicate ledger bodies.
   const run = await f.run('semantic-discovered-dimension'); expect(JSON.stringify(await f.completed(run))).toContain('ALPHA_SEMANTIC_EVIDENCE');
   expect(f.localCalls).not.toHaveBeenCalled();
 }, 50_000);

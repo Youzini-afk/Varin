@@ -290,6 +290,9 @@ struct SelectedProvider {
     primary: Arc<dyn ModelProvider>,
 }
 impl ModelProvider for SelectedProvider {
+    fn retry_policy(&self) -> varin_runtime::model_retry::RetryPolicy {
+        self.primary.retry_policy()
+    }
     fn select_for_request(
         &self,
         run_id: &str,

@@ -215,7 +215,7 @@ it('the installed example integrates a fixed publication from a later Run of the
     h.sourceBinding.mode = 'fixed_branch';
     expect(await h.execute()).toMatchObject({ completion: { outcome: 'failed', effect: 'none' } });
     h.sourceBinding.mode = 'materialized';
-    await expect(h.execute({ ...input, directory: '/unadmitted-target' })).rejects.toThrow('input_schema');
+    await expect(h.execute({ ...input, directory: '/unadmitted-target' })).rejects.toMatchObject({ code: 'extension_tool_input_schema_invalid' });
     h.setManagementArguments({ ...input, publicationId: 'not-the-admitted-arguments' });
     expect(await h.execute()).toMatchObject({ completion: { kind: 'not_dispatched' } });
     expect(h.mergeResult).not.toHaveBeenCalled();

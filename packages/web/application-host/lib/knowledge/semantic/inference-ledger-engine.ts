@@ -203,7 +203,8 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
       for (const id of entries()) {
         const entry = decode(db.getPayload(id));
         if (entry.identity.operation.workspaceId !== workspaceId || active.has(entry.token)) continue;
-        if (entry.result && (entry.result.space.spaceId !== spaceId || !entry.identity.inputHashes.every(contains))) continue;
+        if (!entry.identity.inputHashes.every(contains)) continue;
+        if (entry.result && entry.result.space.spaceId !== spaceId) continue;
         removed.push(id);
       }
       return remove(removed);

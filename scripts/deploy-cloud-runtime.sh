@@ -489,6 +489,7 @@ rollback() {
       if [[ "$PREVIOUS_RUNTIME_STOPPED" = "true" ]]; then
         if ! start_runtime "$PREVIOUS_TARGET"; then
           echo "warning: failed to restart the previous Varin runtime" >&2
+          print_daemon_log_tail
         elif [[ -n "$PREVIOUS_VERSION" ]] && ! wait_for_health "$PREVIOUS_VERSION" "$(basename "$PREVIOUS_TARGET")"; then
           echo "warning: the previous Varin runtime did not become healthy during rollback" >&2
         fi

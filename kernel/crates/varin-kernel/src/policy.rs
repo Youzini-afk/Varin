@@ -686,6 +686,9 @@ struct SelectedPolicyModels {
     primary: Arc<dyn ModelProvider>,
 }
 impl ModelProvider for SelectedPolicyModels {
+    fn retry_policy(&self) -> varin_runtime::model_retry::RetryPolicy {
+        self.primary.retry_policy()
+    }
     fn select_for_request(
         &self,
         run: &str,

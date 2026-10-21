@@ -45,6 +45,7 @@ it('releases entire published receipts while preserving unpublished results and 
   expect(f.ledger.collectPublished('workspace', f.space.spaceId, key => key === hash('published'))).toBe(1);
   expect((await f.ledger.list()).map(entry => entry.receipt.batchId).sort()).toEqual(['live', 'other', 'unpublished']);
   await f.reopen();
+  expect(f.ledger.collectPublished('workspace', f.space.spaceId, () => false)).toBe(0);
   expect((await f.ledger.list()).map(entry => entry.receipt.batchId).sort()).toEqual(['live', 'other', 'unpublished']);
 });
 

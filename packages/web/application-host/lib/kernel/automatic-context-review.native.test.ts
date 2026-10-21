@@ -40,7 +40,7 @@ it.each([
   cleanups.push(()=>fs.rm(root,{recursive:true,force:true}));
   const agentDir=path.join(root,'agent');await fs.mkdir(agentDir);
   await fs.writeFile(path.join(agentDir,'agent-settings.json'),JSON.stringify({compaction:{enabled:true,reserveRatio:0.1,keepRecentTokens:1000,
-    modelOverrides:{'fixture/fixture-model':{reserveRatio:128/(block?12000:24000),keepRecentTokens:96}}},harness:{context:{backgroundPreparation:!retry,preparationWaterline:0.5}}}));
+    modelOverrides:{'fixture/fixture-model':{reserveRatio:128/(block?12000:24000),keepRecentTokens:96}}},harness:{context:{backgroundPreparation:false,preparationWaterline:0.5}}}));
   const projectRoot=path.join(root,'untrusted-project');await fs.mkdir(path.join(projectRoot,'.varin'),{recursive:true});
   await fs.writeFile(path.join(projectRoot,'.varin','settings.json'),'untrusted invalid configuration must not be read');
   const main:Array<{body:Record<string,unknown>;response:ServerResponse}>=[];
@@ -87,22 +87,23 @@ it.each([
     };
   }
   const configuration={providerId:'fixture',providerFamily:'openai-responses',model:'fixture-model',endpoint:`http://127.0.0.1:${address.port}/responses`,allowAnonymous:true,
-    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens:block?12000:24000,retry:{initialDelayMs:0}};
+    credentialEnvironment:null,configurationGeneration:1,maxOutputTokens:256,contextWindowTokens:block?12000:24000,retry:{enabled:retry===true,initialDelayMs:0}};
   const threadId='thread:automatic-context',branchId='branch:automatic-context';
   await runtime.createThread(threadId,branchId);
   const originalText='OLD_EVIDENCE '.repeat(4200);
-  const first=await runtime.submit({key:'first',threadId,branchId,expectedHead:null,input:{text:originalText},configuration,initialContext:context});
+  // Seed the source in a window which actually fits its tokenized request. The
+  // second Run then exercises the selected blocking/background capacity.
+  const first=await runtime.submit({key:'first',threadId,branchId,expectedHead:null,input:{text:originalText},configuration:{...configuration,contextWindowTokens:24000},initialContext:context});
   await runtime.startRun(first.run_id);
   await expect.poll(async()=>(await runtime.run(first.run_id)).state).toBe('completed');
-  expect(policies[0]).toMatchObject({enabled:true,reserveTokens:128,keepRecentTokens:96});
+  expect(policies[0]).toMatchObject({enabled:true,reserveTokens:block?256:128,keepRecentTokens:96});
   const original=await runtime.history(branchId);
   const before=await runtime.context(branchId);
-  if (retry) {
-    // Start this scenario's background job on the second Run deterministically, so
-    // the retry assertion does not depend on when the first Run's observer wins.
+  {
+    // Start preparation on the second Run, independent of first-Run scheduling.
     const file=path.join(agentDir,'agent-settings.json');
     const settings=JSON.parse(await fs.readFile(file,'utf8'));
-    settings.harness.context.backgroundPreparation=true;
+    settings.harness.context.backgroundPreparation=!block;
     await fs.writeFile(file,JSON.stringify(settings));
   }
   const second=await runtime.submit({key:'second',threadId,branchId,expectedHead:original.at(-1)!.id,input:{text:'Continue the work'},configuration});

@@ -476,6 +476,9 @@ impl ContextPreparation for SummaryCapacity {
 }
 struct SummaryProvider(Arc<dyn ModelProvider>);
 impl ModelProvider for SummaryProvider {
+    fn retry_policy(&self) -> crate::model_retry::RetryPolicy {
+        self.0.retry_policy()
+    }
     fn request_budget_protocol(&self) -> Option<crate::context_capacity::RequestBudgetProtocol> {
         self.0.request_budget_protocol()
     }

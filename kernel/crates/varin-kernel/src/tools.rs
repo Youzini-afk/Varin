@@ -1749,7 +1749,6 @@ impl KernelToolExecutor {
                 ToolKind::FileRead
                 | ToolKind::FileList
                 | ToolKind::FileSearch
-                | ToolKind::RecoveryPoints
                 | ToolKind::CodeRetrieval => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
@@ -1757,6 +1756,7 @@ impl KernelToolExecutor {
                 ),
                 ToolKind::FileWrite
                 | ToolKind::FileEdit
+                | ToolKind::RecoveryPoints
                 | ToolKind::FileRestore
                 | ToolKind::ProcessSpawn
                 | ToolKind::ProcessInspect

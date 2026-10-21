@@ -139,6 +139,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     onEvent: (listener: typeof emit) => { emit = listener; return () => {}; }, onExit: () => () => {}, onReady: () => () => {}, reconcileObservations: async () => [],
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [], status: async () => ({ eventCursor: 7 }), events: async () => [],
     context: vi.fn(async () => checkpoint), childExecution: async () => structuredClone(child), launch: async () => null,
+    childPreparationProgress: vi.fn(async () => ({ updated: true })),
     readyChildSource: vi.fn(async (input: Parameters<AgentRuntimeClient['readyChildSource']>[0]) => {
       child.source = { kind: 'ready', handoff: null, pin: input.pin, selection: { mode: input.source.mode, resource_owner: input.source.resourceOwner, workspace_id: input.source.workspaceId,
         execution_workspace_id: input.source.executionWorkspaceId, branch_id: input.source.branchId, revision: input.source.revision, live_root: null }, provenance: input.provenance };
@@ -233,6 +234,7 @@ it.each(['dispatch', 'user_continuation', 'message_request', 'followup', 'calend
     children: async () => [], childExecutions: async () => [structuredClone(child)], unacceptedChildDependencies: async () => [],
     status: async () => ({ eventCursor: 1 }), events: async () => [], context: async () => checkpoint, launch: async () => null,
     thread: async () => ({ bot_id: null }),
+    childPreparationProgress: vi.fn(async () => ({ updated: true })),
     childExecution: async () => structuredClone(child), readyChildSource: vi.fn(),
     prepareChild: vi.fn(async (_input: Parameters<AgentRuntimeClient['prepareChild']>[0]) => {
       child.receipt = { run_id: 'source-free-run', input_id: 'input', thread_id: child.child_thread_id, branch_id: child.child_branch_id, cursor: 2 };

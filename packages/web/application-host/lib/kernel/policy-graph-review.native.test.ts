@@ -73,7 +73,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
     currentScope: async () => ({ reference: 'fixture-reference', authority: 'fixture-existing-owner', account: 'fixture-local-handle', generation: 1 }),
     runtime: { getAuth: async () => ({ auth: { apiKey: secret } }) },
   });
-  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64 };
+  const configuration = { providerFamily: 'openai-responses', model: 'fixture-model', endpoint, credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 64, retry: { enabled: false } };
   const launchErrors: unknown[] = [];
   const workspace = path.join(root, 'workspace'); await fs.mkdir(workspace, { recursive: true });
   const documents = createDocumentAuthority({ hostId: 'http-review', dataDir: path.join(root, 'documents'), isAllowedRoot: async () => true, isTrusted: async () => true });

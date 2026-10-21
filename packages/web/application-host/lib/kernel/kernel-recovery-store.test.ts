@@ -29,10 +29,10 @@ function fixture() {
     if (state.loseReply) { state.loseReply = false; throw new Error('Settled response lost'); }
     return structuredClone(row);
   });
-  const adapter = { context: async () => ({ client: {
+  const adapter = { recoveryMetadataClient: async () => ({
     recoveryTurnGet: async () => structuredClone(row), recoveryChangeList: async () => ({ changes: [{ path: 'a.ts' }] }),
     recoveryTurnSettle: settle,
-  } }) } as unknown as KernelStorageAdapter;
+  }) } as unknown as KernelStorageAdapter;
   const store = new KernelRecoveryStore(adapter, {} as never);
   const input: WorkspaceRecoveryTurnSettledInput = { workspaceId: 'workspace', executionId: 'run:input',
     activeWriterScopes: [], observedResourceIds: ['a.ts'], observationComplete: true, mutationObserved: true,
