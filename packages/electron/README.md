@@ -228,9 +228,9 @@ inference and import behavior.
 
 Two native recipes supply binaries absent from the pinned npm packages:
 
-- Windows ARM64 builds TriviumDB 0.8.8 from commit
-  `f4bdfe35e9a3b7c0587da798886ce29380976cfe`. Upstream's loader selects the
-  actual Windows architecture; the npm archive does not include an ARM64 binary.
+- Windows ARM64 builds TriviumDB 0.8.10 from commit
+  `221a628209838483e20296d29bcf35fc3e2dd156`. The preparation step patches
+  upstream's x64-only Windows loader to select the added ARM64 binary.
   The native runner needs Rust and the ARM64 MSVC toolchain.
 - The optional semantic component's `prepare-onnx-runtime.mjs` builds macOS Intel ONNX Runtime 1.24.3 CPU and Node-API libraries from commit
   `3a728b75062256951b6e19ce718907cf1a1d4cf0`, matching the installed JavaScript API. The

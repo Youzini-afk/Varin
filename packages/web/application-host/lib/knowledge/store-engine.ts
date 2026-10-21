@@ -185,7 +185,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
     maxDeferMs: GRAPH_FLUSH_MAX_DEFER_MS,
     onError: (error) => {
       if (deps.onPersistenceError) deps.onPersistenceError(error);
-      else console.error("[KnowledgeStore] Deferred checkpoint failed");
+      else console.error("[KnowledgeStore] Deferred checkpoint failed:", error);
     },
   });
   const db = trackStoreMutations(runtimeDb, persistence);

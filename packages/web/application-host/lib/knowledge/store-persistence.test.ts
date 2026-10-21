@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -78,5 +79,72 @@ describe("native store persistence", () => {
     await store.close();
     expect(flush).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries a partially written checkpoint without losing either committed or pending nodes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-checkpoint-retry-"));
+    roots.push(root);
+    const file = join(root, "fixture.tdb");
+    const blocked = `${file}.tmp`;
+    const options = { dim: 8, syncMode: "full" as const, autoBuildQuiver: false, loadTextIndex: false };
+    const db = new TriviumDB(file, options);
+    let first: number;
+    let second: number;
+    try {
+      first = db.insert(Array(8).fill(0), { text: "committed" });
+      db.flush();
+      second = db.insert(Array(8).fill(1), { text: "pending" });
+      // Fail the main-file write after the native writer has persisted vectors.
+      await mkdir(blocked);
+      expect(() => db.flush()).toThrow();
+      await rm(blocked, { recursive: true });
+      db.flush();
+      expect(db.nodeCount()).toBe(2);
+    } finally {
+      await rm(blocked, { recursive: true, force: true });
+      db.close();
+    }
+    const reopened = new TriviumDB(file, { ...options, accessMode: "readOnly" });
+    try {
+      expect(reopened.getPayload(first!)).toEqual({ text: "committed" });
+      expect(reopened.getPayload(second!)).toEqual({ text: "pending" });
+      expect(reopened.get(second!)?.vector).toEqual(Array(8).fill(1));
+    } finally { reopened.close(); }
+    expect((await readdir(root)).filter(name => name.includes(".publish"))).toEqual([]);
+  });
+
+  it("recovers an interrupted native publication and WAL after the writer process exits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "varin-checkpoint-reopen-"));
+    roots.push(root);
+    const file = join(root, "fixture.tdb");
+    const child = spawnSync(process.execPath, ["-e", `
+      const { TriviumDB } = require(process.argv[1]);
+      const fs = require('node:fs');
+      const file = process.argv[2];
+      const db = new TriviumDB(file, { dim: 8, syncMode: 'full', autoBuildQuiver: false, loadTextIndex: false });
+      const first = db.insert(Array(8).fill(0), { text: 'committed' });
+      db.flush();
+      const second = db.insert(Array(8).fill(1), { text: 'pending' });
+      fs.mkdirSync(file + '.tmp');
+      try { db.flush(); } catch {
+        console.log(JSON.stringify({ first, second }));
+        process.exit(0); // No successful close or retry in the original writer.
+      }
+      process.exit(2);
+    `, createRequire(import.meta.url).resolve("triviumdb"), file], {
+      encoding: "utf8", windowsHide: true, env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    });
+    expect(child.error ?? child.status, child.stderr).toBe(0);
+    const ids = JSON.parse(child.stdout) as { first: number; second: number };
+    await rm(`${file}.tmp`, { recursive: true });
+    expect(() => new TriviumDB(file, { dim: 8, accessMode: "readOnly" })).toThrow(/recover|恢复/i);
+    const recovered = new TriviumDB(file, { dim: 8, syncMode: "full", autoBuildQuiver: false, loadTextIndex: false });
+    try {
+      expect(recovered.nodeCount()).toBe(2);
+      expect(recovered.getPayload(ids.first)).toEqual({ text: "committed" });
+      expect(recovered.getPayload(ids.second)).toEqual({ text: "pending" });
+      expect(recovered.get(ids.second)?.vector).toEqual(Array(8).fill(1));
+    } finally { recovered.close(); }
+    expect((await readdir(root)).filter(name => name.includes(".publish"))).toEqual([]);
   });
 });

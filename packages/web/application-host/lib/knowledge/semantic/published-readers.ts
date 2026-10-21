@@ -90,7 +90,7 @@ export function createSemanticPublishedReaders(options: {
     publish(writer: TriviumDB, file: string, checkpoint: SemanticCheckpoint): void {
       if (closed) throw new Error("Semantic publication owner is closed");
       const id = `${epoch}:${++nextPublication}`;
-      // In TriviumDB 0.8.8 this operation performs the full checkpoint itself.
+      // This native operation performs the full checkpoint itself.
       // Its manifest names the active payload generation and every required
       // native sidecar. WAL and lock files are not immutable artifact members.
       const manifest = writer.publishGenerationManifest(id);

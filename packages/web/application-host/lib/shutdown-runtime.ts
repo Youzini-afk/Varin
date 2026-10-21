@@ -5,6 +5,22 @@ interface UiAuthRuntime { dispose(): unknown }
 interface TunnelController { stop?(): unknown }
 interface ClosableServer { close(callback: () => void): unknown }
 
+/** A failed owner must not skip the remaining owners' drain and durable close. */
+export const createShutdownCollector = () => {
+  const errors: Error[] = [];
+  return {
+    errors,
+    async run(name: string, stop: () => unknown): Promise<void> {
+      try {
+        await stop();
+      } catch (error) {
+        errors.push(new Error(`${name} shutdown failed`, { cause: error }));
+        console.error(`[Shutdown] ${name} failed:`, error);
+      }
+    },
+  };
+};
+
 export interface GracefulShutdownDependencies<
   Terminal extends TerminalRuntime = TerminalRuntime,
   Documents extends DocumentsAuthorityRuntime = DocumentsAuthorityRuntime,

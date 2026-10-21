@@ -18,7 +18,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
       if (message.type === "plan-changed") deps.onPlanChanged?.(message.change);
       else if (message.type === "knowledge") deps.onKnowledgeChanged?.(message.ids);
       else if (deps.onPersistenceError) deps.onPersistenceError(restoreStoreError(message.error));
-      else console.error("[KnowledgeStore] Deferred checkpoint failed; storage retains pending data for retry");
+      else console.error("[KnowledgeStore] Deferred checkpoint failed; storage retains pending data for retry:", message.error);
     },
   });
   let dim: number;

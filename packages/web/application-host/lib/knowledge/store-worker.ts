@@ -229,6 +229,9 @@ process.once("disconnect", () => {
   void tail.then(async () => {
     const results = await Promise.allSettled([...stores.values(), ...semanticStores.values(),
       ...[...inferenceLedgers.values()].map(entry => entry.store)].map(store => store.close()));
+    for (const result of results) {
+      if (result.status === "rejected") console.error("[KnowledgeStore] Disconnect close failed:", result.reason);
+    }
     // Process exit also releases Windows mmap handles still retained by the addon.
     process.exit(results.some(result => result.status === "rejected") ? 1 : 0);
   });

@@ -103,7 +103,7 @@
         "sherpa-onnx-node": "1.13.8",
         "simple-git": "^4.0.2",
         "tar": "^7.5.13",
-        "triviumdb": "0.8.8",
+        "triviumdb": "0.8.10",
         "turndown": "7.2.4",
         "undici": "8.12.2",
         "web-push": "^3.6.7",
@@ -754,7 +754,7 @@
 
     "toidentifier": ["toidentifier@1.0.1", "", {}, "sha512-o5sSPKEkg/DIQNmH43V0/uerLrpzVedkUh8tGNvaeXpfpuwjKenlSox/2O/BTlZUtEe+JG7s5YhEz608PlAHRA=="],
 
-    "triviumdb": ["triviumdb@0.8.8", "", {}, "sha512-zYXws1W5rsUzg/rW+sUZg7B751fqolqwlWXEXEmSEYtJrN1ti1Uj54Kemm96szDln440ZK0JOCb80ZBP6uQKfw=="],
+    "triviumdb": ["triviumdb@0.8.10", "", {}, "sha512-lD/fhZbyoawOAxVxluUOQ5S4kXhPzFDn5dsdKiyVRMmyPyDQtrs1Jnb1oGfgDhNvO1hszzh+JrtHR6CEIKJMhg=="],
 
     "tslib": ["tslib@2.8.1", "", {}, "sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w=="],
 

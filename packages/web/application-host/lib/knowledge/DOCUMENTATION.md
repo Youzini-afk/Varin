@@ -5,19 +5,23 @@ described in [Memory ownership](../memory/DOCUMENTATION.md). They bypass semanti
 background memory organization. This module still owns plans, observations, symbol indexes,
 and Bot/user long-term knowledge; these are separate from ordinary Agent notes.
 
-The workspace/user KnowledgeStore authority remains TriviumDB 0.8.8. Its existing
+The workspace/user KnowledgeStore authority uses TriviumDB 0.8.10. Its existing
 `.tdb` files, node IDs, graph links and sidecars are unchanged. There is no migration,
 second writer, replacement database or in-main fallback.
 
-The 0.8.6 → 0.8.8 upgrade removes Varin's Windows architecture loader patch:
-upstream now chooses the native addon by platform and architecture. Windows ARM64
-still builds the missing binary from the exact 0.8.8 release commit. In 0.8.7,
-upstream changed parsed-payload cache recency from a linear scan to a logarithmic
-index and corrected composite-index `FIND LIMIT` planning. 0.8.8 restores lazy
-full-node scanning for unindexed `FIND LIMIT` while preserving residual-filter
-correctness. Varin's production graph and knowledge reads use `indexedLookup`
-and `substringLookup`, not TQL `FIND` or the new Server/edge-projection APIs.
-Those query features do not require a Varin call-site migration.
+Native checkpoints retain their previous committed files behind a `.publish`
+undo journal until the new `.tdb/.vec/.pld/.flush_ok` generation commits. A writable
+open restores an interrupted publication before replaying its WAL; read-only opens
+report recovery-required while that restoration is pending. Successful commit or
+recovery removes the journal and its temporary copies. These files belong to the
+native writer and must remain intact during active writes or a failed close.
+Pre-existing damage without such a journal continues to surface as a storage error;
+opening a failed store never deletes or replaces its data.
+
+Windows ARM64 builds the missing addon from the exact 0.8.10 release commit and
+patches upstream's Windows loader to select it. Varin's production graph and knowledge
+reads continue to use `indexedLookup` and `substringLookup`; its existing exact/scoped
+semantic queries and generation manifests retain their native owners.
 
 The authority and derived semantic stores retain `payloadCacheMb: 0` as a memory
 and cold-scan choice, rather than as a workaround for the repaired recency bug.
@@ -48,6 +52,9 @@ and closes the remaining handles. A native close failure retains the handle for
 retry. New calls are rejected while a facade is closing; previously admitted calls
 are drained first. A lost process rejects pending operations with an unknown-outcome
 error and never automatically replays writes or silently switches storage backends.
+Host shutdown collects each owner's errors while continuing its ordered teardown;
+a failed semantic-index close cannot skip the authority stores' durable close.
+Deferred checkpoint and disconnect-close diagnostics retain the original storage error.
 
 The private IPC contract has an exhaustive method allowlist, response validation,
 advanced serialization for existing Set/Date values, and reconstruction of block

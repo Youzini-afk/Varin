@@ -27,6 +27,7 @@ private runtime protocol and product surfaces still move together.
 - 模型可停止后台进程；工具参数错误保留字段与原因，子任务失败携带原始运行错误和事件引用。改进 MCP 错误分类、子任务准备过程和上下文准备失败诊断。
 - 修复只读检索预设误带恢复工具导致准备失败，以及子任务完成或恢复后父任务偶尔停在“可运行”状态的问题，保留旧执行线程退出前的防重入检查。
 - HTTP 关闭和进程信号接入完整 Host 资源清理并合并并发关闭；内核断连后的清理不再因诊断管道关闭而中断。
+- Host 关闭某项资源失败后继续等待其他资源收尾，避免语义索引异常跳过知识库关闭；保留检查点与退出时的原始存储错误。
 
 #### 会话与桌面体验
 
@@ -41,6 +42,7 @@ private runtime protocol and product surfaces still move together.
 - 嵌入文本和批次按模型上下文容量拆分并预留余量，修复 Unicode 分段边界；内核丢失后重新获取 tokenizer 租约，缓存文件被手动删除后允许恢复索引清理。
 - 回收索引旧发布副本及已删除会话的正文和相关资源，减少持续累积的磁盘占用。
 - 索引重新打开时保留尚未发布的推理回执，已发布向量对应的重复账本内容仍正常回收。
+- 升级 TriviumDB 至 0.8.10，接入保存中断后的原生恢复机制，同步云端锁文件和 Windows ARM64 构建、加载适配；索引清理避免重复执行完整检查点。
 - 更新 Wasmtime 至 48.0.7、rustls-webpki 至 0.103.16、webpki-roots 至 1.0.10，修复新披露的 Wasm 执行和证书信任问题。参见 [Wasmtime](https://github.com/bytecodealliance/wasmtime/releases/tag/v48.0.7)、[webpki](https://rustsec.org/advisories/RUSTSEC-2026-0382.html) 和 [根证书公告](https://rustsec.org/advisories/RUSTSEC-2026-0381.html)。
 
 ---
@@ -63,6 +65,7 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 - Page file reads at 64 KiB by default with an explicit larger-read option. Return symbol outlines with expansion, pagination and full-tree mode. Bind directory cursors to their query and reject stale symbol references.
 - Add explicit create/replace file-write modes while preserving version conflict protection. Repair CRLF edits and distinguish missing directories from empty ones.
 - Expose process stopping to models. Preserve argument fields and validation reasons, and include original runtime failures and event references in child reports. Improve MCP error classification and preparation diagnostics.
+- Continue ordered Host teardown after individual cleanup failures so a failed semantic index cannot skip closing knowledge stores. Preserve original checkpoint and shutdown storage errors.
 - Keep physical recovery tools out of the default read-only retrieval profile. Fix stale wait inspections masking launch readiness after child completion or recovery while retaining the original worker's drain fence against duplicate execution.
 - Route HTTP and signal shutdown through complete Host resource cleanup and coalesce concurrent stops. Keep kernel disconnect cleanup independent of a closed diagnostic pipe.
 
@@ -79,6 +82,7 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 - Split embedding inputs and batches using the configured model capacity with reserved space. Preserve Unicode boundaries, renew tokenizer leases after kernel loss, and recover cleanup when cache files disappear.
 - Reclaim retired index publications and deleted-conversation content and resources.
 - Preserve unpublished inference receipts when reopening indexes while reclaiming duplicate ledger content after vector publication.
+- Upgrade TriviumDB to 0.8.10 for interrupted-checkpoint recovery. Synchronize the cloud lockfile and Windows ARM64 build/loader, and avoid duplicate full checkpoints during index cleanup.
 - Update Wasmtime to 48.0.7, rustls-webpki to 0.103.16 and webpki-roots to 1.0.10 for upstream Wasm execution and certificate-trust security fixes.
 
 [完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.30...v0.9.31)

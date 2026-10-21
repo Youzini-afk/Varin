@@ -57,7 +57,7 @@ export function createSemanticGenerationStore(options: {
     if (openTask) return openTask;
     owner = knowledgeStoreProcess("semantic");
     storeId = owner.register({ revision: () => {}, notify: message => {
-      if (message.type === "persistence-error") console.error("[SemanticStore] Deferred checkpoint failed; pending data retained for retry");
+      if (message.type === "persistence-error") console.error("[SemanticStore] Deferred checkpoint failed; pending data retained for retry:", message.error);
     } });
     const activeOwner = owner;
     openTask = activeOwner.request(storeId, "semantic", ["open", {

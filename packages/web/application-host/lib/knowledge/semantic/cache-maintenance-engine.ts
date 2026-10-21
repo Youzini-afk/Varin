@@ -59,7 +59,8 @@ export async function purgeSemanticWorkspaceCache(input: {
           db.commitTransaction(ids.map((id) => ({ type: 'delete' as const, id })));
         }
         if (removed.length) db.compact();
-        db.flush();
+        // close() performs the durable checkpoint, including native publication
+        // recovery. Avoid publishing the entire generation twice during cleanup.
         counts.set(generation.name, db.indexedLookup({ type: 'document' }, Math.max(1, db.nodeCount())).length);
       } finally { db.close(); }
     }
