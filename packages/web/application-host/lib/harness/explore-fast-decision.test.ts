@@ -194,7 +194,7 @@ describe("runExploreFastDecisionLoop", () => {
     run.cancel();
   });
 
-  it("retains the first selected partition when the next material partition fails", async () => {
+  it.each(['batch', 'per-question'] as const)("retains selected evidence when a later %s capacity partition fails", async window => {
     const run = createExploreQueryRun({ question: "find the handlers" }, {
       rgSearch: async () => ['a.ts', 'b.ts'].map(path => ({ path, line: 1, text: 'handler();' })),
       readFile: async () => ready('handler();'),
@@ -202,8 +202,9 @@ describe("runExploreFastDecisionLoop", () => {
     run.start();
     let calls = 0;
     const details = await runExploreFastDecisionLoop({
-      run, binding: { ...binding, contextWindowTokens: 100 }, signal: new AbortController().signal,
-      countInput: async batch => ({ tokens: batch.materials.length * 60, tokenizer: 'fixture' }),
+      run, binding: { ...binding, contextWindowTokens: window === 'batch' ? 100 : 1000,
+        ...(window === 'per-question' ? { perQuestionContextWindowTokens: 100 } : {}) }, signal: new AbortController().signal,
+      countInput: async batch => ({ tokens: batch.materials.length * 60, perQuestionTokens: batch.materials.length * 60, tokenizer: 'fixture' }),
       deadlineAt: Date.now() + 10_000, closing: neverSettle,
       call: async ({ questions }) => {
         if (++calls > 1) throw new Error('Provider unavailable');

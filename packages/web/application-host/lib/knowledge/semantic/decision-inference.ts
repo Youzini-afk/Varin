@@ -10,7 +10,7 @@ import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, In
 import { ResearchDecisionFailure } from '../../harness/research-decide.js';
 import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
 import { acquireTokenCounter } from '../../models/token-count.js';
-import { classifierInputTexts } from '../../models/classifier.js';
+import { classifierContextLimits, classifierInputTexts, classifierQuestionInputTexts } from '../../models/classifier.js';
 
 export interface DecisionInferenceAuthority {
   resolveDecisionBinding(providerId: string, modelId: string, endpoint?: string): Promise<HostInferenceProviderBinding>;
@@ -21,7 +21,7 @@ export interface DecisionInferenceSession {
 }
 export interface DecisionInferenceLease {
   binding: HarnessResolvedFastDecisionBinding;
-  countInput(input: Pick<HarnessFastDecisionParams, 'goal' | 'context' | 'materials' | 'questions'>): Promise<{ tokens: number; tokenizer: string }>;
+  countInput(input: Pick<HarnessFastDecisionParams, 'goal' | 'context' | 'materials' | 'questions'>): Promise<{ tokens: number; perQuestionTokens?: number; tokenizer: string }>;
   assertAvailable(signal: AbortSignal): Promise<void>;
   run<T>(authority: InferenceInvocationAuthority, signal: AbortSignal, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
   consume<T>(call: InferenceCall, consume: (session: DecisionInferenceSession) => Promise<T>): Promise<T>;
@@ -71,7 +71,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
       const generation = revisions.get(purpose) ?? 0;
       const binding: HarnessResolvedFastDecisionBinding = Object.freeze({ ...selected.binding,
         ...(provider.endpoint ? { endpoint: provider.endpoint } : {}), configurationId: provider.configurationId,
-        ...(provider.contextWindow ? { contextWindowTokens: provider.contextWindow } : {}),
+        ...classifierContextLimits(provider.api, provider.contextWindow, provider.headers),
         ...(provider.api === 'llama-cpp-classify' ? { maxChoiceOptions: 62 } : {}) });
       let counter: Awaited<ReturnType<typeof acquireTokenCounter>> | undefined;
       let acquiring: Promise<Awaited<ReturnType<typeof acquireTokenCounter>>> | undefined;
@@ -80,9 +80,20 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
         counter ??= await (acquiring ??= acquireTokenCounter(options.kernel, {
           model: provider.requestModelId ?? binding.modelId, ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}),
         }));
-        const counted = await counter.count(classifierInputTexts(provider.api, provider.requestModelId ?? binding.modelId,
-          { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) }, input.questions));
-        return { tokens: Math.max(0, ...counted.counts), tokenizer: counted.tokenizer };
+        const state = { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) };
+        const model = provider.requestModelId ?? binding.modelId;
+        const full = classifierInputTexts(provider.api, model, state, input.questions);
+        const questions = binding.perQuestionContextWindowTokens ? classifierQuestionInputTexts(provider.api, model, state, input.questions) : [];
+        const texts = [...full, ...questions];
+        const counted = await counter.count(texts);
+        // A reference vocabulary is not this provider's tokenizer. Match the
+        // embedding path's conservative admission until its real vocabulary is
+        // configured; this is a capacity bound, never reported provider usage.
+        const reference = counted.tokenizer.includes('reference tokenizer');
+        const counts = reference ? texts.map(text => Buffer.byteLength(text, 'utf8')) : counted.counts;
+        return { tokens: Math.max(0, ...counts.slice(0, full.length)),
+          tokenizer: reference ? `${counted.tokenizer}; UTF-8 capacity bound` : counted.tokenizer,
+          ...(questions.length ? { perQuestionTokens: counts[full.length]! + Math.max(0, ...counts.slice(full.length + 1)) } : {}) };
       };
       let released = false;
       const release = () => { if (released) return; released = true; leases.delete(release); provider.release?.();

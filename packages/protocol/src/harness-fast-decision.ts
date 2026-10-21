@@ -64,6 +64,8 @@ export interface HarnessResolvedFastDecisionBinding extends HarnessFastDecisionB
   configurationId: string;
   /** Actual frozen model capacity, not a property of the classifier protocol. */
   contextWindowTokens?: number;
+  /** Shared state plus one question may have a smaller window than the whole batch. */
+  perQuestionContextWindowTokens?: number;
   /** Adapter label vocabulary, when choices must map to single tokens. */
   maxChoiceOptions?: number;
 }

@@ -38,6 +38,36 @@ it('embedding reserves model context space and clamps explicit chunk budgets to 
 const requestOptions: InferenceRequestsOptions = { kernel: { agentRuntimeRequest: forbidden },
   runtime: { onEvent: () => () => {}, onReady: () => () => {}, onExit: () => () => {} }, egress: { prepare: forbidden } };
 const requestOwner = { run: forbidden } as unknown as InferenceRequests;
+it('measures the shared-state window separately and honors explicit long-context opt-in', async () => {
+  let headers: Record<string, string> = {};
+  let tokenizer = 'fixture';
+  const owner = createDecisionInference({ resolveDecisionBinding: async () => ({ ...provider(), contextWindow: 65500, headers }) },
+    async () => settings, { ...requestOptions, kernel: { agentRuntimeRequest: (async (method: string, input: { texts?: string[] }) => {
+      if (method === 'runtime.tokenizers.open') return { leaseId: 'counter' };
+      if (method === 'runtime.tokenizers.count') return { tokenizer, counts: input.texts!.map(text => tokenizer === 'fixture' ? text.length : 1) };
+      return null;
+    }) as InferenceRequestsOptions['kernel']['agentRuntimeRequest'] } }, requestOwner);
+  try {
+    const captured = await owner.capture('explore');
+    if (captured.status !== 'ready') throw new Error(captured.status);
+    expect(captured.lease.binding).toMatchObject({ contextWindowTokens: 65500, perQuestionContextWindowTokens: 32768 });
+    const input = { goal: 'x'.repeat(35000), materials: [], questions: [{ id: 'one', kind: 'judge' as const, instructions: 'Relevant?' }] };
+    const measured = await captured.lease.countInput(input);
+    expect(measured.tokens).toBeLessThan(65500);
+    expect(measured.perQuestionTokens).toBeGreaterThan(32768);
+    tokenizer = 'o200k_base (reference tokenizer)';
+    const bounded = await captured.lease.countInput(input);
+    expect(bounded.tokens).toBeGreaterThan(35000);
+    expect(bounded.perQuestionTokens).toBeGreaterThan(32768);
+    expect(bounded.tokenizer).toContain('UTF-8 capacity bound');
+    captured.lease.release();
+    headers = { 'typesafe-danger-zone-long-context': 'true' };
+    const extended = await owner.capture('explore');
+    if (extended.status !== 'ready') throw new Error(extended.status);
+    expect(extended.lease.binding).toMatchObject({ contextWindowTokens: 65500, perQuestionContextWindowTokens: 65500 });
+    extended.lease.release();
+  } finally { owner.close(); }
+});
 it('reports the failed decision route and uses a corrected path without exposing upstream bodies', async () => {
   let endpoint = '/systemone';
   const fetch = vi.fn(async (url: string) => url.endsWith('/decisions')

@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from '../lsp/supervisor.js';
-import type { SourceQueryAccess } from './source-query.js';
+import type { SourceQueryAccess, SourceQueryOwner } from './source-query.js';
 import { createLanguageOwner } from './language-owner.js';
 import { createControlledLanguagePeer, deferred, testRange } from './language.test-helper.js';
 
@@ -15,7 +15,7 @@ const cleanups: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const zeroOmissions = { outOfScope: 0, unmappable: 0, stale: 0, unavailable: 0 };
 
-async function fixture(options: { capabilities?: Record<string, unknown>; prepare?: Prepare; provider?: boolean; afterRead?: () => Promise<void> } = {}) {
+async function fixture(options: { capabilities?: Record<string, unknown>; prepare?: Prepare; provider?: boolean; afterRead?: () => Promise<void>; compute?: SourceQueryOwner['compute'] } = {}) {
   const documents = await createDocumentAuthorityHarness();
   const peer = createControlledLanguagePeer(options.capabilities);
   const spawn = vi.fn((_command?: string) => peer.child);
@@ -23,10 +23,11 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
     ...(options.prepare ? { prepareProvider: options.prepare } : {}) });
   cleanups.push(async () => { await supervisor.dispose(); await documents.cleanup(); });
   if (options.provider !== false) supervisor.registerProvider({ providerId: 'test-language',
-    command: 'controlled-test-peer', languageIds: ['typescript'], source: 'builtin' });
+    command: 'controlled-test-peer', languageIds: ['typescript', 'rust'], source: 'builtin' });
   await fs.writeFile(path.join(documents.workspaceRoot, 'main.ts'), 'const value = 1;\n');
   const validateSource = vi.fn(async (_query?: Pick<SourceQueryAccess, 'grantId'>) => {});
   const owner = createLanguageOwner({ documents: documents.authority, supervisor, sources: {
+    ...(options.compute ? { compute: options.compute } : {}),
     validateLanguage: validateSource,
     prepareLanguageView: async query => ({ root: query.physicalRoot!.canonicalRoot, check: async () => {}, release: async () => {} }),
     dispose: async () => {},
@@ -50,6 +51,46 @@ async function fixture(options: { capabilities?: Record<string, unknown>; prepar
 }
 
 describe('live language owner', () => {
+  it('links a nested Rust manifest while keeping source locations in the original workspace', async () => {
+    const compute = vi.fn(async (query: Query) => ({ status: 'ready', records: [
+      { kind: 'entry', path: `${query.path.split('/')[0]}/Cargo.toml`, revision: 'manifest', data: { kind: 'file' } },
+    ] })) as unknown as SourceQueryOwner['compute'];
+    const f = await fixture({ compute });
+    await fs.mkdir(path.join(f.documents.workspaceRoot, 'project', 'src'), { recursive: true });
+    await fs.writeFile(path.join(f.documents.workspaceRoot, 'project', 'src', 'lib.rs'), 'fn main() {}');
+    f.peer.handlers.set('textDocument/definition', () => [{ uri: f.uri('project/src/lib.rs'), range: testRange(0, 3, 7) }]);
+    const result = await f.invoke({ path: 'project/src/lib.rs', line: 0, character: 4 });
+    expect(compute).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ paths: ['', 'project', 'project/src'], immediate: true }), expect.anything());
+    expect(f.peer.requests('initialize')[0]?.params).toMatchObject({ rootUri: f.uri(''),
+      initializationOptions: { linkedProjects: [path.join(f.documents.workspaceRoot, 'project', 'Cargo.toml')] } });
+    expect(result).toMatchObject({ status: 'ready', items: [{ resource: f.documents.resource('project/src/lib.rs') }] });
+    await fs.mkdir(path.join(f.documents.workspaceRoot, 'other'), { recursive: true });
+    await fs.writeFile(path.join(f.documents.workspaceRoot, 'other', 'lib.rs'), 'fn main() {}');
+    const another = await f.invoke({ path: 'other/lib.rs', line: 0, character: 4 });
+    expect(another.source?.view).toBe(result.source?.view);
+    expect(f.spawn).toHaveBeenCalledTimes(1);
+    expect(f.peer.notifications('workspace/didChangeConfiguration').at(-1)?.params).toMatchObject({ settings: {
+      'rust-analyzer': { linkedProjects: [path.join(f.documents.workspaceRoot, 'project', 'Cargo.toml'), path.join(f.documents.workspaceRoot, 'other', 'Cargo.toml')] },
+    } });
+  });
+
+  it('reports known analysis work as pending and resumes queries after progress ends', async () => {
+    const f = await fixture();
+    await f.invoke();
+    const prior = f.peer.requests('textDocument/definition').length;
+    f.peer.notify('$/progress', { token: 'cargo', value: { kind: 'begin', title: 'Loading Cargo workspace' } });
+    await expect(f.invoke()).resolves.toMatchObject({ status: 'pending', reason: 'indexing', items: [] });
+    expect(f.peer.requests('textDocument/definition')).toHaveLength(prior);
+    f.peer.notify('$/progress', { token: 'cargo', value: { kind: 'end' } });
+    await expect(f.invoke()).resolves.toMatchObject({ status: 'ready' });
+    expect(f.peer.requests('textDocument/definition')).toHaveLength(prior + 1);
+  });
+
+  it('keeps ContentModified as retryable analysis state when source bytes did not change', async () => {
+    const f = await fixture();
+    f.peer.handlers.set('textDocument/definition', () => { throw Object.assign(new Error('content modified'), { code: -32801 }); });
+    await expect(f.invoke()).resolves.toMatchObject({ status: 'pending', reason: 'content-modified', items: [] });
+  });
   it('remains lazy and reports a missing provider without manufacturing a successful zero', async () => {
     const f = await fixture({ provider: false });
     expect(f.spawn).not.toHaveBeenCalled();

@@ -27,7 +27,7 @@ export interface ExploreFastDecisionLoopInput {
   run: ExploreQueryRun;
   binding: HarnessResolvedFastDecisionBinding;
   call(input: Batch & { signal: AbortSignal }): Promise<HarnessFastDecisionResultWire>;
-  countInput?(input: Batch): Promise<{ tokens: number; tokenizer: string }>;
+  countInput?(input: Batch): Promise<{ tokens: number; perQuestionTokens?: number; tokenizer: string }>;
   expand?(views: ExploreQueryView[]): Promise<void>;
   signal: AbortSignal;
   deadlineAt: number;
@@ -64,7 +64,7 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
   let lastFacts = '';
   const usage = { inputTokens: 0, outputTokens: 0 };
   const known = { inputTokens: true, outputTokens: true };
-  const measured = new Map<string, Promise<{ tokens: number; tokenizer: string }>>();
+  const measured = new Map<string, Promise<{ tokens: number; perQuestionTokens?: number; tokenizer: string }>>();
   const judgments = new Map<string, Map<string, FastDecisionAnswer>>();
   const key = (batch: Batch) => createHash('sha256').update(JSON.stringify(batch)).digest('hex');
   const measure = async (batch: Batch) => {
@@ -77,9 +77,11 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
     return counted;
   };
   const fits = async (batch: Batch): Promise<boolean> => {
-    if (!input.countInput || !input.binding.contextWindowTokens) return true;
+    if (!input.countInput) return true;
     const counted = (await measure(batch))!;
-    return !input.binding.contextWindowTokens || counted.tokens + batch.questions.length <= input.binding.contextWindowTokens;
+    return (!input.binding.contextWindowTokens || counted.tokens + batch.questions.length <= input.binding.contextWindowTokens)
+      && (!input.binding.perQuestionContextWindowTokens || counted.perQuestionTokens === undefined
+        || counted.perQuestionTokens + 1 <= input.binding.perQuestionContextWindowTokens);
   };
   const call = async (batch: Batch) => {
     const id = key(batch), previous = judgments.get(id);

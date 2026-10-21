@@ -329,7 +329,7 @@ export function createScriptRuntime(options: {
         if (method === 'run') {
           if (!environment || environment.runId !== authority.runId || environment.threadId !== authority.threadId) {
             return result({ environmentId: id, environmentState: 'closed', error: 'script_environment_closed',
-              message: 'This script environment has ended. Open a new environment to run scripts.' }, 'none', true, 'failed');
+              message: 'This script environment is no longer available in the current Run. Environments end with their original Run, cancellation, explicit timeout, or process exit. Open a new environment and recreate needed bindings; previously returned output remains in conversation history.' }, 'none', true, 'failed');
           }
           return await evaluate(environment, authority, params, context);
         }

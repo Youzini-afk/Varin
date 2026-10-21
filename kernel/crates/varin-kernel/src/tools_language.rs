@@ -359,6 +359,9 @@ impl KernelToolExecutor {
         if let Some(message) = raw["message"].as_str() {
             result["message"] = json!(message);
         }
+        if let Some(reason) = raw["reason"].as_str() {
+            result["reason"] = json!(reason);
+        }
         if let Some(source) = raw["source"].as_object() {
             result["source"] = Value::Object(
                 source

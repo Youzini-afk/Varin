@@ -54,6 +54,10 @@ Live operations and materialized execution perform their separate physical check
 preparation retain capture coverage and exact configuration dependencies; no later read repairs old
 fixed provenance by consulting current disk.
 
+`file.read.check` verifies the original Run grant, regular-file identity and canonical path only.
+Documents owns the subsequent queued read lease. The identity fences do not contest another legitimate
+Documents reader's lease; actual reads and writes continue to enforce the original native lease boundary.
+
 Source preparation reads its durable branch receipt before recapture. Concurrent observers may share
 preparation; the last cancelled observer drains the original capture before its call settles. Source
 replacement prepares context before publishing the new input/Run/source transaction. A failed or stale

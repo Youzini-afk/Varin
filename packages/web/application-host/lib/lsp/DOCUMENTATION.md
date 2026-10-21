@@ -65,6 +65,17 @@ pinned branch's derived project, including drafts captured during source prepara
 reinterprets a Thread as a session or substitutes a same-path live workspace. Cross-file locations remain
 admitted by the source owner rather than being stamped with the queried document's revision.
 
+Rust tool queries discover ancestor `Cargo.toml` / `rust-project.json` entries through the admitted native
+source, then initialize rust-analyzer with the nearest manifest in `linkedProjects`. Newly queried projects
+join that same source view's project configuration; they do not create another whole-source materialization.
+Physical source roots, grants, cwd and URI mapping stay with the original workspace; explicitly configured
+provider `linkedProjects` take precedence. Fixed sources discover their own manifests, never live copies.
+
+Server work-done progress remains visible separately from protocol initialization. Semantic queries during
+reported loading return `pending` with `reason: indexing`; syntax-only document symbols remain available.
+LSP ContentModified retains its numeric code and becomes retryable `pending` when the admitted document
+itself is unchanged. Timeouts return `unavailable` with `reason: timeout`; empty successful results remain `ready`.
+
 Provider language families share a process (for example TS/TSX/JS). Document versions are assigned only
 after shared startup finishes, in the synchronous notification step. A view revision detects changes to
 other synchronized files while a query is answering. Filesystem/Document mutation events invalidate

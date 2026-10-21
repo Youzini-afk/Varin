@@ -150,10 +150,6 @@ export const DEFAULT_HITS_PER_FILE = 12;
 export const DEFAULT_READ_PARALLELISM = 3;
 /** Working nearest-neighbor budget. Not a product hard reject. */
 export const DEFAULT_SEMANTIC_RECALL = 24;
-/** Reserved from the public remaining wait for judge/present. Not a calibrated SLO. */
-export const DEFAULT_JUDGE_RESERVE_MS = 8_000;
-/** Public explore remaining wait shared across stages. Not a calibrated SLO. */
-export const DEFAULT_EXPLORE_QUERY_BUDGET_MS = 120_000;
 
 const VOCAB_PACKAGE_LIMIT = 12;
 const VOCAB_ENTRY_LIMIT = 12;

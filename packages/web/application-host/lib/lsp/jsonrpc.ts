@@ -40,7 +40,8 @@ export const createJsonRpcClient = ({
       pending.delete(message.id);
       if (!waiter) return;
       const error = asRecord(message.error);
-      if (error) waiter.reject(new Error(typeof error.message === 'string' ? error.message : 'Language server request failed'));
+      if (error) waiter.reject(Object.assign(new Error(typeof error.message === 'string' ? error.message : 'Language server request failed'),
+        typeof error.code === 'number' ? { code: error.code } : {}));
       else waiter.resolve(message.result);
       return;
     }

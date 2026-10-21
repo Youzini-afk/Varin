@@ -56,12 +56,13 @@ export function createControlledLanguagePeer(capabilities: Record<string, unknow
         return;
       }
       const handler = handlers.get(frame.method!);
-      void Promise.resolve(handler ? handler(frame) : frame.method === 'textDocument/diagnostic'
+      void Promise.resolve().then(() => handler ? handler(frame) : frame.method === 'textDocument/diagnostic'
         ? { kind: 'full', items: [] } : frame.method === 'shutdown' ? null : []).then(
         value => reply(frame, value),
         error => {
           if (!child.killed) writeContentLengthMessage(stdout, { jsonrpc: '2.0', id: frame.id,
-            error: { code: -32603, message: error instanceof Error ? error.message : String(error) } });
+            error: { code: error && typeof error === 'object' && 'code' in error ? error.code : -32603,
+              message: error instanceof Error ? error.message : String(error) } });
         },
       );
     });

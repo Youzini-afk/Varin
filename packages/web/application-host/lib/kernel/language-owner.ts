@@ -21,6 +21,7 @@ export interface LanguageResult {
   omissions: { outOfScope: number; unmappable: number; stale: number; unavailable: number };
   diagnosticVerification?: 'unversioned';
   message?: string;
+  reason?: string;
 }
 export type LanguageToolOwner = ((query: LanguageQuery, signal: AbortSignal) => Promise<LanguageResult>) & {
   releaseSource?(match: { runId?: string; grantId?: string }): Promise<void>;
@@ -36,7 +37,7 @@ const failure = (status: LanguageResult['status'], message?: string): LanguageRe
 export function createLanguageOwner({ documents, supervisor, sources, remote, targetAuthority }: {
   documents: Pick<DocumentAuthority, 'readSnapshot'>;
   supervisor: ReturnType<typeof createLanguageSupervisor>;
-  sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'>;
+  sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'> & Partial<Pick<SourceQueryOwner, 'compute'>>;
   remote?: ManagedSourceQueryTransport;
   /** Target execution uses a real admitted resource grant, without a local Catalog Run. */
   targetAuthority?: true;
@@ -54,6 +55,21 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
     if (!languageId) return failure('unsupported', 'No language is known for this file');
     const observed = await sources.read(query, query.path, signal);
     if (observed.status !== 'ready') return failure(observed.status === 'stale' ? 'stale' : 'unavailable', observed.message);
+    // rust-analyzer cannot discover an arbitrarily nested Cargo project from an
+    // umbrella directory. Ask the admitted source for ancestor manifests only;
+    // retain the original root for authorization and resource/URI mapping.
+    let projectFile: string | undefined;
+    if (languageId === 'rust' && sources.compute) {
+      const ancestors = query.path.split('/').slice(0, -1);
+      const paths = Array.from({ length: ancestors.length + 1 }, (_, index) => ancestors.slice(0, index).join('/'));
+      const listed = await sources.compute(query, { operation: 'list', lane: 'foreground', paths, immediate: true,
+        globs: ['Cargo.toml', '**/Cargo.toml', 'rust-project.json', '**/rust-project.json'],
+        includeHidden: true, respectGitignore: false }, { signal });
+      if (!['ready', 'empty'].includes(listed.status)) return failure('unavailable', listed.message ?? 'Language project discovery did not complete');
+      projectFile = listed.records.filter(item => item.kind === 'entry' && record(item.data).kind === 'file')
+        .map(item => item.path).filter(path => paths.includes(path.split('/').slice(0, -1).join('/')))
+        .sort((a, b) => b.split('/').length - a.split('/').length || a.localeCompare(b))[0];
+    }
     // Same actual environment across Runs shares one service. Provider/configuration generations
     // remain solely in the supervisor; neither Run identity nor grant ID enters this view key.
     const view = `agent:source:${createHash('sha256').update(JSON.stringify([
@@ -62,6 +78,7 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
         : [query.physicalRoot?.hostId, query.physicalRoot?.rootId, query.physicalRoot ? normalizePathIdentity(query.physicalRoot.canonicalRoot) : null]),
     ])).digest('hex')}` as const;
     const environment = await supervisor.retainSourceView({ view, workspaceId: query.source.workspace_id, root: query.physicalRoot?.canonicalRoot ?? '',
+      ...(projectFile ? { projectFile } : {}),
       runId: query.runId, grantId: query.grantId, executionWorkspaceId: query.source.execution_workspace_id,
       prepare: (viewId, active) => sources.prepareLanguageView(query, viewId, active),
       admitProcess: (active, prepared) => sources.processAdmission(query, prepared)(active),
@@ -132,7 +149,8 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
     if (response.status !== 'ready' && !unversioned) {
       const status = response.status === 'pending' || response.status === 'stale' ? response.status
         : response.reason === 'unsupported' ? 'unsupported' : 'unavailable';
-      return { ...result, status, ...(typeof response.message === 'string' ? { message: response.message } : {}) };
+      return { ...result, status, ...(typeof response.reason === 'string' ? { reason: response.reason } : {}),
+        ...(typeof response.message === 'string' ? { message: response.message } : {}) };
     }
     const values = query.method === 'hover' ? (response.value === null ? [] : [{ ...record(response.value), resource: bound.resource }])
       : Array.isArray(response.value) ? response.value : [];

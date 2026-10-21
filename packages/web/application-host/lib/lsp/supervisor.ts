@@ -105,6 +105,9 @@ type ResolveCollectionName =
   | 'inlayHintResolveItems';
 
 interface LanguageSessionRecord extends ManagedProcessOwner<ManagedPipedProcessHandle> {
+  analysisProgress: Map<string | number, string>;
+  /** Present only when the Host supplies native-source Rust project discovery. */
+  linkedProjects?: string[];
   activeRequests: number;
   documentEpoch: number;
   diagnosticSnapshots: Map<string, { contentRevision: string; documentVersion: number | null; viewRevision: number; items: ReturnType<typeof mapDiagnostic>[]; omissions: { outOfScope: number; unmappable: number } }>;
@@ -197,6 +200,8 @@ interface LanguageProviderDescriptor extends Record<string, unknown> {
 /** One reference to an already admitted source. Configuration still routes by workspaceId.
  * The supervisor owns sharing, watcher, startup, generations and physical process lifetime. */
 export interface LanguageSourceView {
+  /** Source-relative manifest discovered under the original whole-project grant. */
+  projectFile?: string;
   view: LanguageViewId;
   workspaceId: string;
   root: string;
@@ -208,6 +213,7 @@ export interface LanguageSourceView {
   read(resourceId: string, signal: AbortSignal): Promise<{ status: string; content?: string; revision?: string }>;
 }
 interface RetainedSourceView {
+  projectFiles: Set<string>;
   workspaceId: string;
   executionWorkspaceId?: string;
   view: LanguageViewId;
@@ -431,6 +437,15 @@ export const createLanguageSupervisor = ({
   const sourceViews = new Map<string, RetainedSourceView>();
   const sourceViewKey = (workspaceId: string, view: LanguageViewId) => `${workspaceId}\0${view}`;
   const sourceView = (workspaceId: string, view: LanguageViewId) => sourceViews.get(sourceViewKey(workspaceId, view));
+  const syncSourceProjects = (record: LanguageSessionRecord, source: RetainedSourceView | undefined) => {
+    if (!source || !record.rpc || !record.linkedProjects || !['ready', 'degraded'].includes(record.status)) return;
+    const projects = [...source.projectFiles].map(file => pathModule.resolve(source.root, file));
+    if (projects.every(file => record.linkedProjects!.includes(file))) return;
+    record.linkedProjects = projects;
+    record.documentEpoch += 1;
+    record.diagnosticSnapshots.clear();
+    record.rpc.notify('workspace/didChangeConfiguration', { settings: { 'rust-analyzer': { linkedProjects: projects } } });
+  };
   const withSourceOwner = async <T>(entry: RetainedSourceView, signal: AbortSignal,
     consume: (owner: LanguageSourceView) => Promise<T>): Promise<T> => {
     signal.throwIfAborted();
@@ -461,6 +476,10 @@ export const createLanguageSupervisor = ({
     if (record.providerId) snapshot.providerId = record.providerId;
     if (typeof record.generation === 'number') snapshot.generation = record.generation;
     if (record.message) snapshot.message = record.message;
+    if (record.analysisProgress.size && record.status !== 'failed') {
+      snapshot.analysis = 'indexing';
+      snapshot.message = [...record.analysisProgress.values()].join('; ');
+    }
     if (record.status === 'ready' || record.status === 'degraded') {
       const completion = record.serverCapabilities?.completionProvider;
       const signature = record.serverCapabilities?.signatureHelpProvider;
@@ -583,6 +602,7 @@ export const createLanguageSupervisor = ({
     message: input.message,
     failureReason: input.failureReason,
     documents: new Map<string, OpenLanguageDocument>(),
+    analysisProgress: new Map(),
     activeRequests: 0,
     documentEpoch: 0,
     diagnosticSnapshots: new Map(),
@@ -775,6 +795,10 @@ export const createLanguageSupervisor = ({
         if (prepared?.initializationOptions) initializationOptions = { ...prepared.initializationOptions, ...initializationOptions };
         signal.throwIfAborted();
         const source = sourceView(workspaceId, view);
+        if (languageId === 'rust' && source && initializationOptions?.linkedProjects === undefined) {
+          record.linkedProjects = [...source.projectFiles].map(file => pathModule.resolve(workspace.root, file));
+          if (record.linkedProjects.length) initializationOptions = { ...initializationOptions, linkedProjects: record.linkedProjects };
+        }
         if (view.startsWith('agent:source:') && (!source || !spawnAdmitted)) throw new Error('The admitted source process owner is unavailable');
         const launch = source && spawnAdmitted
           ? (command: string, args: readonly string[], options: SpawnOptionsWithStdioTuple<StdioPipe, StdioPipe, StdioPipe>) =>
@@ -807,9 +831,13 @@ export const createLanguageSupervisor = ({
       onRequest: (method, params) => {
         if (method === 'workspace/configuration') {
           const items = asRecord(params)?.items;
-          // No synthetic configuration overrides: servers use their own defaults
-          // and read the project's native configuration (pyrightconfig, tsconfig…).
-          return Array.isArray(items) ? items.map(() => null) : [];
+          // All other settings remain the server/project defaults. Only admitted
+          // Rust manifest discovery is supplied here, matching initialization.
+          return Array.isArray(items) ? items.map(item => {
+            const section = asRecord(item)?.section;
+            return record.linkedProjects?.length && section === 'rust-analyzer' ? { linkedProjects: record.linkedProjects }
+              : record.linkedProjects?.length && section === 'rust-analyzer.linkedProjects' ? record.linkedProjects : null;
+          }) : [];
         }
         if (method === 'workspace/workspaceFolders') return [{ uri: toFileUri(record.root), name: pathModule.basename(record.root) }];
         if (method === 'window/workDoneProgress/create' || method === 'window/showMessageRequest') return null;
@@ -820,6 +848,15 @@ export const createLanguageSupervisor = ({
     record.rpc = rpc;
     rpc.onNotification((method, params) => {
       if (sessions.get(key) !== record || record.rpc !== rpc) return;
+      if (method === '$/progress') {
+        const progress = asRecord(params), value = asRecord(progress?.value), token = progress?.token;
+        if ((typeof token === 'string' || typeof token === 'number') && value) {
+          if (value.kind === 'begin') record.analysisProgress.set(token, typeof value.title === 'string' ? value.title : 'Loading language project');
+          else if (value.kind === 'end') record.analysisProgress.delete(token);
+          emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
+        }
+        return;
+      }
       if (method !== 'textDocument/publishDiagnostics') return;
       const notification = asRecord(params) ?? {};
       const uri = typeof notification.uri === 'string' ? notification.uri : '';
@@ -902,6 +939,7 @@ export const createLanguageSupervisor = ({
         processId: null,
         rootUri: toFileUri(workspace.root),
         capabilities: {
+          window: { workDoneProgress: true },
           textDocument: {
             synchronization: { dynamicRegistration: false },
             completion: {
@@ -1000,6 +1038,7 @@ export const createLanguageSupervisor = ({
         }
       }
       record.status = 'ready';
+      syncSourceProjects(record, sourceView(workspaceId, view));
       record.message = '';
       emit(workspaceId, { kind: 'status', snapshot: snapshotFor(record) });
       if (isHostOwnedView(view) || retainedWorkspaces.has(workspaceId)) ensureIdleReaper();
@@ -1380,6 +1419,10 @@ export const createLanguageSupervisor = ({
       uri = toFileUri(resolved);
     }
     const params = options.params ?? featureParams(method, request, uri);
+    if (record.analysisProgress.size && method !== 'textDocument/documentSymbol') {
+      return { status: 'pending' as const, reason: 'indexing', providerId: record.providerId,
+        message: `Language project is loading: ${[...record.analysisProgress.values()].join('; ')}` };
+    }
     record.activeRequests += 1;
     if (open) open.readers = (open.readers ?? 0) + 1;
     try {
@@ -1423,6 +1466,8 @@ export const createLanguageSupervisor = ({
       } catch (error) {
         options.signal?.throwIfAborted();
         if (error instanceof Error && error.name === 'TimeoutError') return featureFailure(record, 'Language request timed out', 'timeout');
+        if (asRecord(error)?.code === -32801) return { ...featureFailure(record,
+          'Language analysis changed while answering; retry against the current project state', 'content-modified'), status: 'pending' as const };
         if (error instanceof LanguageMappingError) {
           return featureFailure(record, error.message, error.reason);
         }
@@ -1641,9 +1686,11 @@ export const createLanguageSupervisor = ({
     signal.throwIfAborted();
     if (source && !binding.prepare && source.root !== binding.root) throw new Error('Language view root changed');
     if (!source) {
-      source = { workspaceId: binding.workspaceId, executionWorkspaceId: binding.executionWorkspaceId ?? binding.workspaceId, view: binding.view, root: binding.root, owners: new Map(), watch: null };
+      source = { workspaceId: binding.workspaceId, executionWorkspaceId: binding.executionWorkspaceId ?? binding.workspaceId, view: binding.view, root: binding.root,
+        projectFiles: new Set(), owners: new Map(), watch: null };
       sourceViews.set(key, source);
     }
+    if (binding.projectFile) source.projectFiles.add(binding.projectFile);
     // Record the original reference before watch preparation, which may throw
     // synchronously. Targeted Run/grant retirement must still own that attempt.
     const ownerKey = `${binding.runId}\0${binding.grantId}`;
@@ -1673,6 +1720,9 @@ export const createLanguageSupervisor = ({
     signal.throwIfAborted();
     await binding.admitProcess(signal, environment);
     if (source.invalidated || source.closing) throw new Error('Source language view is retiring');
+    for (const current of sessions.values()) {
+      if (current.workspaceId === binding.workspaceId && current.view === binding.view) syncSourceProjects(current, source);
+    }
     if (!source.watch) {
       const held = source;
       source.watch = createWorkspaceWatcher({ workspaceId: binding.workspaceId, rootPath: environment.root,

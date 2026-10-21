@@ -144,6 +144,30 @@ export function classifierInputTexts(api: string, model: string, state: unknown,
   return [JSON.stringify(api === 'cloudflare-workers-ai-system-one' ? { model, input } : { model, ...input })];
 }
 
+/** Jev's two independent windows are part of its API contract, not a question-count
+ * quota. https://docs.typesafe.ai/models#context-length. The opt-in header raises
+ * both windows; a smaller user-configured window still applies. */
+export function classifierContextLimits(api: string, configured?: number, headers?: Record<string, string>) {
+  if (api !== 'typesafe-system-one' && api !== 'cloudflare-workers-ai-system-one') {
+    return configured ? { contextWindowTokens: configured } : {};
+  }
+  const extended = new Headers(headers).get('TypeSafe-Danger-Zone-Long-Context') === 'true';
+  return {
+    contextWindowTokens: Math.min(configured ?? Infinity, extended ? 262144 : 65536),
+    perQuestionContextWindowTokens: Math.min(configured ?? Infinity, extended ? 262144 : 32768),
+  };
+}
+
+/** Count shared state once and question fragments separately, avoiding N copies
+ * of a potentially large state in tokenizer IPC. The complete empty-question
+ * envelope plus the largest question is a conservative framed input budget. */
+export function classifierQuestionInputTexts(api: string, model: string, state: unknown, questions: readonly FastDecisionQuestion[]): string[] {
+  return [classifierInputTexts(api, model, state, [])[0]!, ...questions.map(question => {
+    const wire = classifierQuestion(question);
+    return JSON.stringify({ [question.id]: { ...wire, type: wire.type === 'bool' ? 'noul' : wire.type } });
+  })];
+}
+
 function readAnswer(question: FastDecisionQuestion, raw: unknown): FastDecisionAnswer | undefined {
   if (!isRecord(raw)) return undefined;
   switch (question.kind) {

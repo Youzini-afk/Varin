@@ -4,7 +4,7 @@ import { ExploreEvidenceChanged, type FastDecisionMaterial } from '@varin/protoc
 import type { ExploreToolProgress } from '@varin/protocol';
 import { createExploreProgress } from '../harness/explore-progress.js';
 import { contentHashOf } from '../knowledge/semantic/identity.js';
-import { createExploreQueryRun, requiredExploreComponents, type ExploreDeps, type RgSearchReturn } from '../harness/explore.js';
+import { createExploreQueryRun, DEFAULT_READ_PARALLELISM, requiredExploreComponents, type ExploreDeps, type RgSearchReturn } from '../harness/explore.js';
 import type { ExploreFileSnapshot } from '../harness/file-snapshot.js';
 import type { BoundRetrievalPipeline, PipelinePlan, RetrievalPipelineOwner, RetrievalSnippet, RetrievalStageKind, RetrievalStageStatus } from '../harness/retrieval-pipeline.js';
 import { waitWithSignal } from '../cancellation.js';
@@ -13,6 +13,16 @@ import type { KernelClient } from './kernel-client.js';
 import type { RetrievalSourceOwner } from './retrieval-source.js';
 import { toolOperationId, type LiveRoot, type LaunchSource, type RetrievalQuery } from './protocol.generated.js';
 import type { InferenceCall, InferenceRequests } from '../knowledge/semantic/inference-requests.js';
+
+/** Use the existing source-read parallelism, draining every admitted read even
+ * when a sibling fails. Native leases still serialize overlapping files. */
+async function readBatches<T>(items: readonly T[], read: (item: T) => Promise<unknown>): Promise<void> {
+  for (let start = 0; start < items.length; start += DEFAULT_READ_PARALLELISM) {
+    const batch = await Promise.allSettled(items.slice(start, start + DEFAULT_READ_PARALLELISM).map(read));
+    const failed = batch.find(item => item.status === 'rejected');
+    if (failed?.status === 'rejected') throw failed.reason;
+  }
+}
 
 export interface RetrievalResult {
   status: Exclude<RetrievalStageStatus, 'disabled'>;
@@ -148,13 +158,18 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
           }
           stage('keyword', page.status === 'partial' ? 'partial' : page.records.length ? 'ready' : 'empty');
           const hits = [];
-          for (const record of page.records) {
-            const hit = decodeSearchHit(record, query.source.workspace_id);
-            if (!hit) continue;
+          const candidates = page.records.flatMap(record => {
+            const hit = decodeSearchHit(record, query.source.workspace_id); return hit ? [hit] : [];
+          });
+          await readBatches([...new Set(candidates.map(hit => hit.resource.resourceId))], read);
+          const lines = new Map<string, string[]>();
+          for (const hit of candidates) {
             const snapshot = await read(hit.resource.resourceId);
             if (snapshot.status !== 'ready') continue;
             if (snapshot.revision !== hit.revision) { result.omissions.stale++; continue; }
-            const line = snapshot.content.split('\n')[hit.line - 1];
+            let text = lines.get(hit.resource.resourceId);
+            if (!text) { text = snapshot.content.split('\n'); lines.set(hit.resource.resourceId, text); }
+            const line = text[hit.line - 1];
             if (line === undefined) { result.omissions.stale++; continue; }
             focus(hit.resource.resourceId, hit.line);
             hits.push({ path: hit.resource.resourceId, line: hit.line, text: line.replace(/\r$/u, '') });
@@ -259,7 +274,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
         // Action questions also disclose names discovered in admitted source, even
         // when no new material is offered. Their original snapshots remain fenced.
         const paths = new Map(materials.map(material => views.get(material.id)!).map(view => [view.path, view.revision]));
-        for (const [path, revision] of paths) {
+        await readBatches([...paths], async ([path, revision]) => {
           const original = await read(path);
           if (original.status !== 'ready' || original.revision !== revision) throw new Error('Original retrieval snapshot changed');
           const lines = original.content.split(/\r\n|\n|\r/);
@@ -275,7 +290,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
             result.diagnostics!.push({ kind: 'source-updated', path, message: 'The source changed during judgment; affected evidence was refreshed.' });
             throw new ExploreEvidenceChanged();
           }
-        }
+        });
       };
       let modelParticipation: import('@varin/protocol').ExploreModelParticipation | undefined;
       try {

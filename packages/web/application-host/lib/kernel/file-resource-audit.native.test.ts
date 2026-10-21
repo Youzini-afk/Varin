@@ -54,6 +54,21 @@ it("audit: overlapping physical directories share one lease boundary across root
   assert.equal(attempted.status, "busy");
 });
 
+it("audit: source identity checks coexist with a Documents lease without bypassing actual read locks", async () => {
+  const f = await fixture();
+  await fs.writeFile(path.join(f.workspace, 'nested', 'file.txt'), 'source');
+  const reader = await f.scoped('reader');
+  const address = { ...f.address, path: 'nested/file.txt' };
+  await f.client.fileLeaseAcquire({ ...f.address, leaseId: 'document-reader', resources: [{ path: address.path, scope: 'exact' }] });
+  const admitted = await reader.fileReadCheck(address);
+  assert.ok(admitted.resourceKey);
+  await assert.rejects(reader.fileRead(address), /busy.*lease/i);
+  const restricted = await f.scoped('restricted', 'ws', ['elsewhere']);
+  await assert.rejects(restricted.fileReadCheck(address), /scope|grant|authoriz/i);
+  await f.client.fileLeaseRelease({ ...f.address, leaseId: 'document-reader' });
+  assert.equal((await reader.fileReadCheck(address)).resourceKey, admitted.resourceKey);
+});
+
 it("audit: a descendant subtree lease cannot authorize an ancestor removal", async () => {
   const f = await fixture();
   await fs.mkdir(path.join(f.workspace, "nested", "child"));

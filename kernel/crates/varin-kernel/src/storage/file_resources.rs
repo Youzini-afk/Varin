@@ -1648,7 +1648,9 @@ pub(super) fn resolve_scoped_resource(
 
 impl Storage {
     /// Private read-only Host admission before Documents accesses a retrieval candidate.
-    /// The persisted Run grant and physical lease owner remain authoritative; no body is read.
+    /// Checks the original Run grant and canonical identity only; no body is read.
+    /// Documents separately waits for and owns the physical read lease. Checking
+    /// that lease here races concurrent Documents readers between the two fences.
     pub(crate) fn file_read_check(
         &mut self,
         params: &Value,
@@ -1656,7 +1658,7 @@ impl Storage {
     ) -> Result<Value, KernelError> {
         let args: crate::protocol_generated::KernelFileReadCheckParams = parse_file_params(params)?;
         let key = self.file_resource_key(&args.root_id, &args.path, grant)?;
-        self.file_read(params, grant, false)?;
+        self.check_cancelled()?;
         let resource = self.resolve_file_resource(&args.root_id, &args.path, grant, false)?;
         let metadata = fs::symlink_metadata(&resource.absolute)?;
         if !metadata.is_file() || metadata.file_type().is_symlink() {
