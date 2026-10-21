@@ -70,6 +70,7 @@ fn report(status: Status, reason: Option<&str>) -> ContentCollectionReport {
         removed_objects: 0,
         removed_bytes: 0,
         removed_staging_files: 0,
+        pending_deleted_threads: None,
         reason: reason.map(str::to_owned),
     }
 }
@@ -341,12 +342,14 @@ impl ContentCollection {
         Ok(serde_json::from_slice(&bytes)?)
     }
     fn roots(&self, db: &Connection) -> WorkResult<CollectionRoots> {
+        // Thread metadata commands carry inline intents; only body-bearing commands
+        // publish a ContentStore reference. A malformed present reference still fails decoding.
         let mut roots = "SELECT json_extract(body,'$.request') FROM model_steps
              UNION ALL SELECT json_extract(o.value,'$.item') FROM model_steps m, json_each(m.body,'$.original') o
              UNION ALL SELECT json_extract(body,'$.content') FROM history
              UNION ALL SELECT body FROM model_outputs
              UNION ALL SELECT body FROM input_history_content
-             UNION ALL SELECT intent FROM commands".to_string();
+             UNION ALL SELECT intent FROM commands WHERE json_type(intent,'$.content_object') IS NOT NULL".to_string();
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.claim.reasonRef') FROM computer_requests WHERE json_extract(body,'$.claim.reasonRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.detailRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.detailRef') IS NOT NULL UNION ALL SELECT json_extract(data,'$.claim.reasonRef') FROM events WHERE kind='computer.request_decided' AND json_extract(data,'$.claim.reasonRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.requestRef') FROM computer_requests UNION ALL SELECT json_extract(body,'$.detailRef') FROM computer_requests WHERE json_extract(body,'$.detailRef') IS NOT NULL");
         roots.push_str(" UNION ALL SELECT json_extract(body,'$.intent.reviewed_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' UNION ALL SELECT json_extract(body,'$.intent.configuration_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' UNION ALL SELECT json_extract(body,'$.result.value.snapshot_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' AND json_extract(body,'$.result.value.snapshot_ref') IS NOT NULL UNION ALL SELECT json_extract(body,'$.result.value.output_ref') FROM operations WHERE json_extract(body,'$.intent.kind')='mcp_sampling_generation_v1' AND json_extract(body,'$.result.value.output_ref') IS NOT NULL");

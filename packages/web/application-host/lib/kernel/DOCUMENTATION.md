@@ -78,6 +78,10 @@ owns admission and original command receipts, not an in-memory Host request queu
   deadlines and durable waits stay in Catalog; the Host adds no periodic model polling.
 - Agent content collection uses the original Catalog/ContentStore maintenance worker. Its partial,
   deferred, cancelled and failed outcomes are distinct; it is not workspace Storage GC.
+  `content-maintenance.ts` coalesces Thread deletion requests, rediscovers tombstones at startup,
+  retries busy content readers, and follows durable events until original deleted work settles.
+  Catalog retires the deleted Thread's owned metadata while preserving surviving shared references;
+  the existing content collector releases the resulting unreachable bodies.
 
 UI projections retain exact identities and revisions and discard stale asynchronous results. The same
 Host routes serve native product views; a renderer cannot supply prepared snapshots, trusted actors or

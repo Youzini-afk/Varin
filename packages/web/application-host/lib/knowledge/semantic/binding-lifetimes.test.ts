@@ -122,7 +122,7 @@ it.each(['query', 'index'] as const)('%s embeddings use the captured endpoint, h
   const connection = { fetch, policy: {} as never };
   const prepare = vi.fn(async () => connection);
   const ledger = { admit: async () => ({ status: 'admitted' as const, token: 'original' }), settle: vi.fn(async () => {}),
-    close: async () => {}, read: async () => null, list: async () => [] };
+    close: async () => {}, read: async () => null, list: async () => [], retireScope: async () => {} };
   const owner = createSemanticInference({ readGlobalInferenceSettings: async () => settings, resolveEmbeddingBinding: async () => captured }, undefined,
     { requests: { ...requestOptions, egress: { prepare } }, ledger });
   const lease = await owner.capture();
@@ -151,7 +151,7 @@ it.each([
 ])('index embeddings preserve $name without exposing upstream content', async ({ code, response }) => {
   const captured = provider();
   const ledger = { admit: async () => ({ status: 'admitted' as const, token: 'original' }), settle: async () => {},
-    close: async () => {}, read: async () => null, list: async () => [] };
+    close: async () => {}, read: async () => null, list: async () => [], retireScope: async () => {} };
   const owner = createSemanticInference({ readGlobalInferenceSettings: async () => settings, resolveEmbeddingBinding: async () => captured }, undefined,
     { ledger, fetchImpl: async () => response() });
   const lease = await owner.capture();

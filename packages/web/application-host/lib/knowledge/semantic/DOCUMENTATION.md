@@ -187,12 +187,15 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   and uses the immutable handle's own scoped block-ID cache. New publications preserve retained old
   readers; final release closes retired handles and removes their files. Store close or owner loss
   invalidates all tokens, and startup under the exclusive writer lock removes abandoned copies.
+  On Windows, disposal unlinks each private sidecar before removing its directory: Electron's
+  recursive `rm` can reject previously mapped files even after the native reader closes. Failed
+  cleanup remains retryable; it does not stop admission of a new publication.
   Same-space embedder replacement affects future document admissions while an admitted batch keeps
   its original binding through preparation and embedding.
 - Background index inference facts: `inference-ledger.ts` uses the same private semantic storage process.
   Its sole durable ledger is `VARIN_DATA_DIR/knowledge/<hostId>/semantic-inference/ledger.tdb`, alongside
-  the derived `semantic/` subtree rather than inside it. Storage relocation and index-cache purge
-  cannot erase admitted external work. This dimension-independent, one-dimensional Trivium store
+  the derived `semantic/` subtree rather than inside it. Storage relocation retains admitted work;
+  explicit index removal retires its receipts only after original transports stop. This dimension-independent, one-dimensional Trivium store
   uses full-sync WAL transactions: dispatch intent is acknowledged only after persistence, before
   the inference owner may send HTTP. It records whitelisted operation/identity metadata, input
   hashes, attempt/usage receipts and validated completed vectors; it never stores input text,
@@ -216,9 +219,13 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   retains its live admission until it finishes, so cancellation cannot create concurrent duplicate work.
   HTTP failures, invalid vector responses and classified network failures retain distinct diagnostic
   codes and sanitized details instead of being replaced by a generic indeterminate-dispatch error.
-  Facts are retained across restarts without automatic
-  pruning; future deletion/retention must preserve unresolved-outcome fences. Read-only workspace-scope
-  history projections omit vector payloads and dispatch tokens.
+  A durable index publication collects completed records whose entire batch is present in that
+  vector space, including their vector bodies, auxiliary receipts and old attempts. Inactive failed
+  or interrupted attempts can also retire; live admissions and unpublished successful results remain.
+  Collection compacts the ledger instead of leaving deleted payload generations on disk. Full index
+  removal also retires results from previous model spaces. An admission-specific durable retirement
+  marker survives owner restart and waits for actual transport completion; new workspace enrollment
+  cannot undo an older request's retirement. Read-only workspace-scope projections omit vectors and tokens.
 - Runtime: `runtime.ts` — native directory inventory first returns path and stat metadata without
   reading every file body. New, changed, invalidated and failed paths then enter Documents reads,
   parsing and embedding. Successful document publications retain the metadata from the native byte capture

@@ -59,6 +59,8 @@ export interface SemanticInferenceLedger {
   settle(token: string, settlement: SemanticInferenceSettlement): Promise<void>;
   read(key: string): Promise<Exclude<SemanticInferenceAdmissionResult, { status: "admitted" }> | null>;
   list(filter?: SemanticInferenceFactFilter): Promise<SemanticInferenceFact[]>;
+  /** Release an explicitly removed index's auxiliary history after its live transports stop. */
+  retireScope(workspaceId: string): Promise<void>;
   close(): Promise<void>;
 }
 export type SemanticInferenceLedgerOpenOptions = { dataDir: string; hostId: string };

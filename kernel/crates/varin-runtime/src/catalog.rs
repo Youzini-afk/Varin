@@ -1741,6 +1741,8 @@ mod observe;
 pub mod usage;
 #[path = "catalog_threads.rs"]
 pub mod threads;
+#[path = "catalog_retention.rs"]
+mod retention;
 
 #[path = "catalog_context.rs"]
 pub mod context;

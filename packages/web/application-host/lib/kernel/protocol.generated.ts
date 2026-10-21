@@ -3482,6 +3482,7 @@ export interface ContentCollectionReport {
   removedObjects: number;
   removedBytes: number;
   removedStagingFiles: number;
+  pendingDeletedThreads?: number;
   reason: string | null;
 }
 

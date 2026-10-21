@@ -16,6 +16,7 @@ import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { ThreadAdapter } from './thread-adapter.js';
+import { createContentMaintenance } from './content-maintenance.js';
 import { ThreadCollaboration } from './thread-collaboration.js';
 import { KernelStorageAdapter } from './storage-adapter.js';
 import { createDocumentAuthority } from '../documents/authority.js';
@@ -96,8 +97,31 @@ async function fixture(hold = false, acceptsImages?: boolean, existingRoot?: str
   const hostUrl = await listen(createServer(app));
   configureRuntimeUrlResolver({ apiBaseUrl: hostUrl, realtimeBaseUrl: hostUrl });
   setRuntimeExtraHeaders({ 'x-fixture-auth': 'fixture-client' });
-  return { api: createThreadsHttpAPI(), runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: async () => { await stopContinuations?.(); await kernel.close(); } };
+  return { api: createThreadsHttpAPI(), adapter, runtime: adapter.runtime, hostUrl, secret, requests, launchErrors, root, closeKernel: async () => { await stopContinuations?.(); await kernel.close(); } };
 }
+
+it('deleting a completed HTTP conversation automatically releases its native history and content', async () => {
+  const f = await fixture();
+  const errors: unknown[] = [];
+  let removedObjects = 0;
+  const maintenance = createContentMaintenance({ runtime: {
+    threads: f.runtime.threads.bind(f.runtime), onEvent: f.runtime.onEvent.bind(f.runtime),
+    onReady: f.runtime.onReady.bind(f.runtime), onExit: f.runtime.onExit.bind(f.runtime),
+    collectContent: async signal => { const result = await f.runtime.collectContent(signal); removedObjects += result.removedObjects; return result; },
+  }, onError: error => errors.push(error) });
+  f.adapter.bindContentMaintenance(maintenance.request);
+  cleanups.push(() => maintenance.dispose());
+  const identity = await f.api.create('content-retirement');
+  const receipt = await f.api.submit({ ...identity, key: 'content-retirement-input', expectedHead: null,
+    text: 'conversation body '.repeat(8000), model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
+  const thread = (await f.runtime.threads()).find(thread => thread.thread_id === identity.threadId)!;
+  await f.api.delete({ runtime: identity.runtime, threadId: identity.threadId, key: 'content-retirement-delete', expectedRevision: thread.revision });
+  await expect.poll(() => removedObjects, { timeout: 10_000 }).toBeGreaterThan(0);
+  expect(await f.runtime.history(identity.branchId)).toEqual([]);
+  await expect(f.api.run(receipt.run_id)).rejects.toThrow();
+  expect(errors).toEqual([]);
+}, 30_000);
 
 it('public threads HTTP client reaches the kernel, enforces selected thread identity, and streams no credential material', async () => {
   const f = await fixture();

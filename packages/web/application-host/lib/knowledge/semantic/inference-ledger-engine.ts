@@ -108,7 +108,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
   let closing: Promise<void> | null = null;
   let closed = false;
   // Only requests owned by this live process can hold up another index pass.
-  // Recovered receipts retain their cost facts without blocking recomputation.
+  // Recovered receipts do not block recomputation; publication/removal retires inactive facts.
   const active = new Map<string, Entry>();
   const enqueue = <T>(operation: () => T): Promise<T> => {
     if (closed || closing) return Promise.reject(new Error("Semantic inference ledger is closed"));
@@ -149,7 +149,69 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
     const entry = decode(db.getPayload(ids[0]!));
     return { id: ids[0]!, entry };
   };
+  const entries = () => ["semantic-inference", "semantic-inference-attempt"].flatMap(type =>
+    db.indexedLookup({ type }, Math.max(1, db.nodeCount())));
+  const remove = (ids: number[]): number => {
+    if (ids.length) {
+      db.commitTransaction(ids.map(id => ({ type: "delete" as const, id })));
+      native.compact();
+      persistence.commit();
+    }
+    return ids.length;
+  };
+  // Retirement belongs to the original admission, so re-enrolling a workspace
+  // cannot cancel cleanup of an older request which has not stopped yet.
+  const retirements = new Map<string, number>();
+  for (const id of db.indexedLookup({ type: "semantic-inference-retirement" }, Math.max(1, db.nodeCount()))) {
+    const record = db.getPayload(id) as { token?: unknown };
+    retirements.set(text(record?.token), id);
+  }
+  const collectRetired = () => {
+    const ids: number[] = [];
+    for (const [token, marker] of retirements) {
+      if (active.has(token)) continue;
+      const current = lookup({ token }) ?? lookup({ token }, "semantic-inference-attempt");
+      ids.push(marker, ...(current ? [current.id] : []));
+    }
+    remove(ids);
+    for (const [token] of retirements) if (!active.has(token)) retirements.delete(token);
+  };
+  try { collectRetired(); }
+  catch (error) {
+    try { persistence.close(); }
+    catch (closeError) { throw new AggregateError([error, closeError], "Inference retirement and close failed"); }
+    throw error;
+  }
   return {
+    hostId: options.hostId,
+    /** Called synchronously by the same private storage owner after an index checkpoint.
+     * The index now owns these vectors, so neither their replay body nor its auxiliary receipt
+     * needs another lifetime. Live work and unpublished results stay recoverable. */
+    collectPublished(workspaceId: string, spaceId: string, contains: (inputHash: string) => boolean): number {
+      if (closed || closing) return 0;
+      persistence.recover();
+      const removed: number[] = [];
+      for (const id of entries()) {
+        const entry = decode(db.getPayload(id));
+        if (entry.identity.operation.workspaceId !== workspaceId || active.has(entry.token)) continue;
+        if (entry.result && (entry.result.space.spaceId !== spaceId || !entry.identity.inputHashes.every(contains))) continue;
+        removed.push(id);
+      }
+      return remove(removed);
+    },
+    retireScope(workspaceId: string): Promise<void> {
+      return enqueue(() => {
+        text(workspaceId);
+        for (const id of entries()) {
+          const entry = decode(db.getPayload(id));
+          if (entry.identity.operation.workspaceId !== workspaceId || retirements.has(entry.token)) continue;
+          const marker = db.insert([0], { type: "semantic-inference-retirement", token: entry.token });
+          retirements.set(entry.token, marker);
+        }
+        persistence.commit();
+        collectRetired();
+      });
+    },
     admit(input: SemanticInferenceAdmission): Promise<SemanticInferenceAdmissionResult> {
       return enqueue(() => {
         const identity = identityOf(input?.identity);
@@ -222,6 +284,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
             throw new Error("Semantic inference settlement is already terminal");
           }
           active.delete(token);
+          collectRetired();
           return;
         }
         const entry: Entry = { ...current.entry, receipt, state: receipt.state === "indeterminate" ? "unknown" : "terminal", hasResult: Boolean(result),
@@ -231,6 +294,7 @@ export function createSemanticInferenceLedgerEngine(options: SemanticInferenceLe
         else if (active.has(token)) active.set(token, entry);
         db.commitTransaction([{ type: "delete", id: current.id }, { type: "insert", vector: [0], payload: entry }]);
         persistence.commit();
+        collectRetired();
       });
     },
     read(key: string) { return enqueue(() => { const current = lookup({ key: hash(key) }); return current ? outcome(current.entry) : null; }); },

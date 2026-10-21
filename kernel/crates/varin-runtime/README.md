@@ -13,6 +13,7 @@ This document is the local code map and maintenance boundary, not an implementat
 | --- | --- |
 | Single durable owner, short metadata transactions, format preflight | [catalog.rs](src/catalog.rs) |
 | Thread titles, archive/pin, read positions and visibility tombstones | [catalog_threads.rs](src/catalog_threads.rs) |
+| Deleted conversation metadata retirement and surviving reference protection | [catalog_retention.rs](src/catalog_retention.rs) |
 | Worker lifecycle, cancellation, policy actions, model/tool settlement | [execution.rs](src/execution.rs), [supervisor.rs](src/supervisor.rs) |
 | History/request commit, safe restoration, explicit navigation | [catalog_execution.rs](src/catalog_execution.rs), [catalog_recovery.rs](src/catalog_recovery.rs), [catalog_navigation.rs](src/catalog_navigation.rs) |
 | Immutable bodies, media, publication and collection | [content.rs](src/content.rs), [output.rs](src/output.rs), [content_collection.rs](src/content_collection.rs) |
@@ -59,10 +60,16 @@ second maintenance ledger or add old-format fallback readers.
 Thread product metadata is committed with its event and original command receipt. Rename, pin,
 archive and delete use a metadata revision; read acknowledgements monotonically advance only through
 the observed durable event cursor. Metadata changes do not create unread activity. A delete is a
-visibility tombstone, not cancellation or content/resource collection. It rejects new user input,
+visibility tombstone that requests content maintenance. It rejects new user input,
 messages, explicit child continuations and forks while already accepted queue/child/Run work retains
 its original execution and settlement duties. Internal owner discovery includes archived/deleted
 Threads; the separate product Catalog query omits tombstones and auxiliary inference Threads.
+Maintenance waits for terminal Runs and original executor/model settlement before retiring owned
+history, requests and receipts. Surviving branch ancestry and relational consumers keep shared data
+reachable. Small Thread/branch identities and deletion receipts remain for stable identity and replay;
+ContentStore then collects unreferenced immutable bodies through its existing reader/publication fences.
+Inline metadata commands are not ContentStore roots. Active deleted conversations are reconsidered on
+durable execution events and Host restart; deletion does not cancel their original execution duties.
 
 ## Request and context cost model
 

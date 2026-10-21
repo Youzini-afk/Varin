@@ -54,6 +54,7 @@ export function createSemanticInferenceLedger(options: SemanticInferenceLedgerOp
     settle: (token, settlement) => track(() => call("settle", [token, settlement])),
     read: key => track(() => call("read", [key])),
     list: (filter = {}) => track(() => call("list", [filter])),
+    retireScope: workspaceId => track(() => call("retireScope", [workspaceId])),
     close: () => {
       if (closed) return Promise.resolve();
       if (closing) return closing;

@@ -764,11 +764,11 @@ pub(crate) fn spawn(
                         if method == "runtime.content.collect" {
                             // This admission is metadata-only. Maintenance never enters Storage or
                             // the ordinary history/receipt content queue, and does not own a Run.
-                            let collection = runtime
-                                .catalog()
-                                .lock()
-                                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                                .prepare_content_collection(cancellation.clone());
+                            let collection = {
+                                let catalog = runtime.catalog();
+                                let catalog = catalog.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                                catalog.prepare_content_collection(cancellation.clone())
+                            };
                             match collection {
                                 varin_runtime::content::ContentCollectionAdmission::Deferred(
                                     report,
@@ -781,13 +781,18 @@ pub(crate) fn spawn(
                                     let response_id = id.clone();
                                     let response_sender = responses.clone();
                                     let done = finished.clone();
+                                    let runtime = runtime.clone();
                                     thread::Builder::new()
                                         .name("runtime-content-maintenance".into())
                                         .spawn(move || {
                                             // Collection owns the original runtime.owner file until
                                             // the last unlink/fsync finishes, including after Stop.
-                                            let report = collection.run();
-                                            let response = match serde_json::to_value(report) {
+                                            let result = runtime.retire_deleted_threads().map_err(|error| KernelError::Operation(error.to_string())).and_then(|(_, pending)| {
+                                                let mut report = collection.run();
+                                                report.pending_deleted_threads = Some(pending as u64);
+                                                serde_json::to_value(report).map_err(KernelError::from)
+                                            });
+                                            let response = match result {
                                                 Ok(value) => response_ok(&response_id, value),
                                                 Err(error) => {
                                                     response_error(&response_id, &error.into())

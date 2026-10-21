@@ -1,7 +1,7 @@
 /** Immutable native publications belong to the private semantic storage owner.
  * A writer checkpoint copies a complete manifest-backed artifact once; queries
  * only retain its native handle. Never hardlink files that the writer can edit. */
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, rmdirSync, unlinkSync, type Dirent } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join, toNamespacedPath } from "node:path";
 import type { TriviumDB } from "triviumdb";
@@ -15,6 +15,28 @@ type Backing = {
   documentBlockIds: Map<string, number[]> | null;
 };
 type Publication = { id: string; checkpoint: SemanticCheckpoint; backing: Backing };
+
+/** Electron's native recursive rm on Windows rejects mapped Trivium sidecars with EPERM even
+ * after close. Node's unlink uses the OS delete-sharing semantics and releases these names.
+ * Only walk the private publication tree; never follow links into source or other stores. */
+export function removeSemanticPublications(directory: string): void {
+  let entries: Dirent[];
+  try {
+    if (lstatSync(directory).isSymbolicLink()) { unlinkSync(directory); return; }
+    entries = readdirSync(directory, { withFileTypes: true });
+  }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
+  for (const entry of entries) {
+    const file = join(directory, entry.name);
+    if (entry.isDirectory() && !entry.isSymbolicLink()) removeSemanticPublications(file);
+    else {
+      try { unlinkSync(file); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    }
+  }
+  try { rmdirSync(directory); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+}
 
 export function createSemanticPublishedReaders(options: {
   directory: string;
@@ -36,8 +58,11 @@ export function createSemanticPublishedReaders(options: {
     for (const backing of backings) {
       if (backing.references > 0) continue;
       try {
-        if (!backing.closed) { backing.db?.close(); backing.closed = true; }
-        if (backing.directory) rmSync(backing.directory, { recursive: true, force: true });
+        if (!backing.closed) {
+          backing.db?.close(); backing.closed = true;
+          backing.db = null; backing.documentBlockIds = null;
+        }
+        if (backing.directory) removeSemanticPublications(backing.directory);
         backings.delete(backing);
       } catch (error) { errors.push(error); }
     }
@@ -93,7 +118,7 @@ export function createSemanticPublishedReaders(options: {
       } catch (error) {
         try {
           if (backing) cleanup();
-          else rmSync(candidate, { recursive: true, force: true });
+          else removeSemanticPublications(candidate);
         } catch (cleanupError) {
           throw new AggregateError([error, cleanupError], "Semantic publication and cleanup both failed");
         }
@@ -144,7 +169,7 @@ export function createSemanticPublishedReaders(options: {
       readers.clear();
       for (const backing of backings) backing.references = 0;
       cleanup();
-      rmSync(directory, { recursive: true, force: true });
+      removeSemanticPublications(directory);
     },
   };
 }

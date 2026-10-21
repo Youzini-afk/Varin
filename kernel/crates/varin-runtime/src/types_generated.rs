@@ -275,6 +275,7 @@ pub struct ContentCollectionReport {
     pub removed_objects: u64,
     pub removed_bytes: u64,
     pub removed_staging_files: u64,
+    pub pending_deleted_threads: Option<u64>,
     pub reason: Option<String>,
 }
 

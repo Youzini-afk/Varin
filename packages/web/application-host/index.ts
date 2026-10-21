@@ -8,6 +8,7 @@ import { createModelTextService } from './lib/model-text/service.js';
 import { createThreadTitleService } from './lib/model-text/thread-titles.js';
 import { createSourceGitInventory } from './lib/kernel/source-git-inventory.js';
 import { createThreadNotificationRuntime } from './lib/notifications/thread-runtime.js';
+import { createContentMaintenance } from './lib/kernel/content-maintenance.js';
 import { createContextCompaction } from './lib/kernel/context-compaction.js';
 import { createThreadRecoveryNavigation, createThreadRecoveryFileResolver } from './lib/recovery/thread-navigation.js';
 import { createCheckpointLifecycle } from './lib/recovery/checkpoint-lifecycle.js';
@@ -1911,6 +1912,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload), sendApnsToAllUiSessions(pushPayload)]);
     },
   });
+  const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
+    onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
+  });
   const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
@@ -2008,6 +2012,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindTitles(threadTitles);
   threads.bindSourceDirectory(sourceDirectory);
+  threads.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
     documents: documentsAuthority, validateLiveSource: liveSources.validate }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
@@ -2601,6 +2606,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         await semanticRuntime.withIndexMaintenance(resource.workspaceId, async () => {
           for (const semanticDirectory of caches) await purgeSemanticWorkspaceCache({ semanticDirectory,
             workspaceId: resource.workspaceId, resourceRoot: resource.canonicalPath, removedDirectory: directory, preserveDirectories: preserved });
+          if (insideDirectory(directory, resource.canonicalPath)
+            && !preserved.some(candidate => insideDirectory(resource.canonicalPath, candidate))) {
+            await semanticInference.retireIndexWorkspace(resource.workspaceId);
+          }
         });
         const storeFile = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(resource.workspaceId)}.tdb`);
         if (fs.existsSync(storeFile)) await symbolGraphRuntime.purgeDirectory(resource.workspaceId, directory, resource.canonicalPath, preserved);
@@ -2989,6 +2998,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await environmentForwards.dispose();
       computerRuntimeOwner.current?.stop();
       await threadNotifications.dispose();
+      await contentMaintenance.dispose();
       runObservers.stop();
       collaboration.stop();
       await fileObservations.stop();

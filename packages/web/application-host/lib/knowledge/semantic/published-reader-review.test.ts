@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createSemanticStoreEngine } from './store-engine.js';
+import { removeSemanticPublications } from './published-readers.js';
 import { createSemanticGenerationStore } from './store.js';
 import { createHashEmbedder } from './embedder.js';
 import { blockIdentity, contentHashOf, workspaceScope } from './identity.js';
@@ -12,7 +13,7 @@ import type { SemanticChunk } from './chunker.js';
 
 const dirs: string[] = [];
 const stores: Array<{ close(): Promise<void> }> = [];
-afterEach(async () => { vi.useRealTimers(); for (const store of stores.splice(0)) await store.close(); for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); vi.restoreAllMocks(); });
+afterEach(async () => { vi.useRealTimers(); for (const store of stores.splice(0)) await store.close(); for (const dir of dirs.splice(0)) removeSemanticPublications(dir); vi.restoreAllMocks(); });
 const chunk = (documentId: string, body: string): SemanticChunk => ({ documentId, blockId: blockIdentity(documentId, 1, 1), parentUnitId: documentId, parentName: 'f', parentKind: 'function', parentSignature: 'function f()', startLine: 1, endLine: 1, contentHash: contentHashOf(body), body, embedText: body, fallback: false });
 function fixture(nestedDirectory = '') {
   const root = mkdtempSync(join(tmpdir(), 'varin-published-review-')); dirs.push(root);
@@ -36,6 +37,15 @@ function files(root: string): Record<string, string> {
 }
 
 describe('independent immutable publication reader acceptance', () => {
+  it('checks published input ownership when several source blocks share the same embedding', async () => {
+    const f = fixture();
+    await f.publish('SHARED_INPUT', 1, 'one.ts');
+    await f.publish('SHARED_INPUT', 2, 'two.ts'); f.store.markReady(true);
+    f.store.visitPublished(contains => {
+      expect(contains(createHash('sha256').update('SHARED_INPUT').digest('hex'))).toBe(true);
+      expect(contains(createHash('sha256').update('ABSENT_INPUT').digest('hex'))).toBe(false);
+    });
+  });
   it('publishes and releases native readers beneath deep data directories', async () => {
     const f = fixture('nested-'.repeat(12));
     await f.publish('DEEP_PUBLICATION', 1); f.store.markReady(true);

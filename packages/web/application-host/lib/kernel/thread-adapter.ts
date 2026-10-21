@@ -65,6 +65,8 @@ export class ThreadAdapter {
     private readonly prepareChildProfiles?: ChildProfilePreparer) {}
 
   private inputMaterials?: ThreadInputMaterials;
+  private requestContentMaintenance?: () => void;
+  bindContentMaintenance(request: () => void): void { this.requestContentMaintenance = request; }
   private titles?: import('../model-text/thread-titles.js').ThreadTitleService;
   bindTitles(owner: import('../model-text/thread-titles.js').ThreadTitleService): void { this.titles = owner; }
   private agentProfiles?: AgentProfilesAPI;
@@ -453,9 +455,11 @@ export class ThreadAdapter {
     const { runtime: _runtime, ...command } = input;
     return this.runtime.updateThread(command);
   }
-  delete(input: import('@varin/application-client').ThreadDelete) {
+  async delete(input: import('@varin/application-client').ThreadDelete) {
     const { runtime: _runtime, ...command } = input;
-    return this.runtime.deleteThread(command);
+    const receipt = await this.runtime.deleteThread(command);
+    this.requestContentMaintenance?.();
+    return receipt;
   }
   markRead(input: import('@varin/application-client').ThreadRead) {
     const { runtime: _runtime, ...command } = input;

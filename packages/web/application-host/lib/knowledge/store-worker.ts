@@ -4,6 +4,7 @@ import { createSemanticStoreEngine, type SemanticStoreEngine } from "./semantic/
 import { isSemanticStoreMethod } from "./semantic/store-protocol.js";
 import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance-engine.js";
 import type { SemanticStoreOpenOptions } from "./semantic/store-contract.js";
+import { spaceIdOf } from "./semantic/identity.js";
 import { resolve } from "node:path";
 import { createSemanticInferenceLedgerEngine, type SemanticInferenceLedgerEngine } from "./semantic/inference-ledger-engine.js";
 import type { SemanticInferenceLedgerOpenOptions } from "./semantic/inference-ledger-contract.js";
@@ -67,6 +68,12 @@ async function handle(requests: StoreRequest[]): Promise<void> {
           if (!shared) {
             shared = { store: createSemanticInferenceLedgerEngine(input), references: 0 };
             inferenceLedgers.set(key, shared);
+            for (const index of semanticStores.values()) {
+              if (index.hostId === input.hostId && index.scope.scopeKind === "workspace") {
+                try { index.visitPublished(contains => shared!.store.collectPublished(index.scope.scopeId, index.spaceId, contains)); }
+                catch (error) { console.error("[SemanticInference] Receipt collection deferred:", error); }
+              }
+            }
           }
           shared.references += 1;
           inferenceHandles.set(first.storeId, key);
@@ -76,14 +83,14 @@ async function handle(requests: StoreRequest[]): Promise<void> {
           const shared = key ? inferenceLedgers.get(key) : undefined;
           if (!shared) throw new Error("Semantic inference ledger is not open");
           const action = method.slice("inference-".length);
-          if (!["admit", "settle", "read", "list", "close"].includes(action)) throw new Error("Invalid semantic inference ledger method");
+          if (!["admit", "settle", "read", "list", "retireScope", "close"].includes(action)) throw new Error("Invalid semantic inference ledger method");
           let value: unknown;
           if (action === "close") {
             if (shared.references === 1) { await shared.store.close(); inferenceLedgers.delete(key!); }
             else shared.references -= 1;
             inferenceHandles.delete(first.storeId);
           } else {
-            value = await Reflect.apply(shared.store[action as "admit" | "settle" | "read" | "list"], shared.store, args);
+            value = await Reflect.apply(shared.store[action as "admit" | "settle" | "read" | "list" | "retireScope"], shared.store, args);
           }
           responses.push({ id: first.id, ok: true, value });
         } else if (method === "purge") {
@@ -97,6 +104,12 @@ async function handle(requests: StoreRequest[]): Promise<void> {
             || !Number.isSafeInteger(input.space?.dim) || input.space.dim < 1) throw new Error("Invalid semantic store open request");
           const store = createSemanticStoreEngine({ ...input,
             onPersistenceError: error => send({ type: "persistence-error", storeId: first.storeId, error: storeFailure(error) }),
+            onPublished: contains => {
+              if (input.scope.scopeKind !== "workspace") return;
+              for (const ledger of inferenceLedgers.values()) {
+                if (ledger.store.hostId === input.hostId) ledger.store.collectPublished(input.scope.scopeId, spaceIdOf(input.space), contains);
+              }
+            },
           });
           semanticStores.set(first.storeId, store);
           responses.push({ id: first.id, ok: true, value: { checkpoint: store.checkpoint() } });

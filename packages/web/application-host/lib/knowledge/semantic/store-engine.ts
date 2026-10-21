@@ -1,5 +1,5 @@
 /** Native derived-index owner, loaded only by the private storage process. */
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createRequire } from "node:module";
 import { createStorePersistence, trackStoreMutations } from "../persistence.js";
@@ -8,7 +8,7 @@ import { defaultRecipeIdentity, recipeIdOf, semanticGenerationDir, semanticSpace
 import { cosineSimilarity } from "./embedder.js";
 import { pathInRoots, rootsAreRestricted } from "../../workspace/path-scope.js";
 import { readSemanticCheckpoint, writeSemanticCheckpoint } from "./checkpoint.js";
-import { createSemanticPublishedReaders } from "./published-readers.js";
+import { createSemanticPublishedReaders, removeSemanticPublications } from "./published-readers.js";
 import { resolveSemanticSearchOptions, type BlockPayload, type DocumentPayload, type PreparedSemanticPublication,
   type SemanticStoreOpenOptions, type SemanticIndexLifecycle, type SemanticQueryCoverage, type SemanticCheckpoint,
   type SemanticHit, type SemanticSearchOptions, type SemanticOverlayBlock,
@@ -47,7 +47,10 @@ const openDb = (file: string, dim: number, accessMode: "readWrite" | "readOnly" 
   }
 };
 
-export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { onPersistenceError?(error: unknown): void }) {
+export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & {
+  onPersistenceError?(error: unknown): void;
+  onPublished?(contains: (inputHash: string) => boolean): void;
+}) {
   const space = options.space;
   const spaceId = spaceIdOf(space);
   const latestPublish = new Map<string, number>();
@@ -104,7 +107,12 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     return run;
   };
   const persistence = createStorePersistence({
-    flush: () => { if (writer) publications.publish(writer, dbFile(), refreshCheckpoint()); },
+    flush: () => {
+      if (writer) {
+        publications.publish(writer, dbFile(), refreshCheckpoint());
+        notifyPublished();
+      }
+    },
     close: () => writer?.close(),
     enqueue,
     quietMs: FLUSH_QUIET_MS,
@@ -126,6 +134,29 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     return refreshed;
   };
 
+  const visitPublished = (visit: (contains: (inputHash: string) => boolean) => void): void => {
+    const reader = publications.retain();
+    if (!reader) return;
+    try {
+      publications.read(reader.token, ({ db }) => {
+        const checked = new Map<string, boolean>();
+        visit(hash => {
+          let present = checked.get(hash);
+          if (present === undefined) {
+            present = Boolean(db?.indexedLookup({ type: "block", embedKey: hash }, maximumLookupResults(db)).length);
+            checked.set(hash, present);
+          }
+          return present;
+        });
+      });
+    } finally { publications.release(reader.token); }
+  };
+  const notifyPublished = (): void => {
+    if (!options.onPublished) return;
+    try { visitPublished(options.onPublished); }
+    catch (error) { options.onPersistenceError?.(error); }
+  };
+
   const persistCheckpoint = (): void => {
     writeSemanticCheckpoint(spaceDir, refreshCheckpoint());
   };
@@ -136,7 +167,7 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     writer = trackStoreMutations(openDb(dbFile(), space.dim, "readWrite"), persistence);
     // The native exclusive writer lock excludes another live owner here.
     // Publications from an exited process have no usable tokens or handles.
-    rmSync(publicationsDirectory, { recursive: true, force: true });
+    removeSemanticPublications(publicationsDirectory);
     return writer;
   };
 
@@ -277,8 +308,9 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
     publishedDocuments = countStoredDocuments();
     if (writer) {
       writer = trackStoreMutations(writer, persistence);
-      rmSync(publicationsDirectory, { recursive: true, force: true });
+      removeSemanticPublications(publicationsDirectory);
       publications.publish(writer, dbFile(), refreshCheckpoint());
+      notifyPublished();
     }
   } catch (error) {
     const errors: unknown[] = [error];
@@ -373,6 +405,8 @@ export function createSemanticStoreEngine(options: SemanticStoreOpenOptions & { 
   };
 
   return {
+    hostId: options.hostId,
+    visitPublished,
     scope: options.scope,
     space,
     spaceId,
