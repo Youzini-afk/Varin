@@ -5,6 +5,76 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.31 - 2026-10-22
+
+### 更新摘要
+
+本版重做快速代码检索，加入可配置的模型请求重试，完善上下文整理、文件恢复和多 Agent 协作界面，并集中修复索引存储、工具诊断与 Windows 安装体验。
+
+#### 检索、模型与上下文
+
+- 快速检索改为围绕证据进行决策：保留来源、候选与已选片段，按实际请求容量安排比较材料；避免每批重复发送整个候选目录，容量不足时给出具体计数和窗口信息。明确区分模型预览与完整检索记录。
+- 在「对话默认」加入自动重试设置，支持常见瞬时失败及用户自定义匹配。重试保留原请求身份和尝试记录，停止操作可立即结束等待。
+- 上下文整理按预算选择需要保留的对话原文，并纳入 Agents 设置。Token 计数接入模型元数据和本地 tokenizer，词表缓存支持内存释放、磁盘压缩和旧版本回收。
+- 修复辅助模型标题生成的派发与中断恢复；完善决策接口错误和自定义请求路径的说明，移除改动导读模型及其入口。
+
+#### 工具、恢复与可靠性
+
+- 新增按会话轮次查询恢复点和恢复文件的工具，恢复侧栏提供时间线和文件预览。
+- 文件读取默认按 64 KiB 分页，并允许显式扩大；符号结果默认按层展开，支持子项展开、翻页和完整树模式。目录游标绑定查询，符号引用检查查询和结果版本。
+- 文件写入支持明确的创建和替换模式，保留版本冲突检查；修复 CRLF 多行编辑、缺失目录与空目录的状态区分等问题。
+- 模型可停止后台进程；工具参数错误保留字段与原因，子任务失败携带原始运行错误和事件引用。改进 MCP 错误分类、子任务准备过程和上下文准备失败诊断。
+
+#### 会话与桌面体验
+
+- 重整工作概览与子任务侧栏，加入协作消息和文件交流展示；精简操作并提供任务右键菜单，悬浮概览为聊天内容预留空间。
+- 共享 Agent 头像库扩充到 64 种，头像随任务身份保留；修复侧栏会话重命名的焦点问题。
+- 用量改为一行展示输入、输出及有记录的缓存读取和创建，修复模型渠道归属；重新设计 MCP 摘要，并显示脚本意图和内部工具调用详情。
+- 跟随 Agent 输出时保留底部阅读空间，本轮操作按钮在输出完成后显示；修复 Computer Use 深色主题遮罩，清理旧开发服务器预览入口。
+- Windows 安装和卸载改用 Varin 产品界面，修复选择目录后的白边、盘符根目录解析、首次安装路径、卸载完成状态和任务栏产品名称。
+
+#### 索引、存储与安全
+
+- 嵌入文本和批次按模型上下文容量拆分并预留余量，修复 Unicode 分段边界；内核丢失后重新获取 tokenizer 租约，缓存文件被手动删除后允许恢复索引清理。
+- 回收索引旧发布副本及已删除会话的正文和相关资源，减少持续累积的磁盘占用。
+- 更新 Wasmtime 至 48.0.7、rustls-webpki 至 0.103.16、webpki-roots 至 1.0.10，修复新披露的 Wasm 执行和证书信任问题。参见 [Wasmtime](https://github.com/bytecodealliance/wasmtime/releases/tag/v48.0.7)、[webpki](https://rustsec.org/advisories/RUSTSEC-2026-0382.html) 和 [根证书公告](https://rustsec.org/advisories/RUSTSEC-2026-0381.html)。
+
+---
+
+### Release highlights
+
+Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retries, and improves context organization, recovery, Agent collaboration and Windows setup.
+
+#### Retrieval, models and context
+
+- Make fast retrieval evidence-driven. Keep sources, candidates and selected excerpts while arranging comparisons within the actual request capacity, avoiding repeated full candidate catalogs. Report token counts and window details on capacity failure, and distinguish the model preview from the complete retained result.
+- Add automatic retry settings under Conversation defaults, including custom error matches. Preserve request identity and attempt records; stopping interrupts retry waits immediately.
+- Let context organization select original conversation material within its budget and configure it in Agents settings. Resolve local tokenizers from model metadata, release vocabulary memory, compress disk caches and reclaim old versions.
+- Repair auxiliary-model title dispatch and interrupted work. Clarify decision endpoint errors and custom paths, and remove the change-walkthrough model and interface.
+
+#### Tools and recovery
+
+- Add tools to find recovery points by conversation round and restore files, with a timeline and inline file previews in the recovery sidebar.
+- Page file reads at 64 KiB by default with an explicit larger-read option. Return symbol outlines with expansion, pagination and full-tree mode. Bind directory cursors to their query and reject stale symbol references.
+- Add explicit create/replace file-write modes while preserving version conflict protection. Repair CRLF edits and distinguish missing directories from empty ones.
+- Expose process stopping to models. Preserve argument fields and validation reasons, and include original runtime failures and event references in child reports. Improve MCP error classification and preparation diagnostics.
+
+#### Conversations and desktop
+
+- Redesign the work overview and task sidebar around progress, collaboration messages and file exchange. Add contextual task actions and reserve chat space for the compact floating overview.
+- Expand the shared, persistent Agent avatar library to 64 characters and repair sidebar conversation renaming.
+- Show usage in one row, including cache reads and creation when recorded; retain channel attribution. Redesign MCP summaries and expose script intent and nested tool details.
+- Leave reading space beneath streaming output and show round actions after completion. Repair the Computer Use dark-theme overlay and remove the retired development-server preview.
+- Introduce branded Windows installation and uninstall pages. Repair folder-selection borders, drive-root paths, first-install directory resolution, uninstall completion and taskbar identity.
+
+#### Indexing, storage and security
+
+- Split embedding inputs and batches using the configured model capacity with reserved space. Preserve Unicode boundaries, renew tokenizer leases after kernel loss, and recover cleanup when cache files disappear.
+- Reclaim retired index publications and deleted-conversation content and resources.
+- Update Wasmtime to 48.0.7, rustls-webpki to 0.103.16 and webpki-roots to 1.0.10 for upstream Wasm execution and certificate-trust security fixes.
+
+[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.30...v0.9.31)
+
 ## 0.9.25 - 2026-10-09
 
 ### 更新摘要

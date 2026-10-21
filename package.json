@@ -1,6 +1,6 @@
 {
   "name": "varin-monorepo",
-  "version": "0.9.30",
+  "version": "0.9.31",
   "description": "An open-source AI agent workspace with a native Rust runtime for everyday work, coding, and research.",
   "private": true,
   "type": "module",
