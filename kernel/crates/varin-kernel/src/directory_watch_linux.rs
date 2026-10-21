@@ -533,30 +533,47 @@ impl Observer {
         // Synchronize every original directory once before sampling the queue:
         // FIONREAD alone can miss a visible mutation stalled before fsnotify.
         // This is O(watched directories), not a recursive inventory. The fixed
-        // 32-byte buffer is discarded; no names become another inventory owner.
+        // buffer fits a maximum-sized Linux directory entry and is discarded;
+        // no names become another inventory owner. A 32-byte buffer can reject
+        // a valid long entry with EINVAL instead of crossing the directory lock.
         // Only success proves the lock was crossed. Even EINVAL can originate
         // from a security hook before the lock, so zero-count/EINVAL is not proof.
         // A stop request does not interrupt a blocked kernel directory lock.
         // Keep the handles alive and acknowledge closed only after actual return.
         // Sources: Linux fs/namei.c (vfs_rename + do_renameat2, vfs_create,
         // vfs_unlink) and fs/readdir.c (getdents64 + iterate_dir).
-        let mut buffer = [0u8; 32];
+        let mut buffer = [0u8; std::mem::size_of::<libc::dirent64>()];
         for directory in self.directories.values() {
             control.check()?;
             let fd = directory.barrier.as_raw_fd();
             if unsafe { libc::lseek(fd, 0, libc::SEEK_SET) } < 0 {
+                let error = io::Error::last_os_error();
                 return Err(failure(
                     "watch-gap",
-                    "directory namespace barrier cannot seek its original handle",
+                    format!(
+                        "directory namespace barrier cannot seek its original handle ({}): {error}",
+                        directory.relative,
+                    ),
                 ));
             }
-            let count = unsafe {
-                libc::syscall(libc::SYS_getdents64, fd, buffer.as_mut_ptr(), buffer.len())
-            };
-            if count < 0 {
+            loop {
+                let count = unsafe {
+                    libc::syscall(libc::SYS_getdents64, fd, buffer.as_mut_ptr(), buffer.len())
+                };
+                if count >= 0 {
+                    break;
+                }
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    control.check()?;
+                    continue;
+                }
                 return Err(failure(
                     "watch-gap",
-                    "directory namespace lock barrier did not complete",
+                    format!(
+                        "directory namespace lock barrier did not complete ({}): {error}",
+                        directory.relative,
+                    ),
                 ));
             }
         }
@@ -914,6 +931,35 @@ mod tests {
             .namespace_barrier(&control)
             .unwrap_or_else(|error| panic!("{}", error.error));
         assert_eq!(observer.directories.len(), 2);
+    }
+    #[test]
+    fn namespace_barrier_accepts_maximum_length_names_on_repeated_fences() {
+        let fixture = Fixture::new();
+        fs::write(fixture.0.join("x".repeat(255)), b"long entry").unwrap();
+        fs::create_dir(fixture.0.join("d".repeat(255))).unwrap();
+        let control = Control::new().unwrap();
+        let observer = fixture.observer(&control);
+        for _ in 0..3 {
+            observer
+                .namespace_barrier(&control)
+                .unwrap_or_else(|error| panic!("{}", error.error));
+        }
+    }
+    #[test]
+    fn namespace_barrier_preserves_the_failed_syscall_diagnostic() {
+        let fixture = Fixture::new();
+        let file = fixture.0.join("not-a-directory");
+        fs::write(&file, b"file").unwrap();
+        let control = Control::new().unwrap();
+        let mut observer = fixture.observer(&control);
+        let root = descriptor(&observer, "");
+        observer.directories.get_mut(&root).unwrap().barrier = File::open(file).unwrap();
+        let error = observer.namespace_barrier(&control).err().unwrap();
+        assert_eq!(error.reason, "watch-gap");
+        assert!(error
+            .error
+            .to_string()
+            .contains(&io::Error::from_raw_os_error(libc::ENOTDIR).to_string()));
     }
     #[test]
     fn overflow_and_lost_watch_records_do_not_become_complete() {
