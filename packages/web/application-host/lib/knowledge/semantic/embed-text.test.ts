@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { buildEmbedText } from "./embed-text.js";
 
 describe("buildEmbedText", () => {
-  it("keeps the body when a long path and signature would overflow", () => {
+  it("keeps the body when a long path and signature would overflow", async () => {
     const body = "return reclaimLease(handle);";
-    const text = buildEmbedText({
+    const text = await buildEmbedText({
       documentId: "packages/web/application-host/lib/harness/very-long-path-that-would-eat-the-window.ts",
       parentName: "reclaimLease",
       parentSignature: "export function reclaimLease(handle: Handle): void {".repeat(8),
@@ -16,8 +16,8 @@ describe("buildEmbedText", () => {
     expect(text).not.toContain("very-long-path-that-would-eat-the-window");
   });
 
-  it("adds decoration only while the tokenizer still accepts it", () => {
-    const text = buildEmbedText({
+  it("adds decoration only while the tokenizer still accepts it", async () => {
+    const text = await buildEmbedText({
       documentId: "src/a.ts",
       parentName: "run",
       parentSignature: "function run()",

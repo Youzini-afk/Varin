@@ -40,7 +40,7 @@ async function fixture() {
   };
   const publish = async (path: string, body: string, token: number) => {
     await store.publishDocument({ documentId: path, revision: revision(body), publishToken: token,
-      chunks: packPlainText({ documentId: path, text: body, maxTokens: embedder.space.maxTokens, countTokens: embedder.countTokens }) });
+      chunks: await packPlainText({ documentId: path, text: body, maxTokens: embedder.space.maxTokens, countTokens: embedder.countTokens }) });
     await store.markReady(true);
   };
   return { acquire, files, publish, store, listFiles, queryVector, revoke: () => { allowed = false; } };

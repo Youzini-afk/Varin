@@ -60,17 +60,27 @@ export function createRemoteEmbedder(options: {
   client: RemoteEmbedClient;
   /** Already learned by the same backend; never changes the wire dimensions option. */
   knownDimensions?: number;
+  countTokens?(texts: readonly string[]): Promise<number[]>;
 }): SemanticEmbedder {
   const maxTokens = options.binding.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
   const space = spaceFromBinding(options.binding, options.binding.dimensions ?? options.knownDimensions ?? 0);
+  let acceptedBatchSize = Infinity;
   const embedder: SemanticEmbedder = {
     status: "ready",
     get space() { return space; },
     prepare: async () => undefined,
-    countTokens: (text) => {
-      // The provider tokenizer is not available here. Character length is a
-      // splitting estimate, not a guarantee about the provider's token count.
-      return Math.max(1, text.length);
+    // Standalone adapters without a native tokenizer retain a conservative
+    // byte estimate. Production bindings supply the batched native counter.
+    countTokens: text => Math.max(1, Buffer.byteLength(text, 'utf8')),
+    ...(options.countTokens ? { countTokensBatch: options.countTokens } : {}),
+    selectBatchSize: lengths => {
+      let total = 0, size = 0;
+      for (const count of lengths) {
+        if (size >= acceptedBatchSize) break;
+        if (size && total + count > maxTokens) break;
+        total += count; size++;
+      }
+      return size;
     },
     embed: async (texts, request) => {
       request?.signal?.throwIfAborted();
@@ -84,18 +94,37 @@ export function createRemoteEmbedder(options: {
     },
     embedBatch: async (request: SemanticEmbedRequest): Promise<SemanticEmbedResult> => {
       request.signal?.throwIfAborted();
-      const result = await options.client.embed({
-        purpose: request.purpose,
-        providerId: options.binding.providerId,
-        modelId: options.binding.modelId,
-        protocol: "openai-compatible",
-        configurationId: options.binding.configurationId,
-        items: request.items.map((item) => ({ id: item.id, text: item.text })),
-        batchId: request.batchId,
-        ...(options.binding.dimensions === undefined ? {} : { dimensions: options.binding.dimensions }),
-        maxTokens,
-        ...(request.signal ? { signal: request.signal } : {}),
-      });
+      if (options.countTokens) {
+        const lengths = await options.countTokens(request.items.map(item => item.text));
+        if (lengths.some(count => count > maxTokens)) throw Object.assign(new Error(`embedding-input-limit: Input exceeds the ${maxTokens}-token packing window; check the configured model context.`), { code: 'embedding-input-limit' });
+      }
+      const send = async (items: readonly { id: string; text: string }[], batchId: string): Promise<HarnessEmbedResult> => {
+        try { const result = await options.client.embed({
+          purpose: request.purpose, providerId: options.binding.providerId, modelId: options.binding.modelId,
+          protocol: 'openai-compatible', configurationId: options.binding.configurationId,
+          items: [...items], batchId, maxTokens,
+          ...(options.binding.dimensions === undefined ? {} : { dimensions: options.binding.dimensions }),
+          ...(request.signal ? { signal: request.signal } : {}),
+        });
+          if (result.batchId !== batchId) throw new Error('Remote embedder returned a different batch identity');
+          return result;
+        } catch (error) {
+          const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+          const capacity = error && typeof error === 'object' && 'capacity' in error ? error.capacity : undefined;
+          const status = error && typeof error === 'object' && 'status' in error ? error.status : undefined;
+          if (capacity !== 'batch' && status !== 413 && !['embedding-batch-limit', 'embedding-http-413'].includes(String(code)) || items.length < 2) throw error;
+          request.signal?.throwIfAborted();
+          const middle = Math.floor(items.length / 2);
+          acceptedBatchSize = Math.min(acceptedBatchSize, middle);
+          // Each smaller batch uses the same retained authority and gets its own
+          // actual inference receipt; a rejected request is never relabeled success.
+          const left = await send(items.slice(0, middle), randomUUID());
+          const right = await send(items.slice(middle), randomUUID());
+          if (JSON.stringify(left.space) !== JSON.stringify(right.space)) throw new Error('Embedding batches returned different model spaces');
+          return { batchId, space: left.space, items: [...left.items, ...right.items.map(item => ({ ...item, index: item.index + middle }))] };
+        }
+      };
+      const result = await send(request.items, request.batchId);
       if (result.items.length !== request.items.length) {
         throw new Error(`Remote embedder returned ${result.items.length} vectors for ${request.items.length} inputs.`);
       }

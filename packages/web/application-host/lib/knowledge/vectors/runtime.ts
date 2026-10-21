@@ -282,6 +282,7 @@ export function createKnowledgeVectorRuntime(options: {
       text: embedText,
       maxTokens: embedder.space.maxTokens,
       countTokens: (text) => embedder.countTokens(text),
+      ...(embedder.countTokensBatch ? { countTokensBatch: embedder.countTokensBatch } : {}),
     });
   };
 
@@ -309,7 +310,7 @@ export function createKnowledgeVectorRuntime(options: {
     const latest = await registration.authority.getKnowledge(item.id);
     if (!latest || !eligible(latest, registration.scope)
       || knowledgeContentRevision(latest.content, latest.trigger) !== revision) return;
-    const chunks = chunksFor(latest, embedder);
+    const chunks = await chunksFor(latest, embedder);
     await store.publishDocument({ documentId, revision, chunks, publishToken: token }, scopeSignal(registration.scope, registration.scopeId));
     if (currentToken(registration.scope, registration.scopeId, item.id) !== token) return;
     const after = await registration.authority.getKnowledge(item.id);
@@ -347,7 +348,7 @@ export function createKnowledgeVectorRuntime(options: {
     const publications = [] as Array<{
       documentId: string;
       revision: string;
-      chunks: ReturnType<typeof chunksFor>;
+      chunks: Awaited<ReturnType<typeof chunksFor>>;
       publishToken: number;
     }>;
     for (const item of accepted) {
@@ -363,7 +364,7 @@ export function createKnowledgeVectorRuntime(options: {
       publications.push({
         documentId: knowledgeDocumentId(latest.id),
         revision,
-        chunks: chunksFor(latest, embedder),
+        chunks: await chunksFor(latest, embedder),
         publishToken: token,
       });
     }
@@ -406,7 +407,7 @@ export function createKnowledgeVectorRuntime(options: {
         registration.status = "empty";
         return;
       }
-      const firstChunk = chunksFor(first, embedder)[0];
+      const firstChunk = (await chunksFor(first, embedder))[0];
       if (!firstChunk) {
         registration.status = "empty";
         return;

@@ -250,12 +250,14 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     return documentTokens.get(key) === token;
   };
 
-  const packUnits = (documentId: string, units: StructureUnitsResult, embedder: SemanticEmbedder) => ({
-    chunks: packStructuralUnits({
+  const packUnits = async (documentId: string, units: StructureUnitsResult, embedder: SemanticEmbedder, signal?: AbortSignal) => ({
+    chunks: await packStructuralUnits({
       documentId,
       units: units.units,
       maxTokens: embedder.space.maxTokens,
       countTokens: (value) => embedder.countTokens(value),
+      ...(embedder.countTokensBatch ? { countTokensBatch: embedder.countTokensBatch } : {}),
+      ...(signal ? { signal } : {}),
     }),
     sourceRecipeId: units.recipeId ?? "native-structure-v1",
   });
@@ -268,7 +270,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     signal?.throwIfAborted();
     if (units.status !== "ready" && units.status !== "empty") throw new Error(units.message ?? "Native structural units did not complete");
     if (units.revision !== revision) throw new Error("Native structural units changed their input revision");
-    return packUnits(documentId, units, embedder);
+    return packUnits(documentId, units, embedder, signal);
   };
 
   const diskChunksFor = async (
@@ -295,7 +297,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     }
     if (!units.revision) throw new Error("Native disk structural units returned no source revision");
     return { revision: units.revision, sourceMetadata: units.sourceMetadata,
-      ...(units.unchanged ? { chunks: [], unchanged: true } : packUnits(documentId, units, embedder)) };
+      ...(units.unchanged ? { chunks: [], unchanged: true } : await packUnits(documentId, units, embedder, signal)) };
   };
 
   const prepareDocument = async (
@@ -778,7 +780,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
     path: string,
     revision: string,
     origin: SemanticQueryOverlay["origin"],
-    chunks: ReturnType<typeof packStructuralUnits>,
+    chunks: Awaited<ReturnType<typeof packStructuralUnits>>,
     signal: AbortSignal | undefined,
     embedder: SemanticEmbedder,
   ): Promise<{ extras: SemanticOverlayBlock[]; gaps: SemanticSearchResult["gaps"] }> => {
@@ -963,7 +965,7 @@ export function createSemanticIndexRuntime(options: SemanticIndexRuntimeOptions)
             throw new Error(units.message ?? "Native fixed-view structural units did not complete");
           }
           if (units.revision !== file.revision) throw new Error("Fixed-view semantic source revision changed inside one pin");
-          const chunks = packUnits(file.path, units, embedder).chunks;
+          const chunks = (await packUnits(file.path, units, embedder, signal)).chunks;
           const material = await overlayChunks(file.path, units.revision, "thread", chunks, signal, embedder);
           overlay.extras.push(...material.extras);overlay.gaps.push(...material.gaps);
         }

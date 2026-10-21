@@ -11,7 +11,7 @@ export type EmbedTextParts = {
   body: string;
 };
 
-export type TokenCounter = (text: string) => number;
+export type TokenCounter = (text: string) => number | Promise<number>;
 
 const joinParts = (parts: readonly string[]): string => parts.filter((part) => part.length > 0).join("\n");
 
@@ -19,19 +19,19 @@ const joinParts = (parts: readonly string[]): string => parts.filter((part) => p
  * Keep the body. Add decoration only while the tokenizer still accepts the
  * result. Never shrink the body to make room for a path or signature.
  */
-export function buildEmbedText(parts: EmbedTextParts, maxTokens: number, countTokens: TokenCounter): string {
+export async function buildEmbedText(parts: EmbedTextParts, maxTokens: number, countTokens: TokenCounter): Promise<string> {
   const body = parts.body;
-  if (countTokens(body) > maxTokens) return body;
+  if (await countTokens(body) > maxTokens) throw new Error('Embedding body exceeds its token window');
   const decoration: string[] = [];
-  const tryKeep = (piece: string): void => {
+  const tryKeep = async (piece: string): Promise<void> => {
     if (!piece) return;
     const next = joinParts([...decoration, piece, body]);
-    if (countTokens(next) <= maxTokens) decoration.push(piece);
+    if (await countTokens(next) <= maxTokens) decoration.push(piece);
   };
-  tryKeep(parts.parentSignature);
-  tryKeep(parts.parentName);
-  tryKeep(parts.docComments);
-  tryKeep(parts.documentId);
+  await tryKeep(parts.parentSignature);
+  await tryKeep(parts.parentName);
+  await tryKeep(parts.docComments);
+  await tryKeep(parts.documentId);
   return joinParts([...decoration, body]);
 }
 

@@ -16,6 +16,7 @@ import { classifyEgressError, type EgressOverride } from '../../harness/egress.j
 import { waitWithSignal } from '../../cancellation.js';
 import { semanticInferenceOperationKey, type SemanticInferenceLedger, type SemanticInferenceLedgerIdentity, type SemanticInferenceOperation, type SemanticInferenceFactFilter } from './inference-ledger-contract.js';
 import { ExistingHostCredentialOwner, type CredentialScope, type ExistingModelAuthRuntime } from '../../kernel/credential-owner.js';
+import { acquireTokenCounter } from '../../models/token-count.js';
 
 export interface SemanticProviderBinding {
   providerId: string;
@@ -32,6 +33,7 @@ export interface SemanticProviderBinding {
   allowAnonymous?: boolean;
   requestModelId?: string;
   contextWindow?: number;
+  tokenizer?: import('../../kernel/protocol.generated.js').TokenizerBinding;
   release?(): void;
   headers?: Record<string, string>;
   egressOverride?: EgressOverride;
@@ -88,6 +90,7 @@ export interface SemanticInferenceLease {
   assertAvailable(signal?: AbortSignal): Promise<void>;
   retain(): SemanticInferenceLease;
   release(): void;
+  countTokens(texts: readonly string[]): Promise<number[]>;
   embed(params: SemanticInferenceRequest): Promise<HarnessEmbedResult & { receipt: SemanticInferenceReceipt }>;
   /** Native retrieval consumes its original Catalog request session, never the index ledger. */
   consume(call: InferenceCall, params: SemanticQueryEmbeddingRequest): Promise<HarnessEmbedResult>;
@@ -117,7 +120,8 @@ const invalidSettings = (error: unknown): boolean => error instanceof HarnessInf
 function safeFailure(error: unknown): SemanticInferenceError {
   if (error instanceof SemanticInferenceError) return error;
   if (error instanceof EmbeddingResponseError) {
-    const code = error.status && error.status >= 400 ? `embedding-http-${error.status}` : 'embedding-response-invalid';
+    const code = error.capacity ? `embedding-${error.capacity}-limit`
+      : error.status && error.status >= 400 ? `embedding-http-${error.status}` : 'embedding-response-invalid';
     return new SemanticInferenceError('unavailable', code, undefined, error.message);
   }
   if (invalidSettings(error)) return new SemanticInferenceError('invalid', 'embedding-settings-invalid');
@@ -171,8 +175,12 @@ export function createSemanticInference(
       const ledger = options.ledger;
       const provider = capturedProvider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
       if (JSON.stringify(settingsFrom(await readGlobalSettings())) !== JSON.stringify(settings) || capturedRevocation !== revocationGeneration) return fail('unavailable', 'embedding-selection-changed');
+      // Keep room for model-added tokens and reference-tokenizer differences.
+      // A caller's preferred chunk size cannot exceed the selected model window.
+      const capacity = provider.contextWindow ?? settings.maxTokens ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS;
       const binding: HarnessResolvedEmbeddingBinding = Object.freeze({ ...settings,
-        maxTokens: settings.maxTokens ?? provider.contextWindow ?? REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS, configurationId: provider.configurationId });
+        maxTokens: Math.min(settings.maxTokens ?? Infinity, Math.max(1, Math.floor(capacity * 0.9))),
+        configurationId: provider.tokenizer ? digest(JSON.stringify([provider.configurationId, provider.tokenizer])).slice(0, 16) : provider.configurationId });
       const identity: SemanticInferenceIdentity = Object.freeze({ providerId: binding.providerId,
         modelId: binding.modelId, protocol: binding.protocol, configurationId: binding.configurationId,
         endpoint: provider.requestUrl, credentialScope: Object.freeze({ ...provider.credentialScope }) });
@@ -181,6 +189,17 @@ export function createSemanticInference(
         currentScope: provider.currentScope, runtime: { getAuth: provider.getAuth }, allowAnonymous: provider.allowAnonymous ?? false,
         release: () => provider.release?.() });
       let references = 0;
+      let counter: Promise<Awaited<ReturnType<typeof acquireTokenCounter>>> | undefined;
+      const countTokens = async (texts: readonly string[]) => {
+        if (!options.requests) return texts.map(text => Buffer.byteLength(text, 'utf8'));
+        counter ??= acquireTokenCounter(options.requests.kernel, { model: provider.requestModelId ?? binding.modelId,
+          ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}) });
+        const counted = await (await counter).count(texts);
+        // Reference vocabularies can undercount another model's multilingual
+        // text. Use a byte upper bound until that model's tokenizer is available.
+        return counted.tokenizer.includes('reference tokenizer')
+          ? texts.map(text => Buffer.byteLength(text, 'utf8')) : counted.counts;
+      };
       let revoked = false;
       const retain = (): SemanticInferenceLease => {
         if (closed) return fail('unavailable', 'embedding-owner-closed');
@@ -213,11 +232,11 @@ export function createSemanticInference(
         const release = () => {
           if (released) return;
           released = true; references--; controller.abort(); controllers.delete(controller); leases.delete(release);
-          if (references === 0) credentials.release();
+          if (references === 0) { credentials.release(); void counter?.then(value => value.release()).catch(() => {}); }
         };
         leases.add(release);
         return {
-          binding, identity, assertAvailable,
+          binding, identity, assertAvailable, countTokens: async texts => { await assertAvailable(); return countTokens(texts); },
           retain: () => { if (closed || released) return fail('unavailable', 'embedding-lease-released'); return retain(); },
           release,
           consume: async (call, params) => {

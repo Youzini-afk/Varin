@@ -20,6 +20,7 @@ export interface HarnessEmbeddingSettings {
   providerId: string;
   modelId: string;
   dimensions?: number;
+  /** Preferred per-chunk window, capped by the model context with reserved space. */
   maxTokens?: number;
 }
 

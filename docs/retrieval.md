@@ -94,6 +94,9 @@ Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小�
 前台不枚举整个来源来补建文档向量，索引覆盖单独报告。无已发布索引时也不会为这次查询冷建索引。
 
 Native 前台 query embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
+远端嵌入按所选模型的上下文容量分段，默认预留 10%；显式较小的分段预算继续生效。正文和路径、签名等附加内容共同计入窗口。
+配置词表可用时使用原生 tokenizer；仅有参考词表时使用保守的 UTF-8 字节上界。请求按 token 工作预算拆批，服务明确拒绝批量容量时
+继续拆成更小的批次，各次推理保留自己的回执；普通参数错误和未知执行结果不触发拆批。
 Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属。辅助推理直接使用原生 inference 路径。后台文档索引继续使用现有 index owner。
 
 `localBekko` 是已有本地 embedding 组件。Native 未配置 embedding 选择可用它；显式 remote、disabled、invalid、unavailable

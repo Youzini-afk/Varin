@@ -13,6 +13,8 @@ function indexFailureMessage(failure: string, t: ReturnType<typeof useI18n>['t']
   const httpStatus = /^embedding-http-(\d{3})$/.exec(code ?? '')?.[1];
   if (httpStatus === '401' || httpStatus === '403') return t('index.directories.error.authentication');
   if (httpStatus === '429') return t('index.directories.error.rateLimit');
+  if (code === 'embedding-input-limit') return t('index.directories.error.inputLimit');
+  if (code === 'embedding-batch-limit') return t('index.directories.error.batchLimit');
   if (httpStatus) return t('index.directories.error.http', { status: httpStatus });
   if (code === 'embedding-network-timeout') return t('index.directories.error.timeout');
   if (code === 'embedding-response-invalid') return t('index.directories.error.response');

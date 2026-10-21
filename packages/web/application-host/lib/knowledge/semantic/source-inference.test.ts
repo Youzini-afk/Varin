@@ -106,57 +106,39 @@ it('serves a configured foreground query while the background document watcher i
   } finally { f.releaseWatch(); await scan; await f.close(); }
 });
 
-it('checks complete document versions once at real egress and once before source publication', async () => {
+it('keeps cold source queries free of document inference and still honors explicit revocation', async () => {
   const f = await fixture(false);
   try {
     const result = await f.run();
-    expect(result.hits).toHaveLength(1); expect(f.fetch).toHaveBeenCalledTimes(2); expect(f.versionCheck).toHaveBeenCalledTimes(2);
-    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit').map(frame => (frame.params.binding as { purpose: string }).purpose))
-      .toEqual(['code-retrieval-document-embedding', 'code-retrieval-query-embedding']);
-    const settled = f.frames.filter(frame => frame.method === 'runtime.inference.settle');
-    expect(settled).toHaveLength(2);
-    expect(settled.every(frame => (frame.params.receipt as { requestStarted: boolean }).requestStarted)).toBe(true);
+    expect(result.hits).toEqual([]); expect(f.fetch).not.toHaveBeenCalled(); expect(f.versionCheck).not.toHaveBeenCalled();
+    expect(result.gaps).toContainEqual({ path: '.', reason: 'index-not-ready' });
+    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit')).toHaveLength(0);
     f.versionCheck.mockClear(); f.fetch.mockClear();
     await expect(f.run(() => { f.embedding.enabled = false; })).rejects.toThrow();
     expect(f.fetch).not.toHaveBeenCalled(); expect(f.versionCheck).not.toHaveBeenCalled();
   } finally { await f.close(); }
 });
 
-it('keeps original admission and dispatch intent when the last document fence prevents all HTTP', async () => {
-  const f = await fixture(true);
-  try {
-    const result = await f.run();
-    expect(result.hits).toEqual([]); expect(f.fetch).not.toHaveBeenCalled(); expect(f.versionCheck).toHaveBeenCalledOnce();
-    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit')).toHaveLength(1);
-    expect(f.frames.filter(frame => frame.method === 'runtime.inference.dispatch')).toHaveLength(1);
-    const settled = f.frames.filter(frame => frame.method === 'runtime.inference.settle');
-    expect(settled).toHaveLength(1);
-    expect(settled[0]?.params.receipt).toMatchObject({ requestStarted: false, providerCompleted: false, localExecutorStopped: true, problem: 'not_dispatched' });
-  } finally { await f.close(); }
-});
-
-it('routes unconfigured native source/query through installed local identity and keeps explicit selections authoritative', async () => {
+it('keeps installed local inference idle without a publication and respects explicit model selections', async () => {
   const f = await fixture(false, true);
   try {
     const result = await f.run();
-    expect(result.hits).toHaveLength(1);
+    expect(result.hits).toEqual([]);
     expect(f.fetch).not.toHaveBeenCalled();
     const admitted = f.frames.filter(frame => frame.method === 'runtime.inference.admit');
-    expect(admitted).toHaveLength(2);
-    expect(admitted.every(frame => (frame.params.binding as { executor: { kind: string } }).executor.kind === 'local_component')).toBe(true);
-    expect(admitted.map(frame => frame.params.ordinal)).toEqual([1, 2]);
+    expect(admitted).toHaveLength(0);
     const before = (await f.component!.calls()).length;
     f.versionCheck.mockClear();
     await f.run();
     expect(await f.component!.calls()).toHaveLength(before);
-    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit')).toHaveLength(2);
+    expect(f.frames.filter(frame => frame.method === 'runtime.inference.admit')).toHaveLength(0);
     for (const selection of [{ enabled: false }, { protocol: 'invalid', providerId: 'bad' }, { ...f.embedding, providerId: 'unavailable' }]) {
       f.select(selection); f.versionCheck.mockClear();
       await expect(f.run()).rejects.toThrow('Embedding binding unavailable');
       expect(await f.component!.calls()).toHaveLength(before);
     }
     f.select(f.embedding); f.versionCheck.mockClear();
-    await f.run(); expect(f.fetch).toHaveBeenCalled();
+    await f.run(); expect(f.fetch).not.toHaveBeenCalled();
     expect(await f.component!.calls()).toHaveLength(before);
   } finally { await f.close(); }
 });
@@ -197,14 +179,13 @@ it('reuses the active local generation when the same verified component bytes ar
   } finally { await f.close(); }
 });
 
-it('queries managed live source units under an owner-qualified cache with coordinator inference and no local source lookup', async () => {
+it('keeps managed cold queries under their owner-qualified cache without local source lookup or indexing', async () => {
   const f = await fixture(false, false, true);
   try {
     const result = await f.run();
-    expect(result.hits).toHaveLength(1);
+    expect(result.hits).toEqual([]);
     expect(result.scope).toEqual({ scopeKind: 'workspace', scopeId: f.source.cacheWorkspaceId });
-    expect(result.hits[0]?.body).toContain('export const source = 42');
-    expect(f.fetch).toHaveBeenCalledTimes(2);
-    expect(f.versionCheck).toHaveBeenCalledTimes(2);
+    expect(f.fetch).not.toHaveBeenCalled();
+    expect(f.versionCheck).not.toHaveBeenCalled();
   } finally { await f.close(); }
 });

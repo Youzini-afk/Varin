@@ -350,6 +350,8 @@ export const settingsDict = {
   "index.directories.error.http": "嵌入服务返回 HTTP {status}，请检查服务状态和模型配置。",
   "index.directories.error.timeout": "嵌入请求超时，下次检测可继续索引。",
   "index.directories.error.response": "嵌入服务返回的向量数据无效，请检查模型和向量维度。",
+  "index.directories.error.inputLimit": "单段输入超过嵌入模型容量，请检查模型的上下文长度和 tokenizer 配置。",
+  "index.directories.error.batchLimit": "嵌入服务拒绝了请求批量，请检查服务的批处理容量。",
   "index.directories.error.network": "嵌入服务连接失败，请检查网络或代理后重新检测。",
   "index.directories.error.pending": "上一批嵌入请求仍在结束处理中，完成后可重新检测。",
   "index.directories.error.interrupted": "嵌入请求曾被中断，重新检测可继续索引。",

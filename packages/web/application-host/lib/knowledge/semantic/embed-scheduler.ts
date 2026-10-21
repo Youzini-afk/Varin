@@ -83,13 +83,15 @@ export async function embedInScheduledBatches(options: {
   const order = texts.map((_, index) => index);
   const lengths: number[] = [];
   if (embedder.batchByLength || embedder.selectBatchSize) {
-    let started = performance.now();
-    for (const text of texts) {
-      lengths.push(embedder.countTokens(text));
-      // Packing uses the Host tokenizer. Yield during large preparation work,
-      // instead of blocking request admission until every length is known.
-      if (performance.now() - started >= 16) {
-        await yieldToHost(); signal?.throwIfAborted(); started = performance.now();
+    if (embedder.countTokensBatch) lengths.push(...await embedder.countTokensBatch(texts));
+    else {
+      let started = performance.now();
+      for (const text of texts) {
+        lengths.push(embedder.countTokens(text));
+        // Local packing uses the Host tokenizer; native counting runs off-thread.
+        if (performance.now() - started >= 16) {
+          await yieldToHost(); signal?.throwIfAborted(); started = performance.now();
+        }
       }
     }
   }

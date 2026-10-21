@@ -90,6 +90,12 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   otherwise the semantic source is unavailable. Configured remote inference uses `remote-embedder.ts`
   through the retained native lease. Configured remote never falls back to the local model in the same query.
 - Chunking: `chunker.ts` — tree-sitter containers, backend input length, continue-split of long lines.
+  Remote bindings cap the preferred chunk window at 90% of the selected model's context; a smaller
+  explicit chunk budget remains effective. Complete decorated text (source, signature, comments and
+  path) fits the same window. Packing uses the retained native tokenizer with batched asynchronous
+  probes; document-local count reuse ends with that packing operation. If only a reference vocabulary
+  is available, UTF-8 bytes provide a conservative bound until the configured tokenizer is ready.
+  Continuation boundaries preserve Unicode characters and source offsets without dropping text.
   Semantic eligibility follows recognized text language identities, independently of the tree-sitter
   grammar list. Languages such as Scala use native text units with path, line range and content
   revision; `fallback: true` and file-level parents distinguish these from parsed structure.
@@ -103,6 +109,12 @@ bytes remain at the source owner; model credentials, requests and usage remain w
   `embed-scheduler.ts` (configurable concurrent request slots and background start interval;
   waiting foreground work takes the next free slot without an artificial interval). This
   scheduler is shared with remote knowledge-vector embeddings. Local model work uses its own single-model queue and does not consume HTTP request slots.
+  Remote batches use token work budgets rather than sending every outstanding chunk together. An
+  explicit provider batch-capacity rejection (or HTTP 413) splits into smaller batches under the same
+  retained binding, preserving item order and each original inference receipt. The adapter reuses the
+  smaller batch grain for later work. Generic HTTP 400, authentication errors and unknown outcomes do
+  not trigger this split. Diagnostics distinguish input capacity, batch capacity and ordinary HTTP errors
+  without retaining provider messages that might echo source text or credentials.
   Local backends expose their actual inference grain. Document publication and
   fixed-view vector work release the shared slot between those model calls, so
   a large input request cannot hide many local batches inside one background slot.

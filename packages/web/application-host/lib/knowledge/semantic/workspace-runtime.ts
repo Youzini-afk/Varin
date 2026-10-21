@@ -205,6 +205,7 @@ try {
           if (changed || !state.queryInference) {
             const retained = candidate.lease;
             state.backend.bindRetained(createRemoteEmbedder({ binding: retained.binding,
+              countTokens: texts => retained.countTokens(texts),
               client: { embed: async params => {
                 const call = retained.retain();
                 try { return await call.embed({ ...params, operationIdentity: {
@@ -434,6 +435,7 @@ return;
       ? selection.lease.queryEmbedder(input.inference, { guard: active => validateAvailable(active), ...(cached ? { cached } : {}) })
       : createRemoteEmbedder({ binding: selection.lease.binding,
       knownDimensions: pinnedEmbedder?.space.dim || knownDimensions,
+      countTokens: texts => selection.lease.countTokens(texts),
       client: { embed: params => selection.lease.consume(input.inference, { ...params,
         ...(cached ? { cachedResult: { batchId: params.batchId,
           space: { providerId: params.providerId, modelId: params.modelId, protocol: params.protocol,

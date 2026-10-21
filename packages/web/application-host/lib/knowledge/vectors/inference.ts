@@ -94,7 +94,8 @@ export function createKnowledgeInference(options: {
       const cached = embedders.get(key);
       if (cached) { await cached.lease.assertAvailable(lifetime.signal); return cached.embedder; }
       const lease = selected.retain();
-      const remote = createRemoteEmbedder({ binding: lease.binding, client: { embed: input => embed(scopeId, lease, input) } });
+      const remote = createRemoteEmbedder({ binding: lease.binding, countTokens: texts => lease.countTokens(texts),
+        client: { embed: input => embed(scopeId, lease, input) } });
       // A credential generation cannot consume another account's cached vectors.
       const embedder: SemanticEmbedder = { ...remote, get space() { const base = remote.space; return { ...base,
         ...(base.spaceId ? { spaceId: digest([base.spaceId, lease.identity.credentialScope]).slice(0, 16) } : {}) }; },

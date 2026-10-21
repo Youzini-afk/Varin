@@ -21,6 +21,9 @@ function fixture() {
   }; };
   const kernel = { agentRuntimeRequest: async (method: string, params: Request) => {
     methods.push({ method, params });
+    if (method === 'runtime.tokenizers.open') return { leaseId: 'fixture-tokenizer' };
+    if (method === 'runtime.tokenizers.close') return null;
+    if (method === 'runtime.tokenizers.count') return { counts: (params as unknown as { texts: string[] }).texts.map(text => text.length), tokenizer: 'fixture tokenizer' };
     if (method === 'runtime.knowledge_inference.read') return roots.get(params.operationId) ?? null;
     if (method === 'runtime.knowledge_inference.admit') {
       const root: KnowledgeInferenceView = { operationId: `knowledge-inference:${params.key}`, runId: `run:${params.key}`, executionOwner: params.executionOwner, recipe: structuredClone(params.recipe), inference: [], cancelled: false, finished: false };

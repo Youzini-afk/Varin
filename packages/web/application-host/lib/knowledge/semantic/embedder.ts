@@ -55,6 +55,8 @@ export interface SemanticEmbedder {
   dispose?(): Promise<void>;
   prepare(): Promise<void>;
   countTokens(text: string): number;
+  /** Native model tokenizer, batched off the Host event loop when available. */
+  countTokensBatch?(texts: readonly string[]): Promise<number[]>;
   embed(
     texts: readonly string[],
     request?: { purpose?: SemanticEmbedPurpose; signal?: AbortSignal; batchId?: string; priority?: "foreground" | "background"; scheduled?: boolean; tokenLengths?: readonly number[] },

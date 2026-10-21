@@ -553,7 +553,7 @@ export class ModelsService {
       ? await this.credentials.captureResolver(channel.authentication, channel.id) : undefined;
     let tokenizer: Awaited<ReturnType<ModelsService['acquireTokenizer']>> | undefined;
     try {
-      if (operation === 'decision' || operation === 'rerank') tokenizer = await this.acquireTokenizer(model.tokenizer);
+      tokenizer = await this.acquireTokenizer(model.tokenizer);
     } catch (error) { captured?.release(); throw error; }
     let references = 1, active = 0, baseReleased = false, disposed = false;
     const dispose = () => { if (!references && !active && !disposed) { disposed = true; captured?.release(); tokenizer?.release(); } };

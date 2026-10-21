@@ -81,7 +81,7 @@ const finiteVector = (value: unknown): number[] | undefined => {
 };
 
 export class EmbeddingResponseError extends Error {
-  constructor(message: string, readonly status?: number) {
+  constructor(message: string, readonly status?: number, readonly capacity?: 'batch' | 'input') {
     super(message);
     this.name = "EmbeddingResponseError";
   }
@@ -142,10 +142,19 @@ export async function requestOpenAICompatibleEmbeddings(
     const providerError = isRecord(payload) && isRecord(payload.error) ? payload.error : null;
     const rawCode = providerError?.code;
     const code = typeof rawCode === "string" && /^[a-z0-9._-]{1,64}$/iu.test(rawCode) ? rawCode : undefined;
+    // Interpret length failures without retaining a message that may echo source.
+    const message = typeof providerError?.message === 'string' ? providerError.message
+      : isRecord(payload) && typeof payload.error === 'string' ? payload.error : '';
+    const lengthFailure = /batch[_-]?(size|limit)|too_many_inputs/iu.test(code ?? '')
+      || /(?:max(?:imum)?\s+batch\s+(?:size|tokens)|too\s+many\s+(?:inputs|texts)|(?:number|count)\s+of\s+(?:inputs|texts).*(?:exceed|limit|maximum))/iu.test(message) ? 'batch'
+      : /context_length|token_limit|input_too_long/iu.test(code ?? '')
+        || /(?:context\s+(?:length|window)|(?:input|sequence|token)\s+length).*(?:exceed|maximum|too\s+long|above|limit)/iu.test(message) ? 'input' : undefined;
+    const capacity = response.status === 413 ? 'batch' : response.status === 400 ? lengthFailure : undefined;
     const longestInput = request.input.reduce((longest, value) => Math.max(longest, value.length), 0);
     throw new EmbeddingResponseError(
-      `Embedding HTTP ${response.status} (inputs ${request.input.length}, longest ${longestInput} chars${code ? `, code ${code}` : ""})`,
+      `Embedding HTTP ${response.status} (inputs ${request.input.length}, longest ${longestInput} chars${code ? `, code ${code}` : ""}${capacity ? `, ${capacity} capacity exceeded` : ''})`,
       response.status,
+      capacity,
     );
   }
   const payload = await response.json().catch((error: unknown) => {
@@ -222,7 +231,7 @@ export async function requestAdaptiveEmbeddings(
   try {
     return await requestOpenAICompatibleEmbeddings(request);
   } catch (error) {
-    if (!(error instanceof EmbeddingResponseError) || (error.status !== 400 && error.status !== 413)
+    if (!(error instanceof EmbeddingResponseError) || (error.capacity !== 'batch' && error.status !== 413)
       || request.input.length < 2) throw error;
     const middle = Math.floor(request.input.length / 2);
     const left = await requestAdaptiveEmbeddings({ ...request, input: request.input.slice(0, middle) });

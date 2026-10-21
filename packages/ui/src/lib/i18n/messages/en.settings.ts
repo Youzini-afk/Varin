@@ -350,6 +350,8 @@ export const settingsDict = {
   "index.directories.error.http": "The embedding service returned HTTP {status}. Check the service and model configuration.",
   "index.directories.error.timeout": "The embedding request timed out. Indexing can resume on the next check.",
   "index.directories.error.response": "The embedding service returned invalid vector data. Check the model and vector dimensions.",
+  "index.directories.error.inputLimit": "An input exceeds the embedding model's capacity. Check its context length and tokenizer settings.",
+  "index.directories.error.batchLimit": "The embedding service rejected the batch size. Check the service's batch capacity.",
   "index.directories.error.network": "The embedding service connection failed. Check the network or proxy, then retry indexing.",
   "index.directories.error.pending": "An embedding request is still finishing. Retry after it completes.",
   "index.directories.error.interrupted": "An embedding request was interrupted. Retry indexing to continue.",

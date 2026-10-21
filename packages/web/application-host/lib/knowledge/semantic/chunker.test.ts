@@ -24,7 +24,18 @@ const unit = (
 };
 
 describe("packStructuralUnits", () => {
-  it("covers every line of a large structural unit and keeps each embed text at the tokenizer limit", () => {
+  it('uses asynchronous tokenizer counts in shared batches and preserves Unicode source pieces', async () => {
+    const text = 'const 中文 = "🙂🚀"; '.repeat(30);
+    const count = (value: string) => Array.from(value).length;
+    const batches: number[] = [];
+    const chunks = await packStructuralUnits({ documentId: 'unicode.ts', units: [unit(text), unit('next', { startLine: 2 })],
+      maxTokens: 31, countTokens: () => { throw new Error('The character estimate must not be used'); },
+      countTokensBatch: async texts => { batches.push(texts.length); return texts.map(count); } });
+    expect(chunks.filter(chunk => chunk.startLine === 1).map(chunk => chunk.body).join('')).toBe(text);
+    expect(chunks.every(chunk => count(chunk.embedText) <= 31 && !chunk.body.includes('\uFFFD'))).toBe(true);
+    expect(batches.some(size => size > 1)).toBe(true);
+  });
+  it("covers every line of a large structural unit and keeps each embed text at the tokenizer limit", async () => {
     const bodyLines = Array.from({ length: 80 }, (_, index) => `  const marker_${index + 1} = ${index + 1};`);
     const text = [
       "export function processRequest(input: string) {",
@@ -33,7 +44,7 @@ describe("packStructuralUnits", () => {
       "}",
     ].join("\n");
     const maxTokens = 24;
-    const chunks = packStructuralUnits({
+    const chunks = await packStructuralUnits({
       documentId: "mail:abc123",
       units: [unit(text, {
         parentName: "processRequest",
@@ -57,9 +68,9 @@ describe("packStructuralUnits", () => {
     }
   });
 
-  it("uses overlapping fallback windows for a native fallback unit", () => {
+  it("uses overlapping fallback windows for a native fallback unit", async () => {
     const text = Array.from({ length: 40 }, (_, index) => `line_${index + 1} token token token token`).join("\n");
-    const chunks = packStructuralUnits({
+    const chunks = await packStructuralUnits({
       documentId: "plain.txt",
       units: [unit(text)],
       maxTokens: 12,
@@ -75,7 +86,7 @@ describe("packStructuralUnits", () => {
     )))).toBe(true);
   });
 
-  it("does not treat a character budget as the tokenizer window", () => {
+  it("does not treat a character budget as the tokenizer window", async () => {
     const text = [
       "export function keep() {",
       "  const alphabet = \"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz\";",
@@ -83,7 +94,7 @@ describe("packStructuralUnits", () => {
       "}",
     ].join("\n");
     const countTokens = (value: string) => value.split(/\s+/u).filter(Boolean).length;
-    const chunks = packStructuralUnits({
+    const chunks = await packStructuralUnits({
       documentId: "keep.ts",
       units: [unit(text, { parentName: "keep", parentKind: "function", fallback: false })],
       maxTokens: LOCAL_DEFAULT_MAX_TOKENS,
@@ -93,10 +104,10 @@ describe("packStructuralUnits", () => {
     expect(chunks[0]?.embedText).toContain("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
   });
 
-  it("continue-splits an oversize single line so the original body has no gap", () => {
+  it("continue-splits an oversize single line so the original body has no gap", async () => {
     const text = "abcdefghijklmnopqrstuvwxyz".repeat(8);
     const countCharacters = (value: string): number => value.length;
-    const chunks = packStructuralUnits({
+    const chunks = await packStructuralUnits({
       documentId: "generated.ts",
       units: [unit(text)],
       maxTokens: 32,
@@ -113,14 +124,14 @@ describe("packStructuralUnits", () => {
     expect(chunks.every((chunk) => countCharacters(chunk.body) <= 32)).toBe(true);
   });
 
-  it('splits a generated long line without re-tokenizing the remaining file for every piece', () => {
+  it('splits a generated long line without re-tokenizing the remaining file for every piece', async () => {
     const text = 'entry '.repeat(100_000);
     let tokenizedCharacters = 0;
     const countTokens = (value: string) => {
       tokenizedCharacters += value.length;
       return value.split(/\s+/u).filter(Boolean).length;
     };
-    const chunks = packStructuralUnits({ documentId: 'large-generated.txt', units: [unit(text)],
+    const chunks = await packStructuralUnits({ documentId: 'large-generated.txt', units: [unit(text)],
       maxTokens: 128, countTokens });
     expect(chunks.map(chunk => chunk.body).join('')).toBe(text);
     // Bounded prefix probes plus decoration checks are linear in source size;
@@ -129,7 +140,7 @@ describe("packStructuralUnits", () => {
     expect(chunks.every(chunk => wordCount(chunk.embedText) <= 128)).toBe(true);
   });
 
-  it("finds a large overlapping line window without probing each rejected size", () => {
+  it("finds a large overlapping line window without probing each rejected size", async () => {
     const lineCount = 8_192;
     const text = Array.from({ length: lineCount }, () => "token").join("\n");
     let tokenProbes = 0;
@@ -142,7 +153,7 @@ describe("packStructuralUnits", () => {
       }
       return count;
     };
-    const chunks = packStructuralUnits({
+    const chunks = await packStructuralUnits({
       documentId: "many-lines.ts",
       units: [unit(text)],
       maxTokens: 4_096,
