@@ -4,6 +4,39 @@ use serde_json::json;
 use std::time::{Duration, Instant};
 
 #[test]
+fn stale_wait_check_does_not_hide_an_unowned_runnable_run() {
+    let root = std::env::temp_dir().join(format!("varin-stale-wait-{}", uuid::Uuid::new_v4()));
+    let mut catalog = Catalog::open(&root).unwrap();
+    catalog.create_thread("thread", "branch").unwrap();
+    let receipt = catalog.submit(&crate::SubmitInput {
+        key: "input".into(), thread_id: "thread".into(), branch_id: "branch".into(),
+        expected_head: None, input: json!("ready"), configuration: json!({}),
+    }).unwrap();
+    let epoch = catalog.epoch();
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged {
+        state: RunState::Runnable, waiting_on: None,
+    }).unwrap();
+    let supervisor = Arc::new(RunSupervisor::new(catalog));
+    // A second reconciler already selected this Run's old Wait, but arrives after
+    // the first has delivered it. Hold its fresh Catalog read at that boundary.
+    let catalog = supervisor.catalog.lock().unwrap();
+    let owner = supervisor.clone();
+    let run = receipt.run_id.clone();
+    let check = thread::spawn(move || owner.quiesce_run(&run, |run| run.state == RunState::Waiting));
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !supervisor.quiescence.lock().unwrap().contains_key(&receipt.run_id) {
+        assert!(Instant::now() < deadline, "reconciler must reach its fresh state check");
+        thread::yield_now();
+    }
+    let available = supervisor.start_available(&receipt.run_id).unwrap();
+    drop(catalog);
+    check.join().unwrap().unwrap();
+    drop(supervisor);
+    std::fs::remove_dir_all(root).unwrap();
+    assert!(available, "a stale wait inspection is not a live execution owner");
+}
+
+#[test]
 fn simultaneous_wait_teardown_drains_once_without_holding_global_controls() {
     let root = std::env::temp_dir().join(format!("varin-wait-drain-{}", uuid::Uuid::new_v4()));
     let mut catalog = Catalog::open(&root).unwrap();

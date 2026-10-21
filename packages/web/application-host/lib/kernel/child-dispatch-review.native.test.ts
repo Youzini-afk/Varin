@@ -217,6 +217,11 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
+    const prepareSource = adapter.prepareSource.bind(adapter);
+    adapter.prepareSource = async (...args) => {
+      try { return await prepareSource(...args); }
+      catch (error) { console.error('Source preparation fixture failed', error); throw error; }
+    };
     const collaboration = options.collaboration === false ? undefined : new ThreadCollaboration({ kernel, storageAdapter: storage, resolveLiveSource: liveSources.validate, sourceCaptureOwners: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => { throw new Error("Read-only dispatch must not capture the directory"); } }, runtime,  prepareContext, continueRun: (runId, signal) => adapter.continueLaunch(runId, { signal }), recoverLaunches: signal => adapter.recover(signal), onError: (_operation, error) => { errors.push(error); } });
     const app = express();
     registerCommonRequestMiddleware(app, { express });
@@ -1296,7 +1301,8 @@ for (const family of ['openai-responses', 'anthropic-messages'] as const) {
     expect(h.memoryQueries.some(query => query.action === 'synchronize' && query.scope.threadId === child.child_thread_id && query.scope.projectId === 'child-review-project')).toBe(true);
     expect((await h.runtime.context(child.child_branch_id))?.personalization).toMatchObject({ mode: 'agent', threadRole: 'worker', threadId: child.child_thread_id, projectId: 'child-review-project' });
     combinedReply(family, held!.response, [tool('wait_child', { operationId }, 'combined-next-boundary')]);
-    await expect.poll(async () => (await h.runtime.run(run.run_id)).state).toBe('completed');
+    try { await expect.poll(async () => (await h.runtime.run(run.run_id)).state).toBe('completed'); }
+    catch (error) { console.error('Combined continuation failed', await h.runtime.run(run.run_id), await h.runtime.launch(run.run_id), h.errors); throw error; }
     expect(await h.runtime.children()).toHaveLength(1);
     const requests = await durableRequests(f.root, run.run_id);
     const delivered = requests[2]!;
@@ -1369,7 +1375,8 @@ it('combined recovery reconciles a lost memory receipt while resuming an accepte
   expect(noteWrites).toBe(0); expect(parentSteps).toBe(parentRequests); expect(childSteps).toBe(1);
   observeRecovered = true;
   const next = await reopened.api.submit({ ...identity, key: 'recovery-next', expectedHead: (await reopened.api.snapshot(identity)).historyPage.head, text: 'Continue with the recovered facts', model });
-  await expect.poll(async () => (await reopened.runtime.run(next.run_id)).state).toBe('completed');
+  try { await expect.poll(async () => (await reopened.runtime.run(next.run_id)).state).toBe('completed'); }
+  catch (error) { console.error('Recovered continuation failed', await reopened.runtime.run(next.run_id), await reopened.runtime.launch(next.run_id), reopened.errors); throw error; }
   const finalBody = f.requests.filter(value => isParent(value.body)).at(-1)!.body;
   expect(JSON.stringify(finalBody)).toContain('COMBINED_RECOVERED_CHILD');
   expect(JSON.stringify(finalBody)).toContain('COMBINED_COMMITTED_LOST_RECEIPT');

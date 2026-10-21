@@ -1002,7 +1002,10 @@ impl RunSupervisor {
             .or_insert_with(|| {
                 Arc::new(RunDrain {
                     serial: Mutex::new(()),
-                    active: AtomicBool::new(true),
+                    // A stale reconciler may arrive after another delivered the Wait.
+                    // Inspection owns no execution: fence only after the fresh predicate
+                    // below confirms that this rendezvous must drain the original worker.
+                    active: AtomicBool::new(false),
                 })
             })
             .clone();
