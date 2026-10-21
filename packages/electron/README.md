@@ -133,6 +133,12 @@ The first page centers Varin's vector mark, wordmark and primary action. Install
 the target directory, desktop shortcut and user/machine scope together; the license link lives in
 that settings view. The original window system still supplies dragging, minimizing, closing and
 keyboard/accessibility behavior. Controls retain their native values and actions under custom drawing.
+Installation and uninstallation both advance from completed file operations to their dedicated finish
+page. The progress timer stops at that boundary, including aborted operations; unused wizard navigation
+stays hidden when NSIS refreshes its controls after page callbacks.
+Setup, uninstall and packaged application windows explicitly publish their current taskbar name and
+relaunch identity, rather than relying on Explorer's cached executable description. Setup and uninstall
+use distinct identities from the application.
 Existing installations retain their location, and the original UAC bridge transfers the chosen
 directory and shortcut preference when elevation is needed. The finish page offers opening Varin
 or simply closing setup. English, Simplified Chinese and Traditional Chinese have dedicated copy;

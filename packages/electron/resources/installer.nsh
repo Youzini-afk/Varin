@@ -75,6 +75,9 @@ Var VarinProgressDescription
 
 !macro VarinThemeFunctions PREFIX
   Function ${PREFIX}VarinGuiInit
+    ; AutoCloseWindow only sets the installer default. The uninstaller needs
+    ; its runtime flag too, so instfiles advances to our custom finish page.
+    SetAutoClose true
     ClearErrors
     ReadRegDWORD $VarinTheme HKCU "Software\Microsoft\Windows\CurrentVersion\Themes\Personalize" "AppsUseLightTheme"
     ${If} ${Errors}
@@ -95,7 +98,11 @@ Var VarinProgressDescription
       StrCpy $VarinPrimary "${VARIN_LIGHT_PRIMARY}"
       StrCpy $VarinOnPrimary "${VARIN_LIGHT_ON_PRIMARY}"
     ${EndIf}
-    VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary" "${VERSION} · Windows"
+    !if "${PREFIX}" == "un."
+      VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary" "${VERSION} · Windows" "${APP_ID}.uninstall" "$(VarinUninstallTitle)" "$INSTDIR\${UNINSTALL_FILENAME}"
+    !else
+      VarinSetup::Theme "$VarinBackground" "$VarinForeground" "$VarinMuted" "$VarinSurface" "$VarinPrimary" "$VarinOnPrimary" "${VERSION} · Windows" "${APP_ID}.setup" "${PRODUCT_NAME}" "$EXEPATH"
+    !endif
     CreateFont $VarinTitleFont "Segoe UI" 18 500
   FunctionEnd
   Function ${PREFIX}VarinStylePage
@@ -114,6 +121,11 @@ Var VarinProgressDescription
     !else
       VarinSetup::Progress "$VarinProgressPage" "$VarinProgressTitle" "$VarinProgressDescription" "$(VarinDetails)" "install"
     !endif
+  FunctionEnd
+  Function ${PREFIX}VarinProgressLeave
+    ; Stop the custom timer on both success and abort, before NSIS leaves or
+    ; retains the instfiles page. Completion is owned by NSIS, not bar position.
+    SendMessage $VarinProgressBar ${PBM_SETMARQUEE} 0 0
   FunctionEnd
 !macroend
 
@@ -138,6 +150,7 @@ Var VarinProgressDescription
     !insertmacro VarinInstallFunctions
     Page custom VarinReadyCreate VarinReadyLeave
     !define MUI_PAGE_CUSTOMFUNCTION_SHOW VarinProgressShow
+    !define MUI_PAGE_CUSTOMFUNCTION_LEAVE VarinProgressLeave
     !insertmacro MUI_PAGE_INSTFILES
     Page custom VarinFinishCreate VarinFinishLeave
   !else
@@ -147,6 +160,7 @@ Var VarinProgressDescription
     !insertmacro PAGE_INSTALL_MODE
     UninstPage custom un.VarinReadyCreate un.VarinReadyLeave
     !define MUI_PAGE_CUSTOMFUNCTION_SHOW un.VarinProgressShow
+    !define MUI_PAGE_CUSTOMFUNCTION_LEAVE un.VarinProgressLeave
     !insertmacro MUI_UNPAGE_INSTFILES
     UninstPage custom un.VarinFinishCreate
   !endif

@@ -145,6 +145,16 @@ if (isDev) {
   app.setPath('userData', path.join(app.getPath('appData'), 'Varin Dev'));
 }
 app.setAppUserModelId(APP_USER_MODEL_ID);
+if (process.platform === 'win32' && app.isPackaged) {
+  app.on('browser-window-created', (_event, window) => {
+    window.setAppDetails({
+      appId: APP_USER_MODEL_ID,
+      relaunchDisplayName: app.name,
+      relaunchCommand: `"${process.execPath}"`,
+      appIconPath: process.execPath,
+    });
+  });
+}
 app.commandLine.appendSwitch('proxy-bypass-list', '<-loopback>');
 // The bundled renderer needs more loopback connections because every API call
 // is cross-origin. Vite HMR is different: lifting the cap floods its transform

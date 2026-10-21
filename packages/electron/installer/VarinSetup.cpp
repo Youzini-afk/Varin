@@ -8,6 +8,10 @@
 #include <dwmapi.h>
 #include <objidl.h>
 #include <gdiplus.h>
+#include <shellapi.h>
+#include <propsys.h>
+#include <propkey.h>
+#include <propvarutil.h>
 #include <string>
 #include <algorithm>
 #include <atomic>
@@ -52,6 +56,34 @@ static std::atomic<int> retryDecision{-1};
 static Handle retrySignal;
 static int scale = 100;
 static int px(int value) { return MulDiv(value, scale, 100); }
+static void taskbarIdentity(HWND window, const std::wstring& id, const std::wstring& name, const std::wstring& executable) {
+  const HRESULT initialized=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED);
+  IPropertyStore* store=nullptr;
+  if(SUCCEEDED(SHGetPropertyStoreForWindow(window,IID_PPV_ARGS(&store)))) {
+    const std::wstring command=L"\""+executable+L"\"", icon=executable+L",0";
+    const PROPERTYKEY keys[]{PKEY_AppUserModel_RelaunchCommand,PKEY_AppUserModel_RelaunchDisplayNameResource,
+                             PKEY_AppUserModel_RelaunchIconResource,PKEY_AppUserModel_ID};
+    const wchar_t* values[]{command.c_str(),name.c_str(),icon.c_str(),id.c_str()};
+    for(size_t i=0;i<std::size(keys);++i) {
+      PROPVARIANT value{};
+      if(SUCCEEDED(InitPropVariantFromString(values[i],&value))) {
+        store->SetValue(keys[i],value); PropVariantClear(&value);
+      }
+    }
+    store->Release();
+  }
+  if(SUCCEEDED(initialized)) CoUninitialize();
+}
+static void clearTaskbarIdentity(HWND window) {
+  IPropertyStore* store=nullptr;
+  if(SUCCEEDED(SHGetPropertyStoreForWindow(window,IID_PPV_ARGS(&store)))) {
+    PROPVARIANT empty{};
+    for(const auto& key : {PKEY_AppUserModel_ID,PKEY_AppUserModel_RelaunchCommand,
+                          PKEY_AppUserModel_RelaunchDisplayNameResource,PKEY_AppUserModel_RelaunchIconResource})
+      store->SetValue(key,empty);
+    store->Release();
+  }
+}
 static Gdiplus::Color ink(COLORREF value) { return Gdiplus::Color(255, GetRValue(value), GetGValue(value), GetBValue(value)); }
 static COLORREF mix(COLORREF a, COLORREF b, int amount) {
   return RGB((GetRValue(a)*(100-amount)+GetRValue(b)*amount)/100,
@@ -84,6 +116,12 @@ static LRESULT CALLBACK buttonProc(HWND window, UINT message, WPARAM wp, LPARAM 
   // NSIS reapplies the default-button style after page callbacks; keep its behavior
   // while retaining the installer palette instead of restoring classic white chrome.
   if (message == BM_SETSTYLE) wp = (wp & ~BS_TYPEMASK) | BS_OWNERDRAW;
+  // The engine updates navigation after page callbacks. Keep its unused Back
+  // button hidden through those updates, rather than exposing the old layout.
+  if(message==WM_WINDOWPOSCHANGING && GetParent(window)==installerWindow && GetDlgCtrlID(window)==IDBACK) {
+    auto* position=reinterpret_cast<WINDOWPOS*>(lp);
+    position->flags=(position->flags & ~SWP_SHOWWINDOW)|SWP_HIDEWINDOW;
+  }
   if (message == WM_MOUSEMOVE && !GetPropW(window,L"VarinHot")) {
     SetPropW(window,L"VarinHot",reinterpret_cast<HANDLE>(1));
     TRACKMOUSEEVENT track{sizeof(track),TME_LEAVE,window,0}; TrackMouseEvent(&track);
@@ -263,6 +301,7 @@ static LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM wp, LPARAM 
       return TRUE;
     }
   }
+  if (message == WM_DESTROY && window==installerWindow) clearTaskbarIdentity(window);
   if (message == WM_NCDESTROY) RemoveWindowSubclass(window, windowProc, 1);
   return DefSubclassProc(window, message, wp, lp);
 }
@@ -304,6 +343,7 @@ extern "C" __declspec(dllexport) void __cdecl Theme(HWND parent, int size, wchar
   background = color(call.pop()); foreground = color(call.pop()); muted = color(call.pop());
   surface = color(call.pop()); primary = color(call.pop()); onPrimary = color(call.pop());
   versionLabel=call.pop();
+  const auto appId=call.pop(), displayName=call.pop(), executable=call.pop();
   if (!backgroundBrush) {
     // Subclasses must remain executable until the installer window is destroyed.
     HMODULE module;
@@ -319,6 +359,7 @@ extern "C" __declspec(dllexport) void __cdecl Theme(HWND parent, int size, wchar
     captionFont=CreateFontW(-MulDiv(9,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
     backgroundBrush = CreateSolidBrush(background); surfaceBrush = CreateSolidBrush(surface);
     installerWindow=parent;
+    taskbarIdentity(parent,appId,displayName,executable);
     SetWindowSubclass(parent,windowProc,1,0);
     const LONG_PTR style=GetWindowLongPtrW(parent,GWL_STYLE);
     // A fixed-size custom popup has no native sizing frame. Keeping THICKFRAME

@@ -56,7 +56,7 @@ async function prepareInstallerUI(destination) {
   if (!installation) throw new Error('MSVC x86 build tools are required for the Unicode NSIS UI plugin.');
   const developer = path.join(installation, 'Common7/Tools/VsDevCmd.bat');
   const host = process.arch === 'arm64' ? 'arm64' : 'x64';
-  const command = `call ${quote(developer)} -arch=x86 -host_arch=${host} && cl /nologo /LD /std:c++17 /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /I${quote(destination)} ${quote(source)} /Fo${quote(path.join(destination, 'VarinSetup.obj'))} /link /OUT:${quote(output)} /DEF:${quote(definitions)} user32.lib gdi32.lib comctl32.lib uxtheme.lib dwmapi.lib gdiplus.lib`;
+  const command = `call ${quote(developer)} -arch=x86 -host_arch=${host} && cl /nologo /LD /std:c++17 /W4 /O2 /MT /utf-8 /DUNICODE /D_UNICODE /I${quote(destination)} ${quote(source)} /Fo${quote(path.join(destination, 'VarinSetup.obj'))} /link /OUT:${quote(output)} /DEF:${quote(definitions)} user32.lib gdi32.lib comctl32.lib uxtheme.lib dwmapi.lib gdiplus.lib shell32.lib propsys.lib ole32.lib uuid.lib`;
   const built = await exec(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
     windowsHide: true, windowsVerbatimArguments: true, cwd: destination, env: { ...process.env, VSLANG: '1033' },
   });
