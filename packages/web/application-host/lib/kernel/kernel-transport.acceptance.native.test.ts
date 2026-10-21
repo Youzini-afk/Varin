@@ -11,6 +11,7 @@ import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelClient } from "./kernel-client.js";
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { acquireTokenCounter } from '../models/token-count.js';
+import { packPlainText } from '../knowledge/semantic/chunker.js';
 import { controlFrame } from './kernel-transport.js';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW, type AgentRuntimeStreamEvent } from "./protocol.generated.js";
 
@@ -83,6 +84,24 @@ it('reopens a retained tokenizer after real transport loss and reports the origi
     await expect(counter.count(['released'])).rejects.toMatchObject({ code: 'tokenizer-lease-released' });
     expect(f.host.isReady).toBe(true);
   } finally { await counter.release(); diagnostic.mockRestore(); }
+});
+
+it('packs long multilingual text through the real tokenizer without splitting Unicode in count probes', async () => {
+  const f = await fixture();
+  const counter = await acquireTokenCounter(f.host, { model: 'reference-model' });
+  try {
+    const text = 'a'.repeat(30) + '😀' + ' 中文🚀'.repeat(30);
+    const chunks = await packPlainText({ documentId: 'unicode.txt', text, maxTokens: 31,
+      countTokens: async value => { await counter.count([value]); return Buffer.byteLength(value, 'utf8'); } });
+    expect(chunks.map(chunk => chunk.body).join('')).toBe(text);
+    expect(chunks.every(chunk => Buffer.byteLength(chunk.embedText, 'utf8') <= 31)).toBe(true);
+    const sent = f.requests.length;
+    await expect(counter.count(['\uD800'])).rejects.toMatchObject({ code: 'tokenizer-input-invalid' });
+    await expect(counter.count(['\uDC00'])).rejects.toMatchObject({ code: 'tokenizer-input-invalid' });
+    expect(f.requests).toHaveLength(sent);
+    expect((await counter.count(['仍可计数 😀'])).counts).toHaveLength(1);
+    expect(f.host.isReady).toBe(true);
+  } finally { await counter.release(); }
 });
 
 it('a durable recovery wake preceding the handshake response is delivered only after verified startup', async () => {

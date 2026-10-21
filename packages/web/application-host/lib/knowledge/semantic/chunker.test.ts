@@ -30,10 +30,22 @@ describe("packStructuralUnits", () => {
     const batches: number[] = [];
     const chunks = await packStructuralUnits({ documentId: 'unicode.ts', units: [unit(text), unit('next', { startLine: 2 })],
       maxTokens: 31, countTokens: () => { throw new Error('The character estimate must not be used'); },
-      countTokensBatch: async texts => { batches.push(texts.length); return texts.map(count); } });
+      countTokensBatch: async texts => {
+        for (const value of texts) expect(/[\uD800-\uDFFF]/u.test(value)).toBe(false);
+        batches.push(texts.length); return texts.map(count);
+      } });
     expect(chunks.filter(chunk => chunk.startLine === 1).map(chunk => chunk.body).join('')).toBe(text);
     expect(chunks.every(chunk => count(chunk.embedText) <= 31 && !chunk.body.includes('\uFFFD'))).toBe(true);
     expect(batches.some(size => size > 1)).toBe(true);
+  });
+  it('fits complete supplementary characters even when the initial probe is one UTF-16 code unit', async () => {
+    const text = '😀🚀a';
+    const chunks = await packStructuralUnits({ documentId: 'unicode.txt', units: [unit(text)], maxTokens: 1,
+      countTokens: value => {
+        expect(/[\uD800-\uDFFF]/u.test(value)).toBe(false);
+        return Array.from(value).length;
+      } });
+    expect(chunks.map(chunk => chunk.body)).toEqual(['😀', '🚀', 'a']);
   });
   it("covers every line of a large structural unit and keeps each embed text at the tokenizer limit", async () => {
     const bodyLines = Array.from({ length: 80 }, (_, index) => `  const marker_${index + 1} = ${index + 1};`);

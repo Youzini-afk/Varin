@@ -27,6 +27,9 @@ The retained embedding tokenizer reopens only its read-only counter after an epo
 initial open is not cached as a permanent failure. Original model HTTP dispatches retain the above
 settlement rules. Native transport failures publish a content-free stage, I/O kind, OS code and static
 protocol reason to the Host log; arbitrary stderr, source text and credentials are not included.
+All continuation-split probes preserve Unicode codepoint boundaries before native token counting,
+including growth and binary-search probes. The counter rejects isolated UTF-16 surrogate halves before
+IPC, leaving the native owner and unrelated requests available; it does not silently replace source text.
 
 `local-inference.ts` adapts the existing installed encoder for native query vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
 invalid or unavailable selections never fall back. The HTTP settings DTO remains unconfigured for index-status consumers when local inference is selected.

@@ -34,6 +34,11 @@ export async function acquireTokenCounter(
   await ensureLease();
   return {
     async count(texts: readonly string[]) {
+      // Unicode mode treats a valid surrogate pair as one codepoint, so this
+      // matches only isolated UTF-16 halves that Rust strings cannot represent.
+      if (texts.some(text => /[\uD800-\uDFFF]/u.test(text))) throw new KernelClientError({
+        code: 'tokenizer-input-invalid', message: 'Tokenizer input contains an incomplete Unicode character',
+      });
       // Counting immutable text is read-only. A new kernel may reopen this exact
       // tokenizer; accepted inference requests and their owners are never replayed.
       const current = await ensureLease();

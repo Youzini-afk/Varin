@@ -23,22 +23,28 @@ export type SemanticChunk = {
 
 const prefixThatFits = async (text: string, maxTokens: number, countTokens: TokenCounter): Promise<number> => {
   if (text.length === 0) return 0;
+  const boundary = (offset: number, direction: -1 | 1): number => {
+    const previous = text.charCodeAt(offset - 1), next = text.charCodeAt(offset);
+    return previous >= 0xD800 && previous <= 0xDBFF && next >= 0xDC00 && next <= 0xDFFF
+      ? offset + direction : offset;
+  };
   // Probe near one model window. Re-tokenizing the entire unconsumed suffix
   // for every piece made long generated lines quadratic in source length.
   let low = 0;
-  let high = Math.min(text.length, maxTokens);
+  let high = boundary(Math.min(text.length, maxTokens), 1);
   while (await countTokens(text.slice(0, high)) <= maxTokens) {
     low = high;
     if (high === text.length) return high;
-    high = Math.min(text.length, high * 2);
+    high = boundary(Math.min(text.length, high * 2), 1);
   }
-  high -= 1;
-  while (low < high) {
-    const middle = Math.ceil((low + high) / 2);
+  // Every probe crosses the native UTF-8/JSON boundary, not just the final
+  // chunk. Keep both bounds on codepoint boundaries throughout the search.
+  while (high - low > 1) {
+    const middle = boundary(Math.ceil((low + high) / 2), -1);
+    if (middle === low) break;
     if (await countTokens(text.slice(0, middle)) <= maxTokens) low = middle;
-    else high = middle - 1;
+    else high = middle;
   }
-  if (low > 0 && low < text.length && /[\uD800-\uDBFF]/u.test(text[low - 1]!)) low--;
   if (low === 0) throw new Error('The embedding token window cannot fit a source character');
   return low;
 };
