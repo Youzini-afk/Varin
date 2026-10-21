@@ -11,6 +11,12 @@ pub(super) fn execute(
         return Err(KernelError::Cancelled);
     }
     let owner = runtime.catalog();
+    if method == "runtime.operation.calls" {
+        let p: OperationParams = serde_json::from_value(params)?;
+        let calls = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .nested_tool_calls(&p.operation_id).map_err(domain)?;
+        return Ok(serde_json::to_value(calls)?);
+    }
     if method == "runtime.model.presentations" {
         let selection: varin_runtime::catalog::usage::ModelPresentationParams = serde_json::from_value(params)?;
         let read = owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?

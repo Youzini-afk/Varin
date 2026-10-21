@@ -5,6 +5,43 @@ use crate::execution::{
 };
 use serde::Deserialize;
 
+/// Read-only call outline. Arguments and output remain with their original Operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationCallSummary {
+    pub operation_id: String,
+    pub parent_operation_id: String,
+    pub name: String,
+    pub depth: u64,
+    pub phase: OperationPhase,
+    pub outcome: Option<Outcome>,
+    pub effect: Effect,
+    pub cancel_requested: bool,
+}
+impl Catalog {
+    pub fn nested_tool_calls(&self, operation_id: &str) -> Result<Vec<OperationCallSummary>> {
+        let original: Operation = record(&self.db, "operations", operation_id)?;
+        ToolIntent::from_operation(&original)?;
+        let mut statement = self.db.prepare("WITH RECURSIVE calls(id,depth) AS (
+            SELECT id,0 FROM operations WHERE run_id=?2 AND json_extract(body,'$.intent.origin.kind')='nested_call'
+                AND json_extract(body,'$.intent.origin.parent_operation_id')=?1
+            UNION ALL SELECT o.id,c.depth+1 FROM operations o JOIN calls c ON json_extract(o.body,'$.intent.origin.parent_operation_id')=c.id
+                WHERE o.run_id=?2 AND json_extract(o.body,'$.intent.origin.kind')='nested_call'
+        ) SELECT o.body,c.depth FROM calls c JOIN operations o ON o.id=c.id ORDER BY o.rowid")?;
+        let rows = statement.query_map(params![operation_id, original.run_id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))?;
+        rows.map(|row| {
+            let (body, depth) = row?;
+            let depth = u64::try_from(depth).map_err(|_| RuntimeError::Invalid("invalid nested call depth".into()))?;
+            let operation: Operation = serde_json::from_str(&body)?;
+            let intent = ToolIntent::from_operation(&operation)?;
+            let ToolOrigin::NestedCall { parent_operation_id } = intent.origin() else { unreachable!() };
+            Ok(OperationCallSummary { operation_id: operation.id, parent_operation_id: parent_operation_id.clone(),
+                name: intent.call().name.clone(), depth, phase: operation.phase, outcome: operation.outcome,
+                effect: operation.effect, cancel_requested: operation.cancel_requested })
+        }).collect()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolCallMetadata {

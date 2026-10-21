@@ -59,6 +59,7 @@ import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
 import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
+import { ChatScriptCard } from './ChatScriptCard';
 import { assistantMessagesForTurn } from './usagePresentation';
 import { timelinePresentationCache } from './timelinePresentationCache';
 
@@ -238,7 +239,8 @@ const ToolCallRow: React.FC<{ call: ToolCallPresentation }> = ({ call }) => (
 const ToolResultContent: React.FC<{
   messageId: string;
   result: ChatToolResultMessage;
-}> = ({ messageId, result }) => {
+  hideDetails?: boolean;
+}> = ({ messageId, result, hideDetails = false }) => {
   const { t } = useI18n();
   const calls = projectToolCalls(result);
   return (
@@ -247,17 +249,35 @@ const ToolResultContent: React.FC<{
       <ChatToolResultPreview result={result} />
       <EntryExtras itemId={result.historyId} />
       {result.usage && <ChatAssistantUsageFooter usage={result.usage} />}
-      {calls ? <details className="typography-meta text-muted-foreground">
+      {!hideDetails && calls ? <details className="typography-meta text-muted-foreground">
         <summary className="cursor-pointer">{t('chat.timeline.tools.callCount', { count: calls.calls.length })}{calls.complete ? '' : ` · ${t('chat.timeline.tools.incompleteRecord')}`}</summary>
         <div className="mt-2 space-y-1 border-l border-border/60 pl-3">
           {calls.calls.map(call => <ToolCallRow key={call.id} call={call} />)}
         </div>
       </details> : null}
-      {result.details !== undefined ? (
+      {!hideDetails && result.details !== undefined ? (
         <RawJsonDetails label="details" value={result.details} />
       ) : null}
     </div>
   );
+};
+
+const ScriptCallResult: React.FC<{ operation: import('@varin/protocol').Operation }> = ({ operation }) => {
+  const intent = operation.intent as { call?: { name?: string; arguments?: JsonValue } };
+  const call = intent.call;
+  const completion = operation.call_completion;
+  const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
+  const name = call?.name ?? 'tool';
+  const summary = getToolSummary({ toolName: name, arguments: call?.arguments, details: output?.data }).text;
+  return <>
+    {summary && summary !== name && <p className="break-words typography-meta">{summary}</p>}
+    {completion && <ToolResultContent messageId={operation.id} result={{ role: 'toolResult', toolCallId: operation.id, toolName: name, timestamp: 0,
+      isError: completion.kind === 'not_dispatched' || operation.outcome === 'failed',
+      content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: completion.reason }]
+        : output?.parts.flatMap(part => part.kind === 'text' ? [{ type: 'text' as const, text: part.text }] : []) ?? [],
+      ...(output?.data == null ? {} : { details: output.data as JsonValue }) }} />}
+    {call?.arguments !== undefined && <RawJsonDetails label="arguments" value={call.arguments} />}
+  </>;
 };
 
 // A tool keeps its disclosure choice when a live message becomes a persisted
@@ -362,6 +382,11 @@ const ChatToolCard: React.FC<{
     ? String((call.arguments as Record<string, unknown>).command ?? '')
     : '';
   if (call.name === 'send') return <ChatThreadMessageCard call={call} result={result} sessionId={sessionId} failed={status === 'error'} />;
+  if (['script_open', 'script_run', 'script_close'].includes(call.name)) return <ChatScriptCard call={call} execution={execution}
+    executions={executionById} status={status} result={result} sessionId={sessionId ?? 'preview'} preview={preview} generating={generating}
+    output={result ? <ToolResultContent messageId={`tool-result:${call.id}`} result={result} hideDetails /> : null}
+    rawDetails={<><RawJsonDetails label="arguments" value={call.arguments} />{details !== undefined && <RawJsonDetails label="result" value={details} />}</>}
+    renderCall={operation => <ScriptCallResult operation={operation} />} />;
   if (call.name === 'code_retrieval') return <ChatExploreCard call={call} cwd={cwd} execution={execution}
     result={result} generating={generating} rawDetails={<>
       <pre className="overflow-auto whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(call.arguments)}</pre>

@@ -79,6 +79,7 @@ export interface ChatAssistantMessage {
 
 export interface ChatToolResultMessage {
   historyId?: string;
+  notDispatched?: boolean;
   nestedCalls?: {
     calls: Array<{ id: string; name: string; arguments?: JsonValue; argumentsBytes?: number;
       status: "ok" | "error" | "unfinished"; durationMs?: number; error?: string }>;
@@ -262,6 +263,7 @@ export interface ChatToolExecutionState {
   operationId?: string;
   agent?: { threadId: string; avatar?: string };
   parentToolCallId?: string;
+  revision?: number;
   args: JsonValue;
   isError?: boolean;
   name: string;

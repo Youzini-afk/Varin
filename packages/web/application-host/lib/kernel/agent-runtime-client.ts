@@ -1937,6 +1937,9 @@ export class AgentRuntimeClient {
       signal,
     );
   }
+  toolCalls(operationId: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').OperationCallSummary[]> {
+    return this.kernel.agentRuntimeRequest('runtime.operation.calls', { operationId }, signal);
+  }
   findOperation(operationId: string, signal?: AbortSignal): Promise<Operation | null> {
     return this.kernel.agentRuntimeRequest('runtime.operation.inspect', { operationId, allowMissing: true }, signal);
   }

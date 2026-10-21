@@ -1032,6 +1032,7 @@ pub(crate) fn spawn(
                                 | "runtime.thread.usage"
                                 | "runtime.model.presentations"
                                 | "runtime.operation.inspect"
+                                | "runtime.operation.calls"
                                 | "runtime.thread.operations.active"
                                 | "runtime.permission.open"
                                 | "runtime.permission.consume"

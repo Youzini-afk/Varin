@@ -144,6 +144,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     restartPolicy: (identity, runId, selectionId) => post('policy/restart', { ...identity, runId, selectionId }),
     cancelPolicyUpdate: (identity, runId, selectionId) => post('policy/cancel', { ...identity, runId, selectionId }),
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),
+    toolCalls: (operationId, signal) => post('operation/calls', { operationId }, signal),
     cancelOperation: operationId => post('operation/cancel', { operationId }),
     finishRetrieval: operationId => post('operation/finish-retrieval', { operationId }),
     readRetrievalMaterial: (operationId, viewId) => post('operation/retrieval-material', { operationId, viewId }),

@@ -5,12 +5,13 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 55;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 56;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
     "runtime.thread.usage",
+    "runtime.operation.calls",
     "runtime.model.presentations",
     "runtime.knowledge_inference.finish",
     "runtime.knowledge_inference.cancel",
@@ -94,6 +95,7 @@ pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
     "runtime.context.observations.admit",
     "runtime.thread.usage",
+    "runtime.operation.calls",
     "runtime.model.presentations",
     "source.authority.seal",
     "source.mcp.holder",
@@ -4208,6 +4210,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.operation.calls" => serde_json::from_value::<OperationParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "runtime.operation.status" => serde_json::from_value::<OperationParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

@@ -444,6 +444,7 @@ export interface ThreadsAPI {
   run(runId: string): Promise<Run>;
   cancelRun(runId: string): Promise<RunCancellationReceipt>;
   operation(operationId: string): Promise<Operation>;
+  toolCalls(operationId: string, signal?: AbortSignal): Promise<import('@varin/protocol').OperationCallSummary[]>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   finishRetrieval(operationId: string): Promise<{ accepted: boolean }>;
   readRetrievalMaterial(operationId: string, viewId: string): Promise<import('@varin/protocol').ExploreQueryView>;

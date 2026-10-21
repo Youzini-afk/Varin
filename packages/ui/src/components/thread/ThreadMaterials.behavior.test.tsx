@@ -386,7 +386,7 @@ function artifactConversationFixture() {
     prepareNavigation: unused, recoverySource: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused,
     decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused,
-    cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, operation: unused, cancelOperation: unused, finishRetrieval: unused, readRetrievalMaterial: unused,
+    cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, toolCalls: async () => [], operation: unused, cancelOperation: unused, finishRetrieval: unused, readRetrievalMaterial: unused,
     resume: unused, retryPreparation: unused, events: async () => [],
     observe: async (_cursor, _onEvent, { signal }) => new Promise<void>(resolve => {
       if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true });

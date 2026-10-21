@@ -165,6 +165,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], 'operation/finish-retrieval': ['operationId'], 'operation/retrieval-material': ['operationId', 'viewId'], events: ['cursor'],
   };
+  fields['operation/calls'] = ['operationId'];
   const post = (method: string, action: (body: Record<string, unknown>, signal: AbortSignal) => Promise<unknown>) => {
     app.post(`/api/threads/${method}`, requireAuth, async (request, response) => {
       const controller = new AbortController();
@@ -530,6 +531,11 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('run/resume', body => adapter.resume(text(body.runId), text(body.waitId)));
   post('run/retry-preparation', async body => { await adapter.retryPreparation(text(body.runId)); return {}; });
   post('operation', body => adapter.requireOperation(text(body.operationId)));
+  post('operation/calls', async (body, signal) => {
+    const operationId = text(body.operationId);
+    await adapter.requireOperation(operationId);
+    return adapter.runtime.toolCalls(operationId, signal);
+  });
   post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
   post('operation/finish-retrieval', body => adapter.finishRetrieval(text(body.operationId)));
   post('operation/retrieval-material', body => adapter.readRetrievalMaterial(text(body.operationId), text(body.viewId)));

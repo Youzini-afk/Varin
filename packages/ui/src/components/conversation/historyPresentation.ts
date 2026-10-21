@@ -9,7 +9,7 @@ const json = (value: unknown): JsonValue => value as JsonValue;
 function presentedCall(call: Record<string, unknown>): Record<string, unknown> {
   const args = object(call.arguments);
   const name = object(args.reference).name;
-  return call.name === 'tool_invoke' && (name === 'render_ui' || name === 'code_retrieval')
+  return call.name === 'tool_invoke' && (name === 'render_ui' || name === 'code_retrieval' || ['script_open', 'script_run', 'script_close'].includes(String(name)))
     ? { ...call, name, arguments: args.arguments }
     : call;
 }
@@ -18,6 +18,7 @@ function presentedOutput(data: unknown): unknown {
   const name = object(value.reference).name;
   return (name === 'render_ui' && object(value.result).kind === 'ui')
     || (name === 'code_retrieval' && typeof object(value.result).status === 'string')
+    || ['script_open', 'script_run', 'script_close'].includes(String(name))
     ? value.result : data;
 }
 
@@ -67,6 +68,7 @@ export class HistoryPresentation {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};
     const calls = new Map<string, { id: string; name: string }>();
+    const operationCalls = new Map<string, string>();
     const children = new Map(snapshot?.children?.map(child => [child.operation_id, child]));
     const live = new Map(progress.map(item => [item.operationId, item]));
     const completed = new Map<string, Record<string, unknown>>(history.flatMap(item => {
@@ -90,6 +92,7 @@ export class HistoryPresentation {
           && operation.id === `${request}:tool:${call.call_id}`);
         if (operation) toolExecutions[id] = projectExecution(operation, id, call);
         const operationId = `${request}:tool:${call.call_id}`;
+        operationCalls.set(operationId, id);
         const receipt = completed.get(operationId);
         const candidate = live.get(operationId);
         const update = candidate?.toolName === call.name ? candidate : undefined;
@@ -128,6 +131,7 @@ export class HistoryPresentation {
           const output = completion.content as OutputBody | undefined;
           entry = { ...base, type: 'message', message: { role: 'toolResult', historyId: item.id, toolCallId: id, toolName: calls.get(id)?.name ?? 'tool', timestamp: 0,
             isError: completion.kind === 'not_dispatched' || completion.outcome === 'failed',
+            ...(completion.kind === 'not_dispatched' ? { notDispatched: true } : {}),
             status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
             ...(output?.data == null ? {} : { details: json(presentedOutput(output.data)) }) } };
@@ -150,6 +154,24 @@ export class HistoryPresentation {
         this.entries.set(item.id, entry);
       }
       result.push(entry);
+    }
+    const nestedByParent = new Map<string, Operation[]>();
+    for (const operation of snapshot?.operations ?? []) {
+      const origin = object(object(operation.intent).origin);
+      if (origin.kind !== 'nested_call' || typeof origin.parent_operation_id !== 'string') continue;
+      const siblings = nestedByParent.get(origin.parent_operation_id) ?? [];
+      siblings.push(operation); nestedByParent.set(origin.parent_operation_id, siblings);
+    }
+    const parents = [...operationCalls.keys()];
+    for (let index = 0; index < parents.length; index++) {
+      const parent = parents[index]!;
+      for (const operation of nestedByParent.get(parent) ?? []) {
+        if (operationCalls.has(operation.id)) continue;
+        const call = presentedCall(object(object(operation.intent).call));
+        if (typeof call.name !== 'string') continue;
+        operationCalls.set(operation.id, operation.id); parents.push(operation.id);
+        toolExecutions[operation.id] = { ...projectExecution(operation, operation.id, call), parentToolCallId: operationCalls.get(parent)! };
+      }
     }
     const visible = new Set(result.map(entry => entry.id));
     const lastByRun = new Map<string, string>();
@@ -176,7 +198,7 @@ export class HistoryPresentation {
 function projectExecution(operation: Operation, id: string, call: Record<string, unknown>): ChatToolExecutionState {
   const completion = operation.call_completion;
   const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
-  return { toolCallId: id, operationId: operation.id, name: String(call.name), args: json(call.arguments),
+  return { toolCallId: id, operationId: operation.id, revision: operation.revision, name: String(call.name), args: json(call.arguments),
     status: operation.phase === 'terminal' ? outcomeStatus(operation.outcome) : operation.executor === 'ask_user' ? 'waiting' : 'running',
     ...(output?.data == null ? {} : { result: json(presentedOutput(output.data)) }) };
 }

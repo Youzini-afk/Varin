@@ -407,6 +407,10 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
         let operation = db.lock().unwrap().operation(&child.operation_id).unwrap();
         assert_eq!(operation.effect, Effect::Unknown);
         let outer_operation = db.lock().unwrap().operation(&outer.operation_id).unwrap();
+        let outline = db.lock().unwrap().nested_tool_calls(&outer.operation_id).unwrap();
+        assert!(outline.iter().any(|item| item.operation_id == child.operation_id && item.parent_operation_id == outer.operation_id));
+        assert!(outline.iter().all(|item| item.operation_id != outer.operation_id));
+        assert!(db.lock().unwrap().nested_tool_calls("missing-parent").is_err());
         assert_eq!(outer_operation.effect, Effect::Confirmed);
         assert_eq!(outer_operation.outcome, Some(Outcome::Succeeded));
         assert!(
@@ -452,6 +456,8 @@ fn model_and_policy_nested_calls_share_original_catalog_without_inner_model_pair
         drop(tools);
         drop(db);
         let mut reopened = Catalog::open(&path).unwrap();
+        let restored = reopened.nested_tool_calls(&outer.operation_id).unwrap();
+        assert_eq!(outline.iter().map(|item| &item.operation_id).collect::<Vec<_>>(), restored.iter().map(|item| &item.operation_id).collect::<Vec<_>>());
         assert_eq!(
             reopened.operation(&child.operation_id).unwrap().effect,
             Effect::Unknown

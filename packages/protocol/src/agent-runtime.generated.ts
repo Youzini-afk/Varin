@@ -1506,7 +1506,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 55; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 56; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -3147,6 +3147,8 @@ export interface McpEndpoint {
   configurationVersion: string;
   credentialVersion: string;
 }
+
+export interface OperationCallSummary { operationId: string; parentOperationId: string; name: string; depth: number; phase: OperationPhase; outcome: Outcome | null; effect: Effect; cancelRequested: boolean; }
 
 export type McpChildDerivationOrigin = {kind:'dispatch';parent_source_authority:McpSourceAuthority;binding:SourceMcpChildBinding}|{kind:'continuation';previous_run_id:string};
 
