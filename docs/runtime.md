@@ -369,6 +369,8 @@ AgentPolicy 返回动作和状态，核心负责合法执行与提交。Provider
 Agent 的渠道、账号与用途设置由 Host [模型服务](../packages/web/application-host/lib/models/DOCUMENTATION.md)
 管理，通过领域 API 和配置文件服务设置、发现及登录。渠道目录 ID、实际请求模型 ID、
 固定连接和账号身份各有用途；普通配置更新只影响后续准备，明确撤权仍由原执行边界核验。
+模型请求快照同时保存当时的渠道目录 ID，用量据此按渠道和模型汇总。已有请求缺少该字段时，只有原 Run 的
+连接身份、协议和模型完全匹配才使用其渠道记录；无法确定的归属保留未知，不按当前设置或同名模型猜测。
 扩展通过同一 composition 贡献渠道、目录、协议 codec 和认证。耐久 `adapterIdentity` 绑定确切 artifact/组合；
 `adapterBindingId` 指向实际活跃实现。原 Run、排队输入及 child 持有原 pin，不按今天的服务名重选。
 同账号刷新保留身份，取消等待不放弃真实刷新及保存；网络、用量和实际停止仍由原执行 owner 记录。

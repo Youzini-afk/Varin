@@ -59,6 +59,7 @@ fn model_call(
         },
     );
     let binding = RequestBinding {
+        provider_id: None,
         tokenizer: None,
         request_context: None,
         child_dispatch: None,

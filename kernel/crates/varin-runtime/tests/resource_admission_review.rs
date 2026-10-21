@@ -28,6 +28,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
                 },
             },
             binding: RequestBinding {
+                provider_id: None,
                 tokenizer: None,
                 request_context: None,
                 child_dispatch: None,
@@ -275,6 +276,7 @@ mod actual_engines {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                provider_id: None,
                 tokenizer: None,
                 request_context: None,
                 child_dispatch: None,

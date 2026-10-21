@@ -10,6 +10,7 @@ import {
   groupUsage,
   sumUsage,
   usageMetrics,
+  visibleUsageTotals,
 } from "./thread-usage";
 
 const kinds: Record<ThreadUsageRow["kind"], I18nKey> = {
@@ -81,36 +82,26 @@ export function ThreadUsageView({
         </div>
       ) : (
         <>
-          <div className="mx-5 mb-3 grid grid-cols-2 gap-3">
-            {usageMetrics.slice(0, 2).map(([key, label]) => {
-              const value = sumUsage(primary, key);
+          <dl className="mx-5 mb-3 flex items-start gap-4 overflow-x-auto py-1" aria-label={t("chat.usage.title")}>
+            {visibleUsageTotals(primary).map(({ key, label, value }) => {
               return (
                 <div
                   key={key}
-                  className="min-w-0 rounded-xl bg-[var(--surface-muted)] px-3.5 py-3"
+                  className="flex-1 whitespace-nowrap"
                 >
-                  <p className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Icon
-                      name={key === "inputTokens" ? "arrow-down" : "arrow-up"}
-                      className="size-3"
-                    />
+                  <dt className="text-xs text-muted-foreground">
                     {t(`contextSidebar.tokens.${label}`)}
-                  </p>
-                  <p
-                    className="mt-2 flex flex-wrap items-baseline gap-x-1.5"
+                  </dt>
+                  <dd
+                    className="mt-1 text-xl font-medium leading-tight tracking-tight tabular-nums"
                     title={exactUsage(value)}
                   >
-                    <span className="break-all text-[26px] font-medium leading-tight tracking-tight tabular-nums">
-                      {compactUsage(value)}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      tokens
-                    </span>
-                  </p>
+                    {compactUsage(value)}
+                  </dd>
                 </div>
               );
             })}
-          </div>
+          </dl>
           <div className="mx-5 mb-4 space-y-1.5 text-xs text-muted-foreground">
             <p>
               {t(
@@ -251,12 +242,11 @@ export function ThreadUsageView({
                               )}
                             </p>
                             <dl className="space-y-1.5 text-xs">
-                              {usageMetrics
+                              {visibleUsageTotals(subset)
                                 .filter(
-                                  ([key]) =>
-                                    sumUsage(subset, key).known !== null,
+                                  ({ value }) => value.known !== null,
                                 )
-                                .map(([key, label]) => (
+                                .map(({ key, label, value }) => (
                                   <div
                                     key={key}
                                     className="flex justify-between gap-3"
@@ -265,7 +255,7 @@ export function ThreadUsageView({
                                       {t(`contextSidebar.tokens.${label}`)}
                                     </dt>
                                     <dd className="break-all text-right tabular-nums">
-                                      {exactUsage(sumUsage(subset, key))}
+                                      {exactUsage(value)}
                                     </dd>
                                   </div>
                                 ))}

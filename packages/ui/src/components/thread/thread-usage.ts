@@ -9,6 +9,13 @@ export const usageMetrics = [
 ] as const;
 export type UsageMetric = (typeof usageMetrics)[number][0];
 
+/** Input/output describe every request; optional token kinds appear only with a positive receipt. */
+export function visibleUsageTotals(rows: readonly ThreadUsageRow[]) {
+  return usageMetrics.map(([key, label]) => ({ key, label, value: sumUsage(rows, key) }))
+    .filter(({ key, value }) => key === 'inputTokens' || key === 'outputTokens'
+      || value.known !== null && BigInt(value.known) > 0n);
+}
+
 export function sumUsage(
   rows: readonly ThreadUsageRow[],
   metric: UsageMetric,

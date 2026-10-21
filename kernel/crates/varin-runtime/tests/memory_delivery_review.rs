@@ -170,6 +170,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
             history_range: range.clone(),
         },
         binding: RequestBinding {
+            provider_id: None,
             tokenizer: None,
             request_context: None,
             child_dispatch: None,

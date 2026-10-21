@@ -29,7 +29,20 @@ struct SnapshotMetadata { view: ViewMetadata }
 #[derive(Deserialize)]
 struct ViewMetadata { origin: RequestOrigin, binding: BindingMetadata }
 #[derive(Deserialize)]
-struct BindingMetadata { provider_family: String, model: String }
+struct BindingMetadata {
+    #[serde(default)] provider_id: Option<String>,
+    #[serde(default)] connection_identity: String,
+    provider_family: String, model: String,
+}
+struct RunAttribution { provider_id: String, connection_identity: String, provider_family: String, model: String }
+impl BindingMetadata {
+    fn provider(&self, run_id: &str, originals: &BTreeMap<String, RunAttribution>) -> Option<String> {
+        self.provider_id.clone().or_else(|| originals.get(run_id)
+            .filter(|original| !self.connection_identity.is_empty() && self.connection_identity == original.connection_identity
+                && self.provider_family == original.provider_family && self.model == original.model)
+            .map(|original| original.provider_id.clone()))
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -73,6 +86,7 @@ impl ModelPresentationRead {
 
 pub struct ThreadUsageRead {
     selection: ThreadUsageParams, cursor: u64, steps: Vec<ModelStep>, operations: Vec<Operation>,
+    originals: BTreeMap<String, RunAttribution>,
     content: crate::content::ContentStore, _publication: crate::content::ContentPublication,
 }
 impl Catalog {
@@ -91,7 +105,13 @@ impl Catalog {
         let steps = read("model_steps", "")?.into_iter().map(|body| serde_json::from_str(&body)).collect::<std::result::Result<_, _>>()?;
         let operations = read("operations", "AND json_extract(x.body,'$.intent.kind') IN ('inference_request_v1','policy_model_job_v1','mcp_sampling_generation_v1')")?
             .into_iter().map(|body| serde_json::from_str(&body)).collect::<std::result::Result<_, _>>()?;
-        Ok(ThreadUsageRead { selection: selection.clone(), cursor: self.event_cursor()?, steps, operations,
+        // Existing requests can use the original Run's recorded channel only when
+        // its admitted connection still matches exactly. Never infer from a model name.
+        let mut statement = self.db.prepare("SELECT r.id,json_extract(r.body,'$.configuration.providerId'),json_extract(l.body,'$.selection.connection_identity'),json_extract(l.body,'$.selection.provider_family'),json_extract(l.body,'$.selection.model') FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=?1 AND b.id=?2 AND json_extract(r.body,'$.configuration.providerId') IS NOT NULL")?;
+        let originals = statement.query_map(params![selection.thread_id, selection.branch_id], |row| Ok((row.get(0)?, RunAttribution {
+            provider_id: row.get(1)?, connection_identity: row.get(2)?, provider_family: row.get(3)?, model: row.get(4)?,
+        })))?.collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
+        Ok(ThreadUsageRead { selection: selection.clone(), cursor: self.event_cursor()?, steps, operations, originals,
             content: self.content.clone(), _publication: self.content.begin_publication() })
     }
 }
@@ -149,7 +169,8 @@ impl ThreadUsageRead {
             };
             if matches!(step.state, ModelStepState::Prepared | ModelStepState::NotDispatched) { not_dispatched += 1; continue; }
             let usage = step.usage.clone().map(serde_json::from_value).transpose()?.unwrap_or_default();
-            add(&mut rows, kind, None, Some(metadata.view.binding.provider_family), metadata.view.binding.model,
+            let provider_id = metadata.view.binding.provider(&step.run_id, &self.originals);
+            add(&mut rows, kind, provider_id, Some(metadata.view.binding.provider_family), metadata.view.binding.model,
                 usage, step.state == ModelStepState::Dispatched)?;
         }
         for op in &self.operations {
@@ -175,7 +196,8 @@ impl ThreadUsageRead {
                     if state.dispatch == crate::execution::PolicyModelDispatch::Prepared { not_dispatched += 1; continue; }
                     let metadata = snapshot(&state.request_ref)?;
                     let pending = state.receipt.is_none(); let usage = state.receipt.map(|receipt| receipt.usage).unwrap_or_default();
-                    add(&mut rows, "planning", None, Some(metadata.view.binding.provider_family), metadata.view.binding.model, usage, pending)?;
+                    let provider_id = metadata.view.binding.provider(&op.run_id, &self.originals);
+                    add(&mut rows, "planning", provider_id, Some(metadata.view.binding.provider_family), metadata.view.binding.model, usage, pending)?;
                 }
                 Some("mcp_sampling_generation_v1") => {
                     let state = mcp_interactions::sampling::projection(op)?;

@@ -113,6 +113,7 @@ impl Fixture {
             leaf_id: Some(accepted.input_id),
         };
         let binding = RequestBinding {
+            provider_id: None,
             tokenizer: None,
             request_context: None,
             child_dispatch: None,

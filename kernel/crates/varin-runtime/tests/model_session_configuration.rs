@@ -20,7 +20,9 @@ fn model_only_binding_has_no_tool_grant_and_credentials_remain_dispatch_only() {
     let mut config = configuration();
     let variable = format!("VARIN_MISSING_TEST_{}", uuid::Uuid::new_v4().simple());
     config.credential_environment = Some(variable.clone());
+    config.provider_id = Some("original-channel".into());
     let start = model_session::bind(config).unwrap();
+    assert_eq!(start.binding.provider_id.as_deref(), Some("original-channel"));
     assert!(start.binding.tools.is_empty());
     assert_eq!(start.binding.configuration_generation, 42);
     let view = RequestView {
@@ -31,6 +33,7 @@ fn model_only_binding_has_no_tool_grant_and_credentials_remain_dispatch_only() {
         history: vec![],
     };
     let serialized = start.provider.serialize(&view, None).unwrap();
+    assert!(!serialized.to_string().contains("original-channel"));
     assert!(!serialized.to_string().contains(&variable));
     assert!(serialized.get("authorization").is_none());
     let error = start

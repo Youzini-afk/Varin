@@ -42,6 +42,29 @@ it('renders original branch measurements without zero-filling missing values or 
   expect(container.textContent).toContain('Estimated usage'); expect(container.textContent).toContain('2 pending');
 });
 
+it('shows nonzero cache and reasoning totals and omits zero or missing optional metrics in both views', async () => {
+  const value = snapshot();
+  value.rows[0] = { ...value.rows[0]!, cachedInputTokens: { known: '12000', missing: 1 },
+    cacheWriteTokens: { known: '0', missing: 0 }, reasoningTokens: { known: '500', missing: 0 } };
+  api.usage.mockResolvedValue(value);
+  await render();
+  const summary = container.querySelector('dl[aria-label="Token usage"]')!;
+  expect(summary.textContent).toContain('Cache Read');
+  expect(summary.textContent).toContain('12K+');
+  expect(summary.textContent).toContain('Reasoning');
+  expect(summary.textContent).not.toContain('Cache Write');
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-expanded]')!.click());
+  expect(container.textContent).not.toContain('Cache Write');
+  value.rows[0] = { ...value.rows[0]!, cachedInputTokens: { known: '0', missing: 0 },
+    cacheWriteTokens: { known: '800', missing: 0 }, reasoningTokens: { known: null, missing: 2 } };
+  api.usage.mockResolvedValue(structuredClone(value));
+  await act(async () => container.querySelector('button')!.click());
+  expect(summary.textContent).not.toContain('Cache Read');
+  expect(summary.textContent).not.toContain('Reasoning');
+  expect(summary.textContent).toContain('Cache Write');
+  expect(summary.textContent).toContain('800');
+});
+
 it('groups purposes by channel and model while keeping estimates and unreported requests distinct', async () => {
   const base = snapshot().rows[0]!;
   api.usage.mockResolvedValue({ ...snapshot(), rows: [

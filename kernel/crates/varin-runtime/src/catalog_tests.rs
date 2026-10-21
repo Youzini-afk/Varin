@@ -440,6 +440,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                provider_id: None,
                 tokenizer: None,
                 request_context: None,
                 child_dispatch: None,

@@ -2436,7 +2436,7 @@ export const dict: Record<I18nKey, string> = {
   'contextSidebar.tokens.output': '输出',
   'contextSidebar.tokens.reasoning': '推理',
   'contextSidebar.tokens.cacheRead': '缓存读取',
-  'contextSidebar.tokens.cacheWrite': '缓存写入',
+  'contextSidebar.tokens.cacheWrite': '缓存创建',
   'contextSidebar.tokens.cacheWrite1h': '1 小时缓存写入',
   'contextSidebar.tokens.cacheHit': '缓存命中',
   'contextSidebar.tokens.total': '总计',

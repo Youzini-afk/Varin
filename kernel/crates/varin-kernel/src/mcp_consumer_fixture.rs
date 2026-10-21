@@ -246,6 +246,7 @@ pub(super) fn prepare_child(
     assert!(launch.source.is_none());
     assert_eq!(launch.tools.len(), count);
     let binding = RequestBinding {
+        provider_id: None,
         tokenizer: None,
         request_context: None,
         child_dispatch: None,

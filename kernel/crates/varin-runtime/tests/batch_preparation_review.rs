@@ -286,6 +286,7 @@ fn input(run: &str) -> ExecutionInput {
         run_id: run.into(),
         owner_generation: 1,
         binding: RequestBinding {
+            provider_id: None,
             tokenizer: None,
             request_context: None,
             child_dispatch: None,

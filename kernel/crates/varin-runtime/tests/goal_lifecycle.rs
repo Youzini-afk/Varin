@@ -89,6 +89,7 @@ impl Fixture {
                         history_range: range.clone(),
                     },
                     binding: RequestBinding {
+                        provider_id: None,
                         tokenizer: None,
                         request_context: None,
                         child_dispatch: None,

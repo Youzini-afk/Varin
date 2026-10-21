@@ -371,6 +371,9 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    /// Original user-configured channel, retained independently of later model selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokenizer: Option<crate::token_count::TokenizerBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

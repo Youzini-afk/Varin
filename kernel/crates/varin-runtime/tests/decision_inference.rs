@@ -35,7 +35,7 @@ impl Fixture {
                     branch_id: "branch".into(),
                     expected_head: None,
                     input: json!("Judge original candidates"),
-                    configuration: json!({}),
+                    configuration: json!({"providerId":"channel:original"}),
                 },
                 Some(launch),
             )
@@ -578,6 +578,7 @@ fn thread_usage_counts_original_inference_once_and_keeps_missing_distinct_from_z
     let usage = thread_usage(&f.db, "thread", "branch");
     assert_eq!(usage.rows.len(), 2);
     let main = usage.rows.iter().find(|row| row.kind == "conversation").unwrap();
+    assert_eq!(main.provider_id.as_deref(), Some("channel:original"));
     assert_eq!(main.requests, 1); assert_eq!(main.input_tokens.known.as_deref(), Some("3"));
     let auxiliary = usage.rows.iter().find(|row| row.kind == "auxiliary").unwrap();
     assert_eq!(auxiliary.requests, 2); assert_eq!(auxiliary.pending_requests, 0);
@@ -586,6 +587,30 @@ fn thread_usage_counts_original_inference_once_and_keeps_missing_distinct_from_z
     assert_eq!(auxiliary.output_tokens.missing, 1);
     assert_eq!(auxiliary.cached_input_tokens.known, None);
     assert_eq!(usage.not_dispatched_requests, 1);
+    let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn thread_usage_keeps_request_channels_and_does_not_guess_a_changed_connection() {
+    let mut f = Fixture::new(100);
+    let original = f.db.model_step("request").unwrap().request;
+    for (id, provider) in [("first-channel", Some("channel:a")), ("second-channel", Some("channel:b")), ("unknown-channel", None)] {
+        let mut snapshot = original.clone();
+        snapshot["view"]["binding"]["connection_identity"] = json!(format!("connection:{id}"));
+        snapshot["view"]["binding"]["provider_id"] = json!(provider);
+        f.db.prepare_model_step(id, &f.run, f.db.epoch(), snapshot).unwrap();
+        f.db.dispatch_model_step(id, f.db.epoch()).unwrap();
+        f.db.settle_model_step(id, f.db.epoch(), ModelStepState::Completed, vec![], Some(serde_json::to_value(UsageReceipt {
+            measurement: UsageMeasurement::Actual, input_tokens: Some(100), output_tokens: Some(2), ..Default::default()
+        }).unwrap())).unwrap();
+    }
+    let usage = thread_usage(&f.db, "thread", "branch");
+    assert_eq!(usage.rows.len(), 4);
+    for provider in [Some("channel:original"), Some("channel:a"), Some("channel:b"), None] {
+        let row = usage.rows.iter().find(|row| row.provider_id.as_deref() == provider).unwrap();
+        assert_eq!(row.requests, 1);
+        assert_eq!(row.model_id, "fixture");
+    }
     let root = f.root.clone(); drop(f.db); std::fs::remove_dir_all(root).unwrap();
 }
 
