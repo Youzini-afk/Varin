@@ -137,6 +137,10 @@ fn simultaneous_wait_teardown_drains_once_without_holding_global_controls() {
         matches!(completed.try_recv(), Err(mpsc::TryRecvError::Empty)),
         "neither waiter can finish before the original worker"
     );
+    assert!(
+        !supervisor.start_available(&receipt.run_id).unwrap(),
+        "the original worker's live teardown must still fence a replacement"
+    );
     let (controlled, control) = mpsc::channel();
     let owner = supervisor.clone();
     let run = receipt.run_id.clone();

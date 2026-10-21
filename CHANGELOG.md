@@ -5,32 +5,6 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
-## 0.9.32 - 2026-10-22
-
-### 更新摘要
-
-本版修复 0.9.31 发布验收发现的运行时与关闭流程问题。桌面端同时包含下方 0.9.31 所列的检索、上下文、协作、恢复和安装界面改进。
-
-- 模型选择、规划模型和上下文整理的包装层保留原始重试策略，关闭重试及自定义次数、等待设置能传递到实际执行者。
-- 修复只读检索预设误带需要物理工作区的恢复工具，导致整个子任务在准备前被拒绝的问题。
-- 规划模型配置经过 Rust 序列化再读取时，正确识别可选字段的省略和空值，避免有效的冻结配置被误报为模型选择已改变。
-- 索引重新打开时保留尚未发布的推理回执；已发布向量对应的重复账本内容仍正常回收。
-- HTTP 关闭与进程信号接入完整 Host 资源清理，并合并并发关闭；Host 异常退出后的内核断连不再因错误管道关闭而跳过清理。
-- 同步检索预览、上下文预算、错误码和恢复存储的验收用例；Windows 路径越界回归使用无需额外符号链接权限的目录联接。
-
-### Release highlights
-
-This release fixes runtime and shutdown issues found during 0.9.31 release acceptance. Desktop builds also include the retrieval, context, collaboration, recovery and installer improvements listed under 0.9.31 below.
-
-- Preserve the selected retry policy through model-selection, planning and context-summary wrappers, including disabled retries and custom limits and delays.
-- Keep physical-workspace recovery tools out of the default read-only retrieval profile so child preparation can proceed.
-- Normalize omitted and null optional model fields consistently when restoring frozen planning configurations from Rust.
-- Preserve unpublished inference receipts when reopening indexes while reclaiming duplicate ledger content after vector publication.
-- Route HTTP and signal shutdown through complete Host resource cleanup and coalesce concurrent stops. Keep kernel disconnect cleanup independent of a closed diagnostic pipe after abrupt Host loss.
-- Update acceptance fixtures for retained retrieval evidence, token budgets, typed errors and workspace recovery statistics; use directory junctions for the Windows source-escape regression.
-
-[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.31...v0.9.32)
-
 ## 0.9.31 - 2026-10-22
 
 ### 更新摘要
@@ -41,6 +15,7 @@ This release fixes runtime and shutdown issues found during 0.9.31 release accep
 
 - 快速检索改为围绕证据进行决策：保留来源、候选与已选片段，按实际请求容量安排比较材料；避免每批重复发送整个候选目录，容量不足时给出具体计数和窗口信息。明确区分模型预览与完整检索记录。
 - 在「对话默认」加入自动重试设置，支持常见瞬时失败及用户自定义匹配。重试保留原请求身份和尝试记录，停止操作可立即结束等待。
+- 普通对话、规划和上下文整理保留配置的重试策略；正确识别冻结规划模型配置中的可选空值，避免误报模型选择已改变。
 - 上下文整理按预算选择需要保留的对话原文，并纳入 Agents 设置。Token 计数接入模型元数据和本地 tokenizer，词表缓存支持内存释放、磁盘压缩和旧版本回收。
 - 修复辅助模型标题生成的派发与中断恢复；完善决策接口错误和自定义请求路径的说明，移除改动导读模型及其入口。
 
@@ -50,6 +25,8 @@ This release fixes runtime and shutdown issues found during 0.9.31 release accep
 - 文件读取默认按 64 KiB 分页，并允许显式扩大；符号结果默认按层展开，支持子项展开、翻页和完整树模式。目录游标绑定查询，符号引用检查查询和结果版本。
 - 文件写入支持明确的创建和替换模式，保留版本冲突检查；修复 CRLF 多行编辑、缺失目录与空目录的状态区分等问题。
 - 模型可停止后台进程；工具参数错误保留字段与原因，子任务失败携带原始运行错误和事件引用。改进 MCP 错误分类、子任务准备过程和上下文准备失败诊断。
+- 修复只读检索预设误带恢复工具导致准备失败，以及子任务完成或恢复后父任务偶尔停在“可运行”状态的问题，保留旧执行线程退出前的防重入检查。
+- HTTP 关闭和进程信号接入完整 Host 资源清理并合并并发关闭；内核断连后的清理不再因诊断管道关闭而中断。
 
 #### 会话与桌面体验
 
@@ -63,6 +40,7 @@ This release fixes runtime and shutdown issues found during 0.9.31 release accep
 
 - 嵌入文本和批次按模型上下文容量拆分并预留余量，修复 Unicode 分段边界；内核丢失后重新获取 tokenizer 租约，缓存文件被手动删除后允许恢复索引清理。
 - 回收索引旧发布副本及已删除会话的正文和相关资源，减少持续累积的磁盘占用。
+- 索引重新打开时保留尚未发布的推理回执，已发布向量对应的重复账本内容仍正常回收。
 - 更新 Wasmtime 至 48.0.7、rustls-webpki 至 0.103.16、webpki-roots 至 1.0.10，修复新披露的 Wasm 执行和证书信任问题。参见 [Wasmtime](https://github.com/bytecodealliance/wasmtime/releases/tag/v48.0.7)、[webpki](https://rustsec.org/advisories/RUSTSEC-2026-0382.html) 和 [根证书公告](https://rustsec.org/advisories/RUSTSEC-2026-0381.html)。
 
 ---
@@ -75,6 +53,7 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 
 - Make fast retrieval evidence-driven. Keep sources, candidates and selected excerpts while arranging comparisons within the actual request capacity, avoiding repeated full candidate catalogs. Report token counts and window details on capacity failure, and distinguish the model preview from the complete retained result.
 - Add automatic retry settings under Conversation defaults, including custom error matches. Preserve request identity and attempt records; stopping interrupts retry waits immediately.
+- Preserve configured retries through conversation, planning and context-summary wrappers. Normalize optional null fields when restoring frozen planning configurations instead of rejecting an unchanged model selection.
 - Let context organization select original conversation material within its budget and configure it in Agents settings. Resolve local tokenizers from model metadata, release vocabulary memory, compress disk caches and reclaim old versions.
 - Repair auxiliary-model title dispatch and interrupted work. Clarify decision endpoint errors and custom paths, and remove the change-walkthrough model and interface.
 
@@ -84,6 +63,8 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 - Page file reads at 64 KiB by default with an explicit larger-read option. Return symbol outlines with expansion, pagination and full-tree mode. Bind directory cursors to their query and reject stale symbol references.
 - Add explicit create/replace file-write modes while preserving version conflict protection. Repair CRLF edits and distinguish missing directories from empty ones.
 - Expose process stopping to models. Preserve argument fields and validation reasons, and include original runtime failures and event references in child reports. Improve MCP error classification and preparation diagnostics.
+- Keep physical recovery tools out of the default read-only retrieval profile. Fix stale wait inspections masking launch readiness after child completion or recovery while retaining the original worker's drain fence against duplicate execution.
+- Route HTTP and signal shutdown through complete Host resource cleanup and coalesce concurrent stops. Keep kernel disconnect cleanup independent of a closed diagnostic pipe.
 
 #### Conversations and desktop
 
@@ -97,6 +78,7 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 
 - Split embedding inputs and batches using the configured model capacity with reserved space. Preserve Unicode boundaries, renew tokenizer leases after kernel loss, and recover cleanup when cache files disappear.
 - Reclaim retired index publications and deleted-conversation content and resources.
+- Preserve unpublished inference receipts when reopening indexes while reclaiming duplicate ledger content after vector publication.
 - Update Wasmtime to 48.0.7, rustls-webpki to 0.103.16 and webpki-roots to 1.0.10 for upstream Wasm execution and certificate-trust security fixes.
 
 [完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.30...v0.9.31)
