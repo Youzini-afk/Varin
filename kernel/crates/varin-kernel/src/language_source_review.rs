@@ -117,7 +117,7 @@ impl ModelProvider for Script {
                 "language_symbols",
                 json!({"path":"main.ts","query":"greet"}),
             ),
-            ("language_document_symbols", json!({"path":"main.ts"})),
+            ("language_document_symbols", json!({"path":"main.ts","format":"tree"})),
             (
                 "language_call_hierarchy",
                 json!({"path":declaration["resource"]["resourceId"],"line":declaration["targetSelectionRange"]["start"]["line"],"character":declaration["targetSelectionRange"]["start"]["character"],"direction":"incoming"}),

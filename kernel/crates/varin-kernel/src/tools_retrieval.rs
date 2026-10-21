@@ -66,7 +66,7 @@ pub(super) fn schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["question"],"properties":{
         "question":{"type":"string","minLength":1,"description":"Question about code in the selected source view."},
         "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."},
-        "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Maximum snippets expanded in the preview. All selected evidence is retained and can be read with read_thread."}
+        "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Maximum snippets expanded in the model preview, not a search or selection limit. The original receipt (including tools.invoke in scripts) retains all selected evidence; scripts should print only the needed excerpts. Direct model previews include read_thread continuation."}
     }})
 }
 

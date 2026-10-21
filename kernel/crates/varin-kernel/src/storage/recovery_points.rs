@@ -1198,6 +1198,7 @@ mod tests {
             let state = self.storage.capture_file_state(&resource).unwrap();
             let read_version = read_version(&self.root_id, path, &state).unwrap();
             let mutation = TextMutation::Write(FileWriteArgs {
+                mode: None,
                 path: path.into(),
                 content: text.into(),
                 read_version,

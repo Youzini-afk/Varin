@@ -5,6 +5,10 @@ use super::file_resources::FileState;
 use super::*;
 use serde::{Deserialize, Serialize};
 
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum FileWriteMode { Create, Replace }
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct FileWriteArgs {
@@ -12,6 +16,8 @@ pub(crate) struct FileWriteArgs {
     #[serde(default)]
     pub read_version: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<FileWriteMode>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -157,7 +163,8 @@ impl Storage {
             None,
         )?;
         self.check_cancelled()?;
-        if mutation.read_version().is_empty() && matches!(mutation, TextMutation::Edit(_)) {
+        if mutation.read_version().is_empty() && (matches!(mutation, TextMutation::Edit(_))
+            || matches!(mutation, TextMutation::Write(args) if args.mode == Some(FileWriteMode::Replace))) {
             return Err(KernelError::Operation("readVersion is required".into()));
         }
         if !execute {
@@ -229,6 +236,14 @@ impl Storage {
                 None => (self.capture_file_state(&resource)?, None),
             };
             let current_version = read_version(root_id, &resource.path, &expected)?;
+            if let TextMutation::Write(args) = mutation {
+                let missing = matches!(expected, FileState::Missing);
+                if (args.mode == Some(FileWriteMode::Create) && !missing)
+                    || (args.mode == Some(FileWriteMode::Replace) && missing) {
+                    return Ok(json!({"path":resource.path,"status":"conflict","readVersion":current_version,
+                        "reason":if missing {"replace_target_missing"} else {"create_target_exists"}}));
+                }
+            }
             let version_matches = if mutation.read_version().is_empty() {
                 matches!(expected, FileState::Missing)
             } else {

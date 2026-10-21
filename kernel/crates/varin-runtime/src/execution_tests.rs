@@ -2698,6 +2698,8 @@ fn terminal_failure_fact_survives_reopen_without_exposing_callback_content() {
     }
     for (early, raw_code, expected_code, event_kind) in [
         (false, "context_candidate_capacity", "context_candidate_capacity", "run.failed"),
+        (false, "invalid_provider_event", "invalid_provider_event", "run.failed"),
+        (false, "unknown_tool_schema", "unknown_tool_schema", "run.failed"),
         (false, "external_SECRET", "execution_failed", "run.failed"),
         (true, "external_SECRET", "context_preparation_failed", "context.preparation_failed"),
     ] {

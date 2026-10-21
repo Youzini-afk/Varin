@@ -519,6 +519,11 @@ impl ResourceOperation {
             Self::FileRead(args) => {
                 normalize_separators(&mut args.path);
                 normalized_path(&args.path, false)?;
+                // Agent-facing default page only. Internal source/mutation reads retain
+                // their explicit full-read semantics; callers can request a larger range.
+                if args.length.is_none() && args.start_line.is_none() && args.end_line.is_none() {
+                    args.length = Some(65536);
+                }
                 if args.start_line.is_some() || args.end_line.is_some() {
                     if explicit_offset || args.length.is_some()
                         || args.start_line.is_none_or(|line| line == 0)
@@ -533,7 +538,8 @@ impl ResourceOperation {
                     TextMutation::Edit(args) => &mut args.path,
                 });
                 normalized_path(mutation.path(), false)?;
-                if mutation.read_version().is_empty() && matches!(mutation, TextMutation::Edit(_)) {
+                if mutation.read_version().is_empty() && (matches!(mutation, TextMutation::Edit(_))
+                    || matches!(mutation, TextMutation::Write(args) if args.mode == Some(crate::storage::file_mutations::FileWriteMode::Replace))) {
                     return Err(ExecutionError::new(
                         "invalid_tool_arguments",
                         "readVersion is required",
@@ -1813,7 +1819,9 @@ impl KernelToolExecutor {
             .ok_or_else(|| {
                 ExecutionError::new("tool_not_bound", "tool is not selected in this Run")
             })?;
-        ResourceOperation::parse(kind, &call.arguments)
+        let operation = ResourceOperation::parse(kind, &call.arguments)?;
+        if let ResourceOperation::FileQuery(args) = &operation { args.validate_source(&self.binding)?; }
+        Ok(operation)
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
         let job = matches!(operation, ResourceOperation::ProcessSpawn(_));
@@ -2600,7 +2608,8 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"point":{"type":"string","description":"Recovery point reference, or current:before."},"undo":{"type":"string","description":"Operation ID of the restore to undo."},"paths":{"type":"array","items":{"type":"string"}},"overwritePaths":{"type":"array","items":{"type":"string"},"description":"Restore these files even if their current content differs from the recorded changes."}}), vec![],
         ),
         ToolKind::FileWrite => (
-            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Version for replacing an existing file. Omit to create a new file."},"content":{"type":"string"}}),
+            json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1,"description":"Observed file-state version, including a missing state. Writes require that state to be unchanged. Omit for creation only; existing files require their readVersion."},"content":{"type":"string"},
+                "mode":{"type":"string","enum":["create","replace"],"description":"create requires an absent target; replace requires an existing file and readVersion. Omit to write against the observed state (or create when no version is supplied)."}}),
             vec!["path", "content"],
         ),
         ToolKind::FileEdit => (
@@ -2608,7 +2617,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["path", "readVersion", "edits"],
         ),
         ToolKind::FileRead => (
-            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"length":{"type":"integer","minimum":0},
+            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0,"description":"UTF-8 byte offset; continue with content.nextOffset while content.eof is false. Verify readVersion is unchanged across pages."},"length":{"type":"integer","minimum":0,"default":65536,"description":"Byte page size (default 64 KiB). Request a larger range explicitly when needed; readVersion identifies the observed file state."},
                 "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use with optional inclusive endLine instead of offset/length."},
                 "endLine":{"type":"integer","minimum":1,"description":"Last line, inclusive. Requires startLine."}}),
             vec!["path"],

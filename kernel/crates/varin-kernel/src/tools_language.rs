@@ -12,20 +12,26 @@ enum CallDirection {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct LanguageQueryArgs {
     pub path: String,
     line: Option<u32>,
     character: Option<u32>,
     query: Option<String>,
     direction: Option<CallDirection>,
+    cursor: Option<String>,
+    parent: Option<String>,
+    format: Option<String>,
+    max_results: Option<usize>,
+    max_bytes: Option<usize>,
     #[serde(skip)]
     method: String,
     #[serde(skip)]
     pub(super) derived_view: Option<Value>,
 }
 impl LanguageQueryArgs {
-    pub(super) fn source_descriptor(path:String,derived_view:Option<Value>)->Self{Self{path,derived_view,line:None,character:None,query:None,direction:None,method:String::new()}}
+    pub(super) fn source_descriptor(path:String,derived_view:Option<Value>)->Self{Self{path,derived_view,line:None,character:None,query:None,direction:None,
+        cursor:None,parent:None,format:None,max_results:None,max_bytes:None,method:String::new()}}
     pub fn parse(kind: ToolKind, value: &Value) -> Result<Self, ExecutionError> {
         let mut args: Self = serde_json::from_value(value.clone())
             .map_err(|error| ExecutionError::new("invalid_tool_arguments", error.to_string()))?;
@@ -56,6 +62,14 @@ impl LanguageQueryArgs {
             return Err(ExecutionError::new("invalid_tool_arguments",
                 "Use the selected language tool schema: navigation requires zero-based UTF-16 line/character, symbols requires query, and call hierarchy requires direction"));
         }
+        let symbols = matches!(kind, ToolKind::LanguageSymbols | ToolKind::LanguageDocumentSymbols);
+        if (!symbols && (args.cursor.is_some() || args.parent.is_some() || args.format.is_some() || args.max_results.is_some() || args.max_bytes.is_some()))
+            || args.format.as_deref().is_some_and(|format| !matches!(format, "outline" | "tree"))
+            || args.max_results == Some(0)
+            || args.max_bytes.is_some_and(|n| n == 0 || n > crate::protocol::MAX_FRAME_BYTES / 2) {
+            return Err(ExecutionError::new("invalid_tool_arguments", "Symbol paging requires positive maxResults/maxBytes and format outline or tree; these parameters apply only to symbol tools."));
+        }
+        for reference in [&args.cursor, &args.parent].into_iter().flatten() { SymbolPageReference::decode(reference)?; }
         Ok(args)
     }
 }
@@ -82,6 +96,13 @@ pub(super) fn schema(kind: ToolKind) -> Value {
     if kind == ToolKind::LanguageCallHierarchy {
         properties["direction"] = json!({"type":"string","enum":["incoming","outgoing"]});
         required.push("direction");
+    }
+    if matches!(kind, ToolKind::LanguageSymbols | ToolKind::LanguageDocumentSymbols) {
+        properties["format"] = json!({"type":"string","enum":["outline","tree"],"default":"outline","description":"outline returns immediate symbols with childCount and childrenReference; tree explicitly includes nested children."});
+        properties["parent"] = json!({"type":"string","description":"A returned childrenReference to expand that symbol's children in the same source/query."});
+        properties["cursor"] = json!({"type":"string","description":"Pass nextCursor unchanged to continue the same source/query. Page size and format may change. Changes to the symbol result invalidate continuation."});
+        properties["maxResults"] = json!({"type":"integer","minimum":1,"default":100});
+        properties["maxBytes"] = json!({"type":"integer","minimum":1,"maximum":crate::protocol::MAX_FRAME_BYTES / 2,"default":65536});
     }
     json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
 }
@@ -513,7 +534,128 @@ impl KernelToolExecutor {
         {
             result["status"] = json!("partial");
         }
+        if matches!(args.method.as_str(), "document_symbols" | "workspace_symbols") {
+            page_symbols(&mut result, args)?;
+        }
         Ok(result)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SymbolPageReference {
+    version: u8,
+    query: String,
+    revision: String,
+    parent: Vec<usize>,
+    offset: usize,
+}
+impl SymbolPageReference {
+    fn decode(value: &str) -> Result<Self, ExecutionError> {
+        let invalid = || ExecutionError::new("invalid_tool_arguments", "Invalid symbol continuation. Use the returned nextCursor or childrenReference unchanged.");
+        let reference: Self = URL_SAFE_NO_PAD.decode(value).ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(invalid)?;
+        if reference.version != 1 || [&reference.query, &reference.revision].iter()
+            .any(|hash| hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit())) { return Err(invalid()); }
+        Ok(reference)
+    }
+    fn encode(&self) -> String { URL_SAFE_NO_PAD.encode(serde_json::to_vec(self).expect("symbol reference")) }
+}
+fn page_symbols(result: &mut Value, args: &LanguageQueryArgs) -> Result<(), ExecutionError> {
+    let format = args.format.as_deref().unwrap_or("outline");
+    let digest = |value: &Value| hex::encode(Sha256::digest(value.to_string().as_bytes()));
+    let query = digest(&json!([args.method,args.path,args.query,result["source"]["selection"],result["source"]["physicalRoot"]]));
+    let revision = digest(&result["items"]);
+    let decode = |value: &str| -> Result<SymbolPageReference, ExecutionError> {
+        let reference = SymbolPageReference::decode(value)?;
+        if reference.query != query { return Err(ExecutionError::new("invalid_tool_arguments", "Symbol continuation belongs to another query or source. Restart with the original arguments.")); }
+        if reference.revision != revision { return Err(ExecutionError::new("language_cursor_stale", "Symbols changed since this page was read. Omit cursor/parent to read the current outline.")); }
+        Ok(reference)
+    };
+    let parent = args.parent.as_deref().map(decode).transpose()?;
+    let cursor = args.cursor.as_deref().map(decode).transpose()?;
+    if let (Some(parent), Some(cursor)) = (&parent, &cursor) {
+        if parent.parent != cursor.parent { return Err(ExecutionError::new("invalid_tool_arguments", "Symbol cursor belongs to another parent.")); }
+    }
+    let indexes = cursor.as_ref().or(parent.as_ref()).map(|value| value.parent.clone()).unwrap_or_default();
+    let offset = cursor.as_ref().map(|value| value.offset).unwrap_or(0);
+    let mut items = result["items"].as_array().expect("validated symbols");
+    for index in &indexes {
+        items = items.get(*index).and_then(|item| item["children"].as_array())
+            .ok_or_else(|| ExecutionError::new("invalid_tool_arguments", "Symbol parent does not exist in this result."))?;
+    }
+    if offset > items.len() { return Err(ExecutionError::new("invalid_tool_arguments", "Symbol cursor exceeds this result.")); }
+    let reference = |parent: Vec<usize>, offset| SymbolPageReference { version: 1,
+        query: query.clone(), revision: revision.clone(), parent, offset }.encode();
+    let mut shown = Vec::new();
+    let mut bytes: usize = 2;
+    let max_bytes = args.max_bytes.unwrap_or(65536);
+    for (index, item) in items.iter().enumerate().skip(offset).take(args.max_results.unwrap_or(100)) {
+        let mut item = item.clone();
+        if format == "outline" {
+            let children = item.as_object_mut().expect("symbol object").remove("children");
+            let count = children.as_ref().and_then(Value::as_array).map_or(0, Vec::len);
+            item["childCount"] = json!(count);
+            if count > 0 {
+                let mut path = indexes.clone(); path.push(index);
+                item["childrenReference"] = json!(reference(path, 0));
+            }
+        }
+        let size = item.to_string().len() + usize::from(!shown.is_empty());
+        // An explicit tree or a large symbol remains a complete record; never split it.
+        if !shown.is_empty() && bytes.saturating_add(size) > max_bytes { break; }
+        bytes = bytes.saturating_add(size);
+        shown.push(item);
+        if bytes >= max_bytes { break; }
+    }
+    let end = offset + shown.len();
+    let total = items.len();
+    result["items"] = json!(shown);
+    result["format"] = json!(format);
+    result["totalItems"] = json!(total);
+    result["nextCursor"] = if end < total { json!(reference(indexes, end)) } else { Value::Null };
+    result["truncated"] = json!(end < total);
+    if end < total { result["status"] = json!("partial"); }
+    if total == 0 && result["status"] == "ready" && result.get("message").is_none() {
+        result["message"] = json!("The language provider returned no matching symbols for this query.");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod paging_tests {
+    use super::*;
+    #[test]
+    fn symbol_outline_pages_expand_and_reject_changed_results() {
+        let original = json!({"status":"ready","items":[
+            {"name":"Shelf","children":[{"name":"invoke"},{"name":"close"}]},
+            {"name":"main"}
+        ],"source":{"selection":{"rootId":"root"}}});
+        let query = |value: Value| LanguageQueryArgs::parse(ToolKind::LanguageDocumentSymbols, &value).unwrap();
+        let mut first = original.clone();
+        page_symbols(&mut first, &query(json!({"path":"main.ts","maxResults":1}))).unwrap();
+        assert_eq!(first["items"][0]["childCount"], 2);
+        assert!(first["items"][0].get("children").is_none());
+        assert_eq!(first["status"], "partial");
+        let mut second = original.clone();
+        page_symbols(&mut second, &query(json!({"path":"main.ts","cursor":first["nextCursor"]}))).unwrap();
+        assert_eq!(second["items"][0]["name"], "main");
+        assert!(second["nextCursor"].is_null());
+        let args = query(json!({"path":"main.ts","parent":first["items"][0]["childrenReference"],"maxBytes":1}));
+        let mut children = original.clone();
+        page_symbols(&mut children, &args).unwrap();
+        assert_eq!(children["items"][0]["name"], "invoke");
+        assert!(children["nextCursor"].is_string());
+        let mut rest = original.clone();
+        page_symbols(&mut rest, &query(json!({"path":"main.ts","cursor":children["nextCursor"]}))).unwrap();
+        assert_eq!(rest["items"][0]["name"], "close");
+        let mut changed = original.clone();
+        changed["items"][0]["children"][0]["name"] = json!("changed");
+        assert_eq!(page_symbols(&mut changed, &args).unwrap_err().code, "language_cursor_stale");
+        assert_eq!(page_symbols(&mut original.clone(), &query(json!({"path":"other.ts","cursor":first["nextCursor"]}))).unwrap_err().code, "invalid_tool_arguments");
+        let mut tree = original.clone();
+        page_symbols(&mut tree, &query(json!({"path":"main.ts","format":"tree"}))).unwrap();
+        assert_eq!(tree["items"], original["items"]);
     }
 }
 

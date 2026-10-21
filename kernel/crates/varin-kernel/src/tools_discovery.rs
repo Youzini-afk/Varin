@@ -2,6 +2,22 @@
 //! resource actor handles only admission and page reads, never waits for a scan.
 use super::*;
 use crate::compute::ComputeWatch;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use sha2::{Digest, Sha256};
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ListCursor { version: u8, query: String, after: String }
+fn decode_cursor(value: &str) -> Result<ListCursor, ExecutionError> {
+    let invalid = || ExecutionError::new("invalid_tool_arguments", "Invalid file_list cursor. Pass nextCursor unchanged from a previous page, or omit cursor to restart.");
+    let cursor: ListCursor = URL_SAFE_NO_PAD.decode(value).ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(invalid)?;
+    if cursor.version != 1 || cursor.query.len() != 64 || !cursor.query.bytes().all(|c| c.is_ascii_hexdigit()) {
+        return Err(invalid());
+    }
+    normalized_path(&cursor.after, true).map_err(|_| invalid())?;
+    Ok(cursor)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -29,8 +45,8 @@ impl FileQueryArgs {
             normalized_path(path, true)?;
         }
         if let Some(cursor) = &self.cursor {
-            normalized_path(cursor, true)?;
             if self.search { return Err(ExecutionError::new("invalid_tool_arguments", "cursor is available for file_list")); }
+            decode_cursor(cursor)?;
         }
         if self.search && self.query.as_deref().is_none_or(str::is_empty) {
             return Err(ExecutionError::new("invalid_tool_arguments", "file_search requires a nonempty query"));
@@ -44,8 +60,13 @@ impl FileQueryArgs {
         Ok(())
     }
     pub fn params(&self, binding: &ToolBinding, context: &ToolExecutionContext) -> Value {
+        let mut params = self.query_params(binding);
+        params["jobId"] = json!(context.operation_id);
+        params
+    }
+    fn query_params(&self, binding: &ToolBinding) -> Value {
         let recursive = self.recursive.unwrap_or(self.search);
-        let mut params = json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id,
+        let mut params = json!({"workspaceId":binding.workspace_id,
             "lane":"foreground","operation":if self.search {"search"} else {"list"},
             "paths":self.paths.clone().unwrap_or_else(|| vec![String::new()]),
             "maxResults":self.max_results.unwrap_or(100).saturating_add(if self.search {0} else {1}).min(9_007_199_254_740_991),"includeHidden":self.include_hidden.unwrap_or(true),
@@ -53,7 +74,7 @@ impl FileQueryArgs {
             "respectGitignore":self.respect_gitignore.unwrap_or(recursive),
             "includeRevisions":self.include_revisions.unwrap_or(false),
             "immediate":!recursive});
-        if let Some(cursor) = &self.cursor { params["startAfterPath"] = json!(cursor); }
+        if let Some(cursor) = &self.cursor { params["startAfterPath"] = json!(decode_cursor(cursor).expect("validated cursor").after); }
         if binding.source_mode != SourceMode::FixedBranch {
             params["rootId"] = json!(binding.root_id);
         } else {
@@ -73,6 +94,25 @@ impl FileQueryArgs {
         // Literal search is the useful default; callers may explicitly request regex.
         params["fixedStrings"] = json!(self.fixed_strings.unwrap_or(true));
         params
+    }
+    fn query_identity(&self, binding: &ToolBinding) -> String {
+        let mut query = self.query_params(binding);
+        let fields = query.as_object_mut().expect("query object");
+        for field in ["maxResults", "startAfterPath"] { fields.remove(field); }
+        query["resourceOwner"] = json!(binding.resource_owner);
+        hex::encode(Sha256::digest(query.to_string().as_bytes()))
+    }
+    pub(super) fn validate_source(&self, binding: &ToolBinding) -> Result<(), ExecutionError> {
+        if let Some(cursor) = &self.cursor {
+            if decode_cursor(cursor)?.query != self.query_identity(binding) {
+                return Err(ExecutionError::new("invalid_tool_arguments", "file_list cursor belongs to different filters or source. Keep the original query or omit cursor to restart."));
+            }
+        }
+        Ok(())
+    }
+    fn next_cursor(&self, binding: &ToolBinding, path: &str) -> String {
+        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&ListCursor { version: 1,
+            query: self.query_identity(binding), after: path.into() }).expect("cursor serialization"))
     }
 }
 
@@ -196,7 +236,8 @@ impl KernelResourceClient {
                         dispatched: true,
                     });
                 }
-                let next = (!args.search && truncated).then(|| records.last().and_then(|record|record["path"].as_str())).flatten();
+                let next = (!args.search && truncated).then(|| records.last().and_then(|record|record["path"].as_str())).flatten()
+                    .map(|path| args.next_cursor(binding, path));
                 let output = json!({"source":if binding.source_mode == SourceMode::FixedBranch {
                         json!(binding.file_source)
                     } else { binding.physical_source() },
@@ -238,7 +279,7 @@ pub(super) fn schema(search: bool) -> Value {
             "excludeDirectories":{"type":"array","items":{"type":"string"},"description":"Directory names to skip within selected paths. Recursive queries default to .git, node_modules and .worktrees; non-recursive queries default to none."},
             "respectGitignore":{"type":"boolean","description":"Apply ignore rules within selected paths; defaults to recursive."},
             "includeRevisions":{"type":"boolean","default":false},
-            "cursor":{"type":"string","description":"file_list continuation from nextCursor; keep the original paths and filters."},
+            "cursor":{"type":"string","description":"Opaque file_list continuation from nextCursor; pass it unchanged with the original source, paths and filters. Page size may change. Live files may change between pages."},
             "maxResults":{"type":"integer","minimum":1,"maximum":9_007_199_254_740_991i64,"default":100},
             "maxBytes":{"type":"integer","minimum":1,"maximum":crate::protocol::MAX_FRAME_BYTES / 2,"default":65536}},
         "required":if search {vec!["query"]} else {vec![]}});

@@ -287,7 +287,17 @@ it('installed SDK declaration reaches shared bridge, compiled schemas, validated
     };
     await expect(
       retained.lease.authorize(bad, new AbortController().signal),
-    ).rejects.toThrow('input_schema');
+    ).rejects.toMatchObject({ code: 'extension_tool_input_schema_invalid', message: expect.stringContaining('/offset') });
+    bridge.consume({
+      v: 1, kind: 'host-tool-request', id: 'bad:authorize', kernelEpoch: 'epoch', phase: 'authorize',
+      binding: { ownerId: live.ownerId, reference: retained.binding.providerKey, generation: retained.generation, holderId: 'holder' },
+      call: { ...bad, arguments: { snapshotId: snapshot.snapshotId, offset: 0, maxBytes: 4, unexpected: 'PRIVATE_ARGUMENT_VALUE' } },
+    });
+    await expect.poll(() => frames.find(f => f.kind === 'host-tool-response' && f.id === 'bad:authorize'))
+      .toMatchObject({ ok: false, error: { admission: true, code: 'extension_tool_input_schema_invalid',
+        message: expect.stringContaining('unexpected') } });
+    expect(JSON.stringify(frames.find(f => f.kind === 'host-tool-response' && f.id === 'bad:authorize')))
+      .not.toContain('PRIVATE_ARGUMENT_VALUE');
     invocation = {
       ...bad,
       operationId: 'request:tool:tampered',

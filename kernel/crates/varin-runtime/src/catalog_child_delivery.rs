@@ -120,9 +120,14 @@ impl ChildReportPreparation {
                     outcome,
                     sender_thread_id: child.child_thread_id.clone(),
                     run_id: Some(run.id.clone()),
-                    detail: history_ids
-                        .is_empty()
-                        .then(|| "Child finished without a successful report.".into()),
+                    detail: execution_persistence::read_run_failure(&snapshot, &run)?
+                        .map(|failure| format!("[{}] {} (failure event {})", failure.code, failure.message, failure.cursor))
+                        .or_else(|| match run.state {
+                            RunState::Failed => Some("Child execution failed; no detailed failure event was recorded for this Run.".into()),
+                            RunState::Cancelled => Some("Child execution was cancelled. Any assistant output below is a partial result.".into()),
+                            _ if history_ids.is_empty() => Some("Child execution completed without an assistant report.".into()),
+                            _ => None,
+                        }),
                     history_ids,
                 };
                 Ok(PreparedChildReport {

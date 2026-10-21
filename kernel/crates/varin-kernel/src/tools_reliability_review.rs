@@ -123,6 +123,39 @@ fn file_write_creates_without_a_read_and_keeps_existing_content_on_an_unversione
         ToolCompletion::Result { outcome:Outcome::Succeeded,.. }));
     assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"overwritten"})),ToolCompletion::NotDispatched {..}));
     assert_eq!(fs::read_to_string(f.root.join("work/new.txt")).unwrap(),"中文🙂");
+    let missing = f.read(json!({"path":"missing.txt"}));
+    assert!(matches!(f.call("file_write",json!({"path":"missing.txt","content":"unexpected","mode":"replace","readVersion":missing["readVersion"]})),
+        ToolCompletion::NotDispatched { .. }));
+    assert!(!f.root.join("work/missing.txt").exists());
+    fs::write(f.root.join("work/missing.txt"), "created concurrently").unwrap();
+    assert!(matches!(f.call("file_write",json!({"path":"missing.txt","content":"unexpected","readVersion":missing["readVersion"]})),
+        ToolCompletion::NotDispatched { .. }));
+    let present = f.read(json!({"path":"missing.txt"}));
+    assert!(matches!(f.call("file_write",json!({"path":"missing.txt","content":"unexpected","mode":"create","readVersion":present["readVersion"]})),
+        ToolCompletion::NotDispatched { .. }));
+    assert_eq!(fs::read_to_string(f.root.join("work/missing.txt")).unwrap(), "created concurrently");
+}
+
+#[test]
+fn agent_file_read_pages_by_default_without_limiting_explicit_or_internal_reads() {
+    let mut f = Fixture::new();
+    let body = "中文🙂\n".repeat(12000);
+    fs::write(f.root.join("work/body.txt"), &body).unwrap();
+    let first = f.read(json!({"path":"body.txt"}));
+    let mut text = first["content"]["text"].as_str().unwrap().to_string();
+    // The byte target expands by at most three bytes to finish a UTF-8 character.
+    assert!(text.len() <= 65536 + 3 && text.len() < body.len());
+    let mut page = first.clone();
+    while page["content"]["eof"] == false {
+        let offset = page["content"]["nextOffset"].as_u64().unwrap();
+        page = f.read(json!({"path":"body.txt","offset":offset}));
+        assert_eq!(page["readVersion"], first["readVersion"]);
+        assert!(page["content"]["eof"] == true || page["content"]["nextOffset"].as_u64().unwrap() > offset);
+        text.push_str(page["content"]["text"].as_str().unwrap());
+    }
+    assert_eq!(page["content"]["eof"], true);
+    assert_eq!(text, body);
+    assert_eq!(f.read(json!({"path":"body.txt","length":body.len()}))["content"]["text"], body);
 }
 
 #[test]
@@ -147,7 +180,11 @@ fn healthcheck_file_contracts_keep_line_endings_and_distinguish_invalid_targets(
     let small = f.call("file_list", json!({"paths":["tree"],"maxBytes":1}));
     let ToolCompletion::Result { content, .. } = small else { panic!("{small:?}") };
     assert_eq!(content.data["records"].as_array().unwrap().len(), 1);
-    assert_eq!(content.data["nextCursor"], "tree");
+    assert!(content.data["nextCursor"].is_string());
+    let bad = f.try_call("file_list", json!({"cursor":"not-a-real-cursor"})).unwrap_err();
+    assert_eq!(bad.code, "invalid_tool_arguments");
+    let changed = f.try_call("file_list", json!({"paths":[""],"cursor":content.data["nextCursor"]})).unwrap_err();
+    assert!(changed.message.contains("different filters or source"));
     let invalid = f.try_call("file_list", json!({"maxResults":0})).unwrap_err();
     assert!(invalid.to_string().contains("maxResults"));
     assert!(!invalid.to_string().contains("query"));

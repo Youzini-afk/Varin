@@ -83,6 +83,11 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
       && (!input.binding.perQuestionContextWindowTokens || counted.perQuestionTokens === undefined
         || counted.perQuestionTokens + 1 <= input.binding.perQuestionContextWindowTokens);
   };
+  const capacityError = async (batch: Batch, subject: string) => {
+    const counted = await measure(batch);
+    const limits = counted ? ` Input ${counted.tokens + batch.questions.length}/${input.binding.contextWindowTokens ?? 'unspecified'}; per-question ${counted.perQuestionTokens === undefined ? 'unmeasured' : counted.perQuestionTokens + 1}/${input.binding.perQuestionContextWindowTokens ?? 'unspecified'} (${counted.tokenizer}).` : '';
+    return new Error(`${subject} exceed the selected model capacity.${limits}`);
+  };
   const call = async (batch: Batch) => {
     const id = key(batch), previous = judgments.get(id);
     if (previous) { details.reusedJudgments = (details.reusedJudgments ?? 0) + 1; return previous; }
@@ -123,9 +128,18 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
       lastFacts = facts; details.rounds++;
       input.run.setJudgmentPending(true);
       const retained = input.run.selectedViews();
-      const context = { selected: retained.map(describe), hypotheses: snapshot.hypotheses };
+      const evidenceContext = (views: ExploreQueryView[], selected: ExploreQueryView[]) => {
+        const shown = new Set(views.map(view => view.viewId));
+        return {
+          hypotheses: snapshot.hypotheses,
+          selected: selected.filter(view => shown.has(view.viewId)).map(view => view.viewId),
+          coverage: { available: all.length, selected: selected.length, presented: shown.size,
+            selectedOutsideRequest: selected.filter(view => !shown.has(view.viewId)).length },
+          scope: 'This request contains a capacity-sized evidence comparison. Other evidence remains in the query; absence here is not rejection. Judge contributions and actions against the original goal and supplied relationships.',
+        };
+      };
       // New relationships can make earlier deferred or rejected material useful.
-      const selectionBatch = (views: ExploreQueryView[]): Batch => ({ goal: input.run.question, context, materials: views.map(material),
+      const selectionBatch = (views: ExploreQueryView[]): Batch => ({ goal: input.run.question, context: evidenceContext(views, retained), materials: views.map(material),
         questions: views.map(contribution) });
       const partition = await partitionExploreViews(all, retained, views => fits(selectionBatch(views)));
       details.unevaluatedMaterials = partition.oversized.length;
@@ -170,15 +184,15 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
         ],
       };
       const chosenViews = input.run.selectedViews();
-      const nextContext = { selected: chosenViews.map(describe),
-        candidates: all.map(describe), hypotheses: snapshot.hypotheses, sources: input.run.sourceStates() };
+      const chosenIds = new Set(chosenViews.map(view => view.viewId));
+      const nextSources = input.run.sourceStates();
       const nextBatch = (views: ExploreQueryView[], choices = next.options): Batch => ({
-        goal: input.run.question, context: nextContext, materials: views.map(material), questions: [{ ...next, options: choices }],
+        goal: input.run.question,
+        context: { ...evidenceContext(views, chosenViews), evidence: views.map(describe), sources: nextSources },
+        materials: views.map(material), questions: [{ ...next, options: choices }],
       });
       const requiredContext = (choices: typeof next.options) => {
         const required = new Map<string, ExploreQueryView>();
-        const selected = chosenViews[0] ?? all[0];
-        if (selected) required.set(selected.viewId, selected);
         for (const option of choices) for (const dependency of actions.find(action => action.actionId === option.id)?.dependencies ?? []) {
           const view = input.run.view(dependency.viewId);
           if (view) required.set(view.viewId, view);
@@ -187,10 +201,18 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
       };
       const contextFor = async (choices: typeof next.options) => {
         const context = requiredContext(choices);
-        if (!await fits(nextBatch(context, choices))) throw new Error('A next-step comparison and its source evidence exceed the selected model capacity');
-        for (const view of [...chosenViews, ...all.filter(view => !chosenViews.some(item => item.viewId === view.viewId))]) {
-          if (!context.some(item => item.viewId === view.viewId) && await fits(nextBatch([...context, view], choices))) context.push(view);
-        }
+        if (!await fits(nextBatch(context, choices))) throw await capacityError(nextBatch(context, choices), 'A next-step comparison and its source evidence');
+        const requiredIds = new Set(context.map(view => view.viewId));
+        const affinity = (view: ExploreQueryView) => context.some(other => other.path === view.path
+          || other.relatedPaths?.includes(view.path) || view.relatedPaths?.includes(other.path)) ? 1 : 0;
+        const background = [...chosenViews, ...all.filter(view => !chosenIds.has(view.viewId))]
+          .filter(view => !requiredIds.has(view.viewId))
+          .sort((a, b) => affinity(b) - affinity(a));
+        // Common case: count the complete context once. If it needs partitioning,
+        // keep filling by relevance; one oversized view must not hide later usable
+        // background. Whole source views and action dependencies remain intact.
+        if (await fits(nextBatch([...context, ...background], choices))) return [...context, ...background];
+        for (const view of background) if (await fits(nextBatch([...context, view], choices))) context.push(view);
         return context;
       };
       // Capacity partitions preserve every option. Compare each group's winner
@@ -207,7 +229,8 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
             else {
               if (group.length) groups.push(group);
               group = [];
-              if (!await fits(nextBatch(requiredContext([option, deliver]), [option, deliver]))) throw new Error('A next-step option and its source evidence exceed the selected model capacity');
+              const single = nextBatch(requiredContext([option, deliver]), [option, deliver]);
+              if (!await fits(single)) throw await capacityError(single, 'A next-step option and its source evidence');
               group.push(option);
             }
           }
@@ -256,7 +279,8 @@ export async function runExploreFastDecisionLoop(input: ExploreFastDecisionLoopI
     }
   } catch (error) {
     details.status = input.signal.aborted ? 'cancelled' : 'failed';
-    details.note ??= error instanceof Error ? error.message : String(error);
+    const failure = error instanceof Error ? error.message : String(error);
+    details.note = details.note && details.note !== failure ? `${details.note} ${failure}` : failure;
     input.run.requestDelivery('failed');
   } finally { input.run.setJudgmentPending(false); }
   details.executed = input.run.completedActionIds().filter(id => accepted.has(id));

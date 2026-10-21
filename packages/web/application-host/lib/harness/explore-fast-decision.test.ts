@@ -243,6 +243,39 @@ describe("runExploreFastDecisionLoop", () => {
     run.cancel();
   });
 
+  it("compares next steps within capacity even when the query's complete evidence directory is larger", async () => {
+    const paths = Array.from({ length: 48 }, (_, i) => `handlers/module-${i}.ts`);
+    const run = createExploreQueryRun({ question: 'find the handlers' }, {
+      rgSearch: async () => paths.map(path => ({ path, line: 1, text: 'export function handler() { return 1; }' })),
+      readFile: async () => ready('export function handler() { return 1; }'),
+    });
+    run.start();
+    while (run.collect().pending) await run.waitForProgress(run.collect().sequence);
+    expect(run.collect().views).toHaveLength(paths.length);
+    let comparedNext = false;
+    const capacity = 6000;
+    const details = await runExploreFastDecisionLoop({
+      run, binding: { ...binding, contextWindowTokens: capacity },
+      signal: new AbortController().signal, deadlineAt: Infinity, closing: neverSettle,
+      countInput: async batch => ({ tokens: JSON.stringify(batch).length, tokenizer: 'fixture serialized units' }),
+      call: async ({ signal: _signal, ...batch }) => {
+        expect(JSON.stringify(batch).length + batch.questions.length).toBeLessThanOrEqual(capacity);
+        if (batch.questions[0]?.id === 'next') {
+          comparedNext = true;
+          expect(batch.context, JSON.stringify(batch.context)).toMatchObject({ coverage: { selected: paths.length, selectedOutsideRequest: expect.any(Number) } });
+          expect(batch.materials.length).toBeGreaterThan(0);
+          expect(batch.materials.length).toBeLessThan(paths.length);
+        }
+        return { answers: batch.questions.map(question => ({ id: question.id, kind: 'choose' as const,
+          choice: question.id.startsWith('m:') ? 'keep' : 'deliver' })), missing: [] };
+      },
+    });
+    expect(details.status, details.note).toBe('used');
+    expect(comparedNext).toBe(true);
+    expect(run.selectedViews()).toHaveLength(paths.length);
+    run.cancel();
+  });
+
   it("rejects a stale or fabricated action id the model did not see issued", async () => {
     const run = newRun();
     run.start();

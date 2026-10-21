@@ -1733,6 +1733,7 @@ fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
         (RunState::Completed, true, Outcome::Succeeded),
         (RunState::Completed, false, Outcome::Failed),
         (RunState::Failed, true, Outcome::Failed),
+        (RunState::Failed, false, Outcome::Failed),
         (RunState::Cancelled, true, Outcome::Cancelled),
     ] {
         for timing in ["before_navigation", "after_navigation", "after_reopen"] {
@@ -1784,10 +1785,10 @@ fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
             f.db.commit_execution(
                 &receipt.run_id,
                 epoch,
-                &ExecutionRecord::StateChanged {
-                    state,
-                    waiting_on: None,
-                },
+                &if state == RunState::Failed {
+                    ExecutionRecord::ExecutionFailed { failure: varin_runtime::execution::ExecutionError::new(
+                        "unknown_tool_schema", "private callback SECRET") }
+                } else { ExecutionRecord::StateChanged { state, waiting_on: None } },
             )
             .unwrap();
             let prepared = (timing == "before_navigation").then(|| {
@@ -1822,6 +1823,13 @@ fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
             let execution = f.db.delegated_execution(&child.execution_id).unwrap();
             let report = execution.report.as_ref().unwrap();
             assert_eq!(report.outcome, outcome, "{timing} {state:?}");
+            if state == RunState::Failed {
+                let failure = f.db.run_failure(&receipt.run_id).unwrap().unwrap();
+                let detail = report.detail.as_deref().unwrap();
+                assert!(detail.contains(&failure.code) && detail.contains(&failure.message));
+                assert!(detail.contains(&format!("failure event {}", failure.cursor)));
+                assert!(!detail.contains("SECRET"));
+            }
             assert_eq!(
                 report.history_ids,
                 item.into_iter().map(|item| item.id).collect::<Vec<_>>(),

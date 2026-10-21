@@ -37,6 +37,7 @@ import {
   type ToolExecutionReceipt,
 } from './tool-bridge.js';
 import { permissionService } from './permission-service.js';
+import { HostToolAdmissionError } from './tool-admission.js';
 import {
   withToolInvocation,
   type ToolInvocationAuthority,
@@ -215,9 +216,19 @@ export async function retainExtensionTool(
     };
     const validate = (call: HostToolCall) => {
       assertAvailable(call);
-      const args = parseVarinToolJson(call.arguments);
-      if (!validateInput(args))
-        throw new Error('extension_tool_input_schema_invalid');
+      let args: ReturnType<typeof parseVarinToolJson>;
+      try { args = parseVarinToolJson(call.arguments); }
+      catch {
+        throw new HostToolAdmissionError('extension_tool_input_schema_invalid', 'Tool arguments must be a valid JSON value.');
+      }
+      if (!validateInput(args)) {
+        const issue = validateInput.errors?.[0];
+        // AJV's structural diagnostic identifies the field/rule, never the supplied value.
+        const property = issue?.keyword === 'additionalProperties'
+          ? `: ${JSON.stringify(issue.params.additionalProperty)}` : '';
+        throw new HostToolAdmissionError('extension_tool_input_schema_invalid',
+          `Invalid arguments for ${schema.name} at ${issue?.instancePath || '/'}: ${issue?.message ?? 'schema validation failed'}${property}.`);
+      }
       return args;
     };
     const gate = (call: HostToolCall, current: PermissionPolicy) =>

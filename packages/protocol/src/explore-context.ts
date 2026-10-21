@@ -41,8 +41,8 @@ export async function partitionExploreViews(
     }
   }
   if (current.length) batches.push(current);
-  // Add relevant retained bodies to the same judgment. All retained identities
-  // stay in the caller's shared metadata even when their bodies need another batch.
+  // Add relevant retained bodies to the same judgment. The caller describes which
+  // evidence is present and which remains outside this capacity-sized comparison.
   for (const batch of batches) {
     const affinity = (view: ExploreQueryView) => batch.some(other => related(other, view)) ? 2 : 0;
     const background = [...new Map([...retained, ...views.filter(view => affinity(view))].map(view => [view.viewId, view])).values()];

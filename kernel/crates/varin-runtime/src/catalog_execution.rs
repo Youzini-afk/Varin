@@ -22,23 +22,37 @@ fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
         "transport_error" => ("transport_error", "Could not connect to the model service. Check the connection and proxy settings."),
         "stream_interrupted" => ("stream_interrupted", "The model connection ended before the response completed."),
         "credential_missing" | "unknown_credential_ref" => ("credential_missing", "The selected model credential is unavailable. Configure its API key or sign in again."),
+        "credential_required" | "credential_unavailable" | "credential_binding_required" | "invalid_credential_reference" | "credential_scope" | "invalid_credential_header" => (failure.code.as_str(), "The model credential could not be prepared for this request. Check the selected account and authentication settings."),
+        "invalid_content_type" => ("invalid_content_type", "The model endpoint returned an unsupported response content type. Check the endpoint and API protocol."),
+        "invalid_provider_event" | "invalid_provider_item" | "invalid_model_exchange" | "provider_family_mismatch" => (failure.code.as_str(), "The model response did not match the selected API protocol. Check the model endpoint and protocol settings."),
+        "invalid_tool_call" | "unknown_tool_schema" => (failure.code.as_str(), "The model returned an invalid tool call or a tool outside this request's available tools."),
+        "stale_tool_schema" | "tool_unavailable" | "tool_binding_invalid" | "invalid_tool_declaration" | "prepared_call_required" => (failure.code.as_str(), "The tool binding could not be prepared or used for this request. Check the selected tool's availability and configuration."),
+        "invalid_model_configuration" | "invalid_context_capacity" | "invalid_endpoint" | "credential_in_endpoint" | "model_adapter_registry" | "model_adapter_selection_changed" | "connection_identity" => (failure.code.as_str(), "The selected model connection could not be prepared. Check its endpoint, protocol and context settings."),
+        "context_compile" | "context_content" | "context_execution" | "context_worker_panicked" | "compaction_no_model" | "compaction_tools" => (failure.code.as_str(), "Context assembly or compaction failed before a usable continuation was available. The original history remains available."),
+        "catalog_input" | "catalog_input_content" | "catalog_commit" => (failure.code.as_str(), "The runtime could not read or commit the conversation's execution data."),
         _ => ("execution_failed", "Run execution failed."),
     };
     ExecutionError::new(code, message)
 }
 
+/// Shared by the live query and terminal child-report snapshot. Both read the same
+/// original failure event, including its stable cursor, without a second ledger.
+pub(super) fn read_run_failure(database: &Connection, run: &Run) -> Result<Option<RunFailure>> {
+    if run.state != RunState::Failed { return Ok(None); }
+    let failure: Option<(u64, String)> = database.query_row(
+        "SELECT cursor,data FROM events WHERE subject=?1 AND kind IN ('run.failed','context.preparation_failed') ORDER BY cursor DESC LIMIT 1",
+        [&run.id], |row| Ok((read_number(row, 0)?, row.get(1)?)),
+    ).optional()?;
+    failure.map(|(cursor, data)| {
+        let failure = safe_run_failure(&serde_json::from_str::<ExecutionError>(&data)?);
+        Ok(RunFailure { run_id: run.id.clone(), cursor, code: failure.code, message: failure.message })
+    }).transpose()
+}
+
 impl Catalog {
     /// Read the original indexed event; no second failure ledger or history scan.
     pub fn run_failure(&self, run_id: &str) -> Result<Option<RunFailure>> {
-        if self.run(run_id)?.state != RunState::Failed { return Ok(None); }
-        let failure: Option<(u64, String)> = self.db.query_row(
-            "SELECT cursor,data FROM events WHERE subject=?1 AND kind IN ('run.failed','context.preparation_failed') ORDER BY cursor DESC LIMIT 1",
-            [run_id], |row| Ok((read_number(row, 0)?, row.get(1)?)),
-        ).optional()?;
-        failure.map(|(cursor, data)| {
-            let failure = safe_run_failure(&serde_json::from_str::<ExecutionError>(&data)?);
-            Ok(RunFailure { run_id: run_id.into(), cursor, code: failure.code, message: failure.message })
-        }).transpose()
+        read_run_failure(&self.db, &self.run(run_id)?)
     }
 }
 

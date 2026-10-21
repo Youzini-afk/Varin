@@ -53,7 +53,10 @@ Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及�
 分批计数包括序列化的问题、证据、选项、说明和生成输出空间，模型输入容量按实际绑定传递。
 TypeSafe 的整批窗口与“共享材料＋单个问题”窗口分别检查，显式长上下文请求头才启用对应扩展容量。
 仅有参考词表时，以 UTF-8 字节上界安排完整材料分批，计数说明标明此边界；它不计入真实模型 usage。
-同文件证据优先共同进入判断，分批保留共同背景和已选位置，无法完整容纳的片段报告容量原因。
+同文件证据优先共同进入判断，分批保留共同背景和已选情况，无法完整容纳的片段报告容量原因。
+快速决策的每批只携带本批原文的定位与关系信息，另行说明查询整体的候选数、已选数和未展示数量；
+不把整个候选目录重复塞进每个选材或行动请求。行动依赖原文优先进入，余量用于相关已选材料和其他背景；
+背景按实际容量计数扩展，不设固定片段数。容量失败包含总输入、单问题边界与 tokenizer 说明。
 候选读取和提交前的材料复核复用现有读取并发度，同一路径共享本轮快照；任何一项失败仍等待同批已受理读取结束。
 所有候选仍留在查询中，出现新关系后可以再次比较；没有逐轮摘要调用。相同判断输入和计数结果在查询内复用，提供商 usage 继续取原始回执。
 模型请求期间的结构增强不会使原快照失效；文件内容变化则刷新该文件的视图及动作依赖，保留其他文件的选择，再判断新的证据。
@@ -75,6 +78,8 @@ Rust 保留原 Thread/branch/Run/Operation 身份转发；慢消费者合并快�
 最终输出分开保留 `snippets`、`coverage`、`diagnostics` 和 `completion`。未探索范围、索引覆盖、服务失败与用户结束各有自己的事实。
 不存在检索专用 24 KiB 丢弃层；完整选中原文写入原工具历史，统一输出预览负责正文预算及 `read_thread` 引用。
 `limit` 只约束直接展开的片段数，必要材料组不在预览中拆半，续读指向同一次保存的完整结果。
+脚本的 `tools.invoke` 接收原始工具回执，因而仍有完整选中证据；脚本应自行选取需要展示的摘录，
+不能把原始条数当作模型预览条数。外层脚本输出继续经过统一字节预览，内部 `limit` 不改变脚本可处理的数据。
 
 候选量/来源预算是覆盖事实，不是置信度。graph/index 缺口保持可见。Graph 给 path，真正文本须重读并重新定位 symbol/literal
 才输出位置；过期关系可以不带行号。可选 relation enrichment 不能让成功文本搜索失败，也不能挤掉 unread/partial 提示。
@@ -82,6 +87,9 @@ Rust 保留原 Thread/branch/Run/Operation 身份转发；慢消费者合并快�
 Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小单元可完整呈现，大单元保留签名、命中块、省略标记和
 全文入口。普通 Explore slice 不为装饰启动 cold language server；显式 preparation 才经过现有 owner 请求它。
 结构不支持/失败时保留短文本窗口和诊断，不丢命中。
+Agent 符号工具默认返回一层 outline，使用 `childrenReference` 作为 `parent` 展开子项，`nextCursor` 继续同层页面；
+显式 `format: tree` 保留完整子树。页大小由 `maxResults` / `maxBytes` 调整，默认沿用工具查询的 100 条 / 64 KiB 页面目标，
+完整首条可超过字节目标以保证续读进展。引用绑定查询、来源和实际符号结果；结果变化要求重新读取，避免索引偏移指向另一符号。
 
 入口：[workspace search](../packages/web/application-host/lib/search/DOCUMENTATION.md)、
 [Explore](../packages/web/application-host/lib/harness/explore.ts)、
