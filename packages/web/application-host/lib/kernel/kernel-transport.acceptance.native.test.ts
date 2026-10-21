@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
+import { randomUUID } from 'node:crypto';
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { TransportFixture } from "./tests/transport-fixture.js";
 import { createKernelClient } from "./kernel-client.js";
 import { AgentRuntimeClient } from './agent-runtime-client.js';
+import { acquireTokenCounter } from '../models/token-count.js';
+import { controlFrame } from './kernel-transport.js';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW, type AgentRuntimeStreamEvent } from "./protocol.generated.js";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -56,6 +59,31 @@ async function fixture(recoveryWakeBeforeHandshake = false) {
   const actor = host.scoped(grant);
   return { host, actor, child, root, options, probe, requests, outstanding, runtimeEvents, readyOrder, maximum: () => maximum };
 }
+
+it('reopens a retained tokenizer after real transport loss and reports the original safe native reason', async () => {
+  const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const f = await fixture();
+  const counter = await acquireTokenCounter(f.host, { model: 'reference-model' });
+  try {
+    const original = await counter.count(['中文与 emoji 😀', 'function alpha() { return 1; }']);
+    const originalEpoch = f.host.kernelEpoch;
+    const exited = once(f.child, 'exit');
+    // The real decoder rejects an acknowledgement for a nonexistent stream.
+    // No test data is read from the user's application or projects.
+    f.probe.socket('control').write(controlFrame({ v: KERNEL_PROTOCOL_VERSION, kind: 'transport-stream-ack',
+      kernelEpoch: originalEpoch, streamId: randomUUID(), sequence: 1 }));
+    await exited;
+    await expect.poll(() => diagnostic.mock.calls.some(([prefix, detail]) => prefix === '[VarinKernelTransport]'
+      && detail?.stage === 'control-read' && detail?.reason === 'unknown outgoing stream')).toBe(true);
+    const recovered = await Promise.all([counter.count(['中文与 emoji 😀']), counter.count(['function alpha() { return 1; }'])]);
+    expect(f.host.kernelEpoch).not.toBe(originalEpoch);
+    expect(recovered.flatMap(result => result.counts)).toEqual(original.counts);
+    expect(f.requests.filter(request => request.method === 'runtime.tokenizers.open')).toHaveLength(2);
+    await counter.release();
+    await expect(counter.count(['released'])).rejects.toMatchObject({ code: 'tokenizer-lease-released' });
+    expect(f.host.isReady).toBe(true);
+  } finally { await counter.release(); diagnostic.mockRestore(); }
+});
 
 it('a durable recovery wake preceding the handshake response is delivered only after verified startup', async () => {
   const f = await fixture(true);

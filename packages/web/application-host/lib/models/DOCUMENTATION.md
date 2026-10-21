@@ -11,6 +11,12 @@ purpose-specific consumers and original inference Operations, rather than anothe
 See [runtime ownership](../../../../../docs/runtime.md) and the
 [Rust adapters](../../../../../kernel/crates/varin-runtime/src/providers/README.md).
 
+Read-only token counting retains the exact captured tokenizer configuration. Its native resource
+binds to the epoch returned by opening it, including a kernel started by that request. After native
+owner loss a later count reopens that resource in the new epoch; concurrent callers share the open,
+and a failed open remains retryable. Released consumers stay closed. This does not replay model
+requests or transfer their original execution/usage owners to another kernel.
+
 ## Entry points and storage
 
 | Responsibility | Entry |

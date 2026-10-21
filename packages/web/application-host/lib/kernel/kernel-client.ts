@@ -27,6 +27,7 @@ import path from "node:path";
 import { KernelTransport, CONTROL_METHODS, CONTROL_RESPONSE_METHODS, controlFrame } from "./kernel-transport.js";
 import { prepareKernelCommand } from './kernel-launch.js';
 import { KernelClientError, KernelRequestError } from './kernel-error.js';
+import { kernelDiagnosticReader } from './kernel-diagnostics.js';
 export { KernelClientError } from './kernel-error.js';
 import {
   KERNEL_PROTOCOL_VERSION,
@@ -909,10 +910,14 @@ export class KernelClient {
       }));
     });
     child.stdout.resume();
+    const readDiagnostic = kernelDiagnosticReader(diagnostic => {
+      if (!this.closed) console.error('[VarinKernelTransport]', { pid: child.pid, ...diagnostic });
+    });
     child.stderr.on("data", (chunk: Buffer | string) => {
       // stderr is intentionally separate from the protocol. Keep it out of
       // request responses; the Host can attach a logger at the process layer.
       if (process.env.VARIN_KERNEL_DEBUG === "1") process.stderr.write(chunk);
+      readDiagnostic(chunk);
     });
     child.once("error", (error) => this.failAll(new KernelClientError({ code: "kernel-spawn-failed", message: error.message, retryable: true })));
     child.once("exit", (code, signal) => {

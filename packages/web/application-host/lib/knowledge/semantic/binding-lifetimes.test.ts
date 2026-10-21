@@ -38,6 +38,25 @@ it('embedding reserves model context space and clamps explicit chunk budgets to 
 const requestOptions: InferenceRequestsOptions = { kernel: { agentRuntimeRequest: forbidden },
   runtime: { onEvent: () => () => {}, onReady: () => () => {}, onExit: () => () => {} }, egress: { prepare: forbidden } };
 const requestOwner = { run: forbidden } as unknown as InferenceRequests;
+it('embedding retries initial tokenizer preparation after kernel startup fails', async () => {
+  const captured = provider();
+  const tokenizer = vi.fn(async (method: string, params: { texts?: string[] }) => {
+    if (method === 'runtime.tokenizers.open') return { leaseId: 'counter' };
+    if (method === 'runtime.tokenizers.count') return { counts: params.texts!.map(() => 7), tokenizer: 'configured tokenizer' };
+    return null;
+  });
+  tokenizer.mockRejectedValueOnce(new Error('kernel unavailable'));
+  const owner = createSemanticInference({ readGlobalInferenceSettings: async () => settings,
+    resolveEmbeddingBinding: async () => captured }, undefined, { requests: { ...requestOptions,
+    kernel: { agentRuntimeRequest: tokenizer as InferenceRequestsOptions['kernel']['agentRuntimeRequest'] } } });
+  const lease = await owner.capture();
+  try {
+    await expect(lease.countTokens(['first'])).rejects.toThrow('kernel unavailable');
+    await expect(lease.countTokens(['retry'])).resolves.toEqual([7]);
+    expect(tokenizer.mock.calls.filter(([method]) => method === 'runtime.tokenizers.open')).toHaveLength(2);
+    expect(captured.getAuth).not.toHaveBeenCalled();
+  } finally { lease.release(); await owner.close(); }
+});
 const purposes = ['embedding', 'rerank', 'decision'] as const;
 function fixture(kind: typeof purposes[number], read = async (): Promise<unknown> => settings, resolve = async () => provider()) {
   if (kind === 'embedding') {

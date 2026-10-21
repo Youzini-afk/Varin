@@ -78,8 +78,16 @@ pub(crate) fn input_order_key(meta: &Value) -> Option<&str> {
         .as_str()
         .filter(|key| key.starts_with(&format!("input:{field}:")))
 }
-fn protocol_error(message: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+#[derive(Debug)]
+struct ProtocolFailure(&'static str);
+impl std::fmt::Display for ProtocolFailure {
+    fn fmt(&self, output: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        output.write_str(self.0)
+    }
+}
+impl std::error::Error for ProtocolFailure {}
+fn protocol_error(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, ProtocolFailure(message))
 }
 
 #[derive(Deserialize)]
@@ -262,9 +270,24 @@ struct Shared {
     chunk_bytes: usize,
 }
 impl Shared {
-    fn fail(&self) {
+    fn fail(&self, failure: Option<(&'static str, io::Error)>) {
         let _scheduler = self.scheduled.lock().unwrap();
         if !self.stopped.swap(true, Ordering::AcqRel) {
+            if let Some((stage, error)) = failure {
+                // Only our static protocol reasons and OS error numbers are
+                // diagnostic material. Never emit a frame or arbitrary error text.
+                let reason = error
+                    .get_ref()
+                    .and_then(|inner| inner.downcast_ref::<ProtocolFailure>())
+                    .map(|error| error.0);
+                eprintln!(
+                    "[VarinKernelTransport] {}",
+                    json!({
+                        "stage": stage, "kind": format!("{:?}", error.kind()),
+                        "osError": error.raw_os_error(), "reason": reason,
+                    })
+                );
+            }
             self.changed.notify_all();
             let _ = self.incoming.send(Incoming::Disconnected);
         }
@@ -405,7 +428,9 @@ impl Sender {
     /// content independently. One outstanding batch per stream also preserves delivery order.
     pub(crate) fn send_progress(&self, value: Value) -> Result<(), mpsc::SendError<Value>> {
         #[cfg(test)]
-        if let Some(fixture) = &self.fixture { return fixture.send(value); }
+        if let Some(fixture) = &self.fixture {
+            return fixture.send(value);
+        }
         let shared = self.shared.as_ref().unwrap();
         let id = self.send_body(value)?;
         let mut scheduler = shared.scheduled.lock().unwrap();
@@ -493,9 +518,11 @@ impl Transport {
                     Control::Frame(frame) => Some(frame),
                     Control::DurableCursor => writer.durable_cursor.lock().unwrap().take(),
                 };
-                if frame.is_some_and(|frame| write_frame(&mut control, &frame).is_err()) {
-                    writer.fail();
-                    break;
+                if let Some(frame) = frame {
+                    if let Err(error) = write_frame(&mut control, &frame) {
+                        writer.fail(Some(("control-write", error)));
+                        break;
+                    }
                 }
             }
         });
@@ -515,7 +542,7 @@ impl Transport {
                 let bytes = match serde_json::to_vec(&value) {
                     Ok(bytes) => bytes,
                     Err(_) => {
-                        encoder.fail();
+                        encoder.fail(Some(("body-encode", io::ErrorKind::InvalidData.into())));
                         break;
                     }
                 };
@@ -530,12 +557,11 @@ impl Transport {
                 };
                 stream.bytes = Some(bytes);
                 scheduler.order.push_back(id);
-                if encoder
-                    .command("transport-stream-begin", id, json!({"byteLength":length}))
-                    .is_err()
+                if let Err(error) =
+                    encoder.command("transport-stream-begin", id, json!({"byteLength":length}))
                 {
                     drop(scheduler);
-                    encoder.fail();
+                    encoder.fail(Some(("body-announce", error)));
                     break;
                 }
                 drop(scheduler);
@@ -544,20 +570,20 @@ impl Transport {
         });
         let data_writer = shared.clone();
         thread::spawn(move || {
-            if write_data(data, &data_writer).is_err() {
-                data_writer.fail();
+            if let Err(error) = write_data(data, &data_writer) {
+                data_writer.fail(Some(("data-write", error)));
             }
         });
         let reader = shared.clone();
         thread::spawn(move || {
-            if read_control(control_read, &reader).is_err() {
-                reader.fail();
+            if let Err(error) = read_control(control_read, &reader) {
+                reader.fail(Some(("control-read", error)));
             }
         });
         let reader = shared.clone();
         thread::spawn(move || {
-            if read_data(data_read, &reader).is_err() {
-                reader.fail();
+            if let Err(error) = read_data(data_read, &reader) {
+                reader.fail(Some(("data-read", error)));
             }
         });
         Ok(Self {
@@ -572,7 +598,7 @@ impl Transport {
         })
     }
     pub(crate) fn shutdown(&self) {
-        self.sender.shared.as_ref().unwrap().fail();
+        self.sender.shared.as_ref().unwrap().fail(None);
     }
 }
 
@@ -635,11 +661,10 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                     let request_id = meta["id"]
                         .as_str()
                         .ok_or_else(|| protocol_error("request identity required"))?;
-                    shared
-                        .response_lanes
-                        .lock()
-                        .unwrap()
-                        .insert(request_id.into(), response_lane(meta["method"].as_str().unwrap_or_default()));
+                    shared.response_lanes.lock().unwrap().insert(
+                        request_id.into(),
+                        response_lane(meta["method"].as_str().unwrap_or_default()),
+                    );
                     shared
                         .incoming
                         .send(Incoming::Open(meta))
@@ -726,7 +751,10 @@ fn read_control(mut input: Connection, shared: &Arc<Shared>) -> io::Result<()> {
                         Ok(value) if identity(&value) == received.meta => {
                             let _ = decoder.incoming.send(Incoming::Frame(value, Lane::Data));
                         }
-                        _ => decoder.fail(),
+                        _ => decoder.fail(Some((
+                            "body-decode",
+                            protocol_error("content identity or JSON is invalid"),
+                        ))),
                     }
                 });
             }

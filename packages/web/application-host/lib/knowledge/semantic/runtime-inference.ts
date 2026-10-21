@@ -193,7 +193,10 @@ export function createSemanticInference(
       const countTokens = async (texts: readonly string[]) => {
         if (!options.requests) return texts.map(text => Buffer.byteLength(text, 'utf8'));
         counter ??= acquireTokenCounter(options.requests.kernel, { model: provider.requestModelId ?? binding.modelId,
-          ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}) });
+          ...(provider.tokenizer ? { tokenizer: provider.tokenizer } : {}) }).catch(error => {
+          counter = undefined;
+          throw error;
+        });
         const counted = await (await counter).count(texts);
         // Reference vocabularies can undercount another model's multilingual
         // text. Use a byte upper bound until that model's tokenizer is available.

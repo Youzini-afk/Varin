@@ -23,6 +23,10 @@ The session closes new scheduler admission when its query callback finishes, ret
 HTTP/body or local worker work until its receipt or existing unknown-usage barrier is acknowledged. Kernel generation
 keeps its original execution owner. An unpublished observed receipt remains with its owner for same-identity publication, and prevents
 the SDK from interpreting the persistence failure as permission to send another paid request.
+The retained embedding tokenizer reopens only its read-only counter after an epoch change; a failed
+initial open is not cached as a permanent failure. Original model HTTP dispatches retain the above
+settlement rules. Native transport failures publish a content-free stage, I/O kind, OS code and static
+protocol reason to the Host log; arbitrary stderr, source text and credentials are not included.
 
 `local-inference.ts` adapts the existing installed encoder for native query vectors. An unconfigured embedding selection uses the installed component; explicit remote, disabled,
 invalid or unavailable selections never fall back. The HTTP settings DTO remains unconfigured for index-status consumers when local inference is selected.
