@@ -1037,8 +1037,13 @@ impl RunSupervisor {
             ) {
                 return Ok(());
             }
-            serial.active.store(true, Ordering::Release);
-            let worker = self.workers.lock().map_err(error)?.remove(run_id);
+            let worker = {
+                // Launch admission reads both registries under this same lock.
+                // It must see either the original worker or its active drain.
+                let _entries = self.quiescence.lock().map_err(error)?;
+                serial.active.store(true, Ordering::Release);
+                self.workers.lock().map_err(error)?.remove(run_id)
+            };
             if let Some(mut worker) = worker {
                 if let Some(join) = worker.join.take() {
                     join.join().map_err(|_| error("Run wait teardown failed"))?;
