@@ -176,7 +176,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
   );
   const attention = props.attentionBySession[session.id];
   const selected = props.selectedIds.has(session.id);
-  const pendingRenameRef = React.useRef(false);
+  const menuRenameRequestedRef = React.useRef(false);
   const decorationRenderers = useWorkbenchMatchRenderers<{
     attention?: ConversationSessionAttentionState;
     busy: boolean;
@@ -192,9 +192,10 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
     session,
   });
 
-  const finishPendingRename = (open: boolean) => {
-    if (!open && pendingRenameRef.current) {
-      pendingRenameRef.current = false;
+  const finishMenuRename = (open: boolean) => {
+    if (!open && menuRenameRequestedRef.current) {
+      // Focus restoration runs after close completion. Keep the chosen action until the next
+      // menu opens so it cannot blur (and immediately commit) the newly mounted name editor.
       props.onBeginRename(session);
     }
   };
@@ -218,7 +219,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         {t('sessions.sidebar.header.actions.exitSelection')}
       </Item>
     </> : <>
-      <Item onClick={() => { pendingRenameRef.current = true; }}>
+      <Item onClick={() => { menuRenameRequestedRef.current = true; }}>
         <Icon name="pencil-ai" className="size-4" />
         {t('sessions.sidebar.session.menu.rename')}
       </Item>
@@ -264,8 +265,13 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
     <div>
       <ContextMenu
         disabled={props.editingId === session.id}
-        onOpenChange={(open) => { if (open) props.onContextTarget(session); }}
-        onOpenChangeComplete={finishPendingRename}
+        onOpenChange={(open) => {
+          if (open) {
+            menuRenameRequestedRef.current = false;
+            props.onContextTarget(session);
+          }
+        }}
+        onOpenChangeComplete={finishMenuRename}
       >
       <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
       <div
@@ -370,7 +376,10 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
           </button>
         )}
 
-        {!props.selectionMode ? <DropdownMenu onOpenChangeComplete={finishPendingRename}>
+        {!props.selectionMode ? <DropdownMenu
+          onOpenChange={(open) => { if (open) menuRenameRequestedRef.current = false; }}
+          onOpenChangeComplete={finishMenuRename}
+        >
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -380,13 +389,13 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
               <Icon name="more-2" className="size-3.5" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-48" finalFocus={() => !pendingRenameRef.current}>
+          <DropdownMenuContent align="end" className="min-w-48" finalFocus={() => !menuRenameRequestedRef.current}>
             {renderMenuItems(DropdownMenuItem, DropdownMenuSeparator)}
           </DropdownMenuContent>
         </DropdownMenu> : null}
       </div>
       </ContextMenuTrigger>
-      <ContextMenuContent className="min-w-48" finalFocus={() => !pendingRenameRef.current}>
+      <ContextMenuContent className="min-w-48" finalFocus={() => !menuRenameRequestedRef.current}>
         {renderMenuItems(ContextMenuItem, ContextMenuSeparator)}
       </ContextMenuContent>
       </ContextMenu>
