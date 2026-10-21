@@ -81,9 +81,11 @@ their original keys. Source Host discovery is available before creation and gran
 
 `ThreadConversation` projects native Agent facts through `ThreadsAPI`. Its child, family, follow-up,
 plan, Goal, permission, question and recovery components keep their original owner and revision.
-The work overview projects current execution, plan steps, child tasks and saved outputs. Its quick view
-floats over the conversation; its docked view has a resizable width and one main scroll region. Opening
-or resizing it does not update the streaming timeline. Empty capability categories are not shown.
+The work overview projects current execution, plan steps, child tasks and saved outputs. Its quick and
+full views use compact floating cards in a reserved layout column, so neither covers the conversation
+or composer. Cards fit their content with internal scrolling when needed; the full card has a resizable
+width. Narrow conversations stack the card above the chat. Disclosure and width state remain outside
+streaming timeline subscriptions. Empty capability categories are not shown.
 Workspace, goal, follow-up, memory, research and recovery editors mount on first inspection and retain
 their drafts across panel navigation. Context resources and compression jobs share the context detail.
 The plan reader stays subscribed to its existing branch events, while tool/operation bodies are read

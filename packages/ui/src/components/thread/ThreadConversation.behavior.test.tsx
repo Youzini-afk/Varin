@@ -293,7 +293,7 @@ it('opens and closes the work overview during streaming without redrawing the co
   expect(view()).toBe('full');
   expect(container.textContent).toContain('chunk 2');
   timelineList.render.mockClear();
-  await act(async () => launcher().click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-panel] [aria-label="harness.overview.collapse"]')!.click());
   expect(view()).toBe('closed');
   expect(timelineList.render).not.toHaveBeenCalled();
   await stream(3);
@@ -303,6 +303,11 @@ it('opens and closes the work overview during streaming without redrawing the co
   expect(view()).toBe('compact');
   await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('harness.overview.details'))!.click());
   expect(view()).toBe('full');
+  timelineList.render.mockClear();
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-panel] [aria-label="harness.overview.peek"]')!.click());
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-peek] [aria-label="dialog.common.actions.close"]')!.click());
+  expect(view()).toBe('closed');
+  expect(timelineList.render).not.toHaveBeenCalled();
   expect(f.cancelRun).not.toHaveBeenCalled();
   expect(f.enqueue).not.toHaveBeenCalled();
 });

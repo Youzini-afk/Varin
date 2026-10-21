@@ -6,8 +6,8 @@ type OverviewDisclosure = 'overview' | 'mobile' | 'compact' | 'questions' | 'rev
 type OverviewChoices = Partial<Record<OverviewDisclosure, boolean>>;
 
 interface WorkOverviewStore {
-  width: number;
-  setWidth(width: number): void;
+  panelWidth: number;
+  setPanelWidth(width: number): void;
   bySession: Record<string, OverviewChoices>;
   parentBySession: Record<string, { sessionId: string; directory?: string }>;
   setDisclosure: (key: string, disclosure: OverviewDisclosure, open: boolean) => void;
@@ -22,8 +22,8 @@ export const EMPTY_WORK_OVERVIEW_CHOICES: OverviewChoices = {};
 export const useWorkOverviewStore = create<WorkOverviewStore>()(
   persist(
     (set) => ({
-      width: 320,
-      setWidth: width => set({ width }),
+      panelWidth: 280,
+      setPanelWidth: panelWidth => set({ panelWidth }),
       bySession: {},
       parentBySession: {},
       setDisclosure: (key, disclosure, open) => set((state) => {
@@ -37,7 +37,7 @@ export const useWorkOverviewStore = create<WorkOverviewStore>()(
     {
       name: 'varin.workOverview.v1',
       storage: createDeferredSafeJSONStorage(),
-      partialize: (state) => ({ bySession: state.bySession, width: state.width }),
+      partialize: (state) => ({ bySession: state.bySession, panelWidth: state.panelWidth }),
     },
   ),
 );
