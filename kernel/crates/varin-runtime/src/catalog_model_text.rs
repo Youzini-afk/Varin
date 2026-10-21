@@ -579,4 +579,15 @@ mod tests {
         assert!(view.retry_allowed);
         assert!(view.inference.is_none());
     }
+    #[test]
+    fn standalone_text_request_uses_its_own_identity_without_a_conversation_branch() {
+        let (path, mut db) = open();
+        let id = admit(&mut db, &input("title"));
+        let status = db.model_text_status(&id).unwrap();
+        let context = db.model_request_context(&status.run_id).unwrap();
+        assert_eq!(context.session_id, status.run_id);
+        assert!(context.workspace_id.is_none());
+        drop(db);
+        std::fs::remove_dir_all(path).unwrap();
+    }
 }

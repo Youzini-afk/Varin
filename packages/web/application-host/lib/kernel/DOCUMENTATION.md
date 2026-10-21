@@ -14,6 +14,14 @@ those responsibilities to Host entry points.
 manifest/build/protocol/architecture, bootstrap the local authenticated epoch and carry separate control
 and content streams. `protocol.generated.ts` comes from `kernel/protocol/schema.json`; do not hand-edit it.
 
+`../model-text/service.ts` runs auxiliary text work through native inference and its original receipts.
+Execution-owner equality compares fields, independent of JSON property order. Standalone text and
+knowledge jobs use their own native Run as request context, without a conversation branch/workspace.
+`thread-titles.ts` selects the configured auxiliary model, then replaces only the original input title.
+Startup and kernel-ready discovery reuse completed results or resume linked admissions that never
+reached inference. Sent/uncertain requests require an explicit retry; manual titles remain authoritative.
+Metadata revision races reuse the generated result while rechecking the current title before publication.
+
 Actor-scoped handles bind Host, epoch, Thread/Run, workspace and capability scope. Global management
 is limited to its management operations and cannot silently substitute for an actor grant. Storage resolves
 authority from the original branch/pin/record/operation/object owner. A supplied hash is not blob access.

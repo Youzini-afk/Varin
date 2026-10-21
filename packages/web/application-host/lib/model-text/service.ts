@@ -1,5 +1,6 @@
 /** Product utility requests use the original native inference executor and Catalog receipts. */
 import { createHash, randomUUID } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { createModelAuthority } from '../kernel/model-authority.js';
@@ -75,8 +76,8 @@ export function createModelTextService(options: {
     }
     return { ...parseModelTextSelection({ providerId: settings.defaultProvider, modelId: settings.defaultModel }), source: 'default' as const };
   }
-  const read = (requestId: string, allowMissing = false) => options.kernel.agentRuntimeRequest<ModelTextView | null, 'runtime.model_text.read'>('runtime.model_text.read', { requestId, allowMissing });
-  const status = (requestId: string, allowMissing = false) => options.kernel.agentRuntimeRequest<ModelTextStatus | null, 'runtime.model_text.status'>('runtime.model_text.status', {requestId,allowMissing});
+  const read = (requestId: string, allowMissing = false, signal?: AbortSignal) => options.kernel.agentRuntimeRequest<ModelTextView | null, 'runtime.model_text.read'>('runtime.model_text.read', { requestId, allowMissing }, signal);
+  const status = (requestId: string, allowMissing = false, signal?: AbortSignal) => options.kernel.agentRuntimeRequest<ModelTextStatus | null, 'runtime.model_text.status'>('runtime.model_text.status', {requestId,allowMissing}, signal);
   const cancel = (requestId: string) => options.kernel.agentRuntimeRequest<ModelTextStatus, 'runtime.model_text.cancel'>('runtime.model_text.cancel', { requestId });
   function retainDrain(requestId: string, runId: string, operationId: string, epoch: string | null) {
     if (drains.has(requestId)) return;
@@ -177,7 +178,7 @@ export function createModelTextService(options: {
       epoch = options.kernel.kernelEpoch;
       const work = await status(requestId);
       if (!work || work.requestFingerprint !== fingerprint) return fail('model-text-key-conflict', 'This key belongs to another request.', 409, requestId);
-      if (JSON.stringify(work.executionOwner) !== JSON.stringify(owner)) {
+      if (!isDeepStrictEqual(work.executionOwner, owner)) {
         safelyReleased = true;
         await observe(requestId, epoch, signal);
         return await loadResult(requestId);
@@ -216,7 +217,50 @@ export function createModelTextService(options: {
       model.credentialOwner.release();
     }
   }
+  const generate = (input: ModelTextInput, prepared?: PreparedTextModel): Promise<ModelTextResult> => {
+    if (!input || typeof input.key !== 'string' || !input.key.trim() || !['git-commit', 'review', 'title', 'text'].includes(input.purpose)
+      || typeof input.prompt !== 'string' || !input.prompt.trim() || (input.system !== undefined && typeof input.system !== 'string')
+      || (input.retryOf !== undefined && (typeof input.retryOf !== 'string' || !input.retryOf.startsWith('model-text:')))
+      || (input.maxOutputTokens !== undefined && (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0))) return Promise.reject(Object.assign(new Error('A request key, purpose and prompt are required.'), { statusCode: 400, code: 'model-text-input-invalid' }));
+    const fingerprint = createHash('sha256').update(JSON.stringify({ purpose: input.purpose, prompt: input.prompt, system: input.system ?? null,
+      model: input.model ? parseModelTextSelection(input.model) : null, ...(prepared ? { preparedIdentity: prepared.identity } : {}), maxOutputTokens: input.maxOutputTokens ?? null, responseSchema: input.responseSchema ?? null, schemaProvided: input.responseSchema !== undefined, retryOf: input.retryOf ?? null })).digest('hex');
+    const existing = pending.get(input.key);
+    if (existing) {
+      if (existing.fingerprint !== fingerprint) return Promise.reject(Object.assign(new Error('This request key already belongs to different input.'), { statusCode: 409, code: 'model-text-key-conflict' }));
+      return existing.promise;
+    }
+    const controller = new AbortController();
+    const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
+    const promise = execute(input, fingerprint, signal, prepared).finally(() => { pending.delete(input.key); });
+    pending.set(input.key, { fingerprint, controller, promise });
+    return promise;
+  };
   return {
+    async original(key: string, signal?: AbortSignal) {
+      const work = await read(`model-text:${key}`, true, signal);
+      return work ? { purpose: work.generation.purpose, prompt: work.generation.user } : null;
+    },
+    /** Resume only an admission which Catalog proves never reached inference.
+     * Completed output is reused; sent/uncertain requests are never regenerated here. */
+    async resumeUnsent(key: string, signal?: AbortSignal): Promise<ModelTextResult | null> {
+      let current = await status(`model-text:${key}`, true, signal);
+      while (current) {
+        signal?.throwIfAborted();
+        if (current.inference?.outcome === 'succeeded' && statusDrained(current)) return loadResult(current.requestId);
+        if (current.inference || !current.cancelled || !current.retryAllowed) return null;
+        const nextKey = `model-text-resume:${createHash('sha256').update(current.requestId).digest('hex')}`;
+        const next = await status(`model-text:${nextKey}`, true, signal);
+        if (next) { current = next; continue; }
+        const original = await read(current.requestId, false, signal);
+        if (!original) return null;
+        signal?.throwIfAborted();
+        // This is a new, linked admission using current auxiliary settings. Only
+        // an unsent original permits it; the native owner rechecks that fence.
+        return generate({ key: nextKey, retryOf: current.requestId, purpose: original.generation.purpose as ModelTextPurpose,
+          prompt: original.generation.user, system: original.generation.systemPrompt, signal });
+      }
+      return null;
+    },
     async describe(input: { model?: ModelTextSelection | undefined; purpose?: ModelTextPurpose; outputReserveTokens?: number | ((limits: { contextTokens: number; outputTokenLimit: number | null }) => number) } = {}): Promise<ModelTextDescription> {
       const chosen = await selection(input.model);
       const model = await options.models.describeModel(chosen);
@@ -237,24 +281,7 @@ export function createModelTextService(options: {
       catch { return { ...metadata, outputStatus: 'unavailable' as const }; }
     },
     async cancel(requestId: string) { return projection(await cancel(requestId)); },
-    generate(input: ModelTextInput, prepared?: PreparedTextModel): Promise<ModelTextResult> {
-      if (!input || typeof input.key !== 'string' || !input.key.trim() || !['git-commit', 'review', 'title', 'text'].includes(input.purpose)
-        || typeof input.prompt !== 'string' || !input.prompt.trim() || (input.system !== undefined && typeof input.system !== 'string')
-        || (input.retryOf !== undefined && (typeof input.retryOf !== 'string' || !input.retryOf.startsWith('model-text:')))
-        || (input.maxOutputTokens !== undefined && (!Number.isSafeInteger(input.maxOutputTokens) || input.maxOutputTokens <= 0))) return Promise.reject(Object.assign(new Error('A request key, purpose and prompt are required.'), { statusCode: 400, code: 'model-text-input-invalid' }));
-      const fingerprint = createHash('sha256').update(JSON.stringify({ purpose: input.purpose, prompt: input.prompt, system: input.system ?? null,
-        model: input.model ? parseModelTextSelection(input.model) : null, ...(prepared ? { preparedIdentity: prepared.identity } : {}), maxOutputTokens: input.maxOutputTokens ?? null, responseSchema: input.responseSchema ?? null, schemaProvided: input.responseSchema !== undefined, retryOf: input.retryOf ?? null })).digest('hex');
-      const existing = pending.get(input.key);
-      if (existing) {
-        if (existing.fingerprint !== fingerprint) return Promise.reject(Object.assign(new Error('This request key already belongs to different input.'), { statusCode: 409, code: 'model-text-key-conflict' }));
-        return existing.promise;
-      }
-      const controller = new AbortController();
-      const signal = input.signal ? AbortSignal.any([input.signal, controller.signal]) : controller.signal;
-      const promise = execute(input, fingerprint, signal, prepared).finally(() => { pending.delete(input.key); });
-      pending.set(input.key, { fingerprint, controller, promise });
-      return promise;
-    },
+    generate,
     async close() { closed = true; for (const task of pending.values()) task.controller.abort(); wake(); await Promise.allSettled([...pending.values()].map(task => task.promise)); await Promise.allSettled([...drains.values()]); for (const remove of removers) remove(); },
   };
 }

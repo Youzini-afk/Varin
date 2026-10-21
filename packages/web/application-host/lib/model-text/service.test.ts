@@ -16,7 +16,8 @@ function fixture() {
   const status = (work: ModelTextView | undefined) => {
     if (!work) return null;
     const op=work.inference;const state=op?.result?.kind==='control'?op.result.value as Record<string,unknown>:{};
-    return {requestId:work.requestId,requestFingerprint:work.requestFingerprint,runId:work.runId,executionOwner:work.generation.callerOwner,
+    const owner = work.generation.callerOwner;
+    return {requestId:work.requestId,requestFingerprint:work.requestFingerprint,runId:work.runId,executionOwner:owner.kind === 'external' ? { epoch: owner.epoch, identity: owner.identity, kind: owner.kind } : owner,
       providerId:work.generation.configuration.providerId,modelId:work.generation.configuration.model,purpose:work.generation.purpose,cancelled:work.cancelled,retryAllowed:work.retryAllowed,effect:op?.effect??'none',
       inference:op?{operationId:op.id,phase:op.phase,outcome:op.outcome,cancelRequested:op.cancel_requested,dispatched:state.dispatched,recovered:false,receipt:state.receipt??null}:null};
   };
@@ -134,6 +135,7 @@ describe('native standalone text owner',()=>{
     await until(()=>f.trace.includes('generated'));f.settle('original','indeterminate',false);await failed;
     expect(f.kernel.unregisterCredentialOwner).not.toHaveBeenCalled();
     await expect(f.service.generate(f.input)).rejects.toMatchObject({code:'model-text-indeterminate'});
+    expect(await f.service.resumeUnsent('original')).toBeNull();
     expect(f.trace.filter(value=>value==='generated')).toHaveLength(1);
     const closing=f.service.close();f.kernel.kernelEpoch='next-epoch';f.notify();await closing;
   });

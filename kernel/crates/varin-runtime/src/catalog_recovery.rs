@@ -713,7 +713,12 @@ fn committed_model_history_head(
 impl Catalog {
     /// Actual execution placement, independent of the client's current navigation selection.
     pub fn model_request_context(&self, run_id: &str) -> Result<ModelRequestContext> {
-        let run = self.run(run_id)?;
+        let value: Value = record(&self.db, "runs", run_id)?;
+        if value["kind"] == super::model_text::KIND || value["kind"] == super::knowledge_inference::KIND {
+            let run: super::utility_run::UtilityRun = serde_json::from_value(value)?;
+            return Ok(ModelRequestContext { session_id: run.id, workspace_id: None });
+        }
+        let run: Run = serde_json::from_value(value)?;
         let workspace_id = self
             .launch_metadata(run_id)?
             .and_then(|launch| launch.selection.source)

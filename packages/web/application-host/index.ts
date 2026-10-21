@@ -2011,6 +2011,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     }));
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindTitles(threadTitles);
+  void threadTitles.recover();
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
