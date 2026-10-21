@@ -13,6 +13,16 @@ export interface ThreadObservationMaterial {
   eventCursor: number;
   events: Array<{ ref: string; event: StoredEvent }>;
 }
+/** Only storage reads are optional during request preparation; identity and receipt fences are not. */
+export class ObservationStoreUnavailableError extends Error {
+  readonly reason: 'corrupt' | 'unavailable';
+  constructor(readonly workspaceId: string, cause: unknown) {
+    super('Workspace change notifications are unavailable', { cause });
+    this.name = 'ObservationStoreUnavailableError';
+    this.reason = cause instanceof Error && cause.message.startsWith('TDB_ERROR:') && cause.message.includes('Corrupted file')
+      ? 'corrupt' : 'unavailable';
+  }
+}
 interface ObservationBinding extends ThreadObservationSource {
   workspaceId: string;
   fingerprint: string;
@@ -120,9 +130,15 @@ export function createKnowledgeContextRuntime(options: KnowledgeContextRuntimeOp
       if (JSON.stringify([binding.threadId, binding.branchId, binding.anchorId, binding.source]) !== JSON.stringify([owner.threadId, owner.branchId, owner.anchorId, owner.source])) throw new Error('Observation request changed original Run');
       await waitWithSignal(binding.tail, request.signal);
     }
-    const store = await waitWithSignal(options.getStore(owner.source.execution_workspace_id), request.signal);
-    if (!store) throw new Error('Observation source store is unavailable');
-    const events = await waitWithSignal(store.listEvents({ sessionId: owner.runId, ...(request.afterEventId === undefined ? {} : { afterId: request.afterEventId }) }), request.signal);
+    let events: StoredEvent[];
+    try {
+      const store = await waitWithSignal(options.getStore(owner.source.execution_workspace_id), request.signal);
+      if (!store) throw new Error('Observation source store is unavailable');
+      events = await waitWithSignal(store.listEvents({ sessionId: owner.runId, ...(request.afterEventId === undefined ? {} : { afterId: request.afterEventId }) }), request.signal);
+    } catch (error) {
+      request.signal?.throwIfAborted();
+      throw new ObservationStoreUnavailableError(owner.source.execution_workspace_id, error);
+    }
     request.signal?.throwIfAborted();
     return { owner: structuredClone(owner), eventCursor: events.at(-1)?.id ?? request.afterEventId ?? 0,
       events: events.map(event => ({ ref: `observation:${owner.runId}:${event.id}`, event })) };

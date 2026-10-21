@@ -2344,7 +2344,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       })
   );
 
-  const contextObservationPublication = createContextObservationPublication(kernelClient);
+  const contextObservationPublication = createContextObservationPublication(kernelClient, {
+    onUnavailable: (error, owner) => console.error('[ContextObservations] Workspace notifications unavailable; conversation continues:',
+      { workspaceId: error.workspaceId, runId: owner.runId, reason: error.reason }),
+  });
   const knowledgeContextRuntime = createKnowledgeContextRuntime({
     threadSources: () => contextObservationPublication.sources(),
     goalForThread: async threadId => {

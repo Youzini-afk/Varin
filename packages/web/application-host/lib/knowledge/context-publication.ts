@@ -3,11 +3,14 @@ import { isDeepStrictEqual } from 'node:util';
 import { waitWithSignal } from '../cancellation.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { ContextObservationFact, ContextObservationReceipt, ContextObservationSource, Run } from '../kernel/protocol.generated.js';
-import type { createKnowledgeContextRuntime } from './context-runtime.js';
+import { ObservationStoreUnavailableError, type createKnowledgeContextRuntime, type ThreadObservationMaterial } from './context-runtime.js';
 
-export function createContextObservationPublication(kernel: Pick<KernelClient, 'agentRuntimeRequest'>) {
+export function createContextObservationPublication(kernel: Pick<KernelClient, 'agentRuntimeRequest'>, options: {
+  onUnavailable?(error: ObservationStoreUnavailableError, owner: ContextObservationSource): void;
+} = {}) {
   // This is only a read optimization. Catalog identity deduplication is the durable receipt.
   const cursors = new Map<string, number>();
+  const reportedUnavailable = new Map<string, ObservationStoreUnavailableError['reason']>();
   const sources = (runId?: string, signal?: AbortSignal) => kernel.agentRuntimeRequest<ContextObservationSource[], 'runtime.context.observations.sources'>(
     'runtime.context.observations.sources', runId ? { runId } : {}, signal);
   const publish = async (context: Pick<ReturnType<typeof createKnowledgeContextRuntime>, 'observationsForSource' | 'drain'>, run: Run, signal: AbortSignal): Promise<void> => {
@@ -15,11 +18,28 @@ export function createContextObservationPublication(kernel: Pick<KernelClient, '
     await waitWithSignal(context.drain(), signal);
     // Oldest source owner first; every event still has its original native Run identity.
     const owners = await waitWithSignal(sources(run.id, signal), signal);
+    const unavailable = new Set<string>();
     for (const owner of owners.toReversed()) {
       signal.throwIfAborted();
+      const workspaceId = owner.source.execution_workspace_id;
+      if (unavailable.has(workspaceId)) continue;
       const key = JSON.stringify([owner.epoch, owner.threadId, owner.branchId, owner.runId, owner.anchorId, owner.source]);
       const afterEventId = cursors.get(key) ?? 0;
-      const material = await waitWithSignal(context.observationsForSource(owner, { afterEventId, signal }), signal);
+      let material: ThreadObservationMaterial;
+      try { material = await waitWithSignal(context.observationsForSource(owner, { afterEventId, signal }), signal); }
+      catch (error) {
+        signal.throwIfAborted();
+        if (!(error instanceof ObservationStoreUnavailableError) || error.workspaceId !== workspaceId) throw error;
+        unavailable.add(workspaceId);
+        if (reportedUnavailable.get(workspaceId) !== error.reason) {
+          reportedUnavailable.set(workspaceId, error.reason);
+          try { options.onUnavailable?.(error, owner); } catch { /* Diagnostics cannot fail the main request. */ }
+        }
+        // No material was read and no cursor is acknowledged. The next preparation
+        // retries this original source, while the conversation keeps its own history.
+        continue;
+      }
+      reportedUnavailable.delete(workspaceId);
       signal.throwIfAborted();
       if (!isDeepStrictEqual(material.owner, owner)) throw new Error('Observation material changed its original owner');
       let eventCursor = afterEventId;

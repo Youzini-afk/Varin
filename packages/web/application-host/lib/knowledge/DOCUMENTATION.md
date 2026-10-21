@@ -65,6 +65,13 @@ model request synchronizes that session's observations. Zone 2 reads stop waitin
 cancelled, and do not schedule subsequent reads or recall after that cancellation; accepted storage work
 keeps its original durability and outcome. No database writer is killed to satisfy a caller timeout.
 
+Workspace observations are auxiliary to the conversation's native history. A failed KnowledgeStore
+open or event read reports a content-free availability reason and defers only that workspace's
+notification publication; it cannot prevent the next model request. The original cursor remains
+unacknowledged and is retried at the next preparation boundary. No empty store, automatic database
+replacement or fabricated event is substituted. Source identity, event integrity, native admission
+and receipt failures still fail preparation; cancellation remains cancellation.
+
 ## Checkpoints and acknowledgement
 
 `persistence.ts` tracks native data mutations and owns the checkpoint schedule.
