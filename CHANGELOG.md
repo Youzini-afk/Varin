@@ -5,6 +5,32 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.32 - 2026-10-22
+
+### 更新摘要
+
+本版修复 0.9.31 发布验收发现的运行时与关闭流程问题。桌面端同时包含下方 0.9.31 所列的检索、上下文、协作、恢复和安装界面改进。
+
+- 模型选择、规划模型和上下文整理的包装层保留原始重试策略，关闭重试及自定义次数、等待设置能传递到实际执行者。
+- 修复只读检索预设误带需要物理工作区的恢复工具，导致整个子任务在准备前被拒绝的问题。
+- 规划模型配置经过 Rust 序列化再读取时，正确识别可选字段的省略和空值，避免有效的冻结配置被误报为模型选择已改变。
+- 索引重新打开时保留尚未发布的推理回执；已发布向量对应的重复账本内容仍正常回收。
+- HTTP 关闭与进程信号接入完整 Host 资源清理，并合并并发关闭；Host 异常退出后的内核断连不再因错误管道关闭而跳过清理。
+- 同步检索预览、上下文预算、错误码和恢复存储的验收用例；Windows 路径越界回归使用无需额外符号链接权限的目录联接。
+
+### Release highlights
+
+This release fixes runtime and shutdown issues found during 0.9.31 release acceptance. Desktop builds also include the retrieval, context, collaboration, recovery and installer improvements listed under 0.9.31 below.
+
+- Preserve the selected retry policy through model-selection, planning and context-summary wrappers, including disabled retries and custom limits and delays.
+- Keep physical-workspace recovery tools out of the default read-only retrieval profile so child preparation can proceed.
+- Normalize omitted and null optional model fields consistently when restoring frozen planning configurations from Rust.
+- Preserve unpublished inference receipts when reopening indexes while reclaiming duplicate ledger content after vector publication.
+- Route HTTP and signal shutdown through complete Host resource cleanup and coalesce concurrent stops. Keep kernel disconnect cleanup independent of a closed diagnostic pipe after abrupt Host loss.
+- Update acceptance fixtures for retained retrieval evidence, token budgets, typed errors and workspace recovery statistics; use directory junctions for the Windows source-escape regression.
+
+[完整提交记录 / Full changelog](https://github.com/Youzini-afk/Varin/compare/v0.9.31...v0.9.32)
+
 ## 0.9.31 - 2026-10-22
 
 ### 更新摘要
