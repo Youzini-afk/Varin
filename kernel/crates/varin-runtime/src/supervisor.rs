@@ -56,9 +56,9 @@ struct Worker {
     cancel: CancellationToken,
     join: Option<JoinHandle<()>>,
     pending: Option<PendingLaunch>,
-    // Cancellation-only workers publish this after all body/owner work. Their completion wake
+    // Workers publish this after all body/owner work. Their completion wake
     // may then join the final bookkeeping even before JoinHandle::is_finished becomes visible.
-    cancellation_done: Option<Arc<AtomicBool>>,
+    completion_ready: Option<Arc<AtomicBool>>,
 }
 struct OperationWorker {
     run_id: String,
@@ -166,7 +166,7 @@ impl RunSupervisor {
                     cancel: cancel.clone(),
                     join: None,
                     pending: None,
-                    cancellation_done: None,
+                    completion_ready: None,
                 },
             );
         }
@@ -292,6 +292,8 @@ impl RunSupervisor {
         let catalog = self.catalog.clone();
         let identity = run_id.to_string();
         let wake = self.wake.clone();
+        let done = Arc::new(AtomicBool::new(false));
+        worker.completion_ready = Some(done.clone());
         let join = thread::Builder::new()
             .name(format!("run-{run_id}"))
             .spawn(move || {
@@ -496,6 +498,9 @@ impl RunSupervisor {
                     }
                 }
                 let _ = pending.completion.send(result);
+                // The wake may be consumed before JoinHandle::is_finished. Reaping may
+                // now join this final unwind, before notifying launch consumers again.
+                done.store(true, Ordering::Release);
                 if let Ok(wake) = wake.lock() {
                     if let Some(sender) = wake.as_ref() {
                         let _ = sender.send(());
@@ -765,7 +770,7 @@ impl RunSupervisor {
             }
             workers.insert(run_id.into(), Worker {
                 parent_run_id: None, cancel: cancel.clone(), join: None, pending: None,
-                cancellation_done: Some(done.clone()),
+                completion_ready: Some(done.clone()),
             });
         }
         let preparation = (|| {
@@ -994,6 +999,9 @@ impl RunSupervisor {
         self.quiesce_run_workers(run_id, waiting, false)
     }
     fn quiesce_run_workers(&self, run_id: &str, waiting: impl Fn(&Run) -> bool, operations: bool) -> Result<()> {
+        self.drain_run_workers(run_id, waiting, operations, None)
+    }
+    fn drain_run_workers(&self, run_id: &str, waiting: impl Fn(&Run) -> bool, operations: bool, expected_worker: Option<&CancellationToken>) -> Result<()> {
         let serial = self
             .quiescence
             .lock()
@@ -1011,6 +1019,14 @@ impl RunSupervisor {
             .clone();
         let guard = serial.serial.lock().map_err(error)?;
         let result = (|| {
+            // Another reaper can finish this worker and admit its replacement before
+            // this caller acquires the per-Run fence. Never join that new execution.
+            if let Some(expected) = expected_worker {
+                if !self.workers.lock().map_err(error)?.get(run_id)
+                    .is_some_and(|worker| same_reservation(&worker.cancel, expected)) {
+                    return Ok(());
+                }
+            }
             if !waiting(
                 &self
                     .catalog
@@ -1043,11 +1059,17 @@ impl RunSupervisor {
             Ok(())
         })();
         // Other callers may still be leaving this rendezvous; only the real worker blocks start.
-        serial.active.store(false, Ordering::Release);
+        let drained = serial.active.swap(false, Ordering::AcqRel);
         drop(guard);
         let mut entries = self.quiescence.lock().map_err(error)?;
         if Arc::strong_count(&serial) == 2 {
             entries.remove(run_id);
+        }
+        drop(entries);
+        if drained {
+            if let Some(sender) = self.wake.lock().map_err(error)?.as_ref() {
+                let _ = sender.send(());
+            }
         }
         result
     }
@@ -1129,7 +1151,7 @@ impl RunSupervisor {
                     cancel: CancellationToken::default(),
                     join: None,
                     pending: None,
-                    cancellation_done: None,
+                    completion_ready: None,
                 });
                 worker.cancel.cancel();
                 worker.pending.take()
@@ -1285,20 +1307,16 @@ impl RunSupervisor {
             join.join().map_err(|_| error("operation worker panicked"))?;
         }
         let completed = {
-            let mut workers = self.workers.lock().map_err(error)?;
-            let ids: Vec<_> = workers
+            let workers = self.workers.lock().map_err(error)?;
+            workers
                 .iter()
                 .filter(|(_, worker)| worker.join.as_ref().is_some_and(JoinHandle::is_finished)
-                    || worker.cancellation_done.as_ref().is_some_and(|done| done.load(Ordering::Acquire)))
-                .map(|(id, _)| id.clone())
-                .collect();
-            ids.into_iter()
-                .filter_map(|id| workers.remove(&id).and_then(|worker| worker.join))
+                    || worker.completion_ready.as_ref().is_some_and(|done| done.load(Ordering::Acquire)))
+                .map(|(id, worker)| (id.clone(), worker.cancel.clone()))
                 .collect::<Vec<_>>()
         };
-        for join in completed {
-            join.join()
-                .map_err(|_| ExecutionError::new("worker_panicked", "worker panicked"))?;
+        for (id, worker) in completed {
+            self.drain_run_workers(&id, |_| true, false, Some(&worker))?;
         }
         Ok(())
     }

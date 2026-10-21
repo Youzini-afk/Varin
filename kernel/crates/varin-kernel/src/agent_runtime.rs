@@ -321,6 +321,16 @@ pub(crate) fn spawn(
                                     .record_recovery_failure("queued-runs", &error.to_string());
                             };
                         }
+                        // A durable ready fact can precede the original worker's
+                        // final unwind. Publish another read hint after reaping its
+                        // ownership fence, even when the durable cursor is unchanged.
+                        if let Some((_, epoch)) = identity.as_ref() {
+                            if let Ok(catalog) = runtime.catalog().lock() {
+                                if let Ok(cursor) = catalog.event_cursor() {
+                                    let _ = responses.send(json!({"v":PROTOCOL_VERSION,"kind":"runtime-event","kernelEpoch":epoch,"stream":"durable","cursor":cursor}));
+                                }
+                            }
+                        }
                     }
                 }
                 Command::Stop => {

@@ -25,7 +25,8 @@ private runtime protocol and product surfaces still move together.
 - 文件读取默认按 64 KiB 分页，并允许显式扩大；符号结果默认按层展开，支持子项展开、翻页和完整树模式。目录游标绑定查询，符号引用检查查询和结果版本。
 - 文件写入支持明确的创建和替换模式，保留版本冲突检查；修复 CRLF 多行编辑、缺失目录与空目录的状态区分等问题。
 - 模型可停止后台进程；工具参数错误保留字段与原因，子任务失败携带原始运行错误和事件引用。改进 MCP 错误分类、子任务准备过程和上下文准备失败诊断。
-- 修复只读检索预设误带恢复工具导致准备失败，以及子任务完成或恢复后父任务偶尔停在“可运行”状态的问题，保留旧执行线程退出前的防重入检查。
+- 修复只读检索预设误带恢复工具导致准备失败，以及子任务完成或恢复后父任务偶尔停在“可运行”状态的问题；旧执行线程退出后重新通知继续执行，保留收尾期间的防重入检查。
+- Linux 目录监听的同步检查支持完整长度的文件名和系统调用中断重试，失败信息保留具体目录和系统原因。
 - HTTP 关闭和进程信号接入完整 Host 资源清理并合并并发关闭；内核断连后的清理不再因诊断管道关闭而中断。
 - Host 关闭某项资源失败后继续等待其他资源收尾，避免语义索引异常跳过知识库关闭；保留检查点与退出时的原始存储错误。
 
@@ -66,7 +67,8 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 - Add explicit create/replace file-write modes while preserving version conflict protection. Repair CRLF edits and distinguish missing directories from empty ones.
 - Expose process stopping to models. Preserve argument fields and validation reasons, and include original runtime failures and event references in child reports. Improve MCP error classification and preparation diagnostics.
 - Continue ordered Host teardown after individual cleanup failures so a failed semantic index cannot skip closing knowledge stores. Preserve original checkpoint and shutdown storage errors.
-- Keep physical recovery tools out of the default read-only retrieval profile. Fix stale wait inspections masking launch readiness after child completion or recovery while retaining the original worker's drain fence against duplicate execution.
+- Keep physical recovery tools out of the default read-only retrieval profile. Notify continuation consumers again after the original worker has exited so an early ready event cannot strand a runnable parent. Retain the drain fence against duplicate execution.
+- Handle full-length filenames and interrupted system calls in Linux directory synchronization, preserving the directory and original system error on failure.
 - Route HTTP and signal shutdown through complete Host resource cleanup and coalesce concurrent stops. Keep kernel disconnect cleanup independent of a closed diagnostic pipe.
 
 #### Conversations and desktop

@@ -4,6 +4,55 @@ use serde_json::json;
 use std::time::{Duration, Instant};
 
 #[test]
+fn completion_wake_waits_for_the_original_worker_before_releasing_launch_ownership() {
+    let root = std::env::temp_dir().join(format!("varin-completion-drain-{}", uuid::Uuid::new_v4()));
+    let mut catalog = Catalog::open(&root).unwrap();
+    catalog.create_thread("thread", "branch").unwrap();
+    let receipt = catalog.submit(&crate::SubmitInput {
+        key: "input".into(), thread_id: "thread".into(), branch_id: "branch".into(),
+        expected_head: None, input: json!("ready"), configuration: json!({}),
+    }).unwrap();
+    let epoch = catalog.epoch();
+    catalog.commit_execution(&receipt.run_id, epoch, &ExecutionRecord::StateChanged {
+        state: RunState::Runnable, waiting_on: None,
+    }).unwrap();
+    let supervisor = Arc::new(RunSupervisor::new(catalog));
+    let (wake, wakes) = mpsc::channel();
+    supervisor.set_wake_sender(wake.clone()).unwrap();
+    let (release, held) = mpsc::channel();
+    let ready = Arc::new(AtomicBool::new(false));
+    let done = ready.clone();
+    let worker = thread::spawn(move || {
+        done.store(true, Ordering::Release);
+        wake.send(()).unwrap();
+        // Hold the final unwind after notifying, before JoinHandle::is_finished.
+        let _ = held.recv();
+    });
+    supervisor.workers.lock().unwrap().insert(receipt.run_id.clone(), Worker {
+        parent_run_id: None, cancel: CancellationToken::default(), join: Some(worker),
+        pending: None, completion_ready: Some(ready),
+    });
+    wakes.recv_timeout(Duration::from_secs(3)).unwrap();
+    let owner = supervisor.clone();
+    let reaper = thread::spawn(move || owner.advance_pending());
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !supervisor.quiescence.lock().unwrap().get(&receipt.run_id)
+        .is_some_and(|drain| drain.active.load(Ordering::Acquire)) {
+        assert!(Instant::now() < deadline, "completion wake must join the original worker");
+        thread::yield_now();
+    }
+    let available_while_draining = supervisor.start_available(&receipt.run_id).unwrap();
+    release.send(()).unwrap();
+    reaper.join().unwrap().unwrap();
+    assert!(!available_while_draining, "final unwind still owns execution resources");
+    assert!(supervisor.start_available(&receipt.run_id).unwrap());
+    // A ready notification consumed during teardown must get a new read hint.
+    wakes.recv_timeout(Duration::from_secs(3)).unwrap();
+    drop(supervisor);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn stale_wait_check_does_not_hide_an_unowned_runnable_run() {
     let root = std::env::temp_dir().join(format!("varin-stale-wait-{}", uuid::Uuid::new_v4()));
     let mut catalog = Catalog::open(&root).unwrap();
@@ -102,7 +151,7 @@ fn simultaneous_wait_teardown_drains_once_without_holding_global_controls() {
             cancel: CancellationToken::default(),
             join: Some(worker),
             pending: None,
-            cancellation_done: None,
+            completion_ready: None,
         },
     );
     let (done, completed) = mpsc::channel();
