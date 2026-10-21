@@ -99,6 +99,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
           const combined = call.signal;
           return consume({ decide: async (input, guard, materialFence) => {
             const batchReceipts: InferenceReceipt[] = [];
+            const failedRoutes = new Map<string, number>();
             const batchId = randomUUID();
             const base: HarnessFastDecisionResult = { batchId, providerId: binding.providerId, modelId: binding.modelId,
               answers: [], missing: input.questions.map(question => question.id) };
@@ -135,7 +136,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 const selectedBinding: InferenceBinding = { purpose, providerId: binding.providerId, modelId: binding.modelId,
                   requestKind: route.requestKind, configurationId: binding.configurationId,
                   executor: { kind: 'http', api: provider.api, endpoint: destination, credentialScope: provider.credentialScope } };
-                return call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
+                const response = await call.request({ onReceipt: receipt => batchReceipts.push(receipt), binding: selectedBinding, request: { input, wire: JSON.parse(init.body) }, destination, init, connection,
                   check: async requestSignal => { await assertAvailable(requestSignal); await guard?.(); requestSignal.throwIfAborted(); },
                   ...(materialFence ? { beforeDispatch: materialFence } : {}),
                   observe: raw => {
@@ -144,6 +145,11 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                       rawUsage: route.requestKind === 'model_compute' ? classifierRawUsage(provider.api, raw) : null,
                       valid: route.requestKind !== 'model_compute' || classifierWireResponseValid(provider.api, binding.modelId, input.questions, raw) };
                   } });
+                // A successful retry clears only its own route. Parallel preparation
+                // responses must not erase another endpoint's failed HTTP status.
+                if (response.ok) failedRoutes.delete(destination);
+                else failedRoutes.set(destination, response.status);
+                return response;
               };
               const result = await requestClassifier({ baseUrl: provider.baseUrl, ...(provider.endpoint ? { endpoint: provider.endpoint } : {}),
                 ...(provider.decisionPaths ? { paths: provider.decisionPaths } : {}),
@@ -171,8 +177,16 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               const result = { ...observed(), ...answers };
               if (receipts().length) await assertDelivery(result);
               const wasCancelled = call.cancelled;
+              const failedRoute = [...failedRoutes].at(-1);
+              const httpFailure = failedRoute
+                ? `Decision HTTP ${failedRoute[1]} (${new URL(failedRoute[0]).pathname}). ${failedRoute[1] === 404
+                  ? 'Check the decision endpoint path in model service settings.'
+                  : failedRoute[1] === 401 || failedRoute[1] === 403
+                    ? 'Check the selected provider credentials and model access.'
+                    : failedRoute[1] === 429 ? 'The provider rejected the request due to its rate or usage limit.'
+                      : 'Check the provider response in the original inference receipt.'}` : undefined;
               throw new ResearchDecisionFailure(wasCancelled ? 'Decision cancelled; inspect its original inference receipt.'
-                : 'Decision failed; inspect its original inference receipt and provider configuration.', result, wasCancelled);
+                : httpFailure ?? 'Decision failed; inspect its original inference receipt and provider configuration.', result, wasCancelled);
             }
           } });
       };

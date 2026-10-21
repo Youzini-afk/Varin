@@ -38,6 +38,41 @@ it('embedding reserves model context space and clamps explicit chunk budgets to 
 const requestOptions: InferenceRequestsOptions = { kernel: { agentRuntimeRequest: forbidden },
   runtime: { onEvent: () => () => {}, onReady: () => () => {}, onExit: () => () => {} }, egress: { prepare: forbidden } };
 const requestOwner = { run: forbidden } as unknown as InferenceRequests;
+it('reports the failed decision route and uses a corrected path without exposing upstream bodies', async () => {
+  let endpoint = '/systemone';
+  const fetch = vi.fn(async (url: string) => url.endsWith('/decisions')
+    ? Response.json({ answers: { relevant: { type: 'noul', noul: 0.9 } } })
+    : Response.json({ error: 'private upstream response and credential' }, { status: 404 }));
+  const connection = { fetch, policy: {} as never };
+  const owner = createDecisionInference({ resolveDecisionBinding: async () => ({ ...provider(), endpoint,
+    requestUrl: `https://model.invalid/v1${endpoint}`,
+    routes: [{ requestUrl: `https://model.invalid/v1${endpoint}`, requestKind: 'model_compute' }],
+  }) }, async () => settings, { ...requestOptions, egress: { prepare: async () => connection } }, requestOwner);
+  const signal = new AbortController().signal;
+  const call = { signal, cancelled: false, request: async (input: Parameters<InferenceCall['request']>[0]) => {
+    await input.check(signal);
+    return input.connection.fetch(input.destination, input.init);
+  } } as unknown as InferenceCall;
+  const decide = async () => {
+    const captured = await owner.capture('explore');
+    if (captured.status !== 'ready') throw new Error(captured.status);
+    try {
+      return await captured.lease.consume(call, session => session.decide({ purpose: 'explore', goal: 'Find relevant code',
+        materials: [], questions: [{ id: 'relevant', kind: 'judge', instructions: 'Is this relevant?' }] }));
+    } finally { captured.lease.release(); }
+  };
+  try {
+    const failure = await decide().catch((error: unknown) => error);
+    expect(failure).toMatchObject({ message: expect.stringContaining('HTTP 404 (/v1/systemone)'), result: { answers: [], missing: ['relevant'] } });
+    expect(String(failure)).toContain('Check the decision endpoint path');
+    expect(String(failure)).not.toMatch(/private|credential|fixture-only/);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    endpoint = '/decisions';
+    await expect(decide()).resolves.toMatchObject({ answers: [{ id: 'relevant', value: 0.9 }], missing: [] });
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual(['https://model.invalid/v1/systemone', 'https://model.invalid/v1/decisions']);
+  } finally { owner.close(); }
+});
+
 it('embedding retries initial tokenizer preparation after kernel startup fails', async () => {
   const captured = provider();
   const tokenizer = vi.fn(async (method: string, params: { texts?: string[] }) => {

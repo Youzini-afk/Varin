@@ -294,7 +294,7 @@ export function createRetrievalOwner({ sources, pipelines, preparePipeline, infe
               stage('model', decision.status === 'failed' || decision.status === 'cancelled' ? decision.status
                 : decision.missing || decision.unevaluatedMaterials ? 'partial' : decision.status === 'used' ? 'ready' : 'empty');
               if (decision.status === 'failed') run.requestDelivery('failed');
-              if (decision.missing) result.diagnostics!.push({ kind: 'decision-incomplete',
+              if (decision.missing && decision.status !== 'failed' && decision.status !== 'cancelled') result.diagnostics!.push({ kind: 'decision-incomplete',
                 message: `The selected model left ${decision.missing} judgments unanswered; available evidence and valid decisions were kept.` });
             }
             if (details.model) {

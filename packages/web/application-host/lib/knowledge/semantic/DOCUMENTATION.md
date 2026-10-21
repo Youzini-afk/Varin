@@ -14,6 +14,9 @@ their owners. Catalog owns native request admission,
 dispatch, original receipt, Goal usage and recovery. Background document indexing retains its
 separate existing index owner below. Request/response/raw-usage bodies live in ContentStore. Private retained
 credentials/headers never enter those records.
+Decision failures expose the observed HTTP status and endpoint path with an actionable hint,
+without copying provider error bodies, URL credentials or query parameters. A successful retry
+clears its route's HTTP failure. Failed requests are not described as unanswered model judgments.
 
 Ordinary configuration edits do not redirect an accepted request. Explicit disable/revocation and
 original Goal/parent control fence dispatch. Runtime events reconcile the exact active Operation;
