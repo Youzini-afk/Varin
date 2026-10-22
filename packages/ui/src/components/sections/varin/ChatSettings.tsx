@@ -97,8 +97,9 @@ export const ChatSettings: React.FC = () => {
       <div data-settings-item="chat.reasoning" className="divide-y divide-border/40">
         <Toggle label={t('settings.chat.thinking')} item="chat.reasoning-traces" checked={state.showReasoningTraces}
           onChange={actions.setShowReasoningTraces} />
-        {state.showReasoningTraces ? <div className="pl-5"><Toggle label={t('settings.chat.collapseThinking')} checked={state.collapsibleThinkingBlocks}
-          onChange={actions.setCollapsibleThinkingBlocks} /></div> : null}
+        {state.showReasoningTraces ? <div className="pl-5"><Toggle label={t('settings.chat.autoExpandThinking')}
+          info={t('settings.chat.autoExpandThinkingHint')} checked={!state.collapsibleThinkingBlocks}
+          onChange={value => actions.setCollapsibleThinkingBlocks(!value)} /></div> : null}
       </div>
       <div data-settings-item="chat.expanded-tools" className="divide-y divide-border/40">
         <Toggle label={t('settings.chat.expandCommands')} checked={state.showExpandedBashTools}

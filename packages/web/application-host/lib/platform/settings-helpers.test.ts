@@ -63,6 +63,16 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('shows thinking by default and preserves an explicit visibility preference', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.formatSettingsResponse({}).showReasoningTraces).toBe(true);
+    expect(helpers.formatSettingsResponse({}).collapsibleThinkingBlocks).toBe(true);
+    for (const showReasoningTraces of [false, true]) {
+      const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ showReasoningTraces }));
+      expect(helpers.formatSettingsResponse(saved).showReasoningTraces).toBe(showReasoningTraces);
+    }
+  });
+
   it('keeps VM configuration usable through the same write/read path as Settings', () => {
     const helpers = createTestHelpers();
     const update = helpers.sanitizeSettingsUpdate({ computerVmProviders: [{ id: 'hv1', kind: 'libvirt', uri: 'qemu+ssh://host/system', storagePool: 'data' }] });

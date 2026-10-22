@@ -1,0 +1,94 @@
+.thinking-block {
+  --thinking-ease: cubic-bezier(.4, 0, .2, 1);
+  min-width: 0;
+  margin-block: .25rem;
+  color: var(--muted-foreground);
+}
+
+.thinking-heading {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  width: 100%;
+  min-width: 0;
+  padding: .375rem .5rem .375rem 0;
+  border-radius: .5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+.thinking-heading:hover:not(:disabled) { background: color-mix(in oklab, var(--muted) 25%, transparent); }
+.thinking-heading:focus-visible, .thinking-scroll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.thinking-heading:disabled { cursor: default; }
+.thinking-label { flex-shrink: 0; font-weight: 500; color: color-mix(in oklab, var(--foreground) 80%, transparent); }
+.thinking-chevron { transition: transform 300ms var(--thinking-ease); }
+.thinking-block[data-open="true"] .thinking-chevron { transform: rotate(90deg); }
+
+.thinking-preview {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  height: 1.75em;
+  line-height: 1.75;
+  overflow: hidden;
+  overflow-anchor: none;
+  pointer-events: none;
+  opacity: .75;
+  mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  transition: opacity 200ms ease;
+}
+.thinking-preview-text { display: block; overflow-wrap: anywhere; }
+.thinking-block[data-open="true"] .thinking-preview { opacity: 0; }
+
+/* Keep the body mounted during collapse; native details hides it before a closing animation. */
+.thinking-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 320ms var(--thinking-ease), opacity 220ms ease;
+}
+.thinking-block[data-open="true"] .thinking-panel { grid-template-rows: 1fr; opacity: 1; }
+.thinking-panel-clip { min-height: 0; overflow: hidden; }
+.thinking-window {
+  position: relative;
+  margin: .125rem 0 .5rem .375rem;
+  border-left: 1px solid color-mix(in oklab, var(--border) 65%, transparent);
+}
+.thinking-scroll {
+  /* Roughly half a desktop viewport: enough space for sustained reading, with no text truncation. */
+  max-height: min(34rem, max(20rem, 52dvh));
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 25%, transparent) transparent;
+  border-radius: .25rem;
+}
+.thinking-body { padding: .375rem .75rem .625rem .875rem; }
+.thinking-body .markdown-content { min-width: 0; overflow-wrap: anywhere; }
+.thinking-body .markdown-content > :first-child { margin-top: 0; }
+.thinking-body .markdown-content > :last-child { margin-bottom: 0; }
+.thinking-follow {
+  position: absolute;
+  bottom: .625rem;
+  right: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .375rem .625rem;
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 2px 8px #0002;
+  cursor: pointer;
+}
+.thinking-follow:hover { background: var(--muted); }
+@media (max-height: 600px) { .thinking-scroll { max-height: 64dvh; } }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-panel, .thinking-chevron, .thinking-preview, .thinking-heading { transition: none; }
+}

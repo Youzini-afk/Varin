@@ -73,7 +73,7 @@ export const projectChatSortedTurn = (
         activityAnchorId ??= source.id;
         activity.push({
           content,
-          id: `${source.id}:thinking:${index}`,
+          id: `${message.id}:thinking:${index}`,
           kind: 'thinking',
           sourceId: source.id,
           streaming: streaming && index === message.content.length - 1,

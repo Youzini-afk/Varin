@@ -680,10 +680,11 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'chat.reasoning', category: 'chat', owner: 'app',
-    field: { path: 'collapsibleThinkingBlocks', kind: 'boolean' },
+    field: { path: 'collapsibleThinkingBlocks', kind: 'boolean',
+      note: 'true starts thinking in a one-line preview; false automatically expands its reading window. Manual expansion and collapse remain available.' },
     apply: 'immediate',
     ui: { page: 'chat', titleKey: 'settings.varin.visual.section.reasoning',
-      keywords: ['thinking', 'traces'] },
+      keywords: ['thinking', 'traces', 'expand', 'collapse'] },
   },
   {
     id: 'chat.sticky-user-header', category: 'chat', owner: 'app',

@@ -141,6 +141,14 @@ reports usage. Sidebar message bodies remain paginated, and unavailable billing 
 `timelineViewStore` owns scroll positions only. Message handoff animation targets the history ID from
 the accepted input receipt. A retained outgoing scene is inert during conversation switching.
 
+Thinking is visible by default. `collapsibleThinkingBlocks` selects a one-line live preview versus
+automatic expansion; it never prevents manual folding. `ChatThinkingBlock` follows wrapped preview
+lines, and expanded text grows into a bounded reading viewport. Scrolling up pauses that viewport's
+following until the reader returns to the end or selects Follow new output. Disclosure and reading
+position use the native assistant message ID across live/history handoff, retained only as disposable
+presentation state. The animated fold keeps its body mounted and inert while closed; reduced-motion
+preferences disable movement.
+
 `ThreadContent`/`ThreadMedia` consume declared typed text/media holders, not arbitrary JSON that looks
 like an image descriptor. Visible image previews and explicit attachment reads retain the original holder, part ordinal and execution
 identity. Object URLs belong to the mounted view and are revoked on cancellation or target change.

@@ -2,7 +2,7 @@ import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
 import React from 'react';
 import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard';
 import type { JsonValue } from '@varin/protocol';
-import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry, ChatThinkingContent, ChatToolCall, ChatToolResultMessage, ChatUserContent, ChatUserMessage } from './types';
+import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry, ChatToolCall, ChatToolResultMessage, ChatUserContent, ChatUserMessage } from './types';
 import { Icon } from '@/components/icon/Icon';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
@@ -54,6 +54,7 @@ import { explorePresentation } from './explorePresentation';
 import { ChatThreadMessageCard } from './ChatThreadMessageCard';
 import { ChatReceivedThreadMessage } from './ChatReceivedThreadMessage';
 import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
+import { ChatThinkingBlock } from './ChatThinkingBlock';
 import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
@@ -135,15 +136,6 @@ const formatDuration = (durationMs: number): string => {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.round(seconds % 60);
   return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-};
-
-const thinkingPreview = (value: string): string => {
-  const normalized = value
-    .replace(/[`*_>#-]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (normalized.length <= 80) return normalized;
-  return `${normalized.slice(0, 79).trimEnd()}…`;
 };
 
 const ChatUserContentView: React.FC<{
@@ -591,43 +583,6 @@ const MetaEntry: React.FC<{
   </div>
 );
 
-const ChatThinkingBody: React.FC<{
-  content: ChatThinkingContent;
-  messageId: string;
-  streaming: boolean;
-}> = ({ content, messageId, streaming }) => {
-  if (content.redacted) return null;
-  // Show received reasoning immediately. The Markdown renderer's paced reveal
-  // can lag behind a busy stream and replay thinking after answer text starts.
-  if (streaming) {
-    return <div className="markdown-content markdown-reasoning whitespace-pre-wrap break-words">{content.thinking}</div>;
-  }
-  return <MarkdownRenderer content={content.thinking} messageId={messageId} variant="reasoning" />;
-};
-
-const ChatThinkingBlock: React.FC<{
-  content: ChatThinkingContent; messageId: string; streaming: boolean; label: string;
-}> = ({ content, messageId, streaming, label }) => {
-  const visible = useUIStore(state => state.showReasoningTraces);
-  const collapse = useUIStore(state => state.collapsibleThinkingBlocks);
-  const [open, setOpen] = React.useState(streaming || !collapse);
-  React.useEffect(() => { setOpen(streaming || !collapse); }, [streaming, collapse]);
-  if (!visible || (!content.redacted && !content.thinking.trim())) return null;
-  const preview = content.redacted ? '' : thinkingPreview(content.thinking);
-  return <details className="group/thinking my-1" open={open && !content.redacted}
-    onToggle={event => setOpen(event.currentTarget.open)} data-conversation-activity-kind="thinking">
-    <summary className="flex cursor-pointer list-none items-center gap-1.5 rounded-xl py-1.5 pr-2 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
-      <Icon name="brain" className="size-3.5 shrink-0" />
-      <span className="shrink-0 font-medium text-foreground/80">{label}{content.redacted ? ' (redacted)' : ''}</span>
-      {!streaming && !open && preview ? <span className="min-w-0 flex-1 truncate opacity-75">{preview}</span> : <span className="flex-1" />}
-      <Icon name="arrow-right-s" className="size-3.5 shrink-0 transition-transform group-open/thinking:rotate-90" />
-    </summary>
-    {!content.redacted ? <div className="ml-2 border-l border-border/60 py-1 pl-3 text-muted-foreground">
-      <ChatThinkingBody content={content} messageId={messageId} streaming={streaming} />
-    </div> : null}
-  </details>;
-};
-
 const ChatToolSequence: React.FC<{
   calls: ChatToolCall[];
   cwd: string;
@@ -708,8 +663,8 @@ const AssistantMessage: React.FC<{
         continue;
       }
       if (content.type === 'thinking') {
-        rendered.push(<ChatThinkingBlock key={`${entryId}:thinking:${index}`} content={content}
-          messageId={`${entryId}:thinking:${index}`} label={hiddenThinkingLabel || 'Thinking'}
+        rendered.push(<ChatThinkingBlock key={`${message.id}:thinking:${index}`} content={content}
+          messageId={`${message.id}:thinking:${index}`} label={hiddenThinkingLabel || 'Thinking'}
           streaming={streaming && message.stopReason === 'pending' && index === message.content.length - 1} />);
         index += 1;
         continue;
