@@ -753,6 +753,9 @@ export interface ComputerOfficeResult {
   text?: string;
   target?: string;
   modified?: boolean;
+  /** Readback captured around this write in the same live document. */
+  changes?: { sheet: string; range: string; before: unknown[][]; after: unknown[][] };
+  changesUnavailable?: string;
   error?: string;
 }
 

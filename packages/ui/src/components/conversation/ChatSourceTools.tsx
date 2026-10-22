@@ -1,7 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
-import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView';
 import { isExternalHttpUrl, openExternalUrl } from '@/lib/url';
 import { useI18n } from '@/lib/i18n';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
@@ -77,29 +76,5 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
     {decision && Boolean(data.fallback) && <p className="typography-micro text-muted-foreground">{t('chat.tools.orderFallback')}</p>}
     <ToolResultNotice data={data} status={status} />
     {output}{details}
-  </section>;
-}
-
-export function ChatMcpTool({ call, execution, result, status, generating, output, details }: ToolViewProps) {
-  const { t } = useI18n();
-  const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
-  const source = call.name.startsWith('mcp__') ? call.name.slice(5).split('__') : [];
-  const server = toolText(args.server) || source[0] || 'MCP';
-  const name = toolText(args.tool) || source.slice(1).join('__') || call.name;
-  const job = execution?.operation?.host_job?.mcpTask;
-  const objects = Object.fromEntries(Object.entries(data).filter(([key]) => !['content', 'isError', 'structuredContent', '_meta'].includes(key)));
-  return <section className="tool-mcp-result">
-    <div className="tool-service-byline"><Icon name="plug" className="size-3.5" /><span>{server}</span><span>·</span><span>{name}</span>
-      {status !== 'success' && <ToolStatus status={status} generating={generating} />}</div>
-    {job && <div className="tool-remote-task typography-meta">
-      <span>{t('chat.tools.remoteTask')} · {job.task.status}</span>
-      {job.availability === 'unavailable' && <p className="text-[var(--status-warning)]">{t('chat.tools.observationUnavailable')}</p>}
-      {job.problem && <p className="text-muted-foreground">{job.problem.kind} · {job.problem.stage}</p>}
-    </div>}
-    {data.isError === true && <p className="typography-meta text-destructive">{t('chat.tools.remoteFailure')}</p>}
-    {data.structuredContent !== undefined && <div className="tool-mcp-objects"><JsonSummaryView data={data.structuredContent} /></div>}
-    {output}
-    {data.structuredContent === undefined && Object.keys(objects).length > 0 && <JsonSummaryView data={objects} />}
-    <ToolResultNotice data={data} status={status} />{details}
   </section>;
 }

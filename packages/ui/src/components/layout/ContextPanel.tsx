@@ -48,6 +48,7 @@ const PullRequestView = lazyWithChunkRecovery(() => import('@/components/views/P
 const PlanView = lazyWithChunkRecovery(() => import('@/components/views/PlanView').then((module) => ({ default: module.PlanView })));
 const ComputerWorkSurface = lazyWithChunkRecovery(() => import('@/components/sections/computers/ComputerWorkSurface').then((module) => ({ default: module.ComputerWorkSurface })));
 const ThreadFamilyPanel = lazyWithChunkRecovery(() => import('./ThreadFamilyPanel').then(module => ({ default: module.ThreadFamilyPanel })));
+const MaterialReaderPanel = lazyWithChunkRecovery(() => import('./MaterialReaderPanel').then(module => ({ default: module.MaterialReaderPanel })));
 
 const CONTEXT_PANEL_MIN_WIDTH = 1;
 const CONTEXT_PANEL_MAX_WIDTH = 1400;
@@ -115,6 +116,7 @@ const getModeLabel = (
   if (mode === 'diff') return t('contextPanel.mode.diff');
   if (mode === 'plan') return t('contextPanel.mode.plan');
   if (mode === 'ui') return t('ui.content.title');
+  if (mode === 'material') return t('chat.tools.materials');
   if (mode === 'browser') return t('contextPanel.mode.browser');
   if (mode === 'git') return t('layout.rightSidebar.git');
   if (mode === 'pr') return t('contextPanel.mode.pr');
@@ -181,6 +183,7 @@ const getTabLabel = (
 };
 
 const getTabIcon = (tab: { thread?: ThreadIdentity; mode: ContextPanelMode; targetPath: string | null }): React.ReactNode | undefined => {
+  if (tab.mode === 'material') return <Icon name="book-2" className="h-3.5 w-3.5" />;
   if (tab.mode === 'threads') return <Icon name="chat-1" className="h-3.5 w-3.5" />;
   if (tab.mode === 'file') {
     return tab.targetPath
@@ -839,6 +842,8 @@ export const ContextPanel: React.FC = () => {
             ? <ThreadFamilyPanel active={isOpen} identity={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
             ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
+        : activeTab?.mode === 'material' && activeTab.targetPath && activeTab.thread
+            ? isOpen && <MaterialReaderPanel key={activeTab.id} identity={activeTab.thread} snapshotId={activeTab.targetPath} line={activeTab.materialLine} title={activeTab.label || t('chat.tools.materials')} readOnly={activeTab.readOnly} onClose={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'recovery'
             ? <WorkspaceRecoveryPanel />
         : activeTab?.mode === 'git'

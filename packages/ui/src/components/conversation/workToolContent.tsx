@@ -12,6 +12,7 @@ import { toolRecord, toolText } from './toolInvocation';
 import { toolValueLabel } from './toolLabels';
 import { ChildState } from './childPresentation';
 import { ThreadChildReport } from '../thread/ThreadChildReport';
+import { ToolDisclosure } from './ToolDisclosure';
 
 const records = (value: unknown) => Array.isArray(value) ? value.map(toolRecord) : [];
 const valueText = (value: unknown) => typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);
@@ -57,15 +58,18 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
   }
   if (call.name === 'memory') {
     const changes = records(toolRecord(data.memoryReceipt).changes);
-    const notes = records(data.notes);
+    const notes = data.item ? [toolRecord(data.item)] : records(data.notes);
     if (!notes.length && !changes.length) return null;
     return <div className="tool-memory-notes">{(changes.length ? changes : notes).map((entry, index) => {
       const note = changes.length ? toolRecord(entry.note) : entry;
-      const scope = toolRecord(entry.scope ?? note.scope);
+      const scope = toolRecord(entry.scope ?? note.scope), source = toolRecord(note.source);
       return <div key={String(entry.id ?? index)} className="tool-memory-note">
         <p className="typography-micro text-muted-foreground">{toolValueLabel(scope.kind, t)}{scope.id ? ' · ' + toolText(scope.id) : ''}
           {changes.length > 0 && <span> · {t(entry.note === null ? 'chat.tools.deleted' : 'chat.tools.saved')}</span>}</p>
         {typeof note.content === 'string' && <blockquote className="tool-memory-text">{note.content}</blockquote>}
+        {typeof source.label === 'string' && <ToolDisclosure id={'memory-source:' + call.id + ':' + index} className="tool-document-text"><summary className="typography-micro text-muted-foreground">{t('chat.tools.memorySource')}</summary><p className="typography-meta">{source.label}</p></ToolDisclosure>}
+        {data.sources !== undefined && <ToolDisclosure id={'memory-sources:' + call.id + ':' + index} className="tool-document-text"><summary className="typography-micro text-muted-foreground">{t('chat.tools.memorySource')}</summary><JsonSummaryView data={data.sources} /></ToolDisclosure>}
+        {data.chain !== undefined && <ToolDisclosure id={'memory-chain:' + call.id + ':' + index} className="tool-document-text"><summary className="typography-micro text-muted-foreground">{t('chat.tools.memoryHistory')}</summary><JsonSummaryView data={data.chain} /></ToolDisclosure>}
       </div>;
     })}</div>;
   }
@@ -113,15 +117,6 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
       <p className="whitespace-pre-wrap typography-meta">{toolText(entry.preview)}</p>
       {entry.bodyTruncated === true && <p className="typography-micro text-muted-foreground">{t('chat.tools.partialResult')}</p>}
     </div>)}</div>;
-  }
-  if (call.name === 'follow_up') {
-    const followup = toolRecord(data.followup), trigger = data.registrationTrigger ?? followup.trigger ?? data.trigger;
-    if (!trigger && !data.accepted) return null;
-    return <div className="tool-followup-record">
-      <p className="typography-meta">{toolText(data.followupId) || toolText(followup.id)}{followup.state ? ' · ' + toolText(followup.state) : ''}</p>
-      {trigger !== undefined && <div><p className="typography-micro text-muted-foreground">{t('chat.tools.trigger')}</p><JsonSummaryView data={trigger} /></div>}
-      {typeof data.instruction === 'string' && <p className="whitespace-pre-wrap typography-meta">{data.instruction}</p>}
-    </div>;
   }
   if (call.name === 'goal_report' && data.state) return <div className="tool-goal-record"><p className="typography-meta">{toolText(data.state)}</p>
     {typeof args.reason === 'string' && <p className="whitespace-pre-wrap typography-meta">{args.reason}</p>}</div>;

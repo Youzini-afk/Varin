@@ -147,8 +147,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
-  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, openFile, fileTarget, memory, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
-    [api, identity, head, readOnly, onQuote, openFile, fileTarget, memory, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, openFile, fileTarget, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
+    [api, identity, head, readOnly, onQuote, openFile, fileTarget, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}

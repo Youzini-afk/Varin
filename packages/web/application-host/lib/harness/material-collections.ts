@@ -314,5 +314,14 @@ export const createMaterialCollections = (workingStates: WorkspaceWorkingStateRo
     payload.members.push(member); payload.updatedAt = now();
     return commit(params, ctx, payload, selected.record, [...selected.record.references, ...(ref ? refs(member, ref) : [])], member.memberId);
   };
-  return { execute, receipt };
+  const inspect = async (id: string, ctx: MaterialCollectionContext): Promise<MaterialsCollectionResult> => {
+    ctx.signal?.throwIfAborted();
+    return inScope(ctx, "material-collections-read", async context => {
+      const found = await load(context, id);
+      if (!found || !visible(found.payload, found.record, ctx.authority, await grantsFor(context, ctx.authority)))
+        return { status: "not-found", message: "Collection is missing or not readable" };
+      return { status: "ok", collection: collection(found.payload) };
+    });
+  };
+  return { execute, receipt, inspect };
 };

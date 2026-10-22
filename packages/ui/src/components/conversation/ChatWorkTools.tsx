@@ -3,7 +3,6 @@ import { parseTodoPlan } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView';
 import { useI18n } from '@/lib/i18n';
-import { useUIStore } from '@/stores/useUIStore';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
 import { ToolResultNotice } from './ChatResourceTools';
@@ -25,7 +24,7 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
   const content = toolText(data.content) || toolText(toolRecord(data.note).content);
   const objectResult = result?.details !== undefined && Object.keys(data).length > 0;
   const purposeContent = workToolContent(call, data, t, cwd, conversation);
-  return <ToolDisclosure id={'tool:' + call.id} className={'tool-work-record group ' + (plan ? 'tool-plan-record' : memory ? 'tool-memory-record' : '')}>
+  return <ToolDisclosure id={'tool:' + call.id} initiallyExpanded={memory && Boolean(purposeContent || content)} className={'tool-work-record group ' + (plan ? 'tool-plan-record' : memory ? 'tool-memory-record' : '')}>
     <summary className="tool-work-heading"><Icon name={plan ? 'list-check-2' : memory ? 'brain' : settings ? 'settings-3'
       : call.name.includes('child') ? 'group' : call.name === 'ask_user' || call.name === 'question_status' ? 'question' : 'file-list-2'} className="size-3.5 shrink-0" />
       <span className="typography-meta">{label}</span>
@@ -52,34 +51,15 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
   </ToolDisclosure>;
 }
 
-export function ChatArtifactTool({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
+export function ChatArtifactTool({ call, execution, result, status, generating, output, details }: ToolViewProps) {
   const { t } = useI18n();
-  const conversation = useOptionalConversationPresentation();
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
-  const computer = call.name.startsWith('computer_');
-  const label = computer ? t(call.name === 'computer_observe' ? 'chat.tools.observeComputer'
-    : call.name.startsWith('computer_browser') ? 'chat.tools.browser' : call.name.startsWith('computer_office') ? 'chat.tools.office' : 'chat.tools.computer')
-    : t(call.name === 'image_edit' ? 'chat.tools.editImage' : 'chat.tools.generateImage');
-  const action = toolRecord(args.action ?? args.act);
-  const observation = toolRecord(data.observation ?? data.result ?? data);
-  const app = toolRecord(observation.app);
-  const windowTitle = [toolText(app.name) || toolText(observation.app), toolText(observation.windowTitle) || toolText(app.windowTitle)].filter(Boolean).join(' · ');
-  const observationLines = Array.isArray(observation.treeLines) ? observation.treeLines : Array.isArray(observation.lines) ? observation.lines : [];
-  const target = toolText(args.url) || toolText(action.url) || toolText(args.path) || toolText(args.prompt) || toolText(args.desktopId);
-  return <section className={computer ? 'tool-computer-event' : 'tool-media-result'}>
-    <div className="tool-artifact-heading"><Icon name={computer ? 'computer' : 'file-image'} className="size-3.5 shrink-0" />
-      <span className="typography-meta">{label}</span><span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground" title={target}>{target}</span>
+  const target = toolText(args.prompt);
+  return <section className="tool-media-result">
+    <div className="tool-artifact-heading"><Icon name="file-image" className="size-3.5 shrink-0" />
+      <span className="typography-meta">{t(call.name === 'image_edit' ? 'chat.tools.editImage' : 'chat.tools.generateImage')}</span>
+      <span className="min-w-0 flex-1 truncate typography-micro text-muted-foreground" title={target}>{target}</span>
       {status !== 'success' && <ToolStatus status={status} generating={generating} />}</div>
-    <ToolResultNotice data={data} status={status} />
-    {computer && windowTitle && <p className="typography-micro text-muted-foreground">{windowTitle}</p>}
-    {computer && observation !== data && <ToolResultNotice data={observation} status={status} />}
-    {observationLines.length > 0 && <ToolDisclosure id={'observation:' + call.id} className="tool-document-text">
-      <summary className="typography-micro text-muted-foreground">{t('chat.tools.observedContent')}</summary>
-      <pre className="tool-process-output" tabIndex={0}>{observationLines.filter(line => typeof line === 'string').join('\n')}</pre>
-    </ToolDisclosure>}
-    {typeof observation.text === 'string' && <p className="whitespace-pre-wrap typography-meta">{observation.text}</p>}
-    {output}
-    {computer && conversation && <div className="tool-inline-actions"><button type="button" onClick={() => useUIStore.getState().openContextPanelTab(cwd, { mode: 'computer', thread: conversation.identity })}>{t('chat.tools.openComputer')} <Icon name="external-link" className="size-3" /></button></div>}
-    {details}
+    <ToolResultNotice data={data} status={status} />{output}{details}
   </section>;
 }

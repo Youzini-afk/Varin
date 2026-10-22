@@ -1,8 +1,10 @@
 import { dict as enDict, type I18nKey } from './en';
 import { settingsDict } from './ko.settings';
+import { toolPurposeKo } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...toolPurposeKo,
   ...settingsDict,
   "chat.toolResult.fileContents": "파일 내용: {path}",
   "chat.toolResult.byteRange": "{total}바이트 중 {bytes}바이트 읽음 · 오프셋 {offset}",

@@ -10,6 +10,14 @@ export const workToolLabels: Record<string, I18nKey> = {
 };
 
 const states: Record<string, I18nKey> = {
+  opening: 'chat.tools.state.opening', live: 'chat.tools.state.live', stopping: 'chat.tools.state.stopping', stopped: 'chat.tools.state.stopped',
+  not_created: 'chat.tools.state.direct', absent: 'chat.tools.state.missing', resolved: 'chat.tools.state.ready',
+  installed_disabled: 'chat.tools.state.installedDisabled', candidate_staged: 'chat.tools.state.candidateStaged',
+  application_requested: 'chat.tools.state.applicationRequested', selected: 'chat.tools.state.selected',
+  working: 'chat.timeline.tools.running', input_required: 'chat.timeline.tools.waiting', active: 'chat.tools.state.active',
+  paused: 'chat.tools.state.paused', closed: 'chat.tools.state.stopped', installed: 'chat.tools.state.ready',
+  observed: 'chat.tools.conditionMet', held: 'chat.timeline.tools.waiting', admitted: 'chat.timeline.tools.background',
+  control_paused: 'chat.tools.state.paused', manual_pause: 'chat.tools.state.paused',
   ready: 'chat.tools.state.ready', applied: 'chat.tools.state.applied', partial: 'chat.tools.state.partial',
   failed: 'chat.timeline.tools.error', cancelled: 'chat.timeline.tools.cancelled', unknown: 'chat.timeline.tools.unknown',
   pending: 'chat.tools.state.pending', in_progress: 'chat.timeline.tools.running', running: 'chat.timeline.tools.running',

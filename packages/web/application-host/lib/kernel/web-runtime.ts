@@ -173,6 +173,24 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     return retained;
   };
   const user: ThreadMaterialsAPI = {
+    async collection(identity, request, signal = new AbortController().signal) {
+      const fields = request?.action === 'inspect' ? ['action', 'collectionId'] : ['action', 'collectionId', 'targetThreadId', 'key'];
+      if (!object(request) || !['inspect', 'share'].includes(request.action) || Object.keys(request).some(key => !fields.includes(key))
+        || typeof request.collectionId !== 'string' || !request.collectionId.trim()
+        || request.action === 'share' && (typeof request.targetThreadId !== 'string' || !request.targetThreadId.trim() || typeof request.key !== 'string' || !request.key.trim()))
+        throw new HarnessServiceError('invalid-params', 'Select an original collection and a related recipient');
+      const owner = await scope(identity, signal);
+      if (!options.collections) throw new HarnessServiceError('unavailable', 'Material collections are unavailable');
+      if (request.action === 'inspect') return options.collections.inspect(request.collectionId, { authority: owner.authority, signal });
+      return (await options.collections.execute({ action: 'share', collectionId: request.collectionId, targetThreadId: request.targetThreadId }, {
+        authority: owner.authority, signal, origin: `user-material-share:${JSON.stringify([identity.threadId, identity.branchId, request.key])}`,
+        threadsRelated: async (from, to, workspace) => {
+          if (from !== identity.threadId || workspace !== owner.workspaceId) return false;
+          const family = await options.runtime.familyList({ callerThreadId: from, includeSelf: true }, signal);
+          return threadMaterialScope(family.rootThreadId) === workspace && family.members.some(member => member.threadId === to);
+        },
+      })).result;
+    },
     async upload(identity, request, signal = new AbortController().signal) {
       if (!object(request) || Object.keys(request).some(key => !['filename', 'mimeType', 'data'].includes(key))
         || typeof request.filename !== 'string' || !request.filename.trim() || /[\\/]/.test(request.filename)
@@ -203,7 +221,10 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       // User reads recheck current policy; no stale tool binding comes from UI.
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
-      return options.documentReader.read(request, context(owner, config, signal));
+      const retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal });
+      return retained?.ref.document?.kind === 'pdf'
+        ? options.documentReader.read(request, context(owner, config, signal))
+        : fetchPage(request, owner, config, signal);
     },
     async readSource(selection, request, signal = new AbortController().signal) {
       decode('read', request);

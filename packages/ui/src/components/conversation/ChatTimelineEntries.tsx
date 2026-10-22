@@ -64,7 +64,12 @@ import { ExpandedToolContext, TimelineSessionContext, useToolDisclosureChoices }
 import { presentInvocation, invocationData, invocationGateway, invocationStatus, operationInvocation, toolRecord } from './toolInvocation';
 import { ChatDelegation } from './ChatDelegation';
 import { ChatFileTools, ChatLanguageTools, ChatRecoveryTools } from './ChatResourceTools';
-import { ChatWebTools, ChatMcpTool } from './ChatSourceTools';
+import { ChatWebTools } from './ChatSourceTools';
+import { ChatMcpTool } from './ChatMcpTool';
+import { ChatMaterialsTool } from './ChatMaterialsTool';
+import { ChatForwardTool, ChatExtensionTool } from './ChatEnvironmentTools';
+import { ChatComputerTool } from './ChatComputerTools';
+import { ChatFollowupTool } from './ChatFollowupTool';
 import { ChatProcessTool } from './ChatProcessTool';
 import { ChatWorkTool, ChatArtifactTool } from './ChatWorkTools';
 import { workToolLabels } from './toolLabels';
@@ -399,7 +404,12 @@ const ChatToolCard: React.FC<{
   if (['recovery_points', 'file_restore'].includes(call.name)) return <ChatRecoveryTools {...specific} />;
   if (['websearch', 'webfetch', 'document_read', 'research_search', 'research_decide'].includes(call.name)) return <ChatWebTools {...specific} />;
   if (call.name.startsWith('mcp_')) return <ChatMcpTool {...specific} />;
-  if (call.name.startsWith('computer_') || ['image_generate', 'image_edit'].includes(call.name)) return <ChatArtifactTool {...specific} />;
+  if (call.name === 'materials') return <ChatMaterialsTool {...specific} />;
+  if (call.name.startsWith('environment_forward')) return <ChatForwardTool {...specific} />;
+  if (call.name === 'runtime_contract' || call.name === 'extension_package') return <ChatExtensionTool {...specific} />;
+  if (call.name.startsWith('computer_')) return <ChatComputerTool {...specific} />;
+  if (call.name === 'follow_up') return <ChatFollowupTool {...specific} />;
+  if (['image_generate', 'image_edit'].includes(call.name)) return <ChatArtifactTool {...specific} />;
   if (workToolLabels[call.name]) return <ChatWorkTool {...specific} />;
   const compactSummary = getToolSummary({
     toolName: call.name,

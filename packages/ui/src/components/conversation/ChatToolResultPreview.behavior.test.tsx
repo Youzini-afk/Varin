@@ -9,10 +9,13 @@ import { useUIStore } from '@/stores/useUIStore';
 import { ChatTimelineEntryList } from './ChatTimelineEntries';
 import { ConversationContext, type ConversationPresentation } from './ConversationContext';
 import { HistoryPresentation } from './historyPresentation';
+import { OfficeGrid } from './ChatComputerTools';
+import { ThreadQuestion } from '../thread/ThreadQuestion';
 
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: keyof typeof dict, params?: Record<string, unknown>) =>
   (dict[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => String(params?.[name] ?? name)) }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/lib/device', () => ({ useDeviceInfo: () => ({ isMobile: false }) }));
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/lib/extensions/workbench-registry', () => ({ useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
 
@@ -24,10 +27,10 @@ const auditRead = {
   missing: false, path: 'audit-note.txt', source: { branchId: 'source:audit', revision: 0 },
 };
 
-function history(data: JsonValue, outcome: Outcome = 'succeeded', name = 'file_read'): ThreadHistoryItem[] {
+function history(data: JsonValue, outcome: Outcome = 'succeeded', name = 'file_read', args: JsonValue = { path: 'audit-note.txt' }): ThreadHistoryItem[] {
   return [
     { id: 'history:call', parent: null, thread_id: 'thread:audit', run_id: 'run:audit', source: 'assistant', provider: null,
-      content: { id: 'model-item:7:request:read', content: { kind: 'tool_call', call: { call_id: 'read', name, schema_version: '1', arguments: { path: 'audit-note.txt' } } } } },
+      content: { id: 'model-item:7:request:read', content: { kind: 'tool_call', call: { call_id: 'read', name, schema_version: '1', arguments: args } } } },
     { id: 'history:result', parent: 'history:call', thread_id: 'thread:audit', run_id: 'run:audit', source: 'tool', provider: null,
       content: { content: { kind: 'tool_result', result: { request_id: 'request', call_id: 'read',
         completion: { kind: 'result', outcome, effect: 'none', content: { data, parts: [] } } } } } },
@@ -44,10 +47,10 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-async function render(data: JsonValue, outcome?: Outcome, name?: string) {
-  const projected = new HistoryPresentation('audit').project(history(data, outcome, name), undefined);
+async function render(data: JsonValue, outcome?: Outcome, name?: string, args?: JsonValue) {
+  const projected = new HistoryPresentation('audit').project(history(data, outcome, name, args), undefined);
   const presentation: ConversationPresentation = { identity: { runtime: 'agent', threadId: 'thread:audit', branchId: 'branch:audit' },
-    head: 'history:result', toolExecutions: projected.toolExecutions, api: {} as ConversationPresentation['api'], quote() {},
+    head: 'history:result', toolExecutions: projected.toolExecutions, api: { materials: {} } as ConversationPresentation['api'], quote() {},
     openFile: async () => { throw new Error('File navigation must retain its separate source owner'); },
     fileTarget: async () => { throw new Error('File navigation must retain its separate source owner'); } };
   await act(async () => root.render(<ConversationContext.Provider value={presentation}>
@@ -140,4 +143,40 @@ it('renders nested tool data as inspectable JSON rather than React children', as
   const tool = container.querySelector('[data-conversation-tool-disclosure]')!;
   const details = [...tool.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'details');
   expect(details?.querySelector('pre')?.textContent).toBe(JSON.stringify(data, null, 2));
+});
+
+it('compares actual Office readback and retains document dirty state after export', async () => {
+  await act(async () => root.render(<OfficeGrid values={[[11800, '新的说明']]} before={[[12800, '旧说明']]} range="C3:D3" />));
+  expect(container.querySelector('tbody th')?.textContent).toBe('3');
+  const compare = [...container.querySelectorAll('button')].find(button => button.textContent === 'Compare before')!;
+  await act(async () => compare.click());
+  expect(container.querySelector('tbody')?.textContent).toContain('12800');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent === 'Show changes')!.click());
+  expect(container.querySelector('tbody')?.textContent).toContain('11800');
+  await render({ desktopId: 'original-desktop', result: { ok: true, modified: true, target: 'file:///reports/budget.pdf' } }, 'succeeded', 'computer_office', { op: 'act', act: { kind: 'export', path: '/reports/budget.pdf' } });
+  expect(container.textContent).toContain('Unsaved changes');
+  expect(container.textContent).toContain('Document exported');
+  expect(container.textContent).not.toContain('Document saved');
+});
+
+it('keeps long question choices intact and waits for explicit submission', async () => {
+  const answer = vi.fn(async () => {}), option = '保留所有原始记录，并在报告中逐项解释原因。'.repeat(12) + '\n包含每个失败任务的处理建议。';
+  const operation = { id: 'question', phase: 'waiting', intent: { call: { arguments: { question: '选择报告范围', options: [option, '只列摘要'] } } } } as unknown as import('@varin/protocol').Operation;
+  await act(async () => root.render(<ThreadQuestion operation={operation} enabled onAnswer={answer} />));
+  const choices = container.querySelectorAll<HTMLInputElement>('input[type="radio"]');
+  expect(choices).toHaveLength(2);
+  expect(choices[0]!.parentElement?.textContent).toBe(option);
+  await act(async () => { choices[0]!.click(); choices[0]!.dispatchEvent(new window.Event('change', { bubbles: true })); });
+  expect(answer).not.toHaveBeenCalled();
+  // React's native radio event path is browser-owned; retain a DOM-level assertion here.
+  expect(container.querySelector('form')?.querySelectorAll('button[type="submit"]')).toHaveLength(1);
+});
+
+it('opens the retained material in the space-reserving panel with its original conversation identity', async () => {
+  await render({ status: 'ok', collection: { collectionId: 'collection:one', name: 'Source notes', persisted: false, createdAt: 0, updatedAt: 0,
+    members: [{ memberId: 'member:one', kind: 'snapshot', snapshotId: 'snapshot:original', title: 'Original evidence', addedAt: 0 }] } }, 'succeeded', 'materials');
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Original evidence'))!.click());
+  const panel = useUIStore.getState().contextPanelByDirectory['/isolated-audit'];
+  expect(panel?.isOpen).toBe(true);
+  expect(panel?.tabs.find(tab => tab.id === panel.activeTabId)).toMatchObject({ mode: 'material', targetPath: 'snapshot:original', thread: { threadId: 'thread:audit', branchId: 'branch:audit' } });
 });

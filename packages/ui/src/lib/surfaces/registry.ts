@@ -3,6 +3,7 @@ import type { I18nKey } from '@/lib/i18n';
 import type { ContextPanelMode } from '@/stores/useUIStore';
 
 export type ContextSurfaceId =
+  | 'material'
   | 'editor'
   | 'git'
   | 'pr'
@@ -43,6 +44,7 @@ export type ContextSurfaceDescriptor = {
 };
 
 export const CONTEXT_SURFACES: readonly ContextSurfaceDescriptor[] = [
+  { id: 'material', mode: 'material', icon: 'book-2', labelKey: 'chat.tools.materials', descriptionKey: 'chat.tools.readSource', availability: 'has-content', defaultWidthFraction: 0.38 },
   { id: 'ui', mode: 'ui', icon: 'window', labelKey: 'ui.content.title', descriptionKey: 'ui.content.title', availability: 'has-content', defaultWidthFraction: 0.55 },
   {
     id: 'threads',

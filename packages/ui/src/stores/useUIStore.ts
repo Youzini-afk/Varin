@@ -22,7 +22,7 @@ import {
 
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
-export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui';
+export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
 export type MermaidRenderingMode = 'svg' | 'ascii';
 export type UserMessageRenderingMode = 'markdown' | 'plain';
 export type ChatRenderMode = 'sorted' | 'live';
@@ -39,6 +39,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
 }
 
 type ContextPanelTab = {
+  materialLine?: number;
   member?: ThreadIdentity;
   thread?: ThreadIdentity;
   contentRef?: string;
@@ -57,6 +58,7 @@ type ContextPanelTab = {
 };
 
 type ContextPanelTabDescriptor = {
+  materialLine?: number;
   member?: ThreadIdentity;
   thread?: ThreadIdentity;
   contentRef?: string;
@@ -229,6 +231,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     ...(descriptor.thread ? { thread: descriptor.thread } : {}),
     ...(descriptor.member ? { member: descriptor.member } : {}),
     ...(descriptor.contentRef ? { contentRef: descriptor.contentRef } : {}),
+    ...(Number.isSafeInteger(descriptor.materialLine) && descriptor.materialLine! >= 1 ? { materialLine: descriptor.materialLine } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     targetPath: normalizedTargetPath,
     targetDirectory: normalizeDirectoryPath(descriptor.targetDirectory?.trim() ?? '') || null,
@@ -272,6 +275,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const candidate = entry as {
+      materialLine?: unknown;
       member?: ThreadIdentity;
       mode?: unknown;
       thread?: ThreadIdentity;
@@ -288,11 +292,11 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       touchedAt?: unknown;
     };
 
-    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui') {
+    if (candidate.mode !== 'threads' && candidate.mode !== 'diff' && candidate.mode !== 'file' && candidate.mode !== 'context' && candidate.mode !== 'recovery' && candidate.mode !== 'plan' && candidate.mode !== 'chat' && candidate.mode !== 'browser' && candidate.mode !== 'git' && candidate.mode !== 'pr' && candidate.mode !== 'notes' && candidate.mode !== 'terminal' && candidate.mode !== 'computer' && candidate.mode !== 'ui' && candidate.mode !== 'material') {
       continue;
     }
 
-    if ((candidate.mode === 'chat' || candidate.mode === 'ui') && (!candidate.thread || candidate.thread.runtime !== 'agent' || !candidate.thread.threadId || !candidate.thread.branchId)) continue;
+    if ((candidate.mode === 'chat' || candidate.mode === 'ui' || candidate.mode === 'material') && (!candidate.thread || candidate.thread.runtime !== 'agent' || !candidate.thread.threadId || !candidate.thread.branchId)) continue;
     const targetPath = normalizeContextTargetPath(typeof candidate.targetPath === 'string' ? candidate.targetPath : null);
     const dedupeKey = normalizeContextPanelTabDedupeKey(
       candidate.mode,
@@ -311,6 +315,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       ...(candidate.thread ? { thread: candidate.thread } : {}),
       ...(candidate.member ? { member: candidate.member } : {}),
       ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
+      ...(typeof candidate.materialLine === 'number' && Number.isSafeInteger(candidate.materialLine) && candidate.materialLine >= 1 ? { materialLine: candidate.materialLine } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       targetPath,
       dedupeKey,

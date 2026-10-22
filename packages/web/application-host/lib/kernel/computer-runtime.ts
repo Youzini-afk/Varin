@@ -245,7 +245,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
           const accepted = await rpc<ComputerRequestRecord, 'runtime.computer.request.create'>('runtime.computer.request.create', { operationId: original.operationId, desktopId, access: params.access as 'observe' | 'control', reason: String(params.reason) });
           if (context.signal.aborted || stopSignal.aborted) await cancelRequests([accepted.id]);
           await runtime.reconcileObservations();
-          return result({ requestId: accepted.id, status: context.signal.aborted || stopSignal.aborted ? 'cancelled' : accepted.status, revision: accepted.revision }, 'confirmed');
+          return result({ desktopId, requestId: accepted.id, status: context.signal.aborted || stopSignal.aborted ? 'cancelled' : accepted.status, revision: accepted.revision }, 'confirmed');
         }, desktopId);
         if (method === 'release' || method === 'cancel') {
           if (method === 'cancel') assertNoScriptComputerStopCycle(context, desktopId);
@@ -281,7 +281,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
                 return !query || [app.name, String(app.pid), selected.windowTitle, ...(windows?.map(window => window.title) ?? [])]
                   .some(value => value?.toLocaleLowerCase().includes(query)) ? [selected] : [];
               });
-              return result({ apps });
+              return result({ desktopId, apps });
             }
             case 'prepare': {
               const changed = await computers.prepareDesktop(params as ComputerDesktopPrepareParams, { automated: true, desktopId, signal });
@@ -305,7 +305,7 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
             case 'evidence': return result(await computers.evidence({ ...params, desktopId, signal }));
             case 'open': {
               const opened = await computers.open({ ...params as unknown as ComputerOpenParams, desktopId, signal });
-              return applicationResult({ result: opened }, opened, opened.accepted, opened.cancelled);
+              return applicationResult({ desktopId, result: opened }, opened, opened.accepted, opened.cancelled);
             }
             case 'browser_read':
             case 'browser': {
@@ -319,19 +319,19 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
                 parts.push({ kind: 'media', media: { media_type: match[1]!, data_base64: match[2]! } });
                 imageMetadata = { partIndex: 0, mediaType: match[1]! };
               }
-              return applicationResult({ result: { ...metadata, ...(imageMetadata ? { image: imageMetadata } : {}) } }, browser, browser.ok, browser.cancelled, parts);
+              return applicationResult({ desktopId, result: { ...metadata, ...(imageMetadata ? { image: imageMetadata } : {}) } }, browser, browser.ok, browser.cancelled, parts);
             }
             case 'office_read':
             case 'office': {
               const office = await computers.office({ ...params as unknown as ComputerOfficeParams, desktopId, signal });
-              return applicationResult({ result: office }, office, office.ok, office.cancelled);
+              return applicationResult({ desktopId, result: office }, office, office.ok, office.cancelled);
             }
-            case 'put': return result(await computers.fileWrite({ ...params as unknown as ComputerFileWriteParams, desktopId, signal }), 'confirmed');
+            case 'put': return result({ desktopId, ...await computers.fileWrite({ ...params as unknown as ComputerFileWriteParams, desktopId, signal }) }, 'confirmed');
             case 'install': {
               const installed = await computers.installSoftware({ ...params as unknown as ComputerInstallSoftwareParams, desktopId, signal });
               const complete = installed.results.every(entry => entry.state === 'installed');
               const partial = installed.results.some(entry => entry.state === 'installed');
-              return result(installed, complete ? 'confirmed' : partial ? 'partial' : 'unknown', true, complete ? 'succeeded' : partial ? 'failed' : 'indeterminate');
+              return result({ desktopId, ...installed }, complete ? 'confirmed' : partial ? 'partial' : 'unknown', true, complete ? 'succeeded' : partial ? 'failed' : 'indeterminate');
             }
             case 'observe': {
               const parts: OutputPart<IncomingMedia>[] = [];

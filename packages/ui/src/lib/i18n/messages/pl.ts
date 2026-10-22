@@ -1,8 +1,10 @@
 import { dict as enDict, type I18nKey } from './en';
 import { settingsDict } from './pl.settings';
+import { toolPurposePl } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...toolPurposePl,
   ...settingsDict,
   "chat.toolResult.fileContents": "Zawartość pliku: {path}",
   "chat.toolResult.byteRange": "Odczytano {bytes} z {total} bajtów · przesunięcie {offset}",

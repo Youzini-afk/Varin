@@ -1,8 +1,10 @@
 import { dict as enDict, type I18nKey } from './en';
 import { settingsDict } from './ja.settings';
+import { toolPurposeJa } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...toolPurposeJa,
   ...settingsDict,
   "chat.toolResult.fileContents": "ファイルの内容: {path}",
   "chat.toolResult.byteRange": "{total} バイト中 {bytes} バイトを読み取り · オフセット {offset}",

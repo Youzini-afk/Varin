@@ -25,6 +25,12 @@ The browser is the web-page surface. Saved project actions can open a configured
 there; automatic URL opening is scoped to actions explicitly configured for it.
 Restored layouts retain supported surfaces and discard retired tabs and rail entries.
 
+The material surface is content-driven. Its tab retains the original Thread/branch, snapshot ID
+and optional starting line, while the existing Thread material API checks access and reads content.
+It uses the same reserved panel column as other resources. Mobile conversations expand the reader
+in place. Quoting is available only while that original conversation is selected; the panel never
+redirects a quote into a different conversation's composer.
+
 ## Adding a surface
 
 1. Add a `ContextPanelMode` value in `useUIStore` (type union plus the

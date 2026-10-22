@@ -17,6 +17,7 @@ export interface ConversationPresentation {
   openFile(callId: string, path: string, line?: number): Promise<void>;
   fileTarget(callId: string, path: string): Promise<Extract<ThreadFileTarget, { kind: 'document' }>>;
   memory?: ThreadMemoryAPI;
+  followups?: readonly import('@varin/protocol').Followup[];
   renderExtras?(itemId: string): React.ReactNode;
 }
 /** Presentation-only examples never activate extension renderers or file links. */

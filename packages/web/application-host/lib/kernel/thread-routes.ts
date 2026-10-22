@@ -81,6 +81,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'child/integration': ['runtime', 'threadId', 'branchId', 'key', 'executionId', 'publicationId', 'action', 'sourceOwner', 'expectedBindingFingerprint', 'resolutions', 'operationId', 'sourceRunId'],
     'materials/upload': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
+    'materials/collection': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read-source': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'materials/read-artifact': ['runtime', 'threadId', 'branchId', 'sourceRunId', 'request'],
     'media/read': ['runtime', 'threadId', 'branchId', 'holder', 'partIndex', 'chunkIndex', 'expectedContentRef'],
@@ -211,6 +212,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   };
   const selection = (body: Record<string, unknown>): ThreadResearchSelection => ({ ...identity(body), sourceRunId: text(body.sourceRunId) });
   if (materials) {
+    if (materials.collection) post('materials/collection', (body, signal) => materials.collection!(identity(body), object(body.request) as Parameters<NonNullable<ThreadMaterialsAPI['collection']>>[1], signal));
     // The material owner validates the request and derives its domain from the real Thread.
     post('materials/upload', (body, signal) => materials.upload(identity(body), object(body.request) as unknown as import('@varin/application-client').ThreadMaterialUpload, signal));
     post('materials/read', (body, signal) => materials.read(identity(body), object(body.request) as ThreadMaterialReadRequest, signal));

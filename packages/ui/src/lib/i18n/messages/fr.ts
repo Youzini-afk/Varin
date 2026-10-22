@@ -1,6 +1,8 @@
 import { settingsDict } from './fr.settings';
+import { toolPurposeFr } from './tool-purpose-locales';
 
 export const dict = {
+  ...toolPurposeFr,
   "thread.settings.utilityModel": "Modèle auxiliaire",
   "thread.settings.confirmDelete": "Confirmer la suppression des conversations",
   "thread.composer.goalArmed": "Le prochain message définit un objectif continu.",

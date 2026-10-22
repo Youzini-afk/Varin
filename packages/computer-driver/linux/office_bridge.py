@@ -238,8 +238,24 @@ def _perform(operation):
                 return {"ok": False, "error": "values shape must match the range exactly"}
             if not all(cell is None or isinstance(cell, (str, int, float)) and not isinstance(cell, bool) for row in values for cell in row):
                 return {"ok": False, "error": "Values must be numbers, strings, or null for an empty cell"}
+            before = None
+            readback_error = None
+            try:
+                before = [list(row) for row in cell_range.getDataArray()]
+            except Exception as exc:
+                readback_error = str(exc)
             cell_range.setDataArray(tuple(tuple("" if cell is None else float(cell) if isinstance(cell, (int, float)) else cell for cell in row) for row in values))
-            return {"ok": True, "modified": bool(doc.isModified())}
+            receipt = {"ok": True, "modified": bool(doc.isModified())}
+            if before is None:
+                receipt["changesUnavailable"] = readback_error
+            else:
+                try:
+                    receipt["changes"] = {"sheet": sheet.Name, "range": range_name, "before": before,
+                                          "after": [list(row) for row in cell_range.getDataArray()]}
+                except Exception as exc:
+                    # The write already succeeded. A readback failure does not undo it.
+                    receipt["changesUnavailable"] = str(exc)
+            return receipt
         return {"ok": False, "error": f"unknown office act kind: {kind}"}
 
     return {"ok": False, "error": f"unknown office op: {op}"}

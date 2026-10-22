@@ -371,7 +371,10 @@ export interface ThreadMaterialUpload {
   data: string;
 }
 export interface ThreadMaterialsAPI {
+  /** User inspection/share over the original material owner; shares retain their retry key. */
+  collection?(identity: ThreadIdentity, request: { action: 'inspect'; collectionId: string } | { action: 'share'; collectionId: string; targetThreadId: string; key: string }, signal?: AbortSignal): Promise<import('@varin/protocol').MaterialsCollectionResult>;
   upload(identity: ThreadIdentity, request: ThreadMaterialUpload, signal?: AbortSignal): Promise<FetchResult>;
+  /** Read a fixed PDF or extracted text snapshot under the original material ACL. */
   read(identity: ThreadIdentity, request: ThreadMaterialReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readSource(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialSourceReadRequest, signal?: AbortSignal): Promise<FetchResult>;
   readArtifact(selection: import('./research.js').ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal?: AbortSignal): Promise<FetchResult>;

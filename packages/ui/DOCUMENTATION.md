@@ -28,7 +28,7 @@ Use these for architecture, then the local owner below for implementation change
 | Settings primitives and save feedback | [Settings components](src/components/sections/shared/DOCUMENTATION.md) |
 | Conversation controls | `src/components/thread`, `src/lib/agent-runtime`, and `ThreadsAPI` |
 | Conversation presentation | `src/components/conversation`: virtual timeline, message/tool cards, selection menus, sidebar and transitions |
-| Purpose-specific tools | `ChatDelegation`, `ChatResourceTools`, `ChatSourceTools`, `ChatProcessTool`, `ChatWorkTools`; `toolInvocation` preserves gateway and native operation ownership |
+| Purpose-specific tools | `ChatDelegation`, `ChatResourceTools`, `ChatSourceTools`, `ChatProcessTool`, `ChatWorkTools`, `ChatMaterialsTool`, `ChatEnvironmentTools`, `ChatComputerTools`, `ChatFollowupTool`, `ChatMcpTool`; `toolInvocation` preserves gateway and native operation ownership |
 | Interactive content | `src/lib/interactive-ui`, `src/components/interactive-ui`; [contract and lifecycle](../../docs/interactive-content.md) |
 | Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
 | Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
@@ -161,6 +161,15 @@ Computer activity is an event projection of the Host operation. Its launcher doe
 screens or acquire control. Bot sleep/archive/delete progress is also Host-owned; opening history
 never wakes a Bot. Ordinary navigation filters the native Catalog’s `bot_id` ownership before
 displaying conversations.
+
+Tool presentations use their recorded domain objects: material collections retain snapshot readers and
+explicit family shares; forwarding distinguishes the service endpoint from the coordinating Host's
+access address; extension review binds the original candidate integrity. Computer links open the exact
+recorded desktop. Office comparisons require returned before/after readback, while export and the live
+document's dirty flag remain separate. MCP task cancellation, executor stop, retained output and resource
+notifications retain their separate meanings. Follow-up rows consume the existing snapshot and revisioned
+control API; opening history never starts a renderer scheduler. All question choices use one wrapping
+column with native radios, optional additional text and an explicit submit action.
 
 Source files, Git snapshots, material pages, and editor drafts retain their own identities. Explicit
 resource roots resolve through Documents instead of borrowing a conversation's workspace. A file-change
