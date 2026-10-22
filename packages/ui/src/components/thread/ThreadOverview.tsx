@@ -20,6 +20,7 @@ import { ThreadPlan } from './ThreadPlan';
 import { WorkOverviewControl, type OverviewPeekSection } from './WorkOverviewControl';
 import { ThreadOperationDetails } from './ThreadOperationDetails';
 import { canCancelOperation } from './threadOperations';
+import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { useThreadProducts, type ThreadProduct } from './useThreadProducts';
 
 type Section = OverviewPeekSection;
@@ -87,7 +88,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     : run?.state === 'failed' ? 'harness.threads.state.failed' : failedChildren.length || error || recoveryAttention ? 'harness.overview.needsAttention'
       : run?.state === 'completed' ? 'harness.overview.completed' : run?.state === 'cancelled' ? 'harness.threads.state.cancelled'
         : run?.state === 'waiting' ? 'harness.threads.state.waiting' : run ? 'harness.overview.working' : 'harness.overview.ready';
-  const statusDetail = error || recoveryAttention || (run?.state === 'failed' && snapshot?.runFailure?.runId === run.id ? snapshot.runFailure.message : undefined)
+  const statusDetail = error || recoveryAttention || (run?.state === 'failed' && snapshot?.runFailure?.runId === run.id ? runFailureMessage(snapshot.runFailure, t) : undefined)
     || (failedChildren.length ? failedChildren.map(row => row.child.name || row.child.input.name || row.task).join(' · ')
       : plan.items.find(item => item.status === 'in_progress')?.text || goal?.objective);
   const show = React.useCallback((section: Section) => {

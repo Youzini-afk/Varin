@@ -87,16 +87,16 @@ fn parse(call: &ToolCall, frozen: &FrozenToolContext) -> Result<Request, Executi
         }
         disclosure::INVOKE => {
             let args: Invoke = serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            if !args.arguments.is_object()
-                || !frozen.tools.iter().any(|tool| {
-                    tool.name == args.reference.name
-                        && tool.version == args.reference.version
-                        && !disclosure::is_gateway(tool)
-                })
-            {
-                return Err(error(
-                    "capability unavailable or changed; read tool_describe for its current reference",
-                ));
+            if !args.arguments.is_object() {
+                return Err(error("tool_invoke.arguments must be an object matching the target parameters returned by tool_describe"));
+            }
+            let target = frozen.tools.iter().find(|tool| tool.name == args.reference.name)
+                .ok_or_else(|| error(format!("Tool {:?} is not available to this request. Use tool_describe to check the selected capabilities; tool_invoke does not enable unavailable tools.", args.reference.name)))?;
+            if disclosure::is_gateway(target) {
+                return Err(error("Call the registered tool_describe or tool_invoke function directly; a gateway cannot invoke another gateway."));
+            }
+            if target.version != args.reference.version {
+                return Err(error(format!("The reference for tool {:?} does not match this request's version. Call tool_describe with this name and use the returned reference unchanged.", target.name)));
             }
             Ok(Request::Invoke(args))
         }
@@ -181,13 +181,20 @@ impl Call {
                 Some(tool) => {
                     let mut value = json!({"status":"available","name":tool.name,"reference":{"name":tool.name,"version":tool.version},
                         "namespace":disclosure::namespace(&tool.name),"description":tool.description,"parameters":tool.schema,
-                        "outputSchema":tool.output_schema,"metadata":tool.metadata});
+                        "outputSchema":tool.output_schema,"metadata":tool.metadata,
+                        "directlyCallable":disclosure::is_declared(tool),
+                        "invocation":if disclosure::is_declared(tool) {
+                            json!({"tool":tool.name,"arguments":{},"instruction":"Fill arguments using parameters. This function is declared in the current model request."})
+                        } else {
+                            json!({"tool":disclosure::INVOKE,"arguments":{"reference":{"name":tool.name,"version":tool.version},"arguments":{}},
+                                "instruction":"Fill arguments.arguments using parameters. This description does not register a model function. Call tool_invoke, never the target name directly."})
+                        }});
                     if name == "dispatch" {
                         value["dispatch"] = self.dispatch()?;
                     }
                     value
                 }
-                None => json!({"status":"unavailable","name":name}),
+                None => json!({"status":"unavailable","name":name,"message":"This tool is not available to the current request. Check the selected tools or query an available namespace; tool_invoke does not bypass selection or permissions."}),
             });
         }
         if let Some(group) = &args.namespace {

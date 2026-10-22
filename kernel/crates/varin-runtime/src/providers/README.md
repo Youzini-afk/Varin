@@ -91,9 +91,13 @@ MCP keeps its owner's exposure selection: admitted MCP entrypoints and direct to
 remain visible. Deferred server tools are discovered through `mcp_discover` and called through
 `mcp_call`, without a second discovery layer or adding declarations after discovery.
 Deferred schemas stay in the original request binding for execution and
-enter conversation history only as `tool_describe` results. A model may call a deferred tool
-directly by name or use `tool_invoke`; both resolve against the complete frozen request directory
-and retain the target's original validation and authorization. Built-in and brokered adapters see
+enter conversation history only as `tool_describe` results. Those results include an invocation
+envelope and whether the function was declared. Deferred targets must be called through the
+registered `tool_invoke` function. Both protocol decoding and final model-output validation reject
+direct calls outside the declared interface, including calls from brokered adapters. The gateway
+resolves the target against the complete frozen directory and retains its original validation and
+authorization. Unavailable targets and stale version references fail without executing the target.
+Built-in and brokered adapters see
 the same projection. Hidden catalog changes do not change the provider tools or encoder reuse
 key; the original generation and endpoint pins remain authoritative. Gateway recognition uses
 its callable contract, so a retained description from before a wording change keeps the projection

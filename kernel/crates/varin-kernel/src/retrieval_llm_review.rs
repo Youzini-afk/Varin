@@ -67,6 +67,7 @@ impl HttpTransport for Stream {
                 "actual native transport must remain held until test releases it"
             );
             return Err(ModelFailure {
+                tool_name: None,
                 code: "cancelled".into(),
                 message: "Original native body drained".into(),
                 retry_after_ms: None,

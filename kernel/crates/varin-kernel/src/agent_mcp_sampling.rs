@@ -93,6 +93,7 @@ fn fail(runtime: &RunSupervisor, id: &str, error: ExecutionError) -> Result<(), 
     let receipt = SamplingReceipt {
         finish_reason: None,
         failure: Some(ModelFailure {
+            tool_name: None,
             code: error.code,
             message: "Sampling could not finish; review its retained evidence".into(),
             retry_after_ms: None,

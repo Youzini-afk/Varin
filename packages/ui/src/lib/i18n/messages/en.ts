@@ -1,9 +1,11 @@
 import { settingsDict } from './en.settings';
 import { toolHeadingMessages } from './tool-headings';
+import { toolFailureMessages } from './tool-failures';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
   ...toolHeadingMessages('en'),
+  ...toolFailureMessages('en'),
   ...toolMessagesEn,
   'contextPanel.recovery.files.previewUnavailable': 'File preview is unavailable.',
   'contextPanel.recovery.files.previewChanged': 'The file changed during preview. Refresh to read its current version.',

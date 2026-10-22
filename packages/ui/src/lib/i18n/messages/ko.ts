@@ -1,11 +1,13 @@
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
+import { toolFailureMessages } from './tool-failures';
 import { settingsDict } from './ko.settings';
 import { toolPurposeKo } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...toolHeadingMessages('ko'),
+  ...toolFailureMessages('ko'),
   ...toolPurposeKo,
   ...settingsDict,
   "chat.toolResult.fileContents": "파일 내용: {path}",

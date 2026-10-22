@@ -20,12 +20,15 @@ use std::sync::{mpsc, Arc};
 pub struct ExecutionError {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
 }
 impl ExecutionError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
+            tool_name: None,
         }
     }
 }
@@ -619,6 +622,20 @@ pub struct ModelFailure {
     pub message: String,
     pub retry_after_ms: Option<u64>,
     pub provider_request_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_name: Option<String>,
+}
+
+impl From<ExecutionError> for ModelFailure {
+    fn from(error: ExecutionError) -> Self {
+        Self { code: error.code, message: error.message, tool_name: error.tool_name,
+            retry_after_ms: None, provider_request_id: None }
+    }
+}
+impl From<ModelFailure> for ExecutionError {
+    fn from(error: ModelFailure) -> Self {
+        Self { code: error.code, message: error.message, tool_name: error.tool_name }
+    }
 }
 
 pub trait ModelProvider: Send + Sync {
@@ -2766,12 +2783,7 @@ impl<
                         match validation {
                             Ok(validated) => calls = validated,
                             Err(error) => {
-                                result = Err(ModelFailure {
-                                    code: error.code,
-                                    message: error.message,
-                                    retry_after_ms: None,
-                                    provider_request_id: None,
-                                })
+                                result = Err(error.into())
                             }
                         }
                     }
@@ -2827,7 +2839,7 @@ impl<
                                 continue;
                             }
                             finish!('agent, RunState::Failed, None,
-                                Some(ExecutionError::new(failure.code, failure.message)))
+                                Some(failure.into()))
                         }
                     };
                     break (snapshot, items, calls, reason);
@@ -3001,6 +3013,7 @@ impl<
         }))
         .unwrap_or_else(|_| {
             Err(ModelFailure {
+                tool_name: None,
                 code: "provider_panicked".into(),
                 message: "provider worker panicked after dispatch".into(),
                 retry_after_ms: None,
@@ -3423,8 +3436,8 @@ pub(crate) fn validate_model_items(
     items: &[ProviderItem],
     snapshot: &RequestSnapshot,
 ) -> Result<Vec<ToolCall>, ExecutionError> {
-    // Disclosure only reduces the provider's declarations. Direct calls still resolve
-    // against this request's complete frozen capability cut, never the live catalog.
+    // Model calls must use the schemas actually declared to this request. The full
+    // frozen capability cut is only for nested/gateway execution, never a direct-call bypass.
     // Provider IDs must be unique within this response, not across independent requests.
     let mut item_ids = BTreeSet::new();
     let mut call_ids = BTreeSet::new();
@@ -3454,14 +3467,10 @@ pub(crate) fn validate_model_items(
                         "tool call identity is empty or duplicated",
                     ));
                 }
-                if !snapshot.view.binding.tools
-                    .iter()
-                    .any(|schema| schema.name == call.name && schema.version == call.schema_version)
-                {
-                    return Err(ExecutionError::new(
-                        "unknown_tool_schema",
-                        "tool call was not present in the frozen schema generation",
-                    ));
+                let schema = crate::tool_disclosure::model_tool(&snapshot.view.binding.tools, &call.name)?;
+                if schema.version != call.schema_version {
+                    return Err(crate::tool_disclosure::call_error("stale_tool_schema", &call.name,
+                        "The tool call uses a different schema version from this request. Use the declared schema, or refresh the target reference with tool_describe before tool_invoke."));
                 }
                 calls.push(call.clone());
             }

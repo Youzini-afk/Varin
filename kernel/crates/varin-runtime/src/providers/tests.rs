@@ -746,7 +746,7 @@ fn chat_connection(events: Vec<Value>, done: bool) -> Connection {
     )
 }
 #[test]
-fn disclosure_accepts_mixed_direct_chat_calls_without_declaring_deferred_tools() {
+fn disclosure_rejects_direct_deferred_calls_and_preserves_declared_schema_authority() {
     let provider = chat::ChatProvider::new(chat_connection(vec![json!({
         "id":"mixed", "choices":[{"index":0,"finish_reason":"tool_calls","delta":{"role":"assistant","tool_calls":[
             {"index":0,"id":"read","type":"function","function":{"name":"process_read","arguments":"{\"processId\":\"original\"}"}},
@@ -767,20 +767,29 @@ fn disclosure_accepts_mixed_direct_chat_calls_without_declaring_deferred_tools()
     assert!(names.contains(&"process_read"));
     assert!(!names.contains(&"settings_search"));
     let mut items = Vec::new();
-    assert_eq!(provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
+    let failure = provider.generate(&snapshot, &CancellationToken::default(), &mut |event| {
         if let ProviderEvent::ItemCompleted { item } = event { items.push(item); }
         Ok(())
-    }).unwrap(), FinishReason::ToolCalls);
-    let calls = crate::execution::validate_model_items(&items, &snapshot).unwrap();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[1].name, "settings_search");
-    assert_eq!(calls[1].schema_version, "settings-v2");
-    assert_eq!(calls[1].arguments, json!({"query":"theme"}));
+    }).unwrap_err();
+    assert_eq!(failure.code, "tool_not_declared");
+    assert_eq!(failure.tool_name.as_deref(), Some("settings_search"));
+    assert!(failure.message.contains("tool_invoke"));
+    // A brokered adapter can emit a completed item directly; the executor enforces the same boundary.
+    items.push(ProviderItem { id: "deferred".into(), opaque: None, content: Content::ToolCall { call: ToolCall {
+        call_id: "settings".into(), name: "settings_search".into(), schema_version: "settings-v2".into(), arguments: json!({"query":"theme"}),
+    } } });
+    assert_eq!(crate::execution::validate_model_items(&items, &snapshot).unwrap_err().code, "tool_not_declared");
     let mut unavailable = snapshot.clone();
     unavailable.view.binding.tools.retain(|tool| tool.name != "settings_search");
     assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
-    unavailable.view.binding.tools.push(ToolSchema { version: "different".into(), ..snapshot.view.binding.tools.last().unwrap().clone() });
-    assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
+    let mut declared = snapshot.view.binding.tools.last().unwrap().clone();
+    declared.metadata = Some(ToolMetadata { always_declared: true, service_id: "settings".into(), service_version: 1,
+        completion: RegisteredToolCompletion::Result, lifetime: None, operation: ToolOperation::Read, examples: None, source: None });
+    unavailable.view.binding.tools.push(declared);
+    let declared_calls = crate::execution::validate_model_items(&items, &unavailable).unwrap();
+    assert!(declared_calls.iter().any(|call| call.name == "settings_search" && call.schema_version == "settings-v2"));
+    unavailable.view.binding.tools.last_mut().unwrap().version = "different".into();
+    assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "stale_tool_schema");
 }
 
 #[test]

@@ -85,6 +85,7 @@ impl HttpTransport for Stream {
         }
         if self.mode == "cancel" {
             return Err(ModelFailure {
+                tool_name: None,
                 code: "cancelled".into(),
                 message: "Original body stopped".into(),
                 retry_after_ms: None,

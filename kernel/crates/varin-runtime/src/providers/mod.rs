@@ -309,7 +309,7 @@ impl ReqwestTransport {
                     None => format!("Model endpoint rejected the request (HTTP {status})."),
                 };
                 for credential in credentials { message = message.replace(&credential, "[redacted]"); }
-                return Err(ModelFailure { code: format!("http_{status}"), message, retry_after_ms, provider_request_id: request_id });
+                return Err(ModelFailure { tool_name: None, code: format!("http_{status}"), message, retry_after_ms, provider_request_id: request_id });
             }
             if !response.headers().get("content-type").and_then(|v|v.to_str().ok())
                 .is_some_and(|v| v.split(';').next().is_some_and(|t|t.trim().eq_ignore_ascii_case(content_type))) {
@@ -472,6 +472,7 @@ impl Connection {
 }
 pub(super) fn failure(code: &str, message: &str) -> ModelFailure {
     ModelFailure {
+        tool_name: None,
         code: code.into(),
         message: message.into(),
         retry_after_ms: None,
@@ -482,7 +483,7 @@ pub(super) fn emit_event(
     emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     event: ProviderEvent,
 ) -> Result<(), ModelFailure> {
-    emit(event).map_err(|e| failure(&e.code, &e.message))
+    emit(event).map_err(ModelFailure::from)
 }
 pub(super) fn required<'a>(v: &'a Value, key: &str) -> Result<&'a str, ModelFailure> {
     v.get(key)
@@ -499,22 +500,12 @@ pub(super) fn schema_version(view: &RequestView, name: &str) -> Result<String, M
     // Auxiliary outputs are evidence, never executable calls. Retain an offending call and
     // its provider original even though no schema was offered. The empty version explicitly
     // means unadmitted; the policy-model owner rejects every call before result publication.
-    // Ordinary calls resolve the version from the complete frozen execution directory,
-    // including deferred tools omitted from the provider's declaration list.
+    // Ordinary calls resolve only registered model functions. Disclosure never adds a function.
     if matches!(view.origin, RequestOrigin::PolicyModelJob { .. } | RequestOrigin::McpSampling { .. } | RequestOrigin::AuxiliaryInference { .. }) {
         return Ok(String::new());
     }
-    view.binding
-        .tools
-        .iter()
-        .find(|t| t.name == name)
-        .map(|t| t.version.clone())
-        .ok_or_else(|| {
-            failure(
-                "unknown_tool_schema",
-                "provider called a tool outside the frozen schema",
-            )
-        })
+    crate::tool_disclosure::model_tool(&view.binding.tools, name)
+        .map(|tool| tool.version.clone()).map_err(ModelFailure::from)
 }
 pub(super) fn opaque(view: &RequestView, value: Value) -> Option<OpaqueProviderItem> {
     Some(OpaqueProviderItem {

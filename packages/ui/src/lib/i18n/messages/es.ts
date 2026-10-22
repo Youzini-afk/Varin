@@ -1,11 +1,13 @@
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
+import { toolFailureMessages } from './tool-failures';
 import { settingsDict } from './es.settings';
 import { toolPurposeEs } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...toolHeadingMessages('es'),
+  ...toolFailureMessages('es'),
   ...toolPurposeEs,
   ...settingsDict,
   "chat.toolResult.fileContents": "Contenido del archivo: {path}",

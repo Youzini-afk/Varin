@@ -390,6 +390,7 @@ impl<
                 usage: job.output.usage.clone(),
                 finish_reason: None,
                 failure: Some(ModelFailure {
+                    tool_name: None,
                     code: if token.is_cancelled() {
                         "cancelled"
                     } else {
@@ -452,6 +453,7 @@ impl<
                 usage: job.output.usage.clone(),
                 finish_reason: None,
                 failure: Some(ModelFailure {
+                    tool_name: None,
                     code: error.code,
                     message: error.message,
                     retry_after_ms: None,
@@ -498,6 +500,7 @@ impl<
         }))
         .unwrap_or_else(|_| {
             Err(ModelFailure {
+                tool_name: None,
                 code: "provider_panicked".into(),
                 message: "planning provider panicked".into(),
                 retry_after_ms: None,
@@ -545,6 +548,7 @@ impl<
             finish_reason: result.as_ref().ok().copied(),
             failure: result.err().or_else(|| {
                 forbidden.then(|| ModelFailure {
+                    tool_name: None,
                     code: "planning_tool_calls_forbidden".into(),
                     message: "tool-free planning returned tool calls; originals retained without execution".into(),
                     retry_after_ms: None,

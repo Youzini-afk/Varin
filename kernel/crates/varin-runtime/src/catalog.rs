@@ -1486,7 +1486,7 @@ impl Catalog {
                         .unwrap_or_default();
                     goals::measured(&tx, result.goal.as_ref(), &output.usage)?;
                     result.dispatch = crate::execution::PolicyModelDispatch::Interrupted;
-                    result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
+                    result.receipt=Some(crate::execution::PolicyModelReceipt{dispatch:crate::execution::PolicyModelDispatch::Interrupted,outcome:Outcome::Indeterminate,output:None,usage:output.usage,finish_reason:None,failure:Some(crate::execution::ModelFailure{tool_name: None,code:"planning_interrupted".into(),message:"dispatch intent was durable; completion is unknown and request will not replay".into(),retry_after_ms:None,provider_request_id:None}),usable:false});
                     op.phase = OperationPhase::Terminal;
                     op.outcome = Some(Outcome::Indeterminate);
                     op.revision += 1;

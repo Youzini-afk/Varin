@@ -126,6 +126,7 @@ fn settle_preparation_failure(
         problem: Some(InferenceProblem::NotDispatched),
     };
     let failed = ModelFailure {
+        tool_name: None,
         code: error.code,
         message: "Auxiliary inference could not start; inspect its retained evidence".into(),
         retry_after_ms: None,
@@ -207,6 +208,7 @@ fn run(
     }))
     .unwrap_or_else(|_| {
         Err(ModelFailure {
+            tool_name: None,
             code: "provider_panicked".into(),
             message: "Auxiliary provider failed after dispatch".into(),
             retry_after_ms: None,

@@ -35,6 +35,7 @@ impl ModelProvider for ControlledModel {
         emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
         let failure = |code: &str| ModelFailure {
+            tool_name: None,
             code: code.into(),
             message: code.into(),
             retry_after_ms: None,

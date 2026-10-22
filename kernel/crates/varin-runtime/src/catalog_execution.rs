@@ -25,14 +25,20 @@ fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
         "credential_required" | "credential_unavailable" | "credential_binding_required" | "invalid_credential_reference" | "credential_scope" | "invalid_credential_header" => (failure.code.as_str(), "The model credential could not be prepared for this request. Check the selected account and authentication settings."),
         "invalid_content_type" => ("invalid_content_type", "The model endpoint returned an unsupported response content type. Check the endpoint and API protocol."),
         "invalid_provider_event" | "invalid_provider_item" | "invalid_model_exchange" | "provider_family_mismatch" => (failure.code.as_str(), "The model response did not match the selected API protocol. Check the model endpoint and protocol settings."),
-        "invalid_tool_call" | "unknown_tool_schema" => (failure.code.as_str(), "The model returned an invalid tool call or a tool outside this request's available tools."),
-        "stale_tool_schema" | "tool_unavailable" | "tool_binding_invalid" | "invalid_tool_declaration" | "prepared_call_required" => (failure.code.as_str(), "The tool binding could not be prepared or used for this request. Check the selected tool's availability and configuration."),
+        "invalid_tool_call" => ("invalid_tool_call", "The model returned a malformed tool call, such as a missing or duplicate call ID. No tools from this response were executed. Retry with a valid call to a registered function."),
+        "invalid_tool_arguments" => ("invalid_tool_arguments", "The model returned invalid tool arguments. Arguments must be a JSON object matching the declared parameters. For tool_invoke, put the target parameters in arguments and its name/version in reference. This response's tools were not executed."),
+        "tool_not_declared" => ("tool_not_declared", "The model directly called a tool that was not registered in this request. Use tool_describe to get its reference, then call tool_invoke with reference and arguments. No tools from this response were executed."),
+        "unknown_tool_schema" => ("unknown_tool_schema", "The requested tool is not in this request's available directory. Use tool_describe to check the selected capabilities. tool_invoke cannot enable an unavailable tool. No tools from this response were executed."),
+        "stale_tool_schema" => ("stale_tool_schema", "The tool call does not match this request's registered schema version. Use the declared schema, or refresh the target reference through tool_describe before calling tool_invoke. This call was not executed."),
+        "tool_unavailable" | "tool_binding_invalid" | "invalid_tool_declaration" | "prepared_call_required" => (failure.code.as_str(), "The tool binding could not be prepared or used for this request. Check the selected tool's availability and configuration."),
         "invalid_model_configuration" | "invalid_context_capacity" | "invalid_endpoint" | "credential_in_endpoint" | "model_adapter_registry" | "model_adapter_selection_changed" | "connection_identity" => (failure.code.as_str(), "The selected model connection could not be prepared. Check its endpoint, protocol and context settings."),
         "context_compile" | "context_content" | "context_execution" | "context_worker_panicked" | "compaction_no_model" | "compaction_tools" => (failure.code.as_str(), "Context assembly or compaction failed before a usable continuation was available. The original history remains available."),
         "catalog_input" | "catalog_input_content" | "catalog_commit" => (failure.code.as_str(), "The runtime could not read or commit the conversation's execution data."),
         _ => ("execution_failed", "Run execution failed."),
     };
-    ExecutionError::new(code, message)
+    let tool_name = matches!(code, "tool_not_declared" | "unknown_tool_schema" | "stale_tool_schema" | "invalid_tool_call" | "invalid_tool_arguments")
+        .then(|| failure.tool_name.as_deref().and_then(crate::tool_disclosure::diagnostic_tool_name)).flatten();
+    ExecutionError { code: code.into(), message: tool_name.as_ref().map(|name| format!("Tool `{name}`: {message}")).unwrap_or_else(|| message.into()), tool_name }
 }
 
 /// Shared by the live query and terminal child-report snapshot. Both read the same
@@ -45,7 +51,7 @@ pub(super) fn read_run_failure(database: &Connection, run: &Run) -> Result<Optio
     ).optional()?;
     failure.map(|(cursor, data)| {
         let failure = safe_run_failure(&serde_json::from_str::<ExecutionError>(&data)?);
-        Ok(RunFailure { run_id: run.id.clone(), cursor, code: failure.code, message: failure.message })
+        Ok(RunFailure { run_id: run.id.clone(), cursor, code: failure.code, message: failure.message, tool_name: failure.tool_name })
     }).transpose()
 }
 
@@ -2081,12 +2087,12 @@ impl Catalog {
                 run_id,
                 run.revision,
                 "context.preparation_failed",
-                json!({"code": failure.code, "message": failure.message}),
+                serde_json::to_value(&failure)?,
             )?;
         }
         if let ExecutionRecord::ExecutionFailed { failure } = record {
             let failure = safe_run_failure(failure);
-            event(&tx, run_id, run.revision, "run.failed", json!({"code": failure.code, "message": failure.message}))?;
+            event(&tx, run_id, run.revision, "run.failed", serde_json::to_value(&failure)?)?;
         }
         event(
             &tx,

@@ -285,6 +285,7 @@ impl ModelProvider for Provider {
         let call = self.calls.fetch_add(1, Ordering::SeqCst);
         let send = |emit: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>, event| {
             emit(event).map_err(|e| ModelFailure {
+                tool_name: None,
                 code: e.code,
                 message: e.message,
                 retry_after_ms: None,
@@ -300,6 +301,7 @@ impl ModelProvider for Provider {
                 },
             )?;
             return Err(ModelFailure {
+                tool_name: None,
                 code: "stream_lost".into(),
                 message: "connection lost".into(),
                 retry_after_ms: None,
@@ -500,7 +502,7 @@ fn model_retry_keeps_partial_attempt_and_never_replays_completed_tools() {
                 emit(ProviderEvent::TextDelta { item_id:"partial".into(), text:"unfinished answer".into() }).unwrap();
                 emit(ProviderEvent::Usage { receipt: UsageReceipt { measurement:UsageMeasurement::Actual,
                     input_tokens:Some(7), output_tokens:Some(2), ..Default::default() } }).unwrap();
-                return Err(ModelFailure { code:"stream_interrupted".into(), message:"lost stream".into(),
+                return Err(ModelFailure { tool_name: None, code:"stream_interrupted".into(), message:"lost stream".into(),
                     retry_after_ms:None, provider_request_id:Some("failed-provider-request".into()) });
             }
             if attempt == 2 {
@@ -556,6 +558,7 @@ fn supervisor_control_reaches_provider_while_catalog_is_locked() {
                 .block_on(cancel.cancelled());
             self.stopped.send(()).unwrap();
             Err(ModelFailure {
+                tool_name: None,
                 code: "cancelled".into(),
                 message: "provider observed cancellation".into(),
                 retry_after_ms: None,
@@ -2683,9 +2686,16 @@ fn binding_preparation_sleep_preserves_graph_control() { binding_preparation_con
 #[test]
 fn terminal_failure_fact_survives_reopen_without_exposing_callback_content() {
     struct FailingPreparation { early: bool, code: &'static str }
+    impl FailingPreparation {
+        fn failure(&self) -> ExecutionError {
+            let mut error = ExecutionError::new(self.code, "private callback body SECRET");
+            error.tool_name = Some("private callback body SECRET".into());
+            error
+        }
+    }
     impl ContextPreparation for FailingPreparation {
         fn prepare(&self, _: &str, _: u64, _: &CancellationToken) -> Result<(), ExecutionError> {
-            if self.early { Err(ExecutionError::new(self.code, "private callback body SECRET")) } else { Ok(()) }
+            if self.early { Err(self.failure()) } else { Ok(()) }
         }
         fn prepare_request(
             &self, _: u64, _: &RequestView, _: &RequestBody,
@@ -2693,13 +2703,15 @@ fn terminal_failure_fact_survives_reopen_without_exposing_callback_content() {
             _: &dyn Fn(ContextProjection) -> Result<crate::context_capacity::InputEstimate, ExecutionError>,
             _: &CancellationToken,
         ) -> Result<ContextRequestPreparation, ExecutionError> {
-            Err(ExecutionError::new(self.code, "private callback body SECRET"))
+            Err(self.failure())
         }
     }
     for (early, raw_code, expected_code, event_kind) in [
         (false, "context_candidate_capacity", "context_candidate_capacity", "run.failed"),
         (false, "invalid_provider_event", "invalid_provider_event", "run.failed"),
         (false, "unknown_tool_schema", "unknown_tool_schema", "run.failed"),
+        (false, "tool_not_declared", "tool_not_declared", "run.failed"),
+        (false, "invalid_tool_arguments", "invalid_tool_arguments", "run.failed"),
         (false, "external_SECRET", "execution_failed", "run.failed"),
         (true, "external_SECRET", "context_preparation_failed", "context.preparation_failed"),
     ] {

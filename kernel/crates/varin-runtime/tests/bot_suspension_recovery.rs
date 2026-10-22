@@ -87,6 +87,7 @@ impl ModelProvider for Provider {
             release.lock().unwrap().recv().unwrap();
             assert!(cancel.is_cancelled());
             return Err(ModelFailure {
+                tool_name: None,
                 code: "review_cancelled".into(),
                 message: "original local executor left".into(),
                 retry_after_ms: None,

@@ -2466,6 +2466,7 @@ export interface RunFailure {
   cursor: number;
   code: string;
   message: string;
+  toolName?: string | null;
 }
 
 export interface Run {

@@ -344,6 +344,7 @@ fn execute_node(
     if result.is_ok() {
         if let Err(error) = validate_model_items(&items, &snapshot) {
             result = Err(ModelFailure {
+                tool_name: None,
                 code: error.code,
                 message: error.message,
                 retry_after_ms: None,

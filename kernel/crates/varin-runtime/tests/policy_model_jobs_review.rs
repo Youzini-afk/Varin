@@ -138,6 +138,7 @@ impl ModelProvider for Provider {
         self.requests.lock().unwrap().push(r.clone());
         let mut send = |event| {
             emit(event).map_err(|e| ModelFailure {
+                tool_name: None,
                 code: e.code,
                 message: e.message,
                 retry_after_ms: None,
@@ -196,6 +197,7 @@ impl ModelProvider for Provider {
         }
         if self.failure {
             return Err(ModelFailure {
+                tool_name: None,
                 code: "truncated_stream".into(),
                 message: "fixture partial response".into(),
                 retry_after_ms: None,

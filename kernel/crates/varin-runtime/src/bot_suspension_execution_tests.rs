@@ -36,6 +36,7 @@ fn bot_scope_waits_for_real_provider_and_operation_workers_then_preserves_unknow
             self.release.lock().unwrap().recv().unwrap();
             assert!(cancel.is_cancelled());
             Err(ModelFailure {
+                tool_name: None,
                 code: "cancelled".into(),
                 message: "actual provider exit".into(),
                 retry_after_ms: None,

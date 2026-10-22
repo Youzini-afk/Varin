@@ -265,6 +265,7 @@ pub struct RunFailure {
     pub cursor: u64,
     pub code: String,
     pub message: String,
+    pub tool_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

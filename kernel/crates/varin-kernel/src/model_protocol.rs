@@ -168,6 +168,7 @@ fn problem(message: &str) -> KernelError {
 }
 fn failure(message: impl ToString) -> ModelFailure {
     ModelFailure {
+        tool_name: None,
         code: "model_protocol_unavailable".into(),
         message: message.to_string(),
         retry_after_ms: None,

@@ -283,6 +283,7 @@ impl ModelProvider for Provider {
             },
         })
         .map_err(|e| ModelFailure {
+            tool_name: None,
             code: e.code,
             message: e.message,
             retry_after_ms: None,

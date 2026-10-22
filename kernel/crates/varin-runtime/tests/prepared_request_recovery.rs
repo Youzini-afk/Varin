@@ -30,6 +30,7 @@ impl ModelProvider for Provider {
     ) -> Result<FinishReason, ModelFailure> {
         self.requests.lock().unwrap().push(request.clone());
         let failure = |e: ExecutionError| ModelFailure {
+            tool_name: None,
             code: e.code,
             message: e.message,
             retry_after_ms: None,

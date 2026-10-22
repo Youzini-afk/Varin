@@ -1,11 +1,13 @@
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
+import { toolFailureMessages } from './tool-failures';
 import { settingsDict } from './zh-TW.settings';
 import { toolMessagesZhTW } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...toolHeadingMessages('zh-TW'),
+  ...toolFailureMessages('zh-TW'),
   ...toolMessagesZhTW,
   'contextPanel.recovery.files.previewUnavailable': '檔案預覽暫不可用。',
   'contextPanel.recovery.files.previewChanged': '預覽期間檔案發生了變化，請重新整理查看目前版本。',

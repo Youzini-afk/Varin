@@ -47,6 +47,7 @@ impl HttpTransport for Stream {
             assert!(cancel.is_cancelled());
             self.cancelled.fetch_add(1, Ordering::SeqCst);
             return Err(ModelFailure {
+                tool_name: None,
                 code: "cancelled".into(),
                 message: "Original generation transport cancelled".into(),
                 retry_after_ms: None,

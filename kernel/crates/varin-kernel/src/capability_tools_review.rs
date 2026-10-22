@@ -81,6 +81,9 @@ impl ModelProvider for Provider {
                     }])
                 );
                 assert_eq!(result["name"], if self.mode == "question" { "ask_user" } else { "fixture_effect" });
+                assert_eq!(result["directlyCallable"], self.mode == "question");
+                assert_eq!(result["invocation"]["tool"], if self.mode == "question" { "ask_user" } else { disclosure::INVOKE });
+                if self.mode != "question" { assert_eq!(result["invocation"]["arguments"]["reference"], result["reference"]); }
                 let mut reference = result["reference"].clone();
                 if self.mode == "stale" {
                     reference["version"] = json!("obsolete");
@@ -88,7 +91,7 @@ impl ModelProvider for Provider {
                 if self.mode == "missing" {
                     reference["name"] = json!("not_selected");
                 }
-                let arguments = if self.mode == "direct_invalid" {
+                let arguments = if self.mode.ends_with("invalid") {
                     json!({})
                 } else if self.mode == "question" {
                     json!({"question":"Choose a fixture option","options":["A","B"]})
@@ -124,6 +127,7 @@ impl ModelProvider for Provider {
             },
         })
         .map_err(|e| ModelFailure {
+            tool_name: None,
             code: e.code,
             message: e.message,
             retry_after_ms: None,
@@ -224,7 +228,7 @@ impl ToolExecutor for Target {
 #[test]
 fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output() {
     for mode in [
-        "success", "denied", "stale", "missing", "unknown", "question",
+        "success", "denied", "stale", "missing", "unknown", "question", "invalid",
         "direct_success", "direct_denied", "direct_invalid",
     ] {
         let root = std::env::temp_dir().join(format!("varin-disclosure-{}", uuid::Uuid::new_v4()));
@@ -286,13 +290,27 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
             policy: start.policy,
             progress: ProgressSink::default(),
         };
+        let run_id = input.run_id.clone();
         let report = engine.run(input, CancellationToken::default()).unwrap();
         assert_eq!(
             target.calls.load(Ordering::SeqCst),
-            usize::from(matches!(mode, "success" | "unknown" | "direct_success")),
+            usize::from(matches!(mode, "success" | "unknown")),
             "{mode}: {:?}",
             report.history
         );
+        if mode.starts_with("direct_") {
+            assert_eq!(report.state, RunState::Failed);
+            let failure = db.lock().unwrap().run_failure(&run_id).unwrap().unwrap();
+            assert_eq!(failure.code, "tool_not_declared");
+            assert_eq!(failure.tool_name.as_deref(), Some("fixture_effect"));
+            assert!(failure.message.contains("tool_invoke"));
+            drop(engine); drop(target); drop(db);
+            let reopened = Catalog::open(&root).unwrap();
+            assert_eq!(reopened.run_failure(&run_id).unwrap().unwrap(), failure);
+            drop(reopened);
+            std::fs::remove_dir_all(root).unwrap();
+            continue;
+        }
         let result = report
             .history
             .iter()
@@ -303,16 +321,15 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
                 _ => None,
             })
             .unwrap();
-        if matches!(mode, "success" | "unknown" | "direct_success") {
+        if matches!(mode, "success" | "unknown") {
             let ToolCompletion::Result {
                 outcome, content, ..
             } = &result.completion
             else {
                 panic!("target receipt missing")
             };
-            let direct = mode.starts_with("direct_");
             assert_eq!(
-                if direct { &content.data["actual"] } else { &content.data["result"]["actual"] },
+                &content.data["result"]["actual"],
                 "fixture_effect"
             );
             assert!(
@@ -321,11 +338,7 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
             assert!(
                 matches!(&content.parts[1], varin_runtime::output::OutputPart::Media { media } if media.media_type == "image/png")
             );
-            let operation_id = if direct {
-                format!("{}:tool:{}", result.request_id, result.call_id)
-            } else {
-                content.data["operationId"].as_str().unwrap().into()
-            };
+            let operation_id: String = content.data["operationId"].as_str().unwrap().into();
             let operation = db
                 .lock()
                 .unwrap()
@@ -348,21 +361,14 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
                 }
             );
         }
-        if mode == "direct_denied" {
-            assert!(matches!(&result.completion, ToolCompletion::NotDispatched { reason }
-                if reason == "tool_disclosure: original target permission denied"));
-        }
-        if mode == "direct_invalid" {
-            let ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content } = &result.completion else {
-                panic!("{mode}: rejected invocation must have no effect")
-            };
-            assert_eq!(content.data["message"], "mode required");
-        }
         if mode == "question" {
             let ToolCompletion::Result { content, .. } = &result.completion else {
                 panic!("missing question receipt")
             };
             assert_eq!(content.data["completion"]["kind"], "job_accepted");
+        }
+        if mode == "invalid" {
+            assert!(serde_json::to_string(&result.completion).unwrap().contains("mode required"));
         }
         assert_eq!(
             report.state,

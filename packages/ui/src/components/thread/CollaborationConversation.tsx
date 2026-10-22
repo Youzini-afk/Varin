@@ -10,6 +10,7 @@ import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ConversationTimeline } from '../conversation/ConversationTimeline';
 import { ReferenceNavigationContext } from '../conversation/ReferenceNavigation';
 import { useI18n } from '@/lib/i18n';
+import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { Button } from '@/components/ui/button';
 import { ThreadQuestions } from './ThreadQuestions';
 import { ThreadPermission } from './ThreadPermission';
@@ -136,7 +137,7 @@ export function CollaborationConversation({
             footer={
               <>
                 {snapshot?.runFailure && (
-                  <p className="p-4 typography-meta text-destructive">{snapshot.runFailure.message}</p>
+                  <p className="p-4 typography-meta text-destructive">{runFailureMessage(snapshot.runFailure, t)}</p>
                 )}
                 {snapshot?.operations.map((operation) => (
                   <ThreadPermission

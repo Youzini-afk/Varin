@@ -522,6 +522,7 @@ impl ModelProvider for SummaryProvider {
         let reason = result?;
         if invalid || !matches!(reason,FinishReason::ToolCalls | FinishReason::Stop) || reason == FinishReason::Stop && !has_text {
             return Err(ModelFailure {
+                tool_name: None,
                 code: "invalid_compaction_output".into(),
                 message: "summary generation did not produce a read-only query or complete textual answer"
                     .into(),
@@ -555,6 +556,7 @@ impl ModelProvider for NoModelProvider {
         _: &mut dyn FnMut(ProviderEvent) -> Result<(), ExecutionError>,
     ) -> Result<FinishReason, ModelFailure> {
         Err(ModelFailure {
+            tool_name: None,
             code: "compaction_no_model".into(),
             message: "text compaction has no model provider".into(),
             retry_after_ms: None,
