@@ -12,6 +12,7 @@
 | 角色、任务复用、状态收纳和代码交换 | [Agent 协作](collaboration.md) |
 | 文件来源、WorkingState、进程、跨 Host 和恢复 | [资源](resources.md) |
 | 上下文、检索、材料、知识和记忆 | [检索与上下文](retrieval.md) |
+| 快速检索重构、检索 Agent 终端与共用工具改进（待实现） | [快速检索设计](design/fast-code-retrieval.md) |
 | 外壳、Profile、Documents 和编辑器 | [工作台](workbench.md) |
 | 聊天 HTML、流式作品、画面读取与引用 | [交互内容](interactive-content.md) |
 | Varin 扩展和原生运行时能力组合 | [扩展](extensions.md) |
