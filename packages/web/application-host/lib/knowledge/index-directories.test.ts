@@ -116,7 +116,7 @@ describe('index directory management', () => {
     expect(f.scope.get().directories).toEqual([]);
     await f.manager.act('remove', directory, listed.revision); await f.manager.drain();
     expect(resolve).not.toHaveBeenCalled();
-    expect(f.purge).toHaveBeenCalledWith(directory);
+    expect(f.purge).toHaveBeenCalledWith(directory, expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }));
     expect((await f.manager.list()).entries).toEqual([]);
   });
   it('persists pause, accepts one manual check, and keeps deleted project folders removed after restart', async () => {
@@ -133,7 +133,7 @@ describe('index directory management', () => {
     expect(f.manager.snapshot().entries[0]?.state).toBe('paused');
     await f.manager.act('add', manual, f.manager.snapshot().revision); await f.manager.drain();
     await f.manager.act('remove', project, f.manager.snapshot().revision); await f.manager.drain();
-    expect(f.purge).toHaveBeenCalledWith(await realpath(project));
+    expect(f.purge).toHaveBeenCalledWith(await realpath(project), expect.objectContaining({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) }));
     expect(f.manager.snapshot().entries.map((entry) => entry.path)).toEqual([await realpath(manual)]);
     await f.manager.dispose();
     const reopened = createIndexDirectoryManager(f.options);
@@ -153,6 +153,25 @@ describe('index directory management', () => {
     await f.manager.act('remove', directory, f.manager.snapshot().revision); await f.manager.drain();
     expect(f.manager.snapshot().entries).toEqual([]);
     expect(f.manager.allEntries()[0]?.project).toBe(true);
+  });
+  it('reports actual cleanup work and stops future steps when the Host closes', async () => {
+    let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const f = await fixture({ purge: async (_directory, options) => {
+      options.onProgress({ phase: 'symbols', completed: 64, total: 100, unit: 'files' });
+      entered();
+      await new Promise<void>((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => reject(options.signal.reason), { once: true });
+      });
+    } });
+    const directory = path.join(f.dataDir, 'project');
+    await f.manager.syncProjects([directory]); await f.manager.drain();
+    await f.manager.act('remove', directory, f.manager.snapshot().revision);
+    await started;
+    expect(f.manager.snapshot().entries[0]).toMatchObject({ busy: true, error: undefined,
+      removal: { phase: 'symbols', completed: 64, total: 100, unit: 'files' } });
+    await f.manager.dispose();
+    expect(f.manager.snapshot().entries[0]).toMatchObject({ state: 'deleting', busy: false });
   });
 
   it('rejects stale mutations and cancels an accepted background check when paused', async () => {

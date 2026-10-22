@@ -4,9 +4,10 @@ import {
 } from "./store-contract.js";
 import type { PlanChanged } from "@varin/protocol";
 import type { AssociationRefreshPort } from "./association-refresh.js";
+import type { FilePurgePort } from './file-purge.js';
 
-export type DirectStoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision" | "resolveAssociationCandidates">;
-export type StoreMethod = DirectStoreMethod | keyof AssociationRefreshPort;
+export type DirectStoreMethod = Exclude<keyof KnowledgeStore, "dim" | "knowledgeRevision" | "resolveAssociationCandidates" | "purgeFileCatalog">;
+export type StoreMethod = DirectStoreMethod | keyof AssociationRefreshPort | keyof FilePurgePort;
 // Exhaustive at compile time, and a runtime allowlist on the private child pipe.
 export const STORE_METHODS: Record<DirectStoreMethod, true> = {
   putEvent: true, listEvents: true,
@@ -30,8 +31,11 @@ export const STORE_METHODS: Record<DirectStoreMethod, true> = {
 const ASSOCIATION_METHODS: Record<keyof AssociationRefreshPort, true> = {
   beginAssociationRefresh: true, stepAssociationRefresh: true, releaseAssociationRefresh: true,
 };
+const FILE_PURGE_METHODS: Record<keyof FilePurgePort, true> = {
+  beginFilePurge: true, stepFilePurge: true, releaseFilePurge: true,
+};
 export const isStoreMethod = (value: unknown): value is StoreMethod => (
-  typeof value === "string" && (Object.hasOwn(STORE_METHODS, value) || Object.hasOwn(ASSOCIATION_METHODS, value))
+  typeof value === "string" && (Object.hasOwn(STORE_METHODS, value) || Object.hasOwn(ASSOCIATION_METHODS, value) || Object.hasOwn(FILE_PURGE_METHODS, value))
 );
 
 export type StoreOpenOptions = Pick<OpenWorkspaceKnowledgeDeps, "dataDir" | "hostId" | "workspaceId" | "scope"> & {

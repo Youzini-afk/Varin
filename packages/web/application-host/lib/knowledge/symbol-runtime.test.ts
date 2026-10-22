@@ -56,6 +56,34 @@ describe("symbol graph runtime", () => {
       expect((await store.getKnowledge(memoryId))?.content).toBe('Keep this memory');
     } finally { await runtime.dispose(); }
   });
+  it('cleans a large catalog in observable queue steps while preserving nested selections and memory', async () => {
+    const root = join(TEST_DIR, 'bulk-source');
+    const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 3 };
+    await Promise.all(Array.from({ length: 70 }, (_, index) => store.replaceFileSymbols(
+      `removed/${index}.ts`, 'typescript', [{ name: `S${index}`, kind: 'function', range }], 'revision')));
+    await store.replaceFileSymbols('removed/keep/file.ts', 'typescript', [{ name: 'Kept', kind: 'function', range }], 'revision');
+    await store.recordResolvedRelations('removed/keep/file.ts', 'typescript', [{ kind: 'calls', value: 'S0', line: 1,
+      targetPath: 'removed/0.ts', targetName: 'S0', resolvedBy: 'lsp.definition' }]);
+    const runtime = createSymbolGraphRuntime({ getStore: async () => store, documents: {} as never, supervisor: {} as never });
+    const progress: Array<{ phase: string; completed?: number; total?: number }> = [];
+    let memory: Promise<number> | undefined;
+    try {
+      await runtime.purgeDirectory('workspace', join(root, 'removed'), root, [join(root, 'removed', 'keep')], {
+        onProgress: value => {
+          progress.push(value);
+          if (!memory && value.completed && value.total && value.completed < value.total) {
+            memory = store.putKnowledge({ scope: 'workspace', status: 'accepted', content: 'Written during cleanup', trigger: 'fixture' });
+          }
+        },
+      });
+      expect(progress.some(value => value.phase === 'symbols' && value.completed === 64 && value.total === 70)).toBe(true);
+      expect(progress.at(-1)?.phase).toBe('compacting');
+      expect((await store.catalogStats()).paths).toEqual(['removed/keep/file.ts']);
+      expect((await store.getFileRelations('removed/keep/file.ts'))?.calls).toEqual([]);
+      expect(memory).toBeDefined();
+      expect((await store.getKnowledge(await memory!))?.content).toBe('Written during cleanup');
+    } finally { await runtime.dispose(); }
+  });
   it('limits structure inventories and mutation collection to explicit project folders', async () => {
     const root = join(TEST_DIR, 'user-home');
     const selected = join(root, 'project');

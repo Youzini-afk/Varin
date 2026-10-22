@@ -80,6 +80,18 @@ describe("native store persistence", () => {
     expect(flush).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
   });
+  it('acknowledges native compaction without scheduling a second full snapshot', async () => {
+    const store = await fixture();
+    vi.useFakeTimers();
+    await store.touchFile('src/synthetic.ts', 'typescript');
+    const flush = vi.spyOn(TriviumDB.prototype, 'flush');
+    const compact = vi.spyOn(TriviumDB.prototype, 'compact');
+    await store.compact();
+    await vi.advanceTimersByTimeAsync(31_000);
+    expect(compact).toHaveBeenCalledTimes(1);
+    expect(flush).not.toHaveBeenCalled();
+    expect((await store.catalogStats()).paths).toEqual(['src/synthetic.ts']);
+  });
 
   it("retries a partially written checkpoint without losing either committed or pending nodes", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-checkpoint-retry-"));

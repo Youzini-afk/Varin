@@ -49,6 +49,12 @@ describe('index progress presentation', () => {
     expect(running.querySelector('[role="alert"]')).toBeNull();
     expect(running.body.textContent).not.toContain('index.directories.retryRemoval');
     expect(running.querySelector('progress')).toBeNull();
+    entry.removal = { phase: 'symbols', completed: 64, total: 100, unit: 'files' };
+    const removing = render(status);
+    expect(removing.body.textContent).toContain('index.directories.cleanup.symbols');
+    expect(removing.body.textContent).toContain('index.directories.cleanup.files');
+    expect(removing.querySelector('progress')?.getAttribute('value')).toBe('64');
+    expect(removing.querySelector('progress')?.getAttribute('max')).toBe('100');
   });
 
   it('shows the saved index completion separately from the current check counter', () => {

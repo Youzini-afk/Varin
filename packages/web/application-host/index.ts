@@ -170,7 +170,7 @@ import { createContextObservationPublication } from './lib/knowledge/context-pub
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
 import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
-import { createIndexDirectoryManager } from './lib/knowledge/index-directories.js';
+import { createIndexDirectoryManager, type IndexRemovalProgress } from './lib/knowledge/index-directories.js';
 import { purgeSemanticWorkspaceCache } from './lib/knowledge/semantic/cache-maintenance.js';
 import { projectFolders, projectContainsPath } from '@varin/application-client';
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
@@ -2602,26 +2602,43 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       const progress = semanticRuntime.indexStatuses().find((status) => status.workspaceId === entry.workspaceId)?.progress;
       if (progress?.phase === 'failed') throw new Error(progress.error ?? 'Index update failed');
     },
-    purge: async (directory) => semanticIndexManagement.withCacheMaintenance(async () => {
+    purge: async (directory, cleanup) => semanticIndexManagement.withCacheMaintenance(async () => {
+      const failures: Error[] = [];
+      let activePhase: IndexRemovalProgress['phase'] = 'waiting';
+      const progress = (value: IndexRemovalProgress) => { activePhase = value.phase; cleanup.onProgress(value); };
+      const attempt = async (phase: 'stopping' | 'receipts' | 'symbols', work: () => Promise<void>) => {
+        cleanup.signal.throwIfAborted();
+        progress({ phase });
+        try { await work(); }
+        catch (error) {
+          cleanup.signal.throwIfAborted();
+          failures.push(new Error(`${activePhase}: ${errorMessage(error)}`, { cause: error }));
+        }
+      };
       const saved = await semanticIndexManagement.read();
       const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
       const scope = projectIndexScope.get();
       const preserved = [...scope.directories, ...(scope.pausedDirectories ?? [])]
         .filter((candidate) => insideDirectory(directory, candidate) && indexPathAllowed(scope, candidate, true));
       for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
+        cleanup.signal.throwIfAborted();
         if (!insideDirectory(directory, resource.canonicalPath) && !insideDirectory(resource.canonicalPath, directory)) continue;
         if (preserved.some((candidate) => insideDirectory(candidate, resource.canonicalPath))) continue;
-        await semanticRuntime.withIndexMaintenance(resource.workspaceId, async () => {
+        await attempt('stopping', () => semanticRuntime.withIndexMaintenance(resource.workspaceId, async () => {
+          cleanup.signal.throwIfAborted();
+          progress({ phase: 'vectors' });
           for (const semanticDirectory of caches) await purgeSemanticWorkspaceCache({ semanticDirectory,
             workspaceId: resource.workspaceId, resourceRoot: resource.canonicalPath, removedDirectory: directory, preserveDirectories: preserved });
-          if (insideDirectory(directory, resource.canonicalPath)
-            && !preserved.some(candidate => insideDirectory(resource.canonicalPath, candidate))) {
-            await semanticInference.retireIndexWorkspace(resource.workspaceId);
-          }
-        });
+        }));
+        if (insideDirectory(directory, resource.canonicalPath)
+          && !preserved.some(candidate => insideDirectory(resource.canonicalPath, candidate))) {
+          await attempt('receipts', () => semanticInference.retireIndexWorkspace(resource.workspaceId));
+        }
         const storeFile = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(resource.workspaceId)}.tdb`);
-        if (fs.existsSync(storeFile)) await symbolGraphRuntime.purgeDirectory(resource.workspaceId, directory, resource.canonicalPath, preserved);
+        if (fs.existsSync(storeFile)) await attempt('symbols', () => symbolGraphRuntime.purgeDirectory(resource.workspaceId,
+          directory, resource.canonicalPath, preserved, { signal: cleanup.signal, onProgress: progress }));
       }
+      if (failures.length) throw new AggregateError(failures, `Index cleanup failed: ${failures.map(failure => failure.message).join('; ')}`);
     }),
     cached: async () => {
       const saved = await semanticIndexManagement.read();

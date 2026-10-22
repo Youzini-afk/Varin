@@ -51,10 +51,10 @@ export function createStorePersistence(options: {
     }, delay);
     timer.unref?.();
   };
-  function checkpoint(): void {
+  function checkpoint(save?: () => void): void {
     assertOpen();
     cancelTimer();
-    if (version === durableVersion && !failed) {
+    if (version === durableVersion && !failed && !save) {
       deadline = 0;
       commitRequested = false;
       publish();
@@ -62,7 +62,7 @@ export function createStorePersistence(options: {
     }
     const target = version;
     try {
-      options.flush();
+      (save ?? options.flush)();
     } catch (error) {
       // Never clear dirty state before the native checkpoint succeeds. Retrying
       // persists the already-applied state; it must not replay business writes.
@@ -106,6 +106,9 @@ export function createStorePersistence(options: {
 
   return {
     assertOpen,
+    /** Native compaction is already a full checkpoint; acknowledge that exact
+     * publication and cancel the deferred duplicate save. */
+    checkpoint,
     changed(): void { assertOpen(); version += 1; },
     mutationFailed(): void { failed = true; commitRequested = true; },
     /** A previous failed checkpoint must be retried before admitting another

@@ -74,8 +74,10 @@ import {
 import { createPlanStore } from "./plan-store.js";
 import { createStorePersistence, trackStoreMutations } from "./persistence.js";
 import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
+import { purgeFiles, type FilePurgePort } from './file-purge.js';
+import { createFilePurgeEngine } from './file-purge-engine.js';
 
-export interface KnowledgeStoreEngine extends KnowledgeStore, AssociationRefreshPort {
+export interface KnowledgeStoreEngine extends KnowledgeStore, AssociationRefreshPort, FilePurgePort {
   runBatch<T>(operation: () => Promise<T>): Promise<T>;
 }
 export type KnowledgeStoreEngineOptions = Omit<OpenWorkspaceKnowledgeDeps, "embedding"> & {
@@ -692,6 +694,15 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
       async releaseAssociationRefresh(id) { associationJobs.delete(id); },
     };
+
+    const filePurge = createFilePurgeEngine({ db, enqueue: enqueueGraphWrite, recordBatchSize: MAX_RETENTION_BATCH, changed: () => {
+      graphCounters = null;
+      associationVersion++;
+      invalidateGraphShape();
+      // These are derived graph writes, like incremental symbol removal. Final
+      // compaction publishes cleanup before the directory is marked removed.
+      scheduleGraphFlush();
+    } });
 
     const conversationPlans = createPlanStore({
       lookup, enqueue: enqueueWrite, vector: placeholderVec,
@@ -1430,6 +1441,7 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       resolveAssociationCandidates: () => resolveAssociations(associationPort),
+      purgeFileCatalog: (scope, options) => purgeFiles(filePurge, scope, options),
 
       async removeFileSymbols(path, options) {
         return enqueueGraphWrite(() => {
@@ -1451,38 +1463,19 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
           // with it — a deleted/renamed target cannot stay a current fact (D-240).
           const incomingToTarget = lookup({ type: "link", targetPath: normalizedPath })
             .filter(({ payload }) => RELATION_KINDS.has(payload["kind"] as SymbolGraphRelationKind));
-          const incomingOwnerId = new Map<number, { ownerId: number; label: "references" | "calls" }>();
-          for (const row of incomingToTarget) {
-            const owner = typeof row.payload["path"] === "string" ? fileNodes(row.payload["path"] as string)[0] : undefined;
-            if (owner) {
-              incomingOwnerId.set(row.id, {
-                ownerId: owner.id,
-                label: row.payload["kind"] === "calls" ? "calls" : "references",
-              });
-            }
-          }
-          const operations: TransactionOperation[] = [
-            ...incomingToTarget.flatMap(({ id }) => {
-              const owner = incomingOwnerId.get(id);
-              return owner === undefined
-                ? [{ type: "delete" as const, id }]
-                : [
-                    { type: "unlinkLabel" as const, src: owner.ownerId, dst: id, label: owner.label },
-                    { type: "delete" as const, id },
-                  ];
-            }),
-            ...symbols.map(({ id }) => ({ type: "delete" as const, id })),
-            ...links.map(({ id }) => ({ type: "delete" as const, id })),
-            ...files.map(({ id }) => ({ type: "delete" as const, id })),
-          ];
+          const removedLinks = [...new Map([...links, ...incomingToTarget].map(row => [row.id, row])).values()];
+          // Native node deletion also removes incident edges. Remove each file
+          // owner first so its whole edge list is retired together; self-target
+          // relations occur in both lookups and must only be deleted once.
+          const operations: TransactionOperation[] = [...files, ...[...symbols, ...removedLinks].sort((a, b) => b.id - a.id)]
+            .map(({ id }) => ({ type: 'delete' as const, id }));
           if (operations.length > 0) db.commitTransaction(operations);
           if (files.some(({ payload }) => payload["hasAssociationCandidates"] === true)
             || links.some(({ payload }) => payload["kind"] === "connects")) associationVersion++;
           bumpCounters({
             files: -files.length,
             symbols: -symbols.filter(({ payload }) => payload["active"] === true).length,
-            links: -links.filter(({ payload }) => payload["active"] === true).length
-              - incomingToTarget.filter(({ payload }) => payload["active"] === true).length,
+            links: -removedLinks.filter(({ payload }) => payload["active"] === true).length,
           });
           invalidateGraphShape();
           scheduleGraphFlush();
@@ -2021,17 +2014,18 @@ export async function openKnowledgeStoreEngine(deps: KnowledgeStoreEngineOptions
       },
 
       async compact(): Promise<void> {
-        return enqueueWrite(() => { runtimeDb.compact(); persistence.commit(); });
+        return enqueueWrite(() => { persistence.checkpoint(() => runtimeDb.compact()); });
       },
       async close(): Promise<void> {
         return enqueueWrite(() => {
           persistence.close();
           associationJobs.clear();
+          filePurge.clear();
         });
       },
     };
 
-    return { ...store, ...associationPort, runBatch: (operation) => persistence.batch(operation) };
+    return { ...store, ...associationPort, ...filePurge, runBatch: (operation) => persistence.batch(operation) };
   } catch (error) {
     try { persistence.close(); } catch (closeError) {
       throw new AggregateError([error, closeError], "Knowledge store initialization and cleanup failed");

@@ -4,6 +4,7 @@ import type { KnowledgeStore, OpenWorkspaceKnowledgeDeps } from "./store-contrac
 import { knowledgeStoreProcess } from "./store-process.js";
 import { STORE_METHODS, restoreStoreError, type StoreMethod, type DirectStoreMethod } from "./store-protocol.js";
 import { resolveAssociations, type AssociationRefreshPort } from "./association-refresh.js";
+import { purgeFiles, type FilePurgePort } from './file-purge.js';
 export * from "./store-contract.js";
 
 export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): Promise<KnowledgeStore> {
@@ -11,7 +12,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
   let revision = "";
   let closed = false;
   let closing: Promise<void> | null = null;
-  const associationWork = new Set<Promise<{ activated: number }>>();
+  const ownedWork = new Set<Promise<unknown>>();
   const storeId = owner.register({
     revision: (value) => { revision = value; },
     notify: (message) => {
@@ -47,14 +48,26 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     stepAssociationRefresh: id => owner.request(storeId, "stepAssociationRefresh", [id]) as ReturnType<AssociationRefreshPort["stepAssociationRefresh"]>,
     releaseAssociationRefresh: async id => { await owner.request(storeId, "releaseAssociationRefresh", [id]); },
   };
+  const purgePort: FilePurgePort = {
+    beginFilePurge: scope => call('beginFilePurge', [scope]) as ReturnType<FilePurgePort['beginFilePurge']>,
+    stepFilePurge: id => call('stepFilePurge', [id]) as ReturnType<FilePurgePort['stepFilePurge']>,
+    releaseFilePurge: async id => { await owner.request(storeId, 'releaseFilePurge', [id]); },
+  };
   return {
     ...methods,
     dim,
+    purgeFileCatalog: (scope, options) => {
+      if (closed || closing) return Promise.reject(new Error('Knowledge store is closing or closed'));
+      const work = purgeFiles(purgePort, scope, options);
+      ownedWork.add(work);
+      void work.then(() => ownedWork.delete(work), () => ownedWork.delete(work));
+      return work;
+    },
     resolveAssociationCandidates: () => {
       if (closed || closing) return Promise.reject(new Error("Knowledge store is closing or closed"));
       const work = resolveAssociations(associationPort);
-      associationWork.add(work);
-      void work.then(() => associationWork.delete(work), () => associationWork.delete(work));
+      ownedWork.add(work);
+      void work.then(() => ownedWork.delete(work), () => ownedWork.delete(work));
       return work;
     },
     knowledgeRevision: () => {
@@ -71,7 +84,7 @@ export async function openWorkspaceKnowledge(deps: OpenWorkspaceKnowledgeDeps): 
     close: () => {
       if (closed) return Promise.resolve();
       if (closing) return closing;
-      closing = Promise.allSettled([...associationWork]).then(() => owner.request(storeId, "close", [])).then(async () => {
+      closing = Promise.allSettled([...ownedWork]).then(() => owner.request(storeId, "close", [])).then(async () => {
         closed = true;
         await owner.release(storeId);
       }).catch(async (error: unknown) => {

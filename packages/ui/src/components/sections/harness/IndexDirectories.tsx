@@ -59,6 +59,14 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
         const root = status.roots.find((item) => item.workspaceId === entry.workspaceId);
         const paused = entry.state === 'paused';
         const deleting = entry.state === 'deleting';
+        const cleanupLabels = {
+          waiting: 'index.directories.cleanup.waiting', stopping: 'index.directories.cleanup.stopping',
+          vectors: 'index.directories.cleanup.vectors', receipts: 'index.directories.cleanup.receipts',
+          symbols: 'index.directories.cleanup.symbols', compacting: 'index.directories.cleanup.compacting',
+        } as const;
+        const cleanup = deleting && entry.busy ? entry.removal : undefined;
+        const cleanupCount = cleanup?.completed !== undefined && cleanup.total !== undefined && cleanup.total > 0
+          ? t(cleanup.unit === 'files' ? 'index.directories.cleanup.files' : 'index.directories.cleanup.records', { count: cleanup.completed, total: cleanup.total }) : undefined;
         const semanticProcessing = (entry.state === 'active' || entry.checking) && ['enumerating', 'processing'].includes(root?.progress?.phase ?? '');
         const processing = entry.checking || semanticProcessing;
         const failure = deleting ? entry.busy ? undefined : entry.error : processing ? undefined : entry.error ?? root?.progress?.error;
@@ -71,7 +79,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
             <div className="min-w-0 flex-1">
               <p className="break-all typography-ui-label">{entry.path}</p>
               <p className="typography-micro text-muted-foreground">
-                {failure && !processing && !entry.busy ? t('settings.page.harness.index.phase.failed') : deleting ? t('index.directories.deleting')
+                {failure && !processing && !entry.busy ? t('settings.page.harness.index.phase.failed') : deleting ? t(cleanup ? cleanupLabels[cleanup.phase] : 'index.directories.deleting')
                   : semanticProcessing && root?.progress?.phase === 'processing' ? t('settings.page.harness.index.phase.processing')
                   : entry.checking && root?.progress?.phase === 'ready' ? t('index.directories.updatingRelations')
                   : processing ? t('index.directories.checking') : entry.cacheOnly ? t('index.directories.cached') : paused ? t('index.directories.paused')
@@ -82,6 +90,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
                   ? t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })
                   : t('settings.page.harness.index.progress.documents', { count: indexedDocuments })}` : ''}
               </p>
+              {cleanupCount ? <p className="typography-micro text-muted-foreground" role="status">{cleanupCount}</p> : null}
               {semanticProcessing && totalFiles > 0 && root?.progress ? <p className="typography-micro text-muted-foreground">
                 {t('index.directories.checkedFiles', { count: root.progress.processedFiles, total: totalFiles })}
               </p> : null}
@@ -93,6 +102,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
           </div>
           {!deleting && totalFiles > 0 && indexedDocuments !== undefined ? <progress className="h-1 w-full" value={indexedDocuments} max={totalFiles}
             aria-label={t('index.directories.indexedFiles', { count: indexedDocuments, total: totalFiles })} /> : null}
+          {cleanupCount && cleanup ? <progress className="h-1 w-full" value={cleanup.completed} max={cleanup.total} aria-label={cleanupCount} /> : null}
           <div className="flex flex-wrap items-center gap-1">
             {!deleting ? <>
               <Button size="xs" variant="ghost" disabled={pending.has(entry.path)} onClick={() => void act(paused ? 'resume' : 'pause', entry.path)}>
@@ -116,7 +126,7 @@ export function IndexDirectories({ status, draft, edit, refresh }: {
               })} />{t('settings.page.harness.index.scope.includeIgnored')}
             </label> : null}
           </div>
-          {entry.lastCheckedAt ? <p className="typography-micro text-muted-foreground">{t('index.directories.lastChecked', { time: new Date(entry.lastCheckedAt).toLocaleString(locale) })}</p> : null}
+          {entry.lastCheckedAt && !deleting ? <p className="typography-micro text-muted-foreground">{t('index.directories.lastChecked', { time: new Date(entry.lastCheckedAt).toLocaleString(locale) })}</p> : null}
           {root?.progress?.coverageStats ? <details className="typography-micro text-muted-foreground">
             <summary className="cursor-pointer">{t('settings.page.harness.index.progress.coverageStats', {
               visible: root.progress.coverageStats.visibleFiles, structured: root.progress.coverageStats.structurallySupportedFiles,

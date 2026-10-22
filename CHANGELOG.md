@@ -42,6 +42,7 @@ private runtime protocol and product surfaces still move together.
 
 - 嵌入文本和批次按模型上下文容量拆分并预留余量，修复 Unicode 分段边界；内核丢失后重新获取 tokenizer 租约，缓存文件被手动删除后允许恢复索引清理。
 - 回收索引旧发布副本及已删除会话的正文和相关资源，减少持续累积的磁盘占用。
+- 目录索引清理按阶段显示实际进度，分批删除代码图并按 ID 倒序回收，避免逐文件往返和原生索引反复搬移；中断后继续回收残留记录，压实完成后不再重复写出整库快照。
 - 索引重新打开时保留尚未发布的推理回执，已发布向量对应的重复账本内容仍正常回收。
 - 升级 TriviumDB 至 0.8.10，接入保存中断后的原生恢复机制，同步云端锁文件和 Windows ARM64 构建、加载适配；索引清理避免重复执行完整检查点。
 - 更新 Wasmtime 至 48.0.7、rustls-webpki 至 0.103.16、webpki-roots 至 1.0.10，修复新披露的 Wasm 执行和证书信任问题。参见 [Wasmtime](https://github.com/bytecodealliance/wasmtime/releases/tag/v48.0.7)、[webpki](https://rustsec.org/advisories/RUSTSEC-2026-0382.html) 和 [根证书公告](https://rustsec.org/advisories/RUSTSEC-2026-0381.html)。
@@ -83,6 +84,7 @@ Varin 0.9.31 redesigns fast code retrieval, adds configurable model-request retr
 
 - Split embedding inputs and batches using the configured model capacity with reserved space. Preserve Unicode boundaries, renew tokenizer leases after kernel loss, and recover cleanup when cache files disappear.
 - Reclaim retired index publications and deleted-conversation content and resources.
+- Report directory-cleanup phases and actual counts. Remove graph rows cooperatively in descending ID order to avoid per-file round trips and repeated native posting-list shifts, resume orphan cleanup after interruption, and acknowledge compaction without another full snapshot.
 - Preserve unpublished inference receipts when reopening indexes while reclaiming duplicate ledger content after vector publication.
 - Upgrade TriviumDB to 0.8.10 for interrupted-checkpoint recovery. Synchronize the cloud lockfile and Windows ARM64 build/loader, and avoid duplicate full checkpoints during index cleanup.
 - Update Wasmtime to 48.0.7, rustls-webpki to 0.103.16 and webpki-roots to 1.0.10 for upstream Wasm execution and certificate-trust security fixes.

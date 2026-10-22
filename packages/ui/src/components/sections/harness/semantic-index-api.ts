@@ -15,7 +15,9 @@ export interface SemanticIndexStatus {
   directories: {
     revision: string;
     entries: Array<{ path: string; workspaceId: string; state: 'active' | 'paused' | 'deleting';
-      project: boolean; manual: boolean; lastCheckedAt?: number; error?: string; checking: boolean; busy: boolean; cacheOnly?: boolean }>;
+      project: boolean; manual: boolean; lastCheckedAt?: number; error?: string; checking: boolean; busy: boolean; cacheOnly?: boolean;
+      removal?: { phase: 'waiting' | 'stopping' | 'vectors' | 'receipts' | 'symbols' | 'compacting';
+        completed?: number; total?: number; unit?: 'files' | 'records' } }>;
   };
   config: SemanticIndexConfig;
   activeConfig: SemanticIndexConfig;

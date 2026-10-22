@@ -56,6 +56,20 @@ Host shutdown collects each owner's errors while continuing its ordered teardown
 a failed semantic-index close cannot skip the authority stores' durable close.
 Deferred checkpoint and disconnect-close diagnostics retain the original storage error.
 
+Directory removal reports its current resource-release, vector-cache, inference-receipt,
+symbol-catalog or compaction phase. Independent cleanup domains continue after a failure
+and return their original errors together. Closing the Host stops future catalog-purge
+steps, after the admitted native write has completed, leaving the deletion intent retryable.
+
+Catalog purge selects graph rows once by source scope, including orphaned rows from an
+interrupted attempt. Its private begin/step/release owner removes file owners
+before their symbols and links, avoiding a global label-index scan per symbol. Descending
+IDs keep sorted native property/ngram postings from repeatedly shifting their remaining
+tails. Queue steps permit unrelated plan and memory operations between writes; preserved subdirectories and
+non-graph rows retain their original identities. Native compaction is acknowledged as the
+completed checkpoint instead of scheduling another full snapshot. This does not delete,
+replace or migrate the shared knowledge database.
+
 The private IPC contract has an exhaustive method allowlist, response validation,
 advanced serialization for existing Set/Date values, and reconstruction of block
 conflict/knowledge mutation errors. Only one transport batch per owner is in flight.

@@ -507,6 +507,11 @@ export interface KnowledgeStore {
       signal?: AbortSignal;
     },
   ): Promise<{ removedFiles: number; removedSymbols: number }>;
+  /** Remove a captured source catalog cooperatively, preserving non-graph rows. */
+  purgeFileCatalog(scope: import('./file-purge.js').FilePurgeScope, options?: {
+    signal?: AbortSignal;
+    onProgress?: (progress: import('./file-purge.js').FilePurgeProgress) => void;
+  }): Promise<{ removedNodes: number }>;
   /**
    * Persist language-service-resolved reference/call rows onto the site file's
    * current generation (D-240). Rows carry the bound site revision when the

@@ -11,6 +11,7 @@ import { classifyLiteralCall } from "../structure/connections.js";
 import { CATALOG_SCAN_LANGUAGES } from "../structure/languages.js";
 import type { StructureSource, StructureSymbol, StructureSourceMetadata } from "../structure/types.js";
 import { CATALOG_EXTRACTOR_VERSION, createSymbolCollector, type CollectedSymbols, type SymbolCollector } from "./symbols.js";
+import type { IndexRemovalProgress } from './index-directories.js';
 import type {
   KnowledgeStore,
   SymbolGraphLinkInput,
@@ -131,6 +132,7 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   }
   const catalogScans = new Map<string, CatalogScanState>();
   const manualWorkspaces = new Set<string>();
+  const maintenance = new Map<string, Promise<void>>();
   let disposed = false;
   const metadataMatches = (left: StructureSourceMetadata | undefined, right: StructureSourceMetadata | undefined) =>
     left !== undefined && right !== undefined && left.byteLength === right.byteLength && left.modifiedTimeNs === right.modifiedTimeNs;
@@ -330,6 +332,8 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
 
   const observeDocumentMutation = (event: DocumentMutationObservation): void => {
     if (disposed) return;
+    const purging = maintenance.get(event.workspaceId);
+    if (purging) { track(purging.catch(() => undefined).then(() => observeDocumentMutation(event))); return; }
     const scope = options.getIndexScope?.();
     track((async () => {
       if (scope) {
@@ -360,6 +364,8 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   };
 
   const scanWorkspace = (workspaceId: string, optionsForScan?: { signal?: AbortSignal; manual?: boolean }): Promise<void> => {
+    const purging = maintenance.get(workspaceId);
+    if (purging) return purging.catch(() => undefined).then(() => scanWorkspace(workspaceId, optionsForScan));
     if (disposed || !options.searchFilesystemFiles || !options.documents.inspectWorkspace) return Promise.resolve();
     if (optionsForScan?.signal?.aborted) return Promise.resolve();
     const state = catalogScans.get(workspaceId) ?? {
@@ -514,23 +520,39 @@ export function createSymbolGraphRuntime(options: SymbolGraphRuntimeOptions) {
   };
 
   return { observeDocumentMutation, scanWorkspace, drain, dispose,
-    purgeDirectory: async (workspaceId: string, directory: string, resourceRoot?: string, preserveDirectories: readonly string[] = []) => {
-      catalogControllers.get(workspaceId)?.abort();
-      await catalogScans.get(workspaceId)?.running;
-      const collector = await collectors.get(workspaceId);
-      await collector?.dispose();
-      collectors.delete(workspaceId);
-      const store = await options.getStore(workspaceId);
-      if (!store) return;
-      const root = resourceRoot ?? (await options.documents.inspectWorkspace!(workspaceId)).root;
-      let removed = false;
-      for (const resourceId of (await store.catalogStats()).paths) {
-        if (!insideDirectory(directory, pathModule.resolve(root, resourceId))) continue;
-        if (preserveDirectories.some((retained) => insideDirectory(retained, pathModule.resolve(root, resourceId)))) continue;
-        await store.removeFileSymbols(resourceId);
-        removed = true;
+    purgeDirectory: async (workspaceId: string, directory: string, resourceRoot?: string, preserveDirectories: readonly string[] = [],
+      purgeOptions?: { signal?: AbortSignal; onProgress?(progress: IndexRemovalProgress): void }) => {
+      const preceding = maintenance.get(workspaceId);
+      const task = Promise.resolve().then(async () => {
+        await preceding?.catch(() => undefined);
+        catalogControllers.get(workspaceId)?.abort();
+        await catalogScans.get(workspaceId)?.running;
+        const collector = await collectors.get(workspaceId);
+        await collector?.dispose();
+        collectors.delete(workspaceId);
+        purgeOptions?.signal?.throwIfAborted();
+        const store = await options.getStore(workspaceId);
+        if (!store) return;
+        const root = resourceRoot ?? (await options.documents.inspectWorkspace!(workspaceId)).root;
+        purgeOptions?.onProgress?.({ phase: 'symbols' });
+        const relative = (directory: string) => pathModule.relative(root, directory).split(pathModule.sep).join('/') || '.';
+        const roots = insideDirectory(directory, root) ? ['.'] : insideDirectory(root, directory) ? [relative(directory)] : [];
+        const preservedRoots = preserveDirectories.flatMap(retained => insideDirectory(retained, root) ? ['.'] : insideDirectory(root, retained) ? [relative(retained)] : []);
+        // Scope is independent of file rows: a cancelled purge may already have
+        // removed owners while their orphaned symbol/link rows still need cleanup.
+        const result = await store.purgeFileCatalog({ roots, preservedRoots }, { ...(purgeOptions?.signal ? { signal: purgeOptions.signal } : {}),
+          onProgress: progress => purgeOptions?.onProgress?.({ phase: 'symbols', completed: progress.completed, total: progress.total, unit: progress.phase }) });
+        purgeOptions?.signal?.throwIfAborted();
+        if (result.removedNodes) {
+          purgeOptions?.onProgress?.({ phase: 'compacting' });
+          await store.compact();
+        }
+      });
+      maintenance.set(workspaceId, task);
+      try { await task; }
+      finally {
+        if (maintenance.get(workspaceId) === task) maintenance.delete(workspaceId);
       }
-      if (removed) await store.compact();
     },
     refreshIndexScope: () => {
       for (const controller of catalogControllers.values()) controller.abort();

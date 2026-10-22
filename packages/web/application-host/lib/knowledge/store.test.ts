@@ -558,6 +558,13 @@ describe("KnowledgeStore", () => {
       }], "disk-r2")).rejects.toMatchObject({ code: "invalid" });
       expect(await store.searchSymbols("Stable", 10)).toHaveLength(1);
     });
+    it('deletes self-targeted relations exactly once with their file and symbols', async () => {
+      await store.replaceFileSymbols('src/self.ts', 'typescript', [{ name: 'Recursive', kind: 'function', range }], 'r1');
+      await store.recordResolvedRelations('src/self.ts', 'typescript', [{ kind: 'calls', value: 'Recursive', line: 1,
+        targetPath: 'src/self.ts', targetName: 'Recursive', resolvedBy: 'lsp.definition' }]);
+      expect(await store.removeFileSymbols('src/self.ts')).toEqual({ removedFiles: 1, removedSymbols: 1 });
+      expect(await store.catalogStats()).toMatchObject({ fileCount: 0, symbolCount: 0, linkCount: 0, nodeCount: 0 });
+    });
 
     it("requires a document revision so a stored range can be attributed", async () => {
       await expect(store.replaceFileSymbols("src/a.ts", "typescript", [

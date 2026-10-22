@@ -14,12 +14,18 @@ export interface IndexDirectoryEntry {
   error?: string | undefined;
 }
 export type IndexDirectoryAction = 'add' | 'pause' | 'resume' | 'check' | 'remove';
+export interface IndexRemovalProgress {
+  phase: 'waiting' | 'stopping' | 'vectors' | 'receipts' | 'symbols' | 'compacting';
+  completed?: number;
+  total?: number;
+  unit?: 'files' | 'records';
+}
 export interface IndexDirectoryManagerOptions {
   dataDir: string;
   resolve(directory: string): Promise<{ path: string; workspaceId: string }>;
   apply(entries: readonly IndexDirectoryEntry[]): Promise<void>;
   check(entry: IndexDirectoryEntry, signal: AbortSignal, options: { manual: boolean }): Promise<void>;
-  purge(directory: string): Promise<void>;
+  purge(directory: string, options: { signal: AbortSignal; onProgress(progress: IndexRemovalProgress): void }): Promise<void>;
   cached?(): Promise<Array<{ path: string; workspaceId: string }>>;
   onError?(error: unknown): void;
 }
@@ -40,6 +46,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
   let tail = Promise.resolve();
   let disposed = false;
   const jobs = new Map<string, Promise<void>>();
+  const removals = new Map<string, { controller: AbortController; progress: IndexRemovalProgress }>();
   const checkControllers = new Map<string, AbortController>();
   const checking = new Set<string>();
   const checkModes = new Map<string, boolean>();
@@ -118,13 +125,19 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     const id = key(directory);
     if (disposed) return;
     const preceding = jobs.get(id);
+    const removal = { controller: new AbortController(), progress: { phase: 'waiting' as const } as IndexRemovalProgress };
+    removals.set(id, removal);
     const task = (async () => {
       await preceding;
-      await options.purge(directory);
+      removal.controller.signal.throwIfAborted();
+      await options.purge(directory, { signal: removal.controller.signal, onProgress: progress => { removal.progress = progress; } });
       await finishJob(directory, { state: 'removed', error: undefined }, true);
     })().catch(async (error: unknown) => {
       await finishJob(directory, { error: error instanceof Error ? error.message : String(error) }, true).catch(report);
-    }).finally(() => { if (jobs.get(id) === task) jobs.delete(id); });
+    }).finally(() => {
+      if (jobs.get(id) === task) jobs.delete(id);
+      if (removals.get(id) === removal) removals.delete(id);
+    });
     jobs.set(id, task);
   };
 
@@ -149,11 +162,11 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
       }
     },
     snapshot: () => ({ revision: revisionOf(entries), entries: entries.filter((entry) => entry.state !== 'removed')
-      .map((entry) => ({ ...entry, checking: checking.has(key(entry.path)), busy: jobs.has(key(entry.path)) })) }),
+      .map((entry) => ({ ...entry, ...(removals.has(key(entry.path)) ? { error: undefined, removal: removals.get(key(entry.path))!.progress } : {}), checking: checking.has(key(entry.path)), busy: jobs.has(key(entry.path)) })) }),
     list: async () => {
       const current = entries;
       return { revision: revisionOf(current), entries: [
-      ...current.filter((entry) => entry.state !== 'removed').map((entry) => ({ ...entry, checking: checking.has(key(entry.path)), busy: jobs.has(key(entry.path)) })),
+      ...current.filter((entry) => entry.state !== 'removed').map((entry) => ({ ...entry, ...(removals.has(key(entry.path)) ? { error: undefined, removal: removals.get(key(entry.path))!.progress } : {}), checking: checking.has(key(entry.path)), busy: jobs.has(key(entry.path)) })),
       ...(await options.cached?.() ?? []).filter((cached) => !current.some((entry) => key(entry.path) === key(cached.path)))
         .map((cached) => ({ ...cached, state: 'paused' as const, project: false, manual: false, checking: false, busy: false, cacheOnly: true })),
     ] }; },
@@ -224,6 +237,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
       disposed = true;
       requestedVerification.clear();
       for (const controller of checkControllers.values()) controller.abort();
+      for (const removal of removals.values()) removal.controller.abort();
       await tail;
       await Promise.allSettled([...jobs.values()]);
     },

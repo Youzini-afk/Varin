@@ -206,6 +206,23 @@ describe("knowledge storage process", () => {
     expect(await admitted).toMatchObject({ removedFiles: 1 });
     expect(await store.getFileRelations("src/a.ts")).toBeNull();
   });
+  it('resumes a stopped catalog purge after file owners are gone and preserves knowledge and plans', async () => {
+    const { store } = await fixture();
+    const range = { startLine: 0, startCharacter: 0, endLine: 0, endCharacter: 3 };
+    await store.replaceFileSymbols('src/a.ts', 'typescript', [{ name: 'OrphanAfterStop', kind: 'function', range }], 'r1');
+    const plan = await writePlan(store, 'retained-plan', '- [ ] retain this plan');
+    const memory = await store.putKnowledge({ scope: 'workspace', status: 'accepted', content: 'Keep this knowledge', trigger: 'fixture' });
+    const controller = new AbortController();
+    await expect(store.purgeFileCatalog({ roots: ['src'] }, { signal: controller.signal, onProgress: progress => {
+      if (progress.phase === 'files' && progress.completed === progress.total) controller.abort();
+    } })).rejects.toMatchObject({ name: 'AbortError' });
+    expect((await store.catalogStats()).paths).toEqual([]);
+    expect(await store.searchSymbols('OrphanAfterStop', 5)).toHaveLength(1);
+    await store.purgeFileCatalog({ roots: ['src'] });
+    expect(await store.searchSymbols('OrphanAfterStop', 5)).toEqual([]);
+    expect((await store.getKnowledge(memory))?.content).toBe('Keep this knowledge');
+    expect(await readPlan(store)).toEqual(plan.plan);
+  });
 
   it("rejects lost in-flight work and reopens acknowledged data after a real process kill", async () => {
     const { options, store } = await fixture();
