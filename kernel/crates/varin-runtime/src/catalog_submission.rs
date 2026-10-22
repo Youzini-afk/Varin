@@ -15,6 +15,8 @@ pub struct SubmissionPreparation {
     epoch: u64,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
+    inherited_launch: Option<launch_content::LaunchSelectionMetadata>,
+    current_tool_catalog: Option<Vec<crate::execution::ToolSchema>>,
 }
 
 #[derive(Serialize)]
@@ -57,6 +59,8 @@ pub struct PreparedSubmission {
     pub(super) environment: Vec<Value>,
     pub(super) launch: Option<launch_content::LaunchSelectionMetadata>,
     pub(super) inherit_source: bool,
+    /// New admission only: original base ref -> freshly staged registered schemas.
+    pub(super) inherited_tools: Option<(Value, Value)>,
     pub(super) initial: Option<(context::CheckpointMetadata, Value)>,
     pub(super) origin: SubmissionOrigin,
     pub(super) _publication: crate::content::ContentPublication,
@@ -142,6 +146,12 @@ impl Catalog {
             })
             .transpose()?;
         let checkpoint = self.capture_active_checkpoint(&command.branch_id)?;
+        let inherited_launch: Option<String> = self.db.query_row(
+            "SELECT l.body FROM runs r JOIN run_launches l ON l.id=r.id WHERE r.branch_id=?1 ORDER BY r.rowid DESC LIMIT 1",
+            [&command.branch_id], |row| row.get(0),
+        ).optional()?;
+        let inherited_launch = inherited_launch.map(|body| serde_json::from_str::<launch_content::LaunchMetadata>(&body)
+            .map(|launch| launch.selection)).transpose()?;
         let scope = checkpoint
             .as_ref()
             .and_then(|checkpoint| checkpoint.scope.clone())
@@ -165,6 +175,8 @@ impl Catalog {
             epoch: self.epoch,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
+            inherited_launch,
+            current_tool_catalog: None,
         })
     }
     pub fn admit_submission(&mut self, prepared: PreparedSubmission) -> Result<Receipt> {
@@ -173,6 +185,12 @@ impl Catalog {
 }
 
 impl SubmissionPreparation {
+    /// The executable owner supplies today's directory. A new round may refresh
+    /// schemas/remove retired tools, but never gain names absent from its predecessor.
+    pub fn with_tool_catalog(mut self, tools: Vec<crate::execution::ToolSchema>) -> Self {
+        self.current_tool_catalog = Some(tools);
+        self
+    }
     pub fn with_input_preparation(
         mut self,
         preparation: Option<resources::InputResourcePreparation>,
@@ -246,6 +264,7 @@ impl SubmissionPreparation {
                 environment: Vec::new(),
                 launch: None,
                 inherit_source,
+                inherited_tools: None,
                 initial: None,
                 origin: SubmissionOrigin::User {
                     checkpoint: self.checkpoint,
@@ -276,7 +295,20 @@ impl SubmissionPreparation {
                 ));
             }
         }
-        PreparedSubmission::stage(SubmissionBody {
+        let inherited_tools = if inherit_source {
+            match (&self.inherited_launch, &self.current_tool_catalog) {
+                (Some(previous), Some(available)) if previous.source.is_some() => {
+                    let old: Vec<crate::execution::ToolSchema> = serde_json::from_value(self.content.load(&previous.base_tools_ref)?)?;
+                    let mode = previous.source.as_ref().expect("inherited source").mode;
+                    let mut tools = available.iter().filter(|tool| old.iter().any(|prior| prior.name == tool.name)
+                        && tool.requirements.as_ref().is_none_or(|requirements| requirements.accepts_mode(mode)))
+                        .cloned().collect::<Vec<_>>();
+                    tools.sort_by(|a,b|a.name.cmp(&b.name));
+                    Some((previous.base_tools_ref.clone(), self.content.save(&serde_json::to_value(tools)?)?))
+                }, _ => None,
+            }
+        } else { None };
+        let mut prepared = PreparedSubmission::stage(SubmissionBody {
             input_preparation: self.input_preparation,
             command: self.command,
             launch,
@@ -291,7 +323,9 @@ impl SubmissionPreparation {
             epoch: self.epoch,
             content: self.content,
             publication: self.publication,
-        })
+        })?;
+        prepared.inherited_tools = inherited_tools;
+        Ok(prepared)
     }
 }
 
@@ -550,6 +584,7 @@ impl PreparedSubmission {
             environment: Vec::new(),
             launch,
             inherit_source,
+            inherited_tools: None,
             initial,
             origin,
             _publication: publication,

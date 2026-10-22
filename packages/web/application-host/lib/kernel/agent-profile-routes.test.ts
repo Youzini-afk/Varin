@@ -57,6 +57,11 @@ it('retains the actual owner failure through registered routes and the public HT
     });
     expect(saved.snapshot.profiles.find(profile => profile.id === worker.id)?.tools).toEqual({ source: 'explicit', names: [] });
     const disk = await readFile(path, 'utf8');
+      await expect(api.save({ runtime: 'agent', expectedRevision: saved.snapshot.revision, id: worker.id,
+        config: worker.config, tools: ['language_definition'] })).rejects.toMatchObject({
+        status: 400, message: expect.stringContaining('language_definition'),
+      });
+    expect(await readFile(path, 'utf8')).toBe(disk);
     nativeUnavailable = true;
     await expect(api.read({ runtime: 'agent' })).rejects.toMatchObject({ status: 503, code: 'agent-capabilities-unavailable',
       message: 'Native tool capabilities are unavailable. Check the Agent runtime connection and reload.' });

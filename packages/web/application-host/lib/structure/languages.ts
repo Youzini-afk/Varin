@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { loadCommittedGrammarPackManifest } from "./grammar-manifest.js";
 import { JSON_OUTLINE_MAX_DEPTH, JSON_OUTLINE_MAX_SYMBOLS } from "./constants.js";
 import {
   JAVASCRIPT_DEFINITION_QUERY,
@@ -138,21 +139,11 @@ export const TREE_SITTER_LANGUAGE_SPECS: Readonly<Record<string, TreeSitterLangu
     bindingTypes: new Set(),
     jsonOutline: { maxDepth: JSON_OUTLINE_MAX_DEPTH, maxSymbols: JSON_OUTLINE_MAX_SYMBOLS },
   },
-  python: bundledTags("tree-sitter-python.wasm", "tree-sitter-python.tags.scm"),
-  go: bundledTags("tree-sitter-go.wasm", "tree-sitter-go.tags.scm"),
-  rust: bundledTags("tree-sitter-rust.wasm", "tree-sitter-rust.tags.scm"),
-  java: bundledTags("tree-sitter-java.wasm", "tree-sitter-java.tags.scm"),
-  c: bundledTags("tree-sitter-c.wasm", "tree-sitter-c.tags.scm"),
-  cpp: bundledTags("tree-sitter-cpp.wasm", "tree-sitter-cpp.tags.scm"),
-  csharp: bundledTags("tree-sitter-c_sharp.wasm", "tree-sitter-csharp.tags.scm"),
-  kotlin: bundledTags("tree-sitter-kotlin.wasm", "tree-sitter-kotlin.tags.scm"),
-  ruby: bundledTags("tree-sitter-ruby.wasm", "tree-sitter-ruby.tags.scm"),
-  php: bundledTags("tree-sitter-php.wasm", "tree-sitter-php.tags.scm"),
-  shellscript: bundledTags("tree-sitter-bash.wasm", "tree-sitter-bash.tags.scm"),
-  css: bundledTags("tree-sitter-css.wasm", "tree-sitter-css.tags.scm"),
-  html: bundledTags("tree-sitter-html.wasm", "tree-sitter-html.tags.scm"),
-  yaml: bundledTags("tree-sitter-yaml.wasm", "tree-sitter-yaml.tags.scm"),
-  toml: bundledTags("tree-sitter-toml.wasm", "tree-sitter-toml.tags.scm"),
+  ...Object.fromEntries(Object.entries(loadCommittedGrammarPackManifest().packs).map(([id, pack]) => [id,
+    bundledTags(pack.grammarFile, pack.bundledQueryFile ?? (
+      id === "csharp" ? "tree-sitter-csharp.tags.scm" : pack.grammarFile.replace(/\.wasm$/, ".tags.scm")
+    )),
+  ])),
 };
 
 /**

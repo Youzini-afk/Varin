@@ -108,7 +108,7 @@ const BUNDLED_QUERY_FILES = {
   toml: "tree-sitter-toml.tags.scm",
 };
 
-const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedVersion) => {
+const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedVersion, committed) => {
   let metadata;
   try {
     metadata = await fetchJson(registryUrl(packageName));
@@ -139,7 +139,8 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
     }
   };
   await walk(extractDir);
-  const wasmRelative = preferredWasm(languageId, files);
+  // Collections contain several parsers. Keep the exact admitted artifact path.
+  const wasmRelative = committed?.wasmPath ?? preferredWasm(languageId, files);
   if (!wasmRelative) {
     return { skip: `${packageName}@${version}: tarball has no .wasm` };
   }
@@ -165,7 +166,8 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
       tagsNote = `tags.scm did not compile (${error instanceof Error ? error.message.split("\n")[0] : error})`;
     }
   }
-  const bundledQueryFile = BUNDLED_QUERY_FILES[languageId];
+  const bundledQueryFile = committed?.bundledQueryFile ?? BUNDLED_QUERY_FILES[languageId];
+  let bundledQueryIntegrity;
   if (bundledQueryFile) {
     const bundledQueryPath = path.join(
       webRoot,
@@ -178,6 +180,7 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
     try {
       const bundledQuery = await fs.readFile(bundledQueryPath, "utf8");
       runtime.compileQuery(language, bundledQuery);
+      bundledQueryIntegrity = integrityOf(Buffer.from(bundledQuery));
       bundledQueryValidated = true;
       tagsNote = `${tagsNote ? `${tagsNote}; ` : ""}bundled ${bundledQueryFile} compiled`;
     } catch (error) {
@@ -199,6 +202,7 @@ const inspectPackage = async (languageId, packageName, workDir, runtime, pinnedV
       licensePath: licenseFile(files)?.replace(/\\/g, "/") ?? null,
       tagsPath,
       tagsIntegrity,
+      ...(bundledQueryFile && bundledQueryValidated ? { bundledQueryFile, bundledQueryIntegrity } : {}),
     },
     tagsNote,
     bundledQueryValidated,
@@ -238,21 +242,41 @@ const readCommittedVersions = async () => {
 
 const main = async () => {
   const useLatest = process.argv.includes("--latest");
-  const pinned = useLatest ? new Map() : await readCommittedVersions();
+  const committed = await readCommittedVersions();
+  const pinned = useLatest ? new Map() : committed;
+  const candidates = new Map(CANDIDATES.map(candidate => [candidate.languageId, candidate]));
+  for (const [languageId, pack] of committed) {
+    // Reviewed bundled additions survive a manifest refresh. Their source package
+    // and exact wasm path remain authoritative, including multi-grammar archives.
+    candidates.set(languageId, { languageId, packages: [pack.packageName] });
+  }
   const workDir = await fs.mkdtemp(path.join(os.tmpdir(), "varin-grammar-manifest-"));
   const runtime = await loadWebTreeSitter();
   const packs = {};
   const skipped = {};
   log(useLatest ? "resolving latest published versions" : `reusing ${pinned.size} committed pack version(s)`);
   try {
-    for (const candidate of CANDIDATES) {
+    for (const candidate of candidates.values()) {
+      const release = committed.get(candidate.languageId);
+      if (release?.downloadFormat === "wasm") {
+        const dest = path.join(workDir, release.grammarFile);
+        await downloadTo(release.tarballUrl, dest);
+        const bytes = await fs.readFile(dest);
+        if (integrityOf(bytes) !== release.integrity) throw new Error(`Pinned release changed: ${candidate.languageId}`);
+        const language = await runtime.loadGrammar(dest);
+        const query = await fs.readFile(path.join(webRoot, "application-host/lib/structure/runtime", release.bundledQueryFile), "utf8");
+        runtime.compileQuery(language, query);
+        packs[candidate.languageId] = { ...release, bundledQueryIntegrity: integrityOf(Buffer.from(query)) };
+        log(`${candidate.languageId}: verified pinned upstream release ${release.version}`);
+        continue;
+      }
       let recorded = false;
       const reasons = [];
       const pin = pinned.get(candidate.languageId);
       for (const packageName of candidate.packages) {
         try {
           const pinnedVersion = pin?.packageName === packageName ? pin.version : undefined;
-          const result = await inspectPackage(candidate.languageId, packageName, workDir, runtime, pinnedVersion);
+          const result = await inspectPackage(candidate.languageId, packageName, workDir, runtime, pinnedVersion, committed.get(candidate.languageId));
           if (result.skip) {
             reasons.push(result.skip);
             continue;

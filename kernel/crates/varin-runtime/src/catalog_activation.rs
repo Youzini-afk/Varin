@@ -653,6 +653,7 @@ impl RequestActivationPreparation {
                     environment: Vec::new(),
                     launch: Some(selection),
                     inherit_source: false,
+                    inherited_tools: None,
                     initial: None,
                     origin: submissions::SubmissionOrigin::Ingress {
                         input: row.clone(),

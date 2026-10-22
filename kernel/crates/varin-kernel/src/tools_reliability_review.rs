@@ -343,6 +343,27 @@ fn search_pages_keep_the_original_job_and_release_paused_work_on_revocation() {
 }
 
 #[test]
+fn unavailable_unit_reads_return_context_and_plain_continuation_without_reinterpreting_unit_offsets() {
+    let mut f=Fixture::new();
+    let text=(1..150).map(|i|format!("line {i}: 中文\r\n")).collect::<String>();
+    fs::write(f.root.join("work/source.unknown"),&text).unwrap();
+    let read=f.read(json!({"path":"source.unknown","unit":{"line":50}}));
+    assert_eq!(read["content"]["startLine"],30);
+    assert!(read["content"]["text"].as_str().unwrap().contains("line 50: 中文\r\n"));
+    assert!(read["content"]["text"].as_str().unwrap().ends_with("line 110: 中文\r\n"));
+    assert_eq!(read["structure"]["fallback"],"plain_read");
+    assert_eq!(read["unitComplete"],false);
+    let next=f.read(read["nextRead"].clone());
+    assert!(next["content"]["text"].as_str().unwrap().starts_with("line 111:"));
+    assert_eq!(next["readVersion"],read["readVersion"]);
+    let failed=f.call("file_read",json!({"path":"source.unknown","unit":{"line":50,"revision":"old"},"offset":5}));
+    assert!(matches!(failed,ToolCompletion::Result { outcome:Outcome::Failed,.. }));
+    let batch=f.read(json!({"files":[{"path":"source.unknown","unit":{"line":50,"revision":"old"}},{"path":"source.unknown","unit":{"line":50}}]}));
+    assert_eq!(batch["status"],"partial");
+    assert_eq!(batch["files"][0]["result"]["error"],"structure_continuation_unavailable");
+}
+
+#[test]
 fn missing_search_paths_keep_other_paths_and_stale_continuations_report_the_file() {
     let mut f=Fixture::new();fs::write(f.root.join("work/a"),"needle\nneedle\nneedle\n").unwrap();
     let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","paths":["a","missing"]})) else {panic!("partial search lost results")};

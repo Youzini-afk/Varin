@@ -90,6 +90,8 @@ impl SyntaxRuntime {
     }
     pub fn analyze(&mut self,recipe:&KernelComputeGrammarParams,text:&str,lines:&[i64],budget_ms:u64,content_hash:&str,shared:&Shared)->Result<Value>{
         let (language_key,language)=self.language(recipe,shared)?;
+        // Compilation belongs to the cold grammar load, not the per-file parse budget.
+        let compiled=self.queries(&language_key,recipe,shared)?;
         let parser=self.parser.as_mut().unwrap();
         parser.set_language(&language).map_err(|e|format!("unavailable: {e}"))?;
         let started=Instant::now();let budget=Duration::from_millis(budget_ms);
@@ -102,7 +104,6 @@ impl SyntaxRuntime {
         let tree=tree.ok_or("failed: Parse budget exhausted before the file was finished")?;
         if expired(){return Err("failed: Parse budget exhausted before the file was finished".into());}
         let root=tree.root_node();
-        let compiled=self.queries(&language_key,recipe,shared)?;
         if expired(){return Err("failed: Structure query budget exhausted".into());}
         let mut symbols=Vec::new();let mut names=HashSet::new();let mut seen=HashSet::new();
         if recipe.style=="json"{
@@ -174,20 +175,60 @@ fn node_text<'a>(node:Node,text:&'a[u8])->&'a str{node.utf8_text(text).unwrap_or
 fn unquote(text:&str)->&str{if text.len()>=2&&(text.starts_with('"')||text.starts_with('\'')){&text[1..text.len()-1]}else{text}}
 fn span(node:Node)->(usize,usize){let start=node.start_position();let end=node.end_position();
     (start.row+1,(if end.column==0&&end.row>start.row{end.row}else{end.row+1}).max(start.row+1))}
+/// Navigation tags sometimes capture only a declarator. Readers need its declaration/body.
+fn complete_declaration(mut node:Node)->Node {
+    if node.kind()=="function_declarator" {
+        let mut ancestor=node.parent();
+        while let Some(parent)=ancestor {
+            if matches!(parent.kind(),"function_definition"|"declaration"|"field_declaration") {node=parent;break;}
+            if matches!(parent.kind(),"parameter_declaration"|"parameter_list") {break;}
+            ancestor=parent.parent();
+        }
+    }
+    while let Some(parent)=node.parent() {
+        let wraps=matches!(parent.kind(),"decorated_definition"|"export_statement"|"template_declaration"|"attribute_declaration")
+            || (node.kind()=="variable_declarator" && matches!(parent.kind(),"lexical_declaration"|"variable_declaration"))
+            || (node.kind()=="type_spec" && parent.kind()=="type_declaration")
+            || (node.kind()=="let_binding" && parent.kind()=="value_definition")
+            || (node.kind()=="module_binding" && parent.kind()=="module_definition")
+            || (node.kind()=="function_signature" && parent.kind()=="method_signature");
+        if !wraps {break;}
+        node=parent;
+    }
+    node
+}
 fn push_symbol(symbols:&mut Vec<Value>,seen:&mut HashSet<String>,name:&str,kind:&str,unit:Node,_signature:Option<Node>,text:&[u8]){
-    let (start,end)=span(unit);
-    let key=format!("{kind}:{name}:{start}:{end}:{}",unit.kind());if !seen.insert(key){return;}
     let declaration=initializer(unit).unwrap_or(unit);
+    let unit=complete_declaration(unit);
+    let mut first=unit;
+    while let Some(previous)=first.prev_named_sibling() {
+        if !(previous.kind().contains("comment") || matches!(previous.kind(),"attribute_item"|"outer_attribute"|"annotation")) {break;}
+        let gap=&text[previous.end_byte()..first.start_byte()];
+        if !gap.iter().all(u8::is_ascii_whitespace) || gap.iter().filter(|&&b|b==b'\n').count()>1 {break;}
+        first=previous;
+    }
+    let mut last=unit;
+    // Dart represents signatures and bodies as adjacent siblings, not one function node.
+    if matches!(unit.kind(),"function_signature"|"method_signature"|"constructor_signature") {
+        if let Some(body)=unit.next_named_sibling().filter(|n|n.kind()=="function_body") {last=body;}
+    }
+    if let Some(semicolon)=last.next_sibling().filter(|n|n.kind()==";") {last=semicolon;}
+    let start=span(first).0;let end=span(last).1;
+    let start_byte=first.start_byte();let end_byte=last.end_byte();
+    // Two upstream captures for one method are one unit, even if their kind labels differ.
+    let key=format!("{name}:{start_byte}:{end_byte}");if !seen.insert(key){return;}
     let header_end=declaration.child_by_field_name("body").map(|body|body.start_byte())
         .unwrap_or_else(||unit.start_byte()+node_text(unit,text).find('\n').unwrap_or(unit.end_byte()-unit.start_byte()));
     let header=std::str::from_utf8(&text[unit.start_byte()..header_end.max(unit.start_byte()).min(unit.end_byte())]).unwrap_or_default().trim_end();
-    symbols.push(json!({"name":name,"kind":kind,"range":{"startLine":start,"endLine":end,"startByte":unit.start_byte(),"endByte":unit.end_byte()},
-        "signature":{"startLine":start,"endLine":(start+header.bytes().filter(|byte|*byte==b'\n').count()).min(end),"text":header}}));
+    let signature_start=span(unit).0;
+    symbols.push(json!({"name":name,"kind":kind,"syntaxComplete":!unit.has_error()&&!last.has_error()&&!unit.is_missing(),
+        "range":{"startLine":start,"endLine":end,"startByte":start_byte,"endByte":end_byte},
+        "signature":{"startLine":signature_start,"endLine":(signature_start+header.bytes().filter(|byte|*byte==b'\n').count()).min(end),"text":header}}));
 }
 fn function_like(kind:&str)->bool{matches!(kind,"arrow_function"|"function"|"function_expression"|"generator_function"|"class")}
-fn binding(kind:&str)->bool{matches!(kind,"lexical_declaration"|"variable_declaration"|"public_field_definition"|"field_definition")}
+fn binding(kind:&str)->bool{matches!(kind,"variable_declarator"|"lexical_declaration"|"variable_declaration"|"public_field_definition"|"field_definition")}
 fn initializer(node:Node)->Option<Node>{
-    if matches!(node.kind(),"public_field_definition"|"field_definition"){return node.child_by_field_name("value");}
+    if matches!(node.kind(),"variable_declarator"|"public_field_definition"|"field_definition"){return node.child_by_field_name("value");}
     if matches!(node.kind(),"lexical_declaration"|"variable_declaration"){
         let mut cursor=node.walk();let found=node.named_children(&mut cursor).find(|n|n.kind()=="variable_declarator");
         return found.and_then(|n|n.child_by_field_name("value"));
@@ -266,6 +307,49 @@ mod tests {
             "literalCallQuery": "(call_expression function: (identifier) @fn arguments: (arguments (string) @literal))",
             "importQuery": "(import_statement source: (string) @source)"
         })).unwrap()
+    }
+
+    #[test]
+    fn unit_ranges_keep_bodies_wrappers_attributes_and_adjacent_dart_bodies() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../packages/web/application-host/lib/structure");
+        let manifest: Value = serde_json::from_slice(&fs::read(root.join("grammar-packs.json")).unwrap()).unwrap();
+        let cases = [
+            ("c", "run", "int run(int x) {\n return x + 1;\n}", "int run(int x) {\n return x + 1;\n}"),
+            ("cpp", "run", "template<class T>\nT run(T x) {\n return x;\n}", "template<class T>\nT run(T x) {\n return x;\n}"),
+            ("python", "run", "@logged\ndef run(x):\n    return x + 1\n", "@logged\ndef run(x):\n    return x + 1"),
+            ("rust", "run", "/// Keep this contract.\n#[inline]\npub fn run(x: i32) -> i32 {\n x + 1\n}", "/// Keep this contract.\n#[inline]\npub fn run(x: i32) -> i32 {\n x + 1\n}"),
+            ("dart", "run", "class Box {\n int run() {\n  return 1;\n }\n}", "int run() {\n  return 1;\n }"),
+            ("ocaml", "run", "let run x =\n x + 1\n", "let run x =\n x + 1"),
+        ];
+        let mut syntax = SyntaxRuntime::default();
+        for (id, name, text, expected) in cases {
+            let pack=&manifest["packs"][id];
+            let grammar=root.join("runtime").join(pack["grammarFile"].as_str().unwrap());
+            let query=pack["bundledQueryFile"].as_str().map(str::to_owned)
+                .unwrap_or_else(||pack["grammarFile"].as_str().unwrap().replace(".wasm", ".tags.scm"));
+            let recipe: KernelComputeGrammarParams=serde_json::from_value(json!({
+                "recipeId":format!("test-{id}"), "grammarPath":grammar, "grammarHash":pack["integrity"],
+                "grammarName":id,"style":"tags","definitionQuery":fs::read_to_string(root.join("runtime").join(query)).unwrap(),
+            })).unwrap();
+            let result=syntax.analyze(&recipe,text,&[],30000,&hex::encode(Sha256::digest(text)),&Shared::new(false)).unwrap();
+            let selected=result["symbols"].as_array().unwrap().iter().find(|s|s["name"]==name).unwrap_or_else(||panic!("{id}: {result}"));
+            let start=selected["range"]["startByte"].as_u64().unwrap() as usize;
+            let end=selected["range"]["endByte"].as_u64().unwrap() as usize;
+            assert_eq!(&text[start..end], expected, "{id}: {result}");
+            assert_eq!(selected["syntaxComplete"], true, "{id}");
+        }
+        let mut recipe=recipe();
+        recipe.definition_query="(function_declaration name: (identifier) @name) @unit\n(variable_declarator name: (identifier) @name) @unit".into();
+        let text="export const version = 1, run = () => {\n return version;\n};";
+        let result=syntax.analyze(&recipe,text,&[],30000,"hash",&Shared::new(false)).unwrap();
+        let selected=result["symbols"].as_array().unwrap().iter().find(|s|s["name"]=="run").unwrap();
+        assert_eq!(selected["range"]["startByte"],0);
+        assert_eq!(selected["range"]["endByte"],text.len());
+        assert_eq!(selected["kind"],"function");
+        let broken="function broken() {\n return 1;";
+        let result=syntax.analyze(&recipe,broken,&[],30000,"hash",&Shared::new(false)).unwrap();
+        assert!(result["symbols"].as_array().unwrap().iter().all(|s|s["syntaxComplete"]==false));
     }
 
     #[test]

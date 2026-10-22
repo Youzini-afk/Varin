@@ -614,6 +614,13 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
   });
   await fs.writeFile(path.join(f.workspace,'sample.ts'),"export function outer() {\r\n  function marker() { return 'old'; }\r\n  return marker();\r\n}\r\n");
   const h=await f.openHost({structure:true});const identity=await h.api.create('quick-investigation');
+  const [directory, capabilities, sourceTools] = await Promise.all([
+    h.runtime.toolCatalog(), h.runtime.childCapabilities(), h.runtime.sourceTools('live_root'),
+  ]);
+  expect(directory.some(tool => tool.name.startsWith('language_'))).toBe(false);
+  expect(capabilities.some(tool => tool.name.startsWith('language_'))).toBe(false);
+  expect(sourceTools.some(name => name.startsWith('language_'))).toBe(false);
+  expect(sourceTools).toContain('file_read');
   if(mode==='formal') {
     const catalog=await h.profiles.read({runtime:'agent'});
     const profile=catalog.profiles.find(item=>item.id==='varin:builtin:retrievalAgent')!;

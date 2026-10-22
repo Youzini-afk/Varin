@@ -117,7 +117,9 @@ export function createGrammarInstaller(options: GrammarInstallerOptions): Gramma
       const tarball = await download(pack.tarballUrl, controller.signal);
       if (controller.signal.aborted) return { status: "cancelled", languageId: id };
       const wanted = pack.tagsPath ? [pack.wasmPath, pack.tagsPath] : [pack.wasmPath];
-      const files = await extractFiles(tarball, wanted, controller.signal);
+      const files = pack.downloadFormat === "wasm"
+        ? new Map([[pack.wasmPath, tarball]])
+        : await extractFiles(tarball, wanted, controller.signal);
       if (controller.signal.aborted) return { status: "cancelled", languageId: id };
       const wasm = files.get(pack.wasmPath);
       if (!wasm) return failed(id, "integrity", "The published archive did not contain the expected grammar file.");

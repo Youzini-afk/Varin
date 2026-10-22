@@ -171,7 +171,7 @@ pub(super) fn schema() -> Value {
         "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use instead of offset/length."},
         "endLine":{"type":"integer","minimum":1,"description":"Last line, inclusive; requires startLine."},
         "unit":{"type":"object","additionalProperties":false,"anyOf":[{"required":["line"]},{"required":["symbol"]}],
-            "description":"Read an enclosing Tree-sitter code unit without starting a language server. Exact symbol names may return candidates; add line to disambiguate. offset/length page within the selected unit; continue with nextRead.",
+            "description":"Read an enclosing Tree-sitter code unit without starting a language server. Exact symbol names may return candidates; add line to disambiguate. offset/length page within the selected unit; continue with nextRead. Missing/incomplete structure returns plain source context with an explicit reason, never a claimed complete unit.",
             "properties":{"line":{"type":"integer","minimum":1},"symbol":{"type":"string","minLength":1},"revision":{"type":"string","description":"Retain the returned revision when continuing a unit."}}}});
     let single = json!({"type":"object","additionalProperties":false,"properties":properties,"required":["path"]});
     let mut properties = properties;
@@ -213,9 +213,9 @@ impl KernelToolExecutor {
         })();
         let outline = match outline {
             Ok(value) => value,
-            Err(error) => json!({"status":"unavailable","message":error.message}),
+            Err(error) => json!({"status":"unavailable","error":error.code,"message":error.message}),
         };
-        if cancel.is_cancelled() {
+        if cancel.is_cancelled() || outline["status"] == "cancelled" {
             return ToolCompletion::Result {
                 outcome: Outcome::Cancelled,
                 effect: Effect::None,
@@ -224,28 +224,12 @@ impl KernelToolExecutor {
         }
         let mut read = args.clone();
         read.unit = None;
+        if outline["status"] == "stale" {
+            return ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None,
+                content: json!({"status":"stale","error":"structure_revision_changed","message":outline["message"]}).into() };
+        }
         if outline["status"] != "ready" {
-            if unit.revision.is_some() {
-                return ToolCompletion::Result {outcome:Outcome::Failed,effect:Effect::None,
-                content:json!({"status":"unavailable","error":"structure_continuation_unavailable","message":outline["message"]}).into()};
-            }
-            if let Some(line) = unit.line {
-                read.start_line = Some(line);
-                read.end_line = Some(line);
-                read.length = None;
-                read.offset = 0;
-            }
-            let mut completion = self.execute_operation(
-                context,
-                call,
-                ResourceOperation::FileRead(read),
-                contract,
-                cancel,
-            );
-            if let ToolCompletion::Result { content, .. } = &mut completion {
-                content.data["structure"] = json!({"status":outline["status"],"message":outline["message"],"fallback":"plain_read"});
-            }
-            return completion;
+            return self.unit_plain_read(context, call, args, contract, cancel, outline);
         }
         if unit
             .revision
@@ -281,19 +265,32 @@ impl KernelToolExecutor {
                     .unwrap_or(u64::MAX)
                     .saturating_sub(item["range"]["startByte"].as_u64().unwrap_or(0))
             });
-            candidates.truncate(1);
+            if let Some(first) = candidates.first() {
+                let span = first["range"]["endByte"].as_u64().unwrap_or(u64::MAX)
+                    .saturating_sub(first["range"]["startByte"].as_u64().unwrap_or(0));
+                candidates.retain(|item| item["range"]["endByte"].as_u64().unwrap_or(u64::MAX)
+                    .saturating_sub(item["range"]["startByte"].as_u64().unwrap_or(0)) == span);
+            }
+        }
+        if candidates.is_empty() {
+            return self.unit_plain_read(context, call, args, contract, cancel,
+                json!({"status":"not_found","message":"No enclosing code unit matches this selection; showing source context","revision":outline["revision"]}));
         }
         if candidates.len() != 1 {
             return ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
-                content: json!({"status":if candidates.is_empty(){"not_found"}else{"ambiguous"},
+                content: json!({"status":"ambiguous",
                 "path":args.path,"revision":outline["revision"],"candidates":candidates,
                 "message":"Select a candidate using its line, or request an ordinary file range"})
                 .into(),
             };
         }
         let selected = &candidates[0];
+        if selected["syntaxComplete"] == false {
+            return self.unit_plain_read(context, call, args, contract, cancel,
+                json!({"status":"incomplete","message":"Syntax errors leave the selected declaration incomplete; showing source context","revision":outline["revision"]}));
+        }
         let (Some(start), Some(end)) = (
             selected["range"]["startByte"].as_u64(),
             selected["range"]["endByte"].as_u64(),
@@ -340,7 +337,42 @@ impl KernelToolExecutor {
             if next < end {
                 let mut selected_unit = unit.clone();
                 selected_unit.revision = outline["revision"].as_str().map(str::to_owned);
-                content.data["nextRead"] = json!({"path":args.path,"unit":selected_unit,"offset":next-start,"length":args.length.unwrap_or(65536)});
+                content.data["nextRead"] = json!({"path":args.path,"unit":selected_unit,"offset":next-start,"length":args.length.filter(|length|*length>0).unwrap_or(65536)});
+            }
+        }
+        completion
+    }
+    fn unit_plain_read(
+        &self, context: &ToolExecutionContext, call: &ToolCall, args: &FileReadArgs,
+        contract: &ToolContract, cancel: &CancellationToken, mut reason: Value,
+    ) -> ToolCompletion {
+        let unit = args.unit.as_ref().expect("unit fallback");
+        // A unit-relative continuation must never silently become a file-relative page.
+        if unit.revision.is_some() || args.offset != 0 {
+            return ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None,
+                content: json!({"status":"unavailable","error":"structure_continuation_unavailable",
+                    "message":"The selected unit cannot be continued; repeat selection or use a plain file range", "structure":reason}).into() };
+        }
+        let mut read = args.clone();
+        read.unit = None;
+        if let Some(line) = unit.line {
+            // A useful default context window, not an input or continuation limit.
+            // Explicit ordinary ranges and nextRead remain available for the rest.
+            read.start_line = Some(line.saturating_sub(20).max(1));
+            read.end_line = Some(line.saturating_add(60));
+            read.offset = 0;
+            read.length = None;
+        }
+        let mut completion = self.execute_operation(context, call, ResourceOperation::FileRead(read), contract, cancel);
+        if let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = &mut completion {
+            reason["fallback"] = json!("plain_read");
+            content.data["structure"] = reason;
+            content.data["requestedUnit"] = json!(unit);
+            content.data["unitComplete"] = json!(false);
+            if content.data["content"]["eof"] == false {
+                if let Some(offset) = content.data["content"]["nextOffset"].as_u64() {
+                    content.data["nextRead"] = json!({"path":args.path,"offset":offset,"length":args.length.unwrap_or(65536)});
+                }
             }
         }
         completion
@@ -386,7 +418,9 @@ impl KernelToolExecutor {
                 match completion {
                     ToolCompletion::Result {outcome,content,..} => {
                         let mut value = content.data;
-                        value["status"] = json!(if outcome != Outcome::Succeeded {"failed"} else if value["missing"] == true {"missing"} else {"ready"});
+                        if !value["status"].is_string() {
+                            value["status"] = json!(if outcome != Outcome::Succeeded {"failed"} else if value["missing"] == true {"missing"} else {"ready"});
+                        }
                         if outcome == Outcome::Succeeded && merged { observations.insert(key,value.clone()); }
                         Ok(if selected.is_some() && merged {project_range(value,&original)}else{value})
                     },

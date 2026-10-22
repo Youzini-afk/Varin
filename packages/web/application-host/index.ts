@@ -2070,7 +2070,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     mcpInteractionContinuation: (scope, action, signal) => targetMcpService.interactionContinuation(scope, action, signal),
     mcpDerivationContinuation: (scope, action, signal) => targetMcpService.derivationContinuation(scope, action, signal),
     mcpChildContinuation: (scope, action, signal) => targetMcpService.childContinuation(scope, action, signal),
-    languageAvailable: true, releaseSource: async (scope, retention) => {
+    releaseSource: async (scope, retention) => {
       const [, mcp] = await Promise.all([targetSourceQuery.release(scope), targetMcpService.release(scope, retention), targetScheduleReceipts.flush(scope)]);
       return { mcpExecutorStopped: mcp.executorStopped, mcpTaskControlsDrained: mcp.taskControlsDrained };
     }, cleanupSource: async scope => { await targetScheduleReceipts.flush(scope); await targetSourceQuery.cleanup(scope); },

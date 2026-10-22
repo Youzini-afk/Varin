@@ -44,7 +44,6 @@ export interface ManagedSourceServiceOptions {
   mcpInteractionContinuation?(scope: ManagedSourceCleanupScope, action: import('./managed-mcp-contract.js').ManagedMcpInteractionAction, signal?: AbortSignal): Promise<import('./managed-mcp-contract.js').ManagedMcpReply>;
   releaseSource?(scope: ManagedSourceCleanupScope, options?: { retainMcpHolders: boolean }): Promise<void | { mcpExecutorStopped: boolean; mcpTaskControlsDrained?: boolean }>;
   cleanupSource?(scope: ManagedSourceCleanupScope): Promise<void>;
-  languageAvailable?: boolean;
 }
 
 export function createManagedSourceService(options: ManagedSourceServiceOptions): ManagedSourceService {
@@ -91,8 +90,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     requireReadPrincipal(principal, input.coordinatorHostId);
     await kernel.start();
     return kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
-      ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}), managed: true,
-      clientCapabilities: [...principal.capabilities], languageAvailable: options.languageAvailable === true }, signal);
+      ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}),
+      clientCapabilities: [...principal.capabilities] }, signal);
   };
   const registration = async (source: LaunchSource, signal?: AbortSignal): Promise<void> => {
     if (source.resource_owner.kind !== 'managed_host' || source.resource_owner.hostId !== options.hostId) {
@@ -623,7 +622,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         // Describe the original binding even if current permissions have been
         // withdrawn. This grants no execution or new source access.
         const selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', {
-          mode: authority.source.mode, enabledTools: authority.toolBinding?.enabledTools ?? [], managed: true, languageAvailable: true,
+          mode: authority.source.mode, enabledTools: authority.toolBinding?.enabledTools ?? [],
         }, signal);
         return { scope: authority.scope, phase: authority.phase, purpose: authority.purpose, operationId: authority.operationId, mcpHolders: authority.mcpHolders, mcpDeliveries: authority.mcpDeliveries, mcpChildren: authority.mcpChildren, binding: project(authority, selected) };
       }));

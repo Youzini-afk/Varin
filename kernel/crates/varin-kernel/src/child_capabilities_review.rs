@@ -31,7 +31,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             .find(|tool| tool.name == "process_write")
             .unwrap()
             .source_requirement,
-        ChildSourceRequirement::Physical
+        ChildSourceRequirement::Source
     );
     assert_eq!(
         metadata
@@ -55,29 +55,11 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             varin_runtime::catalog::dispatch::ChildPresetDefault::Verifier,
         ]
     );
-    for name in [
-        "language_definition",
-        "language_references",
-        "language_diagnostics",
-    ] {
-        let capability = metadata.iter().find(|tool| tool.name == name).unwrap();
-        assert_eq!(
-            capability.source_requirement,
-            ChildSourceRequirement::Source
-        );
-        assert!(
-            !capability.process,
-            "Host language service is not a child process-tool grant"
-        );
-        assert_eq!(
-            capability.default_presets,
-            vec![varin_runtime::catalog::dispatch::ChildPresetDefault::Worker, varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval, varin_runtime::catalog::dispatch::ChildPresetDefault::Verifier]
-        );
-        let schema = directory.iter().find(|tool| tool.name == name).unwrap();
-        let requirements = schema.requirements.as_ref().unwrap();
-        assert!(requirements.accepts_mode(varin_runtime::SourceMode::FixedBranch));
-        assert!(requirements.accepts_mode(varin_runtime::SourceMode::Materialized));
-        assert!(requirements.accepts_mode(varin_runtime::SourceMode::LiveRoot));
+    for name in ["language_definition", "language_references", "language_diagnostics", "language_hover", "language_symbols", "language_document_symbols", "language_call_hierarchy"] {
+        assert!(!metadata.iter().any(|tool| tool.name == name));
+        assert!(!directory.iter().any(|tool| tool.name == name));
+        assert!(select(&[name.into()]).is_err());
+        assert!(!varin_runtime::tool_disclosure::is_always_declared(name));
     }
     for name in ["goal_report", "computer", "pi-only"] {
         assert!(select(&[name.into()]).is_err());
@@ -281,7 +263,7 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
         (
             "retrieval",
             ChildPresetDefault::Retrieval,
-            ChildWorkMode::ReadOnly,
+            ChildWorkMode::IsolatedWrite,
         ),
     ] {
         // The profile owner projects these members; no second available-name list.
@@ -330,11 +312,12 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
             input.work_mode = Some(ChildWorkMode::ReadOnly);
             assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
         } else {
-            assert!(!resolved.source_delegation().process);
-            assert!(metadata
-                .iter()
-                .filter(|tool| tools.contains(&tool.name))
-                .all(|tool| tool.source_requirement != ChildSourceRequirement::Physical));
+            assert!(resolved.source_delegation().process);
+            assert!(!executable.contains(&get("file_write")));
+            input.work_mode = Some(ChildWorkMode::ReadOnly);
+            assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
+            input.tools = Some(vec!["file_read".into()]);
+            assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
         }
     }
     selected.catalog.presets[0].tools = vec!["read".into(), "bash".into()];

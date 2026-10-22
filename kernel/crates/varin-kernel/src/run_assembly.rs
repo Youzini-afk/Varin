@@ -43,6 +43,13 @@ pub(crate) struct RunPreparation {
 }
 impl RunPreparation {
     pub fn new(mut params: RunStartParams, run: &varin_runtime::Run) -> Result<Self, KernelError> {
+        if let Some(names) = params.tool_binding.as_ref().and_then(|binding| binding["enabledTools"].as_array()) {
+            let registered = crate::tools::ToolKind::all().map(|kind|kind.name()).collect::<std::collections::BTreeSet<_>>();
+            let unavailable = names.iter().filter_map(Value::as_str).filter(|name|!registered.contains(name)).collect::<Vec<_>>();
+            if !unavailable.is_empty() {
+                return Err(KernelError::Operation(format!("This accepted run requires tools no longer registered: {}. Start a new conversation round to use the current tool directory.",unavailable.join(", "))));
+            }
+        }
         let tools = params
             .tool_binding
             .take()

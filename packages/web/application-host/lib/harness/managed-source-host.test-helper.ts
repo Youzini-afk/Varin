@@ -351,7 +351,7 @@ async function run(frame: Record<string, unknown>) {
   const capture = { documents: bDocuments, inspectInventory: async () => ({ kind: 'directory' as const }) };
   const localPreparer = createThreadSourcePreparer({ documents: bDocuments, liveSources: bLive,
     workingStates: createKernelWorkspaceWorkingStateAccess(storage), inspectInventory: capture.inspectInventory,
-    sourceTools: async mode => (await b.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode, managed: false })).tools.map(tool => tool.name),
+    sourceTools: async mode => (await b.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode })).tools.map(tool => tool.name),
   });
   const packageQueries = frame.scenario === 'extension-package' ? createSourceQueryService({ kernel: b, documents: bDocuments,
     validateLiveSource: bLive.validate, storage, resourceOwners: {

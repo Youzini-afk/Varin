@@ -487,8 +487,14 @@ impl Catalog {
                     {
                         source.environment_run_id = Some(previous_run);
                     }
-                    selection.tools_ref = previous.selection.base_tools_ref.clone();
-                    selection.base_tools_ref = previous.selection.base_tools_ref;
+                    let tools = if let Some((expected, current)) = &prepared.inherited_tools {
+                        if expected != &previous.selection.base_tools_ref {
+                            return Err(RuntimeError::Conflict("inherited tool selection changed during preparation".into()));
+                        }
+                        current.clone()
+                    } else { previous.selection.base_tools_ref };
+                    selection.tools_ref = tools.clone();
+                    selection.base_tools_ref = tools;
                     selection.tool_schema_generation = selection.configuration_generation;
                 }
                 if let Some(source) = &selection.source {

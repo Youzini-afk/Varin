@@ -75,11 +75,12 @@ const validateBundledGrammars = async () => {
     if (bytes !== pack.bytes || sha256(grammarPath) !== pack.integrity) {
       throw new Error(`Bundled grammar digest/size does not match grammar-packs.json for ${languageId}`);
     }
-    const queryPath = path.join(destDir, queryFileFor(languageId, pack.grammarFile));
+    const queryPath = path.join(destDir, pack.bundledQueryFile ?? queryFileFor(languageId, pack.grammarFile));
     if (!fs.existsSync(queryPath) || fs.statSync(queryPath).size === 0) {
       throw new Error(`Missing bundled structure query for ${languageId}: ${queryPath}`);
     }
-    if (pack.tagsIntegrity && !customQueryAliases[languageId] && sha256(queryPath) !== pack.tagsIntegrity) {
+    const queryIntegrity = pack.bundledQueryIntegrity ?? (customQueryAliases[languageId] ? null : pack.tagsIntegrity);
+    if (queryIntegrity && sha256(queryPath) !== queryIntegrity) {
       throw new Error(`Bundled upstream structure query digest does not match grammar-packs.json for ${languageId}`);
     }
     const language = await Language.load(grammarPath);

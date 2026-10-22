@@ -67,9 +67,7 @@ impl SourceAuthorityScope {
 pub(crate) struct SourceCapabilitiesParams {
     pub mode: varin_runtime::SourceMode,
     pub enabled_tools: Option<Vec<String>>,
-    pub managed: bool,
     pub client_capabilities: Option<Vec<String>>,
-    pub language_available: Option<bool>,
 }
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

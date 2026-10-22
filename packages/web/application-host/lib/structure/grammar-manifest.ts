@@ -8,6 +8,8 @@ export interface GrammarPackEntry {
   packageName: string;
   version: string;
   tarballUrl: string;
+  /** Omitted for npm tar archives; some upstream releases publish standalone wasm. */
+  downloadFormat?: "wasm";
   wasmPath: string;
   grammarFile: string;
   integrity: string;
@@ -21,6 +23,9 @@ export interface GrammarPackEntry {
    */
   tagsPath: string | null;
   tagsIntegrity: string | null;
+  /** Reviewed local unit query; independent of an upstream navigation tags file. */
+  bundledQueryFile?: string;
+  bundledQueryIntegrity?: string;
 }
 
 export interface GrammarPackManifest {
@@ -72,6 +77,15 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
     ) {
       throw new Error(`Grammar pack manifest entry for ${languageId} is invalid.`);
     }
+    if (pack.downloadFormat !== undefined && pack.downloadFormat !== "wasm") {
+      throw new Error(`Grammar pack download format for ${languageId} is invalid.`);
+    }
+    if ((pack.bundledQueryFile !== undefined || pack.bundledQueryIntegrity !== undefined) && (
+      typeof pack.bundledQueryFile !== "string" || !/^[\w.-]+\.scm$/.test(pack.bundledQueryFile)
+      || typeof pack.bundledQueryIntegrity !== "string" || !isGrammarIntegrity(pack.bundledQueryIntegrity)
+    )) {
+      throw new Error(`Grammar pack bundled query identity for ${languageId} is invalid.`);
+    }
     // A pack advertised outside the window the manifest itself declares can
     // never load, so it is not offered as installable.
     if (pack.abi < raw.minCompatibleAbi || pack.abi > raw.maxCompatibleAbi) {
@@ -89,6 +103,7 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
       packageName: pack.packageName,
       version: pack.version,
       tarballUrl: pack.tarballUrl,
+      ...(pack.downloadFormat === "wasm" ? { downloadFormat: "wasm" as const } : {}),
       wasmPath: pack.wasmPath,
       grammarFile: pack.grammarFile,
       integrity: pack.integrity,
@@ -97,6 +112,9 @@ export function parseGrammarPackManifest(value: unknown): GrammarPackManifest {
       licensePath: typeof pack.licensePath === "string" ? pack.licensePath : null,
       tagsPath: hasQuery ? path : null,
       tagsIntegrity: hasQuery ? digest : null,
+      ...(typeof pack.bundledQueryFile === "string" && typeof pack.bundledQueryIntegrity === "string"
+        && isGrammarIntegrity(pack.bundledQueryIntegrity)
+        ? { bundledQueryFile: pack.bundledQueryFile, bundledQueryIntegrity: pack.bundledQueryIntegrity } : {}),
     };
   }
   const skipped = raw.skipped && typeof raw.skipped === "object" && !Array.isArray(raw.skipped)

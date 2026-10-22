@@ -113,7 +113,11 @@ fn submit_input(
         }
         return Ok(serde_json::to_value(receipt)?);
     }
-    let prepared = preparation.load(launch, inherit_source).map_err(domain)?;
+    // New user rounds inherit the selected names, resolved against today's owner
+    // declarations. Old launches and already accepted requests stay immutable.
+    let bot = preparation.scope().is_some_and(|scope| scope.mode == "bot");
+    let available = crate::run_tools::builtin_schemas(&crate::tools::ToolKind::all().collect(), plan_eligible, true, bot);
+    let prepared = preparation.with_tool_catalog(available).load(launch, inherit_source).map_err(domain)?;
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
     }

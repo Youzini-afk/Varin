@@ -76,13 +76,7 @@ export const TYPESCRIPT_DEFINITION_QUERY = `
 (module
   name: (_) @name) @unit
 
-(lexical_declaration
-  (variable_declarator
-    name: (identifier) @name)) @unit
-
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @name)) @unit
+(variable_declarator name: (identifier) @name) @unit
 `;
 
 /**
@@ -167,13 +161,7 @@ export const JAVASCRIPT_DEFINITION_QUERY = `
 (field_definition
   property: (_) @name) @unit
 
-(lexical_declaration
-  (variable_declarator
-    name: (identifier) @name)) @unit
-
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @name)) @unit
+(variable_declarator name: (identifier) @name) @unit
 `;
 
 export const JAVASCRIPT_LITERAL_CALL_QUERY = TYPESCRIPT_LITERAL_CALL_QUERY;

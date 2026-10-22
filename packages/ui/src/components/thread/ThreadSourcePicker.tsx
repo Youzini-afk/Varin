@@ -181,7 +181,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
         value={mode} onChange={event => { invalidate(); setMode(event.target.value as typeof mode); if (event.target.value === 'live_root') setContentMode('saved-files'); }}>
         <option value="fixed_branch">Read-only file snapshot: read, list and search</option>
         <option value="materialized">Isolated editable copy and commands</option>
-        <option value="live_root">Live workspace: files, commands and language tools</option>
+        <option value="live_root">Live workspace: files, commands and code structure</option>
       </select>
       {mode === 'live_root' ? <p>Uses saved files directly, without capturing a snapshot. External file and dependency changes remain live; unsaved editor changes are not included. Edits change the selected workspace immediately. Commands can have external effects; this is not a security sandbox.</p> : <>
         <label className="block">Snapshot content

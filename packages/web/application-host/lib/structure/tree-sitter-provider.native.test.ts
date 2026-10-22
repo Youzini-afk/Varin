@@ -33,7 +33,7 @@ describe("tree-sitter language specs", () => {
   it("outlines an installed grammar through its upstream tags query", async () => {
     const provider = createTreeSitterStructureProvider({
       parseBudgetMs: 30_000,
-      resolveInstalledLanguage: (languageId) => (languageId === "markdown" ? {
+      resolveInstalledLanguage: (languageId) => (languageId === "fixture-installed" ? {
         grammarFile: "tree-sitter-javascript.wasm",
         tagsQuery: [
           "(function_declaration name: (identifier) @name) @definition.function",
@@ -55,7 +55,7 @@ describe("tree-sitter language specs", () => {
       "  return inner;",
       "}",
     ].join("\n");
-    const outline = await provider.outline({ path: "sample.md", languageId: "markdown", text, revision: "rev-1" });
+    const outline = await provider.outline({ path: "sample.md", languageId: "fixture-installed", text, revision: "rev-1" });
     expect(outline.status).toBe("ready");
     expect(outline.provider).toBe("tree-sitter");
     const needle = outline.symbols.find((symbol) => symbol.name === "needle");
@@ -67,7 +67,7 @@ describe("tree-sitter language specs", () => {
 
     const classified = await provider.classifyHits({
       path: "sample.md",
-      languageId: "markdown",
+      languageId: "fixture-installed",
       text,
       revision: "rev-1",
       lines: [2, 3],
@@ -81,8 +81,8 @@ describe("tree-sitter language specs", () => {
       parseBudgetMs: 30_000,
       resolveInstalledLanguage: () => null,
     });
-    expect(provider.capabilities("swift")).toEqual(NO_STRUCTURE_CAPABILITIES);
-    const outline = await provider.outline({ path: "a.swift", languageId: "swift", text: "x = 1", revision: "rev-1" });
+    expect(provider.capabilities("fixture-absent")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    const outline = await provider.outline({ path: "a.swift", languageId: "fixture-absent", text: "x = 1", revision: "rev-1" });
     expect(outline.status).toBe("unsupported");
     expect(outline.symbols).toEqual([]);
   });
@@ -91,8 +91,8 @@ describe("tree-sitter language specs", () => {
     const provider = createTreeSitterStructureProvider({
       resolveInstalledLanguage: () => ({ grammarFile: "tree-sitter-javascript.wasm", tagsQuery: "" }),
     });
-    expect(provider.capabilities("markdown")).toEqual(NO_STRUCTURE_CAPABILITIES);
-    const outline = await provider.outline({ path: "a.md", languageId: "markdown", text: "# title", revision: "rev-1" });
+    expect(provider.capabilities("fixture-installed")).toEqual(NO_STRUCTURE_CAPABILITIES);
+    const outline = await provider.outline({ path: "a.md", languageId: "fixture-installed", text: "# title", revision: "rev-1" });
     expect(outline.status).toBe("unavailable");
     expect(outline.message).toMatch(/query is not readable/i);
   });
@@ -402,11 +402,27 @@ describe("createTreeSitterStructureProvider", () => {
       { languageId: "html", path: "index.html", text: "<div><span>Hi</span></div>\n", name: "div" },
       { languageId: "yaml", path: "config.yaml", text: "name: app\nservices:\n  web: nginx\n", name: "services" },
       { languageId: "toml", path: "Cargo.toml", text: "[package]\nname = \"app\"\n", name: "package" },
+      { languageId: "swift", path: "Box.swift", text: "struct Box { func run() -> Int { return 1 } }", name: "Box" },
+      { languageId: "dart", path: "box.dart", text: "class Box { int run() { return 1; } }", name: "run" },
+      { languageId: "vue", path: "App.vue", text: '<template><div>Hello</div></template>\n<script setup lang="ts">function run() {}</script>', name: "script" },
+      { languageId: "svelte", path: "App.svelte", text: '<script lang="ts">function run() {}</script>\n<div>Hello</div>', name: "script" },
+      { languageId: "solidity", path: "Box.sol", text: "contract Box { function run() public pure returns (uint) { return 1; } }", name: "run" },
+      { languageId: "powershell", path: "run.ps1", text: "function Get-Thing { param([string]$Name) Write-Output $Name }", name: "Get-Thing" },
+      { languageId: "ini", path: "app.ini", text: "[service]\nname=app\n", name: "service" },
+      { languageId: "lua", path: "run.lua", text: "local function run(x)\n return x\nend\n", name: "run" },
+      { languageId: "scala", path: "Box.scala", text: "class Box { def run(): Int = { 1 } }", name: "run" },
+      { languageId: "elixir", path: "box.ex", text: "defmodule Box do\n def run(x) do\n x\n end\nend\n", name: "run" },
+      { languageId: "zig", path: "run.zig", text: "pub fn run(x: i32) i32 { return x; }", name: "run" },
+      { languageId: "hcl", path: "app.hcl", text: 'service "web" { port = 8080 }', name: "service" },
+      { languageId: "terraform", path: "main.tf", text: 'resource "aws_instance" "web" { ami = "image" }', name: "resource" },
+      { languageId: "ocaml", path: "box.ml", text: "let run x = x + 1\n", name: "run" },
+      { languageId: "markdown", path: "README.md", text: "# Overview\n\nIntroduction\n\n## Install\n\nRun it.\n", name: "Install" },
+      { languageId: "xml", path: "app.xml", text: '<project><service name="web"><port>8080</port></service></project>', name: "service" },
     ];
     for (const sample of samples) {
       const outline = await provider.outline({ ...sample, revision: `bundled-${sample.languageId}` });
-      expect(outline.status, `${sample.languageId}: ${outline.message ?? ""}`).toBe("ready");
-      expect(outline.symbols.map((symbol) => symbol.name), sample.languageId).toContain(sample.name);
+      expect.soft(outline.status, `${sample.languageId}: ${outline.message ?? ""}`).toBe("ready");
+      expect.soft(outline.symbols.map((symbol) => symbol.name), sample.languageId).toContain(sample.name);
     }
-  });
+  }, 60_000);
 });

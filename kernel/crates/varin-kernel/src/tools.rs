@@ -18,8 +18,6 @@ use varin_runtime::{Effect, Lifetime, Outcome};
 
 #[path = "tools_discovery.rs"]
 mod discovery;
-#[path = "tools_language.rs"]
-mod language;
 #[path = "tools_reconciliation.rs"]
 mod reconciliation;
 #[path = "tools_retrieval.rs"]
@@ -27,9 +25,15 @@ mod retrieval;
 #[path = "tools_read.rs"]
 mod read;
 use discovery::FileQueryArgs;
-use language::LanguageQueryArgs;
 use retrieval::RetrievalQueryArgs;
 use crate::storage::recovery_points::{RecoveryPointsArgs, FileRestoreArgs};
+
+/// Private source admission for the IDE service. Never a model tool or schema.
+#[derive(Debug, Clone)]
+pub(crate) struct LanguageSourceArgs {
+    path: String,
+    derived_view: Option<Value>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -46,13 +50,6 @@ pub(crate) enum ToolKind {
     ProcessSpawn,
     ProcessWrite,
     ProcessResize,
-    LanguageDefinition,
-    LanguageReferences,
-    LanguageDiagnostics,
-    LanguageHover,
-    LanguageSymbols,
-    LanguageDocumentSymbols,
-    LanguageCallHierarchy,
     CodeRetrieval,
 }
 impl ToolKind {
@@ -70,13 +67,6 @@ impl ToolKind {
             Self::ProcessSpawn => "process_spawn",
             Self::ProcessWrite => "process_write",
             Self::ProcessResize => "process_resize",
-            Self::LanguageDefinition => "language_definition",
-            Self::LanguageReferences => "language_references",
-            Self::LanguageDiagnostics => "language_diagnostics",
-            Self::LanguageHover => "language_hover",
-            Self::LanguageSymbols => "language_symbols",
-            Self::LanguageDocumentSymbols => "language_document_symbols",
-            Self::LanguageCallHierarchy => "language_call_hierarchy",
             Self::CodeRetrieval => "code_retrieval",
         }
     }
@@ -85,13 +75,6 @@ impl ToolKind {
         let source = match self {
             Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval
                 | Self::ProcessSpawn | Self::ProcessInspect | Self::ProcessRead | Self::ProcessWrite | Self::ProcessResize => Source,
-            Self::LanguageDefinition
-            | Self::LanguageReferences
-            | Self::LanguageDiagnostics
-            | Self::LanguageHover
-            | Self::LanguageSymbols
-            | Self::LanguageDocumentSymbols
-            | Self::LanguageCallHierarchy => Source,
             _ => Physical,
         };
         ToolRequirements {
@@ -136,25 +119,6 @@ impl ToolKind {
             Self::ProcessResize => {
                 "Resize the original PTY and wait for its actual size-change receipt."
             }
-            Self::LanguageDefinition => {
-                "Find symbol definitions using the admitted source's language provider."
-            }
-            Self::LanguageReferences => {
-                "Find symbol references using the admitted source's language provider."
-            }
-            Self::LanguageDiagnostics => {
-                "Read diagnostics from the admitted source's language provider."
-            }
-            Self::LanguageHover => {
-                "Read type, signature and documentation at a zero-based UTF-16 source position."
-            }
-            Self::LanguageSymbols => {
-                "Find workspace symbols matching query using a representative source file's language provider."
-            }
-            Self::LanguageDocumentSymbols => "Read the source document's hierarchical symbols.",
-            Self::LanguageCallHierarchy => {
-                "Find incoming or outgoing calls at a zero-based UTF-16 source position. Returned call-site ranges belong to the from resource."
-            }
             Self::CodeRetrieval => {
                 "Retrieve source excerpts relevant to the question, following useful code relationships to provide the context needed for further work. Results include source locations and any gaps that affect their use."
             }
@@ -174,13 +138,6 @@ impl ToolKind {
             Self::ProcessSpawn,
             Self::ProcessWrite,
             Self::ProcessResize,
-            Self::LanguageDefinition,
-            Self::LanguageReferences,
-            Self::LanguageDiagnostics,
-            Self::LanguageHover,
-            Self::LanguageSymbols,
-            Self::LanguageDocumentSymbols,
-            Self::LanguageCallHierarchy,
             Self::CodeRetrieval,
         ]
         .into_iter()
@@ -206,6 +163,12 @@ pub(crate) fn source_capabilities(
         .enabled_tools
         .as_ref()
         .map(|names| names.iter().cloned().collect::<BTreeSet<_>>());
+    if let Some(requested) = &requested {
+        let unknown = requested.iter().filter(|name| ToolKind::from_name(name).is_none()).cloned().collect::<Vec<_>>();
+        if !unknown.is_empty() {
+            return Err(KernelError::Protocol(format!("Tools are not registered for Agent sources: {}. Refresh the available tools and update the explicit selection.", unknown.join(", "))));
+        }
+    }
     let client = p
         .client_capabilities
         .as_ref()
@@ -228,24 +191,10 @@ pub(crate) fn source_capabilities(
         if kind.requirements().process {
             caps.extend(["terminal:use", "process:control"]);
         }
-        let language = matches!(
-            kind,
-            ToolKind::LanguageDefinition
-                | ToolKind::LanguageReferences
-                | ToolKind::LanguageDiagnostics
-                | ToolKind::LanguageHover
-                | ToolKind::LanguageSymbols
-                | ToolKind::LanguageDocumentSymbols
-                | ToolKind::LanguageCallHierarchy
-        );
-        // Language servers belong to explicit IDE capabilities, not the Agent's
-        // baseline source directory or its automatic project preparation.
-        if language && requested.is_none() { continue; }
         let missing = !kind.requirements().accepts_mode(p.mode)
             || client
                 .as_ref()
-                .is_some_and(|set| caps.iter().any(|cap| !set.contains(cap)))
-            || p.managed && language && !p.language_available.unwrap_or(false);
+                .is_some_and(|set| caps.iter().any(|cap| !set.contains(cap)));
         if missing {
             unavailable.push(json!({"name":kind.name(),"code":"source_capability_unavailable"}));
         } else {
@@ -422,7 +371,7 @@ enum ResourceOperation {
     FileRead(FileReadArgs),
     FileReadBatch(Vec<Value>),
     FileQuery(FileQueryArgs),
-    LanguageQuery(LanguageQueryArgs),
+    LanguageSource(LanguageSourceArgs),
     RetrievalQuery(RetrievalQueryArgs),
     ObserveCompute {
         job_id: String,
@@ -458,7 +407,7 @@ impl ResourceOperation {
     /// These compose original source reads with Host-owned services/history.
     /// Remote resource Hosts have no coordinator Catalog or language bridge.
     fn coordinator_owned(&self) -> bool {
-        matches!(self, Self::LanguageQuery(_) | Self::RetrievalQuery(_) | Self::FileReadBatch(_))
+        matches!(self, Self::LanguageSource(_) | Self::RetrievalQuery(_) | Self::FileReadBatch(_))
             || matches!(self, Self::FileRead(args) if args.unit.is_some())
     }
     fn parse(kind: ToolKind, args: &Value) -> Result<Self, ExecutionError> {
@@ -475,15 +424,6 @@ impl ResourceOperation {
         let mut parsed = match kind {
             ToolKind::CodeRetrieval => {
                 return RetrievalQueryArgs::parse(args).map(Self::RetrievalQuery);
-            }
-            ToolKind::LanguageDefinition
-            | ToolKind::LanguageReferences
-            | ToolKind::LanguageDiagnostics
-            | ToolKind::LanguageHover
-            | ToolKind::LanguageSymbols
-            | ToolKind::LanguageDocumentSymbols
-            | ToolKind::LanguageCallHierarchy => {
-                return LanguageQueryArgs::parse(kind, args).map(Self::LanguageQuery);
             }
             ToolKind::FileList | ToolKind::FileSearch => {
                 serde_json::from_value::<FileQueryArgs>(args.clone()).map(|mut args| {
@@ -701,7 +641,7 @@ impl ResourceOperation {
                 }
                 ("storage.health", params)
             }
-            Self::LanguageQuery(args) => {
+            Self::LanguageSource(args) => {
                 if let Some(source) = &binding.file_source {
                     (
                         "branch.read",
@@ -1687,13 +1627,6 @@ impl KernelToolExecutor {
                     | ToolKind::FileList
                     | ToolKind::FileSearch
                     | ToolKind::CodeRetrieval
-                    | ToolKind::LanguageDefinition
-                    | ToolKind::LanguageReferences
-                    | ToolKind::LanguageDiagnostics
-                    | ToolKind::LanguageHover
-                    | ToolKind::LanguageSymbols
-                    | ToolKind::LanguageDocumentSymbols
-                    | ToolKind::LanguageCallHierarchy
             )
         }) && binding.source_mode == SourceMode::FixedBranch
             && !binding
@@ -1842,17 +1775,6 @@ impl KernelToolExecutor {
                     kind.requirements().source.into(),
                     &[Worker, Retrieval],
                 ),
-                ToolKind::LanguageDefinition
-                | ToolKind::LanguageReferences
-                | ToolKind::LanguageDiagnostics
-                | ToolKind::LanguageHover
-                | ToolKind::LanguageSymbols
-                | ToolKind::LanguageDocumentSymbols
-                | ToolKind::LanguageCallHierarchy => crate::run_tools::BuiltinSchema::child(
-                    schema,
-                    kind.requirements().source.into(),
-                    &[],
-                ),
             })
             .collect()
     }
@@ -1947,7 +1869,7 @@ impl KernelToolExecutor {
                 ])),
                 Access::Read,
             ),
-            ResourceOperation::LanguageQuery(_) => (
+            ResourceOperation::LanguageSource(_) => (
                 key(json!([
                     "language-view",
                     self.binding.execution_workspace_id,
@@ -2340,7 +2262,7 @@ impl KernelToolExecutor {
                 ResourceOperation::FileRead(_)
                     | ResourceOperation::FileQuery(_)
                     | ResourceOperation::RetrievalQuery(_)
-                    | ResourceOperation::LanguageQuery(_)
+                    | ResourceOperation::LanguageSource(_)
             )
             && contract.read_only
             && contract.completion == CompletionKind::Result
@@ -2387,17 +2309,6 @@ impl KernelToolExecutor {
             }
             return self.admit_retrieval(context, args, cancel).map(|_| ());
         }
-        if let ResourceOperation::LanguageQuery(args) = &operation {
-            if &self.contract(call, &operation) != contract {
-                return Err(ExecutionError::new(
-                    "stale_tool_contract",
-                    "language contract changed",
-                ));
-            }
-            return self
-                .admit_language_path(context, &args.path, cancel)
-                .map(|_| ());
-        }
         if &self.planned_contract(context, call, &operation, cancel)? != contract {
             return Err(ExecutionError::new(
                 "stale_tool_contract",
@@ -2436,9 +2347,6 @@ impl KernelToolExecutor {
         }
         if let ResourceOperation::RetrievalQuery(args) = &operation {
             return self.execute_retrieval(context, call, args, cancel);
-        }
-        if let ResourceOperation::LanguageQuery(args) = &operation {
-            return self.execute_language(context, args, cancel);
         }
         if let ResourceOperation::FileRead(args)=&operation {
             if args.unit.is_some() {return self.execute_unit_read(context,call,args,contract,cancel);}
@@ -2720,13 +2628,6 @@ impl PreparedToolCall for KernelCall {
 fn tool_schema(kind: ToolKind) -> Value {
     let (properties, required) = match kind {
         ToolKind::CodeRetrieval => return retrieval::schema(),
-        ToolKind::LanguageDefinition
-        | ToolKind::LanguageReferences
-        | ToolKind::LanguageDiagnostics
-        | ToolKind::LanguageHover
-        | ToolKind::LanguageSymbols
-        | ToolKind::LanguageDocumentSymbols
-        | ToolKind::LanguageCallHierarchy => return language::schema(kind),
         ToolKind::FileList | ToolKind::FileSearch => {
             return discovery::schema(kind == ToolKind::FileSearch);
         }
@@ -3082,7 +2983,7 @@ fn serve_resource_immediate(
         // A language backend can read all project dependencies/configuration in its cwd.
         // The original Run grant must admit that input even when a Host service grant
         // owns the derived materialization or language process.
-        if matches!(request.operation, ResourceOperation::LanguageQuery(_))
+        if matches!(request.operation, ResourceOperation::LanguageSource(_))
             && !grant.path_scopes.iter().any(String::is_empty)
         {
             let project = if request.binding.source_mode == SourceMode::FixedBranch {
@@ -3218,9 +3119,9 @@ fn serve_resource_immediate(
         }
         if matches!(
             request.operation,
-            ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageQuery(_)
+            ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageSource(_)
         ) {
-            if matches!(request.operation, ResourceOperation::LanguageQuery(_))
+            if matches!(request.operation, ResourceOperation::LanguageSource(_))
                 && request.binding.source_mode != SourceMode::FixedBranch
             {
                 // Keep the original file scope/lease admission without returning its
@@ -3250,7 +3151,7 @@ fn serve_resource_immediate(
                     &source_grant,
                 )?;
             }
-            if let ResourceOperation::LanguageQuery(args) = &request.operation {
+            if let ResourceOperation::LanguageSource(args) = &request.operation {
                 if let Some(expected) = &args.derived_view {
                     let view = storage.check_materialized_view(
                         &json!({"workspaceId":source.workspace_id,"viewId":expected["viewId"]}),
@@ -3516,7 +3417,7 @@ impl ResourceOperation {
                 start_line: args.start_line,
                 end_line: args.end_line,
             },
-            Self::LanguageQuery(args) => A::LanguageSource {
+            Self::LanguageSource(args) => A::LanguageSource {
                 path: args.path.clone(),
                 derived_view: args.derived_view.clone(),
             },
@@ -3575,7 +3476,7 @@ impl ResourceOperation {
                 unit:None,
             }),
             A::LanguageSource { path, derived_view } => {
-                Self::LanguageQuery(LanguageQueryArgs::source_descriptor(path, derived_view))
+                Self::LanguageSource(LanguageSourceArgs { path, derived_view })
             }
             A::RetrievalSource { paths } => {
                 Self::RetrievalQuery(RetrievalQueryArgs::source_descriptor(paths))

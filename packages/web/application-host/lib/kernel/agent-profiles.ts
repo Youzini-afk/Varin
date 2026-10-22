@@ -124,6 +124,11 @@ export function createAgentProfilesAPI(owners: {
       const target = runtime(input.runtime);
       const [tools, context] = await capabilities(signal);
       const config: AgentProfileConfig = input.config;
+      if (Array.isArray(input.tools)) {
+        const available = new Set(tools.map(tool => tool.name));
+        const unavailable = input.tools.filter(name => !available.has(name));
+        if (unavailable.length) invalid(`These tools are not available in this runtime: ${unavailable.join(', ')}. Choose from Available tools.`);
+      }
       let profileId = input.id;
       if (!profileId && (config.kind !== 'custom' || config.key !== '' || !Array.isArray(input.tools))) {
         invalid('New agents require a custom profile and an explicit tool selection for this runtime.');

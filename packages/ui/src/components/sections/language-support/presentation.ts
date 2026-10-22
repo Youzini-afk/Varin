@@ -16,6 +16,9 @@ const LANGUAGE_NAMES: Readonly<Record<string, string>> = {
   html: 'HTML', css: 'CSS', scss: 'SCSS', less: 'Less', json: 'JSON', jsonc: 'JSONC',
   yaml: 'YAML', toml: 'TOML', markdown: 'Markdown', vue: 'Vue', svelte: 'Svelte',
   swift: 'Swift', kotlin: 'Kotlin', lua: 'Lua', sql: 'SQL', dockerfile: 'Dockerfile',
+  dart: 'Dart', powershell: 'PowerShell', scala: 'Scala', elixir: 'Elixir', zig: 'Zig',
+  solidity: 'Solidity', hcl: 'HCL', terraform: 'Terraform', ocaml: 'OCaml', ini: 'INI',
+  zsh: 'Zsh', fish: 'Fish', xml: 'XML',
 };
 export const languageDisplayName = (languageId: string): string => LANGUAGE_NAMES[languageId] ?? languageId;
 

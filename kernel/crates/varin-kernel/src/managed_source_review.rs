@@ -1390,7 +1390,7 @@ fn coordinator_read(
 #[test]
 fn generated_source_and_media_params_use_their_real_typed_owners() {
     let caps =
-        json!({"mode":"fixed_branch","managed":true,"clientCapabilities":["filesystem:read"]});
+        json!({"mode":"fixed_branch","clientCapabilities":["filesystem:read"]});
     assert!(crate::protocol::validate_method_params("source.capabilities", &caps).is_ok());
     let mut invalid = caps;
     invalid["unrecognizedPrivilege"] = json!(true);

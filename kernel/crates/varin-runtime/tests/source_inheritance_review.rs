@@ -137,3 +137,31 @@ fn initial_and_forked_branches_do_not_inherit_another_branchs_source() {
     drop(db);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[test]
+fn new_round_refreshes_registered_schemas_without_rewriting_history_or_adding_tools() {
+    let root=std::env::temp_dir().join(format!("varin-tool-refresh-{}",uuid::Uuid::new_v4()));
+    let mut db=Catalog::open(&root).unwrap();
+    db.create_thread("thread","main").unwrap();
+    let mut original=selection("model-a",Some("source-a"));
+    let mut retired=original.tools[0].clone();retired.name="retired_navigation".into();
+    original.tools.push(retired);
+    let first=db.submit_with_launch(&command(&db,"first","main"),Some(original.clone())).unwrap();
+    complete(&mut db,&first);
+    let mut current=original.tools[0].clone();current.description="Current structure-aware reader".into();
+    let mut added=current.clone();added.name="new_unselected_tool".into();
+    let input=command(&db,"next","main");let launch=selection("model-b",None);
+    let prepared=db.prepare_submission(input.clone(),None,None).unwrap()
+        .with_tool_catalog(vec![current.clone(),added]).load(Some(launch.clone()),true).unwrap();
+    let next=db.admit_submission(prepared).unwrap();
+    let saved=db.launch_intent(&next.run_id).unwrap().unwrap().selection;
+    assert_eq!(saved.tools,vec![current]);
+    assert_eq!(saved.source.as_ref().unwrap().branch_id.as_deref(),Some("source-a"));
+    assert_eq!(db.launch_intent(&first.run_id).unwrap().unwrap().selection.tools,original.tools);
+    // Repeating an accepted key freezes its original directory even after another update.
+    let prepared=db.prepare_submission(input,None,None).unwrap()
+        .with_tool_catalog(vec![]).load(Some(launch),true).unwrap();
+    assert_eq!(db.admit_submission(prepared).unwrap(),next);
+    assert_eq!(db.launch_intent(&next.run_id).unwrap().unwrap().selection,saved);
+    drop(db);std::fs::remove_dir_all(root).unwrap();
+}

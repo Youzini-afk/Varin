@@ -60,7 +60,11 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
       const computed=await sources.compute(query,{operation:'structure',lane:'foreground',files:[{path:query.path,recipeId}]},{signal});
       const summary=computed.records.find(row=>row.kind==='structure');
       const state=record(summary?.data);
-      if (!summary || !['ready','empty'].includes(String(state.status))) return failure('unavailable',String(state.message ?? computed.message ?? 'Source structure did not complete'));
+      if (!summary || !['ready','empty'].includes(String(state.status))) {
+        const status = String(state.status ?? computed.status);
+        return { ...failure(status === 'stale' || status === 'cancelled' ? status : 'unavailable',
+          String(state.message ?? computed.message ?? 'Source structure did not complete')), reason: status };
+      }
       const items=computed.records.filter(row=>row.kind==='structure-part' && record(row.data).category==='symbols' && row.revision===summary.revision)
         .flatMap(row=>Array.isArray(record(row.data).items) ? (record(row.data).items as unknown[]).map(record) : []);
       await sources.checkPath(query,query.path,signal);

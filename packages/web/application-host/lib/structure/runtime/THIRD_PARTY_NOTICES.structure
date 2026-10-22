@@ -53,3 +53,35 @@ and source paths are checked on every load, including cache hits.
    nvim-treesitter (nvim-treesitter/nvim-treesitter), or authored from the
    corresponding grammar node shapes for packages without upstream tags.
    Files: `tree-sitter-*.tags.scm`. See `languages.ts` and the refresh script.
+
+7. Additional grammar wasm and structure units
+   Exact artifact URLs, versions, byte sizes and SHA-256 hashes are pinned in
+   `grammar-packs.json`. `*.units.scm` are reviewed structure queries; Lua,
+   Scala, Elixir and OCaml queries reuse the corresponding upstream tags.
+
+   Swift, Dart, Vue and Solidity wasm: @repomix/tree-sitter-wasms 0.1.17
+   https://github.com/repomix/tree-sitter-wasms (Unlicense distribution;
+   LICENSE.repomix-wasms). Original grammar sources/licenses:
+   https://github.com/alex-pinkus/tree-sitter-swift (MIT; LICENSE.swift)
+   https://github.com/UserNobody14/tree-sitter-dart (MIT; LICENSE.dart)
+   https://github.com/tree-sitter-grammars/tree-sitter-vue (MIT; LICENSE.vue)
+   https://github.com/JoranHonig/tree-sitter-solidity (MIT; LICENSE.solidity)
+
+   PowerShell and INI wasm: @vscode/tree-sitter-wasm 0.3.1
+   https://github.com/microsoft/vscode-tree-sitter-wasm
+   (MIT; LICENSE.vscode-tree-sitter-wasm).
+   https://github.com/airbus-cert/tree-sitter-powershell (MIT; LICENSE.powershell)
+   https://github.com/justinmk/tree-sitter-ini (MIT; LICENSE.ini)
+
+   Lua: @tree-sitter-grammars/tree-sitter-lua 0.4.1 (MIT; LICENSE.lua)
+   Svelte: @tree-sitter-grammars/tree-sitter-svelte 1.0.2 (MIT; LICENSE.svelte)
+   Scala: tree-sitter-scala 0.24.0 (MIT; LICENSE.scala)
+   Elixir: tree-sitter-elixir 0.3.5 (Apache-2.0; LICENSE.elixir)
+   Zig: @tree-sitter-grammars/tree-sitter-zig 1.1.2 (MIT; LICENSE.zig)
+   HCL/Terraform: @tree-sitter-grammars/tree-sitter-hcl 1.2.0
+     (Apache-2.0; LICENSE.hcl and LICENSE.terraform)
+   OCaml: tree-sitter-ocaml 0.24.2 (MIT; LICENSE.ocaml)
+   Markdown: upstream tree-sitter-grammars/tree-sitter-markdown release 0.5.3
+     (MIT; LICENSE.markdown)
+   XML: upstream tree-sitter-grammars/tree-sitter-xml release 0.7.0
+     (MIT; LICENSE.xml)
