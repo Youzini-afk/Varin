@@ -295,12 +295,16 @@ function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>,
 
 it('family tools and public views read original and fork-inherited conversations without relaunch after reopen', async () => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';
+  const parentReply = gate();
   const f = await fixture(({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
       if (++parentSteps === 1) complete(response, [tool('dispatch', { ...dispatch, tools: ['threads', 'read_thread'] }, 'family-child')]);
       else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'family-wait')]); }
-      else complete(response, [answer('Parent received family read report', 'family-parent-done')]);
+      else {
+        complete(response, [answer('Parent received family read report', 'family-parent-done')]);
+        parentReply.release();
+      }
     } else if (++childSteps === 1) complete(response, [tool('threads', {}, 'family-list')]);
     else if (childSteps === 2) {
       const content = result(body, 'threads')?.content as { trust: string; page: import('./protocol.generated.js').FamilyList };
@@ -319,6 +323,27 @@ it('family tools and public views read original and fork-inherited conversations
   const prepared = await h.api.prepareSource({ ...identity, key: 'family-source', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'family-input', expectedHead: null, text: 'FAMILY_PARENT_SEMANTIC: discover and read this original task', model, source: prepared.source });
+  let verified = false;
+  cleanup.push(async () => {
+    if (verified) return;
+    // Diagnostics must not strand cleanup if the authority itself stopped replying.
+    const signal = AbortSignal.timeout(1_000);
+    const [run, launch, child] = await Promise.all([
+      h.runtime.run(receipt.run_id, signal).catch(() => undefined),
+      h.runtime.launch(receipt.run_id, signal).catch(() => undefined),
+      operationId ? h.runtime.child(operationId, signal).catch(() => undefined) : undefined,
+    ]);
+    console.error('Family conversation fixture did not finish', {
+      parentSteps, childSteps, runState: run?.state, waiting: Boolean(run?.waiting_on),
+      startable: launch?.startable, requiresRebind: launch?.requires_rebind, paused: Boolean(launch?.pause),
+      childState: child?.state, childOutcome: child?.report?.outcome,
+      hostErrorTypes: h.errors.map(error => error instanceof Error ? error.name : typeof error),
+    });
+  });
+  // Six provider turns and their real child/tool work belong to the existing 30s
+  // test budget. The terminal-state poll starts at the final response boundary,
+  // not at submission; this barrier never drives or retries the production Run.
+  await parentReply.promise;
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.report?.outcome).toBe('succeeded'); expect(child.launch.tools.map(item => item.name)).toEqual(['read_thread', 'threads', 'tool_describe', 'tool_invoke']);
@@ -351,6 +376,7 @@ it('family tools and public views read original and fork-inherited conversations
   expect((await reopened.api.family!.read(identity, selected)).items.some(item => item.id === original.id)).toBe(true);
   expect(f.requests).toHaveLength(requestCount); expect(parentSteps).toBe(3); expect(childSteps).toBe(3);
   expect(reopened.errors).toEqual([]);
+  verified = true;
 }, 30_000);
 
 it('two real send observations retain their original requests across Host restart and resume only after both linked replies', async () => {
