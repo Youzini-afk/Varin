@@ -81,7 +81,7 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
       {output}
       <div className="tool-inline-actions">
         {!following && <button type="button" onClick={() => { follow.current = true; setFollowing(true); if (viewport.current) viewport.current.scrollTop = viewport.current.scrollHeight; }}>{t('chat.tools.followOutput')} <Icon name="arrow-down-s" className="size-3" /></button>}
-        {spawning && args.mode === 'pty' && operationId && conversation?.api.processes && !conversation.readOnly && <button type="button" disabled={opening} onClick={() => void terminal()}>{t('chat.timeline.tools.openTerminal')} <Icon name="external-link" className="size-3" /></button>}
+        {spawning && !generating && (operation?.managed_process || result?.status === 'background') && args.mode === 'pty' && operationId && conversation?.api.processes && !conversation.readOnly && <button type="button" disabled={opening} onClick={() => void terminal()}>{t('chat.timeline.tools.openTerminal')} <Icon name="external-link" className="size-3" /></button>}
         {live && !conversation?.readOnly && <button type="button" disabled={stopping || operation?.cancel_requested} onClick={() => void stop()}>{t(waiting ? 'chat.tools.stopWaiting' : 'chat.tools.stopProcess')}</button>}
       </div>
       {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}

@@ -65,7 +65,7 @@ export function ChatFileTools({ call, execution, result, status, generating, out
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" />
     </summary>
     <div className="tool-file-results">
-      {reading && path && <ToolFileLink callId={call.id} path={path} />}
+      {reading && path && !generating && <ToolFileLink callId={call.id} path={path} />}
       {rows.length > 0 && <div className="tool-result-scroll" data-conversation-tool-scroll="true">
         {rows.map((row, index) => {
           const item = toolRecord(row.data), rowPath = toolText(row.path);

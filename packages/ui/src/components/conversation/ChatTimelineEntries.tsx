@@ -428,7 +428,7 @@ const ChatToolCard: React.FC<{
     {fileChanges.map((file, index) => <ChatFileChangePreview key={`${index}:${file.path}`} file={file}
       previewId={`${call.id}:${index}:${file.path}`}
       phase={fileChangePhase(execution, result, generating, file.path)}
-      onOpen={file.operation === 'delete' || !conversation ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
+      onOpen={file.operation === 'delete' || !conversation || generating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
       initiallyExpanded={isFileChangeTool(call.name) && expandEdits}
