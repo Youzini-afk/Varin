@@ -653,7 +653,7 @@ describe('affected-file workspace recovery journal', () => {
       dataDir: harness.dataDir,
       documents: harness.authority,
       durableRecoveryStore: durable,
-      fileStore: createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path }),
+      fileStore: createRecoveryFileStore(),
       sessionNavigation: restartNavigation,
     });
     await restartEngine.resumeCombinedOperations();
@@ -794,7 +794,7 @@ describe('affected-file workspace recovery journal', () => {
     // Recovery semantics: target = 'before' (rollback destination), safety = 'after' (current).
     // Use a spy fileStore that crashes after applyState writes the rollback target.
     const { createRecoveryFileStore } = await import('./file-store.test-helper.js');
-    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    const realFileStore = createRecoveryFileStore();
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
       await realFileStore.applyState(...args);
       throw new Error('SIMULATED_CRASH_AFTER_APPLY');
@@ -907,7 +907,7 @@ describe('affected-file workspace recovery journal', () => {
     //          observes that intent and restores note.txt to its safety state.
     // Phase 3: compensation writes 'after-extra' — then crashes, leaving that
     //          path in 'compensate-intent' even though its safety is on disk.
-    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    const realFileStore = createRecoveryFileStore();
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
       await realFileStore.applyState(...args);
       const written = await fs.promises.readFile(path.join(args[1], args[2]), 'utf8');
@@ -984,7 +984,7 @@ describe('affected-file workspace recovery journal', () => {
 
     // Use a crash fileStore to capture safety and crash during applyState.
     const { createRecoveryFileStore } = await import('./file-store.test-helper.js');
-    const realFileStore = createRecoveryFileStore({ fsModule: fs, fsPromises: fs.promises, pathModule: path });
+    const realFileStore = createRecoveryFileStore();
     const crashApplyState = vi.fn(async (...args: Parameters<RecoveryFileStore['applyState']>) => {
       await realFileStore.applyState(...args);
       throw new Error('SIMULATED_CRASH_AFTER_APPLY');
