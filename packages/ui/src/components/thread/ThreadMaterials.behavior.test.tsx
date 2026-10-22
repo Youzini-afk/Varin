@@ -51,11 +51,25 @@ vi.mock('@/components/ui/dialog', () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   DialogDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
 }));
+// Drive the same menu selection semantics; browser checks cover floating geometry.
+vi.mock('@/components/ui/dropdown-menu', async () => {
+  const { createContext, useContext, useState, cloneElement } = await import('react');
+  const State = createContext({ open: false, setOpen: (_value: boolean) => {} });
+  return {
+    DropdownMenu: ({ children }: React.PropsWithChildren) => { const [open, setOpen] = useState(false); return <State.Provider value={{ open, setOpen }}>{children}</State.Provider>; },
+    DropdownMenuTrigger: ({ children }: { children: React.ReactElement<React.HTMLAttributes<HTMLElement>> }) => { const state = useContext(State); return cloneElement(children, { onClick: () => state.setOpen(!state.open) }); },
+    DropdownMenuContent: ({ children }: React.PropsWithChildren) => useContext(State).open ? <div role="menu">{children}</div> : null,
+    DropdownMenuItem: ({ children, onSelect, onClick, disabled }: React.PropsWithChildren<{ onSelect?(): void; onClick?(): void; disabled?: boolean }>) => { const state = useContext(State); return <button role="menuitem" disabled={disabled} onClick={() => { onSelect?.(); onClick?.(); state.setOpen(false); }}>{children}</button>; },
+    DropdownMenuSeparator: () => <hr />,
+  };
+});
+
 vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <p>{content}</p>, SimpleMarkdownRenderer: ({ content }: { content: string }) => <div data-testid="pdf-text">{content}</div> }));
 vi.mock('@/lib/i18n', async original => ({ ...await original<typeof import('@/lib/i18n')>(), useI18n: () => ({ t: mocks.translate }) }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { listEditorContextAttachments, resetEditorContextAttachments } from '@/lib/agent-editor/attachments';
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { threadSummary } from '@/test/threadFixtures';
@@ -134,6 +148,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   useThreadDraftStore.setState({ drafts: {} });
+  useWorkOverviewStore.setState({ bySession: {} });
   resetEditorContextAttachments();
   mocks.runtimeKey = 'runtime-a'; mocks.generation = 1;
   mocks.runtimeFetch.mockReset();
@@ -395,7 +410,23 @@ function artifactConversationFixture() {
   const renderConversation = async (selected = identity) => {
     await act(async () => { root.render(<ThreadConversation api={api} identity={selected} />); await settle(); });
   };
-  const open = async () => { await renderConversation(); await click('research-facts.viewDetails'); await click('harness.pdf.openReader'); };
+  const open = async () => {
+    await renderConversation();
+    // Research details mount on first inspection, just like the real overview path.
+    expect(f.api.scopes).not.toHaveBeenCalled();
+    const overview = container.querySelector<HTMLElement>('.workbench-overview-control')!;
+    if (overview.dataset.view !== 'full') {
+      await act(async () => container.querySelector<HTMLButtonElement>('[data-harness-overview-controls] button')!.click());
+    }
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="harness.overview.more"]')!.click());
+    const research = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find(item => item.textContent === 'harness.overview.research');
+    expect(research).toBeTruthy();
+    await act(async () => { research!.click(); await settle(); });
+    expect(f.api.scopes).toHaveBeenCalledWith(identity, expect.any(AbortSignal));
+    await click('research-facts.viewDetails');
+    await click('harness.pdf.openReader');
+  };
   return { ...f, api, submit, renderConversation, open };
 }
 const editComposer = async (text: string) => {
