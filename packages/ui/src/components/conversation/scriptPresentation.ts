@@ -44,7 +44,20 @@ export function orderScriptCalls(calls: readonly OperationCallSummary[]): Operat
   };
   for (const call of calls) if (!ids.has(call.parentOperationId)) visit(call);
   for (const call of calls) visit(call);
-  return result;
+  // A disclosed invocation has one actual target child. Keep the target's native
+  // identity and avoid showing the same work twice merely because it crossed a gateway.
+  const byId = new Map(calls.map(call => [call.operationId, call]));
+  const wrappers = new Set(calls.filter(call => call.name === 'tool_invoke' && children.get(call.operationId)?.length === 1).map(call => call.operationId));
+  return result.filter(call => !wrappers.has(call.operationId)).map(call => {
+    let parent = byId.get(call.parentOperationId), depth = call.depth;
+    const ancestors = new Set<string>();
+    while (parent && !ancestors.has(parent.operationId)) {
+      ancestors.add(parent.operationId);
+      if (wrappers.has(parent.operationId)) depth--;
+      parent = byId.get(parent.parentOperationId);
+    }
+    return depth === call.depth ? call : { ...call, depth: Math.max(0, depth) };
+  });
 }
 export function scriptDescendants(root: string, executions: Record<string, ChatToolExecutionState>) {
   const selected = new Set([root]); const children: ChatToolExecutionState[] = [];

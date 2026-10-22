@@ -836,7 +836,7 @@ export const ContextPanel: React.FC = () => {
   const activeNonChatContent = activeTab?.mode === 'context'
         ? <ContextPanelContent active={isOpen} />
         : activeTab?.mode === 'threads'
-            ? <ThreadFamilyPanel active={isOpen} />
+            ? <ThreadFamilyPanel active={isOpen} identity={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'ui' && activeTab.targetPath
             ? <InteractiveUiPanel sessionKey={activeTab.targetPath} identity={activeTab.thread} contentRef={activeTab.contentRef} directory={directoryKey} onReturn={() => closeContextPanelTab(directoryKey, activeTab.id)} />
         : activeTab?.mode === 'recovery'

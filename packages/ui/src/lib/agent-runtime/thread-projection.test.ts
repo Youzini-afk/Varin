@@ -112,9 +112,22 @@ it('exposes a gateway render_ui call while its HTML is still streaming and retai
     send(1, { kind: 'tool_call_started', request_id: 'request', call_id: 'call', name: 'tool_invoke' });
     const first = '{"reference":{"name":"render_ui","version":"1"},"arguments":{"ref":"ui:work@1","changes":[{"file":"index.html","op":"write","text":"<h1>生成中';
     send(2, { kind: 'tool_arguments_delta', call_id: 'call', delta: first });
-    expect(h.tools).toHaveBeenLastCalledWith([{ id: JSON.stringify(['run', 'request', 'call']), name: 'render_ui', rawArguments: first, sequence: 2, reference: 'ui:work@1' }]);
+    expect(h.tools).toHaveBeenLastCalledWith([expect.objectContaining({ id: JSON.stringify(['run', 'request', 'call']), name: 'render_ui', rawArguments: first, sequence: 2, reference: 'ui:work@1' })]);
     send(3, { kind: 'tool_arguments_delta', call_id: 'call', delta: '</h1>"}]}}' });
     expect(h.tools.mock.lastCall?.[0][0]).toMatchObject({ name: 'render_ui', reference: 'ui:work@1', rawArguments: first + '</h1>"}]}}' });
+  } finally { h.projection.close(); }
+});
+
+it('presents streamed tool intent without publishing an incomplete file path', async () => {
+  const h = await startProjection(async () => snapshotView());
+  const send = (sequence: number, data: object) => h.listener({ ...delta(sequence, ''), event: { kind: 'batch', events: [{ kind: 'provider', data }] } });
+  try {
+    send(1, { kind: 'tool_call_started', request_id: 'request', call_id: 'read', name: 'tool_invoke' });
+    send(2, { kind: 'tool_arguments_delta', call_id: 'read', delta: '{"reference":{"name":"file_read"},"arguments":{"path":"src/unfin' });
+    expect(h.tools.mock.lastCall?.[0][0]).toMatchObject({ name: 'file_read', arguments: {}, gateway: { name: 'tool_invoke' } });
+    send(3, { kind: 'tool_arguments_delta', call_id: 'read', delta: 'ished.ts","offset":0}}' });
+    expect(h.tools.mock.lastCall?.[0][0]).toMatchObject({ id: JSON.stringify(['run', 'request', 'read']), name: 'file_read', arguments: { path: 'src/unfinished.ts', offset: 0 } });
+    expect(h.report).not.toHaveBeenCalled();
   } finally { h.projection.close(); }
 });
 

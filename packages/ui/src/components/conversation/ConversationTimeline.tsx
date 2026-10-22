@@ -41,8 +41,19 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
   const head = history.at(-1)?.id ?? null;
-  const sourceEntry = React.useCallback((callId: string) => view.entries.find(entry => entry.type === 'message' && entry.message.role === 'assistant'
-    && entry.message.content.some(part => part.type === 'toolCall' && part.id === callId))?.id, [view.entries]);
+  const sourceEntry = React.useCallback((callId: string) => {
+    const visited = new Set<string>();
+    let original = callId;
+    while (!visited.has(original)) {
+      visited.add(original);
+      const entry = view.entries.find(entry => entry.type === 'message' && entry.message.role === 'assistant'
+        && entry.message.content.some(part => part.type === 'toolCall' && part.id === original));
+      if (entry) return entry.id;
+      const parent = view.toolExecutions[original]?.parentToolCallId;
+      if (!parent) return;
+      original = parent;
+    }
+  }, [view.entries, view.toolExecutions]);
   const uiCards = React.useMemo(() => {
     const cards: Record<string, UiCardProjection> = {}, calls = new Map<string, ChatToolCall>();
     const firstByWork = new Map<string, string>();
@@ -89,7 +100,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   }, [uiCards, key, view.toolExecutions]);
   const liveAssistant = React.useMemo(() => progress.length || streamingTools.length ? { ...assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
     ...progress.filter(part => part.type !== 'retry'),
-    ...streamingTools.filter(call => call.name === 'render_ui').map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name, arguments: {}, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
+    ...streamingTools.filter(call => call.name).map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name,
+      arguments: call.arguments ?? {}, gateway: call.gateway, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
   ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
@@ -118,14 +130,13 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, [key]);
   const fileTarget = React.useCallback(async (callId: string, path: string) => {
     const host = getRuntimeEndpointGeneration();
-    const entry = view.entries.find(entry => entry.type === 'message' && entry.message.role === 'assistant'
-      && entry.message.content.some(part => part.type === 'toolCall' && part.id === callId));
-    if (!entry) throw new Error(t('chat.files.no_source'));
-    const target = await api.fileTarget({ ...identity, itemId: entry.id, path });
+    const itemId = sourceEntry(callId);
+    if (!itemId) throw new Error(t('chat.files.no_source'));
+    const target = await api.fileTarget({ ...identity, itemId, path });
     if (!alive.current || currentIdentity.current !== key || host !== getRuntimeEndpointGeneration()) throw new DOMException('Conversation changed', 'AbortError');
     if (target.kind === 'unavailable') throw new Error(t(`chat.files.${target.reason}`));
     return target;
-  }, [api, identity, key, t, view.entries]);
+  }, [api, identity, key, t, sourceEntry]);
   const openFile = React.useCallback(async (callId: string, path: string, line?: number) => {
     const host = getRuntimeEndpointGeneration();
     try {

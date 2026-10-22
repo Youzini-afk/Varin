@@ -14,7 +14,11 @@ interface ProgressView {
   readers: Map<string, PartialJson>;
   retry?: { type: 'retry'; attempt: number; retryAt: number };
 }
-export interface StreamingToolCall { id: string; name: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean }
+export interface StreamingToolCall {
+  id: string; name: string; rawName?: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean;
+  arguments?: import('@varin/protocol').JsonValue;
+  gateway?: { name: string; arguments: import('@varin/protocol').JsonValue };
+}
 export interface ToolExecutionProgress { runId: string; operationId: string; toolName: string; details: unknown }
 export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string } | { type: 'retry'; attempt: number; retryAt: number };
 interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string; attempt?: number; delay_ms?: number } }
@@ -184,18 +188,28 @@ export class ThreadProjection {
                 const old = progress.calls.get(data.call_id);
                 if (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta') progress.calls.set(data.call_id, {
                   id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
-                  name: data.name ?? old?.name ?? '', rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
+                  name: data.name ?? old?.rawName ?? old?.name ?? '', rawName: data.name ?? old?.rawName ?? old?.name,
+                  rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
                 });
                 const call = progress.calls.get(data.call_id);
-                if (call?.name === 'render_ui' || call?.name === 'tool_invoke') {
+                if (call && (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta')) {
                   let reader = progress.readers.get(data.call_id);
                   const fresh = !reader;
                   if (!reader) { reader = new PartialJson(); progress.readers.set(data.call_id, reader); }
                   const input = reader.feed(fresh ? call.rawArguments : data.delta ?? '') as
-                    { ref?: string; reference?: { name?: string }; arguments?: { ref?: string } } | undefined;
-                  const wrapped = input?.reference?.name === 'render_ui' && reader.fieldComplete(input.reference, 'name');
-                  if (wrapped) call.name = 'render_ui';
+                    { ref?: string; reference?: { name?: string }; arguments?: Record<string, unknown>; [key: string]: unknown } | undefined;
+                  const wrapped = call.rawName === 'tool_invoke' && typeof input?.reference?.name === 'string' && reader.fieldComplete(input.reference, 'name');
+                  if (wrapped) {
+                    call.name = input!.reference!.name!;
+                    call.gateway = { name: 'tool_invoke', arguments: input as import('@varin/protocol').JsonValue };
+                  }
                   const args = wrapped ? input.arguments : input;
+                  if (args && typeof args === 'object' && !Array.isArray(args)) {
+                    const visible = { ...args };
+                    // Half-written paths are useful text, but are not navigable resources.
+                    if (!reader.fieldComplete(args, 'path')) delete visible.path;
+                    call.arguments = visible as import('@varin/protocol').JsonValue;
+                  }
                   if (args && reader.fieldComplete(args, 'ref') && typeof args.ref === 'string') call.reference = args.ref;
                 }
               }

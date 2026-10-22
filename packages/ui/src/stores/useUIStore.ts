@@ -39,6 +39,7 @@ function normalizeFileEditorKeymap(value: unknown): FileEditorKeymap {
 }
 
 type ContextPanelTab = {
+  member?: ThreadIdentity;
   thread?: ThreadIdentity;
   contentRef?: string;
   id: string;
@@ -56,6 +57,7 @@ type ContextPanelTab = {
 };
 
 type ContextPanelTabDescriptor = {
+  member?: ThreadIdentity;
   thread?: ThreadIdentity;
   contentRef?: string;
   mode: ContextPanelMode;
@@ -225,6 +227,7 @@ const createContextPanelTab = (descriptor: ContextPanelTabDescriptor): ContextPa
     id: buildContextPanelTabID(descriptor.mode, dedupeKey),
     mode: descriptor.mode,
     ...(descriptor.thread ? { thread: descriptor.thread } : {}),
+    ...(descriptor.member ? { member: descriptor.member } : {}),
     ...(descriptor.contentRef ? { contentRef: descriptor.contentRef } : {}),
     ...(descriptor.editorViewId ? { editorViewId: descriptor.editorViewId } : {}),
     targetPath: normalizedTargetPath,
@@ -269,6 +272,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
     }
 
     const candidate = entry as {
+      member?: ThreadIdentity;
       mode?: unknown;
       thread?: ThreadIdentity;
       contentRef?: unknown;
@@ -305,6 +309,7 @@ const sanitizeContextPanelTabs = (tabs: unknown): ContextPanelTab[] => {
       id,
       mode: candidate.mode,
       ...(candidate.thread ? { thread: candidate.thread } : {}),
+      ...(candidate.member ? { member: candidate.member } : {}),
       ...(typeof candidate.contentRef === 'string' && candidate.contentRef ? { contentRef: candidate.contentRef } : {}),
       ...(typeof candidate.editorViewId === 'string' && candidate.editorViewId ? { editorViewId: candidate.editorViewId } : {}),
       targetPath,
@@ -379,7 +384,8 @@ const upsertContextPanelTab = (
           targetDirectory: nextTab.targetDirectory,
           dedupeKey: nextTab.dedupeKey,
           label: nextTab.label,
-          ...(nextTab.thread ? { thread: nextTab.thread } : {}),
+          ...(nextTab.mode === 'threads' ? { thread: nextTab.thread, member: nextTab.member }
+            : nextTab.thread ? { thread: nextTab.thread } : {}),
           sessionTitleFallback: nextTab.sessionTitleFallback || tab.sessionTitleFallback,
           stagedDiff: nextTab.stagedDiff,
           diffScope: nextTab.diffScope,

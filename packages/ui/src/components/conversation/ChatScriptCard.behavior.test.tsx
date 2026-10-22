@@ -9,6 +9,15 @@ import { ChatScriptCard } from './ChatScriptCard';
 import { HistoryPresentation } from './historyPresentation';
 import type { ThreadHistoryItem, ThreadSnapshot } from '@varin/application-client';
 import type { ChatToolCall } from './types';
+import { orderScriptCalls } from './scriptPresentation';
+
+it('presents a disclosed script action once, using the actual target operation', () => {
+  const common = { phase: 'terminal', outcome: 'succeeded', effect: 'none', cancelRequested: false } as const;
+  expect(orderScriptCalls([
+    { ...common, operationId: 'gateway', parentOperationId: 'script', name: 'tool_invoke', depth: 0 },
+    { ...common, operationId: 'target', parentOperationId: 'gateway', name: 'file_read', depth: 1 },
+  ])).toEqual([{ ...common, operationId: 'target', parentOperationId: 'gateway', name: 'file_read', depth: 0 }]);
+});
 
 afterEach(() => vi.unstubAllGlobals());
 it('shows task intent, retained call failures and on-demand output without executing the displayed script', async () => {

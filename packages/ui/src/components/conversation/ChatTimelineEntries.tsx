@@ -1,5 +1,4 @@
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
-import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import React from 'react';
 import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard';
 import type { JsonValue } from '@varin/protocol';
@@ -11,8 +10,7 @@ import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { renderTerminalOutput } from '@/components/chat/message/parts/toolOutput';
 import { getApplyPatchFileEntries } from '@/components/chat/message/parts/toolDiffUtils';
 import { getToolSummary, groupToolCalls } from '@/components/chat/message/parts/toolSummary';
-import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
-import { ConversationPreviewContext, useOptionalConversationPresentation } from './ConversationContext';
+import { ConversationContext, ConversationPreviewContext, useOptionalConversationPresentation } from './ConversationContext';
 import { EntryExtras } from './EntryExtras';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
@@ -61,7 +59,16 @@ import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
 import { ChatScriptCard } from './ChatScriptCard';
 import { assistantMessagesForTurn } from './usagePresentation';
-import { timelinePresentationCache } from './timelinePresentationCache';
+import { ToolDisclosure, ToolDisclosureScope } from './ToolDisclosure';
+import { ExpandedToolContext, TimelineSessionContext, useToolDisclosureChoices } from './toolDisclosureContext';
+import { presentInvocation, invocationData, invocationGateway, invocationStatus, operationInvocation, toolRecord } from './toolInvocation';
+import { ChatDelegation } from './ChatDelegation';
+import { ChatFileTools, ChatLanguageTools, ChatRecoveryTools } from './ChatResourceTools';
+import { ChatWebTools, ChatMcpTool } from './ChatSourceTools';
+import { ChatProcessTool } from './ChatProcessTool';
+import { ChatWorkTool, ChatArtifactTool } from './ChatWorkTools';
+import { workToolLabels } from './toolLabels';
+import { ThreadMedia } from '../thread/ThreadMedia';
 
 export interface ChatTimelineProps {
   navigation?: {
@@ -242,12 +249,19 @@ const ToolResultContent: React.FC<{
   hideDetails?: boolean;
 }> = ({ messageId, result, hideDetails = false }) => {
   const { t } = useI18n();
+  const conversation = useOptionalConversationPresentation();
   const calls = projectToolCalls(result);
+  const completion = result.operation?.call_completion;
+  const mediaOutput = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
   return (
     <div className="space-y-2">
       <ChatUserContentView content={result.content} messageId={messageId} variant="tool" />
       <ChatToolResultPreview result={result} />
       <EntryExtras itemId={result.historyId} />
+      {conversation && result.operation && mediaOutput?.parts.flatMap((part, index) => part.kind === 'media' ? [
+        <ThreadMedia key={index} api={conversation.api} identity={conversation.identity}
+          holder={{ kind: 'operation', operationId: result.operation!.id, output: 'completion' }} media={part.media} partIndex={index} />,
+      ] : [])}
       {result.usage && <ChatAssistantUsageFooter usage={result.usage} />}
       {!hideDetails && calls ? <details className="typography-meta text-muted-foreground">
         <summary className="cursor-pointer">{t('chat.timeline.tools.callCount', { count: calls.calls.length })}{calls.complete ? '' : ` · ${t('chat.timeline.tools.incompleteRecord')}`}</summary>
@@ -256,43 +270,48 @@ const ToolResultContent: React.FC<{
         </div>
       </details> : null}
       {!hideDetails && result.details !== undefined ? (
-        <RawJsonDetails label="details" value={result.details} />
+        <RawJsonDetails label="details" value={result.originalDetails ?? result.details} />
       ) : null}
     </div>
   );
 };
 
-const ScriptCallResult: React.FC<{ operation: import('@varin/protocol').Operation }> = ({ operation }) => {
-  const intent = operation.intent as { call?: { name?: string; arguments?: JsonValue } };
-  const call = intent.call;
+const ScriptCallResult: React.FC<{ operation: import('@varin/protocol').Operation; sourceCallId: string; cwd: string }> = ({ operation, sourceCallId, cwd }) => {
+  const conversation = useOptionalConversationPresentation();
+  const call = presentInvocation(toolRecord(toolRecord(operation.intent).call));
   const completion = operation.call_completion;
-  const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
-  const name = call?.name ?? 'tool';
-  const summary = getToolSummary({ toolName: name, arguments: call?.arguments, details: output?.data }).text;
-  return <>
-    {summary && summary !== name && <p className="break-words typography-meta">{summary}</p>}
-    {completion && <ToolResultContent messageId={operation.id} result={{ role: 'toolResult', toolCallId: operation.id, toolName: name, timestamp: 0,
-      isError: completion.kind === 'not_dispatched' || operation.outcome === 'failed',
-      content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: completion.reason }]
-        : output?.parts.flatMap(part => part.kind === 'text' ? [{ type: 'text' as const, text: part.text }] : []) ?? [],
-      ...(output?.data == null ? {} : { details: output.data as JsonValue }) }} />}
-    {call?.arguments !== undefined && <RawJsonDetails label="arguments" value={call.arguments} />}
-  </>;
+  const gateway = invocationGateway(completion && completion.kind !== 'not_dispatched' ? completion.content?.data : undefined, call);
+  const live = Object.values(conversation?.toolExecutions ?? {}).find(item => item.operationId === gateway?.operationId)?.operation;
+  const [loaded, setLoaded] = React.useState<import('@varin/protocol').Operation>();
+  const gatewayOperationId = gateway?.operationId;
+  const api = conversation?.api;
+  React.useEffect(() => {
+    if (!gatewayOperationId || live || !api) return;
+    let active = true;
+    void api.operation(gatewayOperationId).then(value => {
+      if (active && value.id === gatewayOperationId) setLoaded(value);
+    }, () => { /* The immutable acceptance receipt remains visible if observation is unavailable. */ });
+    return () => { active = false; };
+  }, [gatewayOperationId, operation.revision, live, api]);
+  const view = operationInvocation(operation, live ?? (loaded?.id === gateway?.operationId ? loaded : undefined));
+  const source = React.useMemo(() => conversation ? {
+    ...conversation,
+    openFile: (_callId: string, path: string, line?: number) => conversation.openFile(sourceCallId, path, line),
+    fileTarget: (_callId: string, path: string) => conversation.fileTarget(sourceCallId, path),
+    sourceEntry: () => conversation.sourceEntry?.(sourceCallId),
+  } : null, [conversation, sourceCallId]);
+  return <ConversationContext.Provider value={source}><ExpandedToolContext.Provider value={true}>
+    <ChatToolCard {...view} cwd={cwd} executionById={conversation?.toolExecutions} />
+  </ExpandedToolContext.Provider></ConversationContext.Provider>;
 };
 
 // A tool keeps its disclosure choice when a live message becomes a persisted
 // entry, or when an adjacent read makes it part of a group. This cache belongs
 // to the mounted turn, never to execution state or the native session history.
-const ToolDisclosureContext = React.createContext<Map<string, boolean> | null>(null);
-const TimelineSessionContext = React.createContext<string | undefined>(undefined);
-
 export const ChatToolDisclosureScope: React.FC<{ children: React.ReactNode; sessionId: string }> = ({ children, sessionId }) => {
-  const parent = React.useContext(ToolDisclosureContext);
-  const [choices] = React.useState(() => timelinePresentationCache(sessionId, 'tools', () => new Map<string, boolean>()));
-  if (parent) return <>{children}</>;
-  return <TimelineSessionContext.Provider value={sessionId}><ToolDisclosureContext.Provider value={choices}>
+  return <ToolDisclosureScope sessionId={sessionId}>
     <ChatExploreScope sessionId={sessionId}><ChatFileChangePreviewScope sessionId={sessionId}>{children}</ChatFileChangePreviewScope></ChatExploreScope>
-  </ToolDisclosureContext.Provider></TimelineSessionContext.Provider>;
+  </ToolDisclosureScope>;
 };
 
 const ChatToolDisclosure: React.FC<{
@@ -301,32 +320,13 @@ const ChatToolDisclosure: React.FC<{
   disclosureId: string;
   initiallyExpanded?: boolean;
 }> = ({ children, className, disclosureId, initiallyExpanded = false }) => {
-  const choices = React.useContext(ToolDisclosureContext);
-  const [expanded, setExpanded] = React.useState(() => choices?.get(disclosureId) ?? initiallyExpanded);
-  React.useEffect(() => {
-    if (!choices?.has(disclosureId)) setExpanded(initiallyExpanded);
-  }, [choices, disclosureId, initiallyExpanded]);
-  return (
-    <details className={cn('workbench-disclosure', className)} open={expanded} data-conversation-tool-disclosure={disclosureId}
-      onToggle={(event) => {
-        const open = event.currentTarget.open;
-        choices?.set(disclosureId, open);
-        setExpanded(open);
-      }}>
-      {children}
-    </details>
-  );
+  return <ToolDisclosure id={disclosureId} className={className} initiallyExpanded={initiallyExpanded}>{children}</ToolDisclosure>;
 };
 
-function toolStatus(result: ChatToolResultMessage | undefined, execution: ChatToolExecutionState | undefined): ChatToolExecutionState['status'] {
-  if (result?.status === 'background') return execution && execution.status !== 'running' ? execution.status : 'background';
-  return result ? result.status ?? (result.isError ? 'error' : 'success') : execution?.status ?? 'unknown';
-}
-
-const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status'] }> = ({ status }) => {
+const ChatToolStatus: React.FC<{ status: ChatToolExecutionState['status']; generating?: boolean }> = ({ status, generating }) => {
   const { t } = useI18n();
   return <span key={status} className={cn('workbench-status-arrival shrink-0 typography-micro', status === 'success' && 'sr-only', status === 'error' && 'text-[var(--status-error)]')}>
-    {t(`chat.timeline.tools.${status}`)}
+    {t(generating ? 'chat.tools.preparingCall' : `chat.timeline.tools.${status}`)}
   </span>;
 };
 
@@ -337,9 +337,26 @@ const ChatToolCard: React.FC<{
   execution?: ChatToolExecutionState;
   executionById?: Record<string, ChatToolExecutionState>;
   result?: ChatToolResultMessage;
-}> = ({ call, cwd, generating = false, execution, executionById, result }) => {
+}> = ({ call: originalCall, cwd, generating = false, execution: originalExecution, executionById, result: originalResult }) => {
+  const call = presentInvocation(originalCall);
+  const result = call !== originalCall && originalResult ? { ...originalResult, toolName: call.name,
+    details: invocationData(originalResult.details, call) as JsonValue, originalDetails: originalResult.details } : originalResult;
+  let execution = call !== originalCall && originalExecution ? { ...originalExecution, name: call.name, args: call.arguments,
+    result: invocationData(originalExecution.result, call) as JsonValue } : originalExecution;
+  const gateway = invocationGateway(result?.originalDetails ?? originalResult?.details, call);
+  if (gateway && execution?.operationId !== gateway.operationId) {
+    execution = Object.values(executionById ?? {}).find(item => item.operationId === gateway.operationId)
+      ?? { toolCallId: call.id, operationId: gateway.operationId, name: call.name, args: call.arguments,
+        status: gateway.completion.kind === 'job_accepted' ? 'background' : invocationStatus(result) };
+  }
+  const executionOperationId = execution?.operationId;
+  const directExecution = executionById?.[call.id] ?? (executionOperationId ? executionById?.[executionOperationId] : undefined);
+  const liveExecution = directExecution?.operationId === executionOperationId ? directExecution
+    : executionOperationId && Object.values(executionById ?? {}).find(item => item.operationId === executionOperationId);
+  if (liveExecution) execution = { ...execution, ...liveExecution, toolCallId: call.id, name: call.name, args: call.arguments };
+  if (call.gateway && toolRecord(toolRecord(execution?.operation?.intent).call).name === 'tool_invoke')
+    execution = { ...execution!, operation: undefined };
   const { t } = useI18n();
-  const expandCommands = useUIStore(state => state.showExpandedBashTools);
   const expandEdits = useUIStore(state => state.showExpandedEditTools);
   const preview = React.useContext(ConversationPreviewContext);
   const toolRenderers = useWorkbenchMatchRenderers<{
@@ -352,7 +369,6 @@ const ChatToolCard: React.FC<{
   const conversation = useOptionalConversationPresentation();
   const extensionRendered = preview ? undefined : renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
-  const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   if (call.name === 'render_ui') {
     const projected = conversation?.uiCards?.[call.id];
@@ -362,37 +378,51 @@ const ChatToolCard: React.FC<{
       execution={projected ? conversation?.toolExecutions[projected.call.id] : execution} result={projected ? projected.result : result} />;
   }
   const mutationPhase = isFileChangeTool(call.name) ? fileChangePhase(execution, result, generating) : undefined;
-  const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : toolStatus(result, execution);
+  const status = mutationPhase === 'failed' || mutationPhase === 'partial' ? 'error' : invocationStatus(result, execution, generating);
   const transientOutput = execution?.result ?? execution?.partialResult;
-  const liveModels = projectToolCalls({ toolName: call.name,
-    ...(transientOutput === undefined ? {} : { details: transientOutput }),
-  }, execution?.status === 'running')?.calls.filter(row => row.name === 'models.classify' || row.name === 'models.generateImages') ?? [];
-  const applyPatchFiles = call.name === 'apply_patch'
-    ? getApplyPatchFileEntries(result?.details ?? transientOutput)
-    : [];
   const details = result?.details ?? transientOutput;
+  const specific = {
+    call, cwd, generating, execution, result, status,
+    output: result ? <ToolResultContent messageId={'tool-result:' + call.id} result={result} hideDetails /> : null,
+    details: <ToolDisclosure id={'raw:' + call.id} className="tool-invocation-details">
+      <summary>{t('chat.tools.details')}</summary>
+      <div><p className="font-mono typography-micro">{call.gateway?.name ?? call.name}</p>
+        <RawJsonDetails label={t('chat.tools.input')} value={call.gateway?.arguments ?? call.arguments} />
+        {details !== undefined && <RawJsonDetails label={t('chat.tools.result')} value={result?.originalDetails ?? details} />}
+      </div>
+    </ToolDisclosure>,
+  };
+  if (call.name === 'dispatch') return <ChatDelegation {...specific} />;
+  if (call.name.startsWith('process_') || call.name === 'wait_process') return <ChatProcessTool {...specific} />;
+  if (['file_read', 'file_list', 'file_search'].includes(call.name)) return <ChatFileTools {...specific} />;
+  if (call.name.startsWith('language_')) return <ChatLanguageTools {...specific} />;
+  if (['recovery_points', 'file_restore'].includes(call.name)) return <ChatRecoveryTools {...specific} />;
+  if (['websearch', 'webfetch', 'document_read', 'research_search', 'research_decide'].includes(call.name)) return <ChatWebTools {...specific} />;
+  if (call.name.startsWith('mcp_')) return <ChatMcpTool {...specific} />;
+  if (call.name.startsWith('computer_') || ['image_generate', 'image_edit'].includes(call.name)) return <ChatArtifactTool {...specific} />;
+  if (workToolLabels[call.name]) return <ChatWorkTool {...specific} />;
   const compactSummary = getToolSummary({
     toolName: call.name,
     arguments: call.arguments,
     details,
   }).text;
-  const harnessShellId = call.name === 'process_spawn' && conversation?.api.processes && execution
-    && typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments) && call.arguments.mode === 'pty' ? call.id : null;
-  const command = typeof call.arguments === 'object' && call.arguments && !Array.isArray(call.arguments)
-    ? String((call.arguments as Record<string, unknown>).command ?? '')
-    : '';
-  if (call.name === 'send') return <ChatThreadMessageCard call={call} result={result} sessionId={sessionId} failed={status === 'error'} />;
+  if (call.name === 'send') return <ChatThreadMessageCard {...specific} />;
   if (['script_open', 'script_run', 'script_close'].includes(call.name)) return <ChatScriptCard call={call} execution={execution}
     executions={executionById} status={status} result={result} sessionId={sessionId ?? 'preview'} preview={preview} generating={generating}
     output={result ? <ToolResultContent messageId={`tool-result:${call.id}`} result={result} hideDetails /> : null}
     rawDetails={<><RawJsonDetails label="arguments" value={call.arguments} />{details !== undefined && <RawJsonDetails label="result" value={details} />}</>}
-    renderCall={operation => <ScriptCallResult operation={operation} />} />;
+    renderCall={operation => <ScriptCallResult operation={operation} sourceCallId={call.id} cwd={cwd} />} />;
   if (call.name === 'code_retrieval') return <ChatExploreCard call={call} cwd={cwd} execution={execution}
     result={result} generating={generating} rawDetails={<>
       <pre className="overflow-auto whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(call.arguments)}</pre>
       {result ? <ToolResultContent messageId={`tool-result:${call.id}`} result={result} />
         : transientOutput !== undefined ? <RawJsonDetails value={transientOutput} /> : null}
     </>} />;
+  const nested = Object.values(executionById ?? {}).filter(child => child.parentToolCallId === call.id);
+  const liveModels = projectToolCalls({ toolName: call.name,
+    ...(transientOutput === undefined ? {} : { details: transientOutput }),
+  }, execution?.status === 'running')?.calls.filter(row => row.name === 'models.classify' || row.name === 'models.generateImages') ?? [];
+  const applyPatchFiles = call.name === 'apply_patch' ? getApplyPatchFileEntries(result?.details ?? transientOutput) : [];
   return (
     <>
     {fileChanges.map((file, index) => <ChatFileChangePreview key={`${index}:${file.path}`} file={file}
@@ -401,7 +431,7 @@ const ChatToolCard: React.FC<{
       onOpen={file.operation === 'delete' || !conversation ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
-      initiallyExpanded={(call.name === 'process_spawn' && expandCommands) || (isFileChangeTool(call.name) && expandEdits)}
+      initiallyExpanded={isFileChangeTool(call.name) && expandEdits}
       className={cn(
         'group',
         'my-1',
@@ -419,25 +449,7 @@ const ChatToolCard: React.FC<{
           )}
         />
         <span className="min-w-0 flex-1 truncate" title={`${call.name}: ${compactSummary || call.name}`}>{fileChanges.length ? t('chat.fileChange.details') : compactSummary || call.name}</span>
-        {harnessShellId && conversation ? (
-          <button
-            type="button"
-            className="shrink-0 rounded px-1.5 typography-micro text-foreground hover:bg-interactive-hover"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const endpointGeneration = getRuntimeEndpointGeneration();
-              const [, requestId, callId] = JSON.parse(call.id) as string[];
-              void conversation.api.processes!.openTerminal({ ...conversation.identity, operationId: `${requestId}:tool:${callId}` }).then(binding => {
-                if (endpointGeneration !== getRuntimeEndpointGeneration()) return;
-                attachProcessTerminal(binding.cwd, binding.sessionId, command, binding.resourceOwner, { identity: conversation.identity, operationId: binding.operationId, processId: binding.processId, endpointGeneration });
-              }).catch(error => toast.error(String(error)));
-            }}
-          >
-            {t('chat.timeline.tools.openTerminal')}
-          </button>
-        ) : null}
-        {!fileChanges.length ? <ChatToolStatus status={status} /> : null}
+        {!fileChanges.length ? <ChatToolStatus status={status} generating={generating} /> : null}
         <Icon name="arrow-down-s" className="size-3.5 text-muted-foreground transition-transform group-open:rotate-180" />
       </summary>
       <div className="ml-2 space-y-3 border-l border-border/60 py-2 pl-3">
@@ -450,7 +462,7 @@ const ChatToolCard: React.FC<{
         <div>
           <p className="mb-1 typography-micro font-medium text-muted-foreground">arguments</p>
           <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 font-mono typography-micro text-foreground">
-            {jsonText(call.arguments)}
+            {jsonText(call.gateway?.arguments ?? call.arguments)}
           </pre>
         </div>
         {result ? (
@@ -501,15 +513,16 @@ const ChatToolCard: React.FC<{
 
 const ChatReadOnlyToolGroup: React.FC<{
   calls: ChatToolCall[];
+  generatingCallIds?: ReadonlySet<string>;
   cwd: string;
   executionById: Record<string, ChatToolExecutionState>;
   resultByCallId: ReadonlyMap<string, ChatToolResultMessage>;
-}> = ({ calls, cwd, executionById, resultByCallId }) => {
+}> = ({ calls, cwd, executionById, resultByCallId, generatingCallIds }) => {
   const { t } = useI18n();
-  const disclosureChoices = React.useContext(ToolDisclosureContext);
+  const disclosureChoices = useToolDisclosureChoices();
   const states = calls.map((call) => {
     const result = resultByCallId.get(call.id);
-    return toolStatus(result, executionById[call.id]);
+    return invocationStatus(result, executionById[call.id], generatingCallIds?.has(call.id));
   });
   const status = states.includes('running') ? 'running' : states.includes('error') ? 'error' : states.includes('unknown') ? 'unknown' : states.includes('cancelled') ? 'cancelled' : states.includes('waiting') ? 'waiting' : states.includes('background') ? 'background' : 'success';
   const counts = { reads: 0, searches: 0, inspections: 0 };
@@ -546,6 +559,7 @@ const ChatReadOnlyToolGroup: React.FC<{
           <ChatToolCard
             key={call.id}
             call={call}
+            generating={generatingCallIds?.has(call.id)}
             cwd={cwd}
             execution={executionById[call.id]}
             executionById={executionById}
@@ -637,6 +651,7 @@ const ChatToolSequence: React.FC<{
       cwd={cwd}
       executionById={executionById}
       resultByCallId={resultByCallId}
+      generatingCallIds={generatingCallIds}
     />
   ))}</>;
 };

@@ -1,26 +1,13 @@
 import type { JsonValue, Operation, OutputBody } from '@varin/protocol';
 import type { ThreadSnapshot, ThreadHistoryItem as HistoryItem, ThreadRunUsage } from '@varin/application-client';
 import type { ChatAssistantMessage, ChatSessionEntry, ChatToolExecutionState, ChatUserContent } from './types';
+import { presentInvocation, invocationData, invocationGateway, operationStatus } from './toolInvocation';
 
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const json = (value: unknown): JsonValue => value as JsonValue;
 
 // Dedicated cards keep their original call/history identity through the gateway.
-function presentedCall(call: Record<string, unknown>): Record<string, unknown> {
-  const args = object(call.arguments);
-  const name = object(args.reference).name;
-  return call.name === 'tool_invoke' && (name === 'render_ui' || name === 'code_retrieval' || ['script_open', 'script_run', 'script_close'].includes(String(name)))
-    ? { ...call, name, arguments: args.arguments }
-    : call;
-}
-function presentedOutput(data: unknown): unknown {
-  const value = object(data);
-  const name = object(value.reference).name;
-  return (name === 'render_ui' && object(value.result).kind === 'ui')
-    || (name === 'code_retrieval' && typeof object(value.result).status === 'string')
-    || ['script_open', 'script_run', 'script_close'].includes(String(name))
-    ? value.result : data;
-}
+const presentedCall = presentInvocation<Record<string, unknown>>;
 
 /** Display only the public thinking text stored in the original provider item. Opaque
  * signatures/encrypted payloads stay untouched; this does not change model replay content. */
@@ -67,7 +54,7 @@ export class HistoryPresentation {
     progress: readonly import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[] = []) {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};
-    const calls = new Map<string, { id: string; name: string }>();
+    const calls = new Map<string, { id: string; name: string; gateway?: unknown }>();
     const operationCalls = new Map<string, string>();
     const children = new Map(snapshot?.children?.map(child => [child.operation_id, child]));
     const live = new Map(progress.map(item => [item.operationId, item]));
@@ -87,14 +74,24 @@ export class HistoryPresentation {
       const call = presentedCall(object(content.call));
       if (content.kind === 'tool_call' && typeof call.call_id === 'string') {
         const id = callKey(item.run_id, request ?? item.id, call.call_id);
-        calls.set(id, { id: item.id, name: String(call.name) });
-        const operation = snapshot?.operations.find(operation => operation.run_id === item.run_id
+        calls.set(id, { id: item.id, name: String(call.name), gateway: call.gateway });
+        let operation = snapshot?.operations.find(operation => operation.run_id === item.run_id
           && operation.id === `${request}:tool:${call.call_id}`);
         if (operation) toolExecutions[id] = projectExecution(operation, id, call);
         const operationId = `${request}:tool:${call.call_id}`;
         operationCalls.set(operationId, id);
         const receipt = completed.get(operationId);
-        const candidate = live.get(operationId);
+        const gateway = invocationGateway(object(receipt?.content).data, call);
+        const targetOperationId = gateway?.operationId ?? operationId;
+        if (gateway) {
+          operation = snapshot?.operations.find(value => value.id === targetOperationId && value.run_id === item.run_id);
+          toolExecutions[id] = operation ? projectExecution(operation, id, call) : {
+            toolCallId: id, operationId: targetOperationId, name: String(call.name), args: json(call.arguments),
+            status: gateway.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(gateway.completion.outcome),
+          };
+          operationCalls.set(targetOperationId, id);
+        }
+        const candidate = live.get(targetOperationId);
         const update = candidate?.toolName === call.name ? candidate : undefined;
         if ((!operation && !receipt && snapshot?.activeRun?.id === item.run_id) || (update && update.runId === item.run_id)) {
           const running = !receipt && snapshot?.activeRun?.id === item.run_id;
@@ -102,10 +99,13 @@ export class HistoryPresentation {
             status: receipt ? outcomeStatus(receipt.outcome) : running ? 'running' : 'unknown' };
           if (update?.runId === item.run_id) toolExecutions[id]!.partialResult = json({ details: update.details });
         }
-        const child = children.get(operationId);
+        const child = children.get(targetOperationId);
         if (child) {
           toolExecutions[id] ??= { toolCallId: id, name: String(call.name), args: json(call.arguments), status: receipt ? outcomeStatus(receipt.outcome) : 'background' };
           toolExecutions[id]!.agent = { threadId: child.child_thread_id, ...(child.avatar ? { avatar: child.avatar } : {}) };
+          const execution = snapshot?.childExecutions?.find(row => row.execution_id === targetOperationId);
+          toolExecutions[id]!.child = { task: child, execution, activity: snapshot?.childActivity?.[targetOperationId] };
+          toolExecutions[id]!.operationId ??= targetOperationId;
         }
       }
       let entry = this.entries.get(item.id);
@@ -123,18 +123,20 @@ export class HistoryPresentation {
           entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text }], configuration) };
         } else if (content.kind === 'tool_call') {
           entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'toolCall', id: callKey(item.run_id, request ?? item.id, String(call.call_id)),
-            name: String(call.name), arguments: json(call.arguments) }], configuration) };
+            name: String(call.name), arguments: json(call.arguments),
+            ...(call.gateway ? { gateway: call.gateway as import('./types').ChatToolCall['gateway'] } : {}) }], configuration) };
         } else if (content.kind === 'tool_result') {
           const toolResult = object(content.result);
           const completion = object(toolResult.completion);
           const id = callKey(item.run_id, String(toolResult.request_id), String(toolResult.call_id));
           const output = completion.content as OutputBody | undefined;
+          const gateway = invocationGateway(output?.data, calls.get(id));
           entry = { ...base, type: 'message', message: { role: 'toolResult', historyId: item.id, toolCallId: id, toolName: calls.get(id)?.name ?? 'tool', timestamp: 0,
             isError: completion.kind === 'not_dispatched' || completion.outcome === 'failed',
             ...(completion.kind === 'not_dispatched' ? { notDispatched: true } : {}),
-            status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
+            status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' || gateway?.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
-            ...(output?.data == null ? {} : { details: json(presentedOutput(output.data)) }) } };
+            ...(output?.data == null ? {} : { details: json(invocationData(output.data, calls.get(id))), originalDetails: json(output.data) }) } };
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };
@@ -171,6 +173,13 @@ export class HistoryPresentation {
         if (typeof call.name !== 'string') continue;
         operationCalls.set(operation.id, operation.id); parents.push(operation.id);
         toolExecutions[operation.id] = { ...projectExecution(operation, operation.id, call), parentToolCallId: operationCalls.get(parent)! };
+        const child = children.get(operation.id);
+        if (child) {
+          toolExecutions[operation.id]!.agent = { threadId: child.child_thread_id, ...(child.avatar ? { avatar: child.avatar } : {}) };
+          toolExecutions[operation.id]!.child = { task: child,
+            execution: snapshot?.childExecutions?.find(row => row.execution_id === operation.id),
+            activity: snapshot?.childActivity?.[operation.id] };
+        }
       }
     }
     const visible = new Set(result.map(entry => entry.id));
@@ -199,8 +208,8 @@ function projectExecution(operation: Operation, id: string, call: Record<string,
   const completion = operation.call_completion;
   const output = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
   return { toolCallId: id, operationId: operation.id, revision: operation.revision, name: String(call.name), args: json(call.arguments),
-    status: operation.phase === 'terminal' ? outcomeStatus(operation.outcome) : operation.executor === 'ask_user' ? 'waiting' : 'running',
-    ...(output?.data == null ? {} : { result: json(presentedOutput(output.data)) }) };
+    status: operationStatus(operation), operation,
+    ...(output?.data == null ? {} : { result: json(invocationData(output.data, call)) }) };
 }
 
 function outcomeStatus(outcome: unknown): ChatToolExecutionState['status'] {

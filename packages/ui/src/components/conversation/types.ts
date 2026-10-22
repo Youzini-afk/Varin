@@ -1,4 +1,4 @@
-import type { JsonValue } from '@varin/protocol';
+import type { JsonValue, Operation, ChildTask, DelegatedExecution } from '@varin/protocol';
 
 /** Read-only conversation presentation. Native history remains authoritative. */
 export interface ChatUsage {
@@ -32,6 +32,7 @@ export interface ChatThinkingContent {
 }
 
 export interface ChatToolCall {
+  gateway?: { name: string; arguments: JsonValue };
   rawArguments?: string;
   sequence?: number;
   interrupted?: boolean;
@@ -78,6 +79,8 @@ export interface ChatAssistantMessage {
 }
 
 export interface ChatToolResultMessage {
+  originalDetails?: JsonValue;
+  operation?: Operation;
   historyId?: string;
   notDispatched?: boolean;
   nestedCalls?: {
@@ -260,6 +263,8 @@ export type ChatSessionEntry =
 
 
 export interface ChatToolExecutionState {
+  operation?: Operation;
+  child?: { task: ChildTask; execution?: DelegatedExecution; activity?: { state: string; reason?: string } };
   operationId?: string;
   agent?: { threadId: string; avatar?: string };
   parentToolCallId?: string;

@@ -53,6 +53,14 @@ async function render(data: JsonValue, outcome?: Outcome, name?: string) {
   await act(async () => root.render(<ConversationContext.Provider value={presentation}>
     <ChatTimelineEntryList cwd="/isolated-audit" entries={projected.entries} sessionId="audit" toolExecutions={projected.toolExecutions} />
   </ConversationContext.Provider>));
+  // Expanded output is mounted on demand, including the original receipt.
+  const opened = new Set<Element>();
+  for (;;) {
+    const next = [...container.querySelectorAll<HTMLDetailsElement>('[data-conversation-tool-disclosure]')].find(node => !opened.has(node));
+    if (!next) break;
+    opened.add(next);
+    await act(async () => { next.open = true; next.dispatchEvent(new window.Event('toggle')); });
+  }
   return container.querySelector<HTMLElement>('section[aria-label="File contents: audit-note.txt"]');
 }
 
@@ -61,8 +69,8 @@ it('renders the native file body as readable text while retaining original argum
   expect(reader?.querySelector('code')?.textContent).toBe(auditRead.content.text);
   expect(reader?.textContent).toContain('Read 92 of 92 bytes · offset 0');
   const tool = container.querySelector('[data-conversation-tool-disclosure]')!;
-  expect(tool.textContent).toContain('arguments');
-  const raw = [...tool.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'details');
+  expect(tool.textContent).toContain('Original input');
+  const raw = [...tool.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Original result');
   expect(raw?.querySelector('pre')?.textContent).toBe(JSON.stringify(auditRead, null, 2));
   expect(tool.querySelector('summary')?.textContent).toContain('audit-note.txt');
   expect(tool.querySelector('summary')?.textContent).toContain('Completed');

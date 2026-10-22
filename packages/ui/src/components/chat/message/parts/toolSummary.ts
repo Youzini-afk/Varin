@@ -4,8 +4,8 @@
  * Summaries use renderer-facing `details`; model-facing `content` keeps the
  * original tool result. See docs/workbench.md.
  *
- * Grouping: consecutive read-only calls (grep, read, find, ls, diagnostics,
- * webfetch, websearch) in the same assistant step are folded into a group
+ * Grouping: consecutive local read-only calls (grep, read, find, ls, diagnostics)
+ * in the same assistant step are folded into a group
  * with a header "first summary + and N other queries". Write tools and bash
  * never enter groups.
  */
@@ -26,7 +26,7 @@ export interface ToolSummary {
 /** Tool names that are read-only and can be grouped */
 const READ_ONLY_TOOLS = new Set([
   "file_read", "file_list", "file_search", "language_diagnostics", "language_symbols", "language_document_symbols", "language_definition", "language_references", "language_hover", "language_call_hierarchy",
-  "grep", "read", "find", "glob", "ls", "diagnostics", "symbols", "definition", "references", "hover", "webfetch", "websearch",
+  "grep", "read", "find", "glob", "ls", "diagnostics", "symbols", "definition", "references", "hover",
 ]);
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {

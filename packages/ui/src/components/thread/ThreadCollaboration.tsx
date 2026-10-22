@@ -47,7 +47,7 @@ const CollaborationConversation = React.lazy(() =>
   })),
 );
 
-type Props = { api: ThreadsAPI; identity: ThreadIdentity };
+type Props = { api: ThreadsAPI; identity: ThreadIdentity; initialMember?: ThreadIdentity; navigationKey?: number };
 type Selection =
   | { kind: "member"; identity: ThreadIdentity }
   | { kind: "exchange"; message: MessageFeedEntry };
@@ -71,10 +71,12 @@ export function ThreadCollaboration(props: Props) {
       api={props.api}
       identity={identity}
       host={host}
+      initialMember={props.initialMember}
+      navigationKey={props.navigationKey}
     />
   );
 }
-function CollaborationRoom({ api, identity, host }: Props & { host: number }) {
+function CollaborationRoom({ api, identity, host, initialMember, navigationKey }: Props & { host: number }) {
   const { t } = useI18n();
   const [feed, setFeed] = React.useState<CollaborationFeed>();
   React.useEffect(() => {
@@ -89,6 +91,8 @@ function CollaborationRoom({ api, identity, host }: Props & { host: number }) {
       identity={identity}
       host={host}
       feed={feed}
+      initialMember={initialMember}
+      navigationKey={navigationKey}
     />
   ) : (
     <p className="p-4 typography-meta text-muted-foreground">
@@ -101,6 +105,8 @@ function CollaborationRoomContent({
   identity,
   host,
   feed,
+  initialMember,
+  navigationKey,
 }: Props & { host: number; feed: CollaborationFeed }) {
   const { t } = useI18n();
   const state = React.useSyncExternalStore(
@@ -163,7 +169,7 @@ function CollaborationRoomContent({
         );
     }
   };
-  const openMember = (threadId: string, branchId?: string) => {
+  const openMember = React.useCallback((threadId: string, branchId?: string) => {
     const request = ++selectionRequest.current;
     setActionError(undefined);
     void feed.resolveMember(threadId).then(
@@ -198,7 +204,15 @@ function CollaborationRoomContent({
           );
       },
     );
-  };
+  }, [feed, identity.threadId, identity.branchId, host]);
+  const memberNavigation = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    if (!initialMember) return;
+    const key = JSON.stringify([initialMember.threadId, initialMember.branchId, navigationKey]);
+    if (memberNavigation.current === key) return;
+    memberNavigation.current = key;
+    openMember(initialMember.threadId, initialMember.branchId);
+  }, [initialMember, navigationKey, openMember]);
   const reply = (message: MessageFeedEntry) => {
     const target =
       message.actor.kind === "user"

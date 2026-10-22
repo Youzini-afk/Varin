@@ -96,7 +96,7 @@ describe('getToolSummary', () => {
       details: { status: 'ok' },
     });
     expect(result.text).toBe('Fetched https://example.com/page · ok');
-    expect(result.readOnly).toBe(true);
+    expect(result.readOnly).toBe(false);
   });
 
   it('websearch: query + result count', () => {
@@ -106,7 +106,7 @@ describe('getToolSummary', () => {
       details: { count: 5 },
     });
     expect(result.text).toBe('Searched "hello world" · 5 results');
-    expect(result.readOnly).toBe(true);
+    expect(result.readOnly).toBe(false);
   });
 
   it('find: glob + count', () => {
