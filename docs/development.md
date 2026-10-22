@@ -101,6 +101,11 @@ schema 匹配的 executable 和 manifest。手工改生成文件、运行旧 bin
 需要重建时显式传 `--build`。`test:rust` 本身不构建这份 release binary；涉及 Host/guardian 的测试还需要 Node/tsx、
 相应 Host/builtin 输出和指向匹配 executable 的 `VARIN_TEST_KERNEL_EXECUTABLE`。
 
+`test:rust` 使用 Cargo 默认选择，不执行标记 `#[ignore]` 的场景；`test:kernel` 只运行 Node transport 和
+Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回归时，先核对其当前 owner、fixture 与前置产物，
+再用上述 Cargo 定向命令追加 `-- --ignored`。旧 fixture 指向已删除入口时属于未验证缺口，不应恢复退役 runtime
+来让测试通过，也不能把默认 suite 成功当成该场景已验证。
+
 `test:dist` 消费已构建产物，应先构建所属包。完整打包、签名、实际桌面/移动端操作和真实 provider 账号验证各有入口，
 不从 helper 或源码测试推导已通过发行验收。
 
