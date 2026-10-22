@@ -71,7 +71,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - run: bun install --frozen-lockfile
+      # Documentation checks use only Node built-ins; prose-only changes do not
+      # need the workspace/native dependency installation or postinstall hooks.
+      - if: needs.changes.outputs.code == 'true'
+        run: bun install --frozen-lockfile
       - run: bun run test:docs
       - run: bun run docs:validate
       - if: needs.changes.outputs.code == 'true'
