@@ -74,7 +74,7 @@ it('materialization hands its grant to the original backend until real readers a
  const materialized=await materializeExperimentAttempt(f.client,f.caller,'successful',f.input);
  assert.equal(f.calls.filter(c=>c.operation==='retire').length,0);
  let finish:()=>void=()=>{};let entered:()=>void=()=>{};const gate=new Promise<void>(r=>{finish=r;}),started=new Promise<void>(r=>{entered=r;});
- Object.assign(f.scoped,{processRead:async()=>{entered();await gate;return {chunks:[],nextCursor:0,endCursor:0,process:{status:'exited',writerActive:false}};}});
+ Object.assign(f.scoped,{processRead:async()=>{entered();await gate;return {chunks:[],nextCursor:0,endCursor:0,outputComplete:true,outputError:null,process:{status:'exited',writerActive:false}};}});
  const backend=createLocalExperimentBackend(materialized.scoped,materialized.releaseAuthority);
  const site={workspaceId:'ws',rootId:materialized.rootId,canonicalRoot:materialized.canonicalRoot,transport:materialized.scoped};
  const reading=backend.read(site,'original',0);await started;

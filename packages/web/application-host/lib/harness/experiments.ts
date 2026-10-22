@@ -101,6 +101,7 @@ interface RunningJob {
   poll: Promise<void>;
   cancelRequested: boolean;
   finalized: boolean;
+  outputError?: string;
   /** Original backend reader/release flight, shared across service detach and manual collect. */
   collection?: Promise<void>;
   lastPollError?: string;
@@ -268,9 +269,12 @@ const unspawnedDrained = (payload: Record<string, unknown>): boolean => !payload
   && (!payload.captureStarted || payload.captureDrained === true)
   && (!payload.preparationStarted || payload.preparationDrained === true)
   && (!payload.admissionStarted || payload.admissionDrained === true);
-const originalOutputDrained = (record: KernelRecordResult, view: ExperimentAttemptView, job: KernelRecordResult | null): boolean =>
+const originalExecutorStopped = (record: KernelRecordResult, view: ExperimentAttemptView, job: KernelRecordResult | null): boolean =>
   view.state !== "lost" && TERMINAL.has(view.state) && (payloadOf(record).spawnDispatched
-    ? !!job && payloadOf(job).executorStopped === true && payloadOf(job).outputDrained === true : unspawnedDrained(payloadOf(record)));
+    ? !!job && payloadOf(job).executorStopped === true : unspawnedDrained(payloadOf(record)));
+
+const originalOutputDrained = (record: KernelRecordResult, view: ExperimentAttemptView, job: KernelRecordResult | null): boolean =>
+  originalExecutorStopped(record, view, job) && (!payloadOf(record).spawnDispatched || payloadOf(job!).outputDrained === true);
 
 const attemptView = (record: KernelRecordResult): ExperimentAttemptView | null => {
   const payload = payloadOf(record);
@@ -1272,9 +1276,10 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
             backendJobId: running.handle.backendJobId,
             exitCode: observation.exitCode,
             signal: observation.signal,
-            reason: observation.reason,
+            reason: running.outputError ?? observation.reason,
             executorStopped: true,
-            outputDrained: true,
+            outputDrained: !running.outputError,
+            ...(running.outputError ? { outputError: running.outputError } : {}),
             endedAt: now(),
           });
         }
@@ -1295,23 +1300,25 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
       });
       if (!terminal) return;
       const owner = recordCaller(workspaceId, terminal);
-      // Execution is durably stopped and its logs are drained. Artifact readers no
+      // Execution is durably stopped; output is drained or explicitly failed. Readers no
       // longer own compute, and cannot hold the attempt's control transaction open.
       await releaseTerminalCommitment(ctx, workspaceId, terminal);
       void drainQueue(workspaceId).catch(report);
       let state = attemptView(terminal)!.collection;
       if (state !== "done") {
         state = "failed";
-        try {
-          const specId = attemptView(terminal)!.specId;
-          const specRecord = specId ? await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(specId)) : null;
-          const spec = specRecord ? specView(specRecord) : null;
-          if (!spec) throw new Error("Experiment spec is unavailable for output collection");
-          const artifacts = await persistArtifacts(ctx, workspaceId, owner, attemptId, spec,
-            { backend: running.backend, site: running.site }, running);
-          state = artifacts.some((artifact) => artifact.state === "failed") ? "failed" : "done";
-        } catch (error) {
-          report(error);
+        if (!running.outputError) {
+          try {
+            const specId = attemptView(terminal)!.specId;
+            const specRecord = specId ? await ctx.scoped.getRecord(workspaceId, recordIdFor.spec(specId)) : null;
+            const spec = specRecord ? specView(specRecord) : null;
+            if (!spec) throw new Error("Experiment spec is unavailable for output collection");
+            const artifacts = await persistArtifacts(ctx, workspaceId, owner, attemptId, spec,
+              { backend: running.backend, site: running.site }, running);
+            state = artifacts.some((artifact) => artifact.state === "failed") ? "failed" : "done";
+          } catch (error) {
+            report(error);
+          }
         }
         await serializeAttempt(workspaceId, attemptId, () => updateAttempt(
           ctx, workspaceId, owner, attemptId, (view) => view.state, (payload, nextRevision) => ({ ...payload, collection: state, collectionCompletion: { recordRevision: nextRevision, outcome: state } }),
@@ -1376,6 +1383,12 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
         }
         running.totals = nextTotals;
         running.cursor = result.nextCursor;
+        // A kernel output error is a durable failed drain, not a reconnect outage.
+        // Retain published bytes and wait for actual writer stop before settling it.
+        if (result.outputError && !running.outputError) {
+          running.outputError = result.outputError;
+          report(new Error(result.outputError));
+        }
         // The durable control receipt remains authoritative across an observer's attach/read awaits.
         const current = await getAttemptRecord(ctx, workspaceId, attemptId);
         if (!current) throw new Error(`Experiment attempt disappeared during observation: ${attemptId}`);
@@ -1393,7 +1406,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           await new Promise((resolve) => setTimeout(resolve, RECONNECT_POLL_MS));
           continue;
         }
-        if (STOPPED_BACKEND_STATES.has(observation.status) && !observation.writerActive && running.cursor === result.endCursor) {
+        if (STOPPED_BACKEND_STATES.has(observation.status) && !observation.writerActive && (result.outputComplete !== false || !!running.outputError) && running.cursor === result.endCursor) {
           await finalize(ctx, workspaceId, attemptId, running, observation);
           return;
         }
@@ -2235,7 +2248,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
           stderr: num(jobPayload.stderrBytes) ?? 0,
         },
         cancelRequested: attempt.state === "stopping" || payload.cancelRequested === true,
-        finalized: TERMINAL.has(attempt.state) && jobPayload.executorStopped === true && jobPayload.outputDrained === true,
+        finalized: TERMINAL.has(attempt.state) && jobPayload.executorStopped === true
+          && (jobPayload.outputDrained === true || typeof jobPayload.outputError === "string"),
+        ...(typeof jobPayload.outputError === "string" ? { outputError: jobPayload.outputError } : {}),
         observerOwner: serviceToken,
         poll: Promise.resolve(),
       };
@@ -2618,6 +2633,9 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     const end = publishedBytes as number;
     const maxBytes = input.maxBytes ?? 64 * 1024;
     if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new HarnessServiceError("invalid-params", "Log read size must be a positive safe integer");
+    if (input.offset >= end && typeof payload?.outputError === "string" && originalExecutorStopped(record, view, job)) {
+      throw new HarnessServiceError("unavailable", payload.outputError);
+    }
     const range = input.offset < end
       ? await readLogRange(ctx, caller.workspaceId, subject.subjectId, input.stream, input.offset, maxBytes, signal, end, caller)
       : { bytes: Buffer.alloc(0), nextOffset: input.offset };
@@ -2960,7 +2978,7 @@ export function createExperimentService(deps: ExperimentServiceDeps) {
     if (!attempt) throw new HarnessServiceError("unavailable", "Native experiment receipt is unreadable");
     const payload = payloadOf(record);
     const job = await ctx.scoped.getRecord(workspaceId, recordIdFor.job(jobIdFor(attemptId)));
-    const stopped = originalOutputDrained(record, attempt, job);
+    const stopped = originalExecutorStopped(record, attempt, job);
     void reconcileAttempt(ctx, workspaceId, caller, record).catch(report);
     const owner = requireResearchOwner(caller);
     const accepted = payload.acceptance as import("@varin/protocol").ExperimentSubmitResult | undefined;

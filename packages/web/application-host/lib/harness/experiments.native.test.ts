@@ -802,7 +802,10 @@ describe("experiment service on the real kernel", () => {
     ));
     const waited = await f.experiments.wait(f.caller, submitted.attempt.attemptId, 45_000);
     assert.equal(waited.attempt.state, "completed");
-    const detail = await f.experiments.get(f.caller, submitted.attempt.attemptId);
+    // Execution completion precedes artifact publication. Join the original
+    // collector before asserting retained bytes, rather than racing a get().
+    const detail = await f.experiments.collect(f.caller, submitted.attempt.attemptId);
+    assert.equal(detail.attempt.collection, "done");
     const stdout = detail.artifacts.find((artifact) => artifact.name === "stdout");
     assert.equal(stdout?.byteLength, prefixBytes + Buffer.byteLength("😀tail"));
     assert.equal(stdout?.truncated, undefined);

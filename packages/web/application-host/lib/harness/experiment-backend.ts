@@ -41,7 +41,8 @@ export interface BackendJobHandle {
 
 export interface BackendObservation {
   status: "starting" | "running" | "exited" | "failed" | "cancelled" | "unknown" | "released";
-  /** True while the backend may still produce output for this job. */
+  /** True while job writers remain active. Asynchronous output drain must be
+   * certified separately by outputComplete on reads. */
   writerActive: boolean;
   exitCode?: number | null;
   signal?: string | null;
@@ -55,6 +56,11 @@ export interface BackendReadResult {
   chunks: Array<{ channel: "stdout" | "stderr"; bytesBase64: string }>;
   nextCursor: number;
   endCursor: number;
+  /** Explicit drain receipt when the backend separates writer exit from output EOF.
+   * Backends without this field must certify final output through writerActive. */
+  outputComplete?: boolean;
+  /** Durable output loss/corruption, not a transient transport observation error. */
+  outputError?: string | null;
   observation: BackendObservation;
 }
 
@@ -231,6 +237,9 @@ export const createLocalExperimentBackend = (scoped: KernelScopedClient, release
         })),
         nextCursor: result.nextCursor,
         endCursor: result.endCursor,
+        // A stopped kernel process can still have guardian readers draining pipes.
+        outputComplete: result.outputComplete === true,
+        outputError: result.outputError,
         observation: {
           status: result.process.status,
           writerActive: result.process.writerActive,

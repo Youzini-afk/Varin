@@ -7,7 +7,7 @@ import { afterEach, describe, it, vi } from "vitest";
 import type { KernelClient, KernelScopedClient } from "../kernel/kernel-client.js";
 import type { KernelRecordResult } from "../kernel/protocol.generated.js";
 import { createExperimentService, type ExperimentCaller } from "./experiments.js";
-import type { ExperimentBackend, ResolvedExperimentBackend } from "./experiment-backend.js";
+import { createLocalExperimentBackend, type ExperimentBackend, type ResolvedExperimentBackend } from "./experiment-backend.js";
 import type { ResourceService } from "./resources.js";
 import { nativeResearchCaller, createResearchSourceFixture } from './native-research.fixture.js';
 import { createSourceService } from "./sources.js";
@@ -858,4 +858,92 @@ it('reads only the original published log byte boundary, including raw UTF-8 spl
   const chunk = [...f.records.entries()].find(([,r]) => r.recordType === 'experiment.artifact' && JSON.parse(r.payloadJson).internalLogChunk === true)!;
   f.records.delete(chunk[0]);
   await assert.rejects(service.readLogObservation(caller,binding,{stream:'stdout',offset:0}),/missing durable page/);
+});
+
+
+it("retains stopped-process output until its delayed tail is drained", async () => {
+  const f = await fixture();
+  const tail = deferred(); cleanup.push(() => tail.resolve());
+  let reads = 0;
+  const local = createLocalExperimentBackend({
+    async processRead({ cursor }: { cursor: number }) {
+      reads++;
+      if (reads > 1) await tail.promise;
+      const bytes = Buffer.from(reads === 1 ? "prefix" : "😀tail");
+      return { chunks: [{ channel: "stdout", bytesBase64: bytes.toString("base64") }],
+        nextCursor: cursor + bytes.length, endCursor: cursor + bytes.length,
+        outputComplete: reads > 1, outputError: null,
+        process: { status: "exited", writerActive: false, exitCode: 0, signal: null } };
+    },
+  } as unknown as KernelScopedClient);
+  f.backend.read = local.read.bind(local);
+  const submitted = await f.service.submit(f.caller, { specId: "seed" });
+  await until(() => reads === 2);
+  const pending = await f.service.wait(f.caller, submitted.attempt.attemptId, 0);
+  assert.equal(pending.timedOut, true);
+  assert.notEqual(pending.attempt.state, "completed");
+  assert.equal(f.events.includes("backend-release"), false);
+  assert.equal((await f.service.get(f.caller, submitted.attempt.attemptId)).artifacts.length, 0);
+  tail.resolve();
+  const waited = await f.service.wait(f.caller, submitted.attempt.attemptId, 5_000);
+  assert.equal(waited.attempt.state, "completed");
+  const collected = await f.service.collect(f.caller, submitted.attempt.attemptId);
+  assert.equal(collected.attempt.collection, "done");
+  assert.equal(collected.artifacts.find(artifact => artifact.name === "stdout")?.byteLength, Buffer.byteLength("prefix😀tail"));
+  const logs = await f.service.logs(f.caller, { attemptId: submitted.attempt.attemptId });
+  assert.equal(logs.text, "prefix😀tail");
+  assert.equal(logs.eof, true);
+});
+
+
+it("settles permanent output failure without claiming complete artifacts or retaining compute", async () => {
+  const f = await fixture();
+  const failure = "guardian ended without a durable completion marker";
+  let reads = 0;
+  const local = createLocalExperimentBackend({
+    async processRead({ cursor }: { cursor: number }) {
+      reads++;
+      const bytes = Buffer.from("retained prefix");
+      return { chunks: cursor === 0 ? [{ channel: "stdout", bytesBase64: bytes.toString("base64") }] : [],
+        nextCursor: bytes.length, endCursor: bytes.length, outputComplete: false, outputError: failure,
+        process: { status: "exited", writerActive: false, exitCode: 0, signal: null } };
+    },
+  } as unknown as KernelScopedClient);
+  f.backend.read = local.read.bind(local);
+  const submitted = await f.service.submit(f.caller, { specId: "seed" });
+  const id = submitted.attempt.attemptId;
+  const waited = await f.service.wait(f.caller, id, 5_000);
+  assert.equal(waited.timedOut, false);
+  assert.equal(waited.attempt.state, "completed"); // Preserve the real exit status.
+  const collected = await f.service.collect(f.caller, id);
+  assert.equal(collected.attempt.collection, "failed");
+  assert.equal(collected.attempt.collectionCompletion?.outcome, "failed");
+  assert.equal(collected.artifacts.length, 0);
+  assert.equal(f.committed.size, 0);
+  assert.equal(f.events.includes("backend-release"), false); // Failed spool evidence is retained.
+  assert.ok(f.errors.some(error => error.message === failure));
+  assert.equal((await f.service.nativeReceipt("ws", id))?.executorStopped, true);
+  const logs = await f.service.logs(f.caller, { attemptId: id });
+  assert.equal(logs.text, "retained prefix");
+  assert.equal(logs.eof, false);
+  assert.equal((await f.service.get(f.caller, id)).job?.reason, failure);
+  const binding = { operationId: f.caller.owner.operationId, executionOwner: f.caller.owner.executionOwner,
+    domain: "research.experiment", domainVersion: 1,
+    subject: { kind: "workspace" as const, workspaceId: "ws", subjectId: id } };
+  const prefix = await f.service.readLogObservation(f.caller, binding, { stream: "stdout", offset: 0 });
+  assert.equal(prefix.bytes.toString(), "retained prefix");
+  assert.equal(prefix.eof, false);
+  await assert.rejects(f.service.readLogObservation(f.caller, binding, { stream: "stdout", offset: prefix.nextOffset }),
+    error => error instanceof Error && error.message === failure);
+  const job = [...f.records.values()].find(record => record.recordType === "experiment.job")!;
+  assert.equal(JSON.parse(job.payloadJson).outputDrained, false);
+  assert.equal(JSON.parse(job.payloadJson).outputError, failure);
+  await f.service.stopForThreads("ws", [f.caller.owner.threadId]);
+  f.service.detachObservers();
+  // A fresh client identity forces reconstruction from durable records, not shared jobs.
+  const restarted = f.makeService(undefined, { ...f.client });
+  const again = await restarted.collect(f.caller, id);
+  assert.equal(again.attempt.collection, "failed");
+  assert.equal(again.artifacts.length, 0);
+  assert.equal(reads, 1);
 });
