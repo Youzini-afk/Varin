@@ -1,17 +1,7 @@
-import fs from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { parseWorkspaceRecoveryCheckpointListResult } from '@varin/extension-contract';
 import type { HostCapabilityCallContext } from '@varin/extension-host';
-import {
-  createDocumentAuthorityHarness,
-  type DocumentAuthorityHarness,
-} from '../documents/contract-fixtures.js';
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
-import { createWorkspaceRecoveryEngine, type RecoverySessionNavigation } from './journal-engine.js';
-import { createRecoveryFileStore } from './file-store.test-helper.js';
-import { createInMemoryRecoveryDurablePort } from './recovery-durable-port.test-helper.js';
-
-let harness: DocumentAuthorityHarness | undefined;
 
 const context: HostCapabilityCallContext = {
   owner: {
@@ -24,67 +14,37 @@ const context: HostCapabilityCallContext = {
   signal: new AbortController().signal,
 };
 
-const navigation: RecoverySessionNavigation = {
-  commit: async () => ({}),
-  commitLeaf: async () => ({}),
-  prepare: async (input) => ({
-    expectedLeafId: input.entryId,
-    removedEntryIds: [],
-    targetLeafId: input.entryId,
-  }),
-  prepareLeaf: async (input) => ({
-    expectedLeafId: input.targetLeafId,
-    removedEntryIds: [],
-    targetLeafId: input.targetLeafId,
-  }),
-};
+it('validates capability input before forwarding and preserves the selected owner result', async () => {
+  const page = { status: 'ready', page: { checkpoints: [], nextCursor: null } };
+  const unavailable = { status: 'failed', failure: { code: 'unavailable', message: 'Selected owner has no storage relocation', retryable: false } };
+  const inventory = { status: 'ready', workspaces: [] };
+  const engine = {
+    listCheckpoints: vi.fn(async () => page),
+    setDefaultStorageLocation: vi.fn(async () => unavailable),
+    clearStorageLocationOverride: vi.fn(async () => unavailable),
+    listStorageWorkspaces: vi.fn(async () => inventory),
+    createCheckpoint: vi.fn(),
+    prepareCombinedRecovery: vi.fn(),
+  };
+  const capability = createWorkspaceRecoveryCapabilityHandler(engine as never);
+  expect(parseWorkspaceRecoveryCheckpointListResult(await capability(
+    'listCheckpoints', { workspaceId: 'workspace', cursor: 3, limit: 10 }, context,
+  ))).toEqual(page);
+  expect(engine.listCheckpoints).toHaveBeenCalledExactlyOnceWith({ workspaceId: 'workspace', cursor: 3, limit: 10 });
 
-afterEach(async () => {
-  await harness?.cleanup();
-  harness = undefined;
-});
+  expect(await capability('setDefaultStorageLocation', { mode: 'workspace-adjacent' }, context)).toEqual(unavailable);
+  expect(engine.setDefaultStorageLocation).toHaveBeenCalledExactlyOnceWith({ mode: 'workspace-adjacent' });
+  expect(await capability('clearStorageLocationOverride', { workspaceId: 'workspace' }, context)).toEqual(unavailable);
+  expect(engine.clearStorageLocationOverride).toHaveBeenCalledExactlyOnceWith('workspace');
+  expect(await capability('listStorageWorkspaces', {}, context)).toEqual(inventory);
+  expect(engine.listStorageWorkspaces).toHaveBeenCalledExactlyOnceWith();
 
-describe('workspace.recovery-primitives Web Host capability', () => {
-  it('validates JSON input across journal, checkpoint, combined, and storage primitives', async () => {
-    harness = await createDocumentAuthorityHarness();
-    await fs.promises.writeFile(`${harness.workspaceRoot}/note.txt`, 'content');
-    const engine = createWorkspaceRecoveryEngine({
-      authorityId: harness.authority.hostId,
-      dataDir: harness.dataDir,
-      documents: harness.authority,
-      durableRecoveryStore: createInMemoryRecoveryDurablePort(),
-      fileStore: createRecoveryFileStore(),
-      sessionNavigation: navigation,
-    });
-    const capability = createWorkspaceRecoveryCapabilityHandler(engine as never);
-    const created = await engine.createCheckpoint({
-      name: 'Before refactor',
-      workspaceId: harness.identity.workspaceId,
-    });
-    expect(created).toMatchObject({ status: 'ready', checkpoint: { source: 'named' } });
-    const listed = parseWorkspaceRecoveryCheckpointListResult(await capability(
-      'listCheckpoints',
-      { workspaceId: harness.identity.workspaceId },
-      context,
-    ));
-    expect(listed.status).toBe('ready');
-    if (listed.status !== 'ready') throw new Error('Expected checkpoint list');
-    expect(listed.page.checkpoints).toHaveLength(1);
-    // Storage location is owned by the Rust kernel: overrides are unavailable.
-    const global = await capability('setDefaultStorageLocation', { mode: 'workspace-adjacent' }, context);
-    expect(global).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
-    expect(await capability('listStorageWorkspaces', {}, context)).toMatchObject({
-      status: 'ready',
-      workspaces: [expect.objectContaining({ workspaceId: harness.identity.workspaceId })],
-    });
-    const inherited = await capability('clearStorageLocationOverride', {
-      workspaceId: harness.identity.workspaceId,
-    }, context);
-    expect(inherited).toMatchObject({ status: 'failed', failure: { code: 'unavailable' } });
-    await expect(capability('createCheckpoint', { name: 'x', workspaceId: harness.identity.workspaceId }, context)).rejects.toThrow();
-    await expect(capability('recordMutationBefore', {}, context)).rejects.toThrow(/original runtime owner/);
-    await expect(capability('prepareCombinedRecovery', {}, context)).rejects.toThrow(/entryId/);
-  });
+  await expect(capability('listCheckpoints', { workspaceId: 'workspace', limit: 0 }, context)).rejects.toThrow();
+  expect(engine.listCheckpoints).toHaveBeenCalledTimes(1);
+  await expect(capability('createCheckpoint', { name: 'x', workspaceId: 'workspace' }, context)).rejects.toThrow(/does not implement/);
+  expect(engine.createCheckpoint).not.toHaveBeenCalled();
+  await expect(capability('prepareCombinedRecovery', {}, context)).rejects.toThrow(/entryId/);
+  expect(engine.prepareCombinedRecovery).not.toHaveBeenCalled();
 });
 
 it('keeps native journal anchors and mutations behind their original runtime owner', async () => {

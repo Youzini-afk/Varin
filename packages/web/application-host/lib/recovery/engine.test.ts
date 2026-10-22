@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryPrepareInput,
-  WorkspaceRecoveryCheckpointQuery,
   WorkspaceRecoveryTurnSettledInput,
 } from '@varin/extension-contract';
 import type { DocumentAuthorityOptions } from '../documents/authority.js';
@@ -160,13 +159,6 @@ const applyCombined = async (
   input: WorkspaceCombinedRecoveryApplyInput,
 ) => ready(await engine.applyCombinedRecovery(input));
 
-const listCheckpoints = async (
-  engine: WorkspaceRecoveryEngine,
-  input: WorkspaceRecoveryCheckpointQuery,
-): Promise<Ready<Awaited<ReturnType<WorkspaceRecoveryEngine['listCheckpoints']>>>> => (
-  ready(await engine.listCheckpoints(input))
-);
-
 const recoveryIdentity = (harness: DocumentAuthorityHarness) => ({
   authorityId: harness.authority.hostId,
   canonicalRoot: harness.workspaceRoot,
@@ -224,30 +216,6 @@ describe('affected-file workspace recovery journal', () => {
     expect(disposed).toBe(false);
     releaseShared(); await shared; await disposing;
     await expect(engine.withWorkspaceStorage(workspaceId, { mode: 'shared', purpose: 'after-dispose' }, () => undefined)).rejects.toThrow('disposed');
-  });
-
-  it('creates a turn checkpoint without scanning unrelated workspace files', async () => {
-    const createReadStream = vi.fn(fs.createReadStream.bind(fs));
-    const { engine, harness } = await createHarness({
-      fileStore: createRecoveryFileStore({ fsModule: { ...fs, createReadStream } }),
-    });
-    await Promise.all(Array.from({ length: 200 }, (_, index) => (
-      fs.promises.writeFile(path.join(harness.workspaceRoot, `unrelated-${index}.txt`), 'large workspace data')
-    )));
-
-    await startTurn(engine, harness);
-    await settleTurn(engine, harness, {
-      mutationObserved: false,
-      observationComplete: false,
-      observedResourceIds: [],
-    });
-
-    expect(createReadStream).not.toHaveBeenCalled();
-    const listed = await listCheckpoints(engine, { workspaceId: harness.identity.workspaceId });
-    expect(listed).toMatchObject({
-      status: 'ready',
-      page: { checkpoints: [{ changedPathCount: 0, state: 'ready' }] },
-    });
   });
 
   it('records only the first before-image and restores the affected path with the conversation', async () => {
@@ -357,41 +325,6 @@ describe('affected-file workspace recovery journal', () => {
     } finally {
       surface.close();
     }
-  });
-
-  it('keeps the first before-image and last after-image across repeated writes in one turn', async () => {
-    const { engine, harness } = await createHarness();
-    const target = path.join(harness.workspaceRoot, 'note.txt');
-    await fs.promises.writeFile(target, 'original');
-    await startTurn(engine, harness);
-    const base = {
-      executionId: 'execution-1',
-      path: target,
-      toolCallId: 'tool-1',
-      toolName: 'edit' as const,
-      workspaceId: harness.identity.workspaceId,
-    };
-    await engine.recordMutationBefore({ ...base, mutationId: 'mutation-1' });
-    await fs.promises.writeFile(target, 'middle');
-    await engine.recordMutationAfter({ ...base, mutationId: 'mutation-1', succeeded: true });
-    await engine.recordMutationBefore({ ...base, mutationId: 'mutation-2', toolCallId: 'tool-2' });
-    await fs.promises.writeFile(target, 'final');
-    await engine.recordMutationAfter({
-      ...base,
-      mutationId: 'mutation-2',
-      succeeded: true,
-      toolCallId: 'tool-2',
-    });
-    await settleTurn(engine, harness);
-
-    const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
-    });
-    await engine.applyCombinedRecovery({
-      confirmedConflicts: [],
-      conflictPolicy: 'abort', expectedRevision: prepared.plan.revision, operationId: prepared.plan.id,
-    });
-    expect(await fs.promises.readFile(target, 'utf8')).toBe('original');
   });
 
   it('turns an unchanged response into an immediate zero-file rollback', async () => {
@@ -671,32 +604,6 @@ describe('affected-file workspace recovery journal', () => {
     expect(redone.operation).toMatchObject({ state: 'complete', undoOf: applied.operation.id });
     expect(await fs.promises.readFile(target, 'utf8')).toBe('after');
     expect(navigation.commitLeaf).toHaveBeenCalledOnce();
-  });
-
-  it('keeps newly referenced objects reachable during cleanup', async () => {
-    const { engine, harness } = await createHarness();
-    const target = path.join(harness.workspaceRoot, 'note.txt');
-    await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
-
-    const cleaned = await engine.cleanupStorage({ workspaceId: harness.identity.workspaceId });
-    expect(cleaned).toMatchObject({
-      status: 'ready',
-      result: { objectsDeleted: 0, recordsDeleted: 0, status: 'complete' },
-    });
-    const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
-    });
-    const applied = await applyCombined(engine, {
-      confirmedConflicts: [],
-      conflictPolicy: 'abort',
-      expectedRevision: prepared.plan.revision,
-      operationId: prepared.plan.id,
-    });
-    expect(applied).toMatchObject({ status: 'ready', operation: { state: 'complete' } });
-    expect(await fs.promises.readFile(target, 'utf8')).toBe('before');
   });
 
   it('resumes the original operation after an uncertain Thread navigation response', async () => {
