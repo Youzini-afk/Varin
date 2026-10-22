@@ -608,12 +608,14 @@ describe('createWorktree', () => {
         returnAfterDirectoryCreated: true,
       });
 
-      await expect.poll(() => fs.existsSync(hookLog), { timeout: 5_000 }).toBe(true);
-      expect(fs.readFileSync(hookLog, 'utf8')).toBe(`${'0'.repeat(40)}|${expectedHead}|1`);
+      // Shell redirection creates the log before printf writes it. Bootstrap
+      // readiness owns hook completion; file existence does not.
       await expect.poll(
         async () => (await getWorktreeBootstrapStatus(created.path)).status,
         { timeout: 5_000 },
       ).toBe('ready');
+      expect(fs.existsSync(hookLog)).toBe(true);
+      expect(fs.readFileSync(hookLog, 'utf8')).toBe(`${'0'.repeat(40)}|${expectedHead}|1`);
     } finally {
       if (previousVarinDataDir === undefined) delete process.env.VARIN_DATA_DIR;
       else process.env.VARIN_DATA_DIR = previousVarinDataDir;
