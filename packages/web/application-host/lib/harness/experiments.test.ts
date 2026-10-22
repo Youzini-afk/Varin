@@ -927,6 +927,7 @@ it("settles permanent output failure without claiming complete artifacts or reta
   assert.equal(logs.text, "retained prefix");
   assert.equal(logs.eof, false);
   assert.equal((await f.service.get(f.caller, id)).job?.reason, failure);
+  assert.ok('operationId' in f.caller.owner && 'executionOwner' in f.caller.owner);
   const binding = { operationId: f.caller.owner.operationId, executionOwner: f.caller.owner.executionOwner,
     domain: "research.experiment", domainVersion: 1,
     subject: { kind: "workspace" as const, workspaceId: "ws", subjectId: id } };
@@ -941,7 +942,7 @@ it("settles permanent output failure without claiming complete artifacts or reta
   await f.service.stopForThreads("ws", [f.caller.owner.threadId]);
   f.service.detachObservers();
   // A fresh client identity forces reconstruction from durable records, not shared jobs.
-  const restarted = f.makeService(undefined, { ...f.client });
+  const restarted = f.makeService(undefined, { ...f.client } as KernelClient);
   const again = await restarted.collect(f.caller, id);
   assert.equal(again.attempt.collection, "failed");
   assert.equal(again.artifacts.length, 0);

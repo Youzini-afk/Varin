@@ -115,12 +115,17 @@ compute job does not become a model runtime.
 
 ## Verification entry points
 
-`bun run test:rust` runs the Rust workspace suites under the pinned toolchain. Tests involving Host or
-guardian consumers need the built dependencies and a matching absolute `VARIN_TEST_KERNEL_EXECUTABLE`.
-`bun run test:kernel` runs the existing Node/Vitest native authority consumers against a staged release
-binary; `node scripts/test-kernel-authority.mjs --build` also builds that binary.
+`bun run test:rust` runs the default Rust workspace suites under the pinned toolchain; `#[ignore]`
+cases do not execute. Host/guardian consumers need built dependencies and a matching absolute
+`VARIN_TEST_KERNEL_EXECUTABLE`. `bun run test:kernel` runs Node/Vitest native authority consumers
+against a staged release binary, not ignored Rust cases; add `--build` to build that binary first.
 
-Choose the focused cases for the changed owner. Native component tests, controlled providers, Host IPC,
-real OS processes, installed products and physical remote machines establish different facts. A passing
-suite in one category is not evidence that the others ran. Commands and CI selection are described in
-[development](../docs/development.md).
+To run an ignored case, first verify its current Host fixture and prerequisites, then use
+`cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib FILTER --locked -- --ignored`.
+A missing retired fixture is an unverified boundary, not permission to restore an obsolete runtime
+or claim coverage from the default Cargo pass.
+
+Choose focused cases for the changed owner. Native components, controlled providers, Host IPC,
+real OS processes, installed products and physical remote machines establish different facts.
+A pass in one category is not evidence that the others ran. See [development](../docs/development.md)
+for commands and CI selection.

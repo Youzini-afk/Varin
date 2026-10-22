@@ -36,6 +36,23 @@ bun run dev
 模拟 provider 只能证明请求接线；UI 测试、Host fixture、真实 Rust、安装包与物理多机分别证明不同层次。
 通过、失败、跳过、未执行和环境阻塞应分别说明。真实环境场景见[运行时验收](runtime-acceptance.md)。
 
+### 测试职责
+
+先沿真实调用链确定契约，再选择一层证明；不要把同一断言复制到每个消费者。
+
+| 契约 / 真实 owner | 主要证据与入口 | 不应由这一层代证 |
+| --- | --- | --- |
+| Thread 执行、Storage 耐久记录与权限 / Rust | `test:rust` 的状态机、真实存储、恢复及撤权测试 | TS 内存端口不证明 Rust 的落盘、GC 或恢复算法 |
+| Host 受理、编排与 DTO / Application Host | `test:packages` 的路由与协调行为；端口替身只提供所需结果 | 重新实现已转交 Rust 的 writer 或状态机 |
+| IPC、真实进程与 Host/native 接线 | `test:kernel`：Node transport + `*.native.test.ts`，Linux/Windows 各自验证 | portable mock 不证明实际停止、文件租约或跨进程持久化 |
+| 客户端协议、授权与观察 / application-client | 包内真实请求/事件消费者测试；UI 只补用户操作与投影 | 测试自己构造的 DTO 或复制类型枚举 |
+| 外壳、文档与渲染 / UI、extension-surface、Electron | 相应包的行为测试；平台专用生命周期走对应 desktop 入口 | CSS/源码字符串、退役渲染路径不能充当产品契约 |
+| 已构建/安装产物 / 发布与平台 owner | `test:packages:dist`、Node smoke、cloud 原子部署及目标安装包 smoke | 源码测试不能替代真实导出、布局、启动与回滚 |
+
+共享 fixture 只负责准备输入、故障注入和资源回收。若测试结果完全由 fixture 自己算出，改为观察真实 owner，
+或在已有 owner 回归足够时删除该重复证明；仍需保留 Host 对冲突、未知效果、权限及取消的独立处理。
+CI 的 cloud 部署 smoke 直接消费本轮生成并校验锁文件/布局的 archive，不另造一份无人消费的 staging 输出。
+
 ## 命令入口
 
 最近的 package.json 是命令权威。以下是入口，不是每次改动必须全跑的清单。
@@ -83,6 +100,11 @@ schema 匹配的 executable 和 manifest。手工改生成文件、运行旧 bin
 `*.native.test.ts` 由专用 kernel 入口运行，portable Web suite 不运行它们。`test:kernel` 消费已核验的 release binary；
 需要重建时显式传 `--build`。`test:rust` 本身不构建这份 release binary；涉及 Host/guardian 的测试还需要 Node/tsx、
 相应 Host/builtin 输出和指向匹配 executable 的 `VARIN_TEST_KERNEL_EXECUTABLE`。
+
+`test:rust` 使用 Cargo 默认选择，不执行标记 `#[ignore]` 的场景；`test:kernel` 只运行 Node transport 和
+Vitest native suites，不会补跑这些 Rust 场景。需要某项 ignored 回归时，先核对其当前 owner、fixture 与前置产物，
+再用上述 Cargo 定向命令追加 `-- --ignored`。旧 fixture 指向已删除入口时属于未验证缺口，不应恢复退役 runtime
+来让测试通过，也不能把默认 suite 成功当成该场景已验证。
 
 `test:dist` 消费已构建产物，应先构建所属包。完整打包、签名、实际桌面/移动端操作和真实 provider 账号验证各有入口，
 不从 helper 或源码测试推导已通过发行验收。

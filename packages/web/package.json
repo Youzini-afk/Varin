@@ -120,7 +120,6 @@
   },
   "devDependencies": {
     "@huggingface/transformers": "4.3.1",
-    "@types/better-sqlite3": "^9.6.0",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.0",
     "@types/luxon": "^3.7.6",
@@ -139,7 +138,6 @@
     "@varin/extension-sdk": "workspace:*",
     "@varin/ui": "workspace:*",
     "@vitejs/plugin-react": "^6.1.2",
-    "better-sqlite3": "^13.0.3",
     "eslint": "^10.13.0",
     "nodemon": "^3.1.7",
     "react": "^19.3.1",

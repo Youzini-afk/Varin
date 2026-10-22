@@ -14,7 +14,7 @@
 | Computer Use / VM | 各平台真实观察与输入、控制交还、Linux 应用桥、KVM/libvirt、安装和升级；实现缺口见[资源](resources.md#computer-use-与平台边界) |
 | 模型与认证 | 实际 provider/云账号、OAuth、代理/DNS/TLS、取消和未知 usage；模拟请求不证明资格、计费或模型质量 |
 | 本地 embedding | 已安装 Bekko/ONNX 组件、实际硬件、真实权重和检索质量，不从受控 worker 结果外推 |
-| 性能 | 同源码/构建下冷、热、并发和更新场景；编译复用与 provider 缓存、价格、延迟分别测量 |
+| 性能 | 同源码/构建下冷、热、并发和更新场景；受影响文件恢复不递归扫描项目需直接观察真实 owner 的文件访问，不能由内存替身代证；编译复用与 provider 缓存、价格、延迟分别测量 |
 
 Managed 文件恢复与 Source Host 项目排程已有实现，物理双机仍需独立验证。固定来源执行 cwd、
 多来源组合等当前边界见[运行时](runtime.md)与[资源](resources.md)。压缩 DAG 已按依赖并发调度，

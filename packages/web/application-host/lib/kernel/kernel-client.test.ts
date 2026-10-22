@@ -1172,14 +1172,14 @@ test("a current-format catalog with missing authority tables is rejected without
   clients.push(host);
   await host.start();
   await host.close();
-  const { default: Database } = await import("better-sqlite3");
-  const catalog = new Database(path.join(root, "catalog.sqlite"));
+  const { DatabaseSync } = await import("node:sqlite");
+  const catalog = new DatabaseSync(path.join(root, "catalog.sqlite"));
   catalog.exec("DROP TABLE object_owners");
   catalog.close();
   const broken = createKernelClient({ hostId: "schema-host", storageRoot: root, buildVersion, kernelPath, allowCargoDevRunner: false });
   clients.push(broken);
   await assert.rejects(broken.start(), /catalog table set is corrupt|schema fingerprint/i);
-  const verify = new Database(path.join(root, "catalog.sqlite"), { readonly: true });
+  const verify = new DatabaseSync(path.join(root, "catalog.sqlite"), { readOnly: true });
   const exists = verify.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'object_owners'").get();
   verify.close();
   assert.equal(exists, undefined);
