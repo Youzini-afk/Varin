@@ -10,6 +10,8 @@ import { toolRecord, toolText } from './toolInvocation';
 import { toolValueLabel } from './toolLabels';
 import { useToolAction } from './useToolAction';
 import type { ToolViewProps } from './toolViewTypes';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject } from './toolSubject';
 
 function Condition({ source, observed }: { source: Record<string, unknown>; observed: boolean }) {
   const { t } = useI18n();
@@ -62,7 +64,7 @@ export function ChatFollowupTool({ call, execution, result, status, generating, 
   const { t } = useI18n();
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
   const entries = Array.isArray(data.followups) ? data.followups.map(item => ({ followup: item })) : typeof data.id === 'string' && data.trigger ? [{ followup: data }] : [data];
-  return <section className="tool-followup-activity"><div className="tool-source-heading"><Icon name="time" className="size-3.5" /><span className="flex-1 typography-meta">{t('chat.tools.followup')}</span><ToolStatus status={status} generating={generating} /></div>
+  return <section className="tool-followup-activity"><div className="tool-source-heading"><Icon name="time" className="size-3.5" /><ToolHeadingText label={t('chat.tools.followup')} subject={toolSubject(call, data, t)} /><ToolStatus status={status} generating={generating} /></div>
     {entries.map((entry, index) => <FollowupRecord key={toolText(toolRecord(entry.followup).id) || index} id={toolText(toolRecord(entry.followup).id) || toolText(data.followupId) || toolText(args.followupId)} data={entry} args={args} />)}
     <ToolResultNotice data={data} status={status} />{output}{details}</section>;
 }

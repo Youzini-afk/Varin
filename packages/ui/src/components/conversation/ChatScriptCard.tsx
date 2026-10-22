@@ -8,6 +8,9 @@ import type { ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from
 import { ToolDisclosure } from './ToolDisclosure';
 import { useToolDisclosureChoices } from './toolDisclosureContext';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
+import { presentInvocation, toolRecord } from './toolInvocation';
+import { toolSubject } from './toolSubject';
+import { useToolTargets } from './toolTargetContext';
 import { orderScriptCalls, scriptArguments, scriptCallStatus, scriptDescendants, scriptOperationId, scriptTitleKey, scriptToolLabels } from './scriptPresentation';
 
 function StatusIcon({ status }: { status: ChatToolExecutionState['status'] }) {
@@ -84,6 +87,7 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
 
 function ScriptCallRow({ call, live, renderCall }: { call: OperationCallSummary; live?: ChatToolExecutionState; renderCall(operation: Operation): React.ReactNode }) {
   const { t } = useI18n();
+  const targets = useToolTargets();
   const api = useOptionalConversationPresentation()?.api;
   const choices = useToolDisclosureChoices();
   const [open, setOpen] = React.useState(() => choices?.get('script-call:' + call.operationId) ?? false);
@@ -93,7 +97,9 @@ function ScriptCallRow({ call, live, renderCall }: { call: OperationCallSummary;
   const status = live?.status ?? scriptCallStatus(call);
   const label = scriptToolLabels[call.name];
   const savedCall = operation?.intent as { call?: { arguments?: unknown } } | undefined;
-  const summary = getToolSummary({ toolName: call.name, arguments: live?.args ?? savedCall?.call?.arguments }).text;
+  const original = presentInvocation({ name: call.name, arguments: live?.args ?? savedCall?.call?.arguments ?? {} });
+  const summary = toolSubject({ name: original.name, arguments: original.arguments as ChatToolCall['arguments'] }, toolRecord(live?.result), t, targets)
+    || getToolSummary({ toolName: original.name, arguments: original.arguments }).text;
   React.useEffect(() => {
     if (!open || !api) return;
     let active = true; setError(false);

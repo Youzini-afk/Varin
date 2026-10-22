@@ -158,6 +158,20 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
 .tool-remote-task { display: grid; gap: 5px; padding-block: 5px; }
 .tool-process { margin-block: 14px; }
 .tool-command-heading { display: flex; gap: 8px; align-items: center; list-style: none; cursor: pointer; padding-block: 7px; }
+.tool-heading-copy { display: flex; flex: 1; min-width: 0; align-items: baseline; column-gap: 9px; row-gap: 2px; }
+.tool-heading-label { flex-shrink: 0; max-width: 48%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--muted-foreground); }
+.tool-heading-copy:not(:has(.tool-heading-subject)) .tool-heading-label { max-width: 100%; }
+.tool-heading-subject { min-width: 0; flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--foreground); opacity: .85; }
+.tool-heading-receipt { min-width: 0; max-width: 45%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tool-process, .tool-work-record, .tool-file-activity, .tool-language-activity, .tool-recovery-activity,
+.tool-computer-event, .tool-office-activity, .tool-material-collection, .tool-forward-activity,
+.tool-contract-inspection, .tool-package-handoff, .tool-mcp-result, .tool-followup-activity { container-type: inline-size; }
+@container (max-width: 540px) {
+  .tool-heading-copy { flex-wrap: wrap; }
+  .tool-heading-label { max-width: 100%; }
+  .tool-heading-subject { flex-basis: 100%; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .tool-heading-receipt { max-width: 100%; margin-left: 0; white-space: normal; }
+}
 .tool-process-console { border-left: 2px solid var(--border); padding: 4px 0 8px 15px; margin-left: 5px; display: grid; gap: 7px; }
 .tool-command-line, .tool-process-output { font-family: var(--font-mono, monospace); font-size: var(--text-code); line-height: 1.85; white-space: pre-wrap; overflow-wrap: anywhere; }
 .tool-command-line { color: var(--foreground); }
@@ -196,6 +210,8 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
   .tool-member-line > span:first-of-type { flex: 1; min-width: 0; }
   .tool-resource-summary, .tool-work-heading, .tool-command-heading { flex-wrap: wrap; }
   .tool-resource-summary > span:first-of-type, .tool-command-heading > span:first-of-type { flex-basis: 55%; }
+  .tool-resource-summary:has(.tool-heading-copy), .tool-work-heading:has(.tool-heading-copy), .tool-command-heading:has(.tool-heading-copy) { flex-wrap: nowrap; align-items: flex-start; }
+  .tool-resource-summary > .tool-heading-copy, .tool-command-heading > .tool-heading-copy { flex-basis: auto; }
   .tool-member-detail, .tool-file-results, .tool-language-results, .tool-work-content { padding-left: 12px; }
 }
 @container tool-members (max-width: 460px) {

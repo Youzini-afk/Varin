@@ -12,19 +12,24 @@ import { invocationOperationId, toolRecord, toolText } from './toolInvocation';
 import { ToolResultNotice } from './ChatResourceTools';
 import type { ToolViewProps } from './toolViewTypes';
 import { toolValueLabel } from './toolLabels';
+import { ToolHeadingText } from './ToolHeadingText';
+import { processCommand, useToolTargets } from './toolTargetContext';
+import { subjectJoin, toolSubject } from './toolSubject';
 
 export function ChatProcessTool({ call, execution, result, status, generating, output, details }: ToolViewProps) {
   const { t } = useI18n(), conversation = useOptionalConversationPresentation();
   const expanded = useUIStore(state => state.showExpandedBashTools);
+  const targets = useToolTargets();
   const args = toolRecord(call.arguments), operation = execution?.operation;
   const data = toolRecord(result?.details ?? execution?.result);
   const finalData = toolRecord(operation?.external_receipt?.result.data);
-  const snapshot = toolRecord(data.process ?? data.snapshot ?? finalData.process ?? finalData.snapshot ?? finalData);
+  const snapshot = toolRecord(data.process ?? data.snapshot ?? finalData.process ?? finalData.snapshot
+    ?? (typeof data.status === 'string' ? data : finalData));
   const chunks = Array.isArray(data.chunks) ? data.chunks.map(toolRecord) : [];
   const text = chunks.length ? chunks.map(chunk => toolText(chunk.text)).join('')
     : operation?.external_receipt?.result.parts.flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n') ?? '';
-  const command = [toolText(args.command), ...(Array.isArray(args.args) ? args.args.filter(value => typeof value === 'string') : [])].filter(Boolean).join(' ');
   const processId = toolText(args.processId) || toolText(data.processId) || toolText(snapshot.processId);
+  const command = processCommand(args) || targets?.processes.get(processId) || '';
   const operationId = invocationOperationId(call, execution);
   const spawning = call.name === 'process_spawn';
   const waiting = call.name === 'wait_process';
@@ -57,13 +62,19 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
     } catch (failure) { if (host === getRuntimeEndpointGeneration()) setError(String(failure)); }
     finally { setOpening(false); }
   };
-  const label = spawning ? command : t(waiting ? 'chat.tools.waitProcess' : call.name === 'process_stop' ? 'chat.tools.stopProcess'
+  const label = t(spawning ? 'chat.toolSummary.runProcess' : waiting ? 'chat.tools.waitProcess' : call.name === 'process_stop' ? 'chat.tools.stopProcess'
     : call.name === 'process_read' ? 'chat.tools.processOutput' : call.name === 'process_write' ? 'chat.tools.processInput'
       : call.name === 'process_resize' ? 'chat.tools.resizeTerminal' : 'chat.tools.inspectProcess');
+  const subject = toolSubject(call, { ...data, process: snapshot }, t, targets);
+  const receipt = subjectJoin(typeof data.confirmedBytes === 'number' ? t('chat.toolSummary.inputBytes', { count: data.confirmedBytes }) : '',
+    typeof snapshot.exitCode === 'number' ? t('chat.tools.exitCode', { code: snapshot.exitCode }) : toolValueLabel(snapshot.status, t),
+    call.name === 'process_read' && Array.isArray(data.chunks) && (text || data.chunks.length === 0)
+      ? t('chat.toolSummary.outputLines', { count: text ? text.replace(/\r?\n$/, '').split(/\r?\n/).length : 0 }) : '',
+    data.stopConfirmed === false ? t('chat.tools.cancelAwaitingStop') : '');
   return <ToolDisclosure id={'tool:' + call.id} className="tool-process group" initiallyExpanded={expanded || status === 'error'}>
     <summary className="tool-command-heading"><Icon name="terminal" className="size-3.5 shrink-0" />
-      <span className="min-w-0 flex-1 truncate typography-meta" title={command || processId}>{label}</span>
-      <ToolStatus status={status} generating={generating} stopped={Boolean(live && (stopping || operation?.cancel_requested))} />
+      <ToolHeadingText label={label} subject={subject} receipt={receipt} />
+      <span className={status === 'success' && receipt ? 'sr-only' : undefined}><ToolStatus status={status} generating={generating} stopped={Boolean(live && (stopping || operation?.cancel_requested))} /></span>
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
     <div className="tool-process-console">
       {spawning && command && <pre className="tool-command-line">{'› ' + command}</pre>}

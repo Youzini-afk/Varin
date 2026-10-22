@@ -9,6 +9,8 @@ import { toolRecord, toolText } from './toolInvocation';
 import type { ToolViewProps } from './toolViewTypes';
 import { toast } from '@/components/ui';
 import { toolValueLabel } from './toolLabels';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject, subjectJoin } from './toolSubject';
 
 const values = (value: unknown) => Array.isArray(value) ? value : [];
 const position = (value: unknown, zeroBased = false): number | undefined =>
@@ -56,9 +58,9 @@ export function ChatFileTools({ call, execution, result, status, generating, out
   return <ToolDisclosure id={'tool:' + call.id} className="tool-file-activity group">
     <summary className="tool-resource-summary">
       {reading ? <FileTypeIcon filePath={path} className="size-3.5 shrink-0" /> : <Icon name={searching ? 'search' : 'folder-open'} className="size-3.5 shrink-0" />}
-      <span className="min-w-0 flex-1 truncate typography-meta" title={reading ? path : roots}>
-        {reading ? path || t('chat.tools.readFile') : searching ? t('chat.tools.searchFor', { query: toolText(args.query) }) : t('chat.tools.listDirectory', { path: roots || '.' })}
-      </span>
+      <ToolHeadingText label={t(reading ? 'chat.tools.readFile' : searching ? 'chat.toolAction.search' : 'chat.toolAction.list')}
+        subject={reading ? path : searching ? subjectJoin(args.query, roots) : roots || '.'}
+        receipt={reading && typeof args.startLine === 'number' ? `L${args.startLine}${typeof args.endLine === 'number' ? '–' + args.endLine : ''}` : undefined} />
       {!reading && Array.isArray(data.records) && <span className="shrink-0 typography-micro">{t(searching ? 'chat.tools.matches' : 'chat.tools.entries', { count: rows.length })}</span>}
       {reading && typeof args.offset === 'number' && <span className="typography-micro text-muted-foreground">{t('chat.tools.readingRange', { offset: args.offset })}</span>}
       <span className={status === 'success' ? 'sr-only' : undefined}><ToolStatus status={status} generating={generating} /></span>
@@ -99,7 +101,7 @@ export function ChatLanguageTools({ call, execution, result, status, generating,
       : call.name === 'language_call_hierarchy' ? t('chat.tools.callHierarchy') : t('chat.tools.symbols');
   return <ToolDisclosure id={'tool:' + call.id} className="tool-language-activity group" initiallyExpanded={diagnostic && items.length > 0}>
     <summary className="tool-resource-summary"><Icon name={diagnostic ? 'error-warning' : 'code-sslash'} className="size-3.5" />
-      <span className="min-w-0 flex-1 truncate typography-meta">{label} · {toolText(args.query) || path}</span>
+      <ToolHeadingText label={label} subject={subjectJoin(args.query, path && `${path}${typeof args.line === 'number' ? ':' + (args.line + 1) : ''}`)} />
       {Array.isArray(data.items) && <span className="typography-micro shrink-0">{t('chat.tools.entries', { count: items.length })}</span>}
       {(status !== 'success' || data.status !== 'ready') && <span className="typography-micro text-muted-foreground">{status !== 'success' ? <ToolStatus status={status} generating={generating} /> : toolValueLabel(data.status, t)}</span>}
       <Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
@@ -138,7 +140,7 @@ export function ChatRecoveryTools({ call, execution, result, status, generating,
   const applied = values(data.appliedPaths), conflicts = values(data.conflictPaths);
   return <ToolDisclosure id={'tool:' + call.id} className="tool-recovery-activity group" initiallyExpanded={restoring && status !== 'running'}>
     <summary className="tool-resource-summary"><Icon name="history" className="size-3.5" />
-      <span className="min-w-0 flex-1 typography-meta">{t(restoring ? 'chat.tools.restoreFiles' : 'chat.tools.recoveryPoints')}</span>
+      <ToolHeadingText label={t(restoring ? 'chat.tools.restoreFiles' : 'chat.tools.recoveryPoints')} subject={toolSubject(call, data, t)} />
       {restoring && typeof data.status === 'string' && <span className={'typography-micro ' + (data.status === 'partial' || data.status === 'failed' ? 'text-destructive' : 'text-muted-foreground')}>{toolValueLabel(data.status, t)}</span>}
       <ToolStatus status={status} generating={generating} /><Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
     <div className="tool-recovery-timeline">

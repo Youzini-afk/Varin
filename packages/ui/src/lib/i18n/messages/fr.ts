@@ -1,7 +1,9 @@
 import { settingsDict } from './fr.settings';
+import { toolHeadingMessages } from './tool-headings';
 import { toolPurposeFr } from './tool-purpose-locales';
 
 export const dict = {
+  ...toolHeadingMessages('fr'),
   ...toolPurposeFr,
   "thread.settings.utilityModel": "Modèle auxiliaire",
   "thread.settings.confirmDelete": "Confirmer la suppression des conversations",

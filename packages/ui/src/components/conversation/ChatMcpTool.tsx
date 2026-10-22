@@ -13,6 +13,8 @@ import { useToolOperation } from './useToolOperation';
 import { invocationOperationId, toolRecord, toolText } from './toolInvocation';
 import { toolValueLabel } from './toolLabels';
 import type { ToolViewProps } from './toolViewTypes';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject } from './toolSubject';
 
 const operations: Record<string, I18nKey> = {
   mcp_discover: 'chat.tools.discoverService', mcp_list_resources: 'chat.tools.serviceResources', mcp_read_resource: 'chat.tools.readResource',
@@ -50,7 +52,7 @@ export function ChatMcpTool({ call, execution, result, status, generating, outpu
   const retained = operation?.host_job?.mcpTaskResult;
   const showControl = Boolean(subscription || hasTask || call.name === 'mcp_start_task' || call.name === 'mcp_subscribe_resource');
   return <section className="tool-mcp-result">
-    <div className="tool-service-byline"><Icon name="plug" className="size-3.5" /><span>{server}</span><span>·</span><span>{name}</span>{status !== 'success' && <ToolStatus status={status} generating={generating} />}</div>
+    <div className="tool-service-byline"><Icon name="plug" className="size-3.5 shrink-0" /><ToolHeadingText label={server + ' · ' + name} subject={toolSubject(call, data, t)} />{status !== 'success' && <ToolStatus status={status} generating={generating} />}</div>
     {call.name === 'mcp_discover' && data.servers !== undefined && <ToolDisclosure id={'mcp-servers:' + call.id} className="tool-document-text" initiallyExpanded><summary className="typography-meta">{t('chat.tools.discoverService')}</summary><JsonSummaryView data={data.servers} /></ToolDisclosure>}
     {call.name === 'mcp_discover' && Array.isArray(data.services) && data.services.length > 0 && <ToolDisclosure id={'mcp-services:' + call.id} className="tool-document-text"><summary className="typography-meta">{t('chat.tools.serviceResources')}</summary><JsonSummaryView data={data.services} /></ToolDisclosure>}
     {hasTask && <div className="tool-remote-task"><div className="flex flex-wrap items-center gap-2 typography-meta"><Icon name={stopped || ['completed','failed','cancelled'].includes(String(task.status)) ? task.status === 'completed' ? 'check' : 'stop' : cancelling ? 'time' : 'loader-4'} className={task.status === 'working' && !cancelling ? 'size-3.5 animate-spin motion-reduce:animate-none' : 'size-3.5'} />

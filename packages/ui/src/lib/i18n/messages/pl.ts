@@ -1,9 +1,11 @@
 import { dict as enDict, type I18nKey } from './en';
+import { toolHeadingMessages } from './tool-headings';
 import { settingsDict } from './pl.settings';
 import { toolPurposePl } from './tool-purpose-locales';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...toolHeadingMessages('pl'),
   ...toolPurposePl,
   ...settingsDict,
   "chat.toolResult.fileContents": "Zawartość pliku: {path}",

@@ -1,0 +1,50 @@
+const rows = [
+  ["chat.toolAction.read","Read","读取","讀取","Lire","Leer","読み取り","읽기","Odczyt","Ler","Читати"],
+  ["chat.toolAction.search","Search","搜索","搜尋","Rechercher","Buscar","検索","검색","Szukaj","Pesquisar","Шукати"],
+  ["chat.toolAction.update","Update","更新","更新","Mettre à jour","Actualizar","更新","업데이트","Aktualizuj","Atualizar","Оновити"],
+  ["chat.toolAction.list","List","列出","列出","Lister","Listar","一覧","목록","Lista","Listar","Перелік"],
+  ["chat.toolAction.create","Create","创建","建立","Créer","Crear","作成","만들기","Utwórz","Criar","Створити"],
+  ["chat.toolAction.add","Add","添加","加入","Ajouter","Añadir","追加","추가","Dodaj","Adicionar","Додати"],
+  ["chat.toolAction.remove","Remove","移除","移除","Retirer","Eliminar","削除","제거","Usuń","Remover","Вилучити"],
+  ["chat.toolAction.share","Share","共享","共用","Partager","Compartir","共有","공유","Udostępnij","Compartilhar","Поділитися"],
+  ["chat.toolAction.inspect","Inspect","查看","查看","Examiner","Inspeccionar","確認","확인","Sprawdź","Inspecionar","Перевірити"],
+  ["chat.toolAction.save","Save","保存","儲存","Enregistrer","Guardar","保存","저장","Zapisz","Salvar","Зберегти"],
+  ["chat.toolAction.export","Export","导出","匯出","Exporter","Exportar","エクスポート","내보내기","Eksportuj","Exportar","Експортувати"],
+  ["chat.toolAction.open","Open","打开","開啟","Ouvrir","Abrir","開く","열기","Otwórz","Abrir","Відкрити"],
+  ["chat.toolAction.launch","Launch","启动","啟動","Lancer","Iniciar","起動","실행","Uruchom","Iniciar","Запустити"],
+  ["chat.toolAction.click","Click","点击","點擊","Cliquer","Hacer clic","クリック","클릭","Kliknij","Clicar","Натиснути"],
+  ["chat.toolAction.type","Type","输入","輸入","Saisir","Escribir","入力","입력","Wpisz","Digitar","Ввести"],
+  ["chat.toolAction.key","Press key","按键","按鍵","Touche","Pulsar tecla","キー入力","키 누르기","Naciśnij klawisz","Pressionar tecla","Клавіша"],
+  ["chat.toolAction.scroll","Scroll","滚动","捲動","Défiler","Desplazar","スクロール","스크롤","Przewiń","Rolar","Прокрутити"],
+  ["chat.toolAction.drag","Drag","拖动","拖曳","Glisser","Arrastrar","ドラッグ","드래그","Przeciągnij","Arrastar","Перетягнути"],
+  ["chat.toolAction.write","Write","写入","寫入","Écrire","Escribir","書き込み","쓰기","Zapisz dane","Gravar","Записати"],
+  ["chat.toolAction.insert","Insert","插入","插入","Insérer","Insertar","挿入","삽입","Wstaw","Inserir","Вставити"],
+  ["chat.toolAction.navigate","Navigate","前往","前往","Accéder","Navegar","移動","이동","Przejdź","Navegar","Перейти"],
+  ["chat.toolAction.evaluate","Evaluate script","执行脚本","執行腳本","Exécuter le script","Ejecutar script","スクリプト実行","스크립트 실행","Wykonaj skrypt","Executar script","Виконати скрипт"],
+  ["chat.toolAction.screenshot","Screenshot","截图","截圖","Capture","Captura","スクリーンショット","스크린샷","Zrzut ekranu","Captura","Знімок екрана"],
+  ["chat.toolAction.pause","Pause","暂停","暫停","Suspendre","Pausar","一時停止","일시 중지","Wstrzymaj","Pausar","Призупинити"],
+  ["chat.toolAction.resume","Resume","恢复","恢復","Reprendre","Reanudar","再開","재개","Wznów","Retomar","Відновити"],
+  ["chat.toolAction.cancel","Cancel","取消","取消","Annuler","Cancelar","キャンセル","취소","Anuluj","Cancelar","Скасувати"],
+  ["chat.toolAction.stage","Stage package","准备候选包","準備候選套件","Préparer le paquet","Preparar paquete","候補パッケージ準備","후보 패키지 준비","Przygotuj pakiet","Preparar pacote","Підготувати пакет"],
+  ["chat.toolAction.apply","Apply","应用","套用","Appliquer","Aplicar","適用","적용","Zastosuj","Aplicar","Застосувати"],
+  ["chat.toolAction.start","Start","启动","啟動","Démarrer","Iniciar","開始","시작","Rozpocznij","Iniciar","Почати"],
+  ["chat.toolAction.stop","Stop","停止","停止","Arrêter","Detener","停止","중지","Zatrzymaj","Parar","Зупинити"],
+  ["chat.toolAction.request","Request","请求","請求","Demander","Solicitar","要求","요청","Poproś","Solicitar","Запросити"],
+  ["chat.toolAction.deny","Deny","拒绝","拒絕","Refuser","Denegar","拒否","거부","Odmów","Negar","Відхилити"],
+  ["chat.toolAction.control","Control","取得控制","取得控制","Prendre le contrôle","Tomar control","制御を取得","제어 획득","Przejmij kontrolę","Assumir controle","Отримати керування"],
+  ["chat.toolAction.release","Release","释放","釋放","Libérer","Liberar","解放","해제","Zwolnij","Liberar","Звільнити"],
+  ["chat.toolAction.prepare","Prepare","准备","準備","Préparer","Preparar","準備","준비","Przygotuj","Preparar","Підготувати"],
+  ["chat.toolAction.install","Install","安装","安裝","Installer","Instalar","インストール","설치","Zainstaluj","Instalar","Встановити"],
+  ["chat.toolAction.register","Register","登记","登記","Enregistrer","Registrar","登録","등록","Zarejestruj","Registrar","Зареєструвати"],
+  ["chat.toolSummary.runProcess","Run process","运行进程","執行程序","Exécuter le processus","Ejecutar proceso","プロセス実行","프로세스 실행","Uruchom proces","Executar processo","Запустити процес"],
+  ["chat.toolSummary.inputBytes","{count} B confirmed","已确认 {count} B","已確認 {count} B","{count} octets confirmés","{count} B confirmados","{count} B 確認済み","{count} B 확인됨","Potwierdzono {count} B","{count} B confirmados","Підтверджено {count} Б"],
+  ["chat.toolSummary.outputLines","{count} output lines","{count} 行输出","{count} 行輸出","{count} lignes de sortie","{count} líneas de salida","出力 {count} 行","출력 {count}줄","{count} wierszy wyjścia","{count} linhas de saída","{count} рядків виводу"],
+  ["chat.toolSummary.restoredFiles","{count} files restored","已恢复 {count} 个文件","已恢復 {count} 個檔案","{count} fichiers restaurés","{count} archivos restaurados","{count} ファイルを復元","파일 {count}개 복원됨","Przywrócono {count} plików","{count} arquivos restaurados","Відновлено {count} файлів"],
+] as const;
+type HeadingKey = typeof rows[number][0];
+const locales = ["en","zh-CN","zh-TW","fr","es","ja","ko","pl","pt-BR","uk"] as const;
+export function toolHeadingMessages(locale: typeof locales[number]): Record<HeadingKey, string> {
+  const column = locales.indexOf(locale) + 1;
+  return Object.fromEntries(rows.map(row => [row[0], row[column]])) as Record<HeadingKey, string>;
+}
+

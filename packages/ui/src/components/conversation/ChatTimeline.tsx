@@ -40,6 +40,7 @@ import {
 import { ChatTimelineBlockView } from './ChatTimelineBlockView';
 import { projectChatTimelineBlocks, type ChatTimelineBlock, type ChatTimelineBlocks, type ChatTimelineBlockAliases } from './chatTimelineBlocks';
 import { timelinePresentationCache } from './timelinePresentationCache';
+import { ToolTargetScope } from './ToolTargetScope';
 import { ChatContextMenu } from './ChatContextMenu';
 import { ChatTurnNavigator, type ChatTurnNavigatorHandle } from './ChatTurnNavigator';
 import { readChatRunNavigationText } from './chatMessageNavigation';
@@ -613,6 +614,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [props.sessionId, takeManualOwnership, handleReturnToLatest, t]);
 
   return (
+    <ToolTargetScope entries={props.entries} executions={props.toolExecutions}>
     <ChatToolDisclosureScope key={props.sessionId} sessionId={props.sessionId}><ChatContextMenu {...props} projection={projection}
       onRevealEntry={async (entryId) => {
         const source = props.entries.find((entry) => entry.id === entryId);
@@ -754,6 +756,6 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         </button>
       ) : null}
     </div>
-    </ChatContextMenu></ChatToolDisclosureScope>
+    </ChatContextMenu></ChatToolDisclosureScope></ToolTargetScope>
   );
 };

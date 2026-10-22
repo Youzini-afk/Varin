@@ -13,6 +13,8 @@ import { toolValueLabel } from './toolLabels';
 import { useToolAction } from './useToolAction';
 import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView';
 import type { ToolViewProps } from './toolViewTypes';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject } from './toolSubject';
 
 const list = (value: unknown) => Array.isArray(value) ? value.map(toolRecord) : [];
 const cellText = (value: unknown) => value === null || value === undefined ? '' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -37,7 +39,7 @@ export function ChatComputerTool({ call, execution, result, status, generating, 
   const { t } = useI18n(), conversation = useOptionalConversationPresentation();
   const action = useToolAction(call.id);
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result), response = toolRecord(data.result);
-  const observation = toolRecord(data.observation ?? response.observation), app = toolRecord(observation.app), control = toolRecord(data.control);
+  const observation = toolRecord(data.observation ?? response.observation), control = toolRecord(data.control);
   const act = toolRecord(args.act ?? args.action), doc = toolRecord(response.doc), changes = toolRecord(response.changes), artifact = toolRecord(data.artifact);
   const desktop = toolRecord(data.desktop), request = toolRecord(data.request), version = toolRecord(data.version);
   const office = call.name.startsWith('computer_office'), browser = call.name.startsWith('computer_browser');
@@ -50,8 +52,8 @@ export function ChatComputerTool({ call, execution, result, status, generating, 
   const registeredArtifact = ['id','desktopId','sourceHostId','scopeId','threadId','relativePath','sha256','modifiedAt','registeredAt'].every(key => typeof artifact[key] === 'string') && typeof artifact.byteLength === 'number';
   const openDesktop = (id: string) => useUIStore.getState().openContextPanelTab(cwd, { mode: 'computer', targetPath: id, dedupeKey: `desktop:${id}`, ...(conversation ? { thread: conversation.identity } : {}) });
   return <section className={office ? 'tool-office-activity' : 'tool-computer-event'}>
-    <div className="tool-artifact-heading"><Icon name={office ? 'table-2' : browser ? 'global' : 'computer'} className="size-3.5 shrink-0" /><span className="min-w-0 flex-1 typography-meta">{toolText(doc.title) || toolText(app.name) || t(label)}</span><ToolStatus status={status} generating={generating} /></div>
-    {office && <div className="tool-office-heading typography-micro text-muted-foreground"><span>{[toolText(changes.sheet) || toolText(response.sheet) || toolText(act.sheet), toolText(changes.range) || toolText(response.range) || toolText(act.range), desktopId].filter(Boolean).join(' · ')}</span>
+    <div className="tool-artifact-heading"><Icon name={office ? 'table-2' : browser ? 'global' : 'computer'} className="size-3.5 shrink-0" /><ToolHeadingText label={t(label)} subject={toolSubject(call, data, t)} /><ToolStatus status={status} generating={generating} /></div>
+    {office && (desktopId || typeof modified === 'boolean') && <div className="tool-office-heading typography-micro text-muted-foreground"><span>{desktopId}</span>
       {typeof modified === 'boolean' && <span className={modified ? 'text-[var(--status-warning)]' : ''}>{t(modified ? 'chat.tools.unsavedDocument' : 'chat.tools.saved')}</span>}</div>}
     {values.length > 0 && <OfficeGrid values={values.filter(Array.isArray)} before={before} range={toolText(changes.range) || toolText(response.range) || toolText(act.range)} />}
     {office && response.ok === true && act.kind === 'write' && !values.length && <p className="typography-meta">{t('chat.tools.documentWriteReturned')}</p>}

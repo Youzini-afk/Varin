@@ -70,6 +70,14 @@ rolled back. Detailed lifecycle mechanics belong to the extension packages.
 
 ## Conversation and resource projections
 
+Tool headings summarize the requested action and its subject before disclosure, then add returned
+facts where useful (process state, confirmed input, output size, matches or restored paths). Each
+purpose-specific renderer keeps its interaction model; `ToolHeadingText` shares typography only.
+`ToolTargetScope` resolves process commands and child names from loaded native call identities,
+including gateway targets. It does not fetch additional history or retain a cross-thread cache.
+Missing subjects stay unknown, and requested mutations never substitute for completed receipts.
+Narrow viewports wrap subjects instead of hiding them; original arguments remain in details.
+
 The native Catalog owns accepted input, history, queues and execution receipts. `useThreadStore`
 projects navigation and summary clocks; `ThreadProjection` observes the selected branch. Progress
 streams are transient and sequence-scoped. A lost connection rebuilds from durable history rather than

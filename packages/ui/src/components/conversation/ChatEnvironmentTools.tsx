@@ -13,6 +13,8 @@ import { invocationOperationId, toolRecord, toolText } from './toolInvocation';
 import { useToolOperation } from './useToolOperation';
 import { toolValueLabel } from './toolLabels';
 import type { ToolViewProps } from './toolViewTypes';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject } from './toolSubject';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { useToolAction } from './useToolAction';
 import { useVarinExtensionCatalog, selectVarinExtensionCandidate, reviewVarinExtensionCandidateCapabilities } from '@/lib/extensions/catalog-store';
@@ -50,7 +52,7 @@ export function ChatForwardTool({ call, execution, result, status, generating, o
   const data = toolRecord(result?.details ?? execution?.result), args = toolRecord(call.arguments);
   const jobs = Array.isArray(data.jobs) ? records(data.jobs) : data.access ? [data] : [];
   return <section className="tool-forward-activity">
-    <div className="tool-source-heading"><Icon name="share-forward" className="size-3.5" /><span className="flex-1 typography-meta">{t('chat.tools.serviceForward')}</span><ToolStatus status={status} generating={generating} /></div>
+    <div className="tool-source-heading"><Icon name="share-forward" className="size-3.5" /><ToolHeadingText label={t('chat.tools.serviceForward')} subject={toolSubject(call, data, t)} /><ToolStatus status={status} generating={generating} /></div>
     {jobs.map((job, index) => <ForwardConnection key={toolText(job.operationId) || index} data={job}
       operationId={toolText(job.operationId) || toolText(args.operationId) || (call.name === 'environment_forward' ? invocationOperationId(call, execution) : undefined)} projected={execution} />)}
     {Array.isArray(data.jobs) && !jobs.length && <p className="typography-meta text-muted-foreground">{t('chat.tools.noResults')}</p>}
@@ -82,7 +84,7 @@ export function ChatExtensionTool({ call, execution, result, status, generating,
   const contract = call.name === 'runtime_contract', member = toolRecord(data.member), schema = toolRecord(member.contract), page = toolRecord(data.page);
   const entries = Array.isArray(data.entries) ? records(data.entries) : data.service ? [toolRecord(data.service)] : data.slot ? [toolRecord(data.slot)] : [];
   return <section className={contract ? 'tool-contract-inspection' : 'tool-package-handoff'}>
-    <div className="tool-source-heading"><Icon name={contract ? 'code-sslash' : 'box-3'} className="size-3.5" /><span className="flex-1 typography-meta">{contract ? t('chat.tools.runtimeContract') : toolText(data.extensionId) || toolText(args.extensionId) || t('chat.tools.extensionPackage')}</span><ToolStatus status={status} generating={generating} /></div>
+    <div className="tool-source-heading"><Icon name={contract ? 'code-sslash' : 'box-3'} className="size-3.5" /><ToolHeadingText label={t(contract ? 'chat.tools.runtimeContract' : 'chat.tools.extensionPackage')} subject={toolSubject(call, data, t)} /><ToolStatus status={status} generating={generating} /></div>
     {!contract && <><p className="typography-meta" role="status">{data.outcome ? toolValueLabel(data.outcome, t) : toolText(args.packagePath)}</p>
       {data.resumesOnRestart === true && <p className="typography-micro text-muted-foreground">{t('chat.tools.applicationRetained')}</p>}
       {typeof data.artifactIntegrity === 'string' && <ToolDisclosure id={'package-version:' + call.id} className="tool-document-text"><summary className="typography-micro text-muted-foreground">{t('chat.tools.packageVersion')}</summary><code className="tool-identity">{data.artifactIntegrity}</code></ToolDisclosure>}

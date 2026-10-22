@@ -182,7 +182,9 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
     default: {
       // Unknown tools have no declared mutation metadata on the renderer side;
       // keeping them separate is the only honest default.
-      return { text: name, readOnly: false };
+      const subject = asString(args?.title) ?? asString(args?.query) ?? asString(args?.path)
+        ?? asString(args?.url) ?? asString(args?.name);
+      return { text: subject ? `${name} · ${subject}` : name, readOnly: false };
     }
   }
 }

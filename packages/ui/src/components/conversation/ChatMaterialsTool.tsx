@@ -17,6 +17,9 @@ import { SourceLink } from './ChatSourceTools';
 import { toolRecord, toolText } from './toolInvocation';
 import { useToolAction } from './useToolAction';
 import type { ToolViewProps } from './toolViewTypes';
+import { ToolHeadingText } from './ToolHeadingText';
+import { toolSubject } from './toolSubject';
+import { useToolTargets } from './toolTargetContext';
 
 export function MaterialSnapshotReader({ snapshotId, title, line = 1, onClose, reader, onQuote }: { snapshotId: string; title: string; line?: number; onClose(): void; reader?: { api: ThreadMaterialsAPI; identity: ThreadIdentity }; onQuote?(text: string): void }) {
   const { t } = useI18n(), conversation = useOptionalConversationPresentation(), openPdf = React.useContext(MaterialLinkContext);
@@ -81,8 +84,9 @@ function MaterialSharing({ collectionId }: { collectionId: string }) {
 
 export function ChatMaterialsTool({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
   const { t } = useI18n(), conversation = useOptionalConversationPresentation();
+  const targets = useToolTargets();
   const { isMobile } = useDeviceInfo();
-  const data = toolRecord(result?.details ?? execution?.result), args = toolRecord(call.arguments);
+  const data = toolRecord(result?.details ?? execution?.result);
   const action = useToolAction(call.id);
   const [inspected, setInspected] = React.useState<MaterialCollection>();
   const collection = inspected ?? toolRecord(data.collection);
@@ -98,7 +102,7 @@ export function ChatMaterialsTool({ call, execution, result, status, generating,
   };
   const grant = toolRecord(data.grant);
   return <section className="tool-material-collection">
-    <div className="tool-collection-heading"><Icon name="book-2" className="size-3.5" /><strong>{toolText(collection.name) || toolText(args.name) || t('chat.tools.materials')}</strong><ToolStatus status={status} generating={generating} /></div>
+    <div className="tool-collection-heading"><Icon name="book-2" className="size-3.5" /><ToolHeadingText label={t('chat.tools.materials')} subject={toolSubject(call, { ...data, collection }, t, targets)} /><ToolStatus status={status} generating={generating} /></div>
     {members.map((member, index) => { const title = toolText(member.title) || toolText(toolRecord(member.paper).title) || toolText(member.url) || toolText(member.snapshotId); return <div className="tool-material-row" key={toolText(member.memberId) || index}>
       <Icon name={member.kind === 'paper' ? 'file-text' : member.kind === 'url' ? 'global' : 'file-list-2'} className="size-4 text-muted-foreground" />
       <div className="min-w-0 flex-1">{member.snapshotId && conversation ? <button type="button" className="tool-material-title" onClick={() => openMaterial({ id: toolText(member.snapshotId), title })}>{title}<Icon name="arrow-right-up" className="size-3" /></button> : member.url ? <SourceLink url={toolText(member.url)}>{title}</SourceLink> : <strong>{title}</strong>}

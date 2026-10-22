@@ -55,6 +55,7 @@ import { ChatThreadMessageCard } from './ChatThreadMessageCard';
 import { ChatReceivedThreadMessage } from './ChatReceivedThreadMessage';
 import { ChatTurnUsageFooter } from './ChatTurnUsageFooter';
 import { ChatThinkingBlock } from './ChatThinkingBlock';
+import { ToolTargetScope } from './ToolTargetScope';
 import { ChatCollapsibleUserContent } from './ChatCollapsibleUserContent';
 import { ChatTurnChangedFiles } from './ChatTurnChangedFiles';
 import { ChatToolResultPreview } from './ChatToolResultPreview';
@@ -1024,6 +1025,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
   const footerUsage = lastEntry?.type === 'run_usage' ? lastEntry : undefined;
 
   return (
+    <ToolTargetScope entries={entries} executions={toolExecutions}>
     <ChatToolDisclosureScope key={sessionId} sessionId={sessionId}>
     <div className="flex flex-col gap-3">
         {part !== 'footer' && projection.visibleEntries.map((entry) => {
@@ -1299,6 +1301,6 @@ export const ChatTimelineEntryList: React.FC<Omit<
           ) : undefined}
         /></>}
     </div>
-    </ChatToolDisclosureScope>
+    </ChatToolDisclosureScope></ToolTargetScope>
   );
 };
