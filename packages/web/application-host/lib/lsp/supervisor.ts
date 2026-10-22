@@ -846,6 +846,14 @@ export const createLanguageSupervisor = ({
       },
     });
     record.rpc = rpc;
+    // A pipe can report a queued write failure after RPC disposal or process exit.
+    // Keep the listener until the pipe itself closes, not merely until kill/exit.
+    const onInputError = (error: Error): void => {
+      rpc.rejectAll(error);
+      if (record.child === child && record.rpc === rpc) setFailed(record, error.message);
+    };
+    child.stdin.on('error', onInputError);
+    child.stdin.once('close', () => child.stdin.off('error', onInputError));
     rpc.onNotification((method, params) => {
       if (sessions.get(key) !== record || record.rpc !== rpc) return;
       if (method === '$/progress') {

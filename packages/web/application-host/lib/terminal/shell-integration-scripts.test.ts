@@ -130,11 +130,21 @@ describe("shell integration launch", () => {
     const bash = bashPath!;
     const launch = shellIntegrationLaunch(bash, [], false, "term-bash:live");
     const script = String(launch?.args[1]).replace(/\\/g, "/").replace(/^([A-Za-z]):/, (_, drive: string) => `/${drive.toLowerCase()}`);
+    // Exercise the integration itself, not runner/user login profiles or BASH_ENV.
+    // Keep login_shell so the init file does not source the user's bashrc either.
+    const env = { ...process.env, ...launch?.env };
+    delete env.BASH_ENV;
+    delete env.ENV;
+    delete env.VARIN_SHELL_INTEGRATION;
+    const version = spawnSync(bash, ["--version"], { encoding: "utf8", env });
     const result = spawnSync(bash, [
-      "-lc",
-      `PROMPT_COMMAND=("echo USER_PROMPT_RAN"); trap 'echo USER_DEBUG_RAN' DEBUG; . "${script.replace(/"/g, '\\"')}"; declare -p PROMPT_COMMAND; trap -p DEBUG`,
-    ], { encoding: "utf8" });
-    expect(result.status).toBe(0);
+      "--noprofile", "--norc", "-lc",
+      `PROMPT_COMMAND=("echo USER_PROMPT_RAN"); trap 'echo USER_DEBUG_RAN' DEBUG; . "$1"; declare -p PROMPT_COMMAND; trap -p DEBUG`,
+      "varin-shell-integration-test", script,
+    ], { encoding: "utf8", env });
+    const diagnostics = JSON.stringify({ bash, version: version.stdout, versionError: version.error?.message, status: result.status, signal: result.signal,
+      error: result.error?.message, stdout: result.stdout, stderr: result.stderr });
+    expect(result.status, diagnostics).toBe(0);
     expect(result.stdout).toContain("declare -a PROMPT_COMMAND");
     expect(result.stdout).toContain("__varin_prompt_command");
     expect(result.stdout).toContain("echo USER_PROMPT_RAN");

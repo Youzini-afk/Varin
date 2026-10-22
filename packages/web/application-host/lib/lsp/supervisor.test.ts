@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
+import { PassThrough, Writable } from 'node:stream';
+import type { ManagedPipedProcessHandle } from '../process/types.js';
 import { describe, expect, it } from 'vitest';
 import { createDocumentAuthorityHarness } from '../documents/contract-fixtures.js';
 import { createLanguageSupervisor } from './supervisor.js';
@@ -50,6 +53,50 @@ const fixtureProvider = (overrides: {
 });
 
 describe('language supervisor', () => {
+  it.each(['active', 'disposing'] as const)('owns asynchronous stdin failure while %s until the process actually exits', async phase => {
+    const harness = await createDocumentAuthorityHarness();
+    let failWrite!: (error: Error) => void;
+    let wrote!: () => void;
+    const written = new Promise<void>(resolve => { wrote = resolve; });
+    let terminationRequested!: () => void;
+    const terminating = new Promise<void>(resolve => { terminationRequested = resolve; });
+    const child: ManagedPipedProcessHandle = Object.assign(new EventEmitter(), {
+      stdin: new Writable({ write(_chunk, _encoding, callback) { failWrite = callback; wrote(); } }),
+      stdout: new PassThrough(), stderr: new PassThrough(),
+      exitCode: null, signalCode: null, killed: false,
+      kill: () => { terminationRequested(); return true; },
+    });
+    const language = createLanguageSupervisor({ documents: harness.authority, spawn: () => child, pathModule: path, isTrusted: async () => true });
+    const failure = Object.assign(new Error('Language input pipe closed'), { code: 'EPIPE' });
+    let stopping: Promise<void> | undefined;
+    try {
+      language.registerProvider(fixtureProvider());
+      const started = language.syncDocument({ resource: harness.resource('note.ts'), languageId: 'typescript',
+        documentVersion: 1, reason: 'open', content: 'const value = 1;\n' });
+      await written;
+      if (phase === 'disposing') stopping = language.dispose();
+      // Writable reports this asynchronously, outside the synchronous RPC write.
+      failWrite(failure);
+      await terminating;
+      let settled = false;
+      void started.then(() => { settled = true; });
+      await new Promise<void>(resolve => setImmediate(resolve));
+      expect(settled).toBe(false);
+      child.emit('exit', 1);
+      child.emit('close', 1);
+      const result = await started;
+      expect(result.status).not.toBe('ready');
+      if (phase === 'active') expect(result).toMatchObject({ status: 'failed', message: failure.message });
+      await stopping;
+    } finally {
+      child.emit('exit', 1);
+      child.emit('close', 1);
+      await language.dispose();
+      child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy();
+      await harness.cleanup();
+    }
+  });
+
   it('batches filesystem invalidations and delivers them before the next language query', async () => {
     const harness = await createDocumentAuthorityHarness();
     const language = createLanguageSupervisor({ documents: harness.authority, spawn, pathModule: path, isTrusted: async () => true });
