@@ -296,6 +296,7 @@ impl Catalog {
             });
         }
         super::threads::require_available(&tx, &command.thread_id)?;
+        super::threads::require_public(&tx, &command.thread_id)?;
         super::threads::initialize_title(&tx, &command.thread_id, title.as_deref())?;
         if let Some(expected) = checkpoint {
             let active: Option<String> = tx

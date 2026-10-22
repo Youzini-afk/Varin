@@ -33,7 +33,7 @@ pub(crate) fn builtin_schemas(
     mut tools: Vec<crate::run_tools::BuiltinSchema>,
 ) -> Vec<crate::run_tools::BuiltinSchema> {
     use varin_runtime::catalog::dispatch::{
-        ChildPresetDefault::Worker, ChildSourceRequirement::Physical,
+        ChildPresetDefault::{Worker, Retrieval}, ChildSourceRequirement::Physical,
     };
     let schemas = schemas(tools.iter().map(|tool| tool.schema.clone()).collect());
     for schema in schemas {
@@ -41,7 +41,7 @@ pub(crate) fn builtin_schemas(
             tools.push(crate::run_tools::BuiltinSchema::child(
                 schema,
                 Physical,
-                &[Worker],
+                &[Worker, Retrieval],
             ));
         }
     }

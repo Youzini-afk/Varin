@@ -314,10 +314,26 @@ export class ThreadAdapter {
     await this.requireRun(current.run_id);
     return this.runtime.finishRetrieval(operationId);
   }
-  async readRetrievalMaterial(operationId: string, viewId: string) {
-    const current = await this.runtime.operationStatus(operationId);
-    await this.requireRun(current.run_id);
-    return this.runtime.readRetrievalMaterial(operationId, viewId);
+  async retrievalTrace(operationId: string, cursor?: { headId: string; beforeId: string }, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadRetrievalTrace> {
+    const operation = await this.requireOperation(operationId);
+    if (operation.executor !== 'code_retrieval') throw Object.assign(new Error('Operation is not an internal retrieval'), {code:'retrieval-scope'});
+    const child = await this.runtime.child(operationId, signal);
+    const parent = await this.requireRun(operation.run_id);
+    if (child.parent_thread_id !== parent.thread_id || child.parent_branch_id !== parent.branch_id || child.operation_id !== operationId) {
+      throw Object.assign(new Error('Retrieval does not belong to this Operation'), {code:'retrieval-scope'});
+    }
+    const [history, operations, run] = await Promise.all([
+      this.readHistoryPage(child.child_branch_id, cursor, signal),
+      this.runtime.activeOperations(child.child_thread_id, child.child_branch_id, signal),
+      child.receipt ? this.runtime.run(child.receipt.run_id, signal) : Promise.resolve(null),
+    ]);
+    return { operationId, history, operations, run };
+  }
+  async retrievalFileTarget(operationId: string, itemId: string, path: string, signal?: AbortSignal) {
+    const operation=await this.requireOperation(operationId);
+    if(operation.executor!=='code_retrieval') throw Object.assign(new Error('Operation is not an internal retrieval'),{code:'retrieval-scope'});
+    const child=await this.runtime.child(operationId,signal);
+    return this.fileTarget({runtime:'agent',threadId:child.child_thread_id,branchId:child.child_branch_id,itemId,path},signal);
   }
   async sendMessage(identity: ThreadIdentity, request: Omit<MessageSendParams, 'senderThreadId' | 'senderBranchId'>, signal?: AbortSignal) {
     await this.requireIdentity(identity, signal);
@@ -380,7 +396,7 @@ export class ThreadAdapter {
     // A historical fork remains readable without acquiring the original branch's executions.
     if (operationId === undefined && child.child_thread_id === identity.threadId && child.child_branch_id !== identity.branchId) return [];
     const own = child.child_thread_id === identity.threadId && child.child_branch_id === identity.branchId;
-    const parent = child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId;
+    const parent = child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId && child.selected_profile.preset_id !== 'code_retrieval';
     if (!own && !parent) throw new Error('Delegated executions belong to another Thread branch');
     return this.runtime.childExecutions(child.operation_id, signal);
   }
@@ -399,7 +415,7 @@ export class ThreadAdapter {
   }
   async children(identity: ThreadIdentity) {
     await this.requireIdentity(identity);
-    return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId);
+    return (await this.runtime.children()).filter(child => child.parent_thread_id === identity.threadId && child.parent_branch_id === identity.branchId && child.selected_profile.preset_id !== 'code_retrieval');
   }
   async childPage(identity:ThreadIdentity, options:Omit<FamilyListParams,'callerThreadId'>={}, signal?:AbortSignal):Promise<import('@varin/application-client').ThreadChildPage> {
     await this.requireIdentity(identity,signal);

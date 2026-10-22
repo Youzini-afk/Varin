@@ -49,6 +49,7 @@ mod gc;
 mod maintenance;
 pub(crate) mod materialization;
 pub(crate) mod materialized_views;
+mod execution_views;
 mod objects;
 mod operations;
 #[cfg(test)]

@@ -546,7 +546,7 @@ pub(super) fn require_job_invocation(
         || op.executor.as_deref() != Some(tool)
         || admitted.contract().completion != crate::execution::CompletionKind::Job
         || admitted.contract().lifetime != Lifetime::Thread
-        || !admitted.contract().read_only
+        || (!admitted.contract().read_only && tool != "code_retrieval")
     {
         return Err(RuntimeError::Conflict(
             "job invocation owner or contract changed".into(),

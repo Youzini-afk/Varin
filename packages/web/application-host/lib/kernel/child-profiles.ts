@@ -1,7 +1,7 @@
 /** Existing user-owned execution presets -> immutable native dispatch choices.
  * This reads no secrets, prepares no child and owns no configuration or execution state. */
 import { createHash } from 'node:crypto';
-import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
+import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, observeQuickRetrieval, requiresRetrievalModelSelection, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
 import type { ThreadThinkingLevel } from '@varin/application-client';
@@ -36,10 +36,12 @@ export function createChildProfilePreparer(owners: {
   return async (input, signal) => {
     signal?.throwIfAborted();
     let settings;
+    let legacyQuickBinding = false;
     try {
       const raw = await waitWithSignal(owners.settings(), signal);
       if (!record(raw) || (raw.harness !== undefined && !record(raw.harness))) return freeze([], unavailable('child-settings-invalid'));
       settings = mergeHarnessSettings((raw.harness ?? {}) as HarnessSettingsInput, {});
+      legacyQuickBinding = requiresRetrievalModelSelection(settings);
     } catch (error) {
       signal?.throwIfAborted();
       const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
@@ -52,7 +54,9 @@ export function createChildProfilePreparer(owners: {
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
     const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined);
     signal?.throwIfAborted();
-    const observations = observePresets(settings.models, main, settings.agents, focus, 'agent', agentPresetTools(descriptors));
+    const defaults = agentPresetTools(descriptors);
+    const observations = [...observePresets(settings.models, main, settings.agents, focus, 'agent', defaults),
+      observeQuickRetrieval(settings.models, main, defaults.retrieval)];
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
       const toolsSource = definition.slot
@@ -60,8 +64,9 @@ export function createChildProfilePreparer(owners: {
         : 'explicit';
       const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,
         ...(definition.avatar ? { avatar: definition.avatar } : {}),
-        tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : 'read_only',
+        tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : definition.worktree === 'shared' ? 'shared' : 'read_only',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
+      if (entry.id === 'code_retrieval' && legacyQuickBinding) { profile.unavailable = unavailable('retrieval-model-selection-required'); return profile; }
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }
       // Host service capabilities are resolved only against the actual frozen Run directory.
       const overrides = definition.modelSettings;

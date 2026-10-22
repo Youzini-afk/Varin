@@ -478,6 +478,7 @@ impl Review {
             );
             let result = match work {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut self.f.storage.lock().unwrap(), EPOCH, HOST, GENERATION, &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let bytes = task.run();
                     finish_resource_blob_read(

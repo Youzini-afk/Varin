@@ -185,7 +185,10 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
     for glob in task.params.globs.as_deref().unwrap_or_default(){glob_builder.add(glob).map_err(|e|e.to_string())?;}
     let glob=glob_builder.build().map_err(|e|e.to_string())?;
     let eligible=|path:&str,directory:bool|->bool{
-        if task.params.start_after_path.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))!=std::cmp::Ordering::Greater){return false;}
+        if task.params.start_after_path.as_deref().is_some_and(|after| {
+            let order = path.split('/').cmp(after.split('/'));
+            order == std::cmp::Ordering::Less || (order == std::cmp::Ordering::Equal && task.params.start_after_line.is_none())
+        }) { return false; }
         if excluded.iter().any(|p|within(path,p))||(!explicit.is_empty()&&!explicit.contains(path))||!scopes.iter().any(|scope|within(path,scope))||!roots.iter().any(|root|within(path,root)){return false;}
         if immediate&&!selections.iter().any(|root|path==root||path.rsplit_once('/').map(|(parent,_)|parent==root).unwrap_or(root.is_empty())){return false;}
         if selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))){return false;}
@@ -195,6 +198,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         !matched.is_ignore() && (!directory || glob.num_whitelists() == 0 || matched.is_whitelist())
     };
     let descend=|path:&str|->bool{
+        if task.params.start_after_path.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))==std::cmp::Ordering::Less && !within(after,path)) {return false;}
         (explicit.is_empty()||explicit.iter().any(|f|within(f,path)||f==path))&&scopes.iter().any(|s|within(path,s)||within(s,path))&&roots.iter().any(|s|within(path,s)||within(s,path))
             &&(selections.iter().any(|root|within(root,path))||!selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))))
     };
@@ -222,12 +226,13 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     if seeded.iter().any(|p|within(prefix,p)){continue;}seeded.push(prefix.clone());
                     if let Some(hash)=reader.path(root,prefix)?{stack.push(Visit::Path(hash,prefix.clone()));}
                     else if !shadowed.iter().any(|p|within(p,prefix)||within(prefix,p)) {
-                        return Err(format!("Discovery path does not exist: {prefix}"));
+                        if !matches!(task.params.operation.as_str(),"list"|"search") || selections.len()==1 {return Err(format!("Discovery path does not exist: {prefix}"));}
+                        partial=true;shared.emit("error",prefix,"",serde_json::json!({"status":"missing","message":"Discovery path does not exist"}))?;
                     }
                 }
             }
             let mut seen=HashSet::new();
-            while let Some(next)=stack.pop(){shared.check()?;match next{
+            while let Some(next)=stack.pop(){shared.check()?;if shared.page_full(){return Ok(partial);}match next{
                 Visit::Index(hash,prefix)=>{
                     let TrieNode::Index{key,child,left,right,..}=reader.node(&hash)? else{return Err("Invalid immutable index".into());};
                     if let Some(right)=right{stack.push(Visit::Index(right,prefix.clone()));}
@@ -270,9 +275,13 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     Ok(metadata) => metadata,
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                         if shadowed.iter().any(|p|within(p,prefix)||within(prefix,p)) { continue; }
-                        return Err(format!("Discovery path does not exist: {prefix}"));
+                        if !matches!(task.params.operation.as_str(),"list"|"search") || selections.len()==1 {return Err(format!("Discovery path does not exist: {prefix}"));}
+                        partial=true;shared.emit("error",prefix,"",serde_json::json!({"status":"missing","message":"Discovery path does not exist"}))?;continue;
                     },
-                    Err(error) => return Err(format!("Cannot inspect discovery path {prefix}: {error}")),
+                    Err(error) => {
+                        if !matches!(task.params.operation.as_str(),"list"|"search") || selections.len()==1 {return Err(format!("Cannot inspect discovery path {prefix}: {error}"));}
+                        partial=true;shared.emit("error",prefix,"",serde_json::json!({"status":"unreadable","message":error.to_string()}))?;continue;
+                    },
                 };
                 let directory_prefix = if metadata.is_dir()||(!task.params.include_tracked.unwrap_or(false)&&!metadata.file_type().is_symlink()) {
                     prefix.clone()
@@ -309,6 +318,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let walk_scopes=scopes.clone();let walk_roots=roots.clone();let walk_dirs=dirs.clone();let walk_root=root.clone();
                 let walk_selections=selections.clone();
                 let walk_prefix=prefix.clone();
+                let walk_after=task.params.start_after_path.clone();
                 let walk_ignore_errors=ignore_errors.clone();
                 // Explicit paths are search roots, including ignored directories. Compile
                 // ignore rules once per selected root; the traversal reuses these matchers.
@@ -337,6 +347,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     .filter_entry(move|entry|{
                         let Ok(path)=entry.path().strip_prefix(&walk_root)else{return false;};let path=path.to_string_lossy().replace('\\',"/");
                         let is_directory=entry.file_type().is_some_and(|t|t.is_dir());
+                        if is_directory && walk_after.as_deref().is_some_and(|after|path.split('/').cmp(after.split('/'))==std::cmp::Ordering::Less && !within(after,&path)) {return false;}
                         if !walk_scopes.iter().any(|s|within(&path,s)||within(s,&path))
                             || !walk_roots.iter().any(|s|within(&path,s)||within(s,&path)) { return false; }
                         let leads_to_selection=walk_selections.iter().any(|selected|within(selected,&path));
@@ -361,7 +372,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                         }
                         true
                     });
-            for entry in builder.build(){shared.check()?;
+            for entry in builder.build(){shared.check()?;if shared.page_full(){return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
                 let entry=match entry{Ok(entry)=>entry,Err(_)=>{partial=true;continue;}};
                 if entry.error().is_some(){partial=true;}
                 let path=entry.path().strip_prefix(&root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
@@ -413,9 +424,9 @@ mod tests {
     fn search_skips_binary_before_allocating_the_file_length() {
         let fixture=TestFile(std::env::temp_dir().join(format!("varin-search-binary-{}",uuid::Uuid::new_v4())));
         let file=File::create(&fixture.0).unwrap(); file.set_len(32*1024*1024).unwrap(); drop(file);
-        assert!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new()).unwrap().is_none());
+        assert!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false)).unwrap().is_none());
         fs::write(&fixture.0,"中文🙂 needle").unwrap();
-        assert_eq!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new()).unwrap().unwrap().bytes,"中文🙂 needle".as_bytes());
+        assert_eq!(search_capture(File::open(&fixture.0).unwrap(),&Shared::new(false)).unwrap().unwrap().bytes,"中文🙂 needle".as_bytes());
     }
     #[test]
     fn capture_allocation_failure_preserves_existing_bytes() {
@@ -429,21 +440,21 @@ mod tests {
         let fixture = TestFile(std::env::temp_dir().join(format!("varin-capture-{}", uuid::Uuid::new_v4())));
         fs::write(&fixture.0, b"abc").unwrap();
         let hash = "sha256-ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-        let captured = read_capture(File::open(&fixture.0).unwrap(), None, &Shared::new()).unwrap();
+        let captured = read_capture(File::open(&fixture.0).unwrap(), None, &Shared::new(false)).unwrap();
         assert_eq!(captured.bytes, b"abc");
         assert_eq!(captured.metadata.byte_length, 3);
         assert_eq!(captured.object_hash, hash);
         assert_eq!(captured.revision, "d1_ungWv48Bz-pBQUDeXa4iI7ADYaOWF3qctBD_YfIAFa0");
         assert_eq!(captured.revision, revision_from_object_hash(hash).unwrap());
-        let verified = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new()).unwrap();
+        let verified = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new(false)).unwrap();
         assert_eq!(verified.object_hash, captured.object_hash);
         assert_eq!(verified.revision, captured.revision);
 
         fs::write(&fixture.0, b"abd").unwrap();
-        let error = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new())
+        let error = read_capture(File::open(&fixture.0).unwrap(), Some(hash), &Shared::new(false))
             .err().expect("corrupt immutable bytes must remain rejected");
         assert!(error.contains("hash mismatch"), "{error}");
-        let cancelled = Shared::new();
+        let cancelled = Shared::new(false);
         cancelled.cancel();
         assert_eq!(read_capture(File::open(&fixture.0).unwrap(), None, &cancelled).err().unwrap(), "cancelled");
     }

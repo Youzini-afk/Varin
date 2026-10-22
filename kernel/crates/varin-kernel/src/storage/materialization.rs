@@ -486,15 +486,21 @@ impl Task {
         let mut cleanup_backup = None;
         let original = journal_directory_identity(&self.journal, "materializationOriginal")?;
         let recorded_stage = journal_directory_identity(&self.journal, "materializationStage")?;
+        let never_staged=recorded_stage.is_none() && original.is_none()
+            && !exists(&stage.absolute)? && !exists(&backup.absolute)?
+            && (!exists(&target.absolute)? || empty_directory(&target.absolute)?);
         let mut result = if self.matches(&target, &entries, true)? {
             effect_observed = self.resuming;
             // Only the original empty directory is eligible for deletion.
             cleanup_backup = original;
             self.success(cow)
-        } else if self.resuming {
+        } else if self.resuming && !never_staged {
             let target_absent = !exists(&target.absolute)?;
+            let original_in_place=original.as_ref().is_some_and(|identity|
+                has_directory_identity(&target.absolute,identity).unwrap_or(false))
+                && empty_directory(&target.absolute)? && !exists(&backup.absolute)?;
             let staging_owned = match recorded_stage.as_ref() {
-                Some(identity) if target_absent => {
+                Some(identity) if target_absent || original_in_place => {
                     has_directory_identity(&stage.absolute, identity)?
                 }
                 _ => false,
@@ -504,15 +510,27 @@ impl Task {
                     Some(identity) => has_directory_identity(&backup.absolute, identity)?,
                     None => !exists(&backup.absolute)?,
                 }
-            } else {
-                false
-            };
-            if target_absent
+            } else { original_in_place };
+            if (target_absent || original_in_place)
                 && staging_owned
                 && original_held
-                && self.matches(&stage, &entries, true)?
             {
                 let identity = recorded_stage.expect("journal-proven stage");
+                if !self.matches(&stage,&entries,true)? {
+                    // This unpublished staging directory is owned by the original
+                    // journal and physical lease. Rebuild it in place after an
+                    // interrupted copy; never remove a target or an unowned path.
+                    for entry in fs::read_dir(&stage.absolute)? {
+                        check(&self.cancellation)?;
+                        if directory_identity(&stage.absolute)?.as_ref()!=Some(&identity) {
+                            return Err(KernelError::Operation("Materialization staging identity changed during recovery".into()));
+                        }
+                        let entry=entry?;let kind=entry.file_type()?;
+                        if kind.is_dir() && !kind.is_symlink(){fs::remove_dir_all(entry.path())?;}else{fs::remove_file(entry.path())?;}
+                    }
+                    cow=self.build(&stage,&identity,&entries)?;
+                    if !self.matches(&stage,&entries,true)? {return Err(KernelError::Storage("Recovered staging differs from its immutable source".into()));}
+                }
                 control(Control::Promote {
                     stage: identity,
                     original: original.clone(),

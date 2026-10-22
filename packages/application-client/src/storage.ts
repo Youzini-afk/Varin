@@ -28,7 +28,7 @@ export interface StorageInventory {
 }
 export interface StorageCleanupCandidate {
   id: string;
-  kind: 'unreferenced-objects' | 'retained-index';
+  kind: 'unreferenced-objects' | 'retained-index' | 'retired-code-model';
   bytes: number;
   count: number;
   location: string;

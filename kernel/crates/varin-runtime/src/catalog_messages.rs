@@ -203,6 +203,7 @@ fn route(
     actor: &MessageActor,
 ) -> Result<(String, String)> {
     branch_owner(db, sender, branch)?;
+    super::threads::require_public(db,sender)?;
     let (target, target_branch) = if let Some(reply) = &input.reply_to {
         let original: QueuedInputMetadata = record(db, "input_queue", reply)?;
         let original = message_identity(&original)?;
@@ -250,6 +251,7 @@ fn route(
         ));
     }
     branch_owner(db, &target, &target_branch)?;
+    super::threads::require_public(db,&target)?;
     if super::scheduling::thread_family(db, sender)?
         != super::scheduling::thread_family(db, &target)?
     {

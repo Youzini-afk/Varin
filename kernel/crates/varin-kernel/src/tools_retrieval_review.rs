@@ -55,14 +55,16 @@ impl Fixture {
     fn cleanup(self) { let root = self.root.clone(); drop(self); std::fs::remove_dir_all(root).unwrap(); }
 }
 #[test]
-fn child_retrieval_policy_read_requires_exact_frozen_source_and_original_grant() {
+fn retrieval_with_terminal_effects_is_not_a_policy_read_and_keeps_original_source_authority() {
     let f = Fixture::new(b"export const marker = true;\n");
     let directory = Arc::new(varin_runtime::composition::tools::ToolDirectory::assemble(
         KernelToolExecutor::new(f.executor.binding.clone(), f.executor.resources.clone()).unwrap().declarations(false)).unwrap());
     let cancel = CancellationToken::default();
     let bound = directory.clone().bind_call(&f.call, &f.frozen, &cancel).unwrap();
     let contract = bound.prepare(&cancel).unwrap();
-    assert!(bound.supports_policy_read(&contract));
+    assert!(!bound.supports_policy_read(&contract));
+    assert!(!contract.read_only);
+    assert_eq!(contract.completion,CompletionKind::Job);
     bound.authorize(&f.context, &contract, &cancel).unwrap();
     for changed in ["revision", "branch", "workspace", "execution", "physical"] {
         let mut frozen = f.frozen.clone();
@@ -74,10 +76,8 @@ fn child_retrieval_policy_read_requires_exact_frozen_source_and_original_grant()
             "execution" => source.execution_workspace_id = "other".into(),
             _ => source.mode = SourceMode::Materialized,
         }
-        assert!(!directory.clone().bind_call(&f.call, &frozen, &cancel).unwrap().supports_policy_read(&contract), "{changed}");
+        assert!(directory.clone().bind_call(&f.call, &frozen, &cancel).unwrap().authorize(&f.context,&contract,&cancel).is_err(), "{changed}");
     }
-    let mut mutable = contract.clone(); mutable.read_only = false;
-    assert!(!bound.supports_policy_read(&mutable));
     f.storage.lock().unwrap().revoke_grant(&json!({"grantId":"reader"}), HOST).unwrap();
     assert!(bound.authorize(&f.context, &contract, &cancel).is_err());
     drop(bound); drop(directory); f.cleanup();

@@ -50,7 +50,7 @@ function outputParts(output: OutputBody | undefined): ChatUserContent[] {
 export class HistoryPresentation {
   constructor(readonly identity: string) {}
   private entries = new Map<string, ChatSessionEntry>();
-  project(history: readonly HistoryItem[], snapshot: ThreadSnapshot | undefined, runUsage: readonly ThreadRunUsage[] = [],
+  project(history: readonly HistoryItem[], snapshot: Pick<ThreadSnapshot, 'operations' | 'activeRun' | 'children' | 'childExecutions' | 'childActivity'> | undefined, runUsage: readonly ThreadRunUsage[] = [],
     progress: readonly import('@/lib/agent-runtime/thread-projection').ToolExecutionProgress[] = []) {
     const result: ChatSessionEntry[] = [];
     const toolExecutions: Record<string, ChatToolExecutionState> = {};

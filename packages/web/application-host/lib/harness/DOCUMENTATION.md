@@ -44,9 +44,10 @@ writer receipts govern release. See [process consumers](../process/DOCUMENTATION
 
 ## Retrieval and materials
 
-Search and Explore use admitted native sources and actual revisions. Host policy, candidate ranking
-and packing stay in TypeScript; Rust owns file traversal, body access and structure computation.
-Graph relations supplement current source facts rather than authorizing stale positions.
+Search and retrieval use admitted native sources and actual revisions. Quick retrieval is an
+internal native Agent Run owned by the original code_retrieval Operation; formal retrieval uses
+the same execution/tools through collaboration. Rust owns traversal, reads, structure and process
+effects. Host supplies configuration and domain adapters, without a second planning/selection loop.
 
 Web search has a Host-owned keyless default and disclosed failure-only fallback. An explicitly selected
 provider never silently becomes another provider. Domain filtering applies before disclosure; valid

@@ -211,6 +211,7 @@ pub struct Catalog {
     epoch: u64,
     plan_cursor_key: [u8; 32],
     continuation_stopping: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    event_observers: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, std::sync::mpsc::SyncSender<()>>>>,
 }
 impl Catalog {
     pub fn open(root: impl AsRef<Path>) -> Result<Self> {
@@ -262,6 +263,7 @@ impl Catalog {
             database_path,
             epoch,
             continuation_stopping: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            event_observers: Default::default(),
             plan_cursor_key: {
                 let mut key = [0; 32];
                 key[..16].copy_from_slice(Uuid::new_v4().as_bytes());
@@ -269,6 +271,7 @@ impl Catalog {
                 key
             },
         };
+        this.install_event_notifier()?;
         this.recover()?;
         this.recover_mcp_interactions()?;
         {

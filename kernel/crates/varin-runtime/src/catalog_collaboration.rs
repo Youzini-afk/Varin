@@ -115,6 +115,9 @@ pub enum ChildSourceContentMode {
 pub enum ChildSourceRoot {
     Fixed { pin: ChildSourcePin },
     Physical { root: launches::LiveRoot },
+    /// A fixed baseline whose Run now owns command-modified physical content.
+    /// The pin also retains that execution view until this handoff is released.
+    Derived { pin: ChildSourcePin, root: launches::LiveRoot, view_id: String },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -177,7 +180,7 @@ impl ChildSource {
             Self::Absent | Self::Shared { .. } => None,
             Self::Ready { pin, .. } => Some(pin),
             Self::Pending { handoff } => match &handoff.root {
-                ChildSourceRoot::Fixed { pin } => Some(pin),
+                ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Derived { pin, .. } => Some(pin),
                 _ => None,
             },
         }
@@ -204,6 +207,8 @@ pub struct ChildWorkingResultRef {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildCodeResult {
     NotApplicable,
+    /// The shared environment owns any command effects; no isolated merge result is produced.
+    SharedSource,
     Pending,
     Settling {
         publication_id: String,
@@ -226,6 +231,7 @@ impl ChildCodeResult {
         matches!(
             self,
             Self::NotApplicable
+                | Self::SharedSource
                 | Self::Published { .. }
                 | Self::NoChanges
                 | Self::Unavailable { .. }
@@ -445,8 +451,8 @@ impl Catalog {
         let run: Run = record(&tx, "runs", &context.run_id)?;
         fence(&run, self.epoch)?;
         let mut op: Operation = record(&tx, "operations", &context.operation_id)?;
-        let admitted =
-            super::tool_content::require_job_invocation(&tx, &run, &op, context, DISPATCH_TOOL)?;
+        let admitted = super::tool_content::require_job_invocation(&tx, &run, &op, context,
+            if prepared.internal_retrieval { "code_retrieval" } else { DISPATCH_TOOL })?;
         if admitted.call().call_id != prepared.call_id
             || op.revision != prepared.operation_revision
             || op.phase != OperationPhase::Running
@@ -474,6 +480,8 @@ impl Catalog {
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![child_branch_id, child_thread_id],
         )?;
+        let shared_physical=prepared.handoff.as_ref().is_some_and(|handoff|handoff.source_run_id.is_none()
+            && matches!(handoff.root,ChildSourceRoot::Physical{..}));
         let mut child =
             ChildTask {
                 avatar: Some(prepared.avatar.unwrap_or_else(|| {
@@ -498,8 +506,7 @@ impl Catalog {
                 dispatch_context_ref: prepared.frozen_reference,
                 launch: prepared.launch,
                 source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
-                    if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly
-                        && handoff.source.resource_owner.is_local()
+                    if prepared.work_mode != super::dispatch::ChildWorkMode::IsolatedWrite
                         && handoff.source_run_id.is_none()
                         && matches!(handoff.root, ChildSourceRoot::Physical { .. })
                     {
@@ -514,6 +521,8 @@ impl Catalog {
                 }),
                 code_result: if parent.selection.source.is_none() {
                     ChildCodeResult::NotApplicable
+                } else if prepared.work_mode == super::dispatch::ChildWorkMode::Shared && (shared_physical || prepared.internal_retrieval) {
+                    ChildCodeResult::SharedSource
                 } else if prepared.work_mode == super::dispatch::ChildWorkMode::ReadOnly {
                     ChildCodeResult::NoChanges
                 } else {
@@ -528,6 +537,7 @@ impl Catalog {
             };
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
+        if !prepared.internal_retrieval {
         let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
             operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
             content:Some(json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}).into()),
@@ -539,6 +549,7 @@ impl Catalog {
         op.effect = Effect::None;
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
+        }
         child.cursor = event(
             &tx,
             &op.id,
@@ -547,6 +558,17 @@ impl Catalog {
             json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id}),
         )?;
         delegated::insert_initial(&tx, &child)?;
+        if prepared.internal_retrieval {
+            let wait_id = format!("retrieval-wait:{}", op.id);
+            let wait = Wait { id: wait_id.clone(), run_id: run.id.clone(), subject: op.id.clone(),
+                kind: "operation.settled".into(), after_cursor: child.cursor, deadline_at_ms: None,
+                trigger_cursor: None, cancelled: false };
+            tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)", params![wait.id,wait.run_id,encode(&wait)?])?;
+            op.waiting_on = Some(wait_id);
+            op.handed_off = true;
+            op.revision += 1;
+            put(&tx, "operations", &op.id, &op)?;
+        }
         super::goals::bind_child(&tx, &op.id, &run.id)?;
         tx.commit()?;
         Ok(child)
@@ -1368,7 +1390,7 @@ impl UnacceptedChildDependenciesRead {
         for read in self.dispatches {
             let selected = read.dispatch.load()?;
             let call = read.call.load(&self.content)?;
-            let input: DispatchInput = serde_json::from_value(call.arguments)?;
+            let input=DispatchInput::from_tool_call(&call.name,&call.arguments)?;
             let resolved = selected.resolve(&input)?;
             let mut dependencies = read.dependencies;
             dependencies.source_pin = selected
@@ -1397,7 +1419,7 @@ impl UnacceptedChildDependenciesRead {
     }
 }
 fn unaccepted_child_dependency_owner(db: &Connection, op: &Operation) -> Result<bool> {
-    if op.executor.as_deref() != Some(DISPATCH_TOOL)
+    if !matches!(op.executor.as_deref(),Some(DISPATCH_TOOL|"code_retrieval"))
         || op.phase != OperationPhase::Terminal
         || op.execution_owner.is_none()
     {
@@ -1420,7 +1442,7 @@ impl Catalog {
                 continue;
             }
             let intent = tool_content::ToolIntent::from_operation(&op)?;
-            if intent.call().name != DISPATCH_TOOL {
+            if !matches!(intent.call().name.as_str(),DISPATCH_TOOL|"code_retrieval") {
                 return Err(RuntimeError::Conflict(
                     "dispatch cleanup invocation changed".into(),
                 ));
@@ -1468,7 +1490,7 @@ impl Catalog {
         }
         let op: Operation = record(&tx, "operations", operation_id)?;
         if !unaccepted_child_dependency_owner(&tx, &op)?
-            || tool_content::ToolIntent::from_operation(&op)?.call().name != DISPATCH_TOOL
+            || !matches!(tool_content::ToolIntent::from_operation(&op)?.call().name.as_str(),DISPATCH_TOOL|"code_retrieval")
         {
             return Err(RuntimeError::Conflict(
                 "dependency cleanup no longer owns this dispatch".into(),
@@ -1488,6 +1510,7 @@ impl Catalog {
 
 pub struct ChildSourcePreparation {
     execution: delegated::DelegatedExecution,
+    profile_ref:Value,
     pin: ChildSourcePin,
     selection: launches::SourceSelection,
     provenance: ChildSourceProvenance,
@@ -1506,7 +1529,8 @@ impl ChildSourcePreparation {
         self.pin.source.validate()?;
         self.selection.validate()?;
         let branch = format!("child-source:{}", self.execution.execution_id);
-        let mode = if matches!(self.execution.code_result, ChildCodeResult::NoChanges) {
+        let profile:super::dispatch::ChildSelectedProfile=serde_json::from_value(self.content.load(&self.profile_ref)?)?;
+        let mode = if profile.work_mode!=super::dispatch::ChildWorkMode::IsolatedWrite {
             SourceMode::FixedBranch
         } else {
             SourceMode::Materialized
@@ -1600,8 +1624,10 @@ impl Catalog {
         selection: launches::SourceSelection,
         provenance: ChildSourceProvenance,
     ) -> Result<ChildSourcePreparation> {
+        let execution=self.delegated_execution(execution_id)?;
+        let profile_ref=delegated::relation(&self.db,&execution.child_operation_id)?.selected_profile_ref;
         Ok(ChildSourcePreparation {
-            execution: self.delegated_execution(execution_id)?,
+            execution,profile_ref,
             pin,
             selection,
             provenance,
@@ -1679,6 +1705,20 @@ impl Catalog {
         };
         child.state = "settling".into();
         self.commit_child_metadata(child, "child.settling")
+    }
+    /// Storage proved that this fixed Run never published a physical execution view.
+    pub fn settle_child_without_execution_view(&mut self,operation_id:&str,bindings:&ChildWriterBindings)->Result<ChildTask> {
+        if operation_id!=bindings.operation_id {return Err(RuntimeError::Conflict("Child writer identity changed".into()));}
+        self.require_child_writers_stopped(bindings)?;
+        let mut child=self.execution_task(operation_id)?;
+        let receipt=child.receipt.as_ref().ok_or_else(||RuntimeError::Conflict("Child has no Run".into()))?;
+        if !self.run(&receipt.run_id)?.state.terminal() || child.source.selection().is_none_or(|source|source.mode!=SourceMode::FixedBranch) {
+            return Err(RuntimeError::Conflict("Only a stopped immutable child can settle without an execution view".into()));
+        }
+        if child.code_result==ChildCodeResult::NoChanges {return Ok(child)};
+        if !matches!(child.code_result,ChildCodeResult::Pending) {return Err(RuntimeError::Conflict("Child already owns a result publication".into()));}
+        child.code_result=ChildCodeResult::NoChanges;
+        self.commit_child_metadata(child,"child.source_unchanged")
     }
     /// Synchronous fixture convenience; production loads writer bindings outside Catalog.
     pub fn attach_child_candidate(

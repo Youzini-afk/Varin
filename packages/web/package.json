@@ -56,10 +56,7 @@
     "lint": "eslint \"./src/**/*.{ts,tsx}\" \"./application-host/**/*.ts\" \"./cli/**/*.ts\" --config ../../eslint.config.js",
     "test": "vitest run",
     "structure:cold-start": "tsx scripts/structure-cold-start.ts",
-    "symbol-graph-query": "tsx scripts/symbol-graph-query.ts",
     "structure:copy-runtime": "node scripts/copy-structure-runtime.mjs",
-    "semantic:copy-model": "node scripts/copy-semantic-model.mjs",
-    "semantic:perf:scan": "tsx scripts/semantic-scan-perf.ts",
     "semantic:perf:store": "tsx scripts/semantic-store-perf.ts",
     "structure:refresh-grammar-manifest": "node ../../scripts/refresh-grammar-manifest.mjs",
     "test:node-smoke": "bun run build:application-host && node --test application-host/lib/knowledge/store.smoke.test.ts",
@@ -119,7 +116,6 @@
     "yazl": "^3.3.1"
   },
   "devDependencies": {
-    "@huggingface/transformers": "4.3.1",
     "@types/compression": "^1.8.1",
     "@types/express": "^5.0.0",
     "@types/luxon": "^3.7.6",

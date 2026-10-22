@@ -1,3 +1,4 @@
+import { createKnowledgeEmbeddingOwner } from './lib/knowledge/vectors/embedding-owner.js';
 import { createStorageService } from './lib/storage/service.js';
 import { registerStorageRoutes } from './lib/storage/routes.js';
 import { createStorageCoordinator } from './lib/storage/coordinator.js';
@@ -22,7 +23,6 @@ import { createThreadMemory } from './lib/memory/thread-memory.js';
 import { registerThreadMemoryRoutes } from './lib/memory/thread-memory-routes.js';
 import { createMemoryInference } from './lib/memory/memory-inference.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
-import { createRetrievalModelStage } from './lib/kernel/retrieval-model.js';
 
 import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
 import { createImageRuntime, IMAGES_CAPABILITY } from './lib/kernel/image-runtime.js';
@@ -57,10 +57,6 @@ import { readContextPolicy } from './lib/kernel/context-settings.js';
 import { ThreadCollaboration } from './lib/kernel/thread-collaboration.js';
 import { createSemanticInferenceLedger } from './lib/knowledge/semantic/inference-ledger.js';
 import { createSemanticInference } from './lib/knowledge/semantic/runtime-inference.js';
-import { createRetrievalOwner } from './lib/kernel/retrieval-owner.js';
-import { retrievalGraph } from './lib/kernel/retrieval-graph.js';
-import { createRetrievalSourceOwner } from './lib/kernel/retrieval-source.js';
-import { createRetrievalComposition } from './lib/kernel/retrieval-composition.js';
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
@@ -153,7 +149,6 @@ import { createWorkspaceRecoveryEngine, type RecoverySessionNavigation, type Wor
 import { createWorkspaceRecoveryCapabilityHandler } from './lib/recovery/capability.js';
 
 import { createLanguageSupervisor } from './lib/lsp/supervisor.js';
-import { createLanguagePrewarm } from './lib/lsp/prewarm.js';
 import { createManagedLanguageServers } from './lib/lsp/managed-servers.js';
 import { canonicalizePathIdentity, isPathWithinRoot } from './lib/workspace/path-safety.js';
 import { createLanguageCapabilityHandler, createWorkspaceSearchCapabilityHandler } from './lib/lsp/capability.js';
@@ -168,16 +163,11 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createContextObservationPublication } from './lib/knowledge/context-publication.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
-import { createSymbolGraphRuntime } from './lib/knowledge/symbol-runtime.js';
 import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
 import { createIndexDirectoryManager, type IndexRemovalProgress } from './lib/knowledge/index-directories.js';
 import { purgeSemanticWorkspaceCache } from './lib/knowledge/semantic/cache-maintenance.js';
 import { projectFolders, projectContainsPath } from '@varin/application-client';
-import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
-import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
-import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, registerSemanticIndexRoutes } from './lib/knowledge/semantic/index-management.js';
-import { createWorkspaceSemanticRuntime, GLOBAL_INFERENCE_SCOPE } from './lib/knowledge/semantic/workspace-runtime.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
@@ -234,7 +224,6 @@ import { resolvePrimaryWorktreeRoot } from './lib/git/service.js';
 
 import { createKernelClient, KernelClientError, type KernelClient } from './lib/kernel/kernel-client.js';
 
-import { createLspStructureProvider } from './lib/structure/lsp-provider.js';
 import { createStructureSource } from './lib/structure/source.js';
 import { createTreeSitterStructureProvider } from './lib/structure/tree-sitter-provider.js';
 import { createGrammarAbiInspector, GRAMMAR_MAX_ABI, GRAMMAR_MIN_ABI } from './lib/structure/grammar-abi.js';
@@ -1866,6 +1855,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     registry: managedRemoteTargets, withRunAuthority: (runId, source, consume, signal) =>
       agentRuntime.withManagedSourceAuthority(runId, source, consume, signal) });
   kernelClient.setLanguageOwner(createLanguageOwner({ documents: documentsAuthority, supervisor: languageSupervisor,
+    structure: () => structureSource,
     remote: managedSourceConsumers.query,
     sources: createSourceQueryOwner({ kernel: kernelClient, documents: documentsAuthority,
       validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query }) }));
@@ -2263,9 +2253,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
 
-  const catalogScan = {
-    start(_workspaceId: string): void {},
-  };
   async function getKnowledgeStoreForScope(scopeId: string): Promise<KnowledgeStore> {
     // HR0: scope ids are either project workspace ids or `session:<id>`; only
     // the persisted store key differs — records keep their real scope. BC0
@@ -2301,7 +2288,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       try { await assertMemoryOwner(); }
       catch (error) { await store.close(); throw error; }
       knowledgeStores.set(storeKey, store);
-      catalogScan.start(scopeId);
       if (scope === 'bot') knowledgeVectors?.scheduleReconcile(store, scope, scopeId, scopeId);
       if (scope === 'bot' && userKnowledgeStore) knowledgeVectors?.scheduleReconcile(userKnowledgeStore, 'user', 'user', scopeId);
       return store;
@@ -2413,63 +2399,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resolveInstalled: (fileName) => grammarStore.pathForGrammarFile(fileName),
       resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
     });
-  const structureSource = createStructureSource([
-    syntaxStructure,
-    createLspStructureProvider({
-      documents: documentsAuthority,
-      supervisor: languageSupervisor,
-    }),
-  ]);
-  const projectDirectories = (settings: { projects?: unknown }) => (sanitizeProjects(settings.projects) ?? []).flatMap(projectFolders);
-  const languagePrewarm = createLanguagePrewarm({
-    documents: documentsAuthority, languages: languageSupportRuntime, supervisor: languageSupervisor,
-    onError: error => console.error('[LanguagePrewarm]', errorMessage(error)),
-  });
-  let prewarmProjectGeneration = 0;
-  let prewarmProjectOwners = new Set<string>();
-  const prewarmProject = (settings: { projects?: unknown; activeProjectId?: unknown }): void => {
-    const generation = ++prewarmProjectGeneration;
-    const project = (sanitizeProjects(settings.projects) ?? []).find(entry => entry.id === settings.activeProjectId);
-    void Promise.all((project ? projectFolders(project) : []).map(async directory => ({
-      owner: `project:${directory}`, workspace: await documentsAuthority.resolveWorkspace({ path: directory }),
-    }))).then(entries => {
-      if (generation !== prewarmProjectGeneration) return;
-      const next = new Set(entries.map(entry => entry.owner));
-      for (const owner of prewarmProjectOwners) if (!next.has(owner)) languagePrewarm.releaseOwner(owner);
-      for (const entry of entries) languagePrewarm.setWorkspace(entry.owner, entry.workspace.workspaceId);
-      prewarmProjectOwners = next;
-    }).catch(error => console.error('[LanguagePrewarm]', errorMessage(error)));
-  };
-  prewarmProject(await readSettingsFromDisk());
-  const projectIndexScope = createProjectIndexScope([],
-    [path.join(await fsPromises.realpath(VARIN_DATA_DIR), 'bots')]);
-  const symbolGraphRuntime = createSymbolGraphRuntime({
-    getIndexScope: projectIndexScope.get,
-    getStore: getKnowledgeStoreForScope,
-    documents: documentsAuthority,
-    supervisor: languageSupervisor,
-    structureSource,
-    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-    isIndexablePath: async (id, resourceId, signal) => catalogFileSearch.isSearchableFile(
-      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal,
-    ),
-    onError: (error) => console.error('[HarnessKnowledge] Symbol graph observer failed:', errorMessage(error)),
-  });
+  const structureSource = createStructureSource([syntaxStructure]);
+  // Legacy cache ownership is retained only for explicit reclamation.
   const semanticIndexManagement = createSemanticIndexManagement(VARIN_DATA_DIR, hostId);
   const semanticIndexLoad = await semanticIndexManagement.load().catch((error: unknown) => ({
     config: DEFAULT_SEMANTIC_INDEX_CONFIGURATION, error: errorMessage(error),
   }));
   if (semanticIndexLoad.error) console.error('[HarnessKnowledge] Index settings need repair:', semanticIndexLoad.error);
   const semanticIndexConfig = semanticIndexLoad.config;
-  const makeLocalEmbedder = () => createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR,
-    cpu: { mode: semanticIndexConfig.localCpuMode ?? 'auto', maxThreads: semanticIndexConfig.localCpuThreads ?? null } });
-  const semanticRuntimeHolder: { current?: ReturnType<typeof createWorkspaceSemanticRuntime> } = {};
-  const localSemanticComponent = createLocalSemanticComponentManager({
-    dataDir: VARIN_DATA_DIR,
-    version: VARIN_VERSION,
-    onEnabled: () => semanticRuntimeHolder.current?.refreshLocalSemantic(makeLocalEmbedder()),
-  });
-  const localEmbedder = makeLocalEmbedder();
   const semanticScheduler = createEmbedScheduler({
     concurrency: semanticIndexConfig.concurrentRequests,
     backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
@@ -2504,104 +2441,18 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     try { response.json({ models: await imageRuntimeOwner.current!.models() }); }
     catch { response.status(503).json({ error: 'Image model catalog is unavailable' }); }
   });
-  const semanticRuntime = createWorkspaceSemanticRuntime({
-    kernel: kernelClient,
-    runtimeInference: semanticInference,
-    dataDir: semanticIndexConfig.storageDirectory ?? VARIN_DATA_DIR,
-    hostId,
-    documents: documentsAuthority,
-    structureSource,
-    searchFilesystemFiles: catalogFileSearch.searchFilesystemFiles,
-    isIndexablePath: async (id, resourceId, signal, options) => catalogFileSearch.isSearchableFile(
-      (await documentsAuthority.inspectWorkspace(id)).root, resourceId, signal, options,
-    ),
-    embedder: localEmbedder,
-    vectorCache: semanticVectorCache,
-    scheduler: semanticScheduler,
-    getIndexScope: projectIndexScope.get,
-    includeIgnoredDirectories: semanticIndexConfig.includeIgnoredDirectories ?? [],
-    onBindingChanged: (workspaceId) => queueMicrotask(() => {
-      // The shared inference state publishes global binding changes; every
-      // knowledge scope resolves its embedder through it, so refresh all.
-      if (workspaceId === GLOBAL_INFERENCE_SCOPE) knowledgeVectors?.refreshAll();
-      else knowledgeVectors?.refreshWorkspace(workspaceId);
-    }),
-    onError: (error) => console.error('[HarnessKnowledge] Semantic runtime failed:', errorMessage(error)),
-  });
-  semanticRuntimeHolder.current = semanticRuntime;
-  const retrievalSources = createRetrievalSourceOwner({ kernel: kernelClient, documents: documentsAuthority,
-    validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query });
-  const retrievalModel = createRetrievalModelStage({ inference: semanticInference, models: modelAuthority,
-    readGlobalSettings: () => modelsService.readGlobalInferenceSettings(), kernel: kernelClient, sources: retrievalSources });
-  const retrievalComposition = createRetrievalComposition(extensionRuntime, {
-    prepareModel: (scope, signal) => {
-      if (!scope.query) throw new Error('Native retrieval model requires its original query');
-      return retrievalModel.prepare(scope.query, signal ?? new AbortController().signal, scope.inference);
-    },
-    structure: structureSource, syntax: syntaxStructure,
-    prepareSemantic: async (scope, signal) => {
-      const query = scope.query;
-      if (!query || !scope.inference) throw new Error('Native semantic retrieval requires its Run identity and inference session');
-      const active = signal ?? new AbortController().signal;
-      const relative = (value: string): string => {
-        if (value.includes('\\') || value.startsWith('/') || value.includes(':') || value.includes('\0')
-          || value.split('/').includes('..')) throw new Error('Invalid native semantic root');
-        return value.split('/').filter(part => part && part !== '.').join('/');
-      };
-      const roots = (query.paths ?? await retrievalSources.pathScopes(query, active)).map(relative);
-      const authorize = async (requestSignal: AbortSignal): Promise<void> => {
-        requestSignal.throwIfAborted();
-        await retrievalSources.validate(query, requestSignal);
-        const granted = (await retrievalSources.pathScopes(query, requestSignal)).map(relative);
-        if (!roots.length || roots.some(root => !granted.some(parent => !parent || root === parent || root.startsWith(`${parent}/`)))) {
-          throw new Error('Native semantic roots are outside the Run grant');
-        }
-      };
-      await authorize(active);
-      return semanticRuntime.acquireQuery({ workspaceId: query.source.workspace_id, inference: scope.inference, roots, signal: active, authorize,
-        ...(query.source.mode === 'live_root' && query.source.resource_owner.kind === 'local' ? {}
-          : { sourceView: await retrievalSources.semanticView(query, active) }),
-        assertAuthorized: () => { active.throwIfAborted(); if (query.source.resource_owner.kind === 'local') kernelClient.sourceGrant(query); } });
-    },
-  });
-  kernelClient.setRetrievalOwner(createRetrievalOwner({ sources: retrievalSources, kernel: kernelClient, inferenceRequests: semanticInference.requests!,
-    graph: (query, roots, read) => {
-      if (query.source.resource_owner.kind !== 'local') return undefined;
-      const store = knowledgeStores.get(knowledgeStoreKeyForScope(query.source.workspace_id));
-      return store ? retrievalGraph(store, roots, read) : undefined;
-    },
-    preparePipeline: async (query, signal, inference) => retrievalComposition.prepare({ threadId: query.threadId, query, inference,
-      ...(query.source.resource_owner.kind === 'local' ? { configurationDirectory: await retrievalSources.routingWorkspace(query, signal), workspaceId: query.source.workspace_id } : {}),
-      ...(query.projectId ? { projectId: query.projectId } : {}) }, signal),
-  }));
-
+  const knowledgeEmbedding = createKnowledgeEmbeddingOwner(kernelClient, semanticInference);
+  const unsubscribeKnowledgeEmbedding = settingsRuntime.subscribe(() => knowledgeVectors?.refreshAll());
   const indexDirectories = createIndexDirectoryManager({
+    maintenanceOnly: true,
     dataDir: VARIN_DATA_DIR,
     resolve: async (directory) => {
       const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: directory });
       const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
-      if (excludedFromIndex(projectIndexScope.get(), root)) throw new Error('Bot private directories cannot be indexed');
       return { path: root, workspaceId };
     },
-    apply: async (entries) => {
-      if (!projectIndexScope.update(entries.filter((entry) => entry.state === 'active').map((entry) => entry.path),
-        entries.filter((entry) => entry.state === 'paused').map((entry) => entry.path),
-        entries.filter((entry) => entry.state === 'deleting' || entry.state === 'removed').map((entry) => entry.path))) return;
-      symbolGraphRuntime.refreshIndexScope();
-      await semanticRuntime.refreshIndexScope();
-    },
-    check: async (entry, requestSignal, { manual }) => {
-      const scope = projectIndexScope.get();
-      const signal = AbortSignal.any([scope.signal, requestSignal]);
-      signal.throwIfAborted();
-      await Promise.all([
-        symbolGraphRuntime.scanWorkspace(entry.workspaceId, { signal, manual }),
-        semanticRuntime.scanWorkspace(entry.workspaceId, { signal, manual, forceContentVerification: manual }),
-      ]);
-      signal.throwIfAborted();
-      const progress = semanticRuntime.indexStatuses().find((status) => status.workspaceId === entry.workspaceId)?.progress;
-      if (progress?.phase === 'failed') throw new Error(progress.error ?? 'Index update failed');
-    },
+    apply: async () => {},
+    check: async () => { throw new Error('Code indexes are retired'); },
     purge: async (directory, cleanup) => semanticIndexManagement.withCacheMaintenance(async () => {
       const failures: Error[] = [];
       let activePhase: IndexRemovalProgress['phase'] = 'waiting';
@@ -2617,26 +2468,32 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       };
       const saved = await semanticIndexManagement.read();
       const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
-      const scope = projectIndexScope.get();
-      const preserved = [...scope.directories, ...(scope.pausedDirectories ?? [])]
-        .filter((candidate) => insideDirectory(directory, candidate) && indexPathAllowed(scope, candidate, true));
+      const preserved: string[] = [];
       for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
         cleanup.signal.throwIfAborted();
         if (!insideDirectory(directory, resource.canonicalPath) && !insideDirectory(resource.canonicalPath, directory)) continue;
         if (preserved.some((candidate) => insideDirectory(candidate, resource.canonicalPath))) continue;
-        await attempt('stopping', () => semanticRuntime.withIndexMaintenance(resource.workspaceId, async () => {
+        await attempt('stopping', async () => {
           cleanup.signal.throwIfAborted();
           progress({ phase: 'vectors' });
           for (const semanticDirectory of caches) await purgeSemanticWorkspaceCache({ semanticDirectory,
             workspaceId: resource.workspaceId, resourceRoot: resource.canonicalPath, removedDirectory: directory, preserveDirectories: preserved });
-        }));
+        });
         if (insideDirectory(directory, resource.canonicalPath)
           && !preserved.some(candidate => insideDirectory(resource.canonicalPath, candidate))) {
           await attempt('receipts', () => semanticInference.retireIndexWorkspace(resource.workspaceId));
         }
         const storeFile = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(resource.workspaceId)}.tdb`);
-        if (fs.existsSync(storeFile)) await attempt('symbols', () => symbolGraphRuntime.purgeDirectory(resource.workspaceId,
-          directory, resource.canonicalPath, preserved, { signal: cleanup.signal, onProgress: progress }));
+        if (fs.existsSync(storeFile)) await attempt('symbols', async () => {
+          const store = await getKnowledgeStoreForScope(resource.workspaceId);
+          const relative = path.relative(resource.canonicalPath, directory).split(path.sep).join('/') || '.';
+          const roots = insideDirectory(directory, resource.canonicalPath) ? ['.'] : [relative];
+          const result = await store.purgeFileCatalog({ roots, preservedRoots: [] }, {
+            signal: cleanup.signal,
+            onProgress: value => progress({ phase: 'symbols', completed: value.completed, total: value.total, unit: value.phase }),
+          });
+          if (result.removedNodes) { progress({ phase: 'compacting' }); await store.compact(); }
+        });
       }
       if (failures.length) throw new AggregateError(failures, `Index cleanup failed: ${failures.map(failure => failure.message).join('; ')}`);
     }),
@@ -2653,20 +2510,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     onError: (error) => console.error('[ProjectIndex]', errorMessage(error)),
   });
-  const unsubscribeProjectIndex = settingsRuntime.subscribe((settings) => {
-    prewarmProject(settings);
-    void indexDirectories.syncProjects(projectDirectories(settings).filter((directory) =>
-      !excludedFromIndex(projectIndexScope.get(), directory))).catch((error) => {
-      console.error('[ProjectIndex] Scope refresh failed:', errorMessage(error));
-    });
-  });
-  registerLocalSemanticComponentRoutes(app, {
-    manager: localSemanticComponent,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
   registerSemanticIndexRoutes(app, {
     management: semanticIndexManagement,
-    runtime: semanticRuntime,
     directories: indexDirectories,
     ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
   });
@@ -2691,31 +2536,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     hostId,
     scheduler: semanticScheduler,
     cache: semanticVectorCache,
-    resolveEmbedder: semanticRuntime.resolveKnowledgeEmbedder,
+    resolveEmbedder: knowledgeEmbedding.resolve,
   });
-  catalogScan.start = (workspaceId: string): void => {
-    // Session-owned stores have no resource root to index; callers pass either
-    // the scope id or its hashed store key depending on the loop they run in.
-    if (isThreadScopeId(workspaceId) || isThreadStoreKey(workspaceId)
-      || isBotScopeId(workspaceId) || isBotStoreKey(workspaceId)) return;
-    queueMicrotask(() => {
-      void symbolGraphRuntime.scanWorkspace(workspaceId).catch((error) => {
-        console.error('[HarnessKnowledge] Catalog scan failed:', errorMessage(error));
-      });
-      void semanticRuntime.scanWorkspace(workspaceId)
-        .catch((error) => {
-          console.error('[HarnessKnowledge] Semantic scan failed:', errorMessage(error));
-        });
-    });
-  };
-  for (const storeKey of knowledgeStores.keys()) {
-    // Store keys may be hashed session scopes — only real resource roots index.
-    if (isThreadStoreKey(storeKey) || isBotStoreKey(storeKey)) continue;
-    catalogScan.start(storeKey);
-  }
   await indexDirectories.load();
-  await indexDirectories.syncProjects(projectDirectories(await readSettingsFromDisk()).filter((directory) =>
-    !excludedFromIndex(projectIndexScope.get(), directory)));
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -2724,8 +2547,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   observeKnowledgeDocumentMutation = (event) => {
     languageSupervisor.observeDocumentMutation(event);
     knowledgeContextRuntime.observeDocumentMutation(event);
-    symbolGraphRuntime.observeDocumentMutation(event);
-    semanticRuntime.observeDocumentMutation(event);
   };
   const knowledgeLanguageSubscriptions = new Map<string, { close(): void }>();
 
@@ -3072,22 +2893,17 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Semantic and graph observers still read Documents and use the kernel
       // services. Stop them while those owners are alive; otherwise each late
       // document event can race a disposed mutation authority during shutdown.
-      catalogScan.start = () => undefined;
-      await shutdown.run('unsubscribeProjectIndex', () => unsubscribeProjectIndex());
-      prewarmProjectGeneration += 1;
-      await shutdown.run('languagePrewarm.dispose', () => languagePrewarm.dispose());
-      await shutdown.run('projectIndexScope.dispose', () => projectIndexScope.dispose());
       await shutdown.run('indexDirectories.dispose', () => indexDirectories.dispose());
       observeKnowledgeDocumentMutation = () => undefined;
-      await shutdown.run('semanticRuntime.dispose', () => semanticRuntime.dispose());
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];
       await shutdown.run('memoryOrganizer.dispose', () => memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
       for (const result of await Promise.allSettled([threadTitles.close(), modelText.close()])) {
         if (result.status === 'rejected') inferenceShutdownErrors.push(result.reason);
       }
+      unsubscribeKnowledgeEmbedding();
+      await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
       await shutdown.run('semanticInference.close', () => semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
-      await shutdown.run('symbolGraphRuntime.dispose', () => symbolGraphRuntime.dispose());
       // Stop producers and drain their receipts while process grants are valid.
       // One refused exit must not prevent the other domains from shutting down.
       const processShutdown = await Promise.allSettled([
@@ -3115,7 +2931,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('documentsAuthority.dispose', () => documentsAuthority.dispose());
       await shutdown.run('Promise.allSettled', () => Promise.allSettled([...workspaceRecoveryEngines.values()].map((engine) => engine.dispose())));
       await shutdown.run('workspaceRecoveryEngines.clear', () => workspaceRecoveryEngines.clear());
-      await shutdown.run('localSemanticComponent.dispose', () => localSemanticComponent.dispose());
       await shutdown.run('kernelCompute.dispose', () => kernelCompute.dispose());
       await shutdown.run('kernelStorageAdapter.dispose', () => kernelStorageAdapter.dispose().catch((error) => console.error('[VarinKernel] Failed to revoke storage grants:', errorMessage(error))));
       await shutdown.run('kernelClient?.close', () => kernelClient?.close());

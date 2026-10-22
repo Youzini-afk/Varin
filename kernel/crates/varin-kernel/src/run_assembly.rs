@@ -16,7 +16,6 @@ pub(crate) struct RunAssembly {
     pub resources: crate::tools::KernelResourceClient,
     pub credentials: crate::credential_bridge::CredentialBridge,
     pub language: crate::language::LanguageBridge,
-    pub retrieval: crate::retrieval::RetrievalBridge,
     pub memory: crate::host_query::OwnerChannel,
     pub context: crate::host_query::OwnerChannel,
     pub resource: crate::host_query::OwnerChannel,
@@ -81,7 +80,6 @@ impl RunAssembly {
         let resources = &self.resources;
         let credential_bridge = &self.credentials;
         let language_bridge = &self.language;
-        let retrieval_bridge = &self.retrieval;
         let memory_bridge = &self.memory;
         let plan_bridge = &self.plan;
         let policy_bridge = &self.policy;
@@ -347,27 +345,27 @@ impl RunAssembly {
             ));
         }
         if let Some(binding) = tool_binding {
+            let retrieval_invocation={
+                let owner=runtime.catalog();let catalog=owner.lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?;
+                match catalog.child_task_for_thread(&run.thread_id).map_err(domain)? {
+                    Some(child) if catalog.operation(&child.operation_id).map_err(domain)?.executor.as_deref()==Some("code_retrieval")=>{
+                        let context=varin_runtime::execution::ToolExecutionContext{run_id:child.parent_run_id,origin:child.origin,operation_id:child.operation_id};
+                        Some(catalog.capture_tool_invocation(&context,&child.call_id).map_err(domain)?)
+                    },_=>None,
+                }
+            };
+            let search_scope=retrieval_invocation.map(|read|read.load()).transpose().map_err(domain)?
+                .and_then(|snapshot|snapshot.call.arguments.get("paths").cloned())
+                .map(serde_json::from_value::<Vec<String>>).transpose()?;
             launch_source = Some(binding.source_selection()?);
-            let retrieval_project_id = runtime
-                .catalog()
-                .lock()
-                .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                .run_project_id(&p.run_id)
-                .map_err(domain)?;
             let collaboration_binding = binding.clone();
             let tools = crate::tools::KernelToolExecutor::new(binding, resources.clone().with_journal_catalog(runtime.catalog()))
                 .map_err(|e| KernelError::Authorization(e.to_string()))?
                 .with_language(language_bridge.clone())
-                .with_retrieval(
-                    retrieval_bridge.clone(),
-                    retrieval_project_id,
-                    runtime
-                        .catalog()
-                        .lock()
-                        .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
-                        .nested_tools(),
-                    Some(run.branch_id.clone()),
-                );
+                .with_search_scope(search_scope)
+                .with_internal_retrieval(Arc::new(crate::agent_runtime::control_commands::ControlCommands {
+                    runtime: runtime.clone(), resources: resources.clone(), models: self.models.clone(), tools: self.tools.clone(),
+                }));
             start.binding.tool_schema_generation =
                 saved_schema_generation.unwrap_or(start.binding.configuration_generation);
             declarations.extend(tools.declarations(true));

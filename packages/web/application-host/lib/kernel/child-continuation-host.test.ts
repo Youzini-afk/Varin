@@ -34,7 +34,7 @@ it('public User continuation preserves exact predecessor and input without selec
   const requests = vi.fn(async (method: string, params: Record<string, unknown>) => {
     if (method === 'runtime.thread.inspect') return { thread_id: params.threadId, parent_thread_id: null, observer_project_ids: [],
       branches: (params.threadId === 'thread:parent' ? ['branch:parent', 'parent-fork'] : [identity.branchId, 'history-fork']).map(branch_id => ({ branch_id, active_run_id: null, head: 'old-head', latest_run: null })) };
-    if (method === 'runtime.child.for_thread' || method === 'runtime.child.inspect') return { operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId, parent_thread_id: 'thread:parent', parent_branch_id: 'branch:parent' };
+    if (method === 'runtime.child.for_thread' || method === 'runtime.child.inspect') return { operation_id: 'original-dispatch', child_thread_id: identity.threadId, child_branch_id: identity.branchId, parent_thread_id: 'thread:parent', parent_branch_id: 'branch:parent',selected_profile:accepted.selected_profile };
     if (method === 'runtime.child.continuation.accept') return structuredClone(accepted);
     if (method === 'runtime.child.execution.list') return [structuredClone(accepted)];
     if (method === 'runtime.child.execution.inspect') return structuredClone(accepted);

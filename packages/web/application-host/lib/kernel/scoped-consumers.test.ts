@@ -13,7 +13,6 @@ import {
 } from '@varin/extension-contract';
 import { createContextComposition } from './context-composition.js';
 import { createContextBudget } from './context-budget.js';
-import { createRetrievalComposition, type RetrievalSemanticLease } from './retrieval-composition.js';
 import { RunObservers } from './run-observers.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 
@@ -146,66 +145,6 @@ test('a cancelled budget decision releases its consumer leases while the origina
   assert.equal(f.services.ownerInUse(f.current.owner), true);
   finish.resolve();
   await f.services.retireOwner(f.current.owner);
-});
-
-test('retrieval owns query pins independently and keeps an older query live when a new candidate fails', { timeout: 5000 }, async () => {
-  const f = fixture({ id: 'varin.retrieval.plan', version: 1 });
-  const leases: Array<{ released: boolean }> = [];
-  const models: Array<{ released: boolean }> = [];
-  let semanticFailure = false;
-  const semanticGate = deferred<RetrievalSemanticLease>();
-  let delaySemantic = false;
-  const semanticWaiting = deferred();
-  const composition = createRetrievalComposition(f.runtime, { prepareSemantic: async (): Promise<RetrievalSemanticLease> => {
-    if (semanticFailure) throw new Error('semantic failed');
-    if (delaySemantic) { semanticWaiting.resolve(); return semanticGate.promise; }
-    const state = { released: false }; leases.push(state);
-    return { stage: { providerId: 'semantic', configurationId: 'configuration', status: 'unavailable' },
-      metadata: { bindingState: 'unavailable', providerId: null, modelId: null, configurationId: null,
-        spaceId: null, recipeId: null, publishedRevision: null, processEpoch: null, coverage: 'empty', lifecycle: 'idle' },
-      assertAvailable() { assert.equal(state.released, false); }, async validateAvailable() {}, release() { state.released = true; } };
-  }, prepareModel: async () => {
-    const state = { released: false }; models.push(state);
-    return { stage: { providerId: 'model', configurationId: 'model-configuration', status: 'unavailable' },
-      assertAvailable() { assert.equal(state.released, false); }, async validateAvailable() {}, release() { state.released = true; } };
-  } });
-  await f.publish('one', () => ({ configurationId: 'one', structure: 'disabled', semantic: 'builtin' })).finalized;
-  const firstOwner = f.current.owner;
-  const first = await composition.prepare({ threadId: 'thread' });
-  assert.equal(f.held.size, 0, 'only the independent query pin survives preparation');
-  assert.equal(f.services.ownerInUse(firstOwner), true);
-  semanticFailure = true;
-  const replacement = f.publish('two', () => ({ configurationId: 'two', structure: 'disabled', semantic: 'builtin' }));
-  await assert.rejects(composition.prepare({ threadId: 'thread' }), /semantic failed/);
-  assert.equal(f.held.size, 0);
-  assert.equal(f.services.ownerInUse(f.current.owner), false);
-  first.assertAvailable();
-  assert.equal(leases[0]!.released, false);
-  assert.equal(models[0]!.released, false);
-  first.release(); first.release();
-  await replacement.finalized;
-  assert.equal(leases[0]!.released, true);
-  assert.equal(models[0]!.released, true);
-  semanticFailure = false;
-  const second = await composition.prepare({ threadId: 'thread' });
-  assert.equal(second.selection.configurationId, 'two');
-  second.release();
-  assert.equal(f.services.ownerInUse(f.current.owner), false);
-  delaySemantic = true;
-  const controller = new AbortController();
-  const pending = composition.prepare({ threadId: 'thread' }, controller.signal);
-  const rejected = assert.rejects(pending, /cancelled/);
-  await semanticWaiting.promise;
-  controller.abort(new Error('cancelled'));
-  await rejected;
-  assert.equal(f.held.size, 0);
-  assert.equal(f.services.ownerInUse(f.current.owner), false);
-  const lateReleased = deferred();
-  semanticGate.resolve({ stage: { providerId: 'late', configurationId: 'late', status: 'unavailable' },
-    metadata: { bindingState: 'unavailable', providerId: null, modelId: null, configurationId: null,
-      spaceId: null, recipeId: null, publishedRevision: null, processEpoch: null, coverage: 'empty', lifecycle: 'idle' },
-    assertAvailable() {}, async validateAvailable() {}, release() { lateReleased.resolve(); } });
-  await lateReleased.promise;
 });
 
 function observerRuntime() {

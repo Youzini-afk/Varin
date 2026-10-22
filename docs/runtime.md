@@ -172,11 +172,11 @@ tool/result 对。持久脚本、PTY、研究 Job 和 MCP Task 各有实际寿�
 选定 Source 始终保留 `resource_owner` 和精确 workspace/view 身份：
 
 - `live_root` 绑定已准入 Host、root identity 和规范目录，通过 Documents/Storage 读当前内容。
-- `fixed_branch` 绑定不可变分支/revision，可供文件、检索和派生语言视图读取；当前不提供
-  可写物理 cwd，也不提供需要该 cwd 的 workspace MCP、shell 或 PTY 执行视图。
+- `fixed_branch` 绑定不可变分支/revision。命令首次执行时由 Storage 按需准备该版本的物理视图，
+  后续文件工具和进程共用派生目录；baseline 保留。workspace MCP 继续使用其显式执行来源合同。
 - `materialized` 绑定固定来源及原 execution copy/Run；副本缺失时明确失败，不能以同一身份换建副本。
 
-本地物理 Source 派发只读子 agent 时，直接共享父 Run 的实际执行目录。各 worktree 保留各自的目录身份；
+本地物理 Source 派发只读或 Shared 子 agent 时，直接共享父 Run 的实际执行目录。各 worktree 保留各自的目录身份；
 materialized 来源保留原 environment Run，续跑沿用同一个目录，并能读取期间发生的文件变化。
 这条路径省去整目录捕获和复制。写代码子 agent 继续准备隔离副本；fixed branch 和 managed Host 保留现有来源交接。
 

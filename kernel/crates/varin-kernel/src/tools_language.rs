@@ -195,6 +195,7 @@ impl KernelToolExecutor {
             length: None,
             start_line: None,
             end_line: None,
+            unit:None,
         });
         let value = self
             .resources
@@ -248,6 +249,7 @@ impl KernelToolExecutor {
                         length: Some(crate::protocol::MAX_BLOB_RESPONSE_BYTES as u64),
                         start_line: None,
                         end_line: None,
+                        unit:None,
                     }),
                     false,
                     cancel,
@@ -304,6 +306,7 @@ impl KernelToolExecutor {
                     length: None,
                     start_line: None,
                     end_line: None,
+                    unit:None,
                 }),
                 false,
                 Some(key),

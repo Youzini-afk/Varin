@@ -96,10 +96,10 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         } finally { await pin.release(); }
       },
     } });
-    const language = options.languageSupervisor ? createLanguageOwner({ documents: options.documents, supervisor: options.languageSupervisor,
-      sources, targetAuthority: true }) : undefined;
+    const language = createLanguageOwner({ documents: options.documents, ...(options.languageSupervisor ? {supervisor:options.languageSupervisor} : {}),
+      sources, targetAuthority: true, ...(options.structureSource ? {structure:options.structureSource} : {}) });
     const value: Services = { scope, sources, resources, packages: new Map(), controller: new AbortController(), pending: new Set(),
-      languageController: new AbortController(), languagePending: new Set(), ...(language ? { language } : {}) }; services.set(key, value); return value;
+      languageController: new AbortController(), languagePending: new Set(), language }; services.set(key, value); return value;
   };
   const releaseLanguage = (owner: Services): Promise<void> => {
     if (owner.languageClosing) return owner.languageClosing;

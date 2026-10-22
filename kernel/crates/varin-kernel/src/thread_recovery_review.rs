@@ -157,6 +157,7 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
             );
             let result = match work {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut storage_for_call.lock().unwrap(), "epoch", "host", "generation", &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let body = task.run();
                     finish_resource_blob_read(
@@ -191,7 +192,6 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
         resources,
         credentials: credentials.clone(),
         language: crate::language::LanguageBridge::new(output.clone()),
-        retrieval: crate::retrieval::RetrievalBridge::new(output.clone()),
         memory: crate::host_query::OwnerChannel::new("memory", output.clone()),
         context: crate::host_query::OwnerChannel::new("context", output.clone()),
         resource: crate::host_query::OwnerChannel::new("resource", output.clone()),

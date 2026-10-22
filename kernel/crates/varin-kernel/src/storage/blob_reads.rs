@@ -164,21 +164,33 @@ impl ImmutableReadTask {
             self.checkpoint(BlobReadPhase::Encoded)?;
             return Ok(PreparedImmutableRead { value, verified: self.verify });
         }
-        file.seek(SeekFrom::Start(self.offset))?;
-        let mut bytes = vec![0u8; self.length];
+        let next = self.offset + self.length as u64;
+        // Text file pages, like live file reads, include complete boundary
+        // characters. Generic getBlob remains an exact raw byte-range API.
+        let padded=self.file_output.is_some() && self.length>0;
+        let from=if padded {self.offset.saturating_sub(3)} else {self.offset};
+        let to=if padded {next.saturating_add(3).min(self.byte_length)} else {next};
+        file.seek(SeekFrom::Start(from))?;
+        let mut bytes = vec![0u8; (to-from) as usize];
         for part in bytes.chunks_mut(128 * 1024) {
             self.check_cancelled()?;
             file.read_exact(part)?;
         }
         self.check_cancelled()?;
-        let next = self.offset + self.length as u64;
         let mut value = json!({"hash":self.hash,"byteLength":self.byte_length,"offset":self.offset,"nextOffset":next,"eof":next >= self.byte_length});
         if let Some((path, source)) = &self.file_output {
-            match String::from_utf8(bytes) {
-                Ok(text) => value["text"] = Value::String(text),
-                Err(error) => {
-                    value["bytesBase64"] = Value::String(BASE64.encode(error.into_bytes()))
-                }
+            let left=(self.offset-from) as usize;let right=(next-from) as usize;
+            let(mut start,mut end)=(left,right);
+            if padded {
+                while start>0 && bytes.get(start).is_some_and(|byte|byte & 0xc0==0x80) {start-=1;}
+                while end<bytes.len() && bytes[end] & 0xc0==0x80 {end+=1;}
+            }
+            match std::str::from_utf8(&bytes[start..end]) {
+                Ok(text) if !text.contains('\0') => {
+                    value["text"]=json!(text);value["offset"]=json!(from+start as u64);
+                    value["nextOffset"]=json!(from+end as u64);value["eof"]=json!(from+end as u64>=self.byte_length);
+                },
+                _ => {value["bytesBase64"]=json!(BASE64.encode(&bytes[left..right]));value["encoding"]=json!("base64");}
             }
             value = json!({"path":path,"source":source,"missing":false,"content":value});
         } else {

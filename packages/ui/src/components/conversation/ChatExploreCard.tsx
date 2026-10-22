@@ -11,6 +11,8 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { explorePresentation, exploreRecord } from './explorePresentation';
 import { timelinePresentationCache } from './timelinePresentationCache';
+import { ChatRetrievalTrace, type RetrievalToolRenderer } from './ChatRetrievalTrace';
+import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
 type ExploreView = { expanded: boolean; sequence: number };
 const ExploreViews = React.createContext<Map<string, ExploreView> | undefined>(undefined);
@@ -44,7 +46,8 @@ export const ChatExploreCard: React.FC<{
   result?: ChatToolResultMessage;
   generating?: boolean;
   rawDetails: React.ReactNode;
-}> = ({ call, cwd, execution, result, generating, rawDetails }) => {
+  renderTool?: RetrievalToolRenderer;
+}> = ({ call, cwd, execution, result, generating, rawDetails, renderTool }) => {
   const { t } = useI18n();
   const presentation = React.useMemo(() => explorePresentation(execution, result, generating), [execution, result, generating]);
   const { phase, progress, snippets, details, running, returnedFiles } = presentation;
@@ -56,10 +59,7 @@ export const ChatExploreCard: React.FC<{
   const [selectedKey, setSelectedKey] = React.useState<string>();
   const [finishing, setFinishing] = React.useState(false);
   const [finishError, setFinishError] = React.useState<string>();
-  const [liveExcerpt, setLiveExcerpt] = React.useState<ExploreSearchSnippet>();
-  const [materialError, setMaterialError] = React.useState<string>();
-  const materialRequest = React.useRef(0);
-  const selected = snippets?.find(snippet => snippetKey(snippet) === selectedKey) ?? liveExcerpt;
+  const selected = snippets?.find(snippet => snippetKey(snippet) === selectedKey);
   const reducedMotion = usePrefersReducedMotion();
   const conversation = useConversationPresentation();
   React.useLayoutEffect(() => {
@@ -89,19 +89,6 @@ export const ChatExploreCard: React.FC<{
     const value = exploreRecord(item);
     return typeof value?.message === 'string' ? [value] : [];
   }) : [];
-  const readMaterial = async (viewId: string) => {
-    if (!execution?.operationId) return;
-    const request = ++materialRequest.current;
-    setMaterialError(undefined);
-    try {
-      const view = await conversation.api.readRetrievalMaterial(execution.operationId, viewId);
-      if (request !== materialRequest.current) return;
-      setSelectedKey(undefined);
-      setLiveExcerpt(view as ExploreSearchSnippet);
-    } catch {
-      if (request === materialRequest.current) setMaterialError(t('chat.explore.materialUnavailable'));
-    }
-  };
   const activity = (item: ExploreProgressActivity, recent: boolean) => <motion.li key={item.sequence}
     layout={recent && !reducedMotion ? 'position' : false}
     initial={recent && !reducedMotion && item.sequence > view.sequence ? { opacity: 0, y: 8 } : false}
@@ -125,8 +112,6 @@ export const ChatExploreCard: React.FC<{
     </span>}
     {item.kind === 'source' ? <span className="shrink-0 typography-micro">{t(`chat.explore.sourceStatus.${item.source.status}`)}</span> : null}
     {item.kind === 'read' && progress?.selectedViewIds?.includes(item.viewId) ? <span className="shrink-0 typography-micro">{t('chat.explore.selected')}</span> : null}
-    {expanded && item.kind === 'read' && execution?.operationId ? <button type="button" className="shrink-0 hover:text-foreground"
-      onClick={() => void readMaterial(item.viewId)}>{t('chat.explore.excerpt')}</button> : null}
   </motion.li>;
 
   return <section className="my-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/20" data-conversation-explore={call.id}>
@@ -141,6 +126,11 @@ export const ChatExploreCard: React.FC<{
       <Icon name="arrow-down-s" className={cn('size-3.5 shrink-0 text-muted-foreground transition-transform', expanded && 'rotate-180')} />
     </button>
     <div id={contentId} className="min-w-0 py-1">
+      {typeof details?.answer === 'string' && details.answer && <div className={cn('px-3 py-2', !expanded && 'line-clamp-4')}>
+        <MarkdownRenderer content={details.answer} messageId={`${call.id}:retrieval-answer`} />
+      </div>}
+      {execution?.operationId && renderTool && !progress && snippets === undefined
+        ? <ChatRetrievalTrace operationId={execution.operationId} running={running} expanded={expanded} renderTool={renderTool} /> : null}
       {showResults && visibleSnippets?.length ? <ol data-conversation-tool-scroll={expanded || undefined}
         tabIndex={expanded ? 0 : undefined}
         className={cn(expanded && 'max-h-72 overflow-auto overscroll-contain')} aria-label={t('chat.explore.results')}>
@@ -153,7 +143,7 @@ export const ChatExploreCard: React.FC<{
             <span className="shrink-0 font-mono typography-micro text-muted-foreground">L{snippet.startLine}–{snippet.endLine}</span>
           </button>
           {expanded ? <button type="button" className="shrink-0 typography-micro text-muted-foreground hover:text-foreground hover:underline"
-            aria-expanded={selected === snippet} onClick={() => { setLiveExcerpt(undefined); setSelectedKey(selected === snippet ? undefined : snippetKey(snippet)); }}>{t('chat.explore.excerpt')}</button> : null}
+            aria-expanded={selected === snippet} onClick={() => setSelectedKey(selected === snippet ? undefined : snippetKey(snippet))}>{t('chat.explore.excerpt')}</button> : null}
         </li>)}
       </ol> : running && visibleActivities.length > 0 ? <div className={cn('overflow-hidden', expanded && 'max-h-72 overflow-auto overscroll-contain')}
         tabIndex={expanded ? 0 : undefined} data-conversation-tool-scroll={expanded || undefined}>
@@ -161,8 +151,7 @@ export const ChatExploreCard: React.FC<{
           <AnimatePresence initial={false} mode="popLayout">{visibleActivities.map(item => activity(item, !expanded))}</AnimatePresence>
         </ol>
       </div> : null}
-      {phase !== 'cancelled' && typeof details?.error === 'string' ? <p className={cn('break-words px-3 py-2 typography-meta text-[var(--status-error)]', !expanded && 'line-clamp-2')}>{details.error}</p> : null}
-      {materialError ? <p role="status" className="px-3 py-2 typography-meta text-muted-foreground">{materialError}</p> : null}
+      {phase !== 'cancelled' && (typeof details?.error === 'string' || typeof details?.detail === 'string') ? <p className={cn('break-words px-3 py-2 typography-meta text-muted-foreground', !expanded && 'line-clamp-2')}>{String(details?.detail ?? details?.message ?? details?.error)}</p> : null}
       {expanded && selected ? <div className="mx-3 my-2 overflow-hidden rounded-lg border border-border/50">
         <div className="break-all bg-muted/20 px-3 py-2 typography-micro text-muted-foreground">
           {selected.path}:{selected.startLine}–{selected.endLine} · {t('chat.explore.snapshot')} · {selected.source} · {selected.revision}
@@ -181,7 +170,7 @@ export const ChatExploreCard: React.FC<{
     </div>
     <footer className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 px-3 py-1.5 typography-micro text-muted-foreground">
       <span role="status" className={cn('min-w-0 flex-1', warning && (phase === 'failed' || phase === 'invalid' ? 'text-[var(--status-error)]' : 'text-[var(--status-warning)]'))}>
-        {warning || running ? <>{t(`chat.explore.phase.${phase}`)}{showResults || running && progress?.receivedSnippets ? ' · ' : ''}</> : null}
+        {warning || running ? <>{t(running && !progress ? 'chat.explore.investigating' : `chat.explore.phase.${phase}`)}{showResults || running && progress?.receivedSnippets ? ' · ' : ''}</> : null}
         {showResults ? t('chat.explore.returned', { snippets: snippets.length, files: returnedFiles ?? 0 })
           : running && progress?.receivedSnippets ? t('chat.explore.received', { snippets: progress.receivedSnippets, files: progress.receivedFiles })
             : !warning && !running ? t(`chat.explore.phase.${phase}`) : null}
@@ -191,6 +180,8 @@ export const ChatExploreCard: React.FC<{
         className="shrink-0 hover:text-foreground disabled:opacity-50" onClick={() => void finish()}>
         {t(finishing ? 'chat.explore.finishing' : 'chat.explore.finish')}
       </button> : null}
+      {running && execution?.operationId && !conversation.readOnly ? <button type="button" className="shrink-0 hover:text-foreground"
+        onClick={() => void conversation.api.cancelOperation(execution.operationId!).catch(() => setFinishError(t('chat.explore.finishUnavailable')))}>{t('chat.explore.cancel')}</button> : null}
       <button type="button" className="ml-auto inline-flex shrink-0 items-center gap-0.5 hover:text-foreground" onClick={toggle}
         aria-expanded={expanded} aria-controls={contentId}>
         {t(expanded ? 'chat.explore.collapse' : 'chat.explore.expand')}

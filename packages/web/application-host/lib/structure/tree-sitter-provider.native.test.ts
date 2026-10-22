@@ -6,7 +6,6 @@ import { languageIdForPath } from "@varin/protocol";
 import { describe, expect, it, onTestFinished } from "vitest";
 import { isJsonStructureContainerKind, isStructureContainerKind } from "./kinds.js";
 import {
-  CATALOG_SCAN_LANGUAGES,
 } from "./languages.js";
 import { createTreeSitterStructureProvider } from "./native-provider.test-helper.js";
 import { NO_STRUCTURE_CAPABILITIES } from "./types.js";
@@ -374,8 +373,6 @@ describe("createTreeSitterStructureProvider", () => {
     expect(outline.symbols.find((symbol) => symbol.kind === "object" && symbol.name === "config")).toBeTruthy();
     expect(isJsonStructureContainerKind("property")).toBe(true);
     expect(isStructureContainerKind("property")).toBe(false);
-    expect(CATALOG_SCAN_LANGUAGES.has("json")).toBe(false);
-    expect(CATALOG_SCAN_LANGUAGES.has("javascript")).toBe(true);
     const imports = await provider.imports(request(text, "pkg.json"));
     expect(imports.status).toBe("unsupported");
     const calls = await provider.literalCalls(request(text, "pkg.json"));

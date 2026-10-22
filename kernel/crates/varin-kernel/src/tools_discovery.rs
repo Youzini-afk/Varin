@@ -7,15 +7,30 @@ use sha2::{Digest, Sha256};
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ListCursor { version: u8, query: String, after: String }
+struct ListCursor {
+    version: u8,
+    query: String,
+    job_id: String,
+    cursor: u64,
+    epoch: String,
+}
 fn decode_cursor(value: &str) -> Result<ListCursor, ExecutionError> {
-    let invalid = || ExecutionError::new("invalid_tool_arguments", "Invalid file_list cursor. Pass nextCursor unchanged from a previous page, or omit cursor to restart.");
-    let cursor: ListCursor = URL_SAFE_NO_PAD.decode(value).ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok()).ok_or_else(invalid)?;
-    if cursor.version != 1 || cursor.query.len() != 64 || !cursor.query.bytes().all(|c| c.is_ascii_hexdigit()) {
+    let invalid = || {
+        ExecutionError::new("invalid_tool_arguments", "Invalid file query cursor. Pass nextCursor unchanged from a previous page, or omit cursor to restart.")
+    };
+    let cursor: ListCursor = URL_SAFE_NO_PAD
+        .decode(value)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .ok_or_else(invalid)?;
+    if cursor.version != 2
+        || cursor.query.len() != 64
+        || !cursor.query.bytes().all(|c| c.is_ascii_hexdigit())
+        || cursor.job_id.is_empty()
+        || cursor.epoch.is_empty()
+    {
         return Err(invalid());
     }
-    normalized_path(&cursor.after, true).map_err(|_| invalid())?;
     Ok(cursor)
 }
 
@@ -27,6 +42,10 @@ pub(super) struct FileQueryArgs {
     paths: Option<Vec<String>>,
     globs: Option<Vec<String>>,
     query: Option<String>,
+    queries: Option<Vec<String>>,
+    format: Option<String>,
+    before: Option<u64>,
+    after: Option<u64>,
     ignore_case: Option<bool>,
     fixed_strings: Option<bool>,
     recursive: Option<bool>,
@@ -39,23 +58,104 @@ pub(super) struct FileQueryArgs {
     max_bytes: Option<usize>,
 }
 impl FileQueryArgs {
+    pub(super) fn restrict_paths(&mut self, scope: &[String]) -> Result<(), ExecutionError> {
+        let within = |path: &str, root: &str| {
+            root.is_empty()
+                || path == root
+                || path
+                    .strip_prefix(root)
+                    .is_some_and(|tail| tail.starts_with('/'))
+        };
+        let requested = self.paths.clone().unwrap_or_else(|| vec![String::new()]);
+        let selected = requested
+            .iter()
+            .flat_map(|path| {
+                scope.iter().filter_map(|root| {
+                    if within(path, root) {
+                        Some(path.clone())
+                    } else if within(root, path) {
+                        Some(root.clone())
+                    } else {
+                        None
+                    }
+                })
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        if selected.is_empty() {
+            return Err(ExecutionError::new(
+                "retrieval_scope",
+                "Requested search paths do not intersect this retrieval invocation's scope",
+            ));
+        }
+        self.paths = Some(selected.into_iter().collect());
+        Ok(())
+    }
     pub fn validate(&mut self) -> Result<(), ExecutionError> {
         for path in self.paths.as_mut().into_iter().flatten() {
             normalize_separators(path);
             normalized_path(path, true)?;
         }
         if let Some(cursor) = &self.cursor {
-            if self.search { return Err(ExecutionError::new("invalid_tool_arguments", "cursor is available for file_list")); }
             decode_cursor(cursor)?;
         }
-        if self.search && self.query.as_deref().is_none_or(str::is_empty) {
-            return Err(ExecutionError::new("invalid_tool_arguments", "file_search requires a nonempty query"));
+        if self
+            .format
+            .as_deref()
+            .is_some_and(|format| !self.search || !matches!(format, "paths" | "lines" | "windows"))
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "Search format must be paths, lines or windows",
+            ));
         }
-        if self.max_results.is_some_and(|n| n < 1 || n > 9_007_199_254_740_991) {
-            return Err(ExecutionError::new("invalid_tool_arguments", "maxResults must be a positive safe integer"));
+        if self.search
+            && (self.query.is_some() == self.queries.is_some()
+                || self.query.as_deref().is_some_and(str::is_empty)
+                || self
+                    .queries
+                    .as_ref()
+                    .is_some_and(|items| items.is_empty() || items.iter().any(String::is_empty)))
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "file_search requires either a nonempty query or a nonempty queries array",
+            ));
         }
-        if self.max_bytes.is_some_and(|n| n == 0 || n > crate::protocol::MAX_FRAME_BYTES / 2) {
-            return Err(ExecutionError::new("invalid_tool_arguments", "maxBytes must be positive and fit the protocol output budget"));
+        if !self.search && (self.queries.is_some() || self.before.is_some() || self.after.is_some())
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "queries and context lines are available for file_search",
+            ));
+        }
+        if self
+            .before
+            .into_iter()
+            .chain(self.after)
+            .any(|n| n > 9_007_199_254_740_991)
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "Context line counts must be nonnegative safe integers",
+            ));
+        }
+        if self
+            .max_results
+            .is_some_and(|n| n < 1 || n > 9_007_199_254_740_991)
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "maxResults must be a positive safe integer",
+            ));
+        }
+        if self
+            .max_bytes
+            .is_some_and(|n| n == 0 || n > crate::protocol::MAX_FRAME_BYTES / 2)
+        {
+            return Err(ExecutionError::new(
+                "invalid_tool_arguments",
+                "maxBytes must be positive and fit the protocol output budget",
+            ));
         }
         Ok(())
     }
@@ -69,12 +169,11 @@ impl FileQueryArgs {
         let mut params = json!({"workspaceId":binding.workspace_id,
             "lane":"foreground","operation":if self.search {"search"} else {"list"},
             "paths":self.paths.clone().unwrap_or_else(|| vec![String::new()]),
-            "maxResults":self.max_results.unwrap_or(100).saturating_add(if self.search {0} else {1}).min(9_007_199_254_740_991),"includeHidden":self.include_hidden.unwrap_or(true),
+            "maxResults":self.max_results.unwrap_or(100).saturating_add(1).min(9_007_199_254_740_991),"includeHidden":self.include_hidden.unwrap_or(true),
             "excludeDirectories":self.exclude_directories.clone().unwrap_or_else(|| if recursive {vec![".git".into(),"node_modules".into(),".worktrees".into()]} else {vec![]}),
             "respectGitignore":self.respect_gitignore.unwrap_or(recursive),
             "includeRevisions":self.include_revisions.unwrap_or(false),
-            "immediate":!recursive});
-        if let Some(cursor) = &self.cursor { params["startAfterPath"] = json!(decode_cursor(cursor).expect("validated cursor").after); }
+            "immediate":!recursive,"paged":true});
         if binding.source_mode != SourceMode::FixedBranch {
             params["rootId"] = json!(binding.root_id);
         } else {
@@ -84,6 +183,16 @@ impl FileQueryArgs {
         }
         if let Some(value) = &self.query {
             params["query"] = json!(value);
+        }
+        if let Some(value) = &self.queries {
+            params["queries"] = json!(value);
+        }
+        params["pathsOnly"] = json!(self.format.as_deref() == Some("paths"));
+        if let Some(value) = self.before {
+            params["before"] = json!(value);
+        }
+        if let Some(value) = self.after {
+            params["after"] = json!(value);
         }
         if let Some(value) = &self.globs {
             params["globs"] = json!(value);
@@ -98,22 +207,89 @@ impl FileQueryArgs {
     fn query_identity(&self, binding: &ToolBinding) -> String {
         let mut query = self.query_params(binding);
         let fields = query.as_object_mut().expect("query object");
-        for field in ["maxResults", "startAfterPath"] { fields.remove(field); }
+        for field in [
+            "maxResults",
+            "startAfterPath",
+            "startAfterLine",
+            "startAfterRevision",
+        ] {
+            fields.remove(field);
+        }
         query["resourceOwner"] = json!(binding.resource_owner);
+        query["format"] = json!(self.format.as_deref().unwrap_or("lines"));
         hex::encode(Sha256::digest(query.to_string().as_bytes()))
     }
     pub(super) fn validate_source(&self, binding: &ToolBinding) -> Result<(), ExecutionError> {
         if let Some(cursor) = &self.cursor {
             if decode_cursor(cursor)?.query != self.query_identity(binding) {
-                return Err(ExecutionError::new("invalid_tool_arguments", "file_list cursor belongs to different filters or source. Keep the original query or omit cursor to restart."));
+                return Err(ExecutionError::new("invalid_tool_arguments", "File query cursor belongs to different filters or source. Keep the original query or omit cursor to restart."));
             }
         }
         Ok(())
     }
-    fn next_cursor(&self, binding: &ToolBinding, path: &str) -> String {
-        URL_SAFE_NO_PAD.encode(serde_json::to_vec(&ListCursor { version: 1,
-            query: self.query_identity(binding), after: path.into() }).expect("cursor serialization"))
+    fn next_cursor(&self, binding: &ToolBinding, page: &Value, cursor: u64) -> String {
+        URL_SAFE_NO_PAD.encode(
+            serde_json::to_vec(&ListCursor {
+                version: 2,
+                query: self.query_identity(binding),
+                job_id: page["jobId"].as_str().expect("compute identity").into(),
+                cursor,
+                epoch: page["kernelEpoch"].as_str().expect("compute epoch").into(),
+            })
+            .expect("cursor serialization"),
+        )
     }
+}
+
+fn merge_windows(records: Vec<Value>) -> Vec<Value> {
+    let mut windows = Vec::<Value>::new();
+    for record in records {
+        if record["kind"] != "hit" {
+            windows.push(record);
+            continue;
+        }
+        let data = &record["data"];
+        let line = data["line"].as_u64().expect("search line");
+        let before = data["before"].as_array().cloned().unwrap_or_default();
+        let after = data["after"].as_array().cloned().unwrap_or_default();
+        let start = line - before.len() as u64;
+        let end = line + after.len() as u64;
+        let lines = before
+            .into_iter()
+            .chain(std::iter::once(data["preview"].clone()))
+            .chain(after)
+            .collect::<Vec<_>>();
+        let mut matched = json!({"line":line,"column":data["column"]});
+        if data.get("queryIndices").is_some() {
+            matched["queryIndices"] = data["queryIndices"].clone();
+        }
+        if let Some(previous) = windows.last_mut().filter(|previous| {
+            previous["kind"] == "window"
+                && previous["path"] == record["path"]
+                && previous["revision"] == record["revision"]
+                && previous["data"]["endLine"]
+                    .as_u64()
+                    .is_some_and(|last| start <= last.saturating_add(1))
+        }) {
+            let last = previous["data"]["endLine"].as_u64().unwrap();
+            previous["data"]["lines"].as_array_mut().unwrap().extend(
+                lines
+                    .into_iter()
+                    .skip(last.saturating_add(1).saturating_sub(start) as usize),
+            );
+            previous["data"]["endLine"] = json!(end.max(last));
+            previous["data"]["matches"]
+                .as_array_mut()
+                .unwrap()
+                .push(matched);
+        } else {
+            windows.push(
+                json!({"kind":"window","path":record["path"],"revision":record["revision"],
+                "data":{"startLine":start,"endLine":end,"lines":lines,"matches":[matched]}}),
+            );
+        }
+    }
+    windows
 }
 
 impl KernelResourceClient {
@@ -121,10 +297,20 @@ impl KernelResourceClient {
         &self,
         binding: &ToolBinding,
         context: &ToolExecutionContext,
+        job_id: &str,
         cancel: &CancellationToken,
     ) -> Result<ComputeWatch, ResourceFailure> {
         let (reply, watch) = mpsc::channel();
-        self.call(binding, context, ResourceOperation::ObserveCompute { reply }, false, cancel)?;
+        self.call(
+            binding,
+            context,
+            ResourceOperation::ObserveCompute {
+                job_id: job_id.into(),
+                reply,
+            },
+            false,
+            cancel,
+        )?;
         watch.recv().map_err(|_| ResourceFailure {
             error: KernelError::Storage("compute owner disconnected before observation".into()),
             dispatched: true,
@@ -134,6 +320,7 @@ impl KernelResourceClient {
         &self,
         binding: &ToolBinding,
         context: &ToolExecutionContext,
+        job_id: &str,
         method: &'static str,
         cursor: u64,
         cancel: &CancellationToken,
@@ -141,28 +328,31 @@ impl KernelResourceClient {
         self.call(
             binding,
             context,
-            ResourceOperation::ComputeControl { method, cursor },
+            ResourceOperation::ComputeControl {
+                job_id: job_id.into(),
+                kernel_epoch: None,
+                method,
+                cursor,
+            },
             false,
             cancel,
         )
     }
-    // Cancellation retains ownership until the compute worker has stopped and
-    // the Storage owner can release its immutable reader reference.
+    // Cancellation retains ownership until the exact worker has stopped.
     fn finish_query(
         &self,
         binding: &ToolBinding,
         context: &ToolExecutionContext,
+        job_id: &str,
         stop: bool,
         watch: &ComputeWatch,
     ) -> Result<(), ResourceFailure> {
         let cleanup = CancellationToken::default();
         if stop {
-            self.query_control(binding, context, "compute.cancel", 0, &cleanup)?;
-            // Cleanup has independent cancellation ownership. A cancelled tool
-            // still waits for the exact worker's terminal fact before releasing pins.
+            self.query_control(binding, context, job_id, "compute.cancel", 0, &cleanup)?;
             watch.wait(0, true, &cleanup);
         }
-        self.query_control(binding, context, "compute.release", 0, &cleanup)
+        self.query_control(binding, context, job_id, "compute.release", 0, &cleanup)
             .map(|_| ())
     }
     pub(super) fn query(
@@ -172,24 +362,73 @@ impl KernelResourceClient {
         args: &FileQueryArgs,
         cancel: &CancellationToken,
     ) -> Result<Value, ResourceFailure> {
-        let mut page = self.call(
-            binding,
-            context,
-            ResourceOperation::FileQuery(args.clone()),
-            false,
-            cancel,
-        )?;
-        // Acquire with independent control so cancellation racing start cannot
-        // abandon a successfully admitted compute reader before cleanup owns it.
-        let watch = match self.observe_query(binding, context, &CancellationToken::default()) {
-            Ok(watch) => watch,
-            Err(error) => {
-                // Revocation cancels and sweeps the job at its existing owner.
-                let _ = self.query_control(binding, context, "compute.cancel", 0, &CancellationToken::default());
-                return Err(error);
+        let continuation = args
+            .cursor
+            .as_deref()
+            .map(|value| decode_cursor(value).expect("validated cursor"));
+        let job_id = continuation
+            .as_ref()
+            .map(|value| value.job_id.as_str())
+            .unwrap_or(&context.operation_id);
+        let mut cursor = continuation.as_ref().map_or(0, |value| value.cursor);
+        let mut page = if let Some(previous) = &continuation {
+            let page = self
+                .call(
+                    binding,
+                    context,
+                    ResourceOperation::ComputeControl {
+                        job_id: job_id.into(),
+                        kernel_epoch: Some(previous.epoch.clone()),
+                        method: "compute.read",
+                        cursor,
+                    },
+                    false,
+                    cancel,
+                )
+                .map_err(|error| ResourceFailure {
+                    error: KernelError::Operation(format!(
+                        "File query continuation is unavailable: {}. Restart without cursor.",
+                        error.error
+                    )),
+                    dispatched: error.dispatched,
+                })?;
+            if page["kernelEpoch"].as_str() != Some(&previous.epoch) {
+                return Err(ResourceFailure {
+                    error: KernelError::Operation(
+                        "File query cursor belongs to an earlier kernel. Restart without cursor."
+                            .into(),
+                    ),
+                    dispatched: true,
+                });
             }
+            page
+        } else {
+            self.call(
+                binding,
+                context,
+                ResourceOperation::FileQuery(args.clone()),
+                false,
+                cancel,
+            )?
         };
+        // The original job/grant remains the owner across tool calls.
+        let watch =
+            match self.observe_query(binding, context, job_id, &CancellationToken::default()) {
+                Ok(watch) => watch,
+                Err(error) => {
+                    let _ = self.query_control(
+                        binding,
+                        context,
+                        job_id,
+                        "compute.cancel",
+                        0,
+                        &CancellationToken::default(),
+                    );
+                    return Err(error);
+                }
+            };
         let mut records = Vec::new();
+        let mut query_errors = Vec::new();
         let mut bytes = 2usize;
         let budget = args.max_bytes.unwrap_or(65536);
         let result = (|| loop {
@@ -199,7 +438,7 @@ impl KernelResourceClient {
                     dispatched: true,
                 });
             }
-            let mut truncated = false;
+            let mut limited = false;
             for record in page["records"].as_array().into_iter().flatten() {
                 let size = serde_json::to_vec(record)
                     .map_err(|error| ResourceFailure {
@@ -208,58 +447,87 @@ impl KernelResourceClient {
                     })?
                     .len()
                     + 1;
-                if (bytes.saturating_add(size) > budget && !records.is_empty()) || (!args.search && records.len() >= args.max_results.unwrap_or(100) as usize) {
-                    truncated = true;
+                if (bytes.saturating_add(size) > budget
+                    && (!records.is_empty() || !query_errors.is_empty()))
+                    || records.len() >= args.max_results.unwrap_or(100) as usize
+                {
+                    limited = true;
                     break;
                 }
+                // Cursor counts every raw record, including per-expression failures.
+                cursor += 1;
                 bytes += size;
+                if record["kind"] == "query-error" {
+                    query_errors.push(record["data"].clone());
+                    continue;
+                }
                 let mut record = record.clone();
                 if !args.search {
-                    if record["revision"] == "" { record.as_object_mut().unwrap().remove("revision"); }
+                    if record["revision"] == "" {
+                        record.as_object_mut().unwrap().remove("revision");
+                    }
                     if record["data"]["state"]["objectHash"] == "" {
-                        record["data"]["state"].as_object_mut().unwrap().remove("objectHash");
+                        record["data"]["state"]
+                            .as_object_mut()
+                            .unwrap()
+                            .remove("objectHash");
                     }
                 }
                 records.push(record);
             }
-            let terminal = !matches!(page["status"].as_str(), Some("queued" | "running"));
-            let cursor = page["nextCursor"].as_u64().expect("compute page cursor");
-            if truncated || (terminal && page["nextCursor"] == page["endCursor"]) {
-                if page["status"] == "failed" {
-                    return Err(ResourceFailure {
-                        error: KernelError::Operation(
-                            page["message"]
-                                .as_str()
-                                .unwrap_or("Discovery failed")
-                                .into(),
-                        ),
-                        dispatched: true,
-                    });
+            let terminal = page["scanComplete"] == true;
+            let drained = page["endCursor"].as_u64() == Some(cursor);
+            limited |= records.len() >= args.max_results.unwrap_or(100) as usize
+                || (bytes >= budget && (!records.is_empty() || !query_errors.is_empty()));
+            if page["status"] == "failed" || page["status"] == "cancelled" {
+                return Err(ResourceFailure {
+                    error: KernelError::Operation(
+                        page["message"]
+                            .as_str()
+                            .unwrap_or("Discovery failed")
+                            .into(),
+                    ),
+                    dispatched: true,
+                });
+            }
+            if limited || (terminal && drained) {
+                let next =
+                    (!(terminal && drained)).then(|| args.next_cursor(binding, &page, cursor));
+                let output = json!({
+                    "source":page["source"],
+                    "status":if next.is_some() {"partial"} else {page["status"].as_str().unwrap_or("failed")},
+                    "records":if args.format.as_deref()==Some("windows") {merge_windows(records)} else {records},
+                    "queryErrors":query_errors,"scannedFiles":page["scannedFiles"],
+                    "scope":{"paths":args.paths.clone().unwrap_or_else(||vec![String::new()]),"globs":args.globs,
+                        "includeHidden":args.include_hidden.unwrap_or(true),"respectGitignore":args.respect_gitignore.unwrap_or(args.recursive.unwrap_or(args.search)),
+                        "excludeDirectories":args.query_params(binding)["excludeDirectories"]},
+                    "format":args.format.as_deref().unwrap_or("lines"),
+                    "truncated":next.is_some() || page["status"]=="partial",
+                    "scanComplete":terminal && drained && matches!(page["status"].as_str(),Some("ready"|"empty")),
+                    "pageComplete":!limited || (terminal && drained),
+                    "nextCursor":next,
+                    "message":if next.is_some() {json!("Continue the original query with nextCursor and the same filters; page size may change. Counts describe observed results, not a whole-source total.")}
+                        else {page["message"].clone()}
+                });
+                if next.is_none() {
+                    self.finish_query(binding, context, job_id, false, &watch)?;
                 }
-                let next = (!args.search && truncated).then(|| records.last().and_then(|record|record["path"].as_str())).flatten()
-                    .map(|path| args.next_cursor(binding, path));
-                let output = json!({"source":if binding.source_mode == SourceMode::FixedBranch {
-                        json!(binding.file_source)
-                    } else { binding.physical_source() },
-                        "status":if truncated {"partial"} else {page["status"].as_str().unwrap_or("failed")},
-                        "records":records,"scannedFiles":page["scannedFiles"],
-                        "truncated":truncated || page["status"] == "partial",
-                        "nextCursor":next,
-                        "message":if next.is_some() {json!("More paths are available; pass nextCursor as cursor with the same filters")}
-                            else if truncated {json!("Output byte budget reached; narrow paths/globs/query or increase maxBytes")} else {page["message"].clone()}});
-                self.finish_query(binding, context, !terminal, &watch)?;
                 return Ok(output);
             }
-            // A nonempty page must first be acknowledged by the next read to
-            // free producer credit; only an already-empty page can park safely.
-            if page["records"].as_array().is_none_or(Vec::is_empty) && !watch.wait(cursor, false, cancel) {
-                return Err(ResourceFailure { error: KernelError::Cancelled, dispatched: true });
+            // A read acknowledges consumed records and resumes a paused producer
+            // only after its buffered page has drained.
+            if page["records"].as_array().is_none_or(Vec::is_empty)
+                && !watch.wait(cursor, false, cancel)
+            {
+                return Err(ResourceFailure {
+                    error: KernelError::Cancelled,
+                    dispatched: true,
+                });
             }
-            page = self.query_control(binding, context, "compute.read", cursor, cancel)?;
+            page = self.query_control(binding, context, job_id, "compute.read", cursor, cancel)?;
         })();
         if result.is_err() {
-            // Grant revocation itself cancels and sweeps owned compute jobs.
-            let _ = self.finish_query(binding, context, true, &watch);
+            let _ = self.finish_query(binding, context, job_id, true, &watch);
         }
         result
     }
@@ -267,7 +535,7 @@ impl KernelResourceClient {
 
 pub(super) fn schema(search: bool) -> Value {
     let mut schema = json!({"type":"object","additionalProperties":false,
-        "description":if search {"Search text in the selected source. Returns file paths, source revisions, line/column and matching text. Narrow paths or globs when results are partial."} else {"List a directory in the selected source. Omit paths for the root. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
+        "description":if search {"Search text in the selected source. Supply query or queries; a batch scans each file once and reports matching queryIndices. Returns exact paths, revisions and line positions. Use nextCursor with the same filters to continue; page size may change."} else {"List a directory in the selected source. Omit paths for the root. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
         "properties":{
             "paths":{"type":"array","items":{"type":"string"},"description":"Explicit files or directories, including ignored paths."},
             "globs":{"type":"array","items":{"type":"string"}},
@@ -279,10 +547,17 @@ pub(super) fn schema(search: bool) -> Value {
             "excludeDirectories":{"type":"array","items":{"type":"string"},"description":"Directory names to skip within selected paths. Recursive queries default to .git, node_modules and .worktrees; non-recursive queries default to none."},
             "respectGitignore":{"type":"boolean","description":"Apply ignore rules within selected paths; defaults to recursive."},
             "includeRevisions":{"type":"boolean","default":false},
-            "cursor":{"type":"string","description":"Opaque file_list continuation from nextCursor; pass it unchanged with the original source, paths and filters. Page size may change. Live files may change between pages."},
+            "cursor":{"type":"string","description":"Opaque continuation from nextCursor; pass it unchanged with the original source, paths and filters. Page size may change. Changed search continuation files require a new query."},
             "maxResults":{"type":"integer","minimum":1,"maximum":9_007_199_254_740_991i64,"default":100},
             "maxBytes":{"type":"integer","minimum":1,"maximum":crate::protocol::MAX_FRAME_BYTES / 2,"default":65536}},
-        "required":if search {vec!["query"]} else {vec![]}});
-    if search { schema["properties"].as_object_mut().unwrap().remove("cursor"); }
+        "required":Vec::<String>::new()});
+    if search {
+        schema["properties"]["format"] = json!({"type":"string","enum":["paths","lines","windows"],"default":"lines","description":"Return matching files, matching lines, or merged overlapping context windows. Pagination counts original matches; scope and completeness remain explicit."});
+        schema["properties"]["queries"] = json!({"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Expressions to search together; queryIndices refer to their zero-based positions. Mutually exclusive with query."});
+        for name in ["before", "after"] {
+            schema["properties"][name] = json!({"type":"integer","minimum":0,"description":"Context lines adjacent to each match."});
+        }
+        schema["oneOf"] = json!([{"required":["query"],"not":{"required":["queries"]}},{"required":["queries"],"not":{"required":["query"]}}]);
+    }
     schema
 }

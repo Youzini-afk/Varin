@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { StorageCategoryId, StorageCleanupCandidate, StorageCleanupPreview, StorageCleanupReceipt, StorageDevice, StorageInventory, StorageScope } from '@varin/application-client';
 import type { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
 import { measureDirectory, within } from './measure.js';
+import { inspectRetiredCodeModel, removeRetiredCodeModel } from './retired-code-model.js';
 
 type IndexManagement = ReturnType<typeof createSemanticIndexManagement>;
 interface Options {
@@ -130,6 +131,11 @@ export function createStorageService(options: Options) {
     // never appear as workspace-exclusive bytes or a workspace cleanup action.
     if (scope.kind !== 'workspace') {
       try {
+        const model = await inspectRetiredCodeModel(options.dataDirectory);
+        if (model?.bytes) candidates.push({ id: randomUUID(), kind: 'retired-code-model', location: model.directory,
+          bytes: model.bytes, count: model.files.length, fingerprint: model.fingerprint });
+      } catch (error) { issues.push(message(error)); }
+      try {
         const health = await options.kernel.health({ gcPreview: true });
         if (!health.gcPreview) issues.push('Native storage cleanup preview is unavailable');
         else if (health.gcPreview.objects.length) candidates.push({ id: randomUUID(), kind: 'unreferenced-objects',
@@ -186,6 +192,9 @@ export function createStorageService(options: Options) {
             if (typeof bytes !== 'number' || typeof count !== 'number' || !Array.isArray(result.cleanupFailures)) throw new Error('Native storage returned an incomplete cleanup receipt');
             receipt.bytesReclaimed += bytes; receipt.objectsDeleted += count;
             if (result.cleanupFailures.length) throw new Error(result.cleanupFailures.map(String).join('; '));
+          } else if (item.kind === 'retired-code-model') {
+            const result = await removeRetiredCodeModel(options.dataDirectory, item.fingerprint!);
+            receipt.bytesReclaimed += result.bytesReclaimed; receipt.objectsDeleted += result.filesDeleted;
           } else {
             const result = await options.indexes.removeRetainedScope(item.directory!, indexRevision!, { ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}), fingerprint: item.fingerprint! });
             receipt.bytesReclaimed += result.bytesReclaimed; receipt.objectsDeleted += result.filesDeleted; indexRevision = result.revision;

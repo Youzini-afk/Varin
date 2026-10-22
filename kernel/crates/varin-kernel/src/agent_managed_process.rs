@@ -278,8 +278,9 @@ pub(super) fn close_ended_environments(
         let mut db = catalog
             .lock()
             .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
-        db.closing_script_environments()
-            .map_err(domain)?
+        let mut closing = db.closing_script_environments().map_err(domain)?;
+        closing.extend(db.closing_retrieval_processes().map_err(domain)?);
+        closing
             .into_iter()
             .map(|id| db.operation(&id).map(|op| (id, op.run_id)))
             .collect::<Result<Vec<_>, _>>()

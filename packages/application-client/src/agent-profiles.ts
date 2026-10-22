@@ -25,7 +25,7 @@ export interface AgentProfileDefaults {
   name: string;
   description: string;
   instructions: string;
-  worktree: 'none' | 'isolated';
+  worktree: 'none' | 'shared' | 'isolated';
   tools: string[];
 }
 
@@ -42,7 +42,7 @@ export interface AgentProfileView {
     model: ModelSelection | null;
     modelSource: 'inherit' | 'selected' | 'unconfigured';
     modelSettings?: HarnessAgentModelSettings;
-    worktree: 'none' | 'isolated';
+    worktree: 'none' | 'shared' | 'isolated';
     workFocus: WorkFocusId[];
   };
   tools: AgentToolsView;

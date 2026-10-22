@@ -30,6 +30,7 @@ pub struct PreparedChildAdmission {
     pub(super) parent_tools_ref: Value,
     pub(super) operation_revision: u64,
     pub(super) call_id: String,
+    pub(super) internal_retrieval: bool,
     _publication: crate::content::ContentPublication,
 }
 impl ChildAdmissionPreparation {
@@ -54,8 +55,7 @@ impl ChildAdmissionPreparation {
             super::tool_content::ToolIntent::from_operation(&operation)?.load(&self.content)?;
         if admitted.origin != self.context.origin
             || operation.run_id != self.context.run_id
-            || admitted.call.name != collaboration::DISPATCH_TOOL
-            || admitted.call.arguments != serde_json::to_value(&self.input)?
+            || super::dispatch::DispatchInput::from_tool_call(&admitted.call.name, &admitted.call.arguments)? != self.input
         {
             return Err(RuntimeError::Conflict(
                 "dispatch differs from its admitted call".into(),
@@ -87,6 +87,12 @@ impl ChildAdmissionPreparation {
                 {
                     ()
                 }
+                ChildSourceRoot::Derived { pin, root, view_id }
+                    if handoff.source.mode == SourceMode::FixedBranch
+                        && pin.source == handoff.source
+                        && !pin.pin_id.is_empty() && !pin.root.is_empty()
+                        && !root.root_id.is_empty() && !root.canonical_root.is_empty()
+                        && view_id == &format!("run-execution:{}", handoff.source_run_id.as_deref().unwrap_or(&self.context.run_id)) => {}
                 _ => {
                     return Err(RuntimeError::Invalid(
                         "child source handoff is inconsistent".into(),
@@ -98,6 +104,7 @@ impl ChildAdmissionPreparation {
         launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
         Ok(PreparedChildAdmission {
+            internal_retrieval: admitted.call.name == "code_retrieval",
             avatar: self.launch.selected_profile.avatar.clone(),
             source_agent:self.input.source_agent.clone(),
             context: self.context,
@@ -250,6 +257,43 @@ impl ChildInputPreparation {
     }
 }
 
+pub(super) struct RetrievalPartialRead {
+    pub request_id:String,
+    reference:Value,
+    content:crate::content::ContentStore,
+    _publication:crate::content::ContentPublication,
+}
+impl RetrievalPartialRead {
+    pub fn load(self)->Result<Option<(String,String)>> {
+        let output=self.content.load(&self.reference)?;
+        let record=&output["record"];
+        let mut parts=Vec::new();let mut completed=std::collections::BTreeSet::new();
+        for item in record["items"].as_array().into_iter().flatten() {
+            if item["content"]["kind"]=="text" {
+                if let Some(text)=item["content"]["text"].as_str() {parts.push(text.to_owned());}
+                if let Some(id)=item["id"].as_str(){completed.insert(id.to_owned());}
+            }
+        }
+        let mut streaming=Vec::<(String,String)>::new();
+        for delta in record["interrupted_deltas"].as_array().into_iter().flatten() {
+            if delta["kind"]!="text_delta" {continue;}
+            let (Some(id),Some(text))=(delta["item_id"].as_str(),delta["text"].as_str()) else {continue};
+            if completed.contains(id){continue;}
+            if let Some((_,prior))=streaming.iter_mut().find(|(item,_)|item==id) {prior.push_str(text);}
+            else {streaming.push((id.to_owned(),text.to_owned()));}
+        }
+        parts.extend(streaming.into_iter().map(|(_,text)|text));
+        let text=parts.join("\n");Ok((!text.is_empty()).then_some((self.request_id,text)))
+    }
+}
+impl Catalog {
+    pub(super) fn capture_retrieval_partial(&self,run:&str)->Result<Option<RetrievalPartialRead>> {
+        let row:Option<(String,String)>=self.db.query_row("SELECT s.id,o.body FROM model_steps s JOIN model_outputs o ON o.request_id=s.id WHERE s.run_id=?1 AND s.state IN ('cancelled','interrupted') ORDER BY s.rowid DESC LIMIT 1",
+            [run],|row|Ok((row.get(0)?,row.get(1)?))).optional()?;
+        row.map(|(request_id,body)|Ok(RetrievalPartialRead{request_id,reference:serde_json::from_str(&body)?,content:self.content.clone(),_publication:self.content.begin_publication()})).transpose()
+    }
+}
+
 pub struct ChildReportRead {
     execution_id: String,
     operation_id: String,
@@ -305,6 +349,18 @@ impl ChildReportRead {
     }
     pub fn load(self) -> Result<collaboration::ChildReportPage> {
         self.page(false, &|| false)
+    }
+    /// Native final delivery reuses the immutable assistant body, without another model call.
+    pub fn answer(self) -> Result<String> {
+        let (body, _) = self.content.load_stored_history_payload(&self.item.content, &|| false)?;
+        let conversation: crate::execution::ConversationItem<crate::output::StoredMedia> = serde_json::from_value(body)?;
+        match conversation.content {
+            crate::execution::Content::Text { text } => Ok(text),
+            crate::execution::Content::Output { output } => Ok(output.parts.iter().filter_map(|part| match part {
+                crate::output::OutputPart::Text { text } => Some(text.as_str()), _ => None,
+            }).collect::<Vec<_>>().join("\n")),
+            _ => Err(RuntimeError::Invalid("Retrieval report is not assistant output".into())),
+        }
     }
     pub(super) fn summary(self) -> Result<collaboration::ChildReportPage> {
         self.page(true, &|| false)

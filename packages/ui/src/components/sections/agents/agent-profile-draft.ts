@@ -13,7 +13,7 @@ export interface AgentProfileDraft {
   thinkingLevel: ThinkingLevel | 'inherit';
   tools: string;
   toolsChange: 'unchanged' | 'explicit' | 'reset';
-  worktree: 'none' | 'isolated';
+  worktree: 'none' | 'shared' | 'isolated';
   workFocus: WorkFocusId[];
 }
 export interface RetainedAgentProfileDraft { values: AgentProfileDraft; revision: string }

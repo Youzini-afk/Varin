@@ -371,10 +371,10 @@ export class ThreadCollaboration {
     });
   }
   private async settle(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
-    if (!child.receipt || child.source?.kind !== 'ready' || child.source.selection.mode !== 'materialized') return child;
+    if (!child.receipt || child.source?.kind !== 'ready' || !['materialized','fixed_branch'].includes(child.source.selection.mode)) return child;
     const { kernel, runtime, storageAdapter, resolveLiveSource } = this.owners;
     const source = this.childSource(child);
-    if (source?.mode !== 'materialized') throw new Error('Writable child lost its private source');
+    if (!source || source.mode === 'live_root' || !source.branchId) throw new Error('Child lost its original source');
     const runId = child.receipt.run_id;
     // The terminal notification withdraws this Run's language reference, but is not
     // a process exit receipt. Capture waits on the same supervisor's actual drain.
@@ -504,7 +504,7 @@ export class ThreadCollaboration {
       const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
         childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
       try {
-        if (handoff.root.kind === 'fixed') {
+        if (handoff.root.kind === 'fixed' || handoff.root.kind === 'derived') {
           await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.execution_id}`,
             branchId: handoff.root.pin.source.branch_id!, pinId: handoff.root.pin.pin_id }, signal);
         }

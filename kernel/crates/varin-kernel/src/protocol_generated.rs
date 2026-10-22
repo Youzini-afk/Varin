@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 57;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 58;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1873,6 +1873,14 @@ pub(crate) struct KernelMaterializedViewParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelExecutionViewParams {
+    pub(crate) workspace_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) revision: i64,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelRecordPutParams {
     pub(crate) operation_id: String,
     pub(crate) record_id: String,
@@ -2462,6 +2470,11 @@ pub(crate) struct KernelComputeStartParams {
     pub(crate) include_tracked: Option<bool>,
     pub(crate) include_revisions: Option<bool>,
     pub(crate) start_after_path: Option<String>,
+    pub(crate) start_after_line: Option<i64>,
+    pub(crate) start_after_revision: Option<String>,
+    pub(crate) queries: Option<Vec<String>>,
+    pub(crate) paths_only: Option<bool>,
+    pub(crate) paged: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -2469,6 +2482,7 @@ pub(crate) struct KernelComputeStartParams {
 pub(crate) struct KernelComputeReadParams {
     pub(crate) workspace_id: String,
     pub(crate) job_id: String,
+    pub(crate) kernel_epoch: Option<String>,
     pub(crate) cursor: i64,
     pub(crate) max_bytes: Option<i64>,
 }
@@ -4432,6 +4446,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         }
         "file.materializedView.check" => {
             serde_json::from_value::<KernelMaterializedViewParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "file.executionView.inspect" => {
+            serde_json::from_value::<KernelExecutionViewParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

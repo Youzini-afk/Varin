@@ -1,4 +1,5 @@
 const en = {
+  retiredModel: 'Retired code embedding component', retiredModelDescription: 'Removes its model, runtime and installation cache. Current retrieval uses ordinary models; speech and Bot knowledge resources remain available.',
   device: 'Device', scope: 'View', all: 'All workspaces and shared data', shared: 'Shared and unattributed data', current: 'Current Agent host', requestedScope: 'Requested workspace',
   summary: 'Varin managed data', knownSubtotal: 'Measured subtotal; some paths are unavailable', exclusive: 'Attributable workspace data', refresh: 'Rescan', scanning: 'Scanning…', scanned: 'Measured', partial: 'Incomplete scan',
   recovery: 'Recovery and working-state objects', copies: 'Managed working copies', conversations: 'Conversations and attachments', indexes: 'Retrieval and index caches', models: 'Shared model resources', other: 'Other application data',
@@ -27,6 +28,7 @@ const en = {
   issues: 'Measurement details', details: 'More about these numbers', selected: 'selected',
 };
 const zh: typeof en = {
+  retiredModel: '旧代码嵌入组件', retiredModelDescription: '清理它的模型、运行库和安装缓存。当前检索使用普通模型；语音和 Bot 知识资源继续保留。',
   device: '设备', scope: '查看范围', all: '全部工作区与共享数据', shared: '共享与未分摊数据', current: '当前 Agent 主机', requestedScope: '请求的工作区',
   summary: 'Varin 受管数据', knownSubtotal: '已测量小计，部分路径暂不可读', exclusive: '工作区可归属数据', refresh: '重新扫描', scanning: '扫描中…', scanned: '已统计', partial: '统计不完整',
   recovery: '恢复与工作状态对象', copies: '独立工作副本', conversations: '对话与附件', indexes: '检索与索引缓存', models: '共享模型资源', other: '其他应用数据',

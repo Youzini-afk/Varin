@@ -34,24 +34,6 @@ export { createRemoteEmbedder } from "./remote-embedder.js";
 export { createSemanticBackend, embeddingSettingsFromSnapshot } from "./backend.js";
 export { createEmbedScheduler } from "./embed-scheduler.js";
 export { createVectorCache } from "./vector-cache.js";
-export { pinSemanticQueryView } from "./query-view.js";
-export type { SemanticQueryView } from "./query-view.js";
-export {
-  resolveModelPackAtComponentRoot,
-  resolveInstalledModelPack,
-} from "./model-store.js";
-export type { ResolvedModelPack, SemanticModelRecipe } from "./model-store.js";
-export { createLocalSemanticEmbedder } from "./local-embedder.js";
-export {
-  LOCAL_SEMANTIC_COMPONENT_ID,
-  LOCAL_SEMANTIC_TRANSFORMERS_ENTRY,
-  createLocalSemanticComponentManager,
-  localSemanticComponentUrl,
-} from "./local-component.js";
-export type {
-  LocalSemanticComponentManager,
-  LocalSemanticComponentManifest,
-} from "./local-component.js";
 export { createSemanticGenerationStore } from "./store.js";
 export type {
   SemanticCheckpoint,
@@ -60,12 +42,3 @@ export type {
   SemanticIndexLifecycle,
   SemanticQueryCoverage,
 } from "./store.js";
-export { isSemanticIndexPath, createSemanticIndexRuntime } from "./runtime.js";
-export type {
-  SemanticIndexRuntime,
-  SemanticIndexRuntimeOptions,
-  SemanticIndexStatus,
-  SemanticQueryOverlay,
-  SemanticQueryStatus,
-  SemanticSearchRequest,
-} from "./runtime.js";

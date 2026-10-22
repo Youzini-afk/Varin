@@ -15,7 +15,8 @@ Agent Thread API 显式选择来源 owner、mode 和内容。本地与 managed-h
 来源发现是只读操作，知道目录或 workspace 登记并不授予执行权限。
 
 - **FixedBranch**：读取不可变 branch/revision。原目录移动后，只要当前登记/信任和原对象仍有效，仍能读固定内容。
-  它没有可写物理 cwd，目前不支持需要 cwd 的 MCP 执行。
+  命令首次受理时按需准备该版本的执行目录，随后文件工具和进程共用这个视图；旧证据保留原版本。
+  workspace MCP 继续要求其显式执行来源。
 - **Materialized**：绑定原 environment/Run、受管物理副本和不可变 baseline。副本丢失或身份变化时，不静默重造同一执行。
 - **LiveRoot**：使用当前准入的物理根，选择已保存文件，不是不可变草稿覆盖，也不承诺隔离任意外部 writer。
 - **无来源**：所选能力不需文件/进程权限时有效；纯能力 child 或对话无需伪造项目。

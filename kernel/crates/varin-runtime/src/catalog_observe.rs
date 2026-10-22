@@ -2,14 +2,36 @@
 use super::*;
 use std::sync::mpsc::SyncSender;
 
+/// A notification carries no authority or payload; callers inspect committed state
+/// after taking Catalog's lock. Dropping a worker removes its observer immediately.
+pub struct EventSubscription {
+    observers: std::sync::Arc<std::sync::Mutex<std::collections::BTreeMap<String, SyncSender<()>>>>,
+    id: String,
+}
+impl Drop for EventSubscription {
+    fn drop(&mut self) { self.observers.lock().unwrap_or_else(|e| e.into_inner()).remove(&self.id); }
+}
+
 impl Catalog {
     /// The hook sends no transaction data. The receiver reads the committed cursor under the
     /// Catalog owner lock after the transaction ends; a rollback is only a harmless wakeup.
     pub fn set_event_notifier(&self, sender: SyncSender<()>) -> Result<()> {
+        self.event_observers.lock().unwrap_or_else(|e| e.into_inner()).insert("host".into(), sender);
+        Ok(())
+    }
+    pub fn subscribe_events(&self, sender: SyncSender<()>) -> EventSubscription {
+        let id = uuid::Uuid::new_v4().to_string();
+        self.event_observers.lock().unwrap_or_else(|e| e.into_inner()).insert(id.clone(), sender);
+        EventSubscription { observers: self.event_observers.clone(), id }
+    }
+    pub(super) fn install_event_notifier(&self) -> Result<()> {
+        let observers = self.event_observers.clone();
         self.db.update_hook(Some(
             move |action, _database: &str, table: &str, _row: i64| {
                 if action == rusqlite::hooks::Action::SQLITE_INSERT && table == "events" {
-                    let _ = sender.try_send(());
+                    for sender in observers.lock().unwrap_or_else(|e| e.into_inner()).values() {
+                        let _ = sender.try_send(());
+                    }
                 }
             },
         ))?;
@@ -27,7 +49,7 @@ impl Catalog {
     }
     pub fn list_threads(&self) -> Result<Vec<Value>> {
         let ids: Vec<String> = {
-            let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE NOT EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.rowid")?;
+            let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE NOT EXISTS(SELECT 1 FROM runs r JOIN branches b ON b.id=r.branch_id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1')  AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') ORDER BY t.rowid")?;
             let rows = statement.query_map([], |r| r.get(0))?;
             rows.collect::<std::result::Result<_, _>>()?
         };

@@ -1,6 +1,5 @@
 import { languageIdForPath } from "@varin/protocol";
 import { structureContainerPredicate } from "./kinds.js";
-import { outlineCoversHitLines } from "./slice.js";
 import type {
   StructureCapabilities,
   StructureClassifyRequest,
@@ -14,7 +13,14 @@ import type {
   StructureProvider,
   StructureSource,
   StructureStatus,
+  StructureSymbol,
 } from "./types.js";
+
+function outlineCoversHitLines(symbols: readonly StructureSymbol[], lines: readonly number[], isContainer: (kind:string)=>boolean): boolean {
+  const contains=(items:readonly StructureSymbol[],line:number):boolean=>items.some(item=>
+    (isContainer(item.kind) && item.range.startLine<=line && item.range.endLine>=line) || contains(item.children ?? [],line));
+  return lines.length>0 && lines.every(line=>contains(symbols,line));
+}
 
 const STATUS_PRIORITY: Record<StructureStatus, number> = {
   ready: 0,

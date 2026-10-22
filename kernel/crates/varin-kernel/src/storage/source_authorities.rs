@@ -859,7 +859,7 @@ impl Storage {
 }
 
 impl Storage {
-    fn source_authority_for_grant(
+    pub(super) fn source_authority_for_grant(
         &self,
         grant_id: &str,
     ) -> Result<Option<AuthorityRecord>, KernelError> {

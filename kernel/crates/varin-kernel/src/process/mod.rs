@@ -99,6 +99,7 @@ struct ProcessControl {
     input: Arc<Mutex<Option<SyncSender<Value>>>>,
     run_id: Option<String>,
     state: Mutex<ControlState>,
+    observers: Mutex<HashMap<String, SyncSender<()>>>,
 }
 impl ProcessControl {
     fn apply(&self, state: &ControlState) -> Result<bool, KernelError> {
@@ -150,6 +151,7 @@ impl ProcessControl {
         if let Ok(mut state) = self.state.lock() {
             state.terminal = true;
         }
+        for sender in self.observers.lock().unwrap_or_else(|e|e.into_inner()).values() { let _ = sender.try_send(()); }
     }
     fn stopped(&self) -> bool {
         self.state
@@ -173,7 +175,21 @@ struct Controls {
 /// loaded from disk is ever signalled. Pending markers require a Catalog-verified native owner.
 #[derive(Clone, Default)]
 pub(crate) struct ProcessControlRegistry(Arc<Mutex<Controls>>);
+pub(crate) struct ProcessObservationGuard { control: Arc<ProcessControl>, id: String }
+impl Drop for ProcessObservationGuard {
+    fn drop(&mut self) { self.control.observers.lock().unwrap_or_else(|e|e.into_inner()).remove(&self.id); }
+}
 impl ProcessControlRegistry {
+    /// This is a wakeup for an already-authorized original process, not a resource grant.
+    pub(crate) fn observe_end(&self, id: &str, run: &str, sender: SyncSender<()>) -> Result<Option<ProcessObservationGuard>, KernelError> {
+        let control = self.0.lock().map_err(|_|failure("process controls poisoned"))?.live.get(id).and_then(Weak::upgrade);
+        let Some(control) = control else { return Ok(None) };
+        if control.run_id.as_deref() != Some(run) { return Err(KernelError::Authorization("process observation Run changed".into())); }
+        let key = uuid::Uuid::new_v4().to_string();
+        control.observers.lock().unwrap_or_else(|e|e.into_inner()).insert(key.clone(),sender.clone());
+        if control.stopped() { let _ = sender.try_send(()); }
+        Ok(Some(ProcessObservationGuard {control,id:key}))
+    }
     pub(crate) fn cancel_known_process(&self, id: &str) -> Result<bool, KernelError> {
         let control = self
             .0
@@ -543,6 +559,7 @@ impl ProcessManager {
         let containment = Arc::new(containment);
         let input = Arc::new(Mutex::new(Some(input)));
         let control = Arc::new(ProcessControl {
+            observers: Default::default(),
             guardian: guardian.clone(),
             containment: containment.clone(),
             input: input.clone(),
@@ -1009,7 +1026,7 @@ fn read_output(
     cursor_state.base = cursor;
     cursor_state.read_position = position;
     cursor_state.frame_start = frame_start;
-    let mut chunks = Vec::new();
+    let mut raw_chunks: Vec<(&str, u64, Vec<u8>)> = Vec::new();
     let mut remaining = limit;
     let mut next = cursor;
     while remaining > 0 && next < end && position < file_end {
@@ -1019,13 +1036,13 @@ fn read_output(
         file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
         let mut bytes = vec![0u8; count];
         file.read_exact(&mut bytes)?;
-        let mut chunk = json!({"channel":channel,"offset":next,"bytesBase64":BASE64.encode(&bytes)});
-        // Raw bytes and cursors remain exact. Only complete UTF-8 chunks have a
-        // text projection; split codepoints and binary output retain their bytes.
-        if let Ok(text) = std::str::from_utf8(&bytes) {
-            if !text.contains('\0') { chunk["text"] = json!(text); }
+        // Storage frames are transport boundaries, not character boundaries.
+        // Join adjacent output from one channel before projecting UTF-8.
+        if let Some((_, _, previous)) = raw_chunks.last_mut().filter(|(previous,_,_)| *previous==channel) {
+            previous.extend_from_slice(&bytes);
+        } else {
+            raw_chunks.push((channel,next,bytes));
         }
-        chunks.push(chunk);
         next += count as u64;
         remaining -= count;
         if skip + count == length {
@@ -1033,6 +1050,41 @@ fn read_output(
             frame_start += length as u64;
         }
     }
+    let chunks=raw_chunks.into_iter().map(|(channel,offset,bytes)|{
+        let mut chunk=json!({"channel":channel,"offset":offset,"byteLength":bytes.len(),"bytesBase64":BASE64.encode(&bytes),"encoding":"base64"});
+        match std::str::from_utf8(&bytes) {
+            Ok(text) if !text.contains('\0') => {chunk["text"]=json!(text);chunk["encoding"]=json!("utf8");},
+            Err(error) if error.error_len().is_none() || (error.valid_up_to()==0 && bytes.first().is_some_and(|byte|byte & 0xc0 == 0x80)) => {
+                chunk["encodingReason"]=json!("UTF-8 character crosses an output page or channel boundary; concatenate raw bytes from the same channel to decode.");
+            },
+            _ => {chunk["encodingReason"]=json!("Output contains binary data or a non-UTF-8 encoding; raw bytes are preserved.");}
+        }
+        chunk
+    }).collect::<Vec<_>>();
     Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,
             "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
+}
+
+#[cfg(test)]
+mod output_projection_tests {
+    use super::*;
+    #[test]
+    fn spool_frames_join_utf8_while_page_boundaries_preserve_exact_bytes() {
+        let path=std::env::temp_dir().join(format!("varin-spool-{}",uuid::Uuid::new_v4()));
+        let text="中文🙂\n".as_bytes();let mut file=File::create(&path).unwrap();
+        for bytes in [&text[..2],&text[2..7],&text[7..]] {
+            file.write_all(&(bytes.len() as u32).to_le_bytes()).unwrap();file.write_all(&[1]).unwrap();file.write_all(bytes).unwrap();
+        }
+        let size=file.metadata().unwrap().len();drop(file);
+        let shared=Arc::new(Shared::new());{let mut state=shared.lock();state.file_end=size;state.end=text.len() as u64;state.output_closed=true;}
+        let handle=OutputHandle{shared,output_path:path.clone(),cursor:Arc::default()};
+        let all=read_output(&handle,&mut SpoolCursor::default(),0,65536).unwrap();
+        assert_eq!(all["chunks"].as_array().unwrap().len(),1);assert_eq!(all["chunks"][0]["text"],"中文🙂\n");
+        let mut cursor=SpoolCursor::default();let first=read_output(&handle,&mut cursor,0,2).unwrap();
+        assert_eq!(first["chunks"][0]["encoding"],"base64");assert!(first["chunks"][0]["encodingReason"].as_str().unwrap().contains("boundary"));
+        let second=read_output(&handle,&mut cursor,2,65536).unwrap();
+        let bytes=first["chunks"].as_array().unwrap().iter().chain(second["chunks"].as_array().unwrap()).flat_map(|chunk|BASE64.decode(chunk["bytesBase64"].as_str().unwrap()).unwrap()).collect::<Vec<_>>();
+        assert_eq!(bytes,text);assert_eq!(second["outputComplete"],true);assert_eq!(second["nextCursor"],text.len());
+        std::fs::remove_file(path).unwrap();
+    }
 }

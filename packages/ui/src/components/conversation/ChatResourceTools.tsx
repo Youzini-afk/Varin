@@ -59,7 +59,8 @@ export function ChatFileTools({ call, execution, result, status, generating, out
     <summary className="tool-resource-summary">
       {reading ? <FileTypeIcon filePath={path} className="size-3.5 shrink-0" /> : <Icon name={searching ? 'search' : 'folder-open'} className="size-3.5 shrink-0" />}
       <ToolHeadingText label={t(reading ? 'chat.tools.readFile' : searching ? 'chat.toolAction.search' : 'chat.toolAction.list')}
-        subject={reading ? path : searching ? subjectJoin(args.query, roots) : roots || '.'}
+        subject={reading ? path || values(args.files).map(value=>toolText(toolRecord(value).path)).filter(Boolean).join(', ')
+          : searching ? subjectJoin(args.query || values(args.queries).join(' · '), roots) : roots || '.'}
         receipt={reading && typeof args.startLine === 'number' ? `L${args.startLine}${typeof args.endLine === 'number' ? '–' + args.endLine : ''}` : undefined} />
       {!reading && Array.isArray(data.records) && <span className="shrink-0 typography-micro">{t(searching ? 'chat.tools.matches' : 'chat.tools.entries', { count: rows.length })}</span>}
       {reading && typeof args.offset === 'number' && <span className="typography-micro text-muted-foreground">{t('chat.tools.readingRange', { offset: args.offset })}</span>}
@@ -71,7 +72,7 @@ export function ChatFileTools({ call, execution, result, status, generating, out
       {rows.length > 0 && <div className="tool-result-scroll" data-conversation-tool-scroll="true">
         {rows.map((row, index) => {
           const item = toolRecord(row.data), rowPath = toolText(row.path);
-          const line = position(item.line);
+          const line = position(item.line ?? item.startLine);
           const directory = item.kind === 'directory';
           return <div key={rowPath + ':' + index} className="tool-search-hit">
             {directory ? <div className="tool-file-link"><Icon name="folder" className="size-3.5" /><span>{rowPath}</span></div>
@@ -81,6 +82,11 @@ export function ChatFileTools({ call, execution, result, status, generating, out
               <mark>{item.preview}</mark>
               {values(item.after).filter(value => typeof value === 'string').map((text, i) => <span key={'after:' + i}>{'\n' + String(text)}</span>)}
             </code></pre>}
+            {row.kind==='window' && <pre className="tool-hit-context"><code>{values(item.lines).map((text,i)=>{
+              const matched=values(item.matches).some(value=>toolRecord(value).line===(line ?? 1)+i);
+              return <React.Fragment key={i}>{i>0?'\n':''}{matched?<mark>{String(text)}</mark>:String(text)}</React.Fragment>;
+            })}</code></pre>}
+            {row.kind==='error' && <ToolResultNotice data={item} status="error" />}
           </div>;
         })}
       </div>}

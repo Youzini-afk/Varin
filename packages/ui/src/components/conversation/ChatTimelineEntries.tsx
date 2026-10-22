@@ -416,6 +416,7 @@ const ChatToolCard: React.FC<{
     rawDetails={<><RawJsonDetails label="arguments" value={call.arguments} />{details !== undefined && <RawJsonDetails label="result" value={details} />}</>}
     renderCall={operation => <ScriptCallResult operation={operation} sourceCallId={call.id} cwd={cwd} />} />;
   if (call.name === 'code_retrieval') return <ChatExploreCard call={call} cwd={cwd} execution={execution}
+    renderTool={(nested, state, result, executions) => <ChatToolCard call={nested} cwd={cwd} execution={state} result={result} executionById={executions} />}
     result={result} generating={generating} rawDetails={<>
       <pre className="overflow-auto whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(call.arguments)}</pre>
       {result ? <ToolResultContent messageId={`tool-result:${call.id}`} result={result} />

@@ -125,7 +125,15 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
       {snapshot.capabilities !== null && <details className="typography-meta"><summary>{t('settings.agents.availableTools')}</summary><p className="mt-2 break-words font-mono">{snapshot.capabilities.map(capability => capability.name).join(', ') || t('settings.agents.noTools')}</p></details>}
     </SettingsSection>
     <SettingsSection contentClassName="space-y-3">
-      <label className="flex items-center gap-2 typography-meta"><input type="checkbox" checked={draft.worktree === 'isolated'} disabled={busy} onChange={event => update({ worktree: event.target.checked ? 'isolated' : 'none' })} />{t('settings.agents.isolated')}</label>
+      <SettingsStackedField label={t('settings.agents.sourceMode')}>
+        <Select value={draft.worktree} disabled={busy} onValueChange={value => update({ worktree: value as AgentProfileDraft['worktree'] })}>
+          <SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
+            <SelectItem value="shared">{t('settings.agents.sourceShared')}</SelectItem>
+            <SelectItem value="none">{t('settings.agents.sourceReadOnly')}</SelectItem>
+            <SelectItem value="isolated">{t('settings.agents.isolated')}</SelectItem>
+          </SelectContent>
+        </Select>
+      </SettingsStackedField>
       <fieldset className="space-y-2"><legend className="typography-meta">{t('settings.agents.focus')}{builtin ? ` · ${t('settings.agents.builtinFocus')}` : ''}</legend><div className="flex gap-4">
         {(['code', 'research'] as const).map(focus => <label key={focus} className="flex items-center gap-2 typography-meta"><input type="checkbox" checked={draft.workFocus.includes(focus)} disabled={busy || builtin}
           onChange={event => update({ workFocus: event.target.checked ? [...draft.workFocus, focus] : draft.workFocus.filter(value => value !== focus) })} />{t(`workFocus.${focus}`)}</label>)}

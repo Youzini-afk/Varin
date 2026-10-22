@@ -6,7 +6,8 @@ import type { ThreadHistoryItem, ThreadSnapshot } from '@varin/application-clien
 import type { ExploreToolProgress } from '@varin/protocol';
 import { dict } from '@/lib/i18n/messages/zh-CN';
 import { ChatExploreCard } from './ChatExploreCard';
-import { ConversationContext, type ConversationPresentation } from './ConversationContext';
+import { ChatRetrievalTrace } from './ChatRetrievalTrace';
+import { ConversationContext, useConversationPresentation, type ConversationPresentation } from './ConversationContext';
 import { HistoryPresentation } from './historyPresentation';
 import type { ChatToolCall, ChatToolResultMessage } from './types';
 
@@ -16,10 +17,35 @@ vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
 vi.mock('@/components/icons/FileTypeIcon', () => ({ FileTypeIcon: () => null }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => true }));
 vi.mock('motion/react', () => ({ AnimatePresence: ({ children }: React.PropsWithChildren) => children,
-  motion: { li: ({ children }: React.PropsWithChildren) => <li>{children}</li> } }));
+  motion: { li: ({ children }: React.PropsWithChildren) => <li>{children}</li>,
+    p: ({ children }: React.PropsWithChildren) => <p>{children}</p>,
+    div: ({ children }: React.PropsWithChildren) => <div>{children}</div> } }));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it.each([false, true])('renders a read-only retrieval from startup through live evidence to final excerpts (gateway=%s)', async gateway => {
+it('observes native tools through the parent retrieval and stops polling after completion', async()=>{
+  vi.useFakeTimers();
+  const {document,window}=parseHTML('<html><body></body></html>');
+  for(const[name,value]of Object.entries({document,window,HTMLElement:window.HTMLElement,IS_REACT_ACT_ENVIRONMENT:true}))vi.stubGlobal(name,value);
+  const container=document.createElement('div');document.body.append(container);const root=createRoot(container);
+  const history=[{id:'native-call',parent:null,thread_id:'thread:child',run_id:'child-run',source:'assistant',provider:null,
+    content:{id:'model-item:7:child-request:search',content:{kind:'tool_call',call:{call_id:'search',name:'file_search',arguments:{query:'marker'}}}}}];
+  const retrievalTrace=vi.fn(async()=>({operationId:'parent-op',history:{items:history,head:'native-call',previous:null},operations:[],
+    run:{id:'child-run',thread_id:'thread:child',branch_id:'child-branch',state:'runnable'}}));
+  const context={identity:{runtime:'agent',threadId:'thread:parent',branchId:'parent-branch'},api:{retrievalTrace}} as unknown as ConversationPresentation;
+  const Tool=({call}:{call:ChatToolCall})=>{const owner=useConversationPresentation();return <span>{owner.identity.threadId}:{call.name}</span>;};
+  const render=async(running:boolean,expanded:boolean)=>act(async()=>root.render(<ConversationContext.Provider value={context}>
+    <ChatRetrievalTrace operationId="parent-op" running={running} expanded={expanded} renderTool={call=><Tool call={call}/>} />
+  </ConversationContext.Provider>));
+  try{
+    await render(true,false);expect(retrievalTrace).toHaveBeenCalledWith('parent-op',undefined,expect.any(AbortSignal));
+    expect(container.textContent).toContain('marker');
+    await render(true,true);expect(container.textContent).toContain('thread:child:file_search');
+    await render(false,true);const calls=retrievalTrace.mock.calls.length;
+    await act(async()=>vi.advanceTimersByTimeAsync(2000));expect(retrievalTrace).toHaveBeenCalledTimes(calls);
+  }finally{act(()=>root.unmount());container.remove();}
+});
+
+it.each([false, true])('keeps saved retrieval progress and excerpts readable (gateway=%s)', async gateway => {
   vi.useFakeTimers();
   const { document, window } = parseHTML('<html><body></body></html>');
   for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
@@ -46,7 +72,7 @@ it.each([false, true])('renders a read-only retrieval from startup through live 
   };
   try {
     await render();
-    expect(container.textContent).toContain('正在启动检索');
+    expect(container.textContent).toContain('正在调查');
     expect(container.textContent).not.toContain('暂无执行结果');
     const progress: ExploreToolProgress = { phase: 'selecting', elapsedMs: 1200, receivedFiles: 1, receivedSnippets: 1, sources: [],
       activities: [{ kind: 'read', sequence: 1, elapsedMs: 900, viewId: 'view', path: 'src/frames.ts', startLine: 1, endLine: 3, revision: 'rev', source: 'disk' }] };

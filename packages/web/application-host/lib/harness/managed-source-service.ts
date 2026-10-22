@@ -359,7 +359,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const actor = kernel.scoped(kernel.sourceAuthorityGrant(opened));
         // The native claim verified the exact committed handoff before this
         // target root can be used; a pre-Run read cannot materialize a path.
-        const handedPhysical = input.handoff?.root.kind === 'physical' ? input.handoff.root.root : null;
+        const handedPhysical = input.handoff && input.handoff.root.kind !== 'fixed' ? input.handoff.root.root : null;
         let physicalRoot = opened.physicalRoot ?? handedPhysical;
         const branch = source.mode === 'live_root' || handedPhysical ? undefined
           : await actor.readBranch({ branchId: source.branch_id!, revision: source.revision!, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });

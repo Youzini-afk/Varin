@@ -3,12 +3,10 @@ import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { CredentialBridge } from './credential-bridge.js';
 import { createChildProfilePreparer } from './child-profiles.js';
 import { createPolicyModelPreparer } from './policy-models.js';
-import { createRetrievalModelStage } from './retrieval-model.js';
 import { createMemoryInference } from '../memory/memory-inference.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
-import type { ModelSessionConfiguration, RetrievalQuery } from './protocol.generated.js';
-import type { InferenceCall } from '../knowledge/semantic/inference-requests.js';
+import type { ModelSessionConfiguration } from './protocol.generated.js';
 
 const scope = { reference: 'original-model', authority: 'extension-auth', account: 'original-account', generation: 1 };
 const configuration: ModelSessionConfiguration = { providerId: 'original-channel', providerFamily: 'openai-completions', model: 'original-model',
@@ -83,45 +81,6 @@ it('policy model preparation releases failures and cancelled late captures, but 
   await vi.waitFor(() => expect(models.resolveModel).toHaveBeenCalledTimes(3));
   controller.abort(); await rejected; gate.resolve();
   await vi.waitFor(() => expect(late.released).toHaveBeenCalledOnce());
-});
-
-it('retrieval keeps one capture across two real Explore operations and releases it with the stage', async () => {
-  const model = captured(), controller = new AbortController();
-  const bridge = new CredentialBridge(() => 'epoch', async () => {}, () => { throw new Error('Unexpected transport'); });
-  const settings = { harness: { codeRetrieval: { decision: 'llm' }, models: { explore: selection } } };
-  const query = { runId: 'run:original', inferenceOwner: { kind: 'external', identity: 'retrieval', epoch: 'epoch' },
-    source: { mode: 'fixed_branch' }, question: 'How does the request handler choose a model?' } as RetrievalQuery;
-  let generated = 0;
-  const generate = vi.fn<InferenceCall['generate']>(async input => {
-    const ordinal = ++generated;
-    const id = `operation:${ordinal}`;
-    await input.check(controller.signal);
-    await input.register(id, controller.signal);
-    try {
-      await model.owner.resolve(scope);
-      expect(model.released).not.toHaveBeenCalled();
-      return ordinal === 1 ? JSON.stringify({ groups: [{ expressions: ['handler'] }] }) : JSON.stringify({ groups: [], done: true });
-    } finally { input.release(id); }
-  });
-  const stage = await createRetrievalModelStage({ models: { resolveModel: async () => model.model, rebindModel: vi.fn() },
-    readGlobalSettings: async () => settings, inference: { captureDecision: vi.fn(), captureRerank: vi.fn() },
-    kernel: { kernelEpoch: 'epoch', agentRuntimeRequest: vi.fn(async (method: string) => method === 'runtime.tokenizers.open' ? { leaseId: 'counter' } : method === 'runtime.tokenizers.count' ? { counts: [1], tokenizer: 'fixture' } : null) as import('./kernel-client.js').KernelClient['agentRuntimeRequest'], registerCredentialOwner: (...args) => bridge.register(...args), unregisterCredentialOwner: (...args) => bridge.unregister(...args) },
-    sources: { validate: async () => {}, read: vi.fn() },
-  }).prepare(query, controller.signal, { operationId: 'retrieval', signal: controller.signal, generate } as unknown as InferenceCall);
-  try {
-    const implementation = stage.stage.implementation;
-    if (implementation?.kind !== 'progressive') throw new Error('Expected progressive stage');
-    const view = { viewId: 'view', path: 'handler.ts', revision: 'original', startLine: 1, endLine: 1, ranges: [], assessment: 'pending', text: 'original source' };
-    const run = { signal: controller.signal, question: query.question, deadlineAt: Infinity, parsed: { objects: [], relation: null, domain: null },
-      refreshVocab: async () => {}, vocab: () => ({}), sourceStates: () => [], submitPlan: async () => ({ launched: ['search'] }),
-      actionCandidates: async () => [], collect: () => ({ views: [view], pending: false, unevaluated: 0, sequence: 1 }),
-      applySelection: () => ({ accepted: [], rejected: [], selectedViews: [] }), requestDelivery: vi.fn(), evidenceVersion: () => 0, selectedViews: () => [] };
-    const result = await implementation.select({ run, validateMaterials: async () => {} } as unknown as Parameters<typeof implementation.select>[0], controller.signal);
-    expect(result.model).toMatchObject({ plan: 'used', select: 'used' });
-    expect(generate).toHaveBeenCalledTimes(2);
-    expect(model.released).not.toHaveBeenCalled();
-  } finally { stage.release(); bridge.close(); }
-  expect(model.released).toHaveBeenCalledOnce();
 });
 
 it('memory binding replacement and shutdown release cached captures, including a bind that settles after close', async () => {

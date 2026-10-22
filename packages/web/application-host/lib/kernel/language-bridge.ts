@@ -17,7 +17,7 @@ const validQuery = (value: unknown): value is LanguageQuery => {
   switch (value.method) {
     case 'definition': case 'references': case 'hover':
       return position && value.query === undefined && value.direction === undefined;
-    case 'diagnostics': case 'document_symbols':
+    case 'diagnostics': case 'document_symbols': case 'structure':
       return noPosition && value.query === undefined && value.direction === undefined;
     case 'workspace_symbols':
       return noPosition && typeof value.query === 'string' && value.direction === undefined;

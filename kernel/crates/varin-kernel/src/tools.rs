@@ -24,6 +24,8 @@ mod language;
 mod reconciliation;
 #[path = "tools_retrieval.rs"]
 mod retrieval;
+#[path = "tools_read.rs"]
+mod read;
 use discovery::FileQueryArgs;
 use language::LanguageQueryArgs;
 use retrieval::RetrievalQueryArgs;
@@ -81,7 +83,8 @@ impl ToolKind {
     pub(crate) fn requirements(self) -> varin_runtime::execution::ToolRequirements {
         use varin_runtime::execution::{ToolRequirements, ToolSourceRequirement::*};
         let source = match self {
-            Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval => Source,
+            Self::FileRead | Self::FileList | Self::FileSearch | Self::CodeRetrieval
+                | Self::ProcessSpawn | Self::ProcessInspect | Self::ProcessRead | Self::ProcessWrite | Self::ProcessResize => Source,
             Self::LanguageDefinition
             | Self::LanguageReferences
             | Self::LanguageDiagnostics
@@ -235,6 +238,9 @@ pub(crate) fn source_capabilities(
                 | ToolKind::LanguageDocumentSymbols
                 | ToolKind::LanguageCallHierarchy
         );
+        // Language servers belong to explicit IDE capabilities, not the Agent's
+        // baseline source directory or its automatic project preparation.
+        if language && requested.is_none() { continue; }
         let missing = !kind.requirements().accepts_mode(p.mode)
             || client
                 .as_ref()
@@ -257,7 +263,7 @@ pub(crate) fn source_capabilities(
     let mut grant_capabilities = vec!["storage.read"];
     // Registering/capturing a physical source is an internal resource-owner write,
     // independent of whether model/client file mutation is available.
-    if p.mode != SourceMode::FixedBranch {
+    if p.mode != SourceMode::FixedBranch || tools.iter().any(|kind|kind.requirements().process) {
         grant_capabilities.push("storage.write");
     }
     if tools.iter().any(|kind| kind.requirements().process) {
@@ -335,7 +341,7 @@ impl ToolBinding {
         Ok(source)
     }
 }
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct FileReadArgs {
     path: String,
@@ -344,6 +350,7 @@ struct FileReadArgs {
     length: Option<u64>,
     start_line: Option<u64>,
     end_line: Option<u64>,
+    unit: Option<read::UnitReadArgs>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -381,16 +388,23 @@ struct EnvironmentEntry {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProcessSpawnArgs {
+    #[serde(default)]
     cwd: String,
     command: String,
+    #[serde(default)]
     args: Vec<String>,
     #[serde(default)]
     env: Vec<EnvironmentEntry>,
+    #[serde(default = "default_process_mode")]
     mode: String,
     cols: Option<u16>,
     rows: Option<u16>,
     windows_raw_arguments: Option<String>,
+    #[serde(default)]
+    wait_ms: u64,
+    max_output_bytes: Option<u64>,
 }
+fn default_process_mode() -> String { "pipe".into() }
 #[derive(Debug, Clone)]
 enum ResourceOperation {
     ChildSourceHandoff {
@@ -406,13 +420,17 @@ enum ResourceOperation {
         pin_id: String,
     },
     FileRead(FileReadArgs),
+    FileReadBatch(Vec<Value>),
     FileQuery(FileQueryArgs),
     LanguageQuery(LanguageQueryArgs),
     RetrievalQuery(RetrievalQueryArgs),
     ObserveCompute {
+        job_id: String,
         reply: mpsc::Sender<crate::compute::ComputeWatch>,
     },
     ComputeControl {
+        job_id: String,
+        kernel_epoch: Option<String>,
         method: &'static str,
         cursor: u64,
     },
@@ -437,6 +455,12 @@ enum ResourceOperation {
     ProcessResize(ProcessResizeArgs),
 }
 impl ResourceOperation {
+    /// These compose original source reads with Host-owned services/history.
+    /// Remote resource Hosts have no coordinator Catalog or language bridge.
+    fn coordinator_owned(&self) -> bool {
+        matches!(self, Self::LanguageQuery(_) | Self::RetrievalQuery(_) | Self::FileReadBatch(_))
+            || matches!(self, Self::FileRead(args) if args.unit.is_some())
+    }
     fn parse(kind: ToolKind, args: &Value) -> Result<Self, ExecutionError> {
         let explicit_offset = args.get("offset").is_some();
         if args
@@ -469,6 +493,14 @@ impl ResourceOperation {
             }
             ToolKind::RecoveryPoints => serde_json::from_value(args.clone()).map(Self::RecoveryPoints),
             ToolKind::FileRestore => serde_json::from_value(args.clone()).map(Self::FileRestore),
+            ToolKind::FileRead if args.get("files").is_some() => {
+                #[derive(Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct Batch { files: Vec<Value> }
+                let batch: Batch = serde_json::from_value(args.clone()).map_err(|e|ExecutionError::new("invalid_tool_arguments",e.to_string()))?;
+                if batch.files.is_empty() { return Err(ExecutionError::new("invalid_tool_arguments","files must contain at least one read")); }
+                return Ok(Self::FileReadBatch(batch.files));
+            }
             ToolKind::FileRead => serde_json::from_value(args.clone()).map(Self::FileRead),
             ToolKind::FileWrite => serde_json::from_value::<FileWriteArgs>(args.clone())
                 .map(|args| Self::FileMutation(TextMutation::Write(args))),
@@ -484,6 +516,21 @@ impl ResourceOperation {
             }
             ToolKind::ProcessSpawn => {
                 let mut arguments = args.clone();
+                if let Some(script) = arguments.get("shellCommand").cloned() {
+                    if script.as_str().is_none_or(|text| text.trim().is_empty() || text.contains('\0'))
+                        || ["command","args","windowsRawArguments"].iter().any(|key|arguments.get(key).is_some()) {
+                        return Err(ExecutionError::new("invalid_tool_arguments","Use shellCommand alone, or command with an argument array"));
+                    }
+                    arguments.as_object_mut().expect("object with shellCommand").remove("shellCommand");
+                    #[cfg(windows)] {
+                        arguments["command"] = json!("powershell.exe");
+                        arguments["args"] = json!(["-NoLogo","-NoProfile","-NonInteractive","-Command",script]);
+                    }
+                    #[cfg(not(windows))] {
+                        arguments["command"] = json!("/bin/sh");
+                        arguments["args"] = json!(["-c",script]);
+                    }
+                }
                 if arguments.get("env").is_none() {
                     let environment = std::env::vars_os()
                         .map(|(name, value)| {
@@ -517,6 +564,10 @@ impl ResourceOperation {
         match &mut parsed {
             Self::FileQuery(args) => args.validate()?,
             Self::FileRead(args) => {
+                if let Some(unit)=&args.unit {
+                    unit.validate()?;
+                    if args.start_line.is_some() || args.end_line.is_some() { return Err(ExecutionError::new("invalid_tool_arguments","Use unit selection without startLine/endLine; offset is relative to the selected unit")); }
+                }
                 normalize_separators(&mut args.path);
                 normalized_path(&args.path, false)?;
                 // Agent-facing default page only. Internal source/mutation reads retain
@@ -547,6 +598,9 @@ impl ResourceOperation {
                 }
             }
             Self::ProcessSpawn(args) => {
+                if args.wait_ms > 9_007_199_254_740_991 || args.max_output_bytes.is_some_and(|value|value==0 || value > crate::process::CHUNK_BYTES as u64) {
+                    return Err(ExecutionError::new("invalid_tool_arguments","waitMs must be a nonnegative safe integer and maxOutputBytes must fit one process output page"));
+                }
                 normalized_path(&args.cwd, true)?;
                 if !matches!(args.mode.as_str(), "pipe" | "pty")
                     || args.command.is_empty()
@@ -660,17 +714,19 @@ impl ResourceOperation {
                     )
                 }
             }
+            Self::FileReadBatch(_) => unreachable!("batch reads are expanded by the tool owner"),
             Self::FileQuery(args) => ("compute.start", args.params(binding, context)),
-            Self::ObserveCompute { .. } => (
+            Self::ObserveCompute { job_id, .. } => (
                 "compute.read",
                 json!({
-                    "workspaceId": binding.workspace_id, "jobId": context.operation_id, "cursor": 0
+                    "workspaceId": binding.workspace_id, "jobId": job_id, "cursor": 0
                 }),
             ),
-            Self::ComputeControl { method, cursor } => {
+            Self::ComputeControl { job_id, kernel_epoch, method, cursor } => {
                 let mut params =
-                    json!({"workspaceId":binding.workspace_id,"jobId":context.operation_id});
+                    json!({"workspaceId":binding.workspace_id,"jobId":job_id});
                 if *method == "compute.read" {
+                    if let Some(epoch)=kernel_epoch {params["kernelEpoch"]=json!(epoch);}
                     params["cursor"] = json!(cursor);
                     params["maxBytes"] = json!(65536);
                 }
@@ -796,6 +852,27 @@ pub(crate) struct ResourceCall {
     pub cancellation: CancellationToken,
     pub reply: ResourceReply,
 }
+impl ResourceCall {
+    fn with_execution_binding(&self,binding:ToolBinding)->Self {
+        Self {binding,context:self.context.clone(),journal:self.journal.clone(),operation:self.operation.clone(),
+            authorize_only:self.authorize_only,expected_resource_key:self.expected_resource_key.clone(),
+            cancellation:self.cancellation.clone(),admission_key:self.admission_key.clone(),
+            reply:ResourceReply{sender:None,wake:None}}
+    }
+}
+fn fixed_read_key(binding:&ToolBinding,path:&str)->String {
+    json!(["file",binding.resource_owner,"fixed",binding.execution_workspace_id,binding.file_source,path]).to_string()
+}
+pub(crate) fn finish_resource_execution_view(storage:&mut Storage,epoch:&str,host:&str,generation:&str,
+    request:&ResourceCall,result:Value)->Result<(),KernelError> {
+    if let Some(authority)=&request.binding.target_authority { storage.validate_source_resource(authority,&request.binding,epoch,true)?; }
+    let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host,generation,"storage.health",&json!({"workspaceId":request.binding.workspace_id}))?;
+    validate_binding(&grant,&request.binding,&request.context)?;
+    Storage::require_execution_view_owner(&request.binding,&grant)?;
+    let params=Storage::execution_view_params(&request.binding)?;
+    storage.finish_materialized_view(&params,&grant,result)?;
+    Ok(())
+}
 #[cfg(test)]
 pub(crate) fn fixed_read_fixture(
     binding: ToolBinding,
@@ -822,6 +899,7 @@ pub(crate) fn fixed_read_fixture(
                 length: if lines { None } else { Some(3) },
                 start_line: lines.then_some(2),
                 end_line: lines.then_some(2),
+                unit:None,
             }),
             authorize_only: false,
             expected_resource_key: None,
@@ -1566,10 +1644,9 @@ pub(crate) struct KernelToolExecutor {
     schemas: Vec<ToolSchema>,
     resources: KernelResourceClient,
     language: Option<crate::language::LanguageBridge>,
-    retrieval: Option<crate::retrieval::RetrievalBridge>,
-    retrieval_project_id: Option<String>,
-    retrieval_branch_id: Option<String>,
-    retrieval_invocations: Option<Arc<varin_runtime::nested_tools::NestedTools>>,
+    retrieval_owner: Option<Arc<crate::agent_runtime::control_commands::ControlCommands>>,
+    search_scope: Option<Vec<String>>,
+
 }
 impl KernelToolExecutor {
     pub(crate) fn validate_source_binding(binding: &ToolBinding) -> Result<(), KernelError> {
@@ -1637,15 +1714,12 @@ impl KernelToolExecutor {
                         | ToolKind::FileEdit
                         | ToolKind::FileRestore
                         | ToolKind::RecoveryPoints
-                        | ToolKind::ProcessSpawn
-                        | ToolKind::ProcessWrite
-                        | ToolKind::ProcessResize
                 )
             })
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
-                "file mutation and process spawning require an explicit physical source",
+                "file mutation requires an explicit physical source",
             ));
         }
         if binding.source_mode != SourceMode::FixedBranch
@@ -1681,6 +1755,7 @@ impl KernelToolExecutor {
             ));
         }
         if binding.enabled_tools.contains(&ToolKind::ProcessSpawn)
+            && binding.source_mode != SourceMode::FixedBranch
             && binding.root_id.as_deref().is_none_or(str::is_empty)
         {
             return Err(ExecutionError::new(
@@ -1694,24 +1769,20 @@ impl KernelToolExecutor {
             schemas,
             resources,
             language: None,
-            retrieval: None,
-            retrieval_project_id: None,
-            retrieval_branch_id: None,
-            retrieval_invocations: None,
+            retrieval_owner: None,
+            search_scope: None,
         })
     }
-    pub(crate) fn with_retrieval(
-        mut self,
-        bridge: crate::retrieval::RetrievalBridge,
-        project_id: Option<String>,
-        invocations: Arc<varin_runtime::nested_tools::NestedTools>,
-        branch_id: Option<String>,
-    ) -> Self {
-        self.retrieval_invocations = Some(invocations);
-        self.retrieval = Some(bridge);
-        self.retrieval_project_id = project_id;
-        self.retrieval_branch_id = branch_id;
+    pub(crate) fn with_internal_retrieval(mut self, owner: Arc<crate::agent_runtime::control_commands::ControlCommands>) -> Self {
+        self.retrieval_owner = Some(owner);
         self
+    }
+    pub(crate) fn with_search_scope(mut self,paths:Option<Vec<String>>)->Self {self.search_scope=paths;self}
+    fn require_search_path(&self,path:&str)->Result<(),ExecutionError> {
+        if self.search_scope.as_ref().is_some_and(|scopes| !scopes.iter().any(|scope|path==scope || path.strip_prefix(scope).is_some_and(|tail|tail.starts_with('/')))) {
+            return Err(ExecutionError::new("retrieval_scope","Path is outside this retrieval invocation's requested paths"));
+        }
+        Ok(())
     }
     pub(crate) fn with_language(mut self, bridge: crate::language::LanguageBridge) -> Self {
         self.language = Some(bridge);
@@ -1757,15 +1828,19 @@ impl KernelToolExecutor {
                 ToolKind::FileWrite
                 | ToolKind::FileEdit
                 | ToolKind::RecoveryPoints
-                | ToolKind::FileRestore
-                | ToolKind::ProcessSpawn
+                | ToolKind::FileRestore => crate::run_tools::BuiltinSchema::child(
+                    schema,
+                    kind.requirements().source.into(),
+                    &[Worker],
+                ),
+                ToolKind::ProcessSpawn
                 | ToolKind::ProcessInspect
                 | ToolKind::ProcessRead
                 | ToolKind::ProcessWrite
                 | ToolKind::ProcessResize => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
-                    &[Worker],
+                    &[Worker, Retrieval],
                 ),
                 ToolKind::LanguageDefinition
                 | ToolKind::LanguageReferences
@@ -1776,7 +1851,7 @@ impl KernelToolExecutor {
                 | ToolKind::LanguageCallHierarchy => crate::run_tools::BuiltinSchema::child(
                     schema,
                     kind.requirements().source.into(),
-                    &[Worker, Retrieval],
+                    &[],
                 ),
             })
             .collect()
@@ -1819,15 +1894,26 @@ impl KernelToolExecutor {
             .ok_or_else(|| {
                 ExecutionError::new("tool_not_bound", "tool is not selected in this Run")
             })?;
-        let operation = ResourceOperation::parse(kind, &call.arguments)?;
-        if let ResourceOperation::FileQuery(args) = &operation { args.validate_source(&self.binding)?; }
+        let mut operation = ResourceOperation::parse(kind, &call.arguments)?;
+        if let ResourceOperation::FileQuery(args) = &mut operation {
+            if let Some(scope)=&self.search_scope {args.restrict_paths(scope)?;}
+            args.validate_source(&self.binding)?;
+        }
+        if let ResourceOperation::FileRead(args)=&operation {self.require_search_path(&args.path)?;}
         Ok(operation)
     }
     fn contract(&self, call: &ToolCall, operation: &ResourceOperation) -> ToolContract {
-        let job = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        if let ResourceOperation::FileReadBatch(files) = operation {
+            return ToolContract { name: call.name.clone(),schema_version:call.schema_version.clone(),read_only:true,
+                completion:CompletionKind::Result,lifetime:Lifetime::Run,resources:files.iter().filter_map(|value|
+                    ResourceOperation::parse(ToolKind::FileRead,value).ok().filter(|op|matches!(op,ResourceOperation::FileRead(_))))
+                    .flat_map(|op|self.contract(call,&op).resources).collect() };
+        }
+        let job = matches!(operation, ResourceOperation::ProcessSpawn(_) | ResourceOperation::RetrievalQuery(_));
         let read_only = !matches!(
             operation,
             ResourceOperation::FileMutation(_)
+                | ResourceOperation::RetrievalQuery(_)
                 | ResourceOperation::FileRestore(_)
                 | ResourceOperation::ProcessSpawn(_)
                 | ResourceOperation::ProcessWrite(_)
@@ -1840,7 +1926,7 @@ impl KernelToolExecutor {
             value.to_string()
         };
         let (resource, access) = match operation {
-            ResourceOperation::CollaborationPin { .. }
+            ResourceOperation::FileReadBatch(_) | ResourceOperation::CollaborationPin { .. }
             | ResourceOperation::ChildSourceHandoff { .. }
             | ResourceOperation::ChildStorageReceipt { .. }
             | ResourceOperation::ChildRootIdle
@@ -1987,9 +2073,7 @@ impl KernelToolExecutor {
         Ok(self.contract(call, &operation))
     }
     fn physical_file(&self, operation: &ResourceOperation) -> bool {
-        matches!(operation, ResourceOperation::FileMutation(_))
-            || (matches!(operation, ResourceOperation::FileRead(_))
-                && self.binding.source_mode != SourceMode::FixedBranch)
+        matches!(operation, ResourceOperation::FileMutation(_) | ResourceOperation::FileRead(_) | ResourceOperation::FileReadBatch(_))
     }
     fn planned_contract(
         &self,
@@ -1999,10 +2083,7 @@ impl KernelToolExecutor {
         cancel: &CancellationToken,
     ) -> Result<ToolContract, ExecutionError> {
         if self.binding.remote_authority.is_some()
-            && !matches!(
-                operation,
-                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
-            )
+            && !operation.coordinator_owned()
         {
             return self
                 .remote_tool("authorize", context, call, cancel)
@@ -2012,6 +2093,16 @@ impl KernelToolExecutor {
                 });
         }
         let mut contract = self.contract(call, operation);
+        if let ResourceOperation::FileReadBatch(files) = operation {
+            contract.resources.clear();
+            for value in files {
+                let Ok(op @ ResourceOperation::FileRead(_)) = ResourceOperation::parse(ToolKind::FileRead,value) else { continue };
+                if let Ok(plan) = self.planned_contract(context,call,&op,cancel) {
+                    for claim in plan.resources { if !contract.resources.contains(&claim) {contract.resources.push(claim);} }
+                }
+            }
+            return Ok(contract);
+        }
         if self.physical_file(operation) {
             let plan = self
                 .resources
@@ -2236,6 +2327,7 @@ impl KernelToolExecutor {
         };
         context.run_id == self.binding.run_id
             && self.binding.source_mode == SourceMode::FixedBranch
+            && !self.binding.enabled_tools.contains(&ToolKind::ProcessSpawn)
             && source.mode == SourceMode::FixedBranch
             && source.live_root.is_none()
             && source.workspace_id == self.binding.workspace_id
@@ -2261,17 +2353,21 @@ impl KernelToolExecutor {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
+        if let ResourceOperation::FileRead(args)=operation {self.require_search_path(&args.path)?;}
         if context.run_id != self.binding.run_id || context.operation_id.is_empty() {
             return Err(ExecutionError::new(
                 "unauthorized",
                 "tool execution identity does not match bound Run",
             ));
         }
+        if matches!(operation,ResourceOperation::FileReadBatch(_)) {
+            if &self.planned_contract(context,call,operation,cancel)? != contract {
+                return Err(ExecutionError::new("read_scope_changed","Batch read resource scope changed; retry the original request"));
+            }
+            return Ok(());
+        }
         if self.binding.remote_authority.is_some()
-            && !matches!(
-                operation,
-                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
-            )
+            && !operation.coordinator_owned()
         {
             return if &self.planned_contract(context, call, operation, cancel)? == contract {
                 Ok(())
@@ -2326,6 +2422,9 @@ impl KernelToolExecutor {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> ToolCompletion {
+        if let ResourceOperation::FileReadBatch(files) = &operation {
+            return self.execute_read_batch(context,call,files,contract,cancel);
+        }
         let mut expected = self.contract(call, &operation);
         if self.physical_file(&operation) {
             expected.resources = contract.resources.clone();
@@ -2341,6 +2440,9 @@ impl KernelToolExecutor {
         if let ResourceOperation::LanguageQuery(args) = &operation {
             return self.execute_language(context, args, cancel);
         }
+        if let ResourceOperation::FileRead(args)=&operation {
+            if args.unit.is_some() {return self.execute_unit_read(context,call,args,contract,cancel);}
+        }
         if matches!(
             operation,
             ResourceOperation::ProcessWrite(_) | ResourceOperation::ProcessResize(_)
@@ -2349,7 +2451,8 @@ impl KernelToolExecutor {
                 reason: "process interaction requires Catalog ownership validation".into(),
             };
         }
-        let spawn = matches!(operation, ResourceOperation::ProcessSpawn(_));
+        let spawn_args = if let ResourceOperation::ProcessSpawn(args) = &operation { Some(args.clone()) } else { None };
+        let spawn = spawn_args.is_some();
         let read = matches!(operation, ResourceOperation::FileRead(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
         let restore = matches!(operation, ResourceOperation::FileRestore(_));
@@ -2372,7 +2475,24 @@ impl KernelToolExecutor {
             )
         };
         match result {
-            Ok(result) if spawn => {
+            Ok(mut result) if spawn => {
+                if let Some(args) = &spawn_args {
+                    if result["processId"].as_str() == Some(&context.operation_id) && !matches!(result["status"].as_str(),Some("unknown"|"failed")) {
+                        let (sender, receiver) = mpsc::sync_channel(1);
+                        let _cancel = cancel.wake_on_cancel(sender.clone());
+                        let observation = self.resources.controls.observe_end(&context.operation_id,&context.run_id,sender);
+                        if args.wait_ms > 0 && observation.as_ref().is_ok_and(Option::is_some) {
+                            let _ = receiver.recv_timeout(std::time::Duration::from_millis(args.wait_ms));
+                        }
+                        match self.resources.observe_process(&self.binding,context,&context.operation_id,&context.run_id,None,
+                            Some((0,args.max_output_bytes)),false,&CancellationToken::default()) {
+                            Ok(output) => { result["observation"] = output; },
+                            Err(error) => { result["observationError"] = json!({"code":error.code,"message":error.message}); },
+                        }
+                        result["command"] = json!(args.command);
+                        result["args"] = json!(args.args);
+                    }
+                }
                 let phase = result.get("status").and_then(Value::as_str);
                 if result.get("processId").and_then(Value::as_str)
                     != Some(context.operation_id.as_str())
@@ -2473,6 +2593,7 @@ fn execution_context(run_id: &str, call: &ToolCall, origin: &ToolOrigin) -> Tool
 impl PreparedToolCall for KernelCall {
     fn receipt_persisted(&self, context: &ToolExecutionContext) {
         if self.executor.binding.remote_authority.is_some()
+            && !self.operation.coordinator_owned()
             && managed_read_receipt_tool(&self.call.name)
         {
             self.executor
@@ -2482,10 +2603,7 @@ impl PreparedToolCall for KernelCall {
     }
 
     fn executor_owner(&self) -> varin_runtime::ExecutorOwner {
-        if matches!(
-            self.operation,
-            ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
-        ) {
+        if self.operation.coordinator_owned() {
             varin_runtime::ExecutorOwner::Kernel
         } else {
             self.executor
@@ -2539,6 +2657,10 @@ impl PreparedToolCall for KernelCall {
         contract: &ToolContract,
         cancel: &CancellationToken,
     ) -> Result<(), ExecutionError> {
+        if matches!(self.operation,ResourceOperation::RetrievalQuery(_))
+            && self.request.source.as_ref()!=Some(&self.executor.binding.source_selection().map_err(|error|ExecutionError::new("source_changed",error.to_string()))?) {
+            return Err(ExecutionError::new("source_changed","Retrieval source differs from the original frozen request"));
+        }
         self.executor
             .authorize_operation(context, &self.call, &self.operation, contract, cancel)
     }
@@ -2549,10 +2671,7 @@ impl PreparedToolCall for KernelCall {
         cancel: &CancellationToken,
     ) -> varin_runtime::execution::ToolExecutionReceipt {
         if self.executor.binding.remote_authority.is_some()
-            && !matches!(
-                self.operation,
-                ResourceOperation::LanguageQuery(_) | ResourceOperation::RetrievalQuery(_)
-            )
+            && !self.operation.coordinator_owned()
         {
             return self
                 .executor
@@ -2575,7 +2694,7 @@ impl PreparedToolCall for KernelCall {
                     executor_stopped: false,
                 });
         }
-        varin_runtime::execution::ToolExecutionReceipt::local(
+        let mut receipt=varin_runtime::execution::ToolExecutionReceipt::local(
             self.executor.execute_operation(
                 context,
                 &self.call,
@@ -2584,7 +2703,17 @@ impl PreparedToolCall for KernelCall {
                 cancel,
             ),
             contract,
-        )
+        );
+        if matches!(self.operation,ResourceOperation::RetrievalQuery(_)) {
+            if let Some(owner)=&self.executor.retrieval_owner {
+                if let Ok(catalog)=owner.runtime.catalog().lock() {
+                    if let Ok(operation)=catalog.operation(&context.operation_id) {
+                        receipt.executor_stopped|=operation.external_receipt.as_ref().is_some_and(|receipt|receipt.executor_stopped);
+                    }
+                }
+            }
+        }
+        receipt
     }
 }
 
@@ -2616,12 +2745,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             json!({"path":{"type":"string"},"readVersion":{"type":"string","minLength":1},"edits":{"type":"array","minItems":1,"items":{"type":"object","additionalProperties":false,"properties":{"oldText":{"type":"string","minLength":1},"newText":{"type":"string"}},"required":["oldText","newText"]}}}),
             vec!["path", "readVersion", "edits"],
         ),
-        ToolKind::FileRead => (
-            json!({"path":{"type":"string"},"offset":{"type":"integer","minimum":0,"description":"UTF-8 byte offset; continue with content.nextOffset while content.eof is false. Verify readVersion is unchanged across pages."},"length":{"type":"integer","minimum":0,"default":65536,"description":"Byte page size (default 64 KiB). Request a larger range explicitly when needed; readVersion identifies the observed file state."},
-                "startLine":{"type":"integer","minimum":1,"description":"First line, 1-based. Use with optional inclusive endLine instead of offset/length."},
-                "endLine":{"type":"integer","minimum":1,"description":"Last line, inclusive. Requires startLine."}}),
-            vec!["path"],
-        ),
+        ToolKind::FileRead => return read::schema(),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
             json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1}}),
@@ -2636,13 +2760,21 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["processId", "cols", "rows"],
         ),
         ToolKind::ProcessSpawn => (
-            json!({"cwd":{"type":"string","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string"},"args":{"type":"array","items":{"type":"string"}},
+            json!({"cwd":{"type":"string","default":"","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string","minLength":1},"args":{"type":"array","items":{"type":"string"}},
+            "shellCommand":{"type":"string","minLength":1,"description":"Shell text for pipelines, redirection or multiline commands. Runs in the actual execution Host's shell: PowerShell on Windows, /bin/sh on Unix. Mutually exclusive with command/args."},
+            "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe the original process until exit or this interval. Zero returns immediately. Never a kill timeout."},
+            "maxOutputBytes":{"type":"integer","minimum":1,"maximum":crate::process::CHUNK_BYTES,"description":"Initial output page. Continue with process_read at observation.nextCursor."},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
-            vec!["cwd", "command", "args", "mode"],
+            vec![],
         ),
     };
-    json!({"type":"object","additionalProperties":false,"properties":properties,"required":required})
+    let mut schema = json!({"type":"object","additionalProperties":false,"properties":properties,"required":required});
+    if kind == ToolKind::ProcessSpawn {
+        schema["oneOf"] = json!([{"required":["command"],"not":{"required":["shellCommand"]}},
+            {"required":["shellCommand"],"not":{"anyOf":[{"required":["command"]},{"required":["args"]},{"required":["windowsRawArguments"]}]}}]);
+    }
+    schema
 }
 
 fn validate_binding(
@@ -2669,6 +2801,7 @@ fn validate_binding(
 pub(crate) enum ResourceWork {
     Ready(Value),
     BlobRead(crate::storage::blob_reads::BlobReadTask),
+    ExecutionView(crate::storage::materialization::Task),
 }
 /// Fixed file bodies use the same immutable reader as wire getBlob. Other domains
 /// retain their original owner and execution path.
@@ -2703,11 +2836,40 @@ pub(crate) fn prepare_resource(
             dispatched: false,
         });
     }
+    let effective;
+    let request = if request.binding.source_mode == SourceMode::FixedBranch && matches!(request.operation,
+        ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_) | ResourceOperation::ProcessSpawn(_)
+        | ResourceOperation::ProcessInspect(_) | ResourceOperation::ProcessRead(_) | ResourceOperation::ProcessObservation {..}) {
+        let (grant,_) = storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,"storage.health",
+            &json!({"workspaceId":request.binding.workspace_id})).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        validate_binding(&grant,&request.binding,&request.context).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        let mut binding = storage.execution_tool_binding(&request.binding,&grant).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        if binding.is_none() && matches!(request.operation,ResourceOperation::ProcessSpawn(_)) {
+            Storage::require_execution_view_owner(&request.binding,&grant).map_err(|error|ResourceFailure{error,dispatched:false})?;
+            if request.authorize_only { return Ok(ResourceWork::Ready(Value::Null)); }
+            let params = Storage::execution_view_params(&request.binding).map_err(|error|ResourceFailure{error,dispatched:false})?;
+            match storage.prepare_materialized_view(&params,&grant,request.cancellation.shared_flag()).map_err(|error|ResourceFailure{error,dispatched:false})? {
+                crate::storage::materialization::Admission::Work(task)=>return Ok(ResourceWork::ExecutionView(task)),
+                crate::storage::materialization::Admission::Complete(_)=>{},
+            }
+            binding = storage.execution_tool_binding(&request.binding,&grant).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        }
+        if let Some(binding)=binding {
+            effective=request.with_execution_binding(binding); &effective
+        } else {request}
+    } else {request};
     let ResourceOperation::FileRead(args) = &request.operation else {
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
     };
     if request.authorize_only {
+        if request.binding.source_mode == SourceMode::FixedBranch {
+            let (method,params)=request.operation.params(&request.binding,&request.context);
+            let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,method,&params)
+                .map_err(|error|ResourceFailure{error,dispatched:false})?;
+            validate_binding(&grant,&request.binding,&request.context).map_err(|error|ResourceFailure{error,dispatched:false})?;
+            return Ok(ResourceWork::Ready(json!({"resourceKey":fixed_read_key(&request.binding,&args.path)})));
+        }
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
     }
@@ -2739,6 +2901,9 @@ pub(crate) fn prepare_resource(
                     value["source"] = request.binding.physical_source(); ResourceWork::Ready(value)
                 }),
             };
+        }
+        if request.expected_resource_key.as_deref().is_some_and(|key|key!=fixed_read_key(&request.binding,&args.path)) {
+            return Err(KernelError::Authorization("Fixed file source changed after admission".into()));
         }
         let state =
             storage.dispatch(method, &authorized, Some(&request.binding.grant_id), &grant)?;
@@ -2808,17 +2973,19 @@ pub(crate) fn finish_resource_blob_read(
             task.params(),
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
+        let effective = storage.execution_tool_binding(&request.binding, &grant)?;
+        let binding = effective.as_ref().unwrap_or(&request.binding);
         if task.method() == "file.read" {
-            if let Some(root) = &request.binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
+            if let Some(root) = &binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
             if let ResourceOperation::FileRead(args) = &request.operation {
-                let key = storage.file_resource_key(request.binding.root_id.as_deref().expect("physical root"), &args.path, &grant)?;
+                let key = storage.file_resource_key(binding.root_id.as_deref().ok_or_else(||KernelError::Authorization("Execution view disappeared during read".into()))?, &args.path, &grant)?;
                 if request.expected_resource_key.as_deref() != Some(key.as_str()) {
                     return Err(KernelError::Authorization("canonical file resource changed during read".into()));
                 }
             }
         }
         storage.finish_blob_read(task, result, &grant).map(|mut value| {
-            if task.method() == "file.read" { value["source"] = request.binding.physical_source(); }
+            if task.method() == "file.read" { value["source"] = binding.physical_source(); }
             value
         })
     })()
@@ -2830,6 +2997,14 @@ pub(crate) fn finish_resource_blob_read(
 /// Unit owner fixtures may synchronously drive the same stages. Production never
 /// performs body I/O here: Kernel retains the original reply through worker completion.
 #[cfg(test)]
+pub(crate) fn serve_execution_view_fixture(storage:&mut Storage,epoch:&str,host:&str,generation:&str,request:&ResourceCall,task:crate::storage::materialization::Task)->Result<Value,ResourceFailure> {
+    let result=task.run(|control|storage.control_materialization(&task.operation_id,&task.job_id,control,false));
+    storage.finish_materialization(&task.operation_id,&task.job_id);
+    result.and_then(|value|finish_resource_execution_view(storage,epoch,host,generation,request,value))
+        .map_err(|error|ResourceFailure{error,dispatched:false})?;
+    serve_resource(storage,epoch,host,generation,request)
+}
+#[cfg(test)]
 pub(crate) fn serve_resource(
     storage: &mut Storage,
     epoch: &str,
@@ -2839,6 +3014,7 @@ pub(crate) fn serve_resource(
 ) -> Result<Value, ResourceFailure> {
     match prepare_resource(storage, epoch, host_id, host_generation, request)? {
         ResourceWork::Ready(value) => Ok(value),
+        ResourceWork::ExecutionView(task) => serve_execution_view_fixture(storage,epoch,host_id,host_generation,request,task),
         ResourceWork::BlobRead(task) => {
             let result = task.run();
             finish_resource_blob_read(
@@ -3139,9 +3315,9 @@ fn serve_resource_immediate(
         if request.authorize_only {
             return Ok(Value::Null);
         }
-        if let ResourceOperation::ObserveCompute { reply } = &request.operation {
+        if let ResourceOperation::ObserveCompute { job_id, reply } = &request.operation {
             let watch = storage.watch_compute(
-                &request.context.operation_id,
+                job_id,
                 &request.binding.workspace_id,
                 &grant,
             )?;
@@ -3175,7 +3351,7 @@ mod retrieval_source_adapter_review;
 
 #[cfg(test)]
 #[path = "tools_reliability_review.rs"]
-mod reliability_review;
+pub(crate) mod reliability_review;
 
 /// Runs only on the actual resource Host. The original coordinator owns Catalog intent;
 /// this adapter invokes the existing typed Storage/compute/process owners directly.
@@ -3396,6 +3572,7 @@ impl ResourceOperation {
                 length,
                 start_line,
                 end_line,
+                unit:None,
             }),
             A::LanguageSource { path, derived_view } => {
                 Self::LanguageQuery(LanguageQueryArgs::source_descriptor(path, derived_view))

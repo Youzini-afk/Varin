@@ -35,7 +35,6 @@ mod process_wait;
 mod protocol;
 mod protocol_generated;
 mod questions;
-mod retrieval;
 mod run_assembly;
 mod run_models;
 mod run_tools;

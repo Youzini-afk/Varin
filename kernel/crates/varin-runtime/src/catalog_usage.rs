@@ -87,6 +87,7 @@ impl ModelPresentationRead {
 pub struct ThreadUsageRead {
     selection: ThreadUsageParams, cursor: u64, steps: Vec<ModelStep>, operations: Vec<Operation>,
     originals: BTreeMap<String, RunAttribution>,
+    retrieval_runs: std::collections::BTreeSet<String>,
     content: crate::content::ContentStore, _publication: crate::content::ContentPublication,
 }
 impl Catalog {
@@ -97,8 +98,9 @@ impl Catalog {
         if self.branch_thread_id(&selection.branch_id)? != selection.thread_id {
             return Err(RuntimeError::Invalid("usage branch belongs to another thread".into()));
         }
+        let scope = "((b.thread_id=?1 AND b.id=?2) OR EXISTS(SELECT 1 FROM child_tasks c JOIN operations owner ON owner.id=c.id WHERE c.child_thread_id=b.thread_id AND json_extract(c.body,'$.parent_thread_id')=?1 AND json_extract(c.body,'$.parent_branch_id')=?2 AND json_extract(owner.body,'$.executor')='code_retrieval'))";
         let read = |table: &str, filter: &str| -> Result<Vec<String>> {
-            let mut statement = self.db.prepare(&format!("SELECT x.body FROM {table} x JOIN runs r ON r.id=x.run_id JOIN branches b ON b.id=r.branch_id WHERE b.thread_id=?1 AND b.id=?2 {filter} ORDER BY x.rowid"))?;
+            let mut statement = self.db.prepare(&format!("SELECT x.body FROM {table} x JOIN runs r ON r.id=x.run_id JOIN branches b ON b.id=r.branch_id WHERE {scope} {filter} ORDER BY x.rowid"))?;
             let rows = statement.query_map(params![selection.thread_id, selection.branch_id], |row| row.get(0))?;
             Ok(rows.collect::<std::result::Result<_, _>>()?)
         };
@@ -107,11 +109,13 @@ impl Catalog {
             .into_iter().map(|body| serde_json::from_str(&body)).collect::<std::result::Result<_, _>>()?;
         // Existing requests can use the original Run's recorded channel only when
         // its admitted connection still matches exactly. Never infer from a model name.
-        let mut statement = self.db.prepare("SELECT r.id,json_extract(r.body,'$.configuration.providerId'),json_extract(l.body,'$.selection.connection_identity'),json_extract(l.body,'$.selection.provider_family'),json_extract(l.body,'$.selection.model') FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE b.thread_id=?1 AND b.id=?2 AND json_extract(r.body,'$.configuration.providerId') IS NOT NULL")?;
+        let mut internal = self.db.prepare(&format!("SELECT r.id FROM runs r JOIN branches b ON b.id=r.branch_id WHERE {scope} AND b.id!=?2"))?;
+        let retrieval_runs = internal.query_map(params![selection.thread_id,selection.branch_id],|row|row.get::<_,String>(0))?.collect::<std::result::Result<_,_>>()?;
+        let mut statement = self.db.prepare(&format!("SELECT r.id,json_extract(r.body,'$.configuration.providerId'),json_extract(l.body,'$.selection.connection_identity'),json_extract(l.body,'$.selection.provider_family'),json_extract(l.body,'$.selection.model') FROM runs r JOIN branches b ON b.id=r.branch_id JOIN run_launches l ON l.id=r.id WHERE {scope} AND json_extract(r.body,'$.configuration.providerId') IS NOT NULL"))?;
         let originals = statement.query_map(params![selection.thread_id, selection.branch_id], |row| Ok((row.get(0)?, RunAttribution {
             provider_id: row.get(1)?, connection_identity: row.get(2)?, provider_family: row.get(3)?, model: row.get(4)?,
         })))?.collect::<std::result::Result<BTreeMap<_, _>, _>>()?;
-        Ok(ThreadUsageRead { selection: selection.clone(), cursor: self.event_cursor()?, steps, operations, originals,
+        Ok(ThreadUsageRead { selection: selection.clone(), cursor: self.event_cursor()?, steps, operations, originals, retrieval_runs,
             content: self.content.clone(), _publication: self.content.begin_publication() })
     }
 }
@@ -162,6 +166,7 @@ impl ThreadUsageRead {
             let metadata = snapshot(&step.request)?;
             let kind = match metadata.view.origin {
                 RequestOrigin::Conversation { compaction: Some(_), .. } => "context",
+                RequestOrigin::Conversation { .. } if self.retrieval_runs.contains(&step.run_id) => "retrieval",
                 RequestOrigin::Conversation { .. } => "conversation",
                 // Auxiliary, sampling and policy requests retain their own original Operation receipt.
                 // Never count a mirrored ModelStep as a second paid request.

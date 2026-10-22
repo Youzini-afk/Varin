@@ -104,7 +104,6 @@ fn text_description_preview_create_and_reopen_run_never_bind_an_adapter_or_crede
         ),
         credentials: credentials.clone(),
         language: crate::language::LanguageBridge::new(output.clone()),
-        retrieval: crate::retrieval::RetrievalBridge::new(output.clone()),
         memory: crate::host_query::OwnerChannel::new("memory", output.clone()),
         context: crate::host_query::OwnerChannel::new("context", output.clone()),
         resource: crate::host_query::OwnerChannel::new("resource", output.clone()),

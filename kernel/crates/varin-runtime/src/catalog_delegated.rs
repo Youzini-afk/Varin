@@ -633,6 +633,9 @@ impl Catalog {
         &self,
         command: ChildContinuationCommand,
     ) -> Result<ChildContinuationPreparation> {
+        if self.operation(&command.child_operation_id)?.executor.as_deref()==Some("code_retrieval") {
+            return Err(RuntimeError::Invalid("Internal retrieval belongs to its original tool call; start a new retrieval or dispatch a formal Agent for continued work".into()));
+        }
         let existing: Option<String> = self
             .db
             .query_row(
@@ -779,7 +782,7 @@ impl Catalog {
             }
             None
         } else if let ChildSource::Shared { selection, .. } = source {
-            if previous.code_result != ChildCodeResult::NoChanges
+            if !matches!(previous.code_result, ChildCodeResult::NoChanges | ChildCodeResult::SharedSource)
                 || launch.selection.source.as_ref() != Some(selection)
             {
                 return Err(RuntimeError::Conflict("shared child workspace changed".into()));

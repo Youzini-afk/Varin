@@ -244,9 +244,6 @@ jobs:
           fi
           node packages/electron/scripts/package.mjs "${args[@]}"
 
-      - name: Build and verify optional local semantic component
-        run: node scripts/build-local-semantic-component.mjs --output packages/electron/release-assets
-
       - name: Smoke unpacked Windows application
         if: matrix.platform == 'windows'
         shell: pwsh

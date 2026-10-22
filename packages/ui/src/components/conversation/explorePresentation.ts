@@ -59,7 +59,7 @@ export function explorePresentation(execution?: ChatToolExecutionState, result?:
   else if (result?.isError || execution?.status === 'error' || typeof details?.error === 'string') phase = 'failed';
   else if (result?.status === 'unknown' || execution?.status === 'unknown') phase = 'unknown';
   else if (invalid) phase = 'invalid';
-  else if (final) phase = details?.status === 'partial' ? 'partial' : snippets ? snippets.length ? 'complete' : 'empty' : 'unknown';
+  else if (final) phase = details?.status === 'partial' ? 'partial' : details?.kind === 'retrieval' && details.status === 'ready' ? 'complete' : snippets ? snippets.length ? 'complete' : 'empty' : 'unknown';
   else if (execution?.status === 'running') phase = progress && ['complete', 'partial', 'empty'].includes(progress.phase) ? 'finishing' : progress?.phase ?? 'starting';
   else phase = generating ? 'preparing' : 'unknown';
   const running = execution?.status === 'running' && !['complete', 'partial', 'empty', 'failed', 'unavailable', 'cancelled'].includes(phase);

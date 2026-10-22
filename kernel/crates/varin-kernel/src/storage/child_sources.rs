@@ -45,7 +45,7 @@ impl Storage {
         }
         if delegation.process
             && (delegation.work_mode
-                != varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite
+                == varin_runtime::catalog::dispatch::ChildWorkMode::ReadOnly
                 || (!delegation.configured_preset && !grant.capabilities.contains("process")))
         {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
@@ -56,7 +56,26 @@ impl Storage {
                 return Err(KernelError::Authorization("stage source belongs to another resource owner".into()));
             }
             match source.mode {
-                varin_runtime::SourceMode::FixedBranch=>None,
+                varin_runtime::SourceMode::FixedBranch=>{
+                    let view_id=format!("run-execution:{}",stage.run_id);
+                    match self.materialized_view_record(&source.workspace_id,&view_id)? {
+                        Some(record) if record["branchId"]==json!(source.branch_id) && record["revision"]==json!(source.revision)=>{
+                            let original=self.load_grant(record["ownerGrantId"].as_str().ok_or_else(||KernelError::Storage("Selected execution view owner missing".into()))?)?;
+                            if original.run_id.as_deref()!=Some(&stage.run_id) || original.owning_workspace.as_deref()!=Some(&source.workspace_id)
+                                || original.execution_workspace.as_deref().or(original.owning_workspace.as_deref())!=Some(&source.execution_workspace_id) {
+                                return Err(KernelError::Authorization("Selected execution view belongs to another Run source".into()));
+                            }
+                            match (self.source_authority_for_grant(&grant.grant_id)?,self.source_authority_for_grant(&original.grant_id)?) {
+                                (None,None)=>{},
+                                (Some(caller),Some(owner)) if caller.principal_id==owner.principal_id && caller.coordinator_host_id==owner.coordinator_host_id && owner.result.source==source=>{},
+                                _=>return Err(KernelError::Authorization("Selected execution view belongs to another authenticated owner".into())),
+                            }
+                            let view=self.inspect_execution_view(&json!({"workspaceId":source.workspace_id,"branchId":source.branch_id,"revision":source.revision}),&original)?;
+                            if view["status"]!="ready" {return Err(KernelError::Operation("Selected Agent execution view preparation has not completed".into()));}
+                            Some(varin_runtime::catalog::launches::LiveRoot{host_id:host_id.into(),root_id:view["rootId"].as_str().unwrap().into(),canonical_root:view["canonicalRoot"].as_str().unwrap().into()})
+                        },_=>None,
+                    }
+                },
                 _=>{
                     let directory=if source.mode==varin_runtime::SourceMode::LiveRoot {
                         PathBuf::from(&source.live_root.as_ref().ok_or_else(||KernelError::Storage("stage live root missing".into()))?.canonical_root)
@@ -74,6 +93,8 @@ impl Storage {
                     Some(varin_runtime::catalog::launches::LiveRoot{host_id:host_id.into(),root_id:root["rootId"].as_str().ok_or_else(||KernelError::Storage("stage root missing".into()))?.into(),canonical_root:root["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("stage directory missing".into()))?.into()})
                 }
             }
+        } else if let Some(effective)=self.execution_tool_binding(binding,grant)? {
+            self.source_physical_root(&effective,grant,host_id)?
         } else { self.source_physical_root(binding, grant, host_id)? };
         if authorize_only {
             return Ok(Value::Null);
@@ -82,7 +103,7 @@ impl Storage {
         let identity = json!({"operationId":operation_id,"workspaceId":binding.workspace_id,"source":source,"physicalRoot":physical,
             "parentRunId":context.run_id,"parentThreadId":binding.thread_id,"childThreadId":format!("thread:child:{}",context.operation_id),"delegation":delegation});
         idempotent(self, "source.handoff", &identity, |storage| {
-            let root = if let Some(root) = physical {
+            let root = if let Some(root) = physical.as_ref().filter(|_|source.mode!=varin_runtime::SourceMode::FixedBranch) {
                 json!({"kind":"physical","root":root})
             } else {
                 let pin_id = format!("child-pin:{}", context.operation_id);
@@ -91,7 +112,10 @@ impl Storage {
                     true,
                     &grant.grant_id,
                 )?;
-                json!({"kind":"fixed","pin":{"pin_id":pin_id,"root":pinned["root"],"source":source}})
+                let pin=json!({"pin_id":pin_id,"root":pinned["root"],"source":source});
+                if let Some(root)=&physical {
+                    json!({"kind":"derived","pin":pin,"root":root,"view_id":format!("run-execution:{}",delegation.agent_source.as_ref().map(|stage|stage.run_id.as_str()).unwrap_or(&binding.run_id))})
+                } else { json!({"kind":"fixed","pin":pin}) }
             };
             Ok(
                 { let mut handoff=json!({"operation_id":operation_id,"source":source,"root":root,"resource_authority":binding.target_authority.as_ref().map(|authority|json!({"authority_id":authority.authority_id,"resource_epoch":authority.resource_epoch}))});
@@ -158,6 +182,18 @@ impl Storage {
         binding: &ToolBinding,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
+        let effective;
+        let binding=if binding.source_mode==varin_runtime::SourceMode::FixedBranch {
+            let params=Storage::execution_view_params(binding)?;
+            let view=self.inspect_execution_view(&json!({"workspaceId":binding.workspace_id,"branchId":params["branchId"],"revision":params["revision"]}),grant)?;
+            if view.is_null() {return Ok(json!({"physical":false,"writerStopped":true}));}
+            // No command can start until preparation commits. Interrupted copy
+            // resources are reclaimed by their original materialization journal.
+            if view["status"]=="interrupted" {return Ok(json!({"physical":false,"writerStopped":true}));}
+            if view["status"]=="preparing" {return Ok(json!({"physical":false,"writerStopped":false}));}
+            effective=self.execution_tool_binding(binding,grant)?.ok_or_else(||KernelError::Storage("Execution view disappeared during settlement".into()))?;
+            &effective
+        } else {binding};
         let root = binding
             .root_id
             .as_deref()
@@ -174,7 +210,7 @@ impl Storage {
         let registered = self.registered_file_root(root, grant)?;
         let path = std::path::PathBuf::from(&registered.canonical_root);
         let stopped = self.process_directory_writer(&path)?.is_none();
-        Ok(json!({"rootId":root,"canonicalRoot":path,"writerStopped":stopped}))
+        Ok(json!({"physical":true,"rootId":root,"canonicalRoot":path,"writerStopped":stopped}))
     }
 }
 
@@ -286,7 +322,8 @@ impl Storage {
         if let Some(actual) = params.get("branchId").and_then(Value::as_str) {
             if actual != branch {
                 let parent = match &handoff.root {
-                    varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => pin,
+                    varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                        | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => pin,
                     _ => return Err(deny()),
                 };
                 if actual != parent.source.branch_id.as_deref().unwrap_or("")
@@ -320,7 +357,8 @@ impl Storage {
         }
         if let Some(pin) = params.get("pinId").and_then(Value::as_str) {
             let parent = match &handoff.root {
-                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => {
+                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                    | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => {
                     Some(pin.pin_id.as_str())
                 }
                 _ => None,
@@ -330,7 +368,8 @@ impl Storage {
             }
         }
         let parent_branch = match &handoff.root {
-            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } => {
+            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => {
                 pin.source.branch_id.as_deref()
             }
             _ => None,
@@ -355,7 +394,8 @@ impl Storage {
         }
         if method.starts_with("file.") || method == "compute.start" {
             let root = match &handoff.root {
-                varin_runtime::catalog::collaboration::ChildSourceRoot::Physical { root } => root,
+                varin_runtime::catalog::collaboration::ChildSourceRoot::Physical { root }
+                    | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { root, .. } => root,
                 _ => return Err(deny()),
             };
             if let Some(actual) = params.get("rootId").and_then(Value::as_str) {

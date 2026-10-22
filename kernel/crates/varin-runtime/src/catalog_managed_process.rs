@@ -102,14 +102,16 @@ impl Catalog {
             .selection
             .source
             .as_ref()
-            .is_some_and(|source| source.mode != SourceMode::FixedBranch)
+            .is_some_and(|source| source.mode != SourceMode::FixedBranch || matches!(kind,ManagedProcessKind::ProcessJob))
         {
             return Err(RuntimeError::Conflict(
-                "Managed process requires its original physical source".into(),
+                "Managed process requires its admitted source; script environments require a physical source".into(),
             ));
         }
         if matches!(kind, ManagedProcessKind::ProcessJob) {
-            let source = launch.selection.source.as_ref().expect("physical source checked");
+            // ProcessJob's first command may still be preparing its original
+            // fixed source view in Storage. Binding records ownership, not cwd readiness.
+            let source = launch.selection.source.as_ref().expect("source checked");
             let matching = match (&source.resource_owner, &op.execution_owner) {
                 (launches::SourceResourceOwner::Local, Some(ExecutorOwner::Kernel)) => true,
                 (launches::SourceResourceOwner::ManagedHost{host_id,..}, Some(ExecutorOwner::External{identity,epoch})) => !epoch.is_empty() && identity.strip_prefix(&format!("source:{host_id}:source-authority:")).is_some_and(|suffix|!suffix.is_empty()),
@@ -205,6 +207,18 @@ impl Catalog {
                 ids.push(op.id);
             }
         }
+        tx.commit()?;
+        Ok(ids)
+    }
+    /// Internal investigations have no independent terminal owner after their report.
+    pub fn closing_retrieval_processes(&mut self) -> Result<Vec<String>> {
+        let tx = self.db.transaction()?;
+        let ids = {
+            let mut query = tx.prepare("SELECT p.id FROM operations p JOIN delegated_executions d ON d.run_id=p.run_id JOIN operations owner ON owner.id=d.child_operation_id WHERE json_extract(owner.body,'$.executor')='code_retrieval' AND (json_extract(d.body,'$.report') IS NOT NULL OR json_extract(owner.body,'$.cancel_requested')=1) AND json_extract(p.body,'$.managed_process') IS NOT NULL AND json_extract(p.body,'$.effect')!='none' AND coalesce(json_extract(p.body,'$.external_receipt.executor_stopped'),0)=0")?;
+            let ids = query.query_map([], |row| row.get::<_,String>(0))?.collect::<std::result::Result<Vec<_>,_>>()?;
+            ids
+        };
+        for id in &ids { request_cancel_operation_in(&tx,id)?; }
         tx.commit()?;
         Ok(ids)
     }

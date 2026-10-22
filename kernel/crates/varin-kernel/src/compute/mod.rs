@@ -42,8 +42,12 @@ struct State {
     scanned: u64,
     message: Option<String>,
     discard: bool,
+    resume: Option<Task>,
+    coverage_partial: bool,
+    checkpoint: Option<(String, Option<i64>, Option<String>)>,
 }
 pub(crate) struct Shared {
+    paged: bool,
     state: Mutex<State>,
     space: Condvar,
     pub cancelled: AtomicBool,
@@ -51,8 +55,8 @@ pub(crate) struct Shared {
     watchers: Mutex<Vec<Weak<mpsc::SyncSender<()>>>>,
 }
 impl Shared {
-    fn new() -> Self { Self { state: Mutex::new(State { status: "queued", records: VecDeque::new(),
-        bytes: 0, base: 0, end: 0, scanned: 0, message: None, discard: false }),
+    fn new(paged:bool) -> Self { Self { paged, state: Mutex::new(State { status: "queued", records: VecDeque::new(),
+        bytes: 0, base: 0, end: 0, scanned: 0, message: None, discard: false, resume:None, coverage_partial:false, checkpoint:None }),
         space: Condvar::new(), cancelled: AtomicBool::new(false), done: AtomicBool::new(false), watchers: Mutex::new(Vec::new()) } }
     fn notify_watchers(&self) {
         self.watchers.lock().unwrap_or_else(|p| p.into_inner()).retain(|watcher| {
@@ -68,12 +72,16 @@ impl Shared {
         let bytes = serde_json::to_vec(&record).map_err(|e|e.to_string())?.len();
         if bytes > RECORD_BYTES { return Err("Computation record exceeds the bounded protocol frame; request a narrower range".into()); }
         let mut state = self.state.lock().unwrap_or_else(|e|e.into_inner());
-        while state.bytes > 0 && state.bytes + bytes > BUFFER_BYTES && !state.discard {
+        while !self.paged && state.bytes > 0 && state.bytes + bytes > BUFFER_BYTES && !state.discard {
             self.check()?;
             state = self.space.wait(state).unwrap_or_else(|e|e.into_inner());
         }
         self.check()?;
         if !state.discard {
+            if kind=="hit" {state.checkpoint=Some((path.into(),record["data"]["line"].as_i64(),Some(revision.into())));}
+            else if kind=="entry" || (kind=="error" && !path.is_empty() && record["data"].get("status").is_none()) {
+                state.checkpoint=Some((path.into(),None,None));
+            }
             let cursor = state.end; state.end += 1; state.bytes += bytes;
             state.records.push_back(Buffered {cursor,bytes,record});
             self.notify_watchers();
@@ -81,21 +89,30 @@ impl Shared {
         Ok(())
     }
     pub fn scanned(&self) { self.state.lock().unwrap_or_else(|e|e.into_inner()).scanned += 1; }
+    // Paged discovery yields after an indivisible record fills the existing
+    // buffer budget. No pool thread waits for a model to request the next page.
+    pub fn page_full(&self)->bool {
+        let state=self.state.lock().unwrap_or_else(|e|e.into_inner());
+        self.paged && state.checkpoint.is_some() && state.bytes>=BUFFER_BYTES
+    }
+    pub fn checkpoint(&self)->Option<(String,Option<i64>,Option<String>)> {self.state.lock().unwrap_or_else(|e|e.into_inner()).checkpoint.clone()}
     fn running(&self) { self.state.lock().unwrap_or_else(|e|e.into_inner()).status = "running"; }
-    fn finish(&self, result: Result<bool>) {
+    fn finish(&self, result: Result<bool>, resume:Option<Task>) {
         let mut state = self.state.lock().unwrap_or_else(|e|e.into_inner());
         if self.cancelled.load(Ordering::Acquire) { state.status="cancelled"; state.message=Some("Native computation cancelled".into()); }
         else { match result {
-            Ok(partial) => state.status = if partial {"partial"} else if state.end==0 {"empty"} else {"ready"},
+            Ok(partial) => { state.coverage_partial |= partial; state.status = if state.coverage_partial {"partial"} else if state.end==0 {"empty"} else {"ready"}; },
             Err(message) => { state.status=if state.end==0 {"failed"} else {"partial"}; state.message=Some(message); }
         } }
-        self.done.store(true,Ordering::Release); self.space.notify_all();
+        if !self.cancelled.load(Ordering::Acquire) && resume.is_some() {state.status="paused";state.resume=resume;}
+        self.done.store(state.resume.is_none(),Ordering::Release); self.space.notify_all();
         self.notify_watchers();
     }
     fn cancel(&self) {
         self.cancelled.store(true,Ordering::Release);
         let mut state=self.state.lock().unwrap_or_else(|e|e.into_inner());
         state.discard=true; state.records.clear(); state.bytes=0; state.base=state.end;
+        if state.resume.take().is_some(){state.status="cancelled";self.done.store(true,Ordering::Release);self.notify_watchers();}
         self.space.notify_all();
     }
 }
@@ -107,7 +124,7 @@ impl Queue {
     fn remove(&self,id:&str) {
         let mut queue=self.work.lock().unwrap_or_else(|e|e.into_inner());
         if let Some(index)=queue.iter().position(|w|w.id==id) {
-            let work=queue.remove(index).unwrap(); work.shared.finish(Err("cancelled".into()));
+            let work=queue.remove(index).unwrap(); work.shared.finish(Err("cancelled".into()),None);
         }
     }
     fn close(&self) {
@@ -132,10 +149,12 @@ pub(crate) struct Job {
     pub root:Option<String>,
     pub params_hash:String,
     pub revoked:bool,
+    source:Value,
     shared:Arc<Shared>,
 }
 impl Job {
     pub fn done(&self)->bool {self.shared.done.load(Ordering::Acquire)}
+    pub fn quiescent(&self)->bool {self.done() || self.shared.state.lock().unwrap_or_else(|e|e.into_inner()).resume.is_some()}
     pub fn watch(&self) -> ComputeWatch { ComputeWatch(self.shared.clone()) }
 }
 /// A read-only notification handle to the admitted job, not another job registry.
@@ -157,7 +176,7 @@ impl ComputeWatch {
             if cancel.is_cancelled() { return false; }
             {
                 let state = self.0.state.lock().unwrap_or_else(|p| p.into_inner());
-                if self.0.done.load(Ordering::Acquire) || (!terminal_only && state.end > cursor) {
+                if self.0.done.load(Ordering::Acquire) || (!terminal_only && (state.end > cursor || state.resume.is_some())) {
                     return true;
                 }
             }
@@ -185,11 +204,12 @@ impl ComputeManager {
         for (name, queue) in queues {
             let worker=thread::Builder::new().name(name.into()).spawn(move||{
                 let mut syntax=structure::SyntaxRuntime::default();
-                while let Some(work)=queue.take() {
+                while let Some(mut work)=queue.take() {
                     work.shared.running();
-                    let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||query::execute(work.task,&work.shared,&mut syntax)))
+                    let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||query::execute(&mut work.task,&work.shared,&mut syntax)))
                         .unwrap_or_else(|_|Err("Native computation failed unexpectedly".into()));
-                    work.shared.finish(result);
+                    let paused=result.as_ref().is_ok_and(|(_,paused)|*paused);
+                    work.shared.finish(result.map(|(partial,_)|partial),paused.then_some(work.task));
                 }
             });
             match worker {
@@ -208,9 +228,12 @@ impl ComputeManager {
     }
     pub fn start(&mut self,id:String,task:Task,grant_id:String,epoch:String,pin_id:Option<String>,root:Option<String>,params_hash:String)->Result<()> {
         self.ensure_workers()?;
-        let shared=Arc::new(Shared::new());
+        let shared=Arc::new(Shared::new(task.params.paged==Some(true)));
         let background=task.params.lane=="background";
-        self.jobs.insert(id.clone(),Job {grant_id,workspace_id:task.params.workspace_id.clone(),epoch,pin_id,root,params_hash,revoked:false,shared:shared.clone()});
+        let source=if let Some(root)=&task.params.root_id{json!({"rootId":root})}
+            else if let Some(branch)=&task.params.branch_id{json!({"branchId":branch,"revision":task.params.revision})}
+            else {json!({"pinId":task.params.pin_id,"root":root})};
+        self.jobs.insert(id.clone(),Job {grant_id,workspace_id:task.params.workspace_id.clone(),epoch,pin_id,root,params_hash,revoked:false,source,shared:shared.clone()});
         let work=Work{id,task,shared};
         if background{self.background.push(work);}else{self.foreground.push(work);}
         Ok(())
@@ -226,13 +249,25 @@ impl ComputeManager {
             if let Some(record)=state.records.pop_front(){state.bytes-=record.bytes;}
         }
         state.base=cursor;job.shared.space.notify_all();
+        // Resume only when the caller asks beyond all already-produced records.
+        // The original task keeps its source and scan position while no worker is held.
+        if cursor==state.end {
+            if let Some(task)=state.resume.take() {
+                state.status="queued";drop(state);
+                let background=task.params.lane=="background";
+                let work=Work{id:id.into(),task,shared:job.shared.clone()};
+                if background{self.background.push(work);}else{self.foreground.push(work);}
+                state=job.shared.state.lock().unwrap_or_else(|e|e.into_inner());
+            }
+        }
         let mut records=Vec::new();let mut bytes=0;let mut next=cursor;
         for record in &state.records {
             if !records.is_empty()&&bytes+record.bytes>max_bytes{break;}
             records.push(record.record.clone());bytes+=record.bytes;next=record.cursor+1;
         }
         Ok(json!({"jobId":id,"kernelEpoch":job.epoch,"workspaceId":job.workspace_id,"status":state.status,
-            "root":job.root,"records":records,"nextCursor":next,"endCursor":state.end,"scannedFiles":state.scanned,"message":state.message}))
+            "root":job.root,"source":job.source,"records":records,"nextCursor":next,"endCursor":state.end,"scannedFiles":state.scanned,"message":state.message,
+            "scanComplete":job.done(),"paused":state.resume.is_some()}))
     }
     pub fn cancel(&self,id:&str) {
         if let Some(job)=self.jobs.get(id){job.shared.cancel();self.foreground.remove(id);self.background.remove(id);}

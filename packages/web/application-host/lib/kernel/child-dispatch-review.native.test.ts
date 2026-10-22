@@ -40,6 +40,11 @@ import { createThreadSourcePreparer, createThreadSourceAdmission } from './threa
 import { KernelStorageAdapter, createKernelWorkspaceWorkingStateAccess } from './storage-adapter.js';
 import { createLiveSourceOwner } from './live-source.js';
 import { originalMaterializationLocation } from './source-launch.js';
+import { createKernelComputeService } from './compute-service.js';
+import { createSourceQueryOwner } from './source-query.js';
+import { createLanguageOwner } from './language-owner.js';
+import { createStructureSource } from '../structure/source.js';
+import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
@@ -131,7 +136,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
   const configuration = { providerId: model.providerId, providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
   let projectId = 'child-review-project'; let trusted = true;
-  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean } = {}) {
+  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean; structure?:boolean } = {}) {
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
@@ -206,6 +211,12 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       } };
     }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, liveSources.validate, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
     const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
+    const compute=options.structure?createKernelComputeService({client:kernel,resolveIdentity:async cwd=>{const selected=await documents.resolveWorkspace({path:cwd});return {workspaceId:selected.workspaceId,executionWorkspaceId:selected.workspaceId,canonicalRoot:(await documents.inspectWorkspace(selected.workspaceId)).root};}}):undefined;
+    const sources=compute?createSourceQueryOwner({kernel,documents,validateLiveSource:liveSources.validate}):undefined;
+    if(compute && sources) {
+      const structure=createStructureSource([createTreeSitterStructureProvider({compute})]);
+      kernel.setLanguageOwner(createLanguageOwner({documents,sources,structure:()=>structure}));
+    }
     const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
     const errors: unknown[] = [];
@@ -240,6 +251,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const close = async () => {
       if (closed) return; closed = true;
       collaboration?.stop(); await host.close(); await extensions?.stop(); await knowledge?.close();
+      await sources?.dispose();await compute?.dispose();
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
       finally { await documents.dispose(); await kernel.close(); }
     };
@@ -559,6 +571,78 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
     expect((await reopened.runtime.child(operationId)).report).toEqual(child.report);
     expect(h.errors.map(String)).toEqual([]); expect(reopened.errors.map(String)).toEqual([]);
   } finally { release.release(); }
+});
+
+it.each(['quick','formal'] as const)('%s retrieval uses native search, structural reading and a fixed-source terminal without IDE services',async(mode)=>{
+  let parentSteps=0,childSteps=0;
+  const invoke=(name:string,args:unknown,id:string)=>tool('tool_invoke',{reference:{name,version:'1'},arguments:args},id);
+  const f=await fixture(({body,response})=>{
+    assertPairing(body);
+    if(isParent(body)) {
+      if(++parentSteps===1) complete(response,[mode==='quick'
+        ? invoke('code_retrieval',{question:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'quick')
+        : tool('dispatch',{preset:'retrieval',task:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'formal')]);
+      else if(mode==='formal' && parentSteps===2) complete(response,[tool('wait_child',{operationId:job(body)},'wait')]);
+      else {
+        if(mode==='quick') {
+          const retrieved=result(body,'code_retrieval')?.content as Record<string,unknown>;
+          expect(retrieved).toMatchObject({kind:'retrieval',status:'ready',answer:'Verified marker and the original execution view.'});
+        }
+        complete(response,[answer('Parent received the investigation','parent-complete')]);
+      }
+    } else {
+      switch(++childSteps) {
+        case 1:complete(response,[tool('file_search',{query:'marker'},'search')]);break;
+        case 2:
+          expect(JSON.stringify(result(body,'file_search'))).toContain('sample.ts');
+          complete(response,[tool('file_read',{path:'sample.ts',unit:{line:2}},'unit')]);break;
+        case 3: {
+          const read=result(body,'file_read')?.content as {unit?:{name:string;signature:{text:string}};content?:{text:string}};
+          expect(read.unit?.name).toBe('marker');expect(read.unit?.signature.text).toContain('function marker');
+          expect(read.content?.text).toBe("function marker() { return 'old'; }");
+          complete(response,[invoke('process_spawn',{command:process.execPath,args:['-e',"require('node:fs').writeFileSync('source.txt','changed in original fixed view'); console.log('verified')"],waitMs:1000,maxOutputBytes:4096},'command')]);break;
+        }
+        case 4:
+          expect(JSON.stringify(result(body,'process_spawn'))).toContain('verified');
+          complete(response,[tool('file_read',{path:'source.txt'},'changed')]);break;
+        case 5:
+          expect(JSON.stringify(result(body,'file_read'))).toContain('changed in original fixed view');
+          complete(response,[answer('Verified marker and the original execution view.','investigation-complete')]);break;
+        default:throw new Error('Unexpected retrieval continuation');
+      }
+    }
+  });
+  await fs.writeFile(path.join(f.workspace,'sample.ts'),"export function outer() {\r\n  function marker() { return 'old'; }\r\n  return marker();\r\n}\r\n");
+  const h=await f.openHost({structure:true});const identity=await h.api.create('quick-investigation');
+  if(mode==='formal') {
+    const catalog=await h.profiles.read({runtime:'agent'});
+    const profile=catalog.profiles.find(item=>item.id==='varin:builtin:retrievalAgent')!;
+    if(profile.config.kind!=='builtin') throw new Error('Expected builtin retrieval');
+    await h.profiles.save({runtime:'agent',expectedRevision:catalog.revision,id:profile.id,config:{...profile.config,binding:{...profile.config.binding,...model}}});
+  }
+  const prepared=await h.api.prepareSource({...identity,key:'quick-source',resourceOwner:{kind:'local'},workspaceId:(await h.documents.resolveWorkspace({path:f.workspace})).workspaceId,
+    content:{mode:'saved-files'},captureScopes:[],mode:'fixed_branch'});
+  prepared.source.tools=['code_retrieval','file_search','file_read','process_spawn','process_read','process_inspect'];
+  const receipt=await h.api.submit({...identity,key:'quick-input',expectedHead:null,text:'Run the focused investigation.',model,source:prepared.source});
+  try {
+    await expect.poll(async()=>(await h.runtime.run(receipt.run_id)).state,{timeout:20000}).toBe('completed');
+  } catch(error) {
+    console.error('Internal retrieval fixture stalled',{parentSteps,childSteps,errors:h.errors.map(error=>String(error)),
+      children:(await h.runtime.children()).map(child=>({state:child.state,report:child.report,codeResult:child.code_result}))});
+    throw error;
+  }
+  expect(parentSteps).toBe(mode==='quick'?2:3);expect(childSteps).toBe(5);
+  expect(await fs.readFile(path.join(f.workspace,'source.txt'),'utf8')).toBe('fixed child source before parent changes');
+  if(mode==='quick') {
+    expect(await h.api.collaboration!.children(identity)).toEqual([]);
+    expect((await h.api.family!.list(identity,{scope:'history'})).members).toEqual([]);
+  } else {
+    const child=(await h.runtime.children())[0]!;
+    expect(child.selected_profile.work_mode).toBe('shared');
+    expect(child.code_result.kind).toBe('published');
+    await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
+  }
+  expect(h.errors).toEqual([]);
 });
 
 it('the configured retrieval preset returns before preparation and delivers one fixed-source scoped report', async () => {

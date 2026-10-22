@@ -1329,7 +1329,7 @@ export interface LanguageQuery {
   grantId: string;
   source: LaunchSource;
   physicalRoot: LiveRoot | null;
-  method: "definition" | "references" | "diagnostics" | "hover" | "workspace_symbols" | "document_symbols" | "call_hierarchy";
+  method: "definition" | "references" | "diagnostics" | "hover" | "workspace_symbols" | "document_symbols" | "call_hierarchy" | "structure";
   path: string;
   line?: number;
   character?: number;
@@ -1506,7 +1506,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 57; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 58; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2575,7 +2575,7 @@ export interface ChildSourceHandoff {
   resource_authority: ChildSourceAuthority | null;
 }
 
-export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot };
+export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot } | { kind: 'derived'; pin: ChildSourcePin; root: LiveRoot; view_id: string };
 
 export interface SourceDraftResource { workspaceId: string; resourceId: string; baseRevision: string | null; localEditRevision: number; revision: string; encoding: string; bom: boolean; coordinationId?: string; documentInstanceId?: string; bufferHash?: string; lineEnding?: 'lf' | 'crlf' | 'cr'; }
 
@@ -2595,7 +2595,7 @@ export interface ChildWorkingResultRef {
   record_id: string;
 }
 
-export type ChildCodeResult = { kind: 'not_applicable' } | { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
+export type ChildCodeResult = { kind: 'not_applicable' } | { kind: 'shared_source' } | { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };
 
 export interface ChildSourceReadyParams {
   executionId: string;
@@ -2654,7 +2654,7 @@ export interface ChildCapabilityDescriptor {
   process?: boolean;
 }
 
-export type ChildWorkMode = 'read_only' | 'isolated_write';
+export type ChildWorkMode = 'read_only' | 'shared' | 'isolated_write';
 
 export interface ChildModelBinding {
   configuration: ModelSessionConfiguration;

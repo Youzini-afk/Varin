@@ -64,19 +64,25 @@ export function getToolSummary(input: ToolSummaryInput): ToolSummary {
       return { text: summary.text === target || !summary.text ? target : `${target} · ${summary.text}`, readOnly: summary.readOnly };
     }
     case "file_read": {
-      const path = asString(args?.path) ?? "";
-      return { text: path, readOnly };
+      const describe=(value:Record<string,unknown>|undefined)=>{
+        const path=asString(value?.path) ?? '';
+        const unit=asRecord(value?.unit);
+        const line=asNumber(value?.startLine) ?? asNumber(unit?.line);
+        const end=asNumber(value?.endLine);
+        return `${path}${line===undefined?'':`:${line}${end===undefined?'':`–${end}`}`}${asString(unit?.symbol)?` · ${String(unit?.symbol)}`:''}`;
+      };
+      return { text: Array.isArray(args?.files) ? args.files.map(value=>describe(asRecord(value))).filter(Boolean).join(', ') : describe(args), readOnly };
     }
     case "file_list": case "file_search": {
       const paths = Array.isArray(args?.paths) ? args.paths.join(", ") : "";
-      const query = asString(args?.query) ?? "";
+      const query = asString(args?.query) ?? (Array.isArray(args?.queries) ? args.queries.filter(value=>typeof value==='string').join(' · ') : "");
       const count = Array.isArray(details?.records) ? details.records.length : undefined;
       return { text: [query, paths, count === undefined ? undefined : String(count)].filter(Boolean).join(" · "), readOnly };
     }
     case "file_write": case "file_edit":
       return { text: asString(args?.path) ?? "", readOnly: false };
     case "process_spawn":
-      return { text: [args?.command, ...(Array.isArray(args?.args) ? args.args : [])].filter(value => typeof value === "string").join(" "), readOnly: false };
+      return { text: asString(args?.shellCommand) ?? [args?.command, ...(Array.isArray(args?.args) ? args.args : [])].filter(value => typeof value === "string").join(" "), readOnly: false };
     case "code_retrieval":
       return { text: asString(args?.question) ?? "", readOnly: false };
     case "language_diagnostics": case "language_symbols": case "language_document_symbols":

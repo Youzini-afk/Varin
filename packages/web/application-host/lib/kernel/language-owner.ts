@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto';
 import { languageIdForPath } from '@varin/protocol';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import type { DocumentAuthority } from '../documents/authority.js';
-import { createLanguageViewBinder } from '../lsp/language-view.js';
 import type { createLanguageSupervisor } from '../lsp/supervisor.js';
 import type { SourceQueryOwner, ManagedSourceQueryTransport } from './source-query.js';
 import type { LanguageQuery, LaunchSource, LiveRoot, KernelMaterializedView } from './protocol.generated.js';
 
 
 export interface LanguageResult {
+  revision?: string;
+  contentHash?: string;
   status: 'ready' | 'partial' | 'pending' | 'unsupported' | 'unavailable' | 'stale' | 'cancelled';
   source?: {
     selection: LaunchSource;
@@ -34,10 +35,11 @@ const failure = (status: LanguageResult['status'], message?: string): LanguageRe
  * Captured project files resolve through the derived tree for fixed sources; provider
  * libraries and explicit external configuration retain their real environment semantics.
  */
-export function createLanguageOwner({ documents, supervisor, sources, remote, targetAuthority }: {
+export function createLanguageOwner({ documents, supervisor, sources, remote, targetAuthority, structure }: {
   documents: Pick<DocumentAuthority, 'readSnapshot'>;
-  supervisor: ReturnType<typeof createLanguageSupervisor>;
-  sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'> & Partial<Pick<SourceQueryOwner, 'compute'>>;
+  supervisor?: ReturnType<typeof createLanguageSupervisor>;
+  sources: Pick<SourceQueryOwner, 'validateLanguage' | 'read' | 'processAdmission' | 'prepareLanguageView' | 'dispose'> & Partial<Pick<SourceQueryOwner, 'compute' | 'checkPath'>>;
+  structure?(): import('../structure/types.js').StructureSource;
   remote?: ManagedSourceQueryTransport;
   /** Target execution uses a real admitted resource grant, without a local Catalog Run. */
   targetAuthority?: true;
@@ -50,6 +52,21 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
       const { runId: _runId, threadId: _threadId, grantId: _grantId, source: _source, physicalRoot: _physicalRoot, ...request } = query;
       return await remote.service(query, { kind: 'language', query: request }, signal);
     }
+    if (query.method === 'structure') {
+      if (!sources.checkPath || !sources.compute || !structure) return failure('unsupported', 'Source structure is unavailable');
+      await sources.checkPath(query,query.path,signal);
+      const recipeId=await structure().unitsRecipe?.({path:query.path,workspaceId:query.source.workspace_id,languageId:languageIdForPath(query.path)});
+      if (!recipeId) return failure('unsupported','No Tree-sitter grammar is available for this file');
+      const computed=await sources.compute(query,{operation:'structure',lane:'foreground',files:[{path:query.path,recipeId}]},{signal});
+      const summary=computed.records.find(row=>row.kind==='structure');
+      const state=record(summary?.data);
+      if (!summary || !['ready','empty'].includes(String(state.status))) return failure('unavailable',String(state.message ?? computed.message ?? 'Source structure did not complete'));
+      const items=computed.records.filter(row=>row.kind==='structure-part' && record(row.data).category==='symbols' && row.revision===summary.revision)
+        .flatMap(row=>Array.isArray(record(row.data).items) ? (record(row.data).items as unknown[]).map(record) : []);
+      await sources.checkPath(query,query.path,signal);
+      return {...failure('ready'),items,revision:summary.revision,contentHash:String(state.contentHash)};
+    }
+    if (!supervisor) return failure('unsupported','IDE language services are not enabled');
     await sources.validateLanguage(query, signal);
     const languageId = languageIdForPath(query.path);
     if (!languageId) return failure('unsupported', 'No language is known for this file');
@@ -84,6 +101,7 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
       admitProcess: (active, prepared) => sources.processAdmission(query, prepared)(active),
       read: (resourceId, active) => sources.read(query, resourceId, active) }, signal);
     signal.throwIfAborted();
+    const { createLanguageViewBinder } = await import('../lsp/language-view.js');
     const binder = createLanguageViewBinder({ supervisor, documents });
     const bound = await binder.bind({ workspaceId: query.source.workspace_id, resourceId: query.path, languageId, text: 'disk', signal,
       sourceView: { view, content: observed.content, revision: observed.revision, source: query.source.mode === 'fixed_branch' ? 'working-branch' : 'disk' } });
@@ -166,7 +184,7 @@ export function createLanguageOwner({ documents, supervisor, sources, remote, ta
     } catch (error) { signal.throwIfAborted(); return failure('unavailable', error instanceof Error ? error.message : 'Language source is unavailable'); }
   };
   owner.releaseSource = async match => {
-    await supervisor.releaseSourceViews(match);
+    await supervisor?.releaseSourceViews(match);
     if (match.runId === undefined && match.grantId === undefined) await sources.dispose();
   };
   return owner;

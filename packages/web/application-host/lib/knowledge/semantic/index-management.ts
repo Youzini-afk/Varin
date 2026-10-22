@@ -2,7 +2,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import express, { type Express, type RequestHandler } from "express";
-import type { createWorkspaceSemanticRuntime } from "./workspace-runtime.js";
 import { semanticRootDir } from "./identity.js";
 import { measureDirectory, within } from "../../storage/measure.js";
 import type { LocalCpuMode } from './local-cpu-policy.js';
@@ -226,7 +225,6 @@ export function registerSemanticIndexRoutes(
   app: Express,
   options: {
     management: ReturnType<typeof createSemanticIndexManagement>;
-    runtime: ReturnType<typeof createWorkspaceSemanticRuntime>;
     directories?: ReturnType<typeof createIndexDirectoryManager>;
     requireAuth?: RequestHandler;
   },
@@ -237,14 +235,13 @@ export function registerSemanticIndexRoutes(
     try {
       const saved = await options.management.read();
       const activeDirectory = options.management.activeDirectory();
-      const roots = options.runtime.indexStatuses();
       response.setHeader("Cache-Control", "no-store");
-      response.json({ config: saved.config, activeConfig: options.management.active(), revision: saved.revision, activeDirectory,
+      response.json({ retired: true, config: saved.config, activeConfig: options.management.active(), revision: saved.revision, activeDirectory,
         directories: await options.directories?.list() ?? { revision: '', entries: [] },
         ...(saved.error ? { configError: saved.error } : {}),
         configuredDirectory: options.management.configuredDirectory(saved.config),
         restartRequired: JSON.stringify(saved.config) !== JSON.stringify(options.management.active()),
-        bytes: await options.management.directoryBytes(activeDirectory), roots,
+        bytes: await options.management.directoryBytes(activeDirectory), roots: [],
         retained: await Promise.all(saved.retainedDirectories.map(async (directory) => ({
           directory, bytes: await options.management.directoryBytes(directory), active: sameDirectory(directory, activeDirectory),
         }))) });

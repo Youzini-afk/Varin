@@ -40,6 +40,22 @@ async function fixture() {
 }
 
 describe('managed storage inventory and scoped cleanup', () => {
+  it('reclaims only the retired code model through a confirmed unchanged shared preview', async () => {
+    const f=await fixture();
+    const retired=path.join(f.data,'optional-components','local-semantic','versions','one','model.bin');
+    await write(retired,'retired-code-model');
+    const scoped=await f.service.preview({kind:'workspace',workspaceId:'workspace-a'});
+    expect(scoped.candidates.some(item=>item.kind==='retired-code-model')).toBe(false);
+    const stale=await f.service.preview({kind:'shared'});const before=stale.candidates.find(item=>item.kind==='retired-code-model')!;
+    await write(retired,'retired-code-model-changed');
+    expect((await f.service.cleanup(stale.id,[before.id])).state).toBe('partial');
+    const preview=await f.service.preview({kind:'shared'});const candidate=preview.candidates.find(item=>item.kind==='retired-code-model')!;
+    const receipt=await f.service.cleanup(preview.id,[candidate.id]);
+    expect(receipt).toMatchObject({state:'complete',bytesReclaimed:Buffer.byteLength('retired-code-model-changed')});
+    await expect(readFile(retired)).rejects.toMatchObject({code:'ENOENT'});
+    expect(await readFile(path.join(f.models,'model.bin'),'utf8')).toBe('model');
+    expect(await f.service.cleanup(preview.id,[candidate.id])).toEqual(receipt);
+  });
   it('measures real owned files once, excludes original projects, and does not repeat shared data per workspace', async () => {
     const f = await fixture();
     const all = await f.service.inventory({ kind: 'all' });

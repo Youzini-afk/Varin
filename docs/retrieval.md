@@ -1,130 +1,143 @@
 # 上下文、检索与知识
 
-本文描述当前实现。下一阶段的检索 Agent、共用工具与依赖收敛方案见[快速检索设计（待实现）](design/fast-code-retrieval.md)。
+检索提供继续工作所需的事实和原文，上下文保存本次调查的探索历史，知识保存显式保留的信息。
+原生 Catalog、Storage 和各领域 owner 共同保证实际来源、授权与结果归属；UI 不另建执行循环。
 
-检索给出证据，上下文决定某次请求实际收到什么，知识保存显式保留的信息。三者共享来源身份，不能互相代替：索引可以重建，
-记忆可以纠正，已经受理的请求仍须保留当时使用的精确材料。
+## 两种检索入口
 
-[Agent runtime](runtime.md) 拥有不可变 request/context 与后台 inference，消费既有 Host 领域服务；
-执行适配器不另造文件、文档或知识权威。
-
-快速检索在直接搜索/读取与独立检索 Agent 之间，交付可继续工作的代码证据。它属于原工具 Operation，不创建协作成员、worktree 或独立聊天。
-上下文充分是前提：优化复用和无收益扩展，需要联合理解的代码共同进入判断，输入小不是独立目标。
-
-## 证据先绑定来源
-
-文件命中与 excerpt 属于实际读取的来源：准入 live root 及观察 revision、固定 branch/revision，或显式捕获的草稿。
-项目 ID、路径、旧图索引行号不足以证明来源。范围在匹配排序前生效，固定依赖缺失不能改读当前磁盘。
-详见[资源](resources.md)和 [Documents](../packages/web/application-host/lib/documents/DOCUMENTATION.md)。
-
-Host 搜索将 inventory/content 计算交给 Rust compute，保留原来源及可选固定草稿覆盖，不再启动生产 ripgrep child 或维护第二
-递归 JS scanner。结果区分 empty、partial、cancelled、failed；NDJSON 以背压交付有限 batch，JSON 完整结果走同一计算。
-显式 result limit 与静默遗漏剩余搜索范围不同。
-
-## 精确搜索、Explore 与语言语义
-
-这些能力解决不同问题，可以直接调用，不要求前一层失败后才能使用下一层。
-
-- 精确 content/name 搜索定位准入范围内的字面证据。
-- Explore 汇合 literal/identifier、graph path、可选 semantic 候选，读取真实来源并按问题打包窗口。材料可增量交付，
-  慢的可选来源不会抹掉已经可用的证据。
-- `related` 描述文件级 import、reverse import 与 connection topology，不等同于 LSP references；association 不冒充确认连接。
-- LSP 使用所属语言进程与版本化文档视图。固定来源必须使用自己的文本/环境，不能借用不一致的 live server 结果。
-
-共享上下文组织与生成式判断在 `packages/protocol`；Host 的 `ExploreQueryRun` 保存原问题、版本化材料、已尝试工作、选择与来源状态。
-同一文件快照在多轮间复用，相同正文的新增命中依据合并；不可变 view 引用与材料位置、来源 revision 分开。
-原生入口接入已经打开的本地符号图，关系只在源文件版本吻合时使用。远端来源继续由原 Host 读取，不借用协调端同名目录的图。
-
-一次查询只有一套选材与行动判断：
-
-| 设置 | 选材与补查 | 生成式模型用途 |
+| 入口 | 执行与交付 | 模型配置 |
 | --- | --- | --- |
-| 自动 | 优先快速决策；未配置时依次采用 Explore LLM、重排、来源排序 | 快速决策按需请求查询扩展 |
-| 快速决策 | 比较材料贡献与下一步；交付也是正常选项 | 按需扩展仓库用语与搜索表达 |
-| Explore LLM | 同一材料/动作契约下的生成式判断 | 规划、选材和补查 |
-| 重排 | 对已取得材料排序 | 不运行自主补查循环 |
-| 来源排序 | 字面、已有关系、语义召回与确定性整理 | 不调用选材模型 |
+| `code_retrieval` | 原工具 Operation 内部的普通 Agent 调查；结果直接返回父工具 | `models.explore`，界面为“快速检索模型” |
+| 正式检索 Agent | 原协作派发、消息、报告及续接 | `models.retrievalAgent` |
 
-决策比较具体动作、等待某个已有结果、直接交付，不再将达到固定概率的所有动作同时排入队列。
-已选服务失败保留此前已确认的证据与具体原因；各材料批次的有效选择随完成提交，后一批失败不会丢掉前一批。
-尚未判断的候选继续留在查询内，不因决策失败自动全部转为正文；没有已选片段时返回明确失败。
-无决策服务的来源检索，以及用户主动“使用已有材料”，仍可按来源打包。配置、凭据和 tokenizer 在本次查询中固定；显式撤权仍即时生效，同次调用不更换付费提供商。
-独立检索 Agent 使用 `models.retrievalAgent`；快速检索的生成式能力使用 `models.explore`，职责不混用。
+`question` 是快速入口唯一必需的任务信息。已有线索自然附在问题里即可；不要求主 Agent
+先写搜索计划、关键词或证据清单。`paths` 是明确的文件调查范围，沿共用搜索/读取生效。
+终端沿原 Source 的进程授权执行，路径提示不冒充操作系统沙箱。自然语言中的猜测位置仍是线索。
 
-`models/token-count.ts` 租用 Rust 原生 TokenCounter，复用模型 tokenizer 获取、匹配质量与词表释放机制。
-分批计数包括序列化的问题、证据、选项、说明和生成输出空间，模型输入容量按实际绑定传递。
-TypeSafe 的整批窗口与“共享材料＋单个问题”窗口分别检查，显式长上下文请求头才启用对应扩展容量。
-仅有参考词表时，以 UTF-8 字节上界安排完整材料分批，计数说明标明此边界；它不计入真实模型 usage。
-同文件证据优先共同进入判断，分批保留共同背景和已选情况，无法完整容纳的片段报告容量原因。
-快速决策的每批只携带本批原文的定位与关系信息，另行说明查询整体的候选数、已选数和未展示数量；
-不把整个候选目录重复塞进每个选材或行动请求。行动依赖原文优先进入，余量用于相关已选材料和其他背景；
-背景按实际容量计数扩展，不设固定片段数。容量失败包含总输入、单问题边界与 tokenizer 说明。
-候选读取和提交前的材料复核复用现有读取并发度，同一路径共享本轮快照；任何一项失败仍等待同批已受理读取结束。
-所有候选仍留在查询中，出现新关系后可以再次比较；没有逐轮摘要调用。相同判断输入和计数结果在查询内复用，提供商 usage 继续取原始回执。
-模型请求期间的结构增强不会使原快照失效；文件内容变化则刷新该文件的视图及动作依赖，保留其他文件的选择，再判断新的证据。
-模型窗口是输入边界，预览条数是展示选择，两者不控制删除已选证据。
+新配置默认明确沿用当前会话模型，也可独立选择支持工具调用的普通模型和推理设置。
+已有显式模型、禁用状态和凭据保持原选择。旧快速决策/重排配置需要用户选择普通模型或继承；
+错误、慢响应和容量失败都不暗中切换另一家服务。快速决策与重排保留其他实际消费者的用途。
 
-同轮同匹配规则的字面表达式合并成一次原生搜索，并保留各表达式的命中归属。
-默认发现遵守 ignore；显式 `paths` 在原授权范围内搜索隐藏/依赖目录，不沿用默认目录剪枝。
-快照由原来源准入，模型发送与应用结果时校验实际涉及的材料，最终 Rust 按文件读取并重建真实原文。
+快速入口和正式检索共用原生 Supervisor、ExecutionEngine、ModelSession、ToolDirectory、
+上下文准备与通用压缩。探索按真实模型/工具交换追加；Host 不再维护候选池、选材评分、
+补查竞赛或逐轮材料重排。最终回答直接交付，不再调用报告整理模型。
+输入小、轮数少、返回片段多都不是独立的质量目标。
 
-快速检索卡片显示问题、实际阶段、已读片段和已选标记。Host 通过私有检索桥发送元数据快照，
-Rust 保留原 Thread/branch/Run/Operation 身份转发；慢消费者合并快照，正文按需从该查询读取。
-界面中的“摘录”读取当时快照；点击文件位置打开当前文件。二者具有明确的版本含义。
-直接调用和 `tool_invoke` 使用相同卡片，界面预览不进入主模型上下文。
+## 内部执行归属
 
-“使用已有材料”经原 Operation 的 `runtime.retrieval.finish` 控制交付，与取消整轮对话分开。
-它在准备、读取或判断期间都能到达。查询冻结已有结果、关闭新增工作；原推理 owner 继续持有已发请求，
-接收回执、保留 usage 并排空资源。最终结果不再等待剩余可选来源或慢观察者，独立后台索引继续运行。
+快速检索在同一 Catalog 中拥有内部 Thread/branch/Run，归属于原 `code_retrieval` Operation。
+内部受理保留原工具调用身份；重连和恢复找到同一内部执行，不伪造 `dispatch` 或重发未知副作用。
+内部记录不进入普通会话列表、协作成员、未读计数、自动命名或任务调度。
+进程与文件效果仍由实际内部操作记录，外层检索不再宣称任意终端都是只读。
 
-最终输出分开保留 `snippets`、`coverage`、`diagnostics` 和 `completion`。未探索范围、索引覆盖、服务失败与用户结束各有自己的事实。
-不存在检索专用 24 KiB 丢弃层；完整选中原文写入原工具历史，统一输出预览负责正文预算及 `read_thread` 引用。
-`limit` 只约束直接展开的片段数，必要材料组不在预览中拆半，续读指向同一次保存的完整结果。
-脚本的 `tools.invoke` 接收原始工具回执，因而仍有完整选中证据；脚本应自行选取需要展示的摘录，
-不能把原始条数当作模型预览条数。外层脚本输出继续经过统一字节预览，内部 `limit` 不改变脚本可处理的数据。
+模型、来源、角色和可用工具在受理时冻结；实际能力取角色与父方可委派授权的交集。
+未声明的能力沿 `tool_describe` / `tool_invoke`，不能凭工具名绕过目录与权限。
+内部检索不递归派发新的快速检索或协作成员。
 
-候选量/来源预算是覆盖事实，不是置信度。graph/index 缺口保持可见。Graph 给 path，真正文本须重读并重新定位 symbol/literal
-才输出位置；过期关系可以不带行号。可选 relation enrichment 不能让成功文本搜索失败，也不能挤掉 unread/partial 提示。
+原 Operation 等待采用原生持久 Wait 和事件唤醒；不在 Catalog 锁、Host 控制通道中等待模型。
+父工具不会在整个调查期间持有阻挡内部进程的宽范围文件租约。
+“使用已有材料”请求结束内部工作并交付已有回答；取消保留取消语义。两者都保留已经取得的
+工具证据、用量和中断时的可见回答，等待真实执行停止后释放资源。未确认效果仍标为未知。
+失败或压缩中断不会把已有证据改成成功完成。
 
-Structure 使用 native tree-sitter grammar/recipe 与适用 LSP fallback。小单元可完整呈现，大单元保留签名、命中块、省略标记和
-全文入口。普通 Explore slice 不为装饰启动 cold language server；显式 preparation 才经过现有 owner 请求它。
-结构不支持/失败时保留短文本窗口和诊断，不丢命中。
-Agent 符号工具默认返回一层 outline，使用 `childrenReference` 作为 `parent` 展开子项，`nextCursor` 继续同层页面；
-显式 `format: tree` 保留完整子树。页大小由 `maxResults` / `maxBytes` 调整，默认沿用工具查询的 100 条 / 64 KiB 页面目标，
-完整首条可超过字节目标以保证续读进展。引用绑定查询、来源和实际符号结果；结果变化要求重新读取，避免索引偏移指向另一符号。
+内部实际模型回执计入所属父会话一次，正式子任务继续使用各自归属。
+父会话删除同时纳入内部历史、内容引用和派生资源的原回收流程；存活进程或 handoff pin
+阻止过早删除。检索详情通过父 Operation 读取真实历史与工具操作。
 
-入口：[workspace search](../packages/web/application-host/lib/search/DOCUMENTATION.md)、
-[Explore](../packages/web/application-host/lib/harness/explore.ts)、
-[structure/graph](../packages/web/application-host/lib/structure/DOCUMENTATION.md)、
-[LSP](../packages/web/application-host/lib/lsp/DOCUMENTATION.md)。
+## 文件来源与终端
 
-## 派生索引与 inference
+| Source | 文件与命令行为 |
+| --- | --- |
+| LiveRoot | 使用原准入目录，读取当前文件，复用实际执行位置 |
+| Materialized | 使用原 environment/Run 的工作副本，不新建另一份检索 worktree |
+| FixedBranch | 初始读取不可变 branch/revision；第一次需要命令时按需物化同一版本 |
+| Managed Host | 原资源 Host 持有读取、物化、进程和清理权威 |
+| 无来源 | 保留不需要来源的能力；需要 cwd 的命令明确报错 |
 
-代码 semantic 和 knowledge-vector 是目的不同的派生库。身份包括实际 content/revision、model/vector space 和 recipe。
-新 generation 发布不会改写已有 reader 的 pin；相同路径或 provider 展示名不足以复用。
+固定来源的执行视图由 Rust Storage 的原物化 journal 准备。后续读取、搜索和命令看到同一个
+派生目录；最初版本保留为 baseline，旧证据仍指向原观察。准备失败或中断按原 journal 恢复，
+不会借用当前项目目录。派发其他检索时，已修改的执行视图通过 Derived handoff 捕获当前内容，
+原 pin 和目录引用在交接完成前继续保留。正式 Shared 检索可发布工作结果供后续协作使用。
 
-文件观察器启动和后台索引独立于前台查询准入。观察器尚未就绪时，查询使用当前可用索引和检索路径，
-标明覆盖未完成；观察器就绪后统一补齐扫描。多个查询复用同一次观察器准备。
-固定版本、物化 worktree 与 managed 来源同样只查询已有发布。候选逐文件核对实际版本，变更或未索引文件仍参加文本检索；
-前台不枚举整个来源来补建文档向量，索引覆盖单独报告。无已发布索引时也不会为这次查询冷建索引。
+两种检索默认具有命令启动、输出、输入、状态、等待和停止能力；显式 read-only 选择继续有效。
+终端使用原会话权限，不增加检索专用命令白名单，也不自动安装项目依赖。
+完整 IDE 拆分及 VSIX 是独立产品方向；基础检索不启动 LSP。
 
-Native 前台 query embedding、rerank、decision、generation 使用原 query session 和递增 ordinal。
-远端嵌入按所选模型的上下文容量分段，默认预留 10%；显式较小的分段预算继续生效。正文和路径、签名等附加内容共同计入窗口。
-配置词表可用时使用原生 tokenizer；仅有参考词表时使用保守的 UTF-8 字节上界。请求按 token 工作预算拆批，服务明确拒绝批量容量时
-继续拆成更小的批次，各次推理保留自己的回执；普通参数错误和未知执行结果不触发拆批。
-Catalog 管受理、dispatch、usage、receipt 与恢复；Host 配置、凭据、egress、protocol adapter 保持原归属。辅助推理直接使用原生 inference 路径。后台文档索引继续使用现有 index owner。
+## 共用搜索、读取与命令
 
-`localBekko` 是已有本地 embedding 组件。Native 未配置 embedding 选择可用它；显式 remote、disabled、invalid、unavailable
-不得偷偷 fallback。组件身份包括经过验证的 manifest/model/tokenizer/recipe/runtime。
-它只承担相应 embedding 工作；knowledge-vector 的原有配置与索引 owner 保持独立。
+### 搜索和发现
 
-本地 grain 在 encoder entry 前取得原 dispatch 许可；排队取消、实际完成和 worker exit 提供不同回执。
-observer abort 不能证明 active compute 停止。Provider usage 在答案校验前保留，缺维度仍缺，估算不能变成真实 token/价格。
-缓存命中不捏造付费请求；恢复不自动重发 unknown dispatched call。
+`file_search` 接受一个 `query` 或 `queries` 数组，同一范围和匹配方式共享文件扫描。
+批量结果以 `queryIndices` 保留归属；某表达式错误不会抹掉有效表达式的结果。
+支持 `paths`、`lines`、`windows` 三种结果：只列匹配文件、匹配行、合并同版本重叠上下文窗口。
+`file_list` 保留目录用途。范围、ignore 与隐藏目录设置随结果显示；显式路径可进入被默认忽略的依赖目录。
 
-详见[semantic](../packages/web/application-host/lib/knowledge/semantic/DOCUMENTATION.md)、
-[knowledge vectors](../packages/web/application-host/lib/knowledge/vectors/DOCUMENTATION.md)与
-[provider](../kernel/crates/varin-runtime/src/providers/README.md)。
+两种工具的 `nextCursor` 续读原生同一计算任务，绑定来源、查询、过滤和原 grant/epoch。
+页面大小可以改变，条件变化须重新查询。游标保留已取得页面和扫描检查点，按需恢复扫描；
+结果缓冲达到既有预算时让出线程，等待模型期间不占扫描线程，不建立全仓结果索引。
+读取完毕释放任务，Run 撤权回收弃用游标。重启、过期或来源变化给出明确重查指引。
+
+`scanComplete` 表示完整覆盖，`pageComplete` 和 `nextCursor` 表示展示与续读。
+已观察数量不是全仓总数；为了计数不会强制继续扫描。无匹配、路径不存在、部分不可读、
+取消和整个来源失败保持区别。多路径请求保留其他路径命中及逐路径错误。
+LiveRoot 的续读是多次真实观察；检查点文件发生变化时要求重新查询，不冒充整仓快照。
+
+### 原文和结构单元
+
+`file_read` 支持单文件和 `files` 批量，逐项保留状态、精确换行、版本、范围及续读。
+同次调用中同来源的重叠范围共用观察；合并结果超过帧时沿原请求分别读取。
+显式原文页不再被模型显示预览第二次静默剪裁；`readVersion` 和原文换行始终保留。
+
+可选 `unit: { line, symbol, revision }` 通过按需 Tree-sitter 选取代码单元。
+命中行优先最小包围单元，单独符号重名返回候选；返回名称、签名、精确字节/行范围和正文。
+大单元以 `offset` / `length` 与 `nextRead` 续读；版本变化要求重新选取。
+解析缺失或失败保留原因并返回普通原文入口。没有 LSP fallback 或全仓图预热。
+结构解析后读取再次校验正文 hash，避免结构和原文来自不同版本。
+
+### 进程
+
+`process_spawn` 以“程序 + 参数列表”或互斥的 `shellCommand` 执行；shell 由实际 Host 决定，
+直接参数不再拼接成 shell 字符串。返回原进程身份、实际 cwd、状态和可用首段输出。
+`waitMs` 是观察等待，默认 0；`maxOutputBytes` 是首段输出目标，不是杀进程期限。
+持续任务继续使用 `process_read`、输入、状态、`wait_process` 与停止工具。
+
+原 spool 保留通道、字节和精确 cursor；退出状态与输出是否读完分开表达。
+同一通道相邻存储块合并后投影 UTF-8，正常文本在模型中只出现一次。
+字符跨页面/通道、二进制或其他编码保留 Base64 与明确原因，脚本仍可按原始字节解码。
+发送输入、取消观察、请求停止和已确认退出是不同事实。
+
+## 依赖与存储
+
+基础检索不要求嵌入服务、本地 embedding 组件、代码向量库、持久化符号图或 LSP。
+代码索引登记、watch、扫描、自动重建、本地模型准备以及旧 Explore 决策/选材流水线已退出启动链。
+Tree-sitter 只解析实际请求的文件；语言服务器保留真实编辑器或显式语言功能消费者，不因选项目预热。
+
+旧代码索引在设置中显示为可清理的旧缓存，经原目录维护 owner 删除对应空间、publications 和索引回执。
+清理不依赖模型；失败保留路径和可重试状态。存储管理还能预览并清理旧
+`optional-components/local-semantic`，再次确认目录身份和内容指纹，保留语音及 Bot 知识资源。
+不为可重建缓存另做完整备份，不在升级时未经说明删除用户源码或知识库。
+
+Bot knowledge-vector 仍有独立用途，使用 `vectors/embedding-owner.ts`、原 KnowledgeStore 和
+原生用途推理回执。共享 embedding 分段、tokenizer、凭据与取消机制继续服务实际消费者；
+代码检索退出不等于删除这些数据域。
+
+## 交互与验证边界
+
+线程内沿用快速检索专用呈现，显示问题、实际最近动作、回答和可展开的工具过程。
+详情复用共用搜索/文件/终端视图，限定滚动区域；在底部时跟随输出，用户上翻后保留阅读位置。
+展开/收起使用现有动效并遵循 reduced-motion。正式检索保留协作成员与报告呈现。
+提前交付与取消分别受理；关闭详情不停止执行。
+
+原生及真实 Host 接线测试覆盖普通工具循环、固定来源命令后读取、分页、部分失败、
+输出游标和回收；测试提供商为本地协议 fixture。真实服务的回答质量、延迟和成本需要在
+具体模型、来源和问题上观察；当前实现不把接线测试耗时当作模型性能。
+
+入口：[原生检索](../kernel/crates/varin-kernel/src/tools_retrieval.rs)、
+[共用发现](../kernel/crates/varin-kernel/src/tools_discovery.rs)、
+[共用读取](../kernel/crates/varin-kernel/src/tools_read.rs)、
+[执行视图](../kernel/crates/varin-kernel/src/storage/execution_views.rs)、
+[Host 协作 owner](../packages/web/application-host/lib/kernel/thread-collaboration.ts)、
+[结构服务](../packages/web/application-host/lib/structure/DOCUMENTATION.md)。
 
 ## Web、学术与文档材料
 
@@ -167,11 +180,11 @@ Organizer 的 MemoryWork 保留固定 recipe、source claim 和 model receipt。
 
 ## Knowledge 与 Plan 的单一 writer
 
-KnowledgeStore 通过私有进程使用 TriviumDB。计划、知识和符号图共用原权威；派生 semantic/vector 工作有另一进程，
+KnowledgeStore 通过私有进程使用 TriviumDB。计划与知识使用原权威；旧符号记录只保留清理入口；派生 semantic/vector 工作有另一进程，
 避免长索引占满计划/记忆队列。Host facade 只提供允许的方法，不暴露任意 SQL。
 
 权威写入在 WAL 耐久后确认。Checkpoint 失败保留 dirty，重试持久化而不重放 mutation；进程丢失保留 unknown outcome。
-关闭排空已受理工作并等待 native handle，不回退到 Host 内 writer。符号 association refresh 按文件让出队列。
+关闭排空已受理工作并等待 native handle，不回退到 Host 内 writer。
 
 Agent Thread plan 在原库中使用不可变 version、branch reference 和 mutation receipt。Catalog 固定原 Tool/Policy invocation
 和 ancestry，Knowledge 执行自己的 CAS；这是可恢复协调，不是跨库事务。丢回执返回原结果，不替换后来用户编辑。

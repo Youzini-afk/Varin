@@ -85,6 +85,13 @@ export interface ThreadHistoryPage {
   previous: string | null;
   items: ThreadHistoryItem[];
 }
+/** Internal retrieval is observed through its original parent Operation. */
+export interface ThreadRetrievalTrace {
+  operationId: string;
+  history: ThreadHistoryPage;
+  operations: Operation[];
+  run: Run | null;
+}
 /** One real Run on the selected branch's visible ancestry, independent of loaded bodies. */
 export interface ThreadHistoryRun {
   runId: string;
@@ -450,7 +457,8 @@ export interface ThreadsAPI {
   toolCalls(operationId: string, signal?: AbortSignal): Promise<import('@varin/protocol').OperationCallSummary[]>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
   finishRetrieval(operationId: string): Promise<{ accepted: boolean }>;
-  readRetrievalMaterial(operationId: string, viewId: string): Promise<import('@varin/protocol').ExploreQueryView>;
+  retrievalTrace(operationId: string, cursor?: { headId: string; beforeId: string }, signal?: AbortSignal): Promise<ThreadRetrievalTrace>;
+  retrievalFileTarget(operationId: string, itemId: string, path: string, signal?: AbortSignal): Promise<ThreadFileTarget>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
   /** Original-owner requests and RPC-error URL choices remain readable after their Run ends. Pages omit original JSON evidence; read/respond return it. */
   listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;

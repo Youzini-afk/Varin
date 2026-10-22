@@ -253,6 +253,7 @@ impl Review {
             );
             let result = match prepared {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut self.f.storage.lock().unwrap(), EPOCH, HOST, GENERATION, &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let body = task.run();
                     finish_resource_blob_read(
@@ -534,7 +535,6 @@ impl Review {
                 resources: self.resource_client.clone(),
                 credentials: credentials.clone(),
                 language: self.language.clone(),
-                retrieval: crate::retrieval::RetrievalBridge::new(output.clone()),
                 memory: crate::host_query::OwnerChannel::new("memory", output.clone()),
                 context: crate::host_query::OwnerChannel::new("context", output.clone()),
                 resource: crate::host_query::OwnerChannel::new("resource", output.clone()),

@@ -105,6 +105,14 @@ pub(super) fn require_available(db: &Connection, thread_id: &str) -> Result<()> 
     }
 }
 
+/// Internal investigations are controlled through their parent Operation.
+pub(super) fn require_public(db:&Connection,thread:&str)->Result<()> {
+    let internal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=?1 AND json_extract(o.body,'$.executor')='code_retrieval')",
+        [thread],|row|row.get(0))?;
+    if internal {return Err(RuntimeError::Conflict("Internal retrieval belongs to its original code_retrieval Operation; use that Operation to inspect, finish or cancel it".into()));}
+    Ok(())
+}
+
 /// Only visible conversation/attention changes advance unread position. Metadata and read ACKs
 /// cannot create their own notification loop. Existing owner identities resolve attribution.
 pub(super) fn record_activity(
@@ -121,7 +129,7 @@ pub(super) fn record_activity(
     };
     if let Some(thread) = thread {
         tx.execute(
-            "UPDATE threads SET activity_cursor=?2,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1",
+            "UPDATE threads SET activity_cursor=?2,updated_at_ms=max(updated_at_ms,?3) WHERE id=?1 AND NOT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=?1 AND json_extract(o.body,'$.executor')='code_retrieval')",
             params![thread, sql_number(cursor)?, sql_number(now_ms()?)?],
         )?;
     }
@@ -233,7 +241,7 @@ impl Catalog {
             ArchiveFilter::Include => 1,
             ArchiveFilter::Only => 2,
         };
-        let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE t.deleted_at_ms IS NULL AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id")?;
+        let mut statement = self.db.prepare("SELECT t.id FROM threads t WHERE t.deleted_at_ms IS NULL AND NOT EXISTS(SELECT 1 FROM child_tasks internal JOIN operations owner ON owner.id=internal.id WHERE internal.child_thread_id=t.id AND json_extract(owner.body,'$.executor')='code_retrieval') AND (?1=1 OR t.archived=CASE WHEN ?1=2 THEN 1 ELSE 0 END) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN context_jobs c ON c.run_id=r.id WHERE b.thread_id=t.id) AND NOT EXISTS(SELECT 1 FROM branches b JOIN runs r ON r.branch_id=b.id JOIN operations o ON o.run_id=r.id WHERE b.thread_id=t.id AND json_extract(o.body,'$.intent.kind')='memory_work_v1') ORDER BY t.pinned DESC,t.updated_at_ms DESC,t.id")?;
         let ids = statement
             .query_map([archive], |r| r.get::<_, String>(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

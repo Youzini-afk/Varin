@@ -23,6 +23,7 @@ enum MaterializationReply {
     View(Value),
     Reconcile(Value),
     RootRegistration(String),
+    Resource(crate::tools::ResourceCall),
 }
 
 struct PendingRootRegistration {
@@ -536,10 +537,9 @@ impl Kernel {
             )));
         }
         if method == "authority.grant.retire" {
-            return Ok(Some(response_ok(
-                id,
-                storage.retire_grants(&params_value, host_id)?,
-            )));
+            let result=storage.retire_grants(&params_value,host_id)?;
+            if let Err(error)=self.collect_obsolete_materialized_views(completions) {eprintln!("derived view cleanup pending: {error}");}
+            return Ok(Some(response_ok(id,result)));
         }
         if method == "authority.grant.revoke" {
             return Ok(Some(response_ok(
@@ -1121,7 +1121,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         crate::host_query::OwnerChannel::new("file-observation", response_tx.clone());
     let plan_bridge = crate::plan_bridge::PlanBridge::new(response_tx.clone());
     let language_bridge = crate::language::LanguageBridge::new(response_tx.clone());
-    let retrieval_bridge = crate::retrieval::RetrievalBridge::new(response_tx.clone());
     let policy_bridge = crate::policy::PolicyBridge::new(response_tx.clone());
     let source_bridge=crate::host_query::OwnerChannel::new("source-resource",response_tx.clone());
     let writer_failed = Arc::new(AtomicBool::new(false));
@@ -1357,7 +1356,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         context_bridge.clone(),
         resource_bridge.clone(),
         plan_bridge.clone(),
-        retrieval_bridge.clone(),
         policy_bridge.clone(),
         response_tx.clone(),
         move |id| {
@@ -1383,7 +1381,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     let worker_resource = resource_bridge.clone();
     let worker_file_observation = file_observation_bridge.clone();
     let worker_plan = plan_bridge.clone();
-    let worker_retrieval = retrieval_bridge.clone();
     let worker_policy = policy_bridge.clone();
     let worker_source=source_bridge.clone();
     let worker_response_tx = response_tx.clone();
@@ -1486,6 +1483,23 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     kernel.active_materializations -= 1;
                     let response = match reply {
+                        MaterializationReply::Resource(call) => {
+                            let result = result.and_then(|value| {
+                                let storage = kernel.storage.as_mut().ok_or_else(|| KernelError::Storage("kernel stopped".into()))?;
+                                crate::tools::finish_resource_execution_view(storage, &kernel.epoch,
+                                    kernel.host_id.as_deref().unwrap_or(""), kernel.host_generation.as_deref().unwrap_or(""), &call, value)
+                            });
+                            match result {
+                                Ok(()) => { let _ = capture_completions.send(WorkerRequest::Resource(call)); }
+                                Err(error) => {
+                                    if let Some(key) = &call.admission_key {
+                                        worker_cancellations.lock().ok().map(|mut active| active.remove(key));
+                                    }
+                                    let _ = call.reply.send(Err(crate::tools::ResourceFailure {error, dispatched: false}));
+                                }
+                            }
+                            None
+                        }
                         MaterializationReply::Direct(request)
                         | MaterializationReply::View(request)
                         | MaterializationReply::Reconcile(request) => {
@@ -1801,6 +1815,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(storage) = kernel.storage.as_mut() {
                         let _ = storage.observe_file_writer_stopped(&id);
                     }
+                    if let Err(error)=kernel.collect_obsolete_materialized_views(&capture_completions) {eprintln!("derived view cleanup pending: {error}");}
                     continue;
                 }
                 WorkerRequest::Resource(call) => {
@@ -1838,6 +1853,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     let result = match result {
                         Ok(crate::tools::ResourceWork::Ready(value)) => Ok(value),
+                        Ok(crate::tools::ResourceWork::ExecutionView(task)) => {
+                            let key = call.admission_key.clone();
+                            let grant_id = call.binding.grant_id.clone();
+                            let cancellation = call.cancellation.shared_flag();
+                            if kernel.spawn_materialization(task, MaterializationReply::Resource(call), grant_id,
+                                cancellation, &capture_completions).is_err() {
+                                if let Some(key) = key {
+                                    worker_cancellations.lock().ok().map(|mut active| active.remove(&key));
+                                }
+                            }
+                            continue;
+                        }
                         Ok(crate::tools::ResourceWork::BlobRead(task)) => {
                             // A failed spawn drops the original reply and retention; its receiver
                             // reports disconnection, never a fabricated successful/cancelled read.
@@ -1931,7 +1958,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     worker_resource.initialize(epoch);
                     worker_file_observation.initialize(epoch);
                     worker_plan.initialize(epoch);
-                    worker_retrieval.initialize(epoch);
                     worker_policy.initialize(epoch);
                     worker_source.initialize(epoch);
                     if let Some(storage) = kernel.storage.as_mut() {
@@ -2126,10 +2152,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
             Some("agent-policy-response" | "agent-policy-transition-response")
         ) {
             policy_bridge.receive(request);
-            continue;
-        }
-        if matches!(request.get("kind").and_then(Value::as_str), Some("retrieval-response" | "retrieval-progress")) {
-            retrieval_bridge.receive(request);
             continue;
         }
         if request.get("kind").and_then(Value::as_str)==Some("source-process-terminal") {if let Ok(frame)=serde_json::from_value(request){let _=agent_tx.send(crate::agent_runtime::Command::SourceProcessTerminal(frame));}continue;}
@@ -2448,7 +2470,6 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
     resource_bridge.close();
     file_observation_bridge.close();
     plan_bridge.close();
-    retrieval_bridge.close();
     policy_bridge.close();
     source_bridge.close();
     subscriptions.shutdown();

@@ -240,6 +240,11 @@ export async function admitRunSourceAuthority(
       rootId = registered.rootId;
       executionCwd = canonicalRoot;
     }
+    if (!resultOnly && selection.mode === 'fixed_branch') {
+      const view = await actor.executionViewInspect({workspaceId:selection.workspaceId,branchId:selection.branchId!,revision:selection.revision!},signal);
+      if (view?.status==='preparing') throw new Error('The original execution view is still being prepared');
+      if (view?.status==='ready') {rootId=view.rootId;executionCwd=view.canonicalRoot;}
+    }
     const fixed = { branchId: selection.branchId!, revision: selection.revision! };
     const toolBinding: SourceToolBinding = {
       resourceOwner: selection.resourceOwner, grantId: grant.grantId, runId: run.id, threadId: run.thread_id,

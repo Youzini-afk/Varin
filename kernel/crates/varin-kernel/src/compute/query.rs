@@ -66,9 +66,9 @@ fn units(shared:&Shared,path:&str,revision:&str,text:&str,analysis:Option<&Value
         }
     }Ok(())
 }
-pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->Result<bool>{
+pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->Result<(bool,bool)>{
     shared.check()?;
-    if task.params.operation == "inventory" { return source::inventory(&task, shared); }
+    if task.params.operation == "inventory" { return source::inventory(task, shared).map(|partial|(partial,false)); }
     let params=task.params.clone();
     let files=params.files.clone().unwrap_or_default().into_iter().map(|f|(f.path.clone(),f)).collect::<HashMap<_,_>>();
     let recipes=task.recipes.clone();
@@ -78,17 +78,39 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
             let probe=syntax.probe(recipe, shared)?;
             shared.emit("grammar", &file.path, &recipe.recipe_id, probe)?;
         }
-        return Ok(false);
+        return Ok((false,false));
     }
     let query=params.query.as_deref().unwrap_or_default();
-    let matcher=if params.operation=="search"{
-        let mut builder=RegexMatcherBuilder::new();builder.case_insensitive(params.ignore_case.unwrap_or(false));
-        Some(if params.fixed_strings.unwrap_or(false){builder.build_literals(&[query])}else{builder.build(query)}.map_err(|e|format!("Invalid search expression: {e}"))?)
-    }else{None};
+    let mut matchers = Vec::new();
+    let mut invalid_expressions = false;
+    if params.operation == "search" {
+        let expressions = params.queries.clone().unwrap_or_else(|| vec![query.to_owned()]);
+        for (index, expression) in expressions.iter().enumerate() {
+            let mut builder = RegexMatcherBuilder::new();
+            builder.case_insensitive(params.ignore_case.unwrap_or(false));
+            let matcher = if params.fixed_strings.unwrap_or(false) { builder.build_literals(&[expression]) } else { builder.build(expression) };
+            match matcher {
+                Ok(matcher) => matchers.push((index, matcher)),
+                Err(error) if params.queries.is_some() => {
+                    invalid_expressions = true;
+                    shared.emit("query-error", "", "", json!({"queryIndex":index,"status":"invalid","message":error.to_string()}))?;
+                },
+                Err(error) => return Err(format!("Invalid search expression: {error}")),
+            }
+        }
+        if matchers.is_empty() { return Ok((true,false)); }
+    }
+    let mut continuation_seen = params.start_after_line.is_none();
     let name_matcher=if params.operation=="list"&&!query.is_empty(){Some(query.to_lowercase())}else{None};
     let mut count=0u64;let mut found=HashSet::new();let mut structure_failed=false;let mut limited=false;
-    let partial=source::visit(&mut task,shared,|document|{
+    let partial=source::visit(task,shared,|document|{
         shared.check()?;let path=&document.path;let revision=&document.revision;
+        if params.start_after_line.is_some() && params.start_after_path.as_deref() == Some(path.as_str()) {
+            continuation_seen = true;
+            if params.start_after_revision.as_deref() != Some(revision.as_str()) {
+                return Err(format!("Search continuation source changed: {path}. Restart the query without cursor."));
+            }
+        }
         if !files.is_empty()&&!files.contains_key(path){return Ok(true);}
         if params.operation=="list"{
             if name_matcher.as_ref().is_some_and(|q|!path.to_lowercase().contains(q)){return Ok(true);}
@@ -99,7 +121,8 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
             }
             shared.emit("entry",path,revision,data)?;count+=1;
         }else if let Some(bytes)=document.bytes{
-            shared.scanned();found.insert(path.clone());
+            if !(params.paged==Some(true) && params.start_after_line.is_some() && params.start_after_path.as_deref()==Some(path)) {shared.scanned();}
+            found.insert(path.clone());
             if matches!(params.operation.as_str(),"structure"|"chunks"){
                 if files.get(path).and_then(|f|f.revision.as_deref()).is_some_and(|requested|requested!=revision){
                     shared.emit("structure",path,revision,json!({"status":"stale","message":"The structure source revision changed"}))?;
@@ -120,16 +143,33 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
                 let text=match std::str::from_utf8(&bytes){Ok(text)if !text.contains('\0')=>text,_=>{
                     if params.operation!="search"{shared.emit("document",path,revision,json!({"status":"binary","byteLength":bytes.len()}))?;}return Ok(true);
                 }};
-                if let Some(matcher)=&matcher{
+                if params.operation == "search" {
                     let lines=search_lines(text);
+                    let mut file_hits=std::collections::BTreeSet::new();
                     for(index,line)in lines.iter().enumerate(){shared.check()?;
-                        if let Some(matched)=matcher.find(line.as_bytes()).map_err(|e|e.to_string())?{
-                            if !line.is_char_boundary(matched.start()) {return Err("Search expression matched inside a UTF-8 codepoint".into());}
-                            let before=params.before.unwrap_or(0) as usize;let after=params.after.unwrap_or(0) as usize;
-                            shared.emit("hit",path,revision,json!({"line":index+1,"column":line[..matched.start()].encode_utf16().count()+1,"preview":line,
-                                "before":lines[index.saturating_sub(before)..index],"after":lines[(index+1)..(index+1+after).min(lines.len())]}))?;
-                            count+=1;if params.max_results.is_some_and(|max|count>=max as u64){limited=true;return Ok(false);}
+                        if params.start_after_path.as_deref() == Some(path.as_str()) && params.start_after_line.is_some_and(|after| (index as i64) < after) { continue; }
+                        let mut hits = Vec::new();
+                        let mut first = None;
+                        for (query_index, matcher) in &matchers {
+                            if let Some(matched) = matcher.find(line.as_bytes()).map_err(|e|e.to_string())? {
+                                hits.push(*query_index);
+                                first = Some(first.map_or(matched.start(), |old:usize|old.min(matched.start())));
+                            }
                         }
+                        if let Some(start) = first {
+                            if params.paths_only==Some(true) {file_hits.extend(hits);continue;}
+                            if !line.is_char_boundary(start) {return Err("Search expression matched inside a UTF-8 codepoint".into());}
+                            let before=params.before.unwrap_or(0) as usize;let after=params.after.unwrap_or(0) as usize;
+                            let mut data = json!({"line":index+1,"column":line[..start].encode_utf16().count()+1,"preview":line,
+                                "before":lines[index.saturating_sub(before)..index],"after":lines[(index+1)..(index+1).saturating_add(after).min(lines.len())]});
+                            if params.queries.is_some() { data["queryIndices"] = json!(hits); }
+                            shared.emit("hit",path,revision,data)?;
+                            count+=1;if shared.page_full() || params.max_results.is_some_and(|max|count>=max as u64){limited=true;return Ok(false);}
+                        }
+                    }
+                    if !file_hits.is_empty() {
+                        shared.emit("entry",path,revision,json!({"kind":"file","queryIndices":file_hits}))?;
+                        count+=1;if shared.page_full() || params.max_results.is_some_and(|max|count>=max as u64){limited=true;return Ok(false);}
                     }
                 }else if params.operation=="read"{
                     let lines=source_lines(text);let start=params.start_line.unwrap_or(1) as usize;
@@ -164,11 +204,18 @@ pub(crate) fn execute(mut task:Task,shared:&Shared,syntax:&mut SyntaxRuntime)->R
                 }else{return Err("Unknown native computation operation".into());}
             }
         }
-        if params.operation=="list"&&params.max_results.is_some_and(|max|count>=max as u64){limited=true;return Ok(false);}
+        if params.operation=="list"&&(shared.page_full() || params.max_results.is_some_and(|max|count>=max as u64)){limited=true;return Ok(false);}
         Ok(true)
     })?;
     if matches!(params.operation.as_str(),"read"|"bytes"|"structure"|"chunks"){
         for file in files.keys(){if !found.contains(file){shared.emit("document",file,"",json!({"status":"missing"}))?;}}
     }
-    Ok(partial||structure_failed||limited)
+    if !continuation_seen { return Err("Search continuation file is unavailable. Restart the query without cursor.".into()); }
+    limited |= shared.page_full();
+    let resumable=params.paged==Some(true) && limited;
+    if resumable {
+        let (path,line,revision)=shared.checkpoint().ok_or("Paged query stopped without a scan position")?;
+        task.params.start_after_path=Some(path);task.params.start_after_line=line;task.params.start_after_revision=revision;
+    }
+    Ok((partial||structure_failed||(limited && !resumable)||invalid_expressions,resumable))
 }

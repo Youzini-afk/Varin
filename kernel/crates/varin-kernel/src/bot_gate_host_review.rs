@@ -477,7 +477,7 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
     let assembly = crate::run_assembly::RunAssembly {
         runtime: runtime.clone(),
         resources: crate::tools::KernelResourceClient::new(|_|Err(KernelError::Operation("No source in this Bot entry".into())), |_|Ok(()), Default::default()),
-        credentials: credentials.clone(), language: crate::language::LanguageBridge::new(send.clone()), retrieval: crate::retrieval::RetrievalBridge::new(send.clone()),
+        credentials: credentials.clone(), language: crate::language::LanguageBridge::new(send.clone()),
         memory: memory.clone(), context: crate::host_query::OwnerChannel::new("context", send.clone()), resource: crate::host_query::OwnerChannel::new("resource", send.clone()),
         plan, policy, models: crate::run_models::RunModels::new(runtime.catalog(), credentials), tools: crate::run_tools::RunTools::new(runtime.catalog(), bridge.clone()), responses: send.into(), epoch: EPOCH.into(),
     };

@@ -59,6 +59,33 @@ fn bounded_content(content: &Content, budget: usize, item_id: &str, can_read: bo
     }
 }
 
+fn process_call(call: &ToolCall) -> bool {
+    let name = if call.name == crate::tool_disclosure::INVOKE { call.arguments["reference"]["name"].as_str().unwrap_or("") } else { &call.name };
+    matches!(name,"process_spawn"|"process_read")
+}
+fn process_text(content: &Content) -> Option<Content> {
+    fn project(value: &mut Value) -> bool {
+        match value {
+            Value::Array(items) => items.iter_mut().fold(false,|changed,item|project(item)||changed),
+            Value::Object(fields) => {
+                let mut changed = fields.values_mut().fold(false,|changed,item|project(item)||changed);
+                if fields.get("text").is_some_and(Value::is_string) && fields.contains_key("bytesBase64") {
+                    fields.remove("bytesBase64"); changed = true;
+                }
+                changed
+            }, _ => false,
+        }
+    }
+    let Content::ToolResult {result} = content else {return None};
+    let mut result=result.clone();
+    let output=match &mut result.completion {
+        ToolCompletion::Result {content,..}=>content,
+        ToolCompletion::JobAccepted {content:Some(content),..}=>content,
+        _=>return None,
+    };
+    project(&mut output.data).then_some(Content::ToolResult {result})
+}
+
 /// Shared by built-in and contributed adapters. Unchanged items keep their Arc identity;
 /// changed items are reused within the original compile cache without copying image bytes.
 pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
@@ -71,7 +98,7 @@ pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, re
 
 fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
     if connection.accepts_images != Some(false) && connection.tool_output_visible_bytes.is_none()
-        && !view.history.iter().any(|item| matches!(&item.content, Content::ToolCall { call } if retrieval_preview_limit(call).is_some())) { return Cow::Borrowed(view); }
+        && !view.history.iter().any(|item| matches!(&item.content, Content::ToolCall { call } if retrieval_preview_limit(call).is_some() || process_call(call))) { return Cow::Borrowed(view); }
     let mut cache = reuse.map(|reuse| &mut reuse.text_input);
     let can_read = view.binding.tools.iter().any(|tool| tool.name == crate::catalog::family::READ_TOOL);
     let settings = (connection.accepts_images, connection.tool_output_visible_bytes, can_read);
@@ -84,16 +111,19 @@ fn text_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<
     let mut changed = false;
     let history = view.history.iter().map(|source| {
         if let Content::ToolCall { call } = &source.content {
-            calls.insert(call.call_id.as_str(), (is_explicit_read(call), retrieval_preview_limit(call)));
+            calls.insert(call.call_id.as_str(), (is_explicit_read(call), retrieval_preview_limit(call),process_call(call)));
         }
-        let (explicit_read, snippet_limit) = match &source.content {
+        let (explicit_read, snippet_limit,process) = match &source.content {
             Content::ToolResult { result } => calls.remove(result.call_id.as_str()).unwrap_or_default(),
-            _ => (false, None),
+            _ => (false, None,false),
         };
         let key = Arc::as_ptr(source) as usize;
         let item = previous.remove(&key).map(|(_, projected)| projected).unwrap_or_else(|| {
-            let mut content = connection.tool_output_visible_bytes.or(snippet_limit.map(|_| usize::MAX)).filter(|_| !explicit_read)
-                .and_then(|budget| bounded_content(&source.content, budget, &source.id, can_read, snippet_limit));
+            let mut content = process.then(||process_text(&source.content)).flatten();
+            if let Some(bounded) = connection.tool_output_visible_bytes.or(snippet_limit.map(|_| usize::MAX)).filter(|_| !explicit_read)
+                .and_then(|budget| bounded_content(content.as_ref().unwrap_or(&source.content), budget, &source.id, can_read, snippet_limit)) {
+                content=Some(bounded);
+            }
             if connection.accepts_images == Some(false) && source.content.media().iter().any(|media| media.media_type.starts_with("image/")) {
                 content = Some(text_content(content.as_ref().unwrap_or(&source.content)));
             }

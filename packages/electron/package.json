@@ -52,7 +52,6 @@
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:runtime && bun run bundle:main && bun run verify:native && node ./scripts/package.mjs",
     "package:win:x64": "bun run build:web-assets && bun run prepare:runtime && bun run bundle:main && bun run verify:native && node ./scripts/package.mjs --win --x64 --publish=never",
-    "package:local-semantic": "node ../../scripts/build-local-semantic-component.mjs",
     "finalize:latest-yml": "node ./scripts/finalize-latest-yml.mjs",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint \"./*.ts\" --config ../../eslint.config.js",

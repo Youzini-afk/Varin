@@ -98,8 +98,9 @@ impl FileReadTask {
                 "file changed while being read".into(),
             ));
         }
+        let content_hash=format!("sha256-{}",hex::encode(hash.finalize()));
         let state = FileState::RegularFile {
-            object_hash: format!("sha256-{}", hex::encode(hash.finalize())),
+            object_hash: content_hash.clone(),
             byte_length: position,
             mode: Some(file_mode(&after)),
         };
@@ -109,8 +110,9 @@ impl FileReadTask {
             &state,
         )?;
         if let Some(lines) = lines {
+            let mut content=lines.content(position);content["hash"]=json!(content_hash);
             return Ok(PreparedFileRead { value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
-                "missing":false,"readVersion":version,"content":lines.content(position)}), state, after });
+                "missing":false,"readVersion":version,"content":content}), state, after });
         }
         let left = (self.start - from) as usize;
         let right = (self.end - from) as usize;
@@ -124,7 +126,7 @@ impl FileReadTask {
                 end += 1;
             }
         }
-        let mut content = json!({"byteLength":position});
+        let mut content = json!({"byteLength":position,"hash":content_hash});
         match std::str::from_utf8(&bytes[start..end]) {
             Ok(text) if !text.contains('\0') => {
                 content["text"] = json!(text);

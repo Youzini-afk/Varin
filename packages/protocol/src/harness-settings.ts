@@ -33,6 +33,17 @@ export interface HarnessCodeRetrievalSettings {
   decision: HarnessExploreDecisionMode;
 }
 
+/** An old non-chat choice requires an explicit ordinary-model selection. */
+export function requiresRetrievalModelSelection(settings:Pick<HarnessSettings,'models'|'codeRetrieval'|'fastDecision'|'rerank'>):boolean {
+  const selected=settings.models.explore;
+  if(selected?.enabled===false || selected?.modelId || selected?.inherit===true)return false;
+  if(selected?.inherit===false)return true;
+  const mode=settings.codeRetrieval.decision;
+  const purpose=settings.fastDecision?.purposes?.explore;
+  const fast=purpose==='off'?undefined:purpose ?? settings.fastDecision?.default;
+  return ['fast-decision','rerank','source'].includes(mode) || mode==='auto' && Boolean(fast || settings.rerank);
+}
+
 export function resolveHarnessCodeRetrievalSettings(value: unknown): HarnessCodeRetrievalSettings {
   if (value === undefined) return { decision: "auto" };
   if (typeof value !== "object" || value === null || Array.isArray(value)) {

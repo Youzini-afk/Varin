@@ -27,6 +27,18 @@ async function fixture() {
 const agent = (overrides: Record<string, unknown> = {}) => ({ name: 'Configured worker', description: 'User choice', instructions: 'Keep the original result.',
   enabled: true, tools: ['file_read'], worktree: 'none', workFocus: [], ...overrides });
 
+it('requires an explicit ordinary model for old decision-only retrieval while preserving disabled and inherited choices',async()=>{
+  const f=await fixture();
+  let settings:unknown={};
+  const prepare=createChildProfilePreparer({models:f.models,capabilities:async()=>f.capabilities,settings:async()=>settings});
+  const quick=async()=>(await prepare({parent:f.parent})).presets.find(profile=>profile.id==='code_retrieval')!;
+  expect(await quick()).toMatchObject({model_source:'inherit',unavailable:null,work_mode:'shared'});
+  const old={codeRetrieval:{decision:'auto'},fastDecision:{default:{protocol:'typed-classifier',providerId:'provider',modelId:'decision'}}};
+  settings={harness:old};expect((await quick()).unavailable?.code).toBe('retrieval-model-selection-required');
+  settings={harness:{...old,models:{explore:{inherit:true}}}};expect((await quick()).unavailable).toBeNull();
+  settings={harness:{...old,models:{explore:{enabled:false}}}};expect((await quick()).unavailable?.code).toBe('child-profile-disabled');
+});
+
 it('compiles original configured profiles without losing unavailable choices, scope or inheritance provenance', async () => {
   const f = await fixture();
   const settings = { harness: { models: { worker: { enabled: false } }, agents: {

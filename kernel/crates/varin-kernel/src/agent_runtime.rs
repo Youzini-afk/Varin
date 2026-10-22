@@ -263,7 +263,6 @@ pub(crate) fn spawn(
     context_bridge: crate::host_query::OwnerChannel,
     resource_bridge: crate::host_query::OwnerChannel,
     plan_bridge: crate::plan_bridge::PlanBridge,
-    retrieval_bridge: crate::retrieval::RetrievalBridge,
     policy_bridge: crate::policy::PolicyBridge,
     responses: crate::transport::Sender,
     finished: impl Fn(&str) + Send + Sync + 'static,
@@ -579,6 +578,13 @@ pub(crate) fn spawn(
                             catalog.pending_managed_processes().map_err(domain)?
                         };
                         resources.replay_source_delivery_releases()?;
+                        let deliveries=owner.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?
+                            .pending_retrieval_deliveries().map_err(domain)?;
+                        let controls=control_commands::ControlCommands {runtime:owner.clone(),resources:resources.clone(),
+                            models:run_models.as_ref().expect("initialized models").clone(),tools:run_tools.as_ref().expect("initialized tools").clone()};
+                        for operation_id in deliveries {
+                            controls.admit_tree_cancel(varin_runtime::catalog::dispatch::TreeCancelTarget::Child{operation_id},None)?;
+                        }
                         if let Err(error) = resources.replay_process_terminals(pending) {
                             let catalog = owner.catalog();
                             if let Ok(mut catalog) = catalog.lock() {
@@ -719,9 +725,14 @@ pub(crate) fn spawn(
                         }
                         if method == "runtime.retrieval.finish" {
                             let p: OperationParams = serde_json::from_value(params)?;
-                            return retrieval_bridge.finish(&p.operation_id)
-                                .map(|accepted| json!({"accepted": accepted}))
-                                .map_err(|error| KernelError::Operation(error.to_string()));
+                            let accepted=runtime.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?
+                                .request_retrieval_delivery(&p.operation_id).map_err(domain)?;
+                            if accepted {
+                                let commands=control_commands::ControlCommands {runtime:runtime.clone(),resources:resources.clone(),
+                                    models:run_models.as_ref().expect("initialized models").clone(),tools:run_tools.as_ref().expect("initialized tools").clone()};
+                                commands.admit_tree_cancel(varin_runtime::catalog::dispatch::TreeCancelTarget::Child{operation_id:p.operation_id},None)?;
+                            }
+                            return Ok(json!({"accepted":accepted}));
                         }
                         if method == "runtime.retry.evaluate" {
                             let p: ModelRetryEvaluateParams = serde_json::from_value(params)?;
@@ -1737,7 +1748,6 @@ pub(crate) fn spawn(
                                 resources: resources.clone(),
                                 credentials: credential_bridge.clone(),
                                 language: language_bridge.clone(),
-                                retrieval: retrieval_bridge.clone(),
                                 memory: memory_bridge.clone(),
                                 context: context_bridge.clone(),
                                 resource: resource_bridge.clone(),

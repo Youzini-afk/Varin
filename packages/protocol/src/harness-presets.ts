@@ -35,12 +35,10 @@ export function agentPresetTools(capabilities: readonly { name: string; default_
 }
 
 /**
- * Preset materialization policy. Write-capable work defaults to an
- * isolated WorkingState; `shared` is never preset-forced — it is an
- * explicit dispatch-time choice (D-285). `none` marks read-only presets
- * that need no WorkingState materialization at all.
+ * Source placement is independent from the investigation role. Shared work uses
+ * the admitted live root; an immutable source needs an owned execution view.
  */
-export type PresetWorktree = "isolated" | "none";
+export type PresetWorktree = "isolated" | "none" | "shared";
 
 export interface ExecutionPreset {
   avatar?: import('./agent-runtime.generated.js').AgentAvatarId;
@@ -77,7 +75,7 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
   "retrieval": {
     id: "retrieval",
     slot: "retrievalAgent",
-    worktree: "none",
+    worktree: "shared",
     systemPromptFragment:
       "Find, verify, and synthesize facts relevant to the assigned question. Understand the surrounding context and follow useful leads across sources and their relationships. Let the evidence guide further retrieval, filling gaps that matter to the answer and examining differences between sources that could change the conclusion.\n\nLet the question and evidence determine the depth of investigation. Deliver when the material answers the question or further retrieval offers little practical value.\n\nProvide a concise, usable synthesis with precise source locations and enough context to understand the conclusions, clearly distinguishing confirmed facts, inferences, and unresolved questions.",
     teamDescription: "multi-step fact retrieval",
@@ -91,6 +89,24 @@ export interface PresetObservation {
   modelSource: "inherit" | "selected";
   definition: ExecutionPreset;
   availability: "available" | "disabled" | "unconfigured" | "scope_unavailable" | "runtime_unconfigured";
+}
+
+/** Internal tool execution has its own model slot without becoming a team preset. */
+export function observeQuickRetrieval(
+  slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
+  mainModel: ModelSelection | null,
+  tools: readonly string[],
+): PresetObservation {
+  const binding = slots.explore;
+  const model = resolveHarnessModelSlot('explore', slots, mainModel);
+  const definition = customizeHarnessAgent({ ...EXECUTION_PRESETS.retrieval,
+    id: 'code_retrieval', slot: 'explore' as const, name: '快速检索',
+    tools: tools.filter(name => !['code_retrieval', 'dispatch'].includes(name)),
+    systemPromptFragment: `${EXECUTION_PRESETS.retrieval.systemPromptFragment}\n\nInvestigate this tool call's question using the available search, file and terminal tools. Use commands when useful for analysis or verification. Return the answer directly with precise source locations and sufficient supporting context. The parent owns this investigation; do not create a separate collaboration task.`,
+  }, binding?.agent, 'agent');
+  return { id: 'code_retrieval', definition, model,
+    modelSource: binding?.providerId && binding.modelId ? 'selected' : 'inherit',
+    availability: binding?.enabled === false ? 'disabled' : model ? 'available' : 'unconfigured' };
 }
 
 export function observePresets(

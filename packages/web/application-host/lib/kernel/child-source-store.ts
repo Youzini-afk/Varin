@@ -68,7 +68,7 @@ export async function prepareChildSourceStore(
   const pin = await store.pinBranchHandoff(sourceBranch, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
   signal.throwIfAborted();
   const source: LaunchSource = { resource_owner: handoff.source.resource_owner,
-    mode: child.code_result.kind === 'no_changes' ? 'fixed_branch' : 'materialized', live_root: null,
+    mode: child.selected_profile.work_mode === 'isolated_write' ? 'materialized' : 'fixed_branch', live_root: null,
     workspace_id: workspace, execution_workspace_id: handoff.source.execution_workspace_id,
     branch_id: sourceBranch, revision: 0 };
   return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch' } }, provenance };
@@ -94,7 +94,7 @@ export async function prepareContinuationSourceStore(
     const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
     signal.throwIfAborted();
     const source: LaunchSource = { resource_owner: basis.source.resource_owner,
-      mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'materialized', live_root: null,
+      mode: child.selected_profile.work_mode === 'isolated_write' ? 'materialized' : 'fixed_branch', live_root: null,
       workspace_id: basis.source.workspace_id, execution_workspace_id: basis.source.execution_workspace_id,
       branch_id: branchId, revision: 0 };
     return { source, pin: { pin_id: retained.pinId, root: retained.root, source: { ...source, mode: 'fixed_branch' } }, provenance: basis.provenance };

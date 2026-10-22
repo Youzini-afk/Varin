@@ -49,6 +49,17 @@ impl Fixture {
             },
         )
     }
+    pub(crate) fn new_internal_retrieval() -> Self {
+        Self::new_internal_retrieval_with_read(read_schema())
+    }
+    pub(crate) fn new_internal_retrieval_with_read(read:ToolSchema) -> Self {
+        Self::new_parent_custom(7, read, ToolSchema {
+            requirements:None,description:String::new(),output_schema:None,metadata:None,
+            name:"code_retrieval".into(),version:"1".into(),schema:json!({"type":"object"}),
+        },false,false,false,|input,_| {
+            *input=DispatchInput::from_tool_call("code_retrieval",&json!({"question":"Read the fixed file and report"})).unwrap();
+        })
+    }
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
         Self::new_parent(revision, read, dispatch, false, false, false)
     }
@@ -310,6 +321,8 @@ impl Fixture {
         project: Option<&str>,
         bot: Option<&str>,
     ) -> Self {
+        let dispatch_name = dispatch.name.clone();
+        let internal = dispatch_name == "code_retrieval";
         let root = std::env::temp_dir().join(format!(
             "varin-child-catalog-review-{}",
             uuid::Uuid::new_v4()
@@ -369,12 +382,19 @@ impl Fixture {
                     source_requirement: varin_runtime::catalog::dispatch::ChildSourceRequirement::Physical, default_presets: Vec::new() })).collect(),
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
-            presets: Vec::new(),
+            presets: if internal { vec![varin_runtime::catalog::dispatch::ChildPreset {
+                id:"code_retrieval".into(),name:"Quick retrieval".into(),avatar:None,
+                tools_source:varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
+                tools:vec!["file_read".into()],instructions:"Investigate using ordinary tools".into(),
+                work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,
+                model_source:varin_runtime::catalog::dispatch::ChildModelSource::Inherit,
+                model:None,inherit_base:None,unavailable:None,
+            }] } else {Vec::new()},
         });
         let dispatch_version = launch
             .tools
             .iter()
-            .find(|tool| tool.name == DISPATCH_TOOL)
+            .find(|tool| tool.name == dispatch_name)
             .unwrap()
             .version
             .clone();
@@ -516,9 +536,9 @@ impl Fixture {
         .unwrap();
         let call = ToolCall {
             call_id: "dispatch-call".into(),
-            name: DISPATCH_TOOL.into(),
+            name: dispatch_name.clone(),
             schema_version: dispatch_version.clone(),
-            arguments: serde_json::to_value(&input).unwrap(),
+            arguments: if internal {json!({"question":input.task})} else {serde_json::to_value(&input).unwrap()},
         };
         db.commit_execution(
             &run,
@@ -542,9 +562,9 @@ impl Fixture {
             let tool = AdmittedTool {
                 call,
                 contract: ToolContract {
-                    name: DISPATCH_TOOL.into(),
+                    name: dispatch_name.clone(),
                     schema_version: dispatch_version.clone(),
-                    read_only: true,
+                    read_only: !internal,
                     completion: CompletionKind::Job,
                     lifetime: Lifetime::Thread,
                     resources: vec![],

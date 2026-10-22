@@ -204,16 +204,6 @@ export function tagsDefinitionKind(captureName: string): string | null {
   return TAGS_DEFINITION_KINDS[suffix] ?? "unknown";
 }
 
-/**
- * Cold catalog languages: specs that extract imports. JSON outlines for
- * slicing only and stays out (D-114 / D-115).
- */
-export const CATALOG_SCAN_LANGUAGES: ReadonlySet<string> = new Set(
-  Object.entries(TREE_SITTER_LANGUAGE_SPECS)
-    .filter(([, spec]) => Boolean(spec.importQuery))
-    .map(([languageId]) => languageId),
-);
-
 export function treeSitterLanguageSpec(languageId: string | null | undefined): TreeSitterLanguageSpec | undefined {
   if (!languageId) return undefined;
   return TREE_SITTER_LANGUAGE_SPECS[languageId];

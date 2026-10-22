@@ -4,6 +4,7 @@ import { parseHarnessAgentOverrides, type HarnessAgentOverrides } from "./harnes
 /** An enabled flag preserves the selected model while the user turns a role off. */
 export interface HarnessModelBinding {
   enabled?: boolean;
+  inherit?: boolean;
   providerId?: string;
   modelId?: string;
   agent?: HarnessAgentOverrides;
@@ -27,7 +28,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "memoryOrganizer",
 ];
 
-const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier", "contextCompaction"]);
+const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier", "contextCompaction", "explore", "retrievalAgent"]);
 
 export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,
@@ -38,7 +39,7 @@ export const resolveHarnessModelSlot = (
   if (binding?.enabled === false) return null;
   return binding?.providerId && binding.modelId
     ? { providerId: binding.providerId, modelId: binding.modelId }
-    : DEFAULTING_TO_MAIN.has(slot) ? mainModel : null;
+    : (binding?.inherit ?? DEFAULTING_TO_MAIN.has(slot)) ? mainModel : null;
 };
 
 export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {
@@ -50,14 +51,16 @@ export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {
       throw new HarnessSettingsValidationError(`Invalid model role: ${role}`);
     }
     const input = raw as Record<string, unknown>;
-    if (Object.keys(input).some(key => !["enabled", "providerId", "modelId", "agent"].includes(key))
+    if (Object.keys(input).some(key => !["enabled", "inherit", "providerId", "modelId", "agent"].includes(key))
       || (input.enabled !== undefined && typeof input.enabled !== "boolean")
+      || (input.inherit !== undefined && typeof input.inherit !== "boolean")
       || ((input.providerId !== undefined || input.modelId !== undefined)
         && (typeof input.providerId !== "string" || !input.providerId.trim() || typeof input.modelId !== "string" || !input.modelId.trim()))) {
       throw new HarnessSettingsValidationError(`Invalid binding for harness.models.${role}`);
     }
     result[role as HarnessModelRole] = {
       ...(input.enabled === undefined ? {} : { enabled: input.enabled as boolean }),
+      ...(input.inherit === undefined ? {} : { inherit: input.inherit as boolean }),
       ...(input.providerId === undefined ? {} : { providerId: input.providerId as string, modelId: input.modelId as string }),
       ...(input.agent === undefined ? {} : { agent: parseHarnessAgentOverrides(input.agent) }),
     };

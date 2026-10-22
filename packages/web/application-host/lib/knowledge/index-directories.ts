@@ -21,6 +21,8 @@ export interface IndexRemovalProgress {
   unit?: 'files' | 'records';
 }
 export interface IndexDirectoryManagerOptions {
+  /** Retired code caches are discoverable/removable without admitting fresh indexing. */
+  maintenanceOnly?: boolean;
   dataDir: string;
   resolve(directory: string): Promise<{ path: string; workspaceId: string }>;
   apply(entries: readonly IndexDirectoryEntry[]): Promise<void>;
@@ -82,6 +84,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
       ? { ...entry, ...patch } : entry));
   });
   const startCheck = (entry: IndexDirectoryEntry, manual = false): void => {
+    if (options.maintenanceOnly) return;
     const id = key(entry.path);
     if (disposed) return;
     if (jobs.has(id)) {
@@ -172,7 +175,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     ] }; },
     allEntries: () => entries,
     syncProjects: (directories: readonly string[]) => serialize(async () => {
-      if (disposed) return;
+      if (disposed || options.maintenanceOnly) return;
       const selected = new Set(directories.map(key));
       const next = entries.map((entry) => ({ ...entry, project: selected.has(key(entry.path)),
         state: entry.project && !selected.has(key(entry.path)) && !entry.manual ? 'deleting' as const : entry.state }));
@@ -199,6 +202,7 @@ export function createIndexDirectoryManager(options: IndexDirectoryManagerOption
     act: (action: IndexDirectoryAction, directory: string, revision: string) => serialize(async () => {
       assertRevision(revision);
       if (disposed) throw new Error('Index directory manager is closed');
+      if (options.maintenanceOnly && action !== 'remove') throw new Error('Code indexes are retired. This entry supports cleanup only.');
       if (action === 'add') {
         const resolved = await options.resolve(directory);
         const previous = entries.find((entry) => key(entry.path) === key(resolved.path));

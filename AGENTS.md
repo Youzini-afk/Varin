@@ -35,8 +35,9 @@ documents. Git preserves their history.
   documents, terminals or durable execution. Publish a prepared candidate only at its actual commit boundary.
 - DocumentsAPI is the text-content path; FilesAPI is browse/binary/CRUD; WorkspaceAPI is project/tree/Git/upload.
   Desktop/Web use the shared Monaco path; mobile/embedded CodeMirror adapters share the same content/save owner.
-- Source identity, execution placement and navigation project are distinct. FixedBranch currently has no
-  writable/MCP execution cwd; ManagedSources do not imply arbitrary multi-parent automatic merging.
+- Source identity, execution placement and navigation project are distinct. FixedBranch commands lazily
+  prepare an owned execution view; subsequent file tools follow that same view while retaining the baseline.
+  Workspace MCP still requires its explicit execution source. ManagedSources do not imply arbitrary multi-parent automatic merging.
   These are current support boundaries, not speculative permanent restrictions.
 - Cancellation intent, effect outcome and actual executor stop are different. HTTP abort or rejected
   observation does not release original readers, writers, assignments or source cleanup responsibility.

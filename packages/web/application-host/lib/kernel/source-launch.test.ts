@@ -17,7 +17,7 @@ it('requires the original materialized directory and rejects substitution inside
     expect(await admitMaterializedRoot(original.targetPath)).toBe(original.targetPath);
     await rename(original.targetPath, `${original.targetPath}-moved`);
     await expect(admitMaterializedRoot(original.targetPath)).rejects.toMatchObject({ code: 'source_environment_unavailable' });
-    await symlink(another.targetPath, original.targetPath, 'dir');
+    await symlink(another.targetPath, original.targetPath, process.platform==='win32'?'junction':'dir');
     await expect(admitMaterializedRoot(original.targetPath)).rejects.toMatchObject({ code: 'source_changed' });
     await expect(originalMaterializationLocation(root, 'workspace', '')).rejects.toMatchObject({ code: 'source_changed' });
   } finally { await rm(root, { recursive: true, force: true }); }
@@ -33,7 +33,7 @@ it('uses current Documents admission before minting a source grant and revokes i
       if (revokeDuringRead) f.setTrusted(false);
       return { workspaceId: source.workspaceId, branchId: source.branchId, revision: 7, view: 'revision', root: 'fixed-root' };
     });
-    const kernel = { subscribeExit() {}, onToolReleased() {}, scoped: () => ({ readBranch }),
+    const kernel = { subscribeExit() {}, onToolReleased() {}, scoped: () => ({ readBranch,executionViewInspect:async()=>null }),
       issueGrant: vi.fn(async (input: { grantId: string }) => ({ grantId: input.grantId })), revokeGrant: vi.fn(async () => {}),
       agentRuntimeRequest: vi.fn(async (method: string) => {
         if (method === 'runtime.run.inspect') return { id: 'run', thread_id: 'thread', state: 'runnable' };

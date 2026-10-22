@@ -27,7 +27,6 @@ describe('semantic index settings', () => {
     const app = express();
     registerSemanticIndexRoutes(app, {
       management,
-      runtime: { indexStatuses: () => [] } as never,
       requireAuth: (request, response, next) => {
         if (request.header('x-test-auth') !== 'yes') response.sendStatus(401);
         else next();

@@ -9,6 +9,8 @@ use serde::Deserialize;
 #[serde(rename_all = "snake_case")]
 pub enum ChildWorkMode {
     ReadOnly,
+    /// Investigate the admitted physical source, preparing a private view only for fixed sources.
+    Shared,
     IsolatedWrite,
 }
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -62,6 +64,33 @@ pub struct DispatchInput {
     pub tools: Option<Vec<String>>,
 }
 impl DispatchInput {
+    /// Internal retrieval is admitted from its real tool call; it never fabricates a dispatch origin.
+    pub fn from_tool_call(name: &str, arguments: &Value) -> Result<Self> {
+        if name == "dispatch" {
+            let input: Self = serde_json::from_value(arguments.clone())?;
+            if input.preset.as_deref() == Some("code_retrieval") {
+                return Err(RuntimeError::Invalid("The internal retrieval profile is available through code_retrieval".into()));
+            }
+            input.validate()?;
+            return Ok(input);
+        }
+        if name != "code_retrieval" { return Err(RuntimeError::Invalid("Not a delegated Agent invocation".into())); }
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Query { question: String, paths: Option<Vec<String>>, limit: Option<u64> }
+        let query: Query = serde_json::from_value(arguments.clone())?;
+        if query.question.trim().is_empty() || query.question.contains('\0') || query.limit.is_some_and(|value|value==0 || value>9_007_199_254_740_991)
+            || query.paths.as_ref().is_some_and(|paths| paths.is_empty() || paths.iter().any(|path|path.is_empty() || path.starts_with('/') || path.contains('\0') || path.contains('\\') || path.contains(':') || path.split('/').any(|p|matches!(p,".."|".") || p.is_empty()))) {
+            return Err(RuntimeError::Invalid("Retrieval requires a question and optional normalized relative paths".into()));
+        }
+        let mut task = query.question;
+        if let Some(paths) = query.paths {
+            task.push_str("\n\nSearch scope (relative to the admitted source): ");
+            task.push_str(&serde_json::to_string(&paths)?);
+        }
+        Ok(Self { task, source_agent: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+    }
+
     pub fn validate(&self) -> Result<()> {
         if self.task.trim().is_empty() || self.name.as_deref().is_some_and(|name| name.trim().is_empty())
             || self.source_agent.as_deref().is_some_and(|source|source.trim().is_empty())
@@ -466,12 +495,13 @@ impl ChildDispatchSelection {
     }
     fn physical_tool(&self, name: &str) -> bool {
         self.source_requirement(name) == Some(ChildSourceRequirement::Physical)
+            || (self.host_tool(name).is_none() && self.catalog.native_capabilities.iter().any(|tool|tool.name==name && tool.process))
     }
     /// Resolve only an already authenticated configuration snapshot. Executable declarations
     /// are still assembled and checked by their owning tool directory in the kernel.
     pub fn resolve(&self, input: &DispatchInput) -> Result<ResolvedChildSelection> {
         input.validate()?;
-        let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none())
+        let available = self.catalog.presets.iter().filter(|preset| preset.unavailable.is_none() && preset.id != "code_retrieval")
             .map(|preset| preset.id.as_str()).collect::<Vec<_>>().join(", ");
         let available = if available.is_empty() { "none" } else { &available };
         let (mut tools, mode, instructions, model, avatar) = if let Some(id) = &input.preset {
@@ -543,6 +573,10 @@ impl ChildDispatchSelection {
             });
             (tools, mode, String::new(), self.frozen.parent_model.clone(), None)
         };
+        if input.preset.as_deref() == Some("code_retrieval") {
+            tools.retain(|name| !matches!(name.as_str(), "code_retrieval" | "dispatch")
+                && self.frozen.allowed_delegation.iter().any(|tool| &tool.name == name));
+        }
         if let Some(selected) = &input.tools {
             if selected.iter().any(|name| !tools.contains(name)) {
                 return Err(RuntimeError::Invalid(
@@ -1081,7 +1115,9 @@ impl Catalog {
             }
         }
         for child in &children {
-            super::request_cancel_operation_in(&tx, &child.operation_id)?;
+            let delivery = matches!(&target,TreeCancelTarget::Child{operation_id} if operation_id==&child.operation_id)
+                && tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='retrieval.delivery_requested')",[&child.operation_id],|row|row.get::<_,bool>(0))?;
+            if !delivery {super::request_cancel_operation_in(&tx, &child.operation_id)?;}
             let executions: Vec<super::delegated::DelegatedExecution> = {
                 let mut s = tx
                     .prepare("SELECT body FROM delegated_executions WHERE child_operation_id=?1")?;

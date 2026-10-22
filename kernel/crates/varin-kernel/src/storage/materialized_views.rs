@@ -51,7 +51,7 @@ impl CleanupTask {
     }
 }
 impl Storage {
-    fn materialized_view_record(
+    pub(super) fn materialized_view_record(
         &self,
         workspace: &str,
         view: &str,
@@ -61,7 +61,7 @@ impl Storage {
             params![workspace,record_id(view),RECORD_TYPE], |row| row.get::<_,String>(0)).optional()?
             .map(|raw| serde_json::from_str(&raw).map_err(Into::into)).transpose()
     }
-    fn save_materialized_view_record(&self, record: &Value) -> Result<(), KernelError> {
+    pub(super) fn save_materialized_view_record(&self, record: &Value) -> Result<(), KernelError> {
         self.require_native_record_owner(field(record, "workspaceId")?, &record_id(field(record, "viewId")?))?;
         self.conn.execute("INSERT INTO domain_records(record_id,workspace_id,record_type,state,record_revision,payload_json,created_at,updated_at) VALUES(?1,?2,?3,?4,1,?5,?6,?6) ON CONFLICT(workspace_id,record_id) DO UPDATE SET state=excluded.state,record_revision=domain_records.record_revision+1,payload_json=excluded.payload_json,updated_at=excluded.updated_at",
             params![record_id(field(record,"viewId")?),field(record,"workspaceId")?,RECORD_TYPE,field(record,"state")?,serde_json::to_string(record)?,now_ms()])?;
@@ -116,9 +116,27 @@ impl Storage {
             params.execution_workspace_id,
             params.view_id
         ]))?));
-        let record = if let Some(record) =
+        let record = if let Some(mut record) =
             self.materialized_view_record(&params.workspace_id, &params.view_id)?
         {
+            if record["branchId"] != params.branch_id || record["revision"] != params.revision
+                || record["sourceRoot"] != branch["root"] || record["executionWorkspaceId"] != params.execution_workspace_id
+                || record["state"]=="releasing" {
+                return Err(KernelError::Authorization("Derived view baseline changed or is retiring".into()));
+            }
+            if params.view_id.starts_with("run-execution:") {
+                self.validate_execution_view_grant(&record,grant)?;
+                if record["state"]=="ready" {
+                    return self.checked_execution_view(&record,grant).map(Admission::Complete);
+                }
+                if record["state"]=="preparing" && !self.materializations.contains_key(field(&record,"operationId")?) {
+                    // Resume the same physical journal and directory. Only caller
+                    // authority advances; neither the baseline nor operation changes.
+                    record["ownerGrantId"]=json!(grant.grant_id);
+                    record["kernelEpoch"]=json!(grant.kernel_epoch);
+                    self.save_materialized_view_record(&record)?;
+                }
+            }
             if record["branchId"] != params.branch_id
                 || record["revision"] != params.revision
                 || record["sourceRoot"] != branch["root"]
@@ -144,7 +162,7 @@ impl Storage {
             let record = json!({"viewId":params.view_id,"workspaceId":params.workspace_id,"executionWorkspaceId":params.execution_workspace_id,
                 "branchId":params.branch_id,"revision":params.revision,"sourceRoot":branch["root"],"kernelEpoch":grant.kernel_epoch,
                 "ownerGrantId":grant.grant_id,"operationId":format!("materialized-view:{key}"),"rootId":container,
-                "path":format!("managed/language-views/{key}"),"state":"preparing"});
+                "path":format!("managed/source-views/{key}"),"state":"preparing"});
             self.save_materialized_view_record(&record)?;
             record
         };
@@ -257,6 +275,9 @@ impl Storage {
         else {
             return Ok(None);
         };
+        if self.execution_view_handoff_retained(&record)? {
+            return Err(unavailable("Execution view is retained by an original child source handoff"));
+        }
         if record["ownerGrantId"] != grant.grant_id && record["kernelEpoch"] == grant.kernel_epoch {
             return Err(KernelError::Authorization(
                 "Derived view release belongs to its original service owner".into(),
@@ -415,9 +436,14 @@ impl Storage {
         let mut result = Vec::new();
         for raw in rows {
             let record: Value = serde_json::from_str(&raw)?;
+            if self.execution_view_handoff_retained(&record)? {continue;}
             let grant = self.load_grant(field(&record, "ownerGrantId")?)?;
-            if record["kernelEpoch"] != epoch
-                || grant.state != crate::model::GrantState::Active
+            let execution_view=record["viewId"].as_str().is_some_and(|id|id.starts_with("run-execution:"));
+            let run_retained=execution_view && grant.run_id.is_some()
+                && self.conn.query_row("SELECT EXISTS(SELECT 1 FROM grants WHERE state='active' AND json_extract(grant_json,'$.run_id')=?1 AND json_extract(grant_json,'$.thread_id')=?2)",
+                    params![grant.run_id,grant.thread_id],|row|row.get::<_,bool>(0))?;
+            if (!execution_view && record["kernelEpoch"] != epoch)
+                || (grant.state != crate::model::GrantState::Active && !run_retained)
                 || record["cleanupRequested"] == true
             {
                 result.push((
@@ -427,6 +453,11 @@ impl Storage {
             }
         }
         Ok(result)
+    }
+    fn execution_view_handoff_retained(&self,record:&Value)->Result<bool,KernelError> {
+        if !record["viewId"].as_str().is_some_and(|id|id.starts_with("run-execution:")) {return Ok(false)}
+        Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM operations o JOIN pins p ON p.pin_id=json_extract(o.result_json,'$.root.pin.pin_id') WHERE o.kind='source.handoff' AND o.state='committed' AND json_extract(o.result_json,'$.root.kind')='derived' AND json_extract(o.result_json,'$.root.view_id')=?1)",
+            [field(record,"viewId")?],|row|row.get(0))?)
     }
 }
 
@@ -532,6 +563,48 @@ mod tests {
     }
     fn address() -> Value {
         json!({"workspaceId":"workspace","viewId":"view-one"})
+    }
+    #[test]
+    fn execution_view_resumes_its_original_journal_and_retains_mutations_across_restart() {
+        fn run_grant(storage:&mut Storage,id:&str,epoch:&str)->Grant {
+            let root=storage.root.to_string_lossy().into_owned();
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","owningWorkspace":"workspace","executionWorkspace":"workspace",
+                "runId":"original-run","threadId":"original-thread","capabilities":["storage.admin","process"],"pathScopes":[""]}),"host","generation",&root,epoch).unwrap();
+            storage.load_grant(id).unwrap()
+        }
+        for staged in [false,true] {
+        let (mut storage,_,root,mut params,_)=fixture();
+        params["viewId"]=json!("run-execution:original-run");
+        let first=run_grant(&mut storage,"run-before","old-epoch");
+        let pending=storage.prepare_materialized_view(&params,&first,Arc::new(AtomicBool::new(false))).unwrap();
+        let Admission::Work(task)=pending else {panic!("new view must prepare")};
+        if staged {
+            storage.control_materialization(&task.operation_id,&task.job_id,super::super::materialization::Control::CreateStage,false).unwrap();
+            let record=storage.materialized_view_record("workspace","run-execution:original-run").unwrap().unwrap();
+            let stage=root.join(materialize_side_path(record["path"].as_str().unwrap(),&task.operation_id,"staging"));
+            fs::write(stage.join("main.ts"),"partial interrupted copy").unwrap();
+        }
+        drop(task);drop(storage);
+        let mut storage=Storage::open(&root,"host").unwrap();
+        let next=run_grant(&mut storage,"run-after","next-epoch");
+        let inspect=json!({"workspaceId":"workspace","branchId":"source","revision":0});
+        assert_eq!(storage.inspect_execution_view(&inspect,&next).unwrap()["status"],"interrupted");
+        let view=prepare(&mut storage,&next,&params);
+        let directory=PathBuf::from(view["canonicalRoot"].as_str().unwrap());
+        fs::write(directory.join("main.ts"),"changed by original command\n").unwrap();
+        drop(storage);
+        let mut storage=Storage::open(&root,"host").unwrap();
+        let current=run_grant(&mut storage,"run-current","current-epoch");
+        let observed=storage.inspect_execution_view(&inspect,&current).unwrap();
+        assert_eq!(observed["canonicalRoot"],view["canonicalRoot"]);
+        assert_eq!(fs::read_to_string(directory.join("main.ts")).unwrap(),"changed by original command\n");
+        assert!(storage.obsolete_materialized_views("current-epoch").unwrap().is_empty());
+        for id in ["run-before","run-after","run-current"] {storage.revoke_grant(&json!({"grantId":id}),"host").unwrap();}
+        let obsolete=storage.obsolete_materialized_views("current-epoch").unwrap();assert_eq!(obsolete.len(),1);
+        let task=storage.prepare_materialized_view_release(&obsolete[0].0,&obsolete[0].1).unwrap().unwrap();
+        storage.finish_materialized_view_release(&task,task.run()).unwrap();
+        assert!(!directory.exists());drop(storage);fs::remove_dir_all(root).unwrap();
+        }
     }
     fn release(storage: &mut Storage, grant: &Grant) {
         if let Some(task) = storage

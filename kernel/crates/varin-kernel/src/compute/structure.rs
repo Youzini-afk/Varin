@@ -121,7 +121,7 @@ impl SyntaxRuntime {
                 if recipe.style=="tags"&&named.is_none(){return Ok(());}
                 let name=named.map(|n|node_text(n,bytes)).filter(|s|!s.is_empty()).unwrap_or("default");
                 let kind=if recipe.style=="tags"{tags_kind(capture)}else{kind_for(*unit)};
-                push_symbol(&mut symbols,&mut seen,name,kind,*unit,named);Ok(())
+                push_symbol(&mut symbols,&mut seen,name,kind,*unit,named,bytes);Ok(())
             })?;
         }
         shared.check()?;
@@ -174,11 +174,15 @@ fn node_text<'a>(node:Node,text:&'a[u8])->&'a str{node.utf8_text(text).unwrap_or
 fn unquote(text:&str)->&str{if text.len()>=2&&(text.starts_with('"')||text.starts_with('\'')){&text[1..text.len()-1]}else{text}}
 fn span(node:Node)->(usize,usize){let start=node.start_position();let end=node.end_position();
     (start.row+1,(if end.column==0&&end.row>start.row{end.row}else{end.row+1}).max(start.row+1))}
-fn push_symbol(symbols:&mut Vec<Value>,seen:&mut HashSet<String>,name:&str,kind:&str,unit:Node,signature:Option<Node>){
-    let (start,end)=span(unit);let(sig_start,sig_end)=signature.map(span).unwrap_or((start,start));
+fn push_symbol(symbols:&mut Vec<Value>,seen:&mut HashSet<String>,name:&str,kind:&str,unit:Node,_signature:Option<Node>,text:&[u8]){
+    let (start,end)=span(unit);
     let key=format!("{kind}:{name}:{start}:{end}:{}",unit.kind());if !seen.insert(key){return;}
-    symbols.push(json!({"name":name,"kind":kind,"range":{"startLine":start,"endLine":end},
-        "signature":{"startLine":start.max(sig_start),"endLine":end.min(sig_end)}}));
+    let declaration=initializer(unit).unwrap_or(unit);
+    let header_end=declaration.child_by_field_name("body").map(|body|body.start_byte())
+        .unwrap_or_else(||unit.start_byte()+node_text(unit,text).find('\n').unwrap_or(unit.end_byte()-unit.start_byte()));
+    let header=std::str::from_utf8(&text[unit.start_byte()..header_end.max(unit.start_byte()).min(unit.end_byte())]).unwrap_or_default().trim_end();
+    symbols.push(json!({"name":name,"kind":kind,"range":{"startLine":start,"endLine":end,"startByte":unit.start_byte(),"endByte":unit.end_byte()},
+        "signature":{"startLine":start,"endLine":(start+header.bytes().filter(|byte|*byte==b'\n').count()).min(end),"text":header}}));
 }
 fn function_like(kind:&str)->bool{matches!(kind,"arrow_function"|"function"|"function_expression"|"generator_function"|"class")}
 fn binding(kind:&str)->bool{matches!(kind,"lexical_declaration"|"variable_declaration"|"public_field_definition"|"field_definition")}
@@ -215,7 +219,7 @@ fn line_has(node:Node,row:usize,matcher:impl Fn(&str)->bool,shared:&Shared)->Res
 struct JsonOutline<'a>{symbols:&'a mut Vec<Value>,names:&'a mut HashSet<usize>,seen:&'a mut HashSet<String>,max_depth:usize,max_symbols:usize,text:&'a[u8],shared:&'a Shared}
 impl JsonOutline<'_>{
     fn push(&mut self,name:&str,kind:&str,unit:Node,signature:Node)->bool{
-        if self.symbols.len()>=self.max_symbols{return false;}push_symbol(self.symbols,self.seen,name,kind,unit,Some(signature));self.symbols.len()<self.max_symbols
+        if self.symbols.len()>=self.max_symbols{return false;}push_symbol(self.symbols,self.seen,name,kind,unit,Some(signature),self.text);self.symbols.len()<self.max_symbols
     }
     fn collect(&mut self,root:Node)->Result<()>{
         let value=if matches!(root.kind(),"object"|"array"){Some(root)}else{let mut c=root.walk();let v=root.named_children(&mut c).find(|n|matches!(n.kind(),"object"|"array"));v};
@@ -268,7 +272,7 @@ mod tests {
     fn repeated_documents_share_compilation_without_sharing_analysis() {
         let mut syntax = SyntaxRuntime::default();
         let recipe = recipe();
-        let shared = Shared::new();
+        let shared = Shared::new(false);
         for index in 0..8 {
             let text = format!("import x from './x';\nfunction fn_{index}() {{ return fetch('/api/{index}'); }}");
             let hash = hex::encode(Sha256::digest(text.as_bytes()));
@@ -299,7 +303,7 @@ mod tests {
     fn latest_recipe_replaces_queries_and_revisiting_recompiles() {
         let mut syntax = SyntaxRuntime::default();
         let base = recipe();
-        let shared = Shared::new();
+        let shared = Shared::new(false);
         let text = (0..12).map(|index| format!("function fn_{index}() {{}}\n")).collect::<String>();
         let hash = hex::encode(Sha256::digest(text.as_bytes()));
         let recipes = (0..12).map(|index| {
@@ -337,12 +341,12 @@ mod tests {
         let mut recipe = recipe();
         let text = "function current() {}";
         let hash = hex::encode(Sha256::digest(text.as_bytes()));
-        syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new()).unwrap();
+        syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new(false)).unwrap();
         assert_eq!(syntax.compiled_query_count, 3);
         recipe.grammar_hash = Some("sha256-changed-after-admission".into());
-        assert!(syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new())
+        assert!(syntax.analyze(&recipe, text, &[], 30000, &hash, &Shared::new(false))
             .unwrap_err().contains("Grammar bytes changed"));
-        let cancelled = Shared::new();
+        let cancelled = Shared::new(false);
         cancelled.cancel();
         assert_eq!(syntax.analyze(&recipe, text, &[], 30000, &hash, &cancelled).unwrap_err(), "cancelled");
         assert_eq!(syntax.compiled_query_count, 3);

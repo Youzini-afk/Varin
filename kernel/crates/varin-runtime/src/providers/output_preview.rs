@@ -275,7 +275,7 @@ pub(super) fn is_explicit_read(call: &ToolCall) -> bool {
             args["query"]["kind"].as_str(),
             Some("item" | "output" | "media")
         ),
-        "file_read" => args.get("length").is_some_and(Value::is_u64)
+        "file_read" => args.get("files").is_some_and(Value::is_array) || args.get("length").is_some_and(Value::is_u64)
             || args.get("startLine").is_some_and(Value::is_u64) && args.get("endLine").is_some_and(Value::is_u64),
         "process_read" => true,
         _ => false,

@@ -1838,11 +1838,19 @@ impl Catalog {
                             *outcome,
                             prepared_result.reference()?,
                         );
+                        // A handed-off domain can finish before its waiting native
+                        // tool returns. Accept only the exact authenticated receipt;
+                        // phase alone is not evidence of an un-dispatched success.
+                        let confirmed_terminal=op.external_receipt.as_ref().is_some_and(|receipt|
+                            receipt.executor_stopped && receipt.identity==op.id
+                            && op.executor.as_deref()==Some(receipt.executor.as_str())
+                            && receipt.outcome==*outcome && receipt.effect==*effect
+                            && prepared_result.reference().is_ok_and(|content|receipt.result_ref==*content));
                         if (*effect == Effect::None
                             && op.effect != Effect::None
                             && !confirmed_no_effect)
                             || (*outcome == Outcome::Succeeded
-                                && op.phase != OperationPhase::Running)
+                                && op.phase != OperationPhase::Running && !confirmed_terminal)
                         {
                             return Err(RuntimeError::Invalid(
                                 "tool receipt lacks dispatch/no-send evidence".into(),
@@ -2689,6 +2697,18 @@ pub(super) fn record_external_receipt_in(
             "DELETE FROM resource_occupancy WHERE operation_id=?1",
             [operation_id],
         )?;
+    }
+    if op.executor.as_deref() == Some("code_retrieval") && settle {
+        if let Some(id) = op.waiting_on.as_deref().filter(|id| id.starts_with("retrieval-wait:")) {
+            let mut wait: Wait = record(tx, "waits", id)?;
+            let cursor = tx.query_row("SELECT max(cursor) FROM events WHERE subject=?1", [operation_id], |row| read_number(row,0))?;
+            wait.trigger_cursor = Some(cursor);
+            put(tx,"waits",id,&wait)?;
+            // Its live tool worker consumes the original receipt. Following restart the
+            // ordinary exchange recovery consumes it; never start a second model writer.
+            tx.execute("INSERT INTO resumptions(wait_id,run_id,trigger_cursor,claimed,acknowledged) VALUES(?1,?2,?3,?4,1) ON CONFLICT(wait_id) DO UPDATE SET acknowledged=1",
+                params![id,op.run_id,sql_number(cursor)?,sql_number(op.epoch)?])?;
+        }
     }
     Ok(op)
 }

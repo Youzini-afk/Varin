@@ -183,7 +183,7 @@ export function createManagedChildSourceService(options: {
         throw new Error('Result publication differs from its original child Run');
       }
       const branchId = scope.source.branch_id;
-      if (!branchId || scope.source.mode !== 'materialized') throw new Error('Child result has no private working source');
+      if (!branchId || !['materialized','fixed_branch'].includes(scope.source.mode)) throw new Error('Child result has no private working source');
       const publicationId = `child-result:${child.execution_id}`;
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (operation.kind === 'child_result_read') return store.readResultCandidate(branchId, publicationId, { signal });
@@ -191,13 +191,19 @@ export function createManagedChildSourceService(options: {
         if (child.code_result.kind !== 'candidate') throw new Error('Child has no accepted result candidate');
         return store.publishPreparedResult(publicationId, child.code_result.candidate, { signal });
       }
-      if (child.code_result.kind !== 'settling' || !scope.physicalRoot) throw new Error('Child result capture has no settled physical source');
+      let executionRoot=scope.physicalRoot;
+      if (scope.source.mode==='fixed_branch') {
+        const view=await options.storage.client.scoped(scope.grant).executionViewInspect({workspaceId:scope.source.workspace_id,branchId,revision:scope.source.revision!},signal);
+        if (view?.status!=='ready') throw new Error('The original child execution view is unavailable');
+        executionRoot={hostId:scope.physicalRoot?.hostId ?? '',rootId:view.rootId,canonicalRoot:view.canonicalRoot};
+      }
+      if (child.code_result.kind !== 'settling' || !executionRoot) throw new Error('Child result capture has no settled physical source');
       const physical = new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({
         grant: scope.grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
-        rootId: scope.physicalRoot.rootId, canonicalRoot: scope.physicalRoot.canonicalRoot,
+        rootId: executionRoot.rootId, canonicalRoot: executionRoot.canonicalRoot,
       }));
       return physical.prepareResultCandidate({ publicationId, branchId,
-        source: { kind: 'directory', directory: scope.physicalRoot.canonicalRoot }, signal });
+        source: { kind: 'directory', directory: executionRoot.canonicalRoot }, signal });
     }
     if (operation.kind === 'child_release') {
       const child = operation.execution;
@@ -205,7 +211,7 @@ export function createManagedChildSourceService(options: {
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
       const handoff = child.source?.kind === 'pending' || child.source?.kind === 'ready' ? child.source.handoff : null;
-      if (child.trigger.kind === 'dispatch' && handoff?.root.kind === 'fixed') {
+      if (child.trigger.kind === 'dispatch' && (handoff?.root.kind === 'fixed' || handoff?.root.kind === 'derived')) {
         await store.releaseBranchHandoffPin(handoff.root.pin.source.branch_id!, handoff.root.pin.pin_id);
       }
       if (child.trigger.kind !== 'dispatch' && child.source_basis) {

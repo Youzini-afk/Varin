@@ -147,7 +147,6 @@ fn public_continuation_source_prepare_and_exact_run_assembly_share_one_execution
         resources,
         credentials: credentials.clone(),
         language: crate::language::LanguageBridge::new(output.clone()),
-        retrieval: crate::retrieval::RetrievalBridge::new(output.clone()),
         memory,
         context: crate::host_query::OwnerChannel::new("context", output.clone()),
         resource: crate::host_query::OwnerChannel::new("resource", output.clone()),

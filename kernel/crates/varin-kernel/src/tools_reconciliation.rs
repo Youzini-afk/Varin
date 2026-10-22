@@ -11,6 +11,9 @@ impl KernelResourceClient {
         binding: ToolBinding,
         operations: Vec<Operation>,
     ) -> Result<Vec<(String, ExternalReceipt)>, KernelError> {
+        // A fixed-source command can produce a working result without admitting
+        // any text-mutation journals. Nothing needs physical mutation recovery.
+        if operations.is_empty() { return Ok(Vec::new()); }
         if binding.source_mode == SourceMode::FixedBranch {
             return Err(KernelError::Authorization(
                 "mutation recovery requires the original physical source".into(),

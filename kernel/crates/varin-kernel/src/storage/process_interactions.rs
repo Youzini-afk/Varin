@@ -433,12 +433,12 @@ impl Client {
 }
 impl Storage {
     fn interaction_context(
-        &self,
+        &mut self,
         context: &Context,
         epoch: &str,
         host_id: &str,
         host_generation: &str,
-        address: &Address,
+        address: &mut Address,
     ) -> Result<Grant, KernelError> {
         if context.epoch.as_deref().is_some_and(|given| given != epoch) {
             return Err(KernelError::Authorization(
@@ -457,12 +457,17 @@ impl Storage {
         if let Some(binding) = &context.binding {
             if let Some(authority)=&binding.target_authority {self.validate_source_resource(authority,binding,epoch,true)?;self.validate_source_process_access(binding,&address.process_id,epoch,None)?;}
             else if !binding.resource_owner.is_local(){return Err(KernelError::Authorization("Managed interaction requires actual target authority".into()));}
+            let effective = self.execution_tool_binding(binding, &grant)?;
+            let actual_root = effective.as_ref().unwrap_or(binding).root_id.clone();
+            if binding.source_mode == varin_runtime::SourceMode::FixedBranch && address.root_id.is_none() {
+                address.root_id = actual_root.clone();
+            }
             if grant.run_id.as_deref() != Some(binding.run_id.as_str())
                 || grant.thread_id.as_deref() != Some(binding.thread_id.as_str())
                 || grant.owning_workspace.as_deref() != Some(binding.workspace_id.as_str())
                 || grant.execution_workspace.as_deref()
                     != Some(binding.execution_workspace_id.as_str())
-                || binding.root_id != address.root_id
+                || actual_root != address.root_id
                 || binding.workspace_id != address.workspace_id
             {
                 return Err(KernelError::Authorization(
@@ -627,24 +632,24 @@ impl Storage {
         match command {
             Command::Lookup {
                 context,
-                address,
+                mut address,
                 reply,
             } => {
                 let result = self
-                    .interaction_context(&context, epoch, host_id, host_generation, &address)
+                    .interaction_context(&context, epoch, host_id, host_generation, &mut address)
                     .and_then(|grant| self.interaction_lookup(&address, &grant));
                 let _ = reply.send(result);
             }
             Command::Prepare {
                 context,
-                address,
+                mut address,
                 input,
                 digest,
                 native,
                 reply,
             } => {
                 let result = self
-                    .interaction_context(&context, epoch, host_id, host_generation, &address)
+                    .interaction_context(&context, epoch, host_id, host_generation, &mut address)
                     .and_then(|grant| {
                         self.interaction_prepare(address, input, digest, native, &grant)
                     });
@@ -666,7 +671,7 @@ impl Storage {
                     })?;
                     if saved != &native
                         || native.context.operation_id != address.operation_id
-                        || read.intent.address.root_id != address.root_id
+                        || address.root_id.as_ref().is_some_and(|root|read.intent.address.root_id.as_ref()!=Some(root))
                     {
                         return Err(KernelError::Authorization(
                             "process recovery differs from its original native intent/root".into(),
@@ -740,7 +745,7 @@ impl Storage {
                 process_id,
                 reply,
             } => {
-                let address = Address {
+                let mut address = Address {
                     workspace_id: binding.workspace_id.clone(),
                     process_id: process_id.clone(),
                     operation_id: process_id.clone(),
@@ -752,7 +757,7 @@ impl Storage {
                     binding: Some(binding),
                 };
                 let result = self
-                    .interaction_context(&context, epoch, host_id, host_generation, &address)
+                    .interaction_context(&context, epoch, host_id, host_generation, &mut address)
                     .and_then(|grant| {
                         self.authorize_process_access(
                             &process_id,

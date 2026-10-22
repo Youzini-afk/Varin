@@ -167,7 +167,7 @@ pub(super) fn validate_environment_source(db: &Connection, thread_id: &str, sour
         for raw in statement.query_map([thread_id], |row| row.get::<_, String>(0))? {
             let child: delegated::DelegatedExecution = serde_json::from_str(&raw?)?;
             if matches!(child.source, Some(collaboration::ChildSource::Shared { selection, .. }) if selection == *source)
-                && child.code_result == collaboration::ChildCodeResult::NoChanges
+                && matches!(child.code_result, collaboration::ChildCodeResult::NoChanges | collaboration::ChildCodeResult::SharedSource)
             {
                 shared = true;
                 break;

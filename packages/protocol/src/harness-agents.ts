@@ -36,7 +36,7 @@ export interface HarnessAgentOverrides {
   description?: string;
   instructions?: string;
   tools?: AgentToolSelection;
-  worktree?: "none" | "isolated";
+  worktree?: "none" | "shared" | "isolated";
   modelSettings?: HarnessAgentModelSettings;
 }
 
@@ -60,7 +60,7 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     || (v.name !== undefined && (typeof v.name !== "string" || !v.name.trim()))
     || (v.description !== undefined && typeof v.description !== "string")
     || (v.instructions !== undefined && typeof v.instructions !== "string")
-    || (v.worktree !== undefined && v.worktree !== "none" && v.worktree !== "isolated")) {
+    || (v.worktree !== undefined && v.worktree !== "none" && v.worktree !== "shared" && v.worktree !== "isolated")) {
     throw new HarnessSettingsValidationError("Invalid built-in agent overrides");
   }
   return {
@@ -69,12 +69,12 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     ...(v.description === undefined ? {} : { description: v.description as string }),
     ...(v.instructions === undefined ? {} : { instructions: v.instructions as string }),
     ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }),
-    ...(v.worktree === undefined ? {} : { worktree: v.worktree as "none" | "isolated" }),
+    ...(v.worktree === undefined ? {} : { worktree: v.worktree as "none" | "shared" | "isolated" }),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }),
   };
 }
 
-export function customizeHarnessAgent<T extends { tools: string[]; worktree: "none" | "isolated"; systemPromptFragment: string }>(
+export function customizeHarnessAgent<T extends { tools: string[]; worktree: "none" | "shared" | "isolated"; systemPromptFragment: string }>(
   definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "agent",
 ): T & { name?: string; description?: string; avatar?: AgentAvatarId; modelSettings?: HarnessAgentModelSettings } {
   return { ...definition,
@@ -98,7 +98,7 @@ export interface HarnessCustomAgent {
   model?: ModelSelection;
   modelSettings?: HarnessAgentModelSettings;
   tools?: AgentToolSelection;
-  worktree: "none" | "isolated";
+  worktree: "none" | "shared" | "isolated";
   /** Empty means available in either work focus. */
   workFocus: WorkFocusId[];
 }
@@ -112,7 +112,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
     || typeof v.name !== "string" || !v.name.trim()
     || typeof v.description !== "string" || typeof v.instructions !== "string"
     || typeof v.enabled !== "boolean"
-    || (v.worktree !== "none" && v.worktree !== "isolated") || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
+    || (v.worktree !== "none" && v.worktree !== "shared" && v.worktree !== "isolated") || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
   let model: ModelSelection | undefined;
   if (v.model !== undefined) {
     if (!v.model || typeof v.model !== "object" || Array.isArray(v.model)) return fail();

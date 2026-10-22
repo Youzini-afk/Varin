@@ -339,7 +339,7 @@ impl Harness {
                     resources: None,
                 }
             }
-            ChildSourceRoot::Physical { root } => {
+            ChildSourceRoot::Physical { root } | ChildSourceRoot::Derived { root, .. } => {
                 assert_eq!(PathBuf::from(&root.canonical_root), parent.cwd);
                 assert_eq!(
                     std::fs::read_dir(&parent.cwd).unwrap().count(),

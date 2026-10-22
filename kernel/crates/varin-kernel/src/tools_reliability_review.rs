@@ -4,7 +4,7 @@ use std::{fs, path::PathBuf, sync::Mutex};
 const HOST: &str = "tools-host";
 const GENERATION: &str = "tools-generation";
 const EPOCH: &str = "tools-epoch";
-struct TestRoot(PathBuf);
+pub(crate) struct TestRoot(PathBuf);
 impl std::ops::Deref for TestRoot {
     type Target = PathBuf;
     fn deref(&self) -> &PathBuf {
@@ -114,6 +114,265 @@ impl Fixture {
             other => panic!("{other:?}"),
         }
     }
+}
+
+pub(crate) fn source_reader(run:&str,thread:&str)->(KernelToolExecutor,TestRoot) {
+    let mut f=Fixture::new();
+    fs::write(f.root.join("work/body.txt"),"native retrieval evidence\r\n").unwrap();
+    f._storage.lock().unwrap().issue_grant(&json!({"grantId":"child-reader","hostGeneration":GENERATION,
+        "capabilities":["storage.read"],"pathScopes":[""],"owningWorkspace":"workspace",
+        "executionWorkspace":"workspace","threadId":thread,"runId":run}),HOST,GENERATION,
+        &f.root.join("store").to_string_lossy(),EPOCH).unwrap();
+    f.executor.binding.grant_id="child-reader".into();
+    f.executor.binding.thread_id=thread.into();f.executor.binding.run_id=run.into();
+    f.executor.binding.enabled_tools=[ToolKind::FileRead].into_iter().collect();
+    (f.executor,f.root)
+}
+
+#[test]
+fn fixed_source_commands_prepare_once_and_reads_searches_use_the_owned_view() {
+    let mut f = Fixture::new();
+    let body = "原🙂 original fixed text\r\n".as_bytes();
+    {
+        let mut storage=f._storage.lock().unwrap();
+        let mut invoke=|method:&str,params:Value| {
+            let (grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();
+            storage.dispatch(method,&params,Some("actor"),&grant).unwrap()
+        };
+        invoke("storage.putBlob.begin",json!({"operationId":"fixed-blob","streamId":"fixed-body","workspaceId":"workspace","byteLength":body.len()}));
+        invoke("storage.putBlob.chunk",json!({"streamId":"fixed-body","sequence":0,"bytesBase64":BASE64.encode(body)}));
+        let blob=invoke("storage.putBlob.finish",json!({"operationId":"fixed-blob","streamId":"fixed-body","workspaceId":"workspace"}));
+        invoke("branch.create.begin",json!({"operationId":"fixed-create","builderId":"fixed-builder","workspaceId":"workspace","branchId":"fixed","draftBasePaths":[],"captureScopes":[]}));
+        invoke("branch.create.append",json!({"builderId":"fixed-builder","sequence":0,"entries":[{"path":"body.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":body.len(),"mode":420},"ownerId":blob["ownerId"]}]}));
+        invoke("branch.create.finish",json!({"operationId":"fixed-create","builderId":"fixed-builder"}));
+    }
+    f.executor.binding.source_mode=SourceMode::FixedBranch;
+    f.executor.binding.root_id=None;
+    f.executor.binding.live_root=None;
+    f.executor.binding.file_source=Some(FixedFileSource{branch_id:"fixed".into(),revision:0});
+    assert_eq!(f.read(json!({"path":"body.txt"}))["content"]["text"],String::from_utf8_lossy(body).as_ref());
+    let page=f.read(json!({"path":"body.txt","offset":1,"length":1}));
+    assert_eq!(page["content"]["text"],"原");assert_eq!(page["content"]["offset"],0);assert_eq!(page["content"]["nextOffset"],3);
+    assert!(!f.root.join("store/managed/source-views").exists());
+    // The command's cwd is checked against the prepared fixed view, before spawning.
+    let result=f.call("process_spawn",json!({"command":"varin-fixture-program-does-not-exist","cwd":"missing"}));
+    assert!(matches!(result,ToolCompletion::NotDispatched{..}),"{result:?}");
+    {
+        let mut storage=f._storage.lock().unwrap();
+        let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        assert!(storage.execution_tool_binding(&f.executor.binding,&grant).unwrap().is_some());
+    }
+    let root={let storage=f._storage.lock().unwrap();
+        let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        PathBuf::from(storage.check_materialized_view(&json!({"workspaceId":"workspace","viewId":"run-execution:run"}),&grant).unwrap()["canonicalRoot"].as_str().unwrap())};
+    fs::write(root.join("body.txt"),"changed in execution view\r\n").unwrap();
+    assert_eq!(f.read(json!({"path":"body.txt"}))["content"]["text"],"changed in execution view\r\n");
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"changed"})) else {panic!("derived search failed")};
+    assert_eq!(content.data["records"][0]["path"],"body.txt");
+    assert!(!f.root.join("work/body.txt").exists());
+    {
+        let mut storage=f._storage.lock().unwrap();
+        let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        let context=ToolExecutionContext{run_id:"run".into(),operation_id:"request:tool:handoff".into(),origin:ToolOrigin::ModelStep{request_id:"request".into()}};
+        let handoff=storage.child_source_handoff(&f.executor.binding,&context,&varin_runtime::catalog::dispatch::ChildSourceDelegation{
+            agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,process:true,configured_preset:true,selection_ref:json!({"content_object":"fixture"})},&grant,HOST,false).unwrap();
+        assert_eq!(handoff["root"]["kind"],"derived");assert_eq!(handoff["root"]["view_id"],"run-execution:run");
+        assert_eq!(fs::canonicalize(handoff["root"]["root"]["canonicalRoot"].as_str().unwrap()).unwrap(),fs::canonicalize(&root).unwrap());
+        storage.revoke_grant(&json!({"grantId":"actor"}),HOST).unwrap();
+        assert!(storage.obsolete_materialized_views(EPOCH).unwrap().is_empty(),"Original handoff retains physical bytes until capture transfers ownership");
+        let owner=serde_json::from_value(handoff.clone()).unwrap();
+        let identity=f.root.join("store").to_string_lossy().into_owned();
+        storage.claim_child_handoff(&json!({"grantId":"release-handoff","childThreadId":"thread:child:request:tool:handoff"}),&owner,HOST,GENERATION,&identity,EPOCH).unwrap();
+        let p=json!({"operationId":"release-derived-pin","branchId":"fixed","pinId":handoff["root"]["pin"]["pin_id"]});
+        let (release,p)=storage.authorize(Some("release-handoff"),EPOCH,HOST,GENERATION,"branch.unpin",&p).unwrap();
+        storage.dispatch("branch.unpin",&p,Some("release-handoff"),&release).unwrap();
+        assert_eq!(storage.obsolete_materialized_views(EPOCH).unwrap().len(),1);
+    }
+    // A separately admitted fixed reader still observes the immutable baseline.
+    f.next_run("baseline-reader",&[""]);
+    assert_eq!(f.read(json!({"path":"body.txt"}))["content"]["text"],String::from_utf8_lossy(body).as_ref());
+}
+
+#[test]
+fn batch_reads_keep_original_ranges_and_individual_failures() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("work/a.txt"), "one\r\ntwo\r\nthree\r\n").unwrap();
+    let result = f.call("file_read",json!({"files":[
+        {"path":"a.txt","startLine":2,"endLine":3},
+        {"path":"missing.txt"},{"path":"../escape"},{"path":"a.txt","offset":0,"length":5}
+    ]}));
+    let ToolCompletion::Result {content,..} = result else {panic!("read result")};
+    assert_eq!(content.data["status"],"partial");
+    assert_eq!(content.data["files"][0]["result"]["content"]["text"],"two\r\nthree\r\n");
+    assert_eq!(content.data["files"][1]["result"]["status"],"missing");
+    assert_eq!(content.data["files"][2]["result"]["status"],"failed");
+    assert_eq!(content.data["files"][3]["result"]["content"]["text"],"one\r\n");
+    assert_eq!(content.data["files"][0]["result"]["readVersion"],content.data["files"][3]["result"]["readVersion"]);
+}
+
+#[test]
+fn overlapping_line_batches_fall_back_when_the_combined_range_exceeds_the_frame() {
+    let mut f=Fixture::new();
+    let line=format!("{}\r\n","x".repeat(crate::protocol::MAX_BLOB_RESPONSE_BYTES/3+1));
+    fs::write(f.root.join("work/large.txt"),line.repeat(4)).unwrap();
+    let result=f.read(json!({"files":[{"path":"large.txt","startLine":1,"endLine":2},{"path":"large.txt","startLine":2,"endLine":3}]}));
+    assert_eq!(result["status"],"ready");
+    for item in result["files"].as_array().unwrap() {assert_eq!(item["result"]["content"]["text"],line.repeat(2));}
+    assert_eq!(result["files"][0]["result"]["readVersion"],result["files"][1]["result"]["readVersion"]);
+}
+
+#[test]
+fn search_batches_preserve_matches_and_continue_within_a_versioned_file() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("work/source.txt"), "alpha\nbeta alpha\ngamma\nbeta\n").unwrap();
+    fs::write(f.root.join("work/z.txt"), "alpha\n").unwrap();
+    let result = |value| match value {
+        ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } => content.data,
+        other => panic!("search failed: {other:?}"),
+    };
+    let first = result(f.call("file_search", json!({"queries":["alpha","beta"],"maxResults":1,"after":1})));
+    assert_eq!(first["records"][0]["data"]["line"], 1);
+    assert_eq!(first["records"][0]["data"]["queryIndices"], json!([0]));
+    assert_eq!(first["records"][0]["data"]["after"], json!(["beta alpha"]));
+    assert_eq!(first["scanComplete"], false);
+    let second = result(f.call("file_search", json!({"queries":["alpha","beta"],"maxResults":2,"after":1,"cursor":first["nextCursor"]})));
+    assert_eq!(second["records"][0]["data"]["line"], 2);
+    assert_eq!(second["records"][0]["data"]["queryIndices"], json!([0,1]));
+    assert_eq!(second["records"][1]["data"]["line"], 4);
+    let third = result(f.call("file_search", json!({"queries":["alpha","beta"],"maxResults":2,"after":1,"cursor":second["nextCursor"]})));
+    assert_eq!(third["records"].as_array().unwrap().len(), 1);
+    assert_eq!(third["records"][0]["path"], "z.txt");
+    assert!(third["nextCursor"].is_null());
+    assert_eq!(third["scanComplete"], true);
+    assert!(f.try_call("file_search", json!({"query":"gamma","cursor":first["nextCursor"]})).is_err());
+    fs::write(f.root.join("work/source.txt"), "changed\nalpha\n").unwrap();
+    let changed = f.call("file_search", json!({"queries":["alpha","beta"],"after":1,"cursor":first["nextCursor"]}));
+    assert!(matches!(changed, ToolCompletion::Result {outcome:Outcome::Failed,..}));
+}
+
+#[test]
+fn search_batch_keeps_valid_results_when_an_expression_is_invalid() {
+    let mut f = Fixture::new();
+    fs::write(f.root.join("work/source.txt"), "alpha\n").unwrap();
+    let ToolCompletion::Result {outcome:Outcome::Succeeded,content,..} = f.call("file_search", json!({"queries":["[","alpha"],"fixedStrings":false})) else {panic!("batch failed")};
+    assert_eq!(content.data["queryErrors"][0]["queryIndex"], 0);
+    assert_eq!(content.data["records"][0]["data"]["queryIndices"], json!([1]));
+    assert_eq!(content.data["status"], "partial");
+}
+
+#[test]
+fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
+    use sha2::Digest;
+    let f=Fixture::new();
+    let (output,events)=mpsc::sync_channel(16);
+    let source=crate::host_query::OwnerChannel::new("source-resource",output.clone());source.initialize(EPOCH);
+    let language=crate::language::LanguageBridge::new(output.clone());language.initialize(EPOCH);drop(output);
+    let mut binding=f.executor.binding.clone();
+    binding.resource_owner=serde_json::from_value(json!({"kind":"managed_host","hostId":"target","connectionId":"remote","endpointIdentity":"endpoint"})).unwrap();
+    binding.live_root.as_mut().unwrap().host_id="target".into();
+    binding.remote_authority=Some(RemoteResourceAuthority{authority_id:"original-authority".into(),resource_epoch:"target-epoch".into(),
+        execution_owner:varin_runtime::ExecutorOwner::External{identity:"original-authority".into(),epoch:"target-epoch".into()}});
+    let selection=binding.source_selection().unwrap();let returned_source=selection.clone();
+    let body="function marker() {}";let hash=hex::encode(sha2::Sha256::digest(body.as_bytes()));
+    let reply_source=source.clone();let reply_language=language.clone();
+    let responder=std::thread::spawn(move||{
+        let mut structured=false;let mut read=false;
+        for event in events {
+            let query=&event["query"];
+            if event["kind"]=="language-request" {
+                assert_eq!(query["method"],"structure");assert_eq!(query["source"],json!(returned_source));structured=true;
+                reply_language.receive(json!({"v":1,"kind":"language-response","id":event["id"],"kernelEpoch":EPOCH,
+                    "result":{"status":"ready","revision":"version","contentHash":hash,"items":[{"name":"marker","range":{"startLine":1,"endLine":1,"startByte":0,"endByte":body.len()}}]}}));
+            } else if event["kind"]=="source-resource-request" {
+                // Resource Hosts execute original reads; the composite tool never
+                // invokes a second remote file_read lacking the language owner.
+                assert_eq!(query["kind"],"resource");
+                let value=if query["action"]["kind"]=="retrieval_source" {json!({"source":returned_source,"physicalRoot":null})}
+                    else if query["authorizeOnly"]==true {json!({"resourceKey":"original-file"})}
+                    else {read=true;json!({"path":"source.ts","content":{"text":body,"hash":format!("sha256-{hash}"),"offset":0,"nextOffset":body.len(),"eof":true}})};
+                reply_source.receive(json!({"v":1,"kind":"source-resource-response","id":event["id"],"kernelEpoch":EPOCH,"result":{"ok":true,"value":value}}));
+            }
+        }
+        assert!(structured && read);
+    });
+    let executor=Arc::new(KernelToolExecutor::new(binding,f.executor.resources.clone().with_source_bridge(source.clone())).unwrap().with_language(language.clone()));
+    let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
+    let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
+    let request=FrozenToolContext{run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
+    let cancel=CancellationToken::default();let bound=executor.bind_call(&call,&request,&cancel).unwrap();
+    assert_eq!(bound.executor_owner(),varin_runtime::ExecutorOwner::Kernel);
+    let plan=bound.prepare(&cancel).unwrap();bound.authorize(&context,&plan,&cancel).unwrap();
+    let result=bound.execute(&context,&plan,&cancel);
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=result.completion else {panic!("unit read failed")};
+    assert_eq!(content.data["unit"]["name"],"marker");assert_eq!(content.data["content"]["text"],body);
+    source.close();language.close();responder.join().unwrap();
+}
+
+#[test]
+fn search_pages_keep_the_original_job_and_release_paused_work_on_revocation() {
+    use base64::Engine;
+    let mut f=Fixture::new();
+    fs::write(f.root.join("work/large.txt"),("needle ".to_owned()+&"x".repeat(8192)+"\n").repeat(300)).unwrap();
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","maxResults":10000,"maxBytes":1})) else {panic!("initial page failed")};
+    let decode=|value:&Value|->Value{serde_json::from_slice(&base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(value.as_str().unwrap()).unwrap()).unwrap()};
+    let first=content.data;let handle=decode(&first["nextCursor"]);
+    let job=handle["job_id"].as_str().unwrap();
+    let watch={let storage=f._storage.lock().unwrap();
+        let(grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        storage.watch_compute(job,"workspace",&grant).unwrap()};
+    assert!(watch.wait(u64::MAX,false,&CancellationToken::default()),"Producer yields without waiting for another model page");
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","maxResults":3,"cursor":first["nextCursor"]})) else {panic!("continuation failed")};
+    assert_eq!(decode(&content.data["nextCursor"])["job_id"],handle["job_id"]);
+    assert_eq!(content.data["records"][0]["data"]["line"],2);
+    assert_eq!(content.data["records"][2]["data"]["line"],4);
+    let retained=content.data["nextCursor"].clone();
+    let mut expired=decode(&retained);expired["epoch"]=json!("prior-kernel");
+    let expired=base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(serde_json::to_vec(&expired).unwrap());
+    let rejected=f.call("file_search",json!({"query":"needle","cursor":expired}));
+    assert!(serde_json::to_string(&rejected).unwrap().contains("earlier kernel epoch"));
+    // An old-epoch request cannot advance or cancel the current job.
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","maxResults":1,"cursor":retained})) else {panic!("expired cursor changed the current job")};
+    assert_eq!(content.data["records"][0]["data"]["line"],5);
+    let retained=content.data["nextCursor"].clone();
+    f._storage.lock().unwrap().revoke_grant(&json!({"grantId":"actor"}),HOST).unwrap();
+    assert!(watch.wait(0,true,&CancellationToken::default()));
+    f.next_run("new-reader",&[""]);
+    let result=f.call("file_search",json!({"query":"needle","cursor":retained}));
+    assert!(matches!(result,ToolCompletion::Result{outcome:Outcome::Failed,..}));
+    assert!(serde_json::to_string(&result).unwrap().contains("Restart without cursor"));
+}
+
+#[test]
+fn missing_search_paths_keep_other_paths_and_stale_continuations_report_the_file() {
+    let mut f=Fixture::new();fs::write(f.root.join("work/a"),"needle\nneedle\nneedle\n").unwrap();
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","paths":["a","missing"]})) else {panic!("partial search lost results")};
+    assert_eq!(content.data["status"],"partial");
+    assert!(content.data["records"].as_array().unwrap().iter().any(|row|row["path"]=="missing" && row["data"]["status"]=="missing"));
+    assert_eq!(content.data["records"].as_array().unwrap().iter().filter(|row|row["kind"]=="hit").count(),3);
+    let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",json!({"query":"needle","maxResults":1})) else {panic!("first page failed")};
+    fs::write(f.root.join("work/a"),"changed\nneedle\n").unwrap();
+    let result=f.call("file_search",json!({"query":"needle","cursor":content.data["nextCursor"]}));
+    assert!(serde_json::to_string(&result).unwrap().contains("Search continuation source changed: a"));
+}
+
+#[test]
+fn search_scope_and_projections_keep_paths_matches_and_windows_distinct() {
+    let mut f=Fixture::new();fs::create_dir(f.root.join("work/src")).unwrap();
+    fs::write(f.root.join("work/src/a"),"intro\nalpha\nbeta\nend\n").unwrap();
+    fs::write(f.root.join("work/elsewhere"),"alpha beta").unwrap();
+    f.executor=f.executor.with_search_scope(Some(vec!["src".into()]));
+    let run=|f:&mut Fixture,args|{let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_search",args) else {panic!("search failed")};content.data};
+    let paths=run(&mut f,json!({"queries":["alpha","beta"],"format":"paths"}));
+    assert_eq!(paths["records"].as_array().unwrap().len(),1);assert_eq!(paths["records"][0]["path"],"src/a");
+    assert_eq!(paths["records"][0]["data"]["queryIndices"],json!([0,1]));
+    assert_eq!(paths["scope"]["paths"],json!(["src"]));
+    let windows=run(&mut f,json!({"queries":["alpha","beta"],"format":"windows","before":1,"after":1}));
+    assert_eq!(windows["records"].as_array().unwrap().len(),1);
+    assert_eq!(windows["records"][0]["data"]["lines"],json!(["intro","alpha","beta","end"]));
+    assert_eq!(windows["records"][0]["data"]["matches"].as_array().unwrap().len(),2);
+    assert!(f.try_call("file_read",json!({"path":"elsewhere"})).is_err());
+    let batch=f.read(json!({"files":[{"path":"src/a"},{"path":"elsewhere"}]}));
+    assert_eq!(batch["status"],"partial");assert_eq!(batch["files"][1]["result"]["status"],"failed");
 }
 
 #[test]

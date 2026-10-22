@@ -32,11 +32,20 @@ impl Storage {
         if params.job_id.is_empty()||params.job_id.len()>200{return Err(failure("Invalid computation identity"));}
         if !matches!(params.lane.as_str(),"foreground"|"background"){return Err(failure("Unknown computation scheduling lane"));}
         if !matches!(params.operation.as_str(),"read"|"bytes"|"list"|"inventory"|"search"|"structure"|"chunks"|"grammar"){return Err(failure("Unknown native computation operation"));}
+        if params.paged==Some(true) && (!matches!(params.operation.as_str(),"list"|"search") || params.objects.is_some() || params.max_results.is_none()) {
+            return Err(failure("Paged discovery requires an original file source and a page size"));
+        }
         for(number,zero_allowed)in [(params.max_results,false),(params.before,true),(params.after,true),(params.start_line,false),(params.end_line,false),
-            (params.byte_offset,true),(params.byte_length,true),(params.parse_budget_ms,true),(params.chunk_lines,false)]{
+            (params.byte_offset,true),(params.byte_length,true),(params.parse_budget_ms,true),(params.chunk_lines,false),(params.start_after_line,false)]{
             if number.is_some_and(|n|n<if zero_allowed{0}else{1}||n>9_007_199_254_740_991){return Err(failure("Computation limits must be safe integers in their valid range"));}
         }
         if params.start_line.zip(params.end_line).is_some_and(|(a,b)|a>b){return Err(failure("Invalid line range"));}
+        if params.start_after_line.is_some() && (params.operation != "search" || params.start_after_path.is_none() || params.start_after_revision.is_none()) {
+            return Err(failure("Search continuation requires the original path, line and revision"));
+        }
+        if params.queries.as_ref().is_some_and(|queries| params.operation != "search" || params.query.is_some() || queries.is_empty() || queries.iter().any(String::is_empty)) {
+            return Err(failure("Batch search requires nonempty expressions without a separate query"));
+        }
         let hash=hash_json(value)?;
         if let Some(job)=self.computations.jobs.get(&params.job_id){
             if job.grant_id!=grant.grant_id||job.workspace_id!=params.workspace_id{return Err(KernelError::Authorization("Computation belongs to another actor/workspace".into()));}
@@ -73,6 +82,11 @@ impl Storage {
         }
         if params.branch_id.is_some() != params.revision.is_some() || params.revision.is_some_and(|revision| revision < 0) {
             return Err(failure("A branch computation requires a fixed non-negative revision"));
+        }
+        if let (Some(branch),Some(revision))=(&params.branch_id,params.revision) {
+            if let Some(root)=self.execution_compute_root(&params.workspace_id,branch,revision,grant)? {
+                params.root_id=Some(root); params.branch_id=None; params.revision=None;
+            }
         }
         let mut pin_id=None;let mut root=None;
         let source=if let Some(branch)=&params.branch_id {
@@ -149,12 +163,13 @@ impl Storage {
         match method{
             "compute.read"=>{
                 let p:KernelComputeReadParams=parse_file_params(value)?;
+                if p.kernel_epoch.as_deref().is_some_and(|epoch|epoch!=job.epoch) {return Err(failure("Computation cursor belongs to an earlier kernel epoch; restart without cursor"));}
                 if p.cursor<0||p.cursor>9_007_199_254_740_991||p.max_bytes.is_some_and(|n|n<=0||n>8*1024*1024){return Err(failure("Invalid computation cursor or read bound"));}
                 self.computations.read(&id,p.cursor as u64,p.max_bytes.unwrap_or(65536) as usize).map_err(failure)
             },
             "compute.cancel"=>{self.computations.cancel(&id);Ok(json!({"requested":true,"stopped":self.computations.jobs.get(&id).is_some_and(|j|j.done())}))},
             "compute.release"=>{
-                if !job.done(){return Err(failure("Native computation is still active; reader references are retained"));}
+                if !job.quiescent(){return Err(failure("Native computation is still active; reader references are retained"));}
                 if let Some(pin)=&job.pin_id{self.conn.execute("DELETE FROM pins WHERE pin_id=?1",params![pin])?;}
                 self.computations.jobs.remove(&id);Ok(json!({"released":true}))
             },_=>Err(failure("Unknown computation method"))

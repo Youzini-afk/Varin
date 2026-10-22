@@ -14,13 +14,13 @@ const get = createRequire(electron.resolve('@electron/get'));
 const got = createRequire(get.resolve('got'));
 const cache = createRequire(got.resolve('cacheable-request'));
 const CachePolicy = cache('http-cache-semantics');
-const transformers = createRequire(web.resolve('@huggingface/transformers'));
-const { sprintf, vsprintf } = transformers('sprintf-js');
+const logging = createRequire(createRequire(get.resolve('global-agent')).resolve('roarr'));
+const { sprintf, vsprintf } = logging('sprintf-js');
 
 test('security exceptions apply only to the pinned, behavior-verified dependency versions', () => {
   assert.equal(micromatch('braces/package.json').version, '3.0.3');
   assert.equal(cache('http-cache-semantics/package.json').version, '4.2.0');
-  assert.equal(transformers('sprintf-js/package.json').version, '1.1.3');
+  assert.equal(logging('sprintf-js/package.json').version, '1.1.3');
 });
 
 test('floating-point formatting handles hostile precision without losing normal formatting', () => {

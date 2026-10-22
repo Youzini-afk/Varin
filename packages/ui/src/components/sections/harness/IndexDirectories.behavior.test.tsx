@@ -30,7 +30,7 @@ const snapshot = (): SemanticIndexStatus => ({
     progress: { phase: 'processing', processedFiles: 3, totalFiles: 100, publishedDocuments: 49 } }],
 });
 const render = (status: SemanticIndexStatus) => parseHTML('<html><body>' + renderToStaticMarkup(
-  <IndexDirectories status={status} draft={null} edit={() => {}} refresh={async () => {}} />,
+  <IndexDirectories status={status} refresh={async () => {}} />,
 ) + '</body></html>').document;
 
 describe('index progress presentation', () => {
@@ -57,39 +57,12 @@ describe('index progress presentation', () => {
     expect(removing.querySelector('progress')?.getAttribute('max')).toBe('100');
   });
 
-  it('shows the saved index completion separately from the current check counter', () => {
+  it('offers cleanup without restarting retired indexes', () => {
     const document = render(snapshot());
-    expect(document.body.textContent).toContain('Indexed 50/100 documents');
-    expect(document.body.textContent).toContain('Checked 3/100 files this pass');
-    expect(document.querySelector('progress')?.getAttribute('value')).toBe('50');
-    const status = snapshot();
-    status.directories.entries[0]!.checking = true;
-    status.roots[0]!.progress!.phase = 'ready';
-    const graphOnly = render(status);
-    expect(graphOnly.body.textContent).toContain('Indexed 50/100 documents');
-    expect(graphOnly.body.textContent).not.toContain('files this pass');
-  });
-
-  it('keeps the saved count visible before a restarted directory inventory knows its total', () => {
-    const status = snapshot();
-    status.roots[0]!.progress = { phase: 'enumerating', processedFiles: 0, totalFiles: 0 };
-    const document = render(status);
-    expect(document.body.textContent).toContain('50 indexed documents');
-    expect(document.body.textContent).not.toContain('Checked 0/');
-  });
-
-  it('clears the old failure from the current check and shows an actionable failure with details afterwards', () => {
-    const status = snapshot();
-    const entry = status.directories.entries[0]!;
-    entry.error = 'embedding-network-connect: connection failed (ECONNRESET)';
-    entry.checking = true;
-    const checking = render(status);
-    expect(checking.querySelector('[role="alert"]')).toBeNull();
-    entry.checking = false;
-    status.roots[0]!.progress = { phase: 'failed', processedFiles: 3, totalFiles: 100, error: entry.error };
-    const failed = render(status);
-    expect(failed.querySelector('[role="alert"]')?.textContent).toContain('index.directories.error.network');
-    expect(failed.querySelector('[role="alert"] details')?.textContent).toContain('ECONNRESET');
-    expect(failed.body.textContent).toContain('index.directories.retry');
+    expect(document.body.textContent).toContain('index.directories.cached');
+    expect(document.body.textContent).toContain('index.directories.remove');
+    expect(document.body.textContent).not.toContain('index.directories.resume');
+    expect(document.body.textContent).not.toContain('index.directories.check');
+    expect(document.querySelector('progress')).toBeNull();
   });
 });

@@ -288,12 +288,14 @@ pub(super) fn execute(
                 varin_runtime::catalog::collaboration::ChildCodeResult::Pending
                     | varin_runtime::catalog::collaboration::ChildCodeResult::Settling { .. }
             );
+        let mut without_execution_view=false;
         {
             let directory_idle = if captures_directory {
-                resources
+                let view=resources
                     .require_child_root_idle(&binding, &context, &cancel)
-                    .map_err(|error| KernelError::Operation(error.to_string()))?["writerStopped"]
-                    == true
+                    .map_err(|error| KernelError::Operation(error.to_string()))?;
+                without_execution_view=view["physical"]==false && view["writerStopped"]==true;
+                view["writerStopped"]==true
             } else {
                 true
             };
@@ -368,9 +370,9 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             let child = if method == "runtime.child.settle" {
-                catalog
+                if without_execution_view {catalog.settle_child_without_execution_view(&operation_id,&writers).map_err(domain)?} else {catalog
                     .begin_child_settlement_bound(&operation_id, &writers)
-                    .map_err(domain)?
+                    .map_err(domain)?}
             } else if method == "runtime.child.result.candidate" {
                 let candidate =
                     crate::storage::result_publication::candidate_view(stored.as_ref().unwrap())?;

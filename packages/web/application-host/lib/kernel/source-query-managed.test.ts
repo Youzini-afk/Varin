@@ -1,8 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import { createSourceQueryOwner, type ManagedSourceQueryTransport, type SourceQueryAccess } from './source-query.js';
 import { createManagedSourceConsumers } from './managed-source-consumers.js';
-import { createRetrievalSourceOwner } from './retrieval-source.js';
-import type { RetrievalQuery } from './protocol.generated.js';
 import { createLanguageOwner } from './language-owner.js';
 import { resourceSource, resourceThreadSource } from './thread-context.js';
 import type { LaunchSource } from './protocol.generated.js';
@@ -53,36 +51,6 @@ it('keeps a materialized source’s original execution owner through Context ser
   const restored = resourceThreadSource(original);
   expect(restored).toMatchObject({ resourceOwner, environmentRunId: 'original-environment-run' });
   expect(resourceSource(restored)).toEqual(original);
-});
-
-it('keeps managed live semantic inventory on B with separate A configuration and owner-qualified cache identities', async () => {
-  const service = vi.fn(async (_query: SourceQueryAccess, operation: { kind: string; input?: unknown }) => {
-    if (operation.kind === 'validate') return { pathScopes: ['allowed'] };
-    if (operation.kind === 'routing_workspace') return 'C:\\remote\\project';
-    if (operation.kind === 'structure_recipe') return { recipeId: 'target-recipe' };
-    if (operation.kind === 'structure_units') return { status: 'ready', revision: 'revision-b', recipeId: 'target-recipe', units: [] };
-    if (operation.kind === 'compute') return { status: 'ready', records: [{ kind: 'entry', path: 'allowed/b.ts', revision: 'revision-b', data: { kind: 'file' } }] };
-    throw new Error('Unexpected source service');
-  });
-  const owner = createRetrievalSourceOwner({ kernel: local as never, documents: local as never,
-    validateLiveSource: async () => { throw new Error('No A live source'); }, remote: { service } as ManagedSourceQueryTransport });
-  const root = { hostId: 'host-b', rootId: 'root-b', canonicalRoot: 'C:\\remote\\project' };
-  const live: RetrievalQuery = { runId: 'actual-run-a', threadId: 'thread-a', grantId: 'coordinator-binding', projectId: null,
-    question: 'source', inferenceOwner: { kind: 'external', identity: 'retrieval', epoch: 'owner-epoch' },
-    invocation: { kind: 'model_step', requestId: 'step', toolCallId: 'call' },
-    source: { ...source, mode: 'live_root', branch_id: null, revision: null, live_root: root }, physicalRoot: root };
-  const signal = new AbortController().signal;
-  const view = await owner.semanticView(live, signal);
-  expect(view.resourceRoot).toBe('C:\\remote\\project'); expect(view.configurationRoot).toBe('');
-  expect(view.resourceOwner).toEqual(resourceOwner); expect(view.cacheWorkspaceId).not.toBe(source.workspace_id);
-  expect(await view.structure!.unitsRecipe!({ path: 'allowed/b.ts', languageId: 'typescript' })).toBe('target-recipe');
-  expect(await view.structure!.unitsFixed!({ workspaceId: source.workspace_id, path: 'allowed/b.ts', languageId: 'typescript',
-    compute: async () => { throw new Error('A cannot consume B grammar recipe'); }, signal })).toMatchObject({ recipeId: 'target-recipe', revision: 'revision-b' });
-  expect(await view.listFiles(['allowed'], signal)).toEqual({ complete: true, files: [{ path: 'allowed/b.ts', revision: 'revision-b' }] });
-  expect(service).toHaveBeenCalledWith(live, expect.objectContaining({ kind: 'compute', input: expect.objectContaining({ includeRevisions: true }) }), signal);
-  const other = await owner.semanticView({ ...live, source: { ...live.source, resource_owner: { ...resourceOwner, hostId: 'host-c' } } }, signal);
-  expect(other.cacheWorkspaceId).not.toBe(view.cacheWorkspaceId);
-  const again = await owner.semanticView(live, signal); expect(again.cacheWorkspaceId).toBe(view.cacheWorkspaceId);
 });
 
 it('admits a prelaunch source with a readonly lifecycle before the actual Run binding exists', async () => {

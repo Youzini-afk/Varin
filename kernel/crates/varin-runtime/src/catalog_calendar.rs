@@ -860,6 +860,7 @@ impl Catalog {
                         branch_id,
                     } => {
                         context_jobs::require_regular_branch(&tx, branch_id)?;
+                        threads::require_public(&tx,thread_id)?;
                         let run = latest_run(&tx, branch_id)?.ok_or_else(|| {
                             RuntimeError::Conflict(
                                 "existing calendar work has no original Run configuration".into(),
@@ -1579,6 +1580,7 @@ impl Catalog {
         if d != p.definition || o != p.occurrence || occurrence_hold(&tx, &d, &o, None)?.is_some() {
             return Ok(());
         }
+        threads::require_public(&tx,&o.thread_id)?;
         let activation = activation::accept_target(&tx, &o.thread_id, &o.branch_id)?;
         let id = format!("calendar-input:{}", o.id);
         let cursor = event(

@@ -11,12 +11,7 @@ import { runKernelCompute, type KernelComputeInput } from "./compute-runner.js";
 import { createKernelComputeService } from "./compute-service.js";
 import type { KernelComputeRecord, KernelEntry } from "./protocol.generated.js";
 import { createTreeSitterStructureProvider } from "../structure/tree-sitter-provider.js";
-import { createStructureSource } from '../structure/source.js';
 import { createDocumentAuthority } from '../documents/authority.js';
-import { createSemanticIndexRuntime } from '../knowledge/semantic/runtime.js';
-import { createHashEmbedder } from '../knowledge/semantic/embedder.js';
-import { workspaceScope } from '../knowledge/semantic/identity.js';
-import { createFsSearchRuntime } from '../fs/search.js';
 import { TYPESCRIPT_DEFINITION_QUERY, TYPESCRIPT_IMPORT_QUERY, TYPESCRIPT_LITERAL_CALL_QUERY } from "../structure/queries.js";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -219,7 +214,7 @@ it('keeps nested Git visibility under a non-Git project parent and checks exact 
   assert.deepEqual(exact.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').map(record => record.path), ['nested/literal[1].ts']);
 });
 
-it('indexes Scala through native text units and validates returned source revisions', async () => {
+it('reads unsupported Scala as native text units and searches the same source revision', async () => {
   const f = await fixture();
   execFileSync('git', ['init', '--quiet'], { cwd: f.workspace, stdio: 'ignore' });
   await fs.writeFile(path.join(f.workspace, '.gitignore'), 'data/raw/\n');
@@ -237,22 +232,14 @@ it('indexes Scala through native text units and validates returned source revisi
   const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: documentId, languageId: 'scala' });
   assert.equal(units.status, 'ready', JSON.stringify(units));
   assert.ok(units.units.length > 0 && units.units.every(unit => unit.fallback && unit.parentKind === 'file'));
-  const runtime = createSemanticIndexRuntime({ dataDir: f.root, hostId: 'scala-index', documents,
-    structureSource: createStructureSource([provider]), embedder: createHashEmbedder(),
-    indexDirectories: [selected], includeIgnoredDirectories: [selected],
-    searchFilesystemFiles: createFsSearchRuntime({ compute: f.service }).searchFilesystemFiles });
-  cleanup.push(() => runtime.dispose());
-  const scope = workspaceScope(workspaceId);
-  await runtime.scanScope(scope);
-  const result = await runtime.search(scope, 'uniqueScalaMarker', 5);
-  assert.ok(result.hits.some(hit => hit.documentId === documentId && hit.body.includes('uniqueScalaMarker') && hit.fallback),
-    JSON.stringify({ result, progress: runtime.scanProgress(scope) }));
-  assert.equal(result.hits[0]?.revision, units.revision);
-  assert.equal(runtime.scanProgress(scope)?.coverageStats?.textFallbackFiles, 1);
-  assert.equal(runtime.scanProgress(scope)?.coverageStats?.structurallySupportedFiles, 0);
+  const search = () => f.service.directory(f.workspace,{operation:'search',lane:'foreground',paths:[documentId],query:'uniqueScalaMarker',respectGitignore:false});
+  const result=await search();
+  const hit=result.records.find(row=>row.kind==='hit' && row.path===documentId);
+  assert.ok(hit,JSON.stringify(result));
+  assert.equal(hit.revision, units.revision);
   await fs.writeFile(file, '// changed\n' + text);
-  const changed = await runtime.search(scope, 'uniqueScalaMarker', 5);
-  assert.ok(changed.hits.every(hit => hit.revision !== units.revision));
+  const changed = await search();
+  assert.ok(changed.records.filter(row=>row.kind==='hit').every(hit => hit.revision !== units.revision));
 }, 30000);
 
 it('resolves directory aliases within the admitted root and rejects aliases outside it', async () => {

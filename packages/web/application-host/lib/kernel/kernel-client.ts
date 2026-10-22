@@ -11,8 +11,6 @@ import type { MemoryToolOwner } from './memory-owner.js';
 import { ContextBridge, type ContextOwner, type PrivateContextResponse } from './context-bridge.js';
 import { ResourceBridge, type PrivateResourceResponse } from './resource-bridge.js';
 import type { ResourceOwner } from './resource-owner.js';
-import { RetrievalBridge, type PrivateRetrievalResponse, type PrivateRetrievalProgress } from './retrieval-bridge.js';
-import type { RetrievalOwner } from './retrieval-owner.js';
 import { LanguageBridge, type PrivateLanguageResponse } from './language-bridge.js';
 import type { LanguageToolOwner } from './language-owner.js';
 import { AgentPolicyBridge, type AgentPolicyLease, type AgentPolicyBinding, type PrivatePolicyResponse } from './agent-policy.js';
@@ -311,6 +309,9 @@ export class KernelScopedClient {
   materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], signal?: AbortSignal): Promise<KernelMaterializedView> {
     return this.owner.materializedViewCheck(params, this.grant, signal);
   }
+  executionViewInspect(params: KernelMethodParams['file.executionView.inspect'], signal?: AbortSignal) {
+    return this.owner.executionViewInspect(params, this.grant, signal);
+  }
   materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], signal?: AbortSignal): Promise<{ released: boolean }> {
     return this.owner.materializedViewRelease(params, this.grant, signal);
   }
@@ -578,7 +579,6 @@ export class KernelClient {
   private readonly resourceBridge: ResourceBridge;
   private readonly fileObservationBridge: FileObservationBridge;
   private readonly planBridge: PlanBridge;
-  private readonly retrievalBridge: RetrievalBridge;
   private readonly issuedGrants = new Map<string, KernelGrantHandle>();
   private readonly policyBridge: AgentPolicyBridge;
   private readonly runPreparations = new Map<string, Set<{ controller: AbortController; settled: Promise<void> }>>();
@@ -611,8 +611,6 @@ export class KernelClient {
     this.spawnProcess = options.spawnProcess ?? spawn;
     this.policyBridge = new AgentPolicyBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "policy-channel-failed", message: "Private policy channel failed", retryable: false }), true));
-    this.retrievalBridge = new RetrievalBridge(() => this.epoch, response => this.write(response),
-      () => this.failAll(new KernelClientError({ code: "retrieval-channel-failed", message: "Private retrieval channel failed", retryable: false }), true));
     this.memoryBridge = new MemoryBridge(() => this.epoch, response => this.write(response),
       () => this.failAll(new KernelClientError({ code: "memory-channel-failed", message: "Private memory channel failed", retryable: false }), true));
     this.fileObservationBridge = new FileObservationBridge(() => this.epoch, response => this.write(response),
@@ -703,8 +701,6 @@ export class KernelClient {
   onToolReleased(listener: (runId: string) => void): () => void {
     this.mcpReleaseListeners.add(listener); return () => { this.mcpReleaseListeners.delete(listener); };
   }
-  setRetrievalOwner(owner: RetrievalOwner): void { this.retrievalBridge.setOwner(owner); }
-  readRetrievalMaterial(operationId: string, viewId: string) { return this.retrievalBridge.readMaterial(operationId, viewId); }
   /** Resolve only an actual Host-issued native Run grant, never caller-created scope metadata. */
   sourceGrant(query: { grantId: string; runId: string; threadId: string; source: import('./protocol.generated.js').LaunchSource }): KernelGrantHandle {
     const grant = this.issuedGrants.get(query.grantId);
@@ -1006,7 +1002,7 @@ export class KernelClient {
         pending?.release();
         return;
       }
-      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.retrievalBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
+      if (this.modelProtocolBridge.consume(response) || this.managedSourceBridge.consume(response) || this.credentialBridge.consume(response) || this.fileObservationBridge.consume(response) || this.resourceBridge.consume(response) || this.contextBridge.consume(response) || this.memoryBridge.consume(response) || this.planBridge.consume(response) || this.languageBridge.consume(response) || this.toolBridge.consume(response) || this.policyBridge.consume(response)) return;
       if (response.kind === "runtime-event") {
         const eventEpoch = this.epoch ?? (this.starting && response.stream === 'durable' ? this.transport?.kernelEpoch : null);
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== eventEpoch
@@ -1091,7 +1087,6 @@ export class KernelClient {
     this.resourceBridge.close();
     this.fileObservationBridge.close();
     this.planBridge.close();
-    this.retrievalBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();
     for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);
@@ -1116,7 +1111,7 @@ export class KernelClient {
     if (terminate && this.child && !this.child.killed) this.child.kill();
   }
 
-  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse | PrivateRetrievalResponse | PrivateRetrievalProgress): Promise<void> {
+  private async write(request: PrivateModelProtocolResponse | PrivateManagedSourceFrame | KernelRequest | PrivateCredentialResponse | PrivateToolFrame | PrivatePolicyResponse | PrivateMemoryResponse | PrivateContextResponse | PrivateResourceResponse | PrivateFileObservationResponse | PrivatePlanResponse | PrivateLanguageResponse): Promise<void> {
     const transport = this.transport;
     if (!transport) throw new KernelClientError({ code: "kernel-disconnected", message: "Rust kernel transport is unavailable", retryable: true });
     const control = request.kind === "cancel" || request.kind === "credential-response" || request.kind === "host-tool-revoked" || request.kind === "file-observation-response"
@@ -1482,6 +1477,9 @@ export class KernelClient {
   }
   async materializedViewCheck(params: KernelMethodParams["file.materializedView.check"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelMaterializedView> {
     return this.requestRaw<KernelMaterializedView>("file.materializedView.check", params, { signal, grant });
+  }
+  async executionViewInspect(params: KernelMethodParams['file.executionView.inspect'], grant: KernelGrantHandle, signal?: AbortSignal) {
+    return this.requestRaw<(KernelMaterializedView & {status:'ready';rootId:string}) | {status:'preparing';viewId:string} | null>('file.executionView.inspect',params,{signal,grant});
   }
   async materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ released: boolean }> {
     return this.requestRaw<{ released: boolean }>("file.materializedView.release", params, { signal, grant, settleCancellation: true });
@@ -1851,7 +1849,6 @@ export class KernelClient {
     this.resourceBridge.close();
     this.fileObservationBridge.close();
     this.planBridge.close();
-    this.retrievalBridge.close();
     this.issuedGrants.clear();
     this.policyBridge.close();
     for (const runId of this.runPreparations.keys()) this.cancelRunPreparation(runId);

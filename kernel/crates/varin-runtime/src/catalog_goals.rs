@@ -446,6 +446,7 @@ impl Catalog {
         if key.trim().is_empty() {
             return Err(RuntimeError::Invalid("Goal key is required".into()));
         }
+        super::threads::require_public(&self.db,&scope.thread_id)?;
         Ok(GoalMutationPreparation {
             scope,
             key: key.into(),
