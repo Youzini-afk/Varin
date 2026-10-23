@@ -299,27 +299,28 @@ renderers.images = () => head('图像生成与编辑','分别指定模型，保�
  route('管理模型服务','models');
 
 const percentText=n=>Number(n.toFixed(2)).toString();
+let contextDrag=null;
 function contextBoundaries(){
- const replace=100-Number(val('上下文预留',15));
- const prepare=replace*Number(val('压缩准备水位',0.75));
- return {replace,prepare,enabled:val('后台准备',true)};
+ const replace=state.contextPreview?.replace??100-Number(val('上下文预留',10));
+ const waterline=state.contextPreview?.waterline??Number(val('压缩准备水位',0.75));
+ return {replace,waterline,prepare:replace*waterline,enabled:val('后台准备',true)};
 }
 function contextScale(){
- const {replace,prepare,enabled}=contextBoundaries();
+ const {replace,prepare,waterline,enabled}=contextBoundaries();
  return `<div class="context-scale ${enabled?'':'preparation-off'}" id="context-scale" style="--prepare:${prepare}%;--replace:${replace}%">
  <div class="context-axis"><span>0%</span><span>模型上下文窗口 · 100%</span></div>
  <div class="context-track"><div class="context-ordinary"></div><div class="context-preparing"></div><div class="context-reserved"></div>
- <button class="context-marker preparation-marker" data-action="context-edit:prepare" aria-label="调整开始后台压缩的基准位置" ${enabled?'':'disabled'}></button>
- <span class="context-position preparation-label" data-context-label="prepare">压缩 · ${percentText(prepare)}%</span>
- <button class="context-marker replacement-marker" data-action="context-edit:replace" aria-label="调整上下文替换位置"></button>
+ <button class="context-marker preparation-marker" data-context-drag="prepare" role="slider" aria-label="准备水位，按可用输入预算计算" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${waterline*100}" aria-valuetext="准备水位 ${percentText(waterline*100)}%，对应全窗口 ${percentText(prepare)}%" ${enabled?'':'disabled'}></button>
+ <span class="context-position preparation-label" data-context-label="prepare">准备基准 · ${percentText(prepare)}%</span>
+ <button class="context-marker replacement-marker" data-context-drag="replace" role="slider" aria-label="替换边界，按整个模型窗口计算" aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${replace}" aria-valuetext="全窗口 ${percentText(replace)}%，预留 ${percentText(100-replace)}%"></button>
  <span class="context-position replacement-label" data-context-label="replace">替换 · ${percentText(replace)}%</span></div>
  <div class="context-legend"><span><i class="ordinary"></i>继续使用当前上下文</span><span data-context-preparation><i class="preparing"></i>后台准备摘要</span><span><i class="reserved"></i>预留空间 <b data-context-reserve>${percentText(100-replace)}%</b></span></div>
  </div>
  <div class="context-boundaries">
- <div class="context-boundary"><label for="context-prepare"><span class="context-dot preparing"></span>开始后台压缩 <small>基准</small></label><div class="actions"><input id="context-prepare" data-context-threshold="prepare" class="number-field" type="number" step="any" value="${percentText(prepare)}" ${enabled?'':'disabled'}><span class="small muted">%</span></div><p>提前准备压缩摘要，对话继续进行。实际准备时机可根据耗时与上下文增长提前。</p></div>
+ <div class="context-boundary"><label for="context-prepare"><span class="context-dot preparing"></span>准备水位</label><div class="actions"><input id="context-prepare" data-context-threshold="prepare" class="number-field" type="number" step="any" value="${Number((waterline*100).toPrecision(12))}" ${enabled?'':'disabled'}><span class="small muted">% · 可用输入预算</span></div><p><span data-context-prepare-note>对应整个窗口的 ${percentText(prepare)}%（基准）。</span>提前准备摘要，对话继续进行；运行时可能根据增长速度和压缩耗时提前。</p></div>
  <div class="context-boundary"><label for="context-replace"><span class="context-dot reserved"></span>替换上下文</label><div class="actions"><input id="context-replace" data-context-threshold="replace" class="number-field" type="number" step="any" value="${percentText(replace)}"><span class="small muted">%</span></div><p>输入用量超过此位置时切换压缩结果；尚未就绪则等待。<span data-context-reserve-note>对应预留 ${percentText(100-replace)}%。</span></p></div>
  </div><p id="context-boundary-error" class="error-inline" role="alert"></p>
- <p class="hint">两个位置都按整个模型窗口显示。点击比例条标记或直接修改下方数值。</p>`;
+ <p class="hint">拖动标记调整时机，也可在下方精确输入。准备水位按可用输入预算计算；比例条与替换位置按整个窗口显示。</p>`;
 }
 renderers.context = () => head('上下文管理','让长对话保持连续，提前压缩，在需要时替换。')+
  section('压缩与替换',row('后台压缩准备',toggle('后台准备'),'开启后，提前准备摘要，减少切换时的等待。')+
@@ -648,6 +649,7 @@ function renderNav(){
  }).join('') || '<p class="hint" style="padding:12px">没有匹配项。可以搜索用途、参数名或页面名称。</p>';
 }
 function render(keepScroll=false){
+ if(contextDrag)finishContextDrag(false);
  const y=$('#scroll').scrollTop, p=pages[state.page];
  const focus=document.activeElement?.getAttribute('data-key');
  $('#page').className='page '+(['appearance','chat','models','agents','projects','skills','mcp','guide','editor','terminal','notifications'].includes(state.page)?'wide':'');
@@ -728,26 +730,89 @@ function previewStyle(){
  const preview=$('#live-preview');
  if(preview){preview.querySelector('.mini-chat').style.fontSize=(Number(val('界面字号',14))-1)+'px';const padding=val('内容留白','标准');preview.querySelector('.mini-chat').style.padding=padding==='紧凑'?'16px':padding==='舒展'?'27px':'22px 20px';preview.querySelector('.preview-window').style.borderRadius=val('圆角',8)+'px';}
 }
-function updateContextScale(){
+function updateContextScale(keepInput=null){
  const scale=$('#context-scale');if(!scale)return;
- const {replace,prepare}=contextBoundaries();
+ const {replace,prepare,waterline}=contextBoundaries();
  scale.style.setProperty('--prepare',prepare+'%');scale.style.setProperty('--replace',replace+'%');
- $('[data-context-label=prepare]').textContent='压缩 · '+percentText(prepare)+'%';
+ $('[data-context-label=prepare]').textContent='准备基准 · '+percentText(prepare)+'%';
  $('[data-context-label=replace]').textContent='替换 · '+percentText(replace)+'%';
  $('[data-context-reserve]').textContent=percentText(100-replace)+'%';
  $('[data-context-reserve-note]').textContent='对应预留 '+percentText(100-replace)+'%。';
- $('[data-context-waterline]').textContent=percentText(Number(val('压缩准备水位',0.75))*100)+'%';
- $('#context-prepare').value=percentText(prepare);$('#context-replace').value=percentText(replace);
+ $('[data-context-prepare-note]').textContent='对应整个窗口的 '+percentText(prepare)+'%（基准）。';
+ $('[data-context-waterline]').textContent=percentText(waterline*100)+'%';
+ if(keepInput!==$('#context-prepare'))$('#context-prepare').value=Number((waterline*100).toPrecision(12));
+ if(keepInput!==$('#context-replace'))$('#context-replace').value=Number(replace.toPrecision(12));
+ for(const kind of ['prepare','replace']){
+  const marker=$('[data-context-drag='+kind+']'),isPrepare=kind==='prepare';
+  marker.setAttribute('aria-valuenow',String(isPrepare?waterline*100:replace));
+  const description=isPrepare?'准备水位 '+percentText(waterline*100)+'%，对应全窗口 '+percentText(prepare)+'%':'全窗口 '+percentText(replace)+'%，预留 '+percentText(100-replace)+'%';
+  marker.setAttribute('aria-valuetext',description);marker.title=description;
+ }
 }
 function changeContextBoundary(input){
- const v=Number(input.value),{replace}=contextBoundaries(),prepare=input.dataset.contextThreshold==='prepare';
- const valid=input.value.trim()!==''&&Number.isFinite(v)&&v>0&&(prepare?v<replace:v<=100);
- const error=valid?'':prepare?'开始后台压缩的位置需大于 0%，并早于替换位置。':'替换位置需大于 0%，且不超过模型窗口的 100%。';
+ const v=Number(input.value),prepare=input.dataset.contextThreshold==='prepare';
+ const valid=input.value.trim()!==''&&Number.isFinite(v)&&v>0&&(prepare?v<100:v<=100);
+ const error=valid?'':prepare?'准备水位需大于 0%、小于可用输入预算的 100%。':'替换位置需大于 0%，且不超过模型窗口的 100%。';
  input.setCustomValidity(error);$('#context-boundary-error').textContent=error;
  if(!valid)return;
- if(prepare)mark('压缩准备水位',v/replace);else mark('上下文预留',100-v);
+ if(prepare)mark('压缩准备水位',v/100);else mark('上下文预留',100-v);
+ updateContextScale(input);
+}
+// Pointer movement only previews. Releasing commits one value; cancellation restores it.
+function clearContextBoundaryError(){
+ $('#context-boundary-error').textContent='';
+ $('#context-prepare').setCustomValidity('');$('#context-replace').setCustomValidity('');
+}
+function finishContextDrag(commit){
+ const drag=contextDrag;if(!drag)return;
+ const preview=state.contextPreview;contextDrag=null;delete state.contextPreview;
+ if(drag.marker.hasPointerCapture(drag.pointerId))drag.marker.releasePointerCapture(drag.pointerId);
+ drag.marker.classList.remove('dragging');$('#context-scale')?.classList.remove('is-dragging');
+ if(commit&&preview&&owner()===drag.ownerKey){
+  if(drag.kind==='prepare'&&preview.waterline!==drag.start.waterline)mark('压缩准备水位',preview.waterline);
+  if(drag.kind==='replace'&&preview.replace!==drag.start.replace)mark('上下文预留',100-preview.replace);
+ }
  updateContextScale();
 }
+document.addEventListener('pointerdown',event=>{
+ const marker=event.target.closest('[data-context-drag]');
+ if(!marker||marker.disabled||event.button!==0||!event.isPrimary||contextDrag)return;
+ const rect=marker.closest('.context-track').getBoundingClientRect();if(!rect.width)return;
+ event.preventDefault();marker.focus({preventScroll:true});clearContextBoundaryError();
+ contextDrag={marker,kind:marker.dataset.contextDrag,pointerId:event.pointerId,startX:event.clientX,width:rect.width,start:contextBoundaries(),ownerKey:owner()};
+ marker.setPointerCapture(event.pointerId);marker.classList.add('dragging');$('#context-scale').classList.add('is-dragging');
+});
+document.addEventListener('pointermove',event=>{
+ const drag=contextDrag;if(!drag||event.pointerId!==drag.pointerId)return;
+ const delta=(event.clientX-drag.startX)/drag.width*100;
+ if(delta===0&&!state.contextPreview)return;
+ // 0.1 percentage point is a drag step, not a limit on precise numeric input.
+ const snap=value=>Math.round(value*10)/10;
+ if(drag.kind==='prepare'){
+  const percent=Math.max(0.1,Math.min(99.9,snap((drag.start.prepare+delta)/drag.start.replace*100)));
+  state.contextPreview={replace:drag.start.replace,waterline:percent/100};
+ }else{
+  state.contextPreview={replace:Math.max(0.1,Math.min(100,snap(drag.start.replace+delta))),waterline:drag.start.waterline};
+ }
+ updateContextScale();
+});
+document.addEventListener('pointerup',event=>{if(contextDrag?.pointerId===event.pointerId)finishContextDrag(true);});
+document.addEventListener('pointercancel',event=>{if(contextDrag?.pointerId===event.pointerId)finishContextDrag(false);});
+document.addEventListener('lostpointercapture',event=>{if(contextDrag?.pointerId===event.pointerId)finishContextDrag(false);});
+window.addEventListener('blur',()=>finishContextDrag(false));
+document.addEventListener('keydown',event=>{
+ if(contextDrag&&event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();finishContextDrag(false);return;}
+ const marker=event.target.closest('[data-context-drag]');
+ if(!marker||marker.disabled||contextDrag)return;
+ const direction={ArrowRight:1,ArrowUp:1,ArrowLeft:-1,ArrowDown:-1}[event.key];
+ if(!direction)return;
+ event.preventDefault();event.stopImmediatePropagation();clearContextBoundaryError();
+ const {waterline,replace}=contextBoundaries(),prepare=marker.dataset.contextDrag==='prepare';
+ const step=event.shiftKey?0.1:1;
+ const value=Number(((prepare?waterline*100:replace)+direction*step).toFixed(6));
+ if(value<=0||(prepare?value>=100:value>100))return;
+ mark(prepare?'压缩准备水位':'上下文预留',prepare?value/100:100-value);updateContextScale();
+});
 function updateSpecificPreviews(){
  const set=(key,text)=>{const n=$('[data-model-preview="'+key+'"]');if(n)n.textContent=text;};
  if(state.page==='models'&&state.detail==='model'){
@@ -903,7 +968,6 @@ function handle(action){
  if(actions[action])return actions[action]();
  const [kind,...tail]=action.split(':'), value=tail.join(':');
  if(kind==='goto')return go(value);
- if(kind==='context-edit'){const input=$('#context-'+value);input?.focus();input?.select();return;}
  if(kind==='speech-download')return toast('下载流程示意：正式界面在当前模型卡片显示进度、取消和失败重试。');
  if(kind==='permission-edit')return permissionEditor(Number(value));
  if(['permission-up','permission-down','permission-delete'].includes(kind)){
