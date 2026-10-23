@@ -34,4 +34,4 @@
 
 ## 正在评审的设计
 
-- [聊天与设置的整体体验](design/chat-settings-experience.md)：阅读层级、任务状态、布局与动态、设置结构和保存语义。设计提案，尚未全部实施。
+- [聊天与设置的整体体验](design/chat-settings-experience.md)、[独立 HTML 设计稿](design/chat-settings-preview.html)：基于现有界面、实际工具字段与三种聊天模式的设计提案，尚未实施。

@@ -1,0 +1,1044 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Varin · 聊天与设置设计稿</title>
+<!-- Standalone design study. Icons and Agent artwork are exported from Varin's
+     icon/sprite.ts and ui/agent-avatar-art.ts. See repository THIRD_PARTY_NOTICES.
+     Synthetic fixture data only. No network, model, filesystem or Host actions. -->
+<style>
+:root{color-scheme:dark;--bg:#151515;--sidebar:#101010;--card:#222;--input:#1c1c1c;--hover:#2b2b2b;--fg:#e7e7e7;--muted:#a4a4a4;--line:#303030;--weak:#232323;--green:#9bbd84;--orange:#dbb06a;--red:#e79b88;--blue:#9cb9d0;--success-bg:#202a1f;--warning-bg:#2b261f;--error-bg:#302120;--button:#e7e7e7;--button-fg:#171717;--shadow:0 4px 18px #0003;--muted-foreground:var(--muted);--foreground:var(--fg);--border:var(--line);--ring:var(--blue);--muted: #272727}
+[data-theme=light]{color-scheme:light;--bg:#fcfcfc;--sidebar:#f3f3f3;--card:#fff;--input:#f5f5f5;--hover:#eaeaea;--fg:#242424;--muted:#696969;--line:#dcdcdc;--weak:#ededed;--green:#4f7240;--orange:#886323;--red:#ae4439;--blue:#4b7191;--success-bg:#eef4ea;--warning-bg:#f7f0e2;--error-bg:#f9ece9;--button:#292929;--button-fg:#fafafa;--shadow:0 4px 18px #0000000b}
+*{box-sizing:border-box}body{margin:0;background:var(--sidebar);color:var(--fg);font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif}button,input,select,textarea{font:inherit;color:inherit}button{cursor:pointer;border:0;background:none;text-align:left}button:disabled{opacity:.45;cursor:default}input,textarea,select{background:var(--input);border:1px solid var(--line);border-radius:6px;padding:7px 10px;min-width:0}input[type=checkbox],input[type=radio]{accent-color:var(--fg)}input[type=range]{padding:0}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--blue);outline-offset:3px}a{color:inherit}p,h1,h2,h3,h4{margin:0}h1,h2,h3,h4,strong{font-weight:600}svg{width:16px;height:16px;flex-shrink:0;vertical-align:middle;fill:currentColor}[hidden]{display:none!important}.muted{color:var(--muted)}.small{font-size:12px}.mono,code,pre{font-family:Consolas,"Cascadia Code",monospace}.good{color:var(--green)}.warning{color:var(--orange)}.error{color:var(--red)}.spacer{flex:1}.wrap{overflow-wrap:anywhere}.icon-btn{width:30px;height:30px;display:inline-grid;place-items:center;border-radius:6px;color:var(--muted);flex-shrink:0}.icon-btn:hover,.text-btn:hover{background:var(--hover);color:var(--fg)}.text-btn{padding:4px 7px;border-radius:5px;font-size:12px;display:inline-flex;align-items:center;gap:5px;color:var(--muted)}.button{padding:6px 13px;border:1px solid var(--line);border-radius:7px;background:var(--card);font-size:12px;display:inline-flex;align-items:center;justify-content:center;gap:7px}.button:hover{background:var(--hover)}.button.primary{background:var(--button);color:var(--button-fg);border-color:transparent}.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.key{font-size:11px;border:1px solid var(--line);border-radius:4px;padding:0 5px;color:var(--muted)}
+.review-head{max-width:1760px;margin:auto;padding:16px 22px 10px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}.review-head h1{font-size:16px;letter-spacing:.2px}.review-head .version{font-size:12px;color:var(--muted);font-weight:400;margin-left:9px}.review-tabs{display:flex;gap:4px}.review-tabs button{padding:6px 12px;color:var(--muted);border-radius:6px;font-size:12px}.review-tabs button[aria-selected=true]{color:var(--fg);background:var(--hover)}.review-tools{display:flex;gap:6px;align-items:center;margin-left:auto}.control-bar{max-width:1760px;margin:auto;padding:0 22px 13px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.modes{display:flex;gap:2px;background:var(--input);padding:3px;border:1px solid var(--line);border-radius:8px}.modes button{font-size:12px;padding:6px 12px;border-radius:5px;color:var(--muted)}.modes button[aria-pressed=true]{background:var(--hover);color:var(--fg);box-shadow:0 1px 3px #0002}.control-bar select{max-width:270px;font-size:12px;padding:7px 28px 7px 10px}.playback{display:flex;gap:7px;align-items:center;margin-left:auto}.playback input{width:110px;accent-color:var(--muted)}.frame-counter{min-width:50px;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}.review-note{max-width:1760px;margin:0 auto;padding:8px 23px 13px;display:flex;gap:16px;justify-content:space-between;flex-wrap:wrap;color:var(--muted);font-size:12px}.review-note span{min-width:0}
+.app{margin:0 20px;height:calc(100dvh - 155px);min-height:620px;max-height:1080px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;max-width:1720px;position:relative}.app-wrap{max-width:1760px;margin:auto}.titlebar{height:42px;flex-shrink:0;display:flex;align-items:center;gap:6px;padding:0 10px;border-bottom:1px solid var(--weak);font-size:12px}.titlebar .workspace-switch{display:flex;gap:6px;align-items:center;padding:5px 8px;color:var(--muted)}.titlebar-title{margin-left:12px;min-width:0;flex:1;line-height:1.25}.titlebar-title span{display:block;font-size:11px;color:var(--muted);margin-top:3px}.top-host{display:flex;align-items:center;gap:6px;padding:0 9px}.top-context{display:flex;align-items:center;gap:5px;margin-right:8px;color:var(--muted)}.ring{width:14px;height:14px;border-radius:50%;border:2px solid var(--line);border-top-color:var(--green)}.app-body{display:flex;flex:1;min-height:0;position:relative}.project-sidebar{width:208px;flex-shrink:0;border-right:1px solid var(--line);background:var(--sidebar);display:flex;flex-direction:column;padding:15px 11px;gap:13px}.project-sidebar.closed{display:none}.side-action{display:flex;align-items:center;gap:9px;color:var(--muted);padding:7px 8px;border-radius:6px;font-size:13px;width:100%}.side-action:hover{background:var(--hover)}.project-label{font-size:11px;color:var(--muted);padding:8px}.tree-head{display:flex;align-items:center;gap:6px;font-size:12px;padding:6px 4px}.session-row{display:flex;align-items:center;gap:8px;padding:9px 8px;margin:2px 0 2px 13px;font-size:12px;border-radius:6px;min-width:0}.session-row.active{background:var(--hover)}.session-row>span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.agent-avatar{height:24px;width:24px;display:inline-block;flex-shrink:0}.agent-avatar svg{height:100%;width:100%}.sidebar-foot{margin-top:auto;display:flex;gap:5px;padding-top:12px}.work-area{min-width:0;min-height:0;flex:1;container:conversation / inline-size;display:flex;flex-direction:column;position:relative}.conversation-layout{flex:1;display:flex;min-width:0;min-height:0;position:relative}.chat-area{flex:1;min-width:0;min-height:0;display:grid;grid-template-rows:minmax(0,1fr) auto}.thread-scroll{overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;scrollbar-width:thin;min-height:0;scroll-behavior:smooth;overscroll-behavior:contain}.transcript{max-width:850px;margin:auto;padding:34px 35px 28px;min-width:0}.resource-rail{width:39px;flex-shrink:0;display:flex;align-items:center;flex-direction:column;gap:8px;padding-top:10px;border-left:1px solid var(--weak)}.resource-rail .icon-btn{width:31px;height:30px}.user-message{margin-left:auto;max-width:91%;background:var(--card);border-radius:11px;padding:12px 16px;font-size:14px;line-height:1.7;overflow-wrap:anywhere}.user-actions{display:flex;gap:4px;justify-content:flex-end;margin:6px 0 20px}.user-actions .icon-btn{width:24px;height:23px}.assistant-text{font-size:15px;line-height:1.85;white-space:pre-wrap;overflow-wrap:anywhere;margin:20px 0 12px}.assistant-text.final{margin-top:24px}.turn-divider{margin:29px 0;border:0;border-top:1px solid var(--line)}.empty-chat{height:100%;display:flex;flex-direction:column;justify-content:center;align-items:center;min-height:300px;gap:12px}.empty-chat h2{font-weight:400;font-size:26px;letter-spacing:-.5px}.empty-chat p{font-size:13px;color:var(--muted)}.starter-list{display:flex;flex-direction:column;gap:2px;margin-top:15px}.starter-list button{font-size:13px;color:var(--muted);padding:8px 15px;border-radius:6px}.starter-list button:hover{background:var(--hover)}
+.process{margin:4px 0 16px}.disclosure-head{width:100%;display:flex;align-items:center;gap:7px;color:var(--muted);padding:7px 2px;font-size:12px;min-width:0;line-height:1.6}.disclosure-head:hover{color:var(--fg)}.disclosure-head .label{flex:1;min-width:0;overflow-wrap:anywhere;text-align:left}.disclosure-head .chevron{transition:transform 200ms;flex-shrink:0}.disclosure-head[aria-expanded=true] .chevron{transform:rotate(90deg)}.running-dot{width:6px;height:6px;border-radius:50%;background:var(--fg);flex-shrink:0}.fold{display:grid;grid-template-rows:0fr;visibility:hidden;transition:grid-template-rows 230ms ease,visibility 230ms}.fold.open{grid-template-rows:1fr;visibility:visible}.fold-clip{min-height:0;overflow:hidden}.process-body{border-left:1px solid var(--line);margin:5px 0 3px 7px;padding:2px 0 3px 14px}.activity-note{font-size:13px;line-height:1.75;white-space:pre-wrap;margin:12px 0;color:var(--fg)}.tool{margin:3px 0;min-width:0}.tool-head{display:flex;width:100%;align-items:center;gap:8px;padding:9px 2px;min-width:0;font-size:12px;color:var(--muted);border-radius:6px}.tool-head:hover{background:var(--hover)}.tool-title{min-width:0;flex:1;display:flex;align-items:baseline;gap:7px;overflow:hidden}.tool-label{flex-shrink:0;color:var(--fg)}.tool-subject{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}.tool-receipt{flex-shrink:0;font-size:11px;white-space:nowrap}.tool-status{display:inline-flex;align-items:center;gap:4px;font-size:11px;flex-shrink:0}.tool-head[aria-expanded=true]>.chevron{transform:rotate(90deg)}.tool-head>.chevron{width:13px;transition:transform 210ms}.tool-body{padding:5px 4px 10px 23px;min-width:0}.tool-body .plain-output{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.65;max-height:320px;overflow:auto;margin:8px 0}.tool-raw{margin:9px 0}.tool-raw summary{font-size:11px;color:var(--muted);cursor:pointer}.tool-raw pre{font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:250px;overflow:auto;background:var(--input);padding:10px;border-radius:6px}.read-code{margin:6px 0;border-left:1px solid var(--line);padding-left:11px;max-height:300px;overflow:auto;scrollbar-width:thin}.read-code code{display:block;font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.line-number{display:inline-block;min-width:28px;color:var(--muted);user-select:none;font-variant-numeric:tabular-nums}.match{padding:9px 0;border-bottom:1px solid var(--weak);font-size:12px;min-width:0}.match .match-path{display:block;overflow-wrap:anywhere;color:var(--fg);margin-bottom:4px}.match code{white-space:pre-wrap;overflow-wrap:anywhere;color:var(--muted)}.scope-caption{display:flex;gap:8px;align-items:center;font-size:11px;color:var(--muted);margin:4px 0 9px;flex-wrap:wrap}.console{background:var(--sidebar);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:7px 0}.console-command{padding:9px 12px;font:12px/1.7 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border-bottom:1px solid var(--line)}.console-output{font:12px/1.8 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;margin:0;padding:10px 12px;scrollbar-width:thin}.console-foot{padding:7px 12px;border-top:1px solid var(--weak);display:flex;gap:12px;font-size:11px;color:var(--muted)}.diff{border:1px solid var(--line);border-radius:9px;overflow:hidden;margin:8px 0 15px}.diff-head{padding:9px 11px;display:flex;align-items:center;gap:8px;font-size:12px;background:var(--input)}.diff-head button{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:0}.diff-body{max-height:310px;overflow-y:auto;overflow-x:hidden;font:12px/1.75 Consolas,monospace;scrollbar-width:thin}.diff-line{display:flex;gap:8px;padding:1px 10px;min-width:0}.diff-line>span:last-child{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;flex:1}.diff-line.added{background:var(--success-bg)}.diff-line.removed{background:var(--error-bg)}.diff-prefix{width:10px;flex-shrink:0;color:var(--green)}.diff-foot{font-size:11px;padding:8px 11px;display:flex;gap:12px;color:var(--muted);border-top:1px solid var(--weak)}.source-mark{display:none;color:var(--blue);padding:0 4px;font-size:11px;border:1px solid var(--line);border-radius:4px;flex-shrink:0}.show-sources .source-mark{display:inline-flex}.delegation{margin:13px 0}.delegation .tool-head{gap:9px}.delegation .agent-name{font-size:13px;color:var(--fg);flex-shrink:0}.delegation .task-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}.delegation .tool-body{padding-left:34px}.task-detail{font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.75}.file-output{display:flex;gap:9px;align-items:center;border-bottom:1px solid var(--line);padding:10px 2px;font-size:12px;width:100%}.file-output>span:first-of-type{flex:1;min-width:0;overflow-wrap:anywhere}.call-failure{padding:7px 0;color:var(--red);font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}.request-block{padding:16px 0;border-top:1px solid var(--line);margin:16px 0 10px}.request-block h3{font-size:14px;margin-bottom:10px}.request-block p{font-size:13px;line-height:1.7}.question-options{display:grid;grid-template-columns:1fr;gap:8px;margin:12px 0}.question-option{display:flex;gap:10px;align-items:flex-start;border:1px solid var(--line);border-radius:8px;padding:10px 12px;font-size:13px;line-height:1.7}.question-option:has(input:checked){background:var(--hover);border-color:var(--muted)}.question-option input{margin-top:5px;flex-shrink:0}.question-option span{min-width:0;overflow-wrap:anywhere}.question-free{width:100%;min-height:74px;resize:vertical;margin:4px 0 11px}.inline-state{margin:13px 0;padding:9px 0;font-size:12px;display:flex;gap:8px;align-items:flex-start}.inline-state>div{flex:1;min-width:0}.inline-state p{white-space:pre-wrap;overflow-wrap:anywhere}.inline-state.error-state{border-left:2px solid var(--red);padding-left:12px}.inline-state.wait-state{border-left:2px solid var(--orange);padding-left:12px}.run-footer{margin-top:23px;display:flex;align-items:center;gap:10px;color:var(--muted);font-size:11px}.usage-line{display:flex;gap:12px;flex-wrap:wrap;padding:10px 0;font-size:12px;color:var(--muted)}
+.composer-area{padding:7px 22px 17px;position:relative}.composer{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:10px 12px;box-shadow:0 2px 10px #0002;max-width:850px;margin:auto}.composer textarea{background:none;border:none;width:100%;min-height:36px;max-height:180px;resize:vertical;padding:0 2px;font-size:14px;line-height:1.65}.composer textarea::placeholder{color:var(--muted)}.composer-bottom{display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;margin-top:9px}.composer-bottom .icon-btn{width:27px;height:27px}.composer-select{padding:3px 5px;display:flex;gap:5px;align-items:center;font-size:12px;color:var(--muted)}.composer-model{margin-left:auto;color:var(--fg)}.composer-model svg{width:15px}.composer .submit{border-radius:7px;background:var(--hover);display:grid;place-items:center;width:28px;height:28px}.queue{font-size:12px;color:var(--muted);max-width:850px;margin:0 auto 7px;display:flex;gap:8px;align-items:center}.new-content{position:absolute;bottom:100%;left:50%;transform:translateX(-50%);padding:6px 12px;font-size:12px;border:1px solid var(--line);border-radius:20px;background:var(--card);box-shadow:var(--shadow);white-space:nowrap}.composer-feedback{font-size:11px;color:var(--muted);max-width:850px;margin:5px auto 0}
+.overview-slot{width:calc(var(--overview-width,280px) + 16px);flex-shrink:0;padding:12px 12px 12px 4px;min-height:0;max-width:calc(100% - 320px);position:relative}.overview-slot[data-view=compact]{width:256px}.overview-slot[data-view=closed]{width:0;max-width:none;padding:0}.overview-card{max-height:100%;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);min-width:0;position:relative}.overview-head{display:flex;align-items:center;gap:1px;padding:5px 9px 5px 12px;min-height:44px;flex-shrink:0;font-size:13px}.overview-head>span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-content{padding:2px 12px 14px;overflow:auto;scrollbar-width:thin;min-width:0;overflow-wrap:anywhere}.overview-status{margin:2px 0 22px;font-size:13px}.overview-status .status-title{display:flex;gap:8px;align-items:center;font-weight:500}.status-dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex-shrink:0}.overview-status p{font-size:12px;color:var(--muted);margin:7px 0 0 14px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.overview-section{margin-top:23px;min-width:0}.overview-label{display:flex;gap:8px;align-items:center;font-size:13px;margin-bottom:8px}.overview-label>span:first-child{flex:1}.overview-label .count{font-size:11px;color:var(--muted)}.plan-summary{width:100%;padding:0;display:grid;gap:8px}.plan-step{display:flex;gap:8px;align-items:flex-start;font-size:12px}.plan-step svg{width:13px;height:13px;margin-top:4px}.plan-step>span{flex:1;min-width:0;text-align:left;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.overview-action{display:flex;align-items:center;gap:8px;width:100%;padding:7px 3px;border-radius:5px;font-size:12px;min-width:0}.overview-action:hover{background:var(--hover)}.overview-action>span{min-width:0;flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-child{display:flex;gap:9px;padding:8px 2px;align-items:flex-start;width:100%;font-size:12px}.overview-child>div{flex:1;min-width:0}.overview-child strong{font-weight:500;display:block}.overview-child small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted);margin-top:3px}.overview-child .child-state{font-size:11px;white-space:nowrap}.overview-footer{display:flex;gap:11px;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:24px;padding-top:13px;font-size:11px;color:var(--muted)}.overview-footer button{font-size:11px;padding:0;display:flex;align-items:center;gap:4px}.overview-footer svg{width:13px}.overview-resizer{position:absolute;top:12px;bottom:12px;left:-4px;width:7px;border-radius:4px;cursor:col-resize;touch-action:none}.overview-resizer:hover{background:#9993}.overview-launcher{position:absolute;right:9px;top:8px;z-index:2;display:flex;background:var(--bg);border-radius:7px}.overview-peek-footer{padding:8px 12px;border-top:1px solid var(--line);font-size:12px}.overview-peek-footer button{display:flex;align-items:center;width:100%;padding:0}.plan-reader{font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;padding-top:7px}.plan-editor{display:block;min-height:300px;field-sizing:content;max-width:100%;width:100%;resize:vertical;font-size:13px;line-height:1.8;overflow-wrap:anywhere;white-space:pre-wrap}.plan-toolbar{display:flex;gap:7px;position:sticky;top:0;background:var(--card);padding-bottom:10px;z-index:1}
+.settings-overlay{position:absolute;inset:12px 18px;z-index:10;border:1px solid var(--line);border-radius:12px;background:var(--bg);box-shadow:0 18px 80px #0007;display:flex;overflow:hidden}.settings-nav{width:220px;background:var(--sidebar);border-right:1px solid var(--line);padding:18px 12px 12px;flex-shrink:0;display:flex;flex-direction:column;min-height:0}.settings-search{width:100%;padding:7px 9px;font-size:13px;margin-bottom:18px}.settings-nav-scroll{overflow:auto;min-height:0;scrollbar-width:thin}.settings-group{margin:13px 0 19px}.settings-group-label{font-size:11px;color:var(--muted);margin:0 9px 6px;font-weight:600}.settings-link{display:flex;align-items:center;gap:9px;width:100%;padding:8px 10px;border-radius:7px;font-size:12px;color:var(--fg)}.settings-link:hover{background:var(--hover)}.settings-link.selected{background:var(--card)}.settings-link.unrepresented{color:var(--muted)}.settings-main{min-width:0;flex:1;display:flex;flex-direction:column;position:relative}.settings-close{position:absolute;right:12px;top:10px;z-index:2}.settings-scroll{overflow:auto;min-height:0;flex:1;scrollbar-width:thin}.settings-page{max-width:940px;padding:35px 55px 40px;margin:auto}.settings-page h2{font-size:22px;letter-spacing:-.4px}.settings-subtitle{font-size:13px;color:var(--muted);margin-top:5px}.scope{font-size:12px;color:var(--muted);margin:25px 0 12px;display:flex;gap:10px;flex-wrap:wrap}.settings-section{border-top:1px solid var(--line);padding:23px 0}.settings-section:first-of-type{border-top:0}.settings-section h3{font-size:14px;margin-bottom:12px}.setting-row{display:flex;gap:24px;align-items:center;min-height:49px;padding:9px 0}.setting-row>.setting-label{min-width:0;flex:1;font-size:13px}.setting-label p{font-size:12px;color:var(--muted);line-height:1.6;margin-top:4px;max-width:430px}.setting-row select,.setting-row input[type=text],.setting-row input[type=number]{width:220px;max-width:50%;font-size:13px}.switch{appearance:none;width:32px;height:19px;border-radius:20px;border:0;position:relative;background:var(--hover);padding:0;flex-shrink:0;cursor:pointer;margin:0}.switch::after{content:"";position:absolute;width:13px;height:13px;top:3px;left:3px;border-radius:50%;background:var(--muted);transition:transform 170ms ease}.switch:checked{background:var(--button)}.switch:checked::after{background:var(--button-fg);transform:translateX(13px)}.dependent{margin:6px 0 13px 0;padding:8px 0 2px 17px;border-left:1px solid var(--line)}.stacked{display:flex;flex-direction:column;gap:7px;font-size:12px;margin:12px 0}.stacked input,.stacked select{max-width:400px;width:100%;font-size:13px}.setting-hint{font-size:12px;color:var(--muted);line-height:1.65;margin:7px 0}.settings-section details{font-size:12px;margin:12px 0;color:var(--muted)}.settings-section summary{cursor:pointer;padding:4px 0}.settings-footer{padding:10px 25px;border-top:1px solid var(--line);font-size:12px;color:var(--muted);display:flex;gap:10px;align-items:center;min-height:47px}.settings-footer .spacer{flex:1}.mode-cards{display:flex;gap:4px;flex-wrap:wrap}.mode-cards button{border-radius:6px;padding:6px 10px;font-size:12px;background:var(--input);color:var(--muted)}.mode-cards button[aria-pressed=true]{background:var(--hover);color:var(--fg);box-shadow:inset 0 0 0 1px var(--line)}.model-list-row{padding:14px 0;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;font-size:13px}.model-list-row>div{flex:1}.model-list-row small{display:block;color:var(--muted);font-size:12px;margin-top:3px}.field-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.retry-rule{display:grid;grid-template-columns:110px 110px minmax(0,1fr) 80px 28px;gap:7px;padding:10px 0;border-bottom:1px solid var(--line);align-items:center}.retry-rule input,.retry-rule select{width:100%;font-size:12px}.storage-total{font-size:30px;line-height:1.3;font-weight:500;letter-spacing:-.5px;margin:8px 0}.storage-table{width:100%;border-collapse:collapse;font-size:13px}.storage-table td{padding:11px 0;border-bottom:1px solid var(--weak)}.storage-table td:last-child{text-align:right;font-variant-numeric:tabular-nums}.storage-table td:first-child{color:var(--muted)}.search-result{padding:11px 0;border-bottom:1px solid var(--line);width:100%;display:flex;gap:10px;font-size:13px}.search-result>span{flex:1;text-align:left}.capability-status{display:flex;gap:6px;align-items:center;font-size:12px;margin:8px 0}.embedded-preview{border:1px solid var(--line);border-radius:9px;padding:18px;margin:16px 0;background:var(--input)}.embedded-preview .assistant-text{font-size:13px}.settings-alert{border-left:2px solid var(--orange);padding:8px 12px;font-size:12px;margin:12px 0;line-height:1.7}
+.evidence-page{display:none;max-width:1400px;margin:0 auto;padding:25px 25px 60px}.evidence-page h2{font-size:24px;font-weight:500;margin:10px 0 14px}.evidence-page p{font-size:14px;color:var(--muted);max-width:900px;margin:10px 0 20px}.evidence-table{width:100%;border-collapse:collapse;font-size:13px;margin:20px 0 35px}.evidence-table th,.evidence-table td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);vertical-align:top;overflow-wrap:anywhere}.evidence-table th{color:var(--muted);font-weight:400;font-size:12px}.evidence-table code{font-size:12px}.matrix td button{font-size:12px;padding:5px 8px;background:var(--input);border-radius:5px;margin:2px}.inspector{display:none;position:absolute;inset:0 0 0 auto;z-index:30;width:min(490px,100%);background:var(--card);border-left:1px solid var(--line);box-shadow:-15px 0 60px #0003;flex-direction:column}.inspector.open{display:flex}.inspector-head{display:flex;gap:12px;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line);font-size:13px}.inspector-head>span{flex:1}.inspector-body{padding:18px;overflow:auto;scrollbar-width:thin}.inspector-body pre{font:12px/1.75 Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0}.inspector-body p{font-size:12px;color:var(--muted);margin-bottom:16px}.inspector-body dt{font-size:12px;color:var(--muted);margin-top:15px}.inspector-body dd{font:12px/1.7 Consolas,monospace;margin:6px 0;overflow-wrap:anywhere}.menu-pop{position:absolute;z-index:15;right:46px;top:12px;padding:6px;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);min-width:180px}.menu-pop button{display:block;font-size:12px;padding:7px 9px;width:100%;border-radius:5px}.menu-pop button:hover{background:var(--hover)}
+@keyframes current-arrive{from{opacity:.2;transform:translateY(3px)}to{opacity:1;transform:none}}.arriving{animation:current-arrive 180ms ease-out}.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}.stream-caret::after{content:"";display:inline-block;width:2px;height:1em;vertical-align:-.1em;background:var(--muted);margin-left:3px}.thinking-heading{font-size:12px}.thinking-body{font-size:13px;line-height:1.85;white-space:pre-wrap}.thinking-window{background:none}.thinking-scroll{max-height:min(34rem,max(20rem,52dvh))}
+.thinking-block {
+  --thinking-ease: cubic-bezier(.4, 0, .2, 1);
+  min-width: 0;
+  margin-block: .25rem;
+  color: var(--muted-foreground);
+}
+
+.thinking-heading {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  width: 100%;
+  min-width: 0;
+  padding: .375rem .5rem .375rem 0;
+  border-radius: .5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms ease;
+}
+.thinking-heading:hover:not(:disabled) { background: color-mix(in oklab, var(--muted) 25%, transparent); }
+.thinking-heading:focus-visible, .thinking-scroll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.thinking-heading:disabled { cursor: default; }
+.thinking-label { flex-shrink: 0; font-weight: 500; color: color-mix(in oklab, var(--foreground) 80%, transparent); }
+.thinking-chevron { transition: transform 300ms var(--thinking-ease); }
+.thinking-block[data-open="true"] .thinking-chevron { transform: rotate(90deg); }
+
+.thinking-preview {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  height: 1.75em;
+  line-height: 1.75;
+  overflow: hidden;
+  overflow-anchor: none;
+  pointer-events: none;
+  opacity: .75;
+  mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
+  transition: opacity 200ms ease;
+}
+.thinking-preview-text { display: block; overflow-wrap: anywhere; }
+.thinking-block[data-open="true"] .thinking-preview { opacity: 0; }
+
+/* Keep the body mounted during collapse; native details hides it before a closing animation. */
+.thinking-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 320ms var(--thinking-ease), opacity 220ms ease;
+}
+.thinking-block[data-open="true"] .thinking-panel { grid-template-rows: 1fr; opacity: 1; }
+.thinking-panel-clip { min-height: 0; overflow: hidden; }
+.thinking-window {
+  position: relative;
+  margin: .125rem 0 .5rem .375rem;
+  border-left: 1px solid color-mix(in oklab, var(--border) 65%, transparent);
+}
+.thinking-scroll {
+  /* Roughly half a desktop viewport: enough space for sustained reading, with no text truncation. */
+  max-height: min(34rem, max(20rem, 52dvh));
+  overflow: auto;
+  overscroll-behavior: contain;
+  overflow-anchor: none;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--muted-foreground) 25%, transparent) transparent;
+  border-radius: .25rem;
+}
+.thinking-body { padding: .375rem .75rem .625rem .875rem; }
+.thinking-body .markdown-content { min-width: 0; overflow-wrap: anywhere; }
+.thinking-body .markdown-content > :first-child { margin-top: 0; }
+.thinking-body .markdown-content > :last-child { margin-bottom: 0; }
+.thinking-follow {
+  position: absolute;
+  bottom: .625rem;
+  right: 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: .375rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: .375rem .625rem;
+  color: var(--foreground);
+  background: var(--background);
+  box-shadow: 0 2px 8px #0002;
+  cursor: pointer;
+}
+.thinking-follow:hover { background: var(--muted); }
+@media (max-height: 600px) { .thinking-scroll { max-height: 64dvh; } }
+@media (prefers-reduced-motion: reduce) {
+  .thinking-panel, .thinking-chevron, .thinking-preview, .thinking-heading { transition: none; }
+}
+
+:root{--muted:#a4a4a4}[data-theme=light]{--muted:#696969}.tool-heading-shell{display:flex;align-items:center;min-width:0}.tool-heading-shell>.tool-head,.tool-heading-shell>.disclosure-head{flex:1;min-width:0}.setting-row input[type=number]{width:110px}.settings-section{max-width:760px}
+.question-popup{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:512px;z-index:20;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg);box-shadow:0 15px 70px #0006}.question-popup>header{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px}.question-popup>header>span{flex:1}.question-popup-body{max-height:50vh;overflow:auto;scrollbar-width:thin}.question-popup .request-block{margin:0;border:0;padding:0}.no-code-wrap .console-output,.no-code-wrap .read-code code{white-space:pre;overflow-x:auto}.no-code-wrap .diff-body{overflow-x:auto}.no-code-wrap .diff-line{min-width:max-content}.no-code-wrap .diff-line>span:last-child{white-space:pre}
+.chat-area.with-run-error{grid-template-rows:auto minmax(0,1fr) auto}.run-alert{padding:12px 26px 0;color:var(--red);font-size:13px;overflow-wrap:anywhere}.run-alert p+p{margin-top:3px}
+@container conversation (max-width:600px){.conversation-layout:has(.overview-slot:not([data-view=closed])){flex-direction:column}.overview-slot[data-view=full],.overview-slot[data-view=compact]{order:-1;width:100%;max-width:none;max-height:45%;padding:8px 12px;display:flex;flex-direction:column}.overview-card{width:100%}.overview-resizer{display:none}.overview-status{margin-bottom:10px}.overview-section{margin-top:15px}.transcript{padding:25px 22px}.composer-area{padding-inline:14px}.overview-content{max-height:100%}}
+@media(min-width:1760px){.app{margin-inline:auto}}@media(max-width:1100px){.project-sidebar{width:178px}.settings-page{padding:30px}.titlebar-title{max-width:220px}.top-context{display:none}.retry-rule{grid-template-columns:1fr 1fr}.retry-rule input{grid-column:1/-1}.retry-rule .icon-btn{grid-column:2;justify-self:end}.settings-nav{width:200px}.transcript{padding-inline:25px}}
+@media(max-width:800px){.review-head{padding:12px 12px 8px;gap:10px}.control-bar{padding:0 12px 10px;gap:8px}.playback{margin-left:0}.app{margin:0 8px;height:calc(100dvh - 205px)}.project-sidebar{display:none}.titlebar-title{display:none}.settings-overlay{inset:5px}.settings-nav{width:160px;padding:14px 8px}.settings-page{padding:25px 20px}.settings-link{padding:8px;font-size:12px}.setting-row{gap:12px}.review-note{padding:8px 12px}.top-host{margin-left:auto}}
+@media(max-width:520px){.review-head .version{display:none}.review-tools{gap:0}.review-tabs button{padding-inline:7px}.control-bar .modes{width:100%}.modes button{flex:1;padding:6px}.control-bar select{max-width:220px}.playback input{width:74px}.app{height:calc(100dvh - 220px);min-height:570px}.resource-rail{width:32px}.resource-rail .icon-btn{width:27px}.titlebar .workspace-switch:nth-of-type(2){display:none}.transcript{padding:23px 16px}.tool-title{display:block}.tool-label{display:inline;margin-right:6px}.tool-subject{display:inline;white-space:normal;overflow-wrap:anywhere}.tool-receipt{display:none}.user-message{max-width:100%}.composer-area{padding:6px 10px 12px}.composer-model{margin-left:0}.settings-overlay{flex-direction:column}.settings-nav{width:100%;border-right:0;border-bottom:1px solid var(--line);padding:10px 12px;max-height:130px}.settings-nav-scroll{display:flex;gap:6px}.settings-group{display:contents}.settings-group-label{display:none}.settings-link{white-space:nowrap;width:auto}.settings-link.unrepresented{display:none}.settings-search{margin-bottom:7px}.settings-page{padding:22px 18px}.setting-row{flex-wrap:wrap}.setting-row select{width:100%;max-width:100%}.field-columns{grid-template-columns:1fr}.settings-close{position:fixed;top:auto;right:20px}.evidence-table th,.evidence-table td{padding:8px 6px}.evidence-page{padding:16px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+</style>
+</head>
+<body>
+<header class="review-head">
+  <h1>Varin<span class="version">聊天与设置 · HTML 设计稿</span></h1>
+  <nav class="review-tabs" aria-label="设计页面"><button data-view="chat" aria-selected="true">聊天</button><button data-view="settings" aria-selected="false">设置</button><button data-view="evidence" aria-selected="false">数据与覆盖</button></nav>
+  <div class="review-tools"><button class="text-btn" data-action="toggle-sources">显示字段来源</button><button class="icon-btn" data-action="theme" aria-label="切换深浅主题" id="theme-icon"></button></div>
+</header>
+<div class="control-bar" id="review-controls">
+  <div class="modes" aria-label="聊天呈现模式"><button data-mode="live">按时间展开</button><button data-mode="dialogue">对话优先</button><button data-mode="sorted">集中展示回答</button></div>
+  <select id="scenario" aria-label="选择场景"></select>
+  <div class="playback"><button class="icon-btn" data-action="replay" aria-label="从头演示" id="replay-icon"></button><button class="button" data-action="play" id="play-button">播放</button><input type="range" id="frame-slider" min="0" max="1" step="1" value="1" aria-label="事件进度"><span class="frame-counter" id="frame-counter"></span></div>
+</div>
+<div class="app-wrap" id="app-wrap">
+  <section class="app" aria-label="Varin 工作台设计稿">
+    <header class="titlebar" id="titlebar"></header>
+    <div class="app-body">
+      <aside class="project-sidebar" id="project-sidebar"></aside>
+      <main class="work-area" id="work-area"><div class="conversation-layout" id="conversation-layout"></div></main>
+      <nav class="resource-rail" id="resource-rail" aria-label="资源面板"></nav>
+      <div id="settings-root"></div>
+      <div id="question-root"></div>
+      <aside class="inspector" id="inspector" aria-label="设计稿字段来源"></aside>
+    </div>
+  </section>
+</div>
+<main class="evidence-page" id="evidence-page"></main>
+<footer class="review-note"><span id="mode-note"></span><span>示例数据 · 保留现有概览与思考形态 · 无外部请求</span></footer>
+<script>
+const ICONS={"question":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 15H13V17H11V15ZM13 13.3551V14H11V12.5C11 11.9477 11.4477 11.5 12 11.5C12.8284 11.5 13.5 10.8284 13.5 10C13.5 9.17157 12.8284 8.5 12 8.5C11.2723 8.5 10.6656 9.01823 10.5288 9.70577L8.56731 9.31346C8.88637 7.70919 10.302 6.5 12 6.5C13.933 6.5 15.5 8.067 15.5 10C15.5 11.5855 14.4457 12.9248 13 13.3551Z\" fill=\"currentColor\"/>","add":"<path d=\"M11 11V5H13V11H19V13H13V19H11V13H5V11H11Z\" fill=\"currentColor\"/>","ai-agent":"<path d=\"M12 2C17.5228 2 22 6.47715 22 12C22 14.7096 20.9205 17.1697 19.1709 18.9697C17.3551 20.8376 14.8124 22 12 22C9.18756 22 6.64488 20.8376 4.8291 18.9697C3.07949 17.1697 2 14.7096 2 12C2 6.47715 6.47715 2 12 2ZM12 16C10.0022 16 8.20124 16.8375 6.9248 18.1816C8.30642 19.3175 10.0724 20 12 20C13.9274 20 15.6927 19.3173 17.0742 18.1816C15.7978 16.8377 13.9975 16 12 16ZM12 4C7.58172 4 4 7.58172 4 12C4 13.7701 4.57462 15.4044 5.54785 16.7295C7.1822 15.0483 9.46797 14 12 14C14.5318 14 16.8169 15.0485 18.4512 16.7295C19.4246 15.4043 20 13.7703 20 12C20 7.58172 16.4183 4 12 4ZM11.5293 5.31934C11.7058 4.89329 12.2943 4.89329 12.4707 5.31934L12.7236 5.93066C13.1556 6.97343 13.9615 7.80622 14.9746 8.25684L15.6924 8.5752C16.1029 8.75796 16.1028 9.35627 15.6924 9.53906L14.9326 9.87695C13.9448 10.3163 13.1534 11.1193 12.7139 12.1279L12.4668 12.6934C12.2864 13.1074 11.7137 13.1074 11.5332 12.6934L11.2871 12.1279C10.8476 11.1193 10.0552 10.3163 9.06738 9.87695L8.30762 9.53906C7.89719 9.35628 7.89717 8.75795 8.30762 8.5752L9.02539 8.25684C10.0385 7.80623 10.8445 6.97345 11.2764 5.93066L11.5293 5.31934Z\" fill=\"currentColor\"/>","chat-ai-3":"<path d=\"M12 1.99996C12.8632 1.99996 13.701 2.10973 14.5 2.31539L14 4.25192C13.3608 4.0874 12.6906 3.99997 12 3.99997C7.58174 3.99997 4.00002 7.58172 4 12C4 13.3344 4.3255 14.6174 4.93945 15.7656L5.28906 16.4189L4.63379 19.3662L7.58105 18.7109L8.23438 19.0605C9.38255 19.6745 10.6656 20 12 20C16.4183 20 20 16.4183 20 12C20 11.6771 19.9805 11.3587 19.9434 11.0459L21.9297 10.8095C21.976 11.1999 22 11.5972 22 12C22 17.5228 17.5228 22 12 22C10.2975 22 8.69425 21.5746 7.29102 20.8242L2 22L3.17578 16.709C2.42541 15.3057 2 13.7025 2 12C2.00002 6.47714 6.47717 1.99996 12 1.99996ZM19.5293 1.3193C19.7058 0.893513 20.2942 0.8935 20.4707 1.3193L20.7236 1.93063C21.1555 2.97343 21.9615 3.80614 22.9746 4.2568L23.6914 4.57614C24.1022 4.75882 24.1022 5.35635 23.6914 5.53903L22.9326 5.87692C21.945 6.3162 21.1534 7.11943 20.7139 8.1279L20.4668 8.69333C20.2863 9.10747 19.7136 9.10747 19.5332 8.69333L19.2861 8.1279C18.8466 7.11942 18.0551 6.3162 17.0674 5.87692L16.3076 5.53903C15.8974 5.35618 15.8974 4.75895 16.3076 4.57614L17.0254 4.2568C18.0384 3.80614 18.8445 2.97343 19.2764 1.93063L19.5293 1.3193Z\" fill=\"currentColor\"/>","arrow-down":"<path d=\"M13.0001 16.1716L18.3641 10.8076L19.7783 12.2218L12.0001 20L4.22192 12.2218L5.63614 10.8076L11.0001 16.1716V4H13.0001V16.1716Z\" fill=\"currentColor\"/>","arrow-down-s":"<path d=\"M11.9999 13.1714L16.9497 8.22168L18.3639 9.63589L11.9999 15.9999L5.63599 9.63589L7.0502 8.22168L11.9999 13.1714Z\" fill=\"currentColor\"/>","arrow-left":"<path d=\"M7.82843 10.9999H20V12.9999H7.82843L13.1924 18.3638L11.7782 19.778L4 11.9999L11.7782 4.22168L13.1924 5.63589L7.82843 10.9999Z\" fill=\"currentColor\"/>","arrow-right-s":"<path d=\"M13.1717 12.0007L8.22192 7.05093L9.63614 5.63672L16.0001 12.0007L9.63614 18.3646L8.22192 16.9504L13.1717 12.0007Z\" fill=\"currentColor\"/>","arrow-up":"<path d=\"M13.0001 7.82843V20H11.0001V7.82843L5.63614 13.1924L4.22192 11.7782L12.0001 4L19.7783 11.7782L18.3641 13.1924L13.0001 7.82843Z\" fill=\"currentColor\"/>","attachment-2":"<path d=\"M14.8287 7.75737L9.1718 13.4142C8.78127 13.8047 8.78127 14.4379 9.1718 14.8284C9.56232 15.219 10.1955 15.219 10.586 14.8284L16.2429 9.17158C17.4144 8.00001 17.4144 6.10052 16.2429 4.92894C15.0713 3.75737 13.1718 3.75737 12.0002 4.92894L6.34337 10.5858C4.39075 12.5384 4.39075 15.7042 6.34337 17.6569C8.29599 19.6095 11.4618 19.6095 13.4144 17.6569L19.0713 12L20.4855 13.4142L14.8287 19.0711C12.095 21.8047 7.66283 21.8047 4.92916 19.0711C2.19549 16.3374 2.19549 11.9053 4.92916 9.17158L10.586 3.51473C12.5386 1.56211 15.7045 1.56211 17.6571 3.51473C19.6097 5.46735 19.6097 8.63317 17.6571 10.5858L12.0002 16.2427C10.8287 17.4142 8.92916 17.4142 7.75759 16.2427C6.58601 15.0711 6.58601 13.1716 7.75759 12L13.4144 6.34316L14.8287 7.75737Z\" fill=\"currentColor\"/>","book":"<path d=\"M3 18.5V5C3 3.34315 4.34315 2 6 2H20C20.5523 2 21 2.44772 21 3V21C21 21.5523 20.5523 22 20 22H6.5C4.567 22 3 20.433 3 18.5ZM19 20V17H6.5C5.67157 17 5 17.6716 5 18.5C5 19.3284 5.67157 20 6.5 20H19ZM5 15.3368C5.45463 15.1208 5.9632 15 6.5 15H19V4H6C5.44772 4 5 4.44772 5 5V15.3368Z\" fill=\"currentColor\"/>","book-open":"<path d=\"M13 21V23H11V21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H9C10.1947 3 11.2671 3.52375 12 4.35418C12.7329 3.52375 13.8053 3 15 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H13ZM20 19V5H15C13.8954 5 13 5.89543 13 7V19H20ZM11 19V7C11 5.89543 10.1046 5 9 5H4V19H11Z\" fill=\"currentColor\"/>","brain":"<path d=\"M9 4C10.1046 4 11 4.89543 11 6V12.8271C10.1058 12.1373 8.96602 11.7305 7.6644 11.5136L7.3356 13.4864C8.71622 13.7165 9.59743 14.1528 10.1402 14.7408C10.67 15.3147 11 16.167 11 17.5C11 18.8807 9.88071 20 8.5 20C7.11929 20 6 18.8807 6 17.5V17.1493C6.43007 17.2926 6.87634 17.4099 7.3356 17.4864L7.6644 15.5136C6.92149 15.3898 6.1752 15.1144 5.42909 14.7599C4.58157 14.3573 4 13.499 4 12.5C4 11.6653 4.20761 11.0085 4.55874 10.5257C4.90441 10.0504 5.4419 9.6703 6.24254 9.47014L7 9.28078V6C7 4.89543 7.89543 4 9 4ZM12 3.35418C11.2671 2.52376 10.1947 2 9 2C6.79086 2 5 3.79086 5 6V7.77422C4.14895 8.11644 3.45143 8.64785 2.94126 9.34933C2.29239 10.2415 2 11.3347 2 12.5C2 14.0652 2.79565 15.4367 4 16.2422V17.5C4 19.9853 6.01472 22 8.5 22C9.91363 22 11.175 21.3482 12 20.3287C12.825 21.3482 14.0864 22 15.5 22C17.9853 22 20 19.9853 20 17.5V16.2422C21.2044 15.4367 22 14.0652 22 12.5C22 11.3347 21.7076 10.2415 21.0587 9.34933C20.5486 8.64785 19.8511 8.11644 19 7.77422V6C19 3.79086 17.2091 2 15 2C13.8053 2 12.7329 2.52376 12 3.35418ZM18 17.1493V17.5C18 18.8807 16.8807 20 15.5 20C14.1193 20 13 18.8807 13 17.5C13 16.167 13.33 15.3147 13.8598 14.7408C14.4026 14.1528 15.2838 13.7165 16.6644 13.4864L16.3356 11.5136C15.034 11.7305 13.8942 12.1373 13 12.8271V6C13 4.89543 13.8954 4 15 4C16.1046 4 17 4.89543 17 6V9.28078L17.7575 9.47014C18.5581 9.6703 19.0956 10.0504 19.4413 10.5257C19.7924 11.0085 20 11.6653 20 12.5C20 13.499 19.4184 14.3573 18.5709 14.7599C17.8248 15.1144 17.0785 15.3898 16.3356 15.5136L16.6644 17.4864C17.1237 17.4099 17.5699 17.2926 18 17.1493Z\" fill=\"currentColor\"/>","chat-1":"<path d=\"M10 3H14C18.4183 3 22 6.58172 22 11C22 15.4183 18.4183 19 14 19V22.5C9 20.5 2 17.5 2 11C2 6.58172 5.58172 3 10 3ZM12 17H14C17.3137 17 20 14.3137 20 11C20 7.68629 17.3137 5 14 5H10C6.68629 5 4 7.68629 4 11C4 14.61 6.46208 16.9656 12 19.4798V17Z\" fill=\"currentColor\"/>","chat-3":"<path d=\"M7.29117 20.8242L2 22L3.17581 16.7088C2.42544 15.3056 2 13.7025 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C10.2975 22 8.6944 21.5746 7.29117 20.8242ZM7.58075 18.711L8.23428 19.0605C9.38248 19.6745 10.6655 20 12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 13.3345 4.32549 14.6175 4.93949 15.7657L5.28896 16.4192L4.63416 19.3658L7.58075 18.711Z\" fill=\"currentColor\"/>","chat-new":"<path d=\"M14 3V5H4V18.3851L5.76282 17H20V10H22V18C22 18.5523 21.5523 19 21 19H6.45455L2 22.5V4C2 3.44772 2.44772 3 3 3H14ZM19 3V0H21V3H24V5H21V8H19V5H16V3H19Z\" fill=\"currentColor\"/>","check":"<path d=\"M9.9997 15.1709L19.1921 5.97852L20.6063 7.39273L9.9997 17.9993L3.63574 11.6354L5.04996 10.2212L9.9997 15.1709Z\" fill=\"currentColor\"/>","checkbox-circle":"<path d=\"M4 12C4 7.58172 7.58172 4 12 4C16.4183 4 20 7.58172 20 12C20 16.4183 16.4183 20 12 20C7.58172 20 4 16.4183 4 12ZM12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2ZM17.4571 9.45711L16.0429 8.04289L11 13.0858L8.20711 10.2929L6.79289 11.7071L11 15.9142L17.4571 9.45711Z\" fill=\"currentColor\"/>","checkbox-blank-circle":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20Z\" fill=\"currentColor\"/>","close":"<path d=\"M11.9997 10.5865L16.9495 5.63672L18.3637 7.05093L13.4139 12.0007L18.3637 16.9504L16.9495 18.3646L11.9997 13.4149L7.04996 18.3646L5.63574 16.9504L10.5855 12.0007L5.63574 7.05093L7.04996 5.63672L11.9997 10.5865Z\" fill=\"currentColor\"/>","cloud":"<path d=\"M12 2C15.866 2 19 5.13401 19 9C19 9.11351 18.9973 9.22639 18.992 9.33857C21.3265 10.16 23 12.3846 23 15C23 18.3137 20.3137 21 17 21H7C3.68629 21 1 18.3137 1 15C1 12.3846 2.67346 10.16 5.00804 9.33857C5.0027 9.22639 5 9.11351 5 9C5 5.13401 8.13401 2 12 2ZM12 4C9.23858 4 7 6.23858 7 9C7 9.08147 7.00193 9.16263 7.00578 9.24344L7.07662 10.7309L5.67183 11.2252C4.0844 11.7837 3 13.2889 3 15C3 17.2091 4.79086 19 7 19H17C19.2091 19 21 17.2091 21 15C21 12.79 19.21 11 17 11C15.233 11 13.7337 12.1457 13.2042 13.7347L11.3064 13.1021C12.1005 10.7185 14.35 9 17 9C17 6.23858 14.7614 4 12 4Z\" fill=\"currentColor\"/>","cloud-off":"<path d=\"M3.51472 2.10051L22.6066 21.1924L21.1924 22.6066L19.1782 20.5924C18.503 20.8556 17.7684 21 17 21H7C3.68629 21 1 18.3137 1 15C1 12.3846 2.67346 10.16 5.00804 9.33857C5.0027 9.22639 5 9.11351 5 9C5 8.22228 5.12683 7.47418 5.36094 6.77527L2.10051 3.51472L3.51472 2.10051ZM7 9C7 9.08147 7.00193 9.16263 7.00578 9.24344L7.07662 10.7309L5.67183 11.2252C4.0844 11.7837 3 13.2889 3 15C3 17.2091 4.79086 19 7 19H17C17.1858 19 17.3687 18.9873 17.5478 18.9628L7.03043 8.44519C7.01032 8.62736 7 8.81247 7 9ZM12 2C15.866 2 19 5.13401 19 9C19 9.11351 18.9973 9.22639 18.992 9.33857C21.3265 10.16 23 12.3846 23 15C23 16.0883 22.7103 17.1089 22.2037 17.9889L20.7111 16.4955C20.8974 16.0335 21 15.5287 21 15C21 12.79 19.21 11 17 11C16.4711 11 15.9661 11.1027 15.5039 11.2892L14.0111 9.7964C14.8912 9.28978 15.9118 9 17 9C17 6.23858 14.7614 4 12 4C10.9295 4 9.93766 4.33639 9.12428 4.90922L7.69418 3.48056C8.88169 2.55284 10.3763 2 12 2Z\" fill=\"currentColor\"/>","code":"<path d=\"M23 12L15.9289 19.0711L14.5147 17.6569L20.1716 12L14.5147 6.34317L15.9289 4.92896L23 12ZM3.82843 12L9.48528 17.6569L8.07107 19.0711L1 12L8.07107 4.92896L9.48528 6.34317L3.82843 12Z\" fill=\"currentColor\"/>","code-box":"<path d=\"M3 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3ZM4 5V19H20V5H4ZM20 12L16.4645 15.5355L15.0503 14.1213L17.1716 12L15.0503 9.87868L16.4645 8.46447L20 12ZM6.82843 12L8.94975 14.1213L7.53553 15.5355L4 12L7.53553 8.46447L8.94975 9.87868L6.82843 12ZM11.2443 17H9.11597L12.7557 7H14.884L11.2443 17Z\" fill=\"currentColor\"/>","code-sslash":"<path d=\"M24 12L18.3431 17.6569L16.9289 16.2426L21.1716 12L16.9289 7.75736L18.3431 6.34315L24 12ZM2.82843 12L7.07107 16.2426L5.65685 17.6569L0 12L5.65685 6.34315L7.07107 7.75736L2.82843 12ZM9.78845 21H7.66009L14.2116 3H16.3399L9.78845 21Z\" fill=\"currentColor\"/>","database-2":"<path d=\"M5 12.5C5 12.8134 5.46101 13.3584 6.53047 13.8931C7.91405 14.5849 9.87677 15 12 15C14.1232 15 16.0859 14.5849 17.4695 13.8931C18.539 13.3584 19 12.8134 19 12.5V10.3287C17.35 11.3482 14.8273 12 12 12C9.17273 12 6.64996 11.3482 5 10.3287V12.5ZM19 15.3287C17.35 16.3482 14.8273 17 12 17C9.17273 17 6.64996 16.3482 5 15.3287V17.5C5 17.8134 5.46101 18.3584 6.53047 18.8931C7.91405 19.5849 9.87677 20 12 20C14.1232 20 16.0859 19.5849 17.4695 18.8931C18.539 18.3584 19 17.8134 19 17.5V15.3287ZM3 17.5V7.5C3 5.01472 7.02944 3 12 3C16.9706 3 21 5.01472 21 7.5V17.5C21 19.9853 16.9706 22 12 22C7.02944 22 3 19.9853 3 17.5ZM12 10C14.1232 10 16.0859 9.58492 17.4695 8.89313C18.539 8.3584 19 7.81342 19 7.5C19 7.18658 18.539 6.6416 17.4695 6.10687C16.0859 5.41508 14.1232 5 12 5C9.87677 5 7.91405 5.41508 6.53047 6.10687C5.46101 6.6416 5 7.18658 5 7.5C5 7.81342 5.46101 8.3584 6.53047 8.89313C7.91405 9.58492 9.87677 10 12 10Z\" fill=\"currentColor\"/>","delete-bin":"<path d=\"M17 6H22V8H20V21C20 21.5523 19.5523 22 19 22H5C4.44772 22 4 21.5523 4 21V8H2V6H7V3C7 2.44772 7.44772 2 8 2H16C16.5523 2 17 2.44772 17 3V6ZM18 8H6V20H18V8ZM9 11H11V17H9V11ZM13 11H15V17H13V11ZM9 4V6H15V4H9Z\" fill=\"currentColor\"/>","donut-chart-fill":"<path d=\"M10.9999 2.04938L11 5.07088C7.6077 5.55612 5 8.47352 5 12C5 15.866 8.13401 19 12 19C13.5723 19 15.0236 18.4816 16.1922 17.6064L18.3289 19.7428C16.605 21.1536 14.4014 22 12 22C6.47715 22 2 17.5228 2 12C2 6.81468 5.94662 2.55115 10.9999 2.04938ZM21.9506 13.0001C21.7509 15.0111 20.9555 16.8468 19.7433 18.3283L17.6064 16.1922C18.2926 15.2759 18.7595 14.1859 18.9291 13L21.9506 13.0001ZM13.0011 2.04948C17.725 2.51902 21.4815 6.27589 21.9506 10.9999L18.9291 10.9998C18.4905 7.93452 16.0661 5.50992 13.001 5.07103L13.0011 2.04948Z\" fill=\"currentColor\"/>","error-warning":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM11 15H13V17H11V15ZM11 7H13V13H11V7Z\" fill=\"currentColor\"/>","external-link":"<path d=\"M10 6V8H5V19H16V14H18V20C18 20.5523 17.5523 21 17 21H4C3.44772 21 3 20.5523 3 20V7C3 6.44772 3.44772 6 4 6H10ZM21 3V11H19L18.9999 6.413L11.2071 14.2071L9.79289 12.7929L17.5849 5H13V3H21Z\" fill=\"currentColor\"/>","file-code":"<path d=\"M15 4H5V20H19V8H15V4ZM3 2.9918C3 2.44405 3.44749 2 3.9985 2H16L20.9997 7L21 20.9925C21 21.5489 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5447 3 21.0082V2.9918ZM17.6569 12L14.1213 15.5355L12.7071 14.1213L14.8284 12L12.7071 9.87868L14.1213 8.46447L17.6569 12ZM6.34315 12L9.87868 8.46447L11.2929 9.87868L9.17157 12L11.2929 14.1213L9.87868 15.5355L6.34315 12Z\" fill=\"currentColor\"/>","file-copy":"<path d=\"M6.9998 6V3C6.9998 2.44772 7.44752 2 7.9998 2H19.9998C20.5521 2 20.9998 2.44772 20.9998 3V17C20.9998 17.5523 20.5521 18 19.9998 18H16.9998V20.9991C16.9998 21.5519 16.5499 22 15.993 22H4.00666C3.45059 22 3 21.5554 3 20.9991L3.0026 7.00087C3.0027 6.44811 3.45264 6 4.00942 6H6.9998ZM5.00242 8L5.00019 20H14.9998V8H5.00242ZM8.9998 6H16.9998V16H18.9998V4H8.9998V6Z\" fill=\"currentColor\"/>","file-edit":"<path d=\"M21 6.75736L19 8.75736V4H10V9H5V20H19V17.2426L21 15.2426V21.0082C21 21.556 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5501 3 20.9932V8L9.00319 2H19.9978C20.5513 2 21 2.45531 21 2.9918V6.75736ZM21.7782 8.80761L23.1924 10.2218L15.4142 18L13.9979 17.9979L14 16.5858L21.7782 8.80761Z\" fill=\"currentColor\"/>","file-text":"<path d=\"M21 8V20.9932C21 21.5501 20.5552 22 20.0066 22H3.9934C3.44495 22 3 21.556 3 21.0082V2.9918C3 2.45531 3.4487 2 4.00221 2H14.9968L21 8ZM19 9H14V4H5V20H19V9ZM8 7H11V9H8V7ZM8 11H16V13H8V11ZM8 15H16V17H8V15Z\" fill=\"currentColor\"/>","folder":"<path d=\"M4 5V19H20V7H11.5858L9.58579 5H4ZM12.4142 5H21C21.5523 5 22 5.44772 22 6V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5Z\" fill=\"currentColor\"/>","folder-open":"<path d=\"M3 21C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H10.4142L12.4142 5H20C20.5523 5 21 5.44772 21 6V9H19V7H11.5858L9.58579 5H4V16.998L5.5 11H22.5L20.1894 20.2425C20.0781 20.6877 19.6781 21 19.2192 21H3ZM19.9384 13H7.06155L5.56155 19H18.4384L19.9384 13Z\" fill=\"currentColor\"/>","history":"<path d=\"M12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12H4C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C9.25022 4 6.82447 5.38734 5.38451 7.50024L8 7.5V9.5H2V3.5H4L3.99989 5.99918C5.82434 3.57075 8.72873 2 12 2ZM13 7L12.9998 11.585L16.2426 14.8284L14.8284 16.2426L10.9998 12.413L11 7H13Z\" fill=\"currentColor\"/>","layout-left":"<path d=\"M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM7 5H4V19H7V5ZM20 5H9V19H20V5Z\" fill=\"currentColor\"/>","loader-4":"<path d=\"M18.364 5.63604L16.9497 7.05025C15.683 5.7835 13.933 5 12 5C8.13401 5 5 8.13401 5 12C5 15.866 8.13401 19 12 19C15.866 19 19 15.866 19 12H21C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C14.4853 3 16.7353 4.00736 18.364 5.63604Z\" fill=\"currentColor\"/>","menu-2":"<path d=\"M3 4H21V6H3V4ZM3 11H15V13H3V11ZM3 18H21V20H3V18Z\" fill=\"currentColor\"/>","mic":"<path d=\"M11.9998 3C10.3429 3 8.99976 4.34315 8.99976 6V10C8.99976 11.6569 10.3429 13 11.9998 13C13.6566 13 14.9998 11.6569 14.9998 10V6C14.9998 4.34315 13.6566 3 11.9998 3ZM11.9998 1C14.7612 1 16.9998 3.23858 16.9998 6V10C16.9998 12.7614 14.7612 15 11.9998 15C9.23833 15 6.99976 12.7614 6.99976 10V6C6.99976 3.23858 9.23833 1 11.9998 1ZM3.05469 11H5.07065C5.55588 14.3923 8.47329 17 11.9998 17C15.5262 17 18.4436 14.3923 18.9289 11H20.9448C20.4837 15.1716 17.1714 18.4839 12.9998 18.9451V23H10.9998V18.9451C6.82814 18.4839 3.51584 15.1716 3.05469 11Z\" fill=\"currentColor\"/>","moon":"<path d=\"M10 7C10 10.866 13.134 14 17 14C18.9584 14 20.729 13.1957 21.9995 11.8995C22 11.933 22 11.9665 22 12C22 17.5228 17.5228 22 12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C12.0335 2 12.067 2 12.1005 2.00049C10.8043 3.27098 10 5.04157 10 7ZM4 12C4 16.4183 7.58172 20 12 20C15.0583 20 17.7158 18.2839 19.062 15.7621C18.3945 15.9187 17.7035 16 17 16C12.0294 16 8 11.9706 8 7C8 6.29648 8.08133 5.60547 8.2379 4.938C5.71611 6.28423 4 8.9417 4 12Z\" fill=\"currentColor\"/>","more":"<path d=\"M4.5 10.5C3.675 10.5 3 11.175 3 12C3 12.825 3.675 13.5 4.5 13.5C5.325 13.5 6 12.825 6 12C6 11.175 5.325 10.5 4.5 10.5ZM19.5 10.5C18.675 10.5 18 11.175 18 12C18 12.825 18.675 13.5 19.5 13.5C20.325 13.5 21 12.825 21 12C21 11.175 20.325 10.5 19.5 10.5ZM12 10.5C11.175 10.5 10.5 11.175 10.5 12C10.5 12.825 11.175 13.5 12 13.5C12.825 13.5 13.5 12.825 13.5 12C13.5 11.175 12.825 10.5 12 10.5Z\" fill=\"currentColor\"/>","more-2":"<path d=\"M12 3C11.175 3 10.5 3.675 10.5 4.5C10.5 5.325 11.175 6 12 6C12.825 6 13.5 5.325 13.5 4.5C13.5 3.675 12.825 3 12 3ZM12 18C11.175 18 10.5 18.675 10.5 19.5C10.5 20.325 11.175 21 12 21C12.825 21 13.5 20.325 13.5 19.5C13.5 18.675 12.825 18 12 18ZM12 10.5C11.175 10.5 10.5 11.175 10.5 12C10.5 12.825 11.175 13.5 12 13.5C12.825 13.5 13.5 12.825 13.5 12C13.5 11.175 12.825 10.5 12 10.5Z\" fill=\"currentColor\"/>","pause":"<path d=\"M6 5H8V19H6V5ZM16 5H18V19H16V5Z\" fill=\"currentColor\"/>","play":"<path d=\"M16.3944 12.0001L10 7.7371V16.263L16.3944 12.0001ZM19.376 12.4161L8.77735 19.4818C8.54759 19.635 8.23715 19.5729 8.08397 19.3432C8.02922 19.261 8 19.1645 8 19.0658V4.93433C8 4.65818 8.22386 4.43433 8.5 4.43433C8.59871 4.43433 8.69522 4.46355 8.77735 4.5183L19.376 11.584C19.6057 11.7372 19.6678 12.0477 19.5146 12.2774C19.478 12.3323 19.4309 12.3795 19.376 12.4161Z\" fill=\"currentColor\"/>","refresh":"<path d=\"M5.46257 4.43262C7.21556 2.91688 9.5007 2 12 2C17.5228 2 22 6.47715 22 12C22 14.1361 21.3302 16.1158 20.1892 17.7406L17 12H20C20 7.58172 16.4183 4 12 4C9.84982 4 7.89777 4.84827 6.46023 6.22842L5.46257 4.43262ZM18.5374 19.5674C16.7844 21.0831 14.4993 22 12 22C6.47715 22 2 17.5228 2 12C2 9.86386 2.66979 7.88416 3.8108 6.25944L7 12H4C4 16.4183 7.58172 20 12 20C14.1502 20 16.1022 19.1517 17.5398 17.7716L18.5374 19.5674Z\" fill=\"currentColor\"/>","search":"<path d=\"M18.031 16.6168L22.3137 20.8995L20.8995 22.3137L16.6168 18.031C15.0769 19.263 13.124 20 11 20C6.032 20 2 15.968 2 11C2 6.032 6.032 2 11 2C15.968 2 20 6.032 20 11C20 13.124 19.263 15.0769 18.031 16.6168ZM16.0247 15.8748C17.2475 14.6146 18 12.8956 18 11C18 7.1325 14.8675 4 11 4C7.1325 4 4 7.1325 4 11C4 14.8675 7.1325 18 11 18C12.8956 18 14.6146 17.2475 15.8748 16.0247L16.0247 15.8748Z\" fill=\"currentColor\"/>","server":"<path d=\"M5 11H19V5H5V11ZM21 4V20C21 20.5523 20.5523 21 20 21H4C3.44772 21 3 20.5523 3 20V4C3 3.44772 3.44772 3 4 3H20C20.5523 3 21 3.44772 21 4ZM19 13H5V19H19V13ZM7 15H10V17H7V15ZM7 7H10V9H7V7Z\" fill=\"currentColor\"/>","settings-3":"<path d=\"M3.33946 17.0002C2.90721 16.2515 2.58277 15.4702 2.36133 14.6741C3.3338 14.1779 3.99972 13.1668 3.99972 12.0002C3.99972 10.8345 3.3348 9.824 2.36353 9.32741C2.81025 7.71651 3.65857 6.21627 4.86474 4.99001C5.7807 5.58416 6.98935 5.65534 7.99972 5.072C9.01009 4.48866 9.55277 3.40635 9.4962 2.31604C11.1613 1.8846 12.8847 1.90004 14.5031 2.31862C14.4475 3.40806 14.9901 4.48912 15.9997 5.072C17.0101 5.65532 18.2187 5.58416 19.1346 4.99007C19.7133 5.57986 20.2277 6.25151 20.66 7.00021C21.0922 7.7489 21.4167 8.53025 21.6381 9.32628C20.6656 9.82247 19.9997 10.8336 19.9997 12.0002C19.9997 13.166 20.6646 14.1764 21.6359 14.673C21.1892 16.2839 20.3409 17.7841 19.1347 19.0104C18.2187 18.4163 17.0101 18.3451 15.9997 18.9284C14.9893 19.5117 14.4467 20.5941 14.5032 21.6844C12.8382 22.1158 11.1148 22.1004 9.49633 21.6818C9.55191 20.5923 9.00929 19.5113 7.99972 18.9284C6.98938 18.3451 5.78079 18.4162 4.86484 19.0103C4.28617 18.4205 3.77172 17.7489 3.33946 17.0002ZM8.99972 17.1964C10.0911 17.8265 10.8749 18.8227 11.2503 19.9659C11.7486 20.0133 12.2502 20.014 12.7486 19.9675C13.1238 18.8237 13.9078 17.8268 14.9997 17.1964C16.0916 16.5659 17.347 16.3855 18.5252 16.6324C18.8146 16.224 19.0648 15.7892 19.2729 15.334C18.4706 14.4373 17.9997 13.2604 17.9997 12.0002C17.9997 10.74 18.4706 9.5632 19.2729 8.6665C19.1688 8.4405 19.0538 8.21822 18.9279 8.00021C18.802 7.78219 18.667 7.57148 18.5233 7.36842C17.3457 7.61476 16.0911 7.43414 14.9997 6.80405C13.9083 6.17395 13.1246 5.17768 12.7491 4.03455C12.2509 3.98714 11.7492 3.98646 11.2509 4.03292C10.8756 5.17671 10.0916 6.17364 8.99972 6.80405C7.9078 7.43447 6.65245 7.61494 5.47428 7.36803C5.18485 7.77641 4.93463 8.21117 4.72656 8.66637C5.52881 9.56311 5.99972 10.74 5.99972 12.0002C5.99972 13.2604 5.52883 14.4372 4.72656 15.3339C4.83067 15.5599 4.94564 15.7822 5.07152 16.0002C5.19739 16.2182 5.3324 16.4289 5.47612 16.632C6.65377 16.3857 7.90838 16.5663 8.99972 17.1964ZM11.9997 15.0002C10.3429 15.0002 8.99972 13.6571 8.99972 12.0002C8.99972 10.3434 10.3429 9.00021 11.9997 9.00021C13.6566 9.00021 14.9997 10.3434 14.9997 12.0002C14.9997 13.6571 13.6566 15.0002 11.9997 15.0002ZM11.9997 13.0002C12.552 13.0002 12.9997 12.5525 12.9997 12.0002C12.9997 11.4479 12.552 11.0002 11.9997 11.0002C11.4474 11.0002 10.9997 11.4479 10.9997 12.0002C10.9997 12.5525 11.4474 13.0002 11.9997 13.0002Z\" fill=\"currentColor\"/>","shield-check":"<path d=\"M12 1L20.2169 2.82598C20.6745 2.92766 21 3.33347 21 3.80217V13.7889C21 15.795 19.9974 17.6684 18.3282 18.7812L12 23L5.6718 18.7812C4.00261 17.6684 3 15.795 3 13.7889V3.80217C3 3.33347 3.32553 2.92766 3.78307 2.82598L12 1ZM12 3.04879L5 4.60434V13.7889C5 15.1263 5.6684 16.3752 6.7812 17.1171L12 20.5963L17.2188 17.1171C18.3316 16.3752 19 15.1263 19 13.7889V4.60434L12 3.04879ZM16.4524 8.22183L17.8666 9.63604L11.5026 16L7.25999 11.7574L8.67421 10.3431L11.5019 13.1709L16.4524 8.22183Z\" fill=\"currentColor\"/>","stack":"<path d=\"M20.0833 15.1999L21.2854 15.9212C21.5221 16.0633 21.5989 16.3704 21.4569 16.6072C21.4146 16.6776 21.3557 16.7365 21.2854 16.7787L12.5144 22.0412C12.1977 22.2313 11.8021 22.2313 11.4854 22.0412L2.71451 16.7787C2.47772 16.6366 2.40093 16.3295 2.54301 16.0927C2.58523 16.0223 2.64413 15.9634 2.71451 15.9212L3.9166 15.1999L11.9999 20.0499L20.0833 15.1999ZM20.0833 10.4999L21.2854 11.2212C21.5221 11.3633 21.5989 11.6704 21.4569 11.9072C21.4146 11.9776 21.3557 12.0365 21.2854 12.0787L11.9999 17.6499L2.71451 12.0787C2.47772 11.9366 2.40093 11.6295 2.54301 11.3927C2.58523 11.3223 2.64413 11.2634 2.71451 11.2212L3.9166 10.4999L11.9999 15.3499L20.0833 10.4999ZM12.5144 1.30864L21.2854 6.5712C21.5221 6.71327 21.5989 7.0204 21.4569 7.25719C21.4146 7.32757 21.3557 7.38647 21.2854 7.42869L11.9999 12.9999L2.71451 7.42869C2.47772 7.28662 2.40093 6.97949 2.54301 6.7427C2.58523 6.67232 2.64413 6.61343 2.71451 6.5712L11.4854 1.30864C11.8021 1.11864 12.1977 1.11864 12.5144 1.30864ZM11.9999 3.33233L5.88723 6.99995L11.9999 10.6676L18.1126 6.99995L11.9999 3.33233Z\" fill=\"currentColor\"/>","stop":"<path d=\"M7 7V17H17V7H7ZM6 5H18C18.5523 5 19 5.44772 19 6V18C19 18.5523 18.5523 19 18 19H6C5.44772 19 5 18.5523 5 18V6C5 5.44772 5.44772 5 6 5Z\" fill=\"currentColor\"/>","stop-circle":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM9 9H15V15H9V9Z\" fill=\"currentColor\"/>","target":"<path d=\"M12 1.99999C12.5523 1.99999 13 2.4477 13 2.99999C12.9999 3.55224 12.5522 3.99999 12 3.99999C7.58172 3.99999 4 7.58171 4 12C4.00004 16.4182 7.58174 20 12 20C16.4182 20 19.9999 16.4182 20 12C20 11.4477 20.4477 11 21 11C21.5523 11 22 11.4477 22 12C21.9999 17.5228 17.5228 22 12 22C6.47717 22 2.00004 17.5228 2 12C2 6.47714 6.47715 1.99999 12 1.99999ZM12 5.99999C12.5523 5.99999 13 6.4477 13 6.99999C12.9999 7.55224 12.5522 7.99999 12 7.99999C9.79085 7.99999 7.99999 9.79085 7.99999 12C8.00004 14.2091 9.79088 16 12 16C14.2091 16 15.9999 14.2091 16 12C16 11.4477 16.4477 11 17 11C17.5523 11 18 11.4477 18 12C17.9999 15.3137 15.3137 18 12 18C8.68631 18 6.00004 15.3137 6 12C6 8.68628 8.68629 5.99999 12 5.99999ZM17.6562 2.10057C18.0468 1.71005 18.6807 1.71005 19.0713 2.10057C19.4614 2.49105 19.4615 3.12419 19.0713 3.51463L18.3633 4.22069L18.3642 4.22167C17.9737 4.61219 17.9737 5.2452 18.3642 5.63573C18.7548 6.02612 19.3878 6.02621 19.7783 5.63573L20.4853 4.9287C20.8759 4.53839 21.5089 4.53826 21.8994 4.9287C22.2899 5.31915 22.2897 5.95222 21.8994 6.34276L19.7783 8.46483C19.5909 8.65223 19.3363 8.75671 19.0713 8.75682H16.6572L12.707 12.707C12.3165 13.0974 11.6834 13.0974 11.293 12.707C10.9025 12.3165 10.9026 11.6835 11.293 11.293L15.2422 7.34374V4.9287C15.2422 4.66356 15.3477 4.40916 15.5351 4.22167L17.6562 2.10057Z\" fill=\"currentColor\"/>","task":"<path d=\"M19 4H5V20H19V4ZM3 2.9918C3 2.44405 3.44749 2 3.9985 2H19.9997C20.5519 2 20.9996 2.44772 20.9997 3L21 20.9925C21 21.5489 20.5551 22 20.0066 22H3.9934C3.44476 22 3 21.5447 3 21.0082V2.9918ZM11.2929 13.1213L15.5355 8.87868L16.9497 10.2929L11.2929 15.9497L7.40381 12.0607L8.81802 10.6464L11.2929 13.1213Z\" fill=\"currentColor\"/>","terminal":"<path d=\"M10.9999 12L3.92886 19.0711L2.51465 17.6569L8.1715 12L2.51465 6.34317L3.92886 4.92896L10.9999 12ZM10.9999 19H20.9999V21H10.9999V19Z\" fill=\"currentColor\"/>","terminal-box":"<path d=\"M3 3H21C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3ZM4 5V19H20V5H4ZM12 15H18V17H12V15ZM8.66685 12L5.83842 9.17157L7.25264 7.75736L11.4953 12L7.25264 16.2426L5.83842 14.8284L8.66685 12Z\" fill=\"currentColor\"/>","time":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20ZM13 12H17V14H11V7H13V12Z\" fill=\"currentColor\"/>","timer":"<path d=\"M17.6177 5.9681L19.0711 4.51472L20.4853 5.92893L19.0319 7.38231C20.2635 8.92199 21 10.875 21 13C21 17.9706 16.9706 22 12 22C7.02944 22 3 17.9706 3 13C3 8.02944 7.02944 4 12 4C14.125 4 16.078 4.73647 17.6177 5.9681ZM12 20C15.866 20 19 16.866 19 13C19 9.13401 15.866 6 12 6C8.13401 6 5 9.13401 5 13C5 16.866 8.13401 20 12 20ZM11 8H13V14H11V8ZM8 1H16V3H8V1Z\" fill=\"currentColor\"/>","window":"<path d=\"M21 3C21.5523 3 22 3.44772 22 4V20C22 20.5523 21.5523 21 21 21H3C2.44772 21 2 20.5523 2 20V4C2 3.44772 2.44772 3 3 3H21ZM20 11H4V19H20V11ZM20 5H4V9H20V5ZM11 6V8H9V6H11ZM7 6V8H5V6H7Z\" fill=\"currentColor\"/>","global":"<path d=\"M12 22C6.47715 22 2 17.5228 2 12C2 6.47715 6.47715 2 12 2C17.5228 2 22 6.47715 22 12C22 17.5228 17.5228 22 12 22ZM9.71002 19.6674C8.74743 17.6259 8.15732 15.3742 8.02731 13H4.06189C4.458 16.1765 6.71639 18.7747 9.71002 19.6674ZM10.0307 13C10.1811 15.4388 10.8778 17.7297 12 19.752C13.1222 17.7297 13.8189 15.4388 13.9693 13H10.0307ZM19.9381 13H15.9727C15.8427 15.3742 15.2526 17.6259 14.29 19.6674C17.2836 18.7747 19.542 16.1765 19.9381 13ZM4.06189 11H8.02731C8.15732 8.62577 8.74743 6.37407 9.71002 4.33256C6.71639 5.22533 4.458 7.8235 4.06189 11ZM10.0307 11H13.9693C13.8189 8.56122 13.1222 6.27025 12 4.24799C10.8778 6.27025 10.1811 8.56122 10.0307 11ZM14.29 4.33256C15.2526 6.37407 15.8427 8.62577 15.9727 11H19.9381C19.542 7.8235 17.2836 5.22533 14.29 4.33256Z\" fill=\"currentColor\"/>"};
+const AVATARS={"slant-mint":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><path fill=\"#96C4B4\" d=\"M11 19Q12 13 20 13L44 10Q50 9 53 16L61 43Q64 52 54 54L18 58Q10 59 8 51L5 29Q4 22 11 19Z\"/><path fill=\"#202326\" d=\"M19 31L24 30Q27 30 27 32Q27 34 25 34L20 35Q17 35 17 33Q17 31 19 31ZM40 28L45 27Q48 27 48 29Q48 31 46 31L41 32Q38 32 38 30Q38 28 40 28Z\"/></svg>","pebble-blue":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><path fill=\"#85B3D2\" d=\"M7 28Q15 11 30 11L37 11Q49 12 56 27Q62 39 59 48Q57 55 47 56Q30 60 14 56Q5 54 4 44Q3 36 7 28Z\"/><path fill=\"#202326\" d=\"M18 31H24Q26 31 26 33Q26 35 24 35H18Q16 35 16 33Q16 31 18 31ZM40 31H46Q48 31 48 33Q48 35 46 35H40Q38 35 38 33Q38 31 40 31Z\"/></svg>","notch-ochre":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><path fill=\"#E9C16E\" d=\"M5 31Q9 13 28 12Q34 12 38 17Q41 21 48 21Q59 22 61 34L62 43Q63 54 50 55L18 55Q4 55 3 44Q2 37 5 31Z\"/><path fill=\"#202326\" d=\"M20 30H23Q26 30 26 33V34Q26 37 23 37H20Q18 37 18 34V33Q18 30 20 30ZM40 33H46Q48 33 48 35Q48 37 46 37H40Q38 37 38 35Q38 33 40 33Z\"/></svg>","dome-ivory":"<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><path fill=\"#E9DED0\" d=\"M5 43C6 23 18 12 32 12C49 12 59 26 60 45Q61 51 54 52Q32 55 10 52Q3 52 5 43Z\"/><path fill=\"#202326\" d=\"M21 29H24Q26 29 26 32V34Q26 36 23 36H21Q19 36 19 33V32Q19 29 21 29ZM41 29H44Q46 29 46 32V34Q46 36 43 36H41Q39 36 39 33V32Q39 29 41 29Z\"/></svg>"};
+const escapeHtml=value=>String(value??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+const H=escapeHtml;
+const clone=value=>JSON.parse(JSON.stringify(value));
+const message=(id,text,stopReason='toolUse')=>({kind:'text',id,messageId:id,requestId:id,text,stopReason});
+const thought=(id,thinking,streaming=false)=>({kind:'thinking',id,messageId:id,requestId:id.split(':')[0],thinking,streaming});
+function tool(id,name,args,details,status='success',extra={}){
+  return {kind:'tool',id,requestId:id.split(':')[0],call:{id,name,arguments:args,type:'toolCall',...(extra.rawArguments?{rawArguments:extra.rawArguments}:{})},
+    execution:{toolCallId:id,name,args,status,...(extra.operationId?{operationId:extra.operationId}:{}),...(details!==undefined?{result:details}:{})},
+    ...(details!==undefined?{result:{role:'toolResult',toolCallId:id,toolName:name,isError:status==='error',status,details,content:[]}}:{}),...extra};
+}
+const planFixture={items:[
+  {text:'读取计划面板与工作概览实现',status:'completed'},
+  {text:'检查长内容的换行与尺寸约束',status:'in_progress'},
+  {text:'修改摘要与原位编辑',status:'pending'},
+  {text:'整理本次变更',status:'pending'}
+]};
+const planPath='packages/ui/src/components/thread/ThreadPlan.tsx';
+const overviewPath='packages/ui/src/components/thread/ThreadOverview.tsx';
+const codeLines=[
+  'const current = plan.items.findIndex(item => item.status === "in_progress");',
+  'const summary = summarizePlan(plan, current);',
+  '',
+  'return <button className="thread-plan-summary" onClick={onInspect}>',
+  '  {summary.items.map(item => <PlanStep key={item.id} item={item} />)}',
+  '</button>;'
+];
+const longWrite=[
+  '# 计划面板的阅读与编辑','',
+  '## 计划摘要','',
+  '概览保留当前步骤附近的条目。点击摘要进入完整计划，条目较长时按实际宽度换行。','',
+  '## 原位编辑','',
+  '进入编辑状态后，输入区域替换原来的计划正文。保存和取消保留在面板上方。','',
+  '读取和编辑使用相同的面板宽度；代码标识符也应换行，例如 packages/ui/src/components/thread/ThreadOverview.tsx 和 packages/ui/src/components/thread/ThreadPlan.tsx。','',
+  '## 交互细节','',
+  '用户向上阅读时，流式内容继续接收，但不会把阅读位置拉回底部。',
+  '计划摘要只表达已有步骤，任务状态来自真实回执。',
+  '取消编辑时恢复原内容；保存失败时保留草稿。'
+].join('\n');
+const baseIntro=[
+  message('r1','我先看一下计划面板和工作概览的实现。'),
+  thought('r1:thinking','需要先找到计划的渲染位置，以及阅读与编辑状态如何切换。'),
+  tool('r1:read-plan','file_read',{path:planPath,startLine:70,endLine:130},{records:[{path:planPath,kind:'window',data:{startLine:70,lines:codeLines}}]}),
+  tool('r1:read-overview','file_read',{path:overviewPath,startLine:120,endLine:180},{records:[{path:overviewPath,kind:'window',data:{startLine:120,lines:['<ThreadPlan summaryView={{ onInspect: () => show("plan") }} />','<section className="thread-overview-section">{childTasks}</section>']}}]})
+];
+const searchEvent=tool('r2:search','file_search',{query:'summaryView|overflow',fixedStrings:false,paths:['packages/ui/src/components/thread']},{records:[
+  {path:planPath,data:{line:118,preview:'summaryView={detail === "plan" ? undefined : { onInspect }}'}},
+  {path:overviewPath,data:{line:216,preview:'className="min-w-0 overflow-x-hidden"'}}
+]});
+const procEvent=tool('r2:cmd','process_spawn',{command:'rg',args:['-n','summaryView|overflow','packages/ui/src/components/thread'],mode:'pipe'},{processId:'proc-17',snapshot:{pid:14220,status:'running'},chunks:[{text:'ThreadPlan.tsx:118: summaryView\nThreadOverview.tsx:216: overflow-x-hidden\n'}]},'running');
+const childA=tool('r2:child-a','dispatch',{name:'Layout Scout',task:'检查工作概览在窄窗口下的布局与长路径换行。',tools:['file_read','file_search']},{threadId:'child-layout',branchId:'main',name:'Layout Scout'},'background',{child:{name:'Layout Scout',threadId:'child-layout',avatar:'slant-mint',state:'running'}});
+const childB=tool('r2:child-b','dispatch',{name:'Flow Review',task:'检查计划编辑与取消、保存失败时的草稿行为。'},{threadId:'child-flow',branchId:'main',name:'Flow Review'},'background',{child:{name:'Flow Review',threadId:'child-flow',avatar:'pebble-blue',state:'preparing'}});
+const invocationSource=e=>'await tools.invoke('+JSON.stringify({callId:e.id,name:e.call.name,arguments:e.call.arguments})+')';
+const scriptExample='const matches = '+invocationSource(searchEvent)+';\nconst process = '+invocationSource(procEvent)+';\nreturn matches;';
+const procDone=tool('r2:cmd','process_spawn',clone(procEvent.call.arguments),{processId:'proc-17',snapshot:{exitCode:0,status:'exited'},chunks:[{text:'ThreadPlan.tsx:118: summaryView\nThreadOverview.tsx:216: overflow-x-hidden\n'}]});
+const editEvent=tool('r3:edit','file_edit',{path:planPath,readVersion:'read-version:plan-demo',edits:[{oldText:'<PlanReader plan={plan} />',newText:'{editing ? <PlanEditor draft={draft} /> : <PlanReader plan={plan} />}'}]},{status:'applied',applied:true});
+const finalText=message('r4','计划摘要会保留当前步骤附近的条目，点击后进入完整计划。\n\n编辑在原位置进行；长内容跟随面板宽度换行。', 'stop');
+const mainEvents=[...baseIntro,message('r2','预览直接显示了完整计划。我会保留当前步骤的摘要，并让编辑区替换原来的正文。'),searchEvent,procEvent,childA];
+const scene=(id,label,group,prompt,frames,extra={})=>({id,label,group,prompt,frames,...extra});
+const frame=(events,state='running',extra={})=>({events,run:{state},plan:clone(planFixture),...extra});
+const scenarios=[
+  scene('mixed','常规执行与阶段转换','基础','工作概览里的计划太长了，帮我调整摘要、换行和编辑方式。',[
+    frame(baseIntro.slice(0,2)),frame(baseIntro),frame(mainEvents),
+    frame([...mainEvents,thought('r3:thinking','编辑区应该直接替换原文，保存前保留原始草稿。',true),tool('r3:edit','file_edit',{path:planPath},undefined,'running',{generating:true})]),
+    frame([...mainEvents,editEvent,finalText],'completed')
+  ],{initial:2}),
+  scene('text','纯对话 · 无工具','基础','为什么计划摘要最好围绕当前步骤？',[
+    frame([message('text1','当前步骤是用户最需要关注的位置。摘要保留它和相邻条目，', 'pending')]),
+    frame([message('text1','当前步骤是用户最需要关注的位置。摘要保留它和相邻条目，既能说明正在做什么，也能交代前后关系。\n\n完整计划仍然保留在专用面板，需要回顾或编辑时可以直接进入。','stop')],'completed',{plan:null})
+  ],{initial:1}),
+  scene('thinking','长思考 · 流式与阅读窗口','基础','综合考虑计划、草稿与会话滚动，再决定怎么调整。',[
+    frame([thought('think:content','先分别梳理计划状态与面板状态。',true)]),
+    frame([thought('think:content',Array.from({length:14},(_,i)=>(i+1)+'. '+['计划来自已有步骤，不需要通过工具标题解释每个步骤的用途。','概览的摘要与完整计划应保留同一个原始来源。','编辑中的草稿需要在保存失败和并发更新时保留。','用户阅读历史时，新内容不能重新定位整个会话。'][i%4]).join('\n\n'),true)]),
+    frame([thought('think:content',Array.from({length:14},(_,i)=>(i+1)+'. '+['先确认实际数据，再安排呈现层级。','长内容进入有足够面积的阅读窗口。','状态变化时保持用户的滚动位置。'][i%3]).join('\n\n')),message('think-final','可以分别处理计划内容、编辑草稿和界面展开状态，让它们各自保持连续。','stop')],'completed')
+  ],{initial:1}),
+  scene('write','文件写入 · 参数与内容流式到达','执行','把计划面板的交互约定写到 docs/plan-notes.md。',[
+    frame([message('w1','我把交互约定写进文档。'),tool('w1:write','file_write',{},undefined,'running',{generating:true,rawArguments:'{"path":'})]),
+    frame([message('w1','我把交互约定写进文档。'),tool('w1:write','file_write',{path:'docs/plan-notes.md',content:longWrite.slice(0,115)},undefined,'running',{generating:true})]),
+    frame([message('w1','我把交互约定写进文档。'),tool('w1:write','file_write',{path:'docs/plan-notes.md',content:longWrite},undefined,'running',{generating:true})]),
+    frame([message('w1','我把交互约定写进文档。'),tool('w1:write','file_write',{path:'docs/plan-notes.md',content:longWrite},{status:'applied',applied:true}),message('w2','已写入 docs/plan-notes.md。','stop')],'completed')
+  ],{initial:2}),
+  scene('script','脚本 · 子调用与命令输出','执行','看看哪些地方使用了 summaryView，再读一下相关文件。',[
+    frame([message('s1','我先查找使用位置。'),tool('s1:script','script_run',{environmentId:'env-7',script:scriptExample},undefined,'running',{children:[searchEvent,procEvent],childrenComplete:false})]),
+    frame([message('s1','我先查找使用位置。'),tool('s1:script','script_run',{environmentId:'env-7',script:scriptExample},{valueText:'2 matches'},'success',{children:[searchEvent,clone(procDone)],childrenComplete:true}),message('s2','找到两处相关实现，可以从 ThreadPlan.tsx 开始看。','stop')],'completed')
+  ],{initial:0}),
+  scene('parallel','多个子 Agent · 一项失败主任务继续','协作','分开检查布局和编辑流程，主会话继续处理样式。',[
+    frame([message('p1','布局和编辑流程分别检查，我继续看样式。'),clone(childA),clone(childB),tool('p1:style','file_read',{path:'packages/ui/src/styles/workbench.css',startLine:210,endLine:241},{records:[]},'running')]),
+    frame([message('p1','布局和编辑流程分别检查，我继续看样式。'),{...clone(childA),child:{...childA.child,state:'completed',report:{detail:'内容列需要允许收缩，连续路径应自然换行。'}}},{...clone(childB),child:{...childB.child,state:'failed',reason:'Preparing child source: source unavailable'}},message('p2','布局检查已经返回。编辑流程的子任务准备失败，我继续从当前会话读取这部分实现。'),clone(baseIntro[2])]),
+    frame([message('p1','布局和编辑流程分别检查，我继续看样式。'),{...clone(childA),child:{...childA.child,state:'completed',report:{detail:'内容列需要允许收缩。'}}},{...clone(childB),child:{...childB.child,state:'failed',reason:'Preparing child source: source unavailable'}},message('p3','布局检查已返回；编辑流程仍有一项未完成。','stop')],'completed')
+  ],{initial:1}),
+  scene('question','询问 · 长选项与自由输入','需要介入','调整计划编辑的行为。',[
+    frame([message('q1','这里有两种编辑方式，需要确定你希望保留哪一种。'),tool('q1:ask','ask_user',{question:'计划更新时，如果你正在编辑一份草稿，应当怎样处理？',options:['保留我的草稿，并提供查看最新计划的入口；等我完成比较后，再决定是否合并更新。','先保留最新的计划版本，我退出编辑后再重新打开；不要直接丢掉已经输入的内容。']},undefined,'running')],'waiting'),
+    frame([message('q1','这里有两种编辑方式，需要确定你希望保留哪一种。'),tool('q1:ask','ask_user',{question:'计划更新时，如果你正在编辑一份草稿，应当怎样处理？'}, {answer:'保留我的草稿，并提供查看最新计划的入口。'}),message('q2','按保留草稿的方式处理。')])
+  ],{initial:0}),
+  scene('permission','权限 · 原操作与精确参数','需要介入','把本次结果写到项目外的报告目录。',[
+    frame([message('a1','准备写入指定的报告目录。'),{kind:'permission',id:'permission-1',operation:{phase:'waiting',waiting_on:'permission:report',result:{kind:'control',value:{permission:{id:'permission:report',decision:null,call:{name:'file_write',arguments:{path:'D:/reports/plan-review.md',content:'计划面板修改记录'}},scope:{ownerReference:'file-source:reports',ownerGeneration:3,reason:'目标位于当前项目允许目录之外。'},actor:{account:'local-user',authority:'workspace'}}}}}}],'waiting'),
+    frame([message('a1','准备写入指定的报告目录。'),tool('a1:write','file_write',{path:'D:/reports/plan-review.md',content:'计划面板修改记录'},{status:'applied',applied:true}),message('a2','已写入指定目录。','stop')],'completed')
+  ],{initial:0}),
+  scene('retry','模型请求 · 自动重试','故障与边界','继续检查计划编辑逻辑。',[
+    frame([...baseIntro,{kind:'retry',id:'retry-1',requestId:'r2',attempt:1,delay_ms:1000}],'waiting'),
+    frame([...baseIntro,{kind:'retry',id:'retry-1',requestId:'r2',attempt:2,delay_ms:3000}],'waiting'),
+    frame([...baseIntro,message('retry-answer','请求已继续，下面处理计划编辑的切换逻辑。')])
+  ],{initial:1}),
+  scene('failure','读取失败 · 随后有另一条成功读取','故障与边界','读取 .varin-healthcheck/r5/multi.txt。',[
+    frame([tool('f1:read','file_read',{path:'.varin-healthcheck/r5/multi.txt',offset:-5},{error:{message:'Invalid offset: -5'}},'error')]),
+    frame([tool('f1:read','file_read',{path:'.varin-healthcheck/r5/multi.txt',offset:-5},{error:{message:'Invalid offset: -5'}},'error'),message('f2','读取起点超出了范围，我从文件开头重新读取。'),tool('f2:read','file_read',{path:'.varin-healthcheck/r5/multi.txt',offset:0},{records:[{path:'.varin-healthcheck/r5/multi.txt',kind:'window',data:{startLine:1,lines:['first line','第二行内容','last line']}}]})]),
+    frame([tool('f1:read','file_read',{path:'.varin-healthcheck/r5/multi.txt',offset:-5},{error:{message:'Invalid offset: -5'}},'error'),message('f2','读取起点超出了范围，我从文件开头重新读取。'),tool('f2:read','file_read',{path:'.varin-healthcheck/r5/multi.txt',offset:0},{records:[{path:'.varin-healthcheck/r5/multi.txt',kind:'window',data:{startLine:1,lines:['first line','第二行内容','last line']}}]}),message('f3','文件已读取，包含三行内容。','stop')],'completed')
+  ],{initial:1}),
+  scene('unknown','写入效果未知 · 保留原操作','故障与边界','更新计划说明文件。',[
+    frame([message('u1','正在更新说明文件。'),tool('u1:write','file_write',{path:'docs/plan-notes.md',content:longWrite},undefined,'unknown',{operationId:'operation:write-23'})],'waiting'),
+    frame([message('u1','正在更新说明文件。'),tool('u1:write','file_write',{path:'docs/plan-notes.md',content:longWrite},{applied:true},'success',{operationId:'operation:write-23'}),message('u2','已确认文件写入完成。','stop')],'completed')
+  ],{initial:0}),
+  scene('connection','观察中断 · 保留最后确认状态','故障与边界','查看进程的输出。',[
+    frame([clone(procEvent),{kind:'connection',id:'connection-1',connected:false,lastObservedAt:'14:36:08',message:'Kernel control connection disconnected'}]),
+    frame([clone(procEvent),tool('r2:output','process_read',{processId:'proc-17'},{chunks:[{text:'ThreadPlan.tsx:118: summaryView\n'}],snapshot:{status:'running'}})])
+  ],{initial:0}),
+  scene('cancelled','取消 · 已应用文件仍保留','故障与边界','先改计划面板，再处理其他组件。',[
+    frame([message('c1','先更新计划面板。'),clone(editEvent),clone(procEvent)],'running'),
+    frame([message('c1','先更新计划面板。'),clone(editEvent),{...clone(procEvent),execution:{...clone(procEvent.execution),status:'cancelled'}}],'cancelled')
+  ],{initial:1}),
+  scene('background','本轮结束 · 后台进程继续','执行','启动本地文档预览。',[
+    frame([message('b1','我启动预览进程。'),tool('b1:spawn','process_spawn',{command:'bun',args:['run','docs:dev'],mode:'pty'},{processId:'proc-docs',snapshot:{pid:18201,status:'running'},chunks:[{text:'Local: http://localhost:5173\n'}]},'background'),message('b2','文档预览已启动，进程会继续运行。','stop')],'completed')
+  ],{initial:0}),
+  scene('results','空结果 · 截断 · 未完整返回','故障与边界','搜索计划相关的内容。',[
+    frame([tool('e1:empty','file_search',{query:'oldPlanPopup',paths:['packages/ui/src']},{records:[]}),tool('e1:partial','file_search',{query:'plan',paths:['packages/ui/src']},{records:[{path:planPath,data:{line:20,preview:'export function ThreadPlan(...) {'}}],truncated:true,nextCursor:'cursor:page2'})]),
+    frame([tool('e1:empty','file_search',{query:'oldPlanPopup',paths:['packages/ui/src']},{records:[]}),tool('e1:partial','file_search',{query:'plan',paths:['packages/ui/src']},{records:[{path:planPath,data:{line:20,preview:'export function ThreadPlan(...) {'}}],truncated:true,nextCursor:'cursor:page2'}),message('e2','没有找到 oldPlanPopup。另一组结果尚未完整返回，当前已看到 ThreadPlan.tsx。','stop')],'completed')
+  ],{initial:0}),
+  scene('sparse','未知工具 · 参数不足 · 无额外标题','故障与边界','继续处理当前任务。',[
+    frame([tool('x1:call','file_read',{},undefined,'running',{generating:true}),tool('x1:mcp','mcp__workspace__inspect',{resource:'workspace:current'},{items:[]}),tool('x1:script','script_run',{environmentId:'env-7',script:'return 2 + 2;'}, {valueText:'4'})]),
+    frame([tool('x1:call','file_read',{path:planPath},{records:[]}),tool('x1:mcp','mcp__workspace__inspect',{resource:'workspace:current'},{items:[]}),tool('x1:script','script_run',{environmentId:'env-7',script:'return 2 + 2;'}, {valueText:'4'})])
+  ],{initial:0}),
+  scene('followup','后续任务 · 空列表与取消','协作','取消之前的文件触发任务，再看看还有没有后续任务。',[
+    frame([tool('fu1:cancel','follow_up',{action:'cancel',followupId:'followup:tool:1c9e8280-c563-414a-9eea-992525f52a40'},{followup:{id:'followup:tool:1c9e8280-c563-414a-9eea-992525f52a40',revision:3,state:'cancelled',trigger:{kind:'file',path:'.varin-healthcheck/r5/trigger.txt',condition:'exists'},sources:[{source_index:0,observed:false}]} }),tool('fu1:list','follow_up',{action:'list'},{followups:[]}),message('fu2','文件触发任务已取消，目前没有其他后续任务。','stop')],'completed')
+  ],{initial:0}),
+  scene('history','长会话 · 上翻阅读与新内容','基础','继续处理下一处布局。',[
+    frame([...Array.from({length:9},(_,i)=>({kind:'history-turn',id:'history-'+i,prompt:'检查第 '+(i+1)+' 处布局。',events:[message('h'+i,'我先读取相关文件。'),tool('h'+i+':read','file_read',{path:'packages/ui/src/components/thread/Section'+(i+1)+'.tsx',startLine:1,endLine:80},{records:[]}),message('h'+i+'a','这一处内容需要自然换行，下一步继续检查相邻组件。','stop')]})),...mainEvents])
+  ],{initial:0}),
+  scene('empty','新会话 · 输入与配置','基础','',[frame([], 'idle',{plan:null})],{initial:0})
+];
+const settingsCases=[
+  ['chat','聊天 · 三种模式与原有开关'],['web','网络与文档 · 辅助模型未选'],
+  ['web-remote','网络与文档 · 平台不可用'],['web-failure','网络与文档 · 保存失败'],
+  ['models','模型服务 · 对象编辑'],['defaults','对话默认 · 重试规则'],
+  ['defaults-project','对话默认 · 项目覆盖'],['storage','存储 · 实际分类'],
+  ['storage-partial','存储 · 统计不完整']
+];
+scenarios.push(scene('nested-dispatch','脚本内派发 · 子任务独立可见','协作','用脚本安排一次布局检查，再继续读取文件。',[
+  frame([message('nd1','先安排布局检查。'),tool('nd1:script','script_run',{environmentId:'env-7',script:invocationSource(childA)+';\n'+invocationSource(baseIntro[2])+';'},{valueText:'Task accepted'},'success',{children:[clone(childA),clone(baseIntro[2])],childrenComplete:true}),message('nd2','布局任务已经派发，我继续读取计划组件。'),clone(searchEvent)])
+],{initial:0}));
+scenarios.push(scene('run-failed','本轮失败 · 上下文准备失败','故障与边界','继续处理计划组件。',[
+  frame([...baseIntro],'failed',{runFailure:{message:'下一次模型请求获准执行前，上下文准备失败。'}})
+],{initial:0}));
+scenarios.push(scene('write-conflict','文件编辑冲突 · 未应用','故障与边界','修改计划面板的阅读区域。',[
+  frame([message('wc1','我准备更新计划组件。'),tool('wc1:edit','file_edit',clone(editEvent.call.arguments),{applied:false,error:{message:'File version conflict: readVersion no longer matches the current file.'}},'error')]),
+  frame([message('wc1','我准备更新计划组件。'),tool('wc1:edit','file_edit',clone(editEvent.call.arguments),{applied:false,error:{message:'File version conflict: readVersion no longer matches the current file.'}},'error'),message('wc2','文件版本已经变化，这次修改没有应用。我会先读取当前内容。'),clone(baseIntro[2])])
+],{initial:0}));
+const historyScenario=scenarios.find(sc=>sc.id==='history');
+historyScenario.frames.push(frame([...clone(historyScenario.frames[0].events),message('history-new','我继续处理下一处组件，已经完成的段落会保留在原位置。')]));
+const state={
+  view:'chat',mode:'dialogue',scene:'mixed',frame:2,playing:false,sources:false,
+  sidebar:true,overview:'full',overviewWidth:280,panel:'overview',open:new Set(),
+  thoughtOpen:new Map(),thoughtScroll:new Map(),follow:true,scroll:0,prompt:'',answer:'',answerText:'',
+  planDraft:'',editingPlan:false,planOverride:null,questionAnswered:false,questionHidden:false,permissionChoice:null,
+  settingsCase:'web',settingsPage:'web',search:'',settingsFeedback:'',settingsError:false,
+  prefs:{thinking:true,autoThinking:false,commands:false,edits:true,wrap:true,activity:'collapsed'},
+  web:{enabled:true,provider:'default',reader:true,readerModel:'',render:false,docling:'docling',tesseract:'tesseract',language:'eng'},
+  model:{name:'DeepSeek',base:'https://api.deepseek.com',requestModel:'deepseek-flash',editing:false},
+  retry:{enabled:true,maxRetries:2,initialDelayMs:1000,maxDelayMs:30000,rules:[{field:'message',match:'contains',pattern:'overloaded',action:'retry'}]},
+  storage:{scope:'all',cleanPreview:false,cleaned:false},menu:null
+};
+let timer=null;
+const currentScene=()=>scenarios.find(item=>item.id===state.scene);
+const currentFrame=()=>currentScene().frames[state.frame];
+const modeNames={live:'按时间展开',dialogue:'对话优先',sorted:'集中展示回答'};
+const I=(name,cls='')=>'<svg class="'+cls+'" viewBox="0 0 24 24" aria-hidden="true">'+(ICONS[name]||ICONS['question'])+'</svg>';
+const Avatar=id=>'<span class="agent-avatar">'+AVATARS[id||'slant-mint']+'</span>';
+const Btn=(action,label,cls='text-btn',attr='')=>'<button type="button" class="'+cls+'" data-action="'+action+'" '+attr+'>'+label+'</button>';
+const rawOf=e=>e.kind==='tool'?{call:e.call,execution:e.execution,result:e.result,...(e.generating?{streamingArguments:true}:{}),...(e.child?{childFromThreadSnapshot:e.child}:{}),...(e.children?{observedChildren:e.children.map(rawOf),childrenComplete:e.childrenComplete}:{})}:e;
+const allEvents=(events=currentFrame().events)=>events.flatMap(e=>[e,...(e.children?allEvents(e.children):[]),...(e.kind==='history-turn'?allEvents(e.events):[])]);
+const root=document.documentElement;
+const byId=id=>document.getElementById(id);
+const openerKey=id=>state.scene+':'+state.mode+':'+id;
+const isOpen=(id,defaultOpen=false)=>state.open.has(openerKey(id))?true:state.open.has('closed:'+openerKey(id))?false:defaultOpen;
+function Fold(id,head,body,{cls='process',headClass='disclosure-head',defaultOpen=false,source=null}={}){
+  const opened=isOpen(id,defaultOpen),key=openerKey(id),safe=key.replace(/[^a-zA-Z0-9_-]/g,'-');
+  return '<section class="'+cls+'"><div class="tool-heading-shell"><button class="'+headClass+'" data-fold="'+H(id)+'" aria-expanded="'+opened+'" aria-controls="fold-'+safe+'">'+head+'</button>'+
+    (source?'<button class="source-mark" data-source="'+H(source)+'" aria-label="查看此条目的字段来源">字段</button>':'')+
+    '</div><div class="fold '+(opened?'open':'')+'" data-fold-body="'+H(id)+'" id="fold-'+safe+'" '+(opened?'':'inert')+'><div class="fold-clip">'+body+'</div></div></section>';
+}
+function setFold(id){
+  const current=isOpen(id,Boolean(document.querySelector('[data-fold="'+CSS.escape(id)+'"]')?.getAttribute('aria-expanded')==='true'));
+  const key=openerKey(id);state.open.delete(key);state.open.delete('closed:'+key);
+  state.open.add(current?'closed:'+key:key);
+  document.querySelectorAll('[data-fold="'+CSS.escape(id)+'"]').forEach(el=>el.setAttribute('aria-expanded',String(!current)));
+  document.querySelectorAll('[data-fold-body="'+CSS.escape(id)+'"]').forEach(el=>{el.classList.toggle('open',!current);el.inert=current;});
+  followAfterChange();
+}
+function statusOf(e){return e.generating?'generating':e.execution?.status||'unknown'}
+function statusHtml(e){
+  const status=statusOf(e);
+  const labels={generating:'准备调用',running:'进行中',background:'后台运行',success:'已完成',error:'失败',unknown:'结果待确认',cancelled:'已取消'};
+  if(status==='success')return '';
+  return '<span class="tool-status '+(status==='error'?'error':status==='unknown'?'warning':'')+'">'+
+    I(status==='running'||status==='generating'?'loader-4':status==='error'?'error-warning':status==='unknown'?'question':status==='cancelled'?'stop-circle':'time',status==='running'?'spin':'')+
+    H(labels[status]||status)+'</span>';
+}
+function processCommand(e){
+  const a=e.call.arguments||{};
+  if(a.command)return [a.command,...(a.args||[]).map(v=>/\s/.test(String(v))?JSON.stringify(v):v)].join(' ');
+  if(a.processId){
+    const original=allEvents().find(x=>x.kind==='tool'&&x.call.name==='process_spawn'&&x.execution?.result?.processId===a.processId);
+    if(original)return processCommand(original);
+    return a.processId;
+  }
+  const pid=e.execution?.result?.snapshot?.pid;
+  return typeof pid==='number'?'PID '+pid:'';
+}
+function toolInfo(e){
+  const a=e.call.arguments||{},d=e.result?.details??e.execution?.result??{},n=e.call.name;
+  let label=n,subject='',receipt='',symbol='code',origins=[];
+  if(n==='file_read'){label='读取文件';symbol='file-text';subject=a.path||(a.files||[]).map(x=>x.path).filter(Boolean).join(', ');receipt=typeof a.startLine==='number'?'L'+a.startLine+(a.endLine?'–'+a.endLine:''):typeof a.offset==='number'?'从第 '+a.offset+' 字节读取':'';origins=['call.arguments.path / files[].path','call.arguments.startLine / endLine / offset'];}
+  else if(n==='file_search'){label='搜索';symbol='search';subject=[a.query||(a.queries||[]).join(' · '),(a.paths||[]).join(', ')].filter(Boolean).join(' · ');receipt=Array.isArray(d.records)?d.records.length+' 项匹配':'';origins=['call.arguments.query / queries','call.arguments.paths','result.details.records.length'];}
+  else if(n==='file_list'){label='列出';symbol='folder-open';subject=(a.paths||[]).join(', ')||'.';receipt=Array.isArray(d.records)?d.records.length+' 项':'';origins=['call.arguments.paths','result.details.records.length'];}
+  else if(n==='file_write'||n==='file_edit'){label=n==='file_write'?'写入文件':'编辑文件';symbol='file-edit';subject=a.path||'';origins=['call.arguments.path','call.arguments.content / edits[].oldText / edits[].newText','result.details.applied / status'];}
+  else if(n.startsWith('process_')||n==='wait_process'){
+    label=({process_spawn:'运行进程',process_read:'读取进程输出',process_write:'发送进程输入',process_inspect:'查看进程状态',process_stop:'停止进程',process_resize:'调整终端',wait_process:'等待进程'})[n]||n;symbol='terminal';subject=processCommand(e);
+    if(n==='process_write'&&a.text)subject+=' · '+a.text.replace(/\n/g,' ↵ ');
+    if(n==='process_resize')subject+=' · '+a.cols+' × '+a.rows;
+    receipt=typeof d.snapshot?.exitCode==='number'?'退出码 '+d.snapshot.exitCode:typeof d.confirmedBytes==='number'?d.confirmedBytes+' 字节':'';
+    origins=['call.arguments.command + args','call.arguments.processId → 已观测的 process_spawn','result.details.snapshot.exitCode / confirmedBytes'];
+  } else if(n==='script_run'){
+    const names=(e.children||[]).map(x=>x.call.name);
+    label=a.title||(names.every(x=>['file_read','file_search','file_list'].includes(x))&&names.length?'读取与搜索文件':names.some(x=>x.startsWith('process_'))?'脚本与进程':'运行脚本');
+    symbol='code-sslash';receipt=e.children?e.children.length+' 次调用':'JS';
+    origins=['call.arguments.title（可选；本例未提供）','已观测子调用名称的固定分类','已观测子调用数量，不补造未加载调用'];
+  } else if(n==='follow_up'){
+    label='后续任务';symbol='timer';subject=({list:'列出',cancel:'取消',pause:'暂停',resume:'继续',register:'创建'})[a.action]||a.action||'';
+    if(d.followup?.trigger?.path)subject+=' · '+d.followup.trigger.path;
+    receipt=d.followup?.state==='cancelled'?'已取消':Array.isArray(d.followups)?d.followups.length+' 项':'';
+    origins=['call.arguments.action','result.details.followup.state / trigger.path','result.details.followups'];
+  } else if(n==='dispatch'){
+    label=e.child?.name||d.name||a.name||'子任务';subject=a.task||'';origins=['child.name / result.details.name / call.arguments.name','call.arguments.task','child.state'];
+  } else if(n==='ask_user'){label='询问';subject=a.question||'';origins=['call.arguments.question','call.arguments.options'];}
+  else{subject='';origins=['call.name；通用参数没有可确定标题时留空'];}
+  return {label,subject,receipt,symbol,origins};
+}
+function rawDetails(e){
+  return '<details class="tool-raw"><summary>调用详情</summary><pre>'+H(JSON.stringify(rawOf(e),null,2))+'</pre></details>';
+}
+function shortSubject(e,info){
+  const path=e.call?.arguments?.path;
+  if(typeof path!=='string'||!e.call.name.startsWith('file_'))return info.subject;
+  const parts=path.split(/[\\/]/),base=parts.at(-1);
+  const same=allEvents().filter(x=>x.kind==='tool'&&typeof x.call.arguments.path==='string'&&x.call.arguments.path.split(/[\\/]/).at(-1)===base);
+  return new Set(same.map(x=>x.call.arguments.path)).size>1?parts.slice(-2).join('/'):base;
+}
+function renderThinking(e){
+  if(!state.prefs.thinking)return '';
+  const key=state.scene+':'+e.id,opened=state.thoughtOpen.has(key)?state.thoughtOpen.get(key):state.prefs.autoThinking;
+  const scrollState=state.thoughtScroll.get(key),follow=scrollState?.follow!==false;
+  return '<section class="thinking-block" data-open="'+opened+'" data-streaming="'+Boolean(e.streaming)+'" data-thought-id="'+H(key)+'">'+
+    '<button type="button" class="thinking-heading" data-think="'+H(e.id)+'" aria-expanded="'+opened+'" aria-controls="thinking-'+H(e.id)+'">'+
+    I('brain','thinking-icon')+'<span class="thinking-label">思考</span><span class="thinking-preview" aria-hidden="true"><span class="thinking-preview-text">'+H(e.thinking)+'</span></span>'+I('arrow-right-s','thinking-chevron')+'</button>'+
+    '<div class="thinking-panel" id="thinking-'+H(e.id)+'" aria-hidden="'+!opened+'" '+(opened?'':'inert')+'><div class="thinking-panel-clip"><div class="thinking-window">'+
+    '<div class="thinking-scroll" role="region" aria-label="思考内容" data-thinking-scroll="'+H(key)+'" tabindex="'+(opened?'0':'-1')+'"><div class="thinking-body">'+H(e.thinking)+'</div></div>'+
+    '<button class="thinking-follow" data-think-follow="'+H(key)+'" '+(follow?'hidden':'')+'>'+I('arrow-down')+'跟随最新内容</button></div></div></div></section>';
+}
+function fileResults(e){
+  const d=e.result?.details??e.execution?.result??{},rows=d.records;
+  if(!Array.isArray(rows))return '';
+  if(!rows.length)return '<p class="small muted">没有结果</p>';
+  return rows.map(row=>{
+    const data=row.data||{};
+    return '<div class="match"><span class="match-path">'+I(row.kind==='directory'?'folder':'file-text')+' '+H(row.path)+(data.line?' · L'+data.line:'')+'</span>'+
+      (Array.isArray(data.lines)?'<div class="read-code">'+data.lines.map((text,index)=>'<code><span class="line-number">'+((data.startLine||1)+index)+'</span>'+H(text)+'</code>').join('')+'</div>':data.preview?'<code>'+H(data.preview)+'</code>':'')+'</div>';
+  }).join('');
+}
+function renderDiff(e){
+  const a=e.call.arguments||{},d=e.result?.details||{};
+  const changes=Array.isArray(a.edits)?a.edits:[];
+  const content=typeof a.content==='string'?a.content:changes.map(change=>change.newText).join('\n');
+  if(!a.path&&!content)return '';
+  const applied=d.applied===true||d.status==='applied';
+  const phase=applied?'已应用':statusOf(e)==='error'?'未应用':statusOf(e)==='unknown'?'结果待确认':e.generating?'内容正在生成':'等待执行回执';
+  const lines=changes.filter(change=>typeof change.oldText==='string').map(change=>({type:'removed',text:change.oldText})).concat(content.split('\n').map(text=>({type:'added',text})));
+  return '<div class="diff"><div class="diff-head">'+I('file-code')+'<button data-action="inspect-file" data-event="'+H(e.id)+'">'+H(a.path||'写入文件')+'</button>'+I('arrow-down-s')+'</div>'+
+    '<div class="diff-body" data-output-scroll="'+H(e.id)+'">'+lines.map((line,index)=>'<div class="diff-line '+line.type+'"><span class="line-number">'+(index+1)+'</span><span class="diff-prefix">'+(line.type==='added'?'+':'−')+'</span><span>'+H(line.text||' ')+'</span></div>').join('')+'</div>'+
+    '<div class="diff-foot"><span>'+phase+'</span><span>'+(e.call.name==='file_edit'?'修改预览':'写入内容预览')+'</span></div></div>';
+}
+function renderChild(e){
+  const a=e.call.arguments,d=e.child||{},info=toolInfo(e);
+  const stateLabel={preparing:'准备中',running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',settling:'正在归档',stopping:'正在停止'}[d.state]||'已派发';
+  const head=Avatar(d.avatar)+'<span class="agent-name">'+H(info.label)+'</span><span class="task-text" title="'+H(a.task||'')+'">'+H(a.task||'')+'</span><span class="tool-status '+(d.state==='failed'?'error':'')+'">'+stateLabel+'</span>'+I('arrow-right-s','chevron');
+  const body='<div class="tool-body"><p class="task-detail">'+H(a.task||'')+'</p>'+(d.reason?'<p class="call-failure">'+H(d.reason)+'</p>':'')+
+    '<div class="actions" style="margin-top:10px">'+Btn('child-panel','查看会话 '+I('external-link'),'text-btn','data-event="'+e.id+'"')+
+    (['preparing','running'].includes(d.state)?Btn('child-stop','停止任务','text-btn','data-event="'+e.id+'"'):'')+'</div>'+
+    (d.report?.detail?'<p class="task-detail" style="margin-top:13px">'+H(d.report.detail)+'</p>':'')+rawDetails(e)+'</div>';
+  return Fold(e.id,head,body,{cls:'delegation',headClass:'tool-head',source:e.id});
+}
+function renderQuestion(e){
+  const a=e.call.arguments||{},answer=e.result?.details?.answer;
+  if(answer||state.questionAnswered)return '<div class="inline-state">'+I('check')+'<div><p>已回答</p><p class="muted">'+H(answer||[state.answer,state.answerText].filter(Boolean).join('\n\n'))+'</p></div></div>';
+  return '<section class="request-block" data-question="'+e.id+'"><h3>'+H(a.question)+'</h3><div class="question-options">'+(a.options||[]).map((option,index)=>
+    '<label class="question-option"><input type="radio" name="question" value="'+index+'" '+(state.answer===option?'checked':'')+'><span>'+H(option)+'</span></label>').join('')+'</div>'+
+    (state.answer?Btn('clear-answer','清除选择'):'')+'<textarea class="question-free" id="question-free" aria-label="你的回答" placeholder="你的回答，也可以补充说明…">'+H(state.answerText)+'</textarea>'+
+    '<div class="actions">'+Btn('answer','提交','button primary',!state.answer&&!state.answerText.trim()?'disabled':'')+Btn('cancel-question','取消','button')+
+    '<button class="source-mark" data-source="'+e.id+'">字段</button></div></section>';
+}
+function renderPermission(e){
+  const p=e.operation.result.value.permission;
+  return '<section class="request-block"><h3>是否允许这次工具操作？</h3><p>'+H(p.call.name)+' · '+H(p.call.arguments.path||'')+'</p><p class="setting-hint">'+H(p.scope.reason)+' 本次决定仅适用于这次操作及其参数。</p>'+
+    '<details class="tool-raw"><summary>查看精确参数与作用范围</summary><pre>'+H(JSON.stringify(p,null,2))+'</pre></details>'+
+    (state.permissionChoice?'<p class="small">'+(state.permissionChoice==='allow'?'已允许一次':'已拒绝')+'</p>':'<div class="actions">'+Btn('allow','允许一次','button primary')+Btn('deny','拒绝','button')+'</div>')+'</section>';
+}
+function renderTool(e){
+  if(e.call.name==='dispatch')return renderChild(e);
+  if(e.call.name==='ask_user'){
+    if(e.result||state.questionAnswered)return renderQuestion(e);
+    return '<div class="inline-state">'+I('question')+'<div><p>'+H(e.call.arguments.question)+'</p>'+Btn('show-question','等待回答 · 打开问题')+'</div><button class="source-mark" data-source="'+e.id+'">字段</button></div>';
+  }
+  const info=toolInfo(e),a=e.call.arguments||{},d=e.result?.details??e.execution?.result??{},status=statusOf(e);
+  let receipt=info.receipt,body='';
+  const writing=['file_write','file_edit'].includes(e.call.name);
+  if(writing&&a.path&&state.prefs.edits){
+    const failure=d.error?.message||d.error;
+    return '<section class="tool">'+renderDiff(e)+(typeof failure==='string'?'<p class="call-failure">'+H(failure)+'</p>':'')+
+      (status==='unknown'?Btn('inspect-operation','查看原操作','text-btn','data-event="'+e.id+'"'):'')+
+      '<div class="actions"><button class="source-mark" data-source="'+e.id+'">字段</button></div>'+rawDetails(e)+'</section>';
+  }
+  if(e.call.name.startsWith('file_'))body+=fileResults(e);
+  if(writing)body+=renderDiff(e);
+  if(e.call.name.startsWith('process_')||e.call.name==='wait_process'){
+    const text=(d.chunks||[]).map(part=>part.text||'').join('');
+    body+='<div class="console">'+(a.command?'<div class="console-command">› '+H(processCommand(e))+'</div>':'')+
+      (text?'<pre class="console-output" data-output-scroll="'+e.id+'">'+H(text)+'</pre>':'')+
+      '<div class="console-foot"><span>'+H(d.processId||a.processId||'')+'</span><span>'+H(d.snapshot?.status||'')+'</span>'+
+      (typeof d.snapshot?.exitCode==='number'?'<span>退出码 '+d.snapshot.exitCode+'</span>':'')+'</div></div>';
+  }
+  if(e.call.name==='script_run'){
+    if(d.valueText)body+='<pre class="plain-output">'+H(d.valueText)+'</pre>';
+    if(e.children)body+='<div class="scope-caption">内部调用 · '+e.children.length+' 项已观测'+(e.childrenComplete?'':' · 记录尚未完整')+'</div>'+e.children.filter(x=>x.call.name!=='dispatch').map(renderTool).join('');
+    if(a.script)body+='<details class="tool-raw"><summary>脚本源码</summary><pre>'+H(a.script)+'</pre></details>';
+  }
+  if(e.call.name==='follow_up'){
+    if(Array.isArray(d.followups))body+='<p class="small">'+(d.followups.length?d.followups.length+' 个后续任务':'暂无后续任务')+'</p>';
+    if(d.followup)body+='<div class="small"><p>'+H(d.followup.trigger?.path||'')+'</p><p class="muted">'+(d.followup.state==='cancelled'?'已取消 · 取消前条件尚未触发':'等待条件')+'</p></div>';
+  }
+  const error=d.error?.message||d.error||d.message||d.reason;
+  if(typeof error==='string')body+='<p class="call-failure">'+H(error)+'</p>';
+  if(d.truncated||d.partial||d.nextCursor)body+='<p class="small warning" style="margin:8px 0">结果尚未完整返回</p>';
+  if(status==='unknown')body+='<p class="small warning">尚未取得明确的结果回执。</p>'+Btn('inspect-operation','查看原操作','text-btn','data-event="'+e.id+'"');
+  body+=rawDetails(e);
+  const head=I(info.symbol)+'<span class="tool-title"><span class="tool-label" title="'+H(info.label)+'">'+H(info.label)+'</span>'+(info.subject?'<span class="tool-subject" title="'+H(info.subject)+'">'+H(shortSubject(e,info))+'</span>':'')+'</span>'+
+    (receipt?'<span class="tool-receipt">'+H(receipt)+'</span>':'')+statusHtml(e)+I('arrow-right-s','chevron');
+  return Fold(e.id,head,'<div class="tool-body">'+body+'</div>',{cls:'tool',headClass:'tool-head',defaultOpen:e.call.name.startsWith('process_')&&state.prefs.commands||status==='error',source:e.id});
+}
+function renderNotice(e){
+  if(e.kind==='retry')return '<div class="inline-state">'+I('refresh')+'<div><p>模型请求正在重试 · 第 '+e.attempt+' 次</p><p class="muted small">本次等待 '+e.delay_ms+' ms</p></div><button class="source-mark" data-source="'+e.id+'">字段</button></div>';
+  if(e.kind==='connection')return '<div class="inline-state wait-state">'+I('cloud-off')+'<div><p>观察连接中断</p><p class="muted small">最后收到进度：'+H(e.lastObservedAt)+'。当前任务的执行状态尚未更新。</p><details class="tool-raw"><summary>技术详情</summary><pre>'+H(e.message)+'</pre></details>'+Btn('next','恢复观察','button')+'</div></div>';
+  return '';
+}
+function renderEvent(e,context='normal'){
+  if(e.kind==='text')return '<div class="'+(context==='activity'?'activity-note':'assistant-text')+(e.stopReason==='stop'?' final':'')+(e.stopReason==='pending'?' stream-caret':'')+'" data-message="'+H(e.id)+'">'+H(e.text)+'</div>';
+  if(e.kind==='thinking')return renderThinking(e);
+  if(e.kind==='tool')return renderTool(e);
+  if(e.kind==='permission')return '';
+  if(e.kind==='retry'||e.kind==='connection')return renderNotice(e);
+  if(e.kind==='history-turn')return '<div class="history-turn"><div class="user-message">'+H(e.prompt)+'</div>'+renderEvents(e.events,'completed')+'<hr class="turn-divider"></div>';
+  return '';
+}
+function leafTools(events){return events.flatMap(e=>e.kind==='tool'?e.call.name==='script_run'&&e.children?.length?leafTools(e.children):[e]:[]).filter(e=>e.call.name!=='dispatch'&&e.call.name!=='ask_user')}
+function summary(events,active){
+  const calls=leafTools(events);
+  const pending=calls.filter(e=>['running','generating'].includes(statusOf(e)));
+  if(active&&pending.length){const last=pending.at(-1),info=toolInfo(last);return (last.generating?'正在准备'+(info.label.endsWith('文件')?'文件操作':'调用'):'正在'+({file_read:'读取',file_search:'搜索',process_spawn:'运行',file_write:'写入',file_edit:'编辑'}[last.call.name]||info.label))+(info.subject?' '+shortSubject(last,info):'')+(pending.length>1?' · 另有 '+(pending.length-1)+' 项进行中':'');}
+  if(active&&!calls.length&&events.some(e=>e.kind==='thinking'))return '正在思考';
+  const successful=calls.filter(e=>statusOf(e)==='success');
+  const reads=successful.filter(e=>e.call.name==='file_read');
+  const search=successful.filter(e=>e.call.name==='file_search');
+  const commands=successful.filter(e=>e.call.name==='process_spawn');
+  const writes=successful.filter(e=>['file_edit','file_write'].includes(e.call.name)&&(e.result?.details?.applied===true||e.result?.details?.status==='applied'));
+  const other=successful.length-reads.length-search.length-commands.length-writes.length;
+  const parts=[];
+  if(reads.length)parts.push('读取文件 '+reads.length+' 次');
+  if(search.length)parts.push('搜索 '+search.length+' 次');
+  if(commands.length)parts.push('运行命令 '+commands.length+' 次');
+  if(writes.length)parts.push('修改 '+new Set(writes.map(e=>e.call.arguments.path)).size+' 个文件');
+  if(other)parts.push('完成 '+other+' 项操作');
+  const failures=calls.filter(e=>statusOf(e)==='error').length,unknown=calls.filter(e=>statusOf(e)==='unknown').length,background=calls.filter(e=>statusOf(e)==='background').length;
+  if(failures)parts.push(failures+' 次失败');
+  if(unknown)parts.push(unknown+' 项结果待确认');
+  if(background)parts.push(background+' 项后台运行');
+  if(!parts.length)parts.push(events.some(e=>e.kind==='thinking')?'思考过程':calls.some(e=>statusOf(e)==='cancelled')?'已取消':'执行过程');
+  return parts.join(' · ');
+}
+function processGroup(events,id,active=false,sorted=false){
+  if(!events.length)return '';
+  return Fold(id,I('arrow-right-s','chevron')+(active?'<span class="running-dot"></span>':'')+
+    '<span class="label">'+(sorted?'活动 · ':'')+H(summary(events,active))+'</span>',
+    '<div class="process-body">'+events.map(e=>renderEvent(e,sorted?'activity':'normal')).join('')+'</div>',
+    {defaultOpen:sorted&&state.prefs.activity==='summary'});
+}
+function renderEvents(events,runState=currentFrame().run.state){
+  const active=['running','waiting'].includes(runState);
+  if(state.mode==='live')return events.map(e=>renderEvent(e)+(e.children?e.children.filter(child=>child.call.name==='dispatch').map(renderChild).join(''):'')).join('');
+  if(state.mode==='dialogue'){
+    const projected=[];let group=null;
+    for(const e of events){
+      const direct=e.kind==='text'||e.kind==='history-turn';
+      const standalone=e.kind==='permission'||e.kind==='retry'||e.kind==='connection'||e.kind==='tool'&&['dispatch','ask_user'].includes(e.call.name);
+      if(direct){if(group)group.sealed=true;group=null;projected.push({e});}
+      else if(standalone){projected.push({e});}
+      else{if(!group){group={items:[],id:'process-'+e.id,sealed:false};projected.push(group);}group.items.push(e);}
+      if(e.children)for(const child of e.children.filter(x=>x.call.name==='dispatch'))projected.push({e:child});
+    }
+    return projected.map(x=>x.e?renderEvent(x.e):processGroup(x.items,x.id,active&&!x.sealed)).join('');
+  }
+  const callsByRequest=new Set(events.filter(e=>e.kind==='tool').map(e=>e.requestId));
+  const activity=[],standalone=[],answers=[],history=[];
+  for(const e of events){
+    if(e.kind==='history-turn'){history.push(e);continue;}
+    if(e.kind==='permission'||e.kind==='retry'||e.kind==='connection'||e.kind==='tool'&&['dispatch','ask_user'].includes(e.call.name)){standalone.push(e);continue;}
+    if(e.kind==='text'&&e.stopReason!=='toolUse'&&!callsByRequest.has(e.requestId))answers.push(e);
+    else activity.push(e);
+    if(e.children)standalone.push(...e.children.filter(x=>x.call.name==='dispatch'));
+  }
+  return history.map(e=>renderEvent(e)).join('')+processGroup(activity,'activity-'+(events[0]?.id||'empty'),active,true)+standalone.map(e=>renderEvent(e)).join('')+answers.map(e=>renderEvent(e)).join('');
+}
+function filesInFrame(){return allEvents().filter(e=>e.kind==='tool'&&['file_write','file_edit'].includes(e.call.name)&&(e.result?.details?.applied===true||e.result?.details?.status==='applied'));}
+function renderTranscript(){
+  const sc=currentScene(),f=currentFrame();
+  if(state.scene==='empty')return '<div class="empty-chat"><h2>有什么想一起完成的？</h2><p>opencr · 当前项目</p><div class="starter-list">'+Btn('starter','检查当前项目的结构')+Btn('starter','继续修改工作概览')+'</div></div>';
+  return '<div class="user-message">'+H(sc.prompt)+'</div><div class="user-actions">'+Btn('copy-prompt',I('file-copy'),'icon-btn','aria-label="复制消息"')+Btn('inspect-history',I('history'),'icon-btn','aria-label="查看本轮来源"')+'</div>'+
+    renderEvents(f.events)+f.events.filter(e=>e.kind==='permission').map(renderPermission).join('')+
+    (f.run.state==='cancelled'?'<div class="inline-state muted">'+I('stop-circle')+'<span>本轮已取消。已应用的文件修改保留。</span></div>':'')+
+    (f.run.state==='completed'?'<div class="run-footer">'+I('check')+'<span>本轮已完成</span>'+Btn('usage','用量 '+I('arrow-right-s'))+'</div>':'');
+}
+function renderComposer(){
+  const active=['running','waiting'].includes(currentFrame().run.state);
+  return '<div class="composer-area">'+Btn('bottom',I('arrow-down')+'滚动到底部','new-content',state.follow?'hidden':'')+
+    (state.questionHidden&&!state.questionAnswered&&currentFrame().events.some(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result)?Btn('show-question',I('question')+'需要你的回答','text-btn'):'')+
+    '<div class="queue" id="queue-feedback" hidden></div><div class="composer"><textarea id="prompt" aria-label="输入消息" placeholder="描述你想做的事…" rows="1">'+H(state.prompt)+'</textarea>'+
+    '<div class="composer-bottom">'+Btn('attachments',I('add'),'icon-btn','aria-label="添加附件"')+Btn('permission-panel',I('shield-check'),'icon-btn','aria-label="执行权限"')+
+    Btn('goals',I('target'),'icon-btn','aria-label="目标"')+'<span class="composer-select">'+I('folder')+'opencr</span><span class="spacer"></span>'+
+    '<span class="composer-select">'+I('brain')+'高</span><button class="composer-select composer-model" data-action="models">'+I('cloud')+'DeepSeek V4.1 Flash</button>'+
+    '<span class="composer-select">Varin '+I('arrow-down-s')+'</span><span class="composer-select">通用 '+I('arrow-down-s')+'</span>'+Btn('voice',I('mic'),'icon-btn','aria-label="语音输入"')+
+    (active?Btn('stop-run',I('stop'),'submit','aria-label="停止当前工作"'):'')+Btn('send',I('arrow-up'),'submit','aria-label="发送消息" '+(active&&!state.prompt.trim()?'hidden':''))+'</div></div><div id="composer-feedback" class="composer-feedback"></div></div>';
+}
+function overviewStatus(){
+  const f=currentFrame(),failed=allEvents().filter(e=>e.child?.state==='failed'),q=f.events.some(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result&&!state.questionAnswered),p=f.events.some(e=>e.kind==='permission'&&!state.permissionChoice);
+  return q?'等待你的回答':p?'等待授权':f.run.state==='failed'?'失败':failed.length?'有工作需要处理':({completed:'本轮已完成',cancelled:'已取消',waiting:'等待中',idle:'准备就绪'}[f.run.state]||'正在工作');
+}
+const planData=()=>state.planOverride||( ['mixed','parallel','history'].includes(state.scene)?currentFrame().plan:null);
+function panelHeader(){
+  const title={overview:'工作概览',plan:'计划',threads:'子任务',outputs:'产出与变更',context:'上下文',memory:'记忆与决定',operations:'运行详情',followups:'后续任务'}[state.panel]||'工作概览';
+  return '<header class="overview-head">'+(state.panel!=='overview'?Btn('overview-back',I('arrow-left'),'icon-btn','aria-label="返回工作概览"'):'')+'<span>'+title+'</span>'+Btn('overview-menu',I('more'),'icon-btn','aria-label="更多面板"')+
+    (state.overview==='full'?Btn('overview-compact',I('arrow-down-s'),'icon-btn','aria-label="切换轻览"'):'')+Btn('overview-close',I('close'),'icon-btn','aria-label="关闭工作概览"')+'</header>';
+}
+function renderOverviewContent(){
+  const f=currentFrame(),plan=planData(),children=allEvents().filter(e=>e.child),files=filesInFrame();
+  if(state.panel==='plan'){
+    const text=plan?.items.map(x=>'- ['+(x.status==='completed'?'x':' ')+'] '+x.text).join('\n')||'';
+    if(state.editingPlan)return '<div class="plan-toolbar">'+Btn('plan-save','保存','button primary')+Btn('plan-cancel','取消','button')+'</div><textarea class="plan-editor" id="plan-editor" aria-label="编辑计划">'+H(state.planDraft)+'</textarea>';
+    return '<div class="actions">'+Btn('plan-edit',I('file-edit')+'编辑计划','text-btn',!plan?'disabled':'')+'</div><div class="plan-reader">'+H(text||'当前没有计划。')+'</div>';
+  }
+  if(state.panel==='threads')return children.length?children.map(renderChild).join(''):'<p class="small muted">当前没有子任务。</p>';
+  if(state.panel==='outputs')return files.length?files.map(renderDiff).join(''):'<p class="small muted">当前没有已确认的文件修改。</p>';
+  if(state.panel==='operations')return allEvents().filter(e=>e.kind==='tool'&&e.call.name.startsWith('process_')).map(renderTool).join('')||'<p class="small muted">当前没有进程操作。</p>';
+  if(state.panel==='followups')return allEvents().filter(e=>e.kind==='tool'&&e.call.name==='follow_up').map(renderTool).join('')||'<p class="small muted">暂无后续任务。</p>';
+  if(state.panel==='context')return '<div class="small"><p>上下文 · 12%</p><p class="muted" style="margin-top:10px">15,728 / 131,072 tokens</p></div>';
+  if(state.panel==='memory')return '<p class="small muted">本例没有额外的记忆记录。</p>';
+  const failed=children.filter(e=>e.child.state==='failed'),currentStep=plan?.items.find(x=>x.status==='in_progress');
+  let html='<div class="overview-status"><div class="status-title"><span class="status-dot" '+(failed.length?'style="background:var(--orange)"':'')+'></span>'+overviewStatus()+'</div>'+
+    (failed.length?'<p>'+H(failed.map(e=>e.child.name).join(' · '))+'</p>'+Btn('panel-threads','查看任务与已有结果 '+I('arrow-right-s')):currentStep?'<p>'+H(currentStep.text)+'</p>':'')+'</div>';
+  if(state.overview==='compact'){
+    if(currentStep)html+=Btn('panel-plan',I('task')+'<span>'+H(currentStep.text)+'</span>','overview-action');
+    html+=children.filter(e=>['preparing','running'].includes(e.child.state)).map(e=>Btn('panel-threads',Avatar(e.child.avatar)+'<span>'+H(e.child.name)+'</span>','overview-action')).join('');
+    if(files.length)html+=Btn('panel-outputs',I('file-code')+'<span>本轮修改了 '+files.length+' 个文件</span>','overview-action');
+    return html;
+  }
+  if(plan){const items=plan.items,idx=Math.max(0,items.findIndex(x=>x.status==='in_progress')),start=Math.max(0,idx-1);html+='<section class="overview-section"><div class="overview-label"><span>计划</span><span class="count">'+items.filter(x=>x.status==='completed').length+' / '+items.length+'</span>'+I('arrow-down-s')+I('more')+'</div><button class="plan-summary" data-action="panel-plan">'+items.slice(start,start+3).map(x=>'<span class="plan-step">'+I(x.status==='completed'?'check':x.status==='in_progress'?'checkbox-circle':'checkbox-blank-circle')+'<span>'+H(x.text)+'</span></span>').join('')+'</button>'+Btn('panel-plan','查看完整计划 '+I('arrow-right-s'))+'</section>';}
+  if(children.length)html+='<section class="overview-section"><div class="overview-label"><span>子任务</span></div>'+children.filter(e=>e.child.state!=='completed').map(e=>'<button class="overview-child" data-action="panel-threads">'+Avatar(e.child.avatar)+'<div><strong>'+H(e.child.name)+'</strong><small>'+H(e.child.reason||e.call.arguments.task)+'</small></div><span class="child-state '+(e.child.state==='failed'?'error':'muted')+'">'+({failed:'失败',running:'进行中',preparing:'准备中'}[e.child.state]||e.child.state)+'</span></button>').join('')+
+    (children.some(e=>e.child.state==='completed')?Btn('panel-threads',I('arrow-right-s')+'已结束任务'):'')+'</section>';
+  if(files.length)html+='<section class="overview-section"><div class="overview-label"><span>产出与变更</span></div>'+Btn('panel-outputs',I('file-code')+'<span>本轮修改了 '+new Set(files.map(e=>e.call.arguments.path)).size+' 个文件</span>'+I('arrow-right-s'),'overview-action')+'</section>';
+  const bg=allEvents().filter(e=>e.kind==='tool'&&e.call.name.startsWith('process_')&&['running','background'].includes(statusOf(e)));
+  if(bg.length)html+='<section class="overview-section">'+bg.map(e=>Btn('panel-operations',I('terminal-box')+'<span>'+H(processCommand(e)||'进程操作')+'</span><small class="muted">运行中</small>','overview-action')).join('')+'</section>';
+  html+='<footer class="overview-footer">'+Btn('inspect-scope',I('folder')+'opencr')+Btn('panel-context',I('donut-chart-fill')+'上下文 · 12%')+Btn('panel-memory',I('book-open')+'记忆与决定')+'</footer>';
+  return html;
+}
+function renderOverview(){
+  if(state.overview==='closed')return '<aside class="overview-slot" data-view="closed"><div class="overview-launcher">'+Btn('overview-open',I('stack'),'icon-btn','aria-label="打开工作概览"')+Btn('overview-compact',I('arrow-down-s'),'icon-btn','aria-label="打开轻览"')+'</div></aside>';
+  return '<aside class="overview-slot" data-view="'+state.overview+'" style="--overview-width:'+state.overviewWidth+'px"><section class="overview-card">'+
+    (state.overview==='full'?'<div class="overview-resizer" role="separator" aria-orientation="vertical" tabindex="0" aria-label="调整概览宽度" aria-valuenow="'+state.overviewWidth+'" id="overview-resizer"></div>':'')+
+    panelHeader()+'<div class="overview-content">'+renderOverviewContent()+'</div>'+
+    (state.overview==='compact'?'<div class="overview-peek-footer">'+Btn('overview-open','查看完整概览 <span class="spacer"></span>'+I('arrow-right-s'))+'</div>':'')+'</section></aside>';
+}
+const Toggle=(key,label,checked,disabled=false)=>'<input type="checkbox" class="switch" role="switch" data-pref="'+key+'" aria-label="'+H(label)+'" '+(checked?'checked ':'')+(disabled?'disabled':'')+'>';
+const options=(items,selected)=>items.map(([value,label])=>'<option value="'+H(value)+'" '+(selected===value?'selected':'')+'>'+H(label)+'</option>').join('');
+const Field=(label,control,hint='')=>'<div class="setting-row"><div class="setting-label">'+H(label)+(hint?'<p>'+H(hint)+'</p>':'')+'</div>'+control+'</div>';
+const settingPages={
+  chat:{title:'聊天',description:'调整消息、思考、工具与输入的呈现方式。',source:'ChatSettings.tsx'},
+  web:{title:'网络检索和文档',description:'配置网页搜索与文档阅读能力。',source:'harness/WebSettings.tsx + HarnessModelField.tsx'},
+  models:{title:'模型服务',description:'管理服务、模型与各自的能力配置。',source:'sections/models'},
+  defaults:{title:'对话默认',description:'管理新请求的默认配置与模型请求重试。',source:'varin/DefaultsSettings.tsx + RetrySettings.tsx'},
+  storage:{title:'存储',description:'查看设备与工作区的受管数据，检查可清理项。',source:'storage/StorageSettings.tsx'}
+};
+function settingsNav(){
+  const groups=[
+    ['使用偏好',[['settings-3','通用','general'],['moon','外观','appearance'],['chat-1','聊天','chat'],['chat-3','对话默认','defaults'],['time','通知','notifications'],['mic','语音','voice'],['code','快捷键','shortcuts'],['database-2','存储','storage'],['history','历史与恢复','history']]],
+    ['AGENT',[['cloud','模型服务','models'],['ai-agent','agents','agents'],['chat-ai-3','Varin bot','bot'],['file-text','系统提示词','prompts'],['book','记忆','memory'],['database-2','记忆与知识嵌入','embeddings'],['terminal','工具与执行','tools'],['global','网络检索和文档','web']]],
+    ['开发与项目',[['folder','项目','projects']]],['连接与扩展',[['server','工作连接','connections'],['code-box','MCP','mcp']]]
+  ];
+  return '<aside class="settings-nav"><input class="settings-search" type="search" placeholder="搜索设置" aria-label="搜索设置" id="settings-search" value="'+H(state.search)+'"><div class="settings-nav-scroll">'+
+    groups.map(([title,items])=>'<section class="settings-group"><p class="settings-group-label">'+title+'</p>'+items.map(([icon,label,page])=>'<button class="settings-link '+(state.settingsPage===page?'selected':'')+(!settingPages[page]?' unrepresented':'')+'" '+(settingPages[page]?'data-page="'+page+'"':'data-existing="'+page+'"')+'>'+I(icon)+'<span>'+label+'</span></button>').join('')+'</section>').join('')+'</div><div class="sidebar-foot">'+I('question')+'<span class="small">关于</span></div></aside>';
+}
+function chatSettings(){
+  return '<section class="settings-section"><h3>执行过程</h3><div class="setting-row"><div class="setting-label">回复布局</div><div class="mode-cards">'+
+    Object.entries(modeNames).map(([key,label])=>'<button data-mode="'+key+'" aria-pressed="'+(state.mode===key)+'">'+label+'</button>').join('')+'</div></div>'+
+    '<p class="setting-hint">'+({live:'文字、思考与工具按发生顺序逐步显示。',dialogue:'保留每段发言，段落间用一条动态行收纳过程；子 Agent 独立显示。',sorted:'本轮工作过程收进活动区，回答集中显示。'}[state.mode])+'</p>'+
+    (state.mode==='sorted'?Field('活动区域','<select data-setting="activity">'+options([['collapsed','默认收起'],['summary','默认展开']],state.prefs.activity)+'</select>'):'')+
+    Field('显示思考内容',Toggle('thinking','显示思考内容',state.prefs.thinking))+
+    (state.prefs.thinking?'<div class="dependent">'+Field('自动展开思考',Toggle('autoThinking','自动展开思考',state.prefs.autoThinking),'收起时保留原来的单行内容预览；展开后在阅读窗口中滚动。')+'</div>':'')+
+    Field('默认展开命令输出',Toggle('commands','默认展开命令输出',state.prefs.commands))+
+    Field('默认展开文件修改',Toggle('edits','默认展开文件修改',state.prefs.edits))+
+    (state.mode==='dialogue'?'<p class="setting-hint">思考和工具的展开偏好在打开对应过程后生效。</p>':'')+'</section>'+
+    '<section class="settings-section"><h3>阅读与文件</h3>'+Field('代码自动换行',Toggle('wrap','代码自动换行',state.prefs.wrap))+
+    Field('差异布局','<select data-local="diff"><option>动态布局</option><option>行内差异</option><option>并列差异</option></select>')+
+    '<p class="setting-hint">长路径与普通标题始终可在可用宽度内阅读。</p></section>'+
+    '<section class="settings-section"><h3>当前数据的呈现预览</h3><div class="embedded-preview">'+renderEvents(currentFrame().events.slice(0,6))+'</div>'+
+    Btn('back-chat','在完整会话中查看 '+I('arrow-right-s'),'button')+'</section>';
+}
+function webSettings(){
+  const w=state.web,remote=state.settingsCase==='web-remote';
+  return '<section class="settings-section"><h3>网页搜索</h3>'+Field('启用网页搜索',Toggle('web.enabled','启用网页搜索',w.enabled))+
+    (w.enabled?'<div class="dependent"><label class="stacked">搜索提供商<select data-setting="provider">'+options([['default','默认搜索 · 无需密钥'],['exa','Exa'],['searxng','SearXNG']],w.provider)+'</select></label>'+
+      (w.provider==='default'?'<p class="setting-hint">搜索词发送至 Exa，不可用时改用 Parallel。免费服务有使用限制。</p>':
+        '<label class="stacked">'+(w.provider==='searxng'?'服务地址':'API 密钥')+'<input '+(w.provider==='searxng'?'type="url" placeholder="http://127.0.0.1:8080"':'type="password" placeholder="示例输入，不持久保存"')+' id="provider-value"></label>'+
+        '<div class="actions">'+Btn('save-provider',state.settingsError?'重试保存':'保存','button')+'</div>'+
+        (state.settingsError?'<p class="setting-hint error" role="alert">保存失败。输入已保留。</p>':''))+'</div>':'')+'</section>'+
+    '<section class="settings-section"><h3>浏览器渲染</h3>'+Field('浏览器渲染',Toggle('web.render','浏览器渲染',w.render,remote),'允许读取需要运行脚本才能显示的网页内容。')+
+    (remote?'<p class="setting-hint warning">当前 Web / 云端 Host 不提供这项能力。</p>':'<details><summary>运行方式</summary><p class="setting-hint">本地桌面 Host 使用 Electron 离屏浏览器渲染。</p></details>')+'</section>'+
+    '<section class="settings-section"><h3>文档阅读</h3><p class="setting-hint">基础文字提取和页面图像默认可用。</p>'+
+    Field('阅读辅助',Toggle('web.reader','阅读辅助',w.reader),'使用选定模型辅助理解和整理材料。')+
+    (w.reader?'<div class="dependent"><label class="stacked"><span class="'+(!w.readerModel?'warning':'muted')+'">'+(w.readerModel?'已选择辅助模型':'尚未选择辅助模型')+'</span><select data-setting="readerModel">'+options([['','不使用辅助模型'],['deepseek','DeepSeek V4.1 Flash']],w.readerModel)+'</select></label>'+
+    (!w.readerModel?'<p class="setting-hint">依赖辅助模型的能力暂不可用。基础读取仍然可用。</p>':'<p class="setting-hint">配置用于之后的新请求。</p>')+'</div>':'')+
+    '<details id="component-settings" '+(state.search.toLowerCase().includes('path')||state.search.includes('路径')?'open':'')+'><summary>Docling、OCR 与本地组件</summary><div class="dependent">'+
+    '<label class="stacked">OCR 语言<input data-web-field="language" value="'+H(w.language)+'"></label>'+
+    '<label class="stacked">Docling 可执行文件<input data-web-field="docling" value="'+H(w.docling)+'"></label>'+
+    '<label class="stacked">Tesseract 可执行文件<input data-web-field="tesseract" value="'+H(w.tesseract)+'"></label>'+
+    '<p class="setting-hint">使用可执行文件名或完整路径，不拼接 Shell 命令。</p></div></details></section>'+
+    '<section class="settings-section"><h3>域名规则</h3><details><summary>允许与排除的域名</summary><label class="stacked">排除的域名<input placeholder="ads.example.com, example.org" data-local="blocked-domains"></label></details></section>';
+}
+function modelsSettings(){
+  const m=state.model;
+  if(m.editing)return '<section class="settings-section"><h3>服务配置</h3><label class="stacked">名称<input data-model-field="name" value="'+H(m.name)+'"></label><label class="stacked">服务地址<input data-model-field="base" value="'+H(m.base)+'"></label>'+
+    '<p class="setting-hint">密钥已保存。这里展示配置事实，不额外宣称连接成功。</p></section>'+
+    '<section class="settings-section"><h3>模型</h3><label class="stacked">名称<input value="DeepSeek V4.1 Flash" data-local="model-name"></label><label class="stacked">实际模型 ID 或部署名<input data-model-field="requestModel" value="'+H(m.requestModel)+'"></label>'+
+    '<div class="actions"><label><input type="checkbox" checked>对话</label><label><input type="checkbox">嵌入</label><label><input type="checkbox">重排</label><label><input type="checkbox">图像生成</label></div></section>'+
+    '<section class="settings-section"><h3>模型能力</h3><label class="stacked">上下文容量（token）<input type="number" value="131072" data-local="capacity"></label><details><summary>高级参数</summary><p class="setting-hint">参数属于当前模型，保留原有字段与保存范围。</p></details></section>';
+  return '<section class="settings-section"><h3>服务</h3><button class="model-list-row" data-action="edit-model" style="width:100%">'+I('cloud')+'<div>'+H(m.name)+'<small>'+H(m.base)+'</small></div><span class="small muted">1 个模型</span>'+I('arrow-right-s')+'</button>'+
+    '<div class="model-list-row">'+I('file-code')+'<div>DeepSeek V4.1 Flash<small>'+H(m.requestModel)+'</small></div><span class="small muted">对话</span></div></section>'+
+    '<section class="settings-section"><h3>用途配置</h3>'+Field('阅读辅助','<select data-setting="readerModel">'+options([['','不使用辅助模型'],['deepseek','DeepSeek V4.1 Flash']],state.web.readerModel)+'</select>')+
+    '<p class="setting-hint">此选择引用同一个模型对象，不另建一份模型配置。</p></section>';
+}
+function defaultsSettings(){
+  const r=state.retry,project=state.settingsCase==='defaults-project';
+  return (project?'<div class="settings-alert"><p>opencr 使用项目覆盖</p><p>当前显示这个项目的配置。恢复继承时将使用全局默认值。</p>'+Btn('inherit-defaults','使用继承值')+'</div>':'')+
+    '<section class="settings-section"><h3>模型请求重试</h3><p class="setting-hint">模型请求遇到暂时性失败时，按配置重试。匹配规则由运行时执行。</p>'+
+    Field('启用自动重试',Toggle('retry.enabled','启用自动重试',r.enabled))+
+    (r.enabled?'<div class="dependent">'+Field('最大重试次数','<input type="number" min="0" data-retry-field="maxRetries" value="'+r.maxRetries+'">')+
+    Field('初始等待时间（ms）','<input type="number" min="0" data-retry-field="initialDelayMs" value="'+r.initialDelayMs+'">')+
+    Field('最长等待时间（ms）','<input type="number" min="0" data-retry-field="maxDelayMs" value="'+r.maxDelayMs+'">')+'</div>':'')+'</section>'+
+    '<section class="settings-section"><div class="actions"><h3 style="margin:0">自定义匹配规则</h3><span class="spacer"></span>'+Btn('add-rule',I('add')+'添加规则','button')+'</div><p class="setting-hint">按顺序匹配状态码、错误代码或消息文本。</p>'+
+    r.rules.map((rule,index)=>'<div class="retry-rule"><select data-rule="'+index+'" data-rule-field="field" aria-label="匹配字段">'+options([['status','状态码'],['code','错误代码'],['message','错误消息']],rule.field)+'</select>'+
+      '<select data-rule="'+index+'" data-rule-field="match" aria-label="匹配方式">'+options([['exact','精确匹配'],['contains','包含'],['regex','正则表达式']],rule.match)+'</select>'+
+      '<input data-rule="'+index+'" data-rule-field="pattern" aria-label="匹配文本" value="'+H(rule.pattern)+'"><select data-rule="'+index+'" data-rule-field="action" aria-label="规则动作">'+options([['retry','重试'],['stop','停止']],rule.action)+'</select>'+
+      Btn('remove-rule',I('delete-bin'),'icon-btn','data-index="'+index+'" aria-label="删除规则"')+'</div>').join('')+
+    '<details><summary>匹配示例</summary><p class="setting-hint">例如：message 包含 overloaded → 重试。HTML 样稿不执行运行时规则测试。</p></details>'+
+    '<div class="actions">'+Btn('save-retry','保存重试设置','button primary')+'</div></section>';
+}
+const storageCategories=[['recovery','恢复与工作状态对象',720],['copies','独立工作副本',8192],['conversations','对话与附件',2458],['embeddings','记忆与知识向量',684],['models','共享模型资源',1229],['other','其他应用数据',201]];
+const storageAmount=value=>value>=1024?(value/1024).toFixed(2)+' GiB':value+' MiB';
+function storageSettings(){
+  const partial=state.settingsCase==='storage-partial',items=storageCategories.filter(item=>!partial||item[0]!=='copies'),total=items.reduce((sum,item)=>sum+item[2],0);
+  return '<section class="settings-section">'+Field('设备','<select data-local="device"><option>当前 Agent 主机 · Local</option></select>')+
+    Field('查看范围','<select data-storage-scope>'+options([['all','全部工作区与共享数据'],['workspace','opencr · 可归属数据'],['shared','共享与未分摊数据']],state.storage.scope)+'</select>')+
+    '<p class="setting-hint">C:\\Users\\Youzi\\AppData\\Roaming\\Varin</p></section>'+
+    '<section class="settings-section"><p class="small muted">'+(partial?'已测量小计':'Varin 受管数据')+'</p><p class="storage-total">'+storageAmount(total)+'</p><p class="setting-hint">'+(partial?'部分路径暂不可读；未知项保持未知。':'已统计 · 14:36:08')+'</p>'+
+    '<table class="storage-table"><tbody>'+storageCategories.map(([id,label,amount])=>'<tr><td>'+label+'</td><td>'+(partial&&id==='copies'?'—':storageAmount(amount))+'</td></tr>').join('')+'</tbody></table>'+
+    (partial?'<details open><summary class="warning">统计详情（1）</summary><p class="setting-hint">独立工作副本目录当前不可读，未将它记为 0 B。</p></details>':'')+'</section>'+
+    '<section class="settings-section"><h3>整理空间</h3>'+Field('缓存与未引用对象',Btn('cleanup-preview','查看可清理项','button'),'先查看候选、范围与预计空间，再确认清理。')+
+    (state.storage.cleanPreview?'<div class="dependent"><p class="small">不再引用的存储对象 · 128 MiB</p><p class="setting-hint">保留对话历史、附件、原始项目、活跃缓存、工作副本与恢复记录。</p><div class="actions">'+Btn('cleanup-confirm','确认清理','button primary')+Btn('cleanup-cancel','取消')+'</div></div>':'')+
+    (state.storage.cleaned?'<p class="setting-hint">样稿回执：已移除 128 MiB；需重新统计后更新占用。</p>':'')+'</section>'+
+    '<section class="settings-section"><h3>按工作区查看</h3><p class="setting-hint">只显示可明确归属的数据，共享对象与数据库只计一次。</p>'+Btn('inspect-storage-scope',I('folder')+'opencr '+I('arrow-right-s'),'button')+'</section>';
+}
+function renderQuestionPopup(){
+  const events=currentFrame().events.filter(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result);
+  byId('question-root').innerHTML=state.view==='chat'&&events.length&&!state.questionAnswered&&!state.questionHidden?
+    '<section class="question-popup" aria-label="需要你的回答"><header>'+I('question')+'<span>需要你的回答</span>'+Btn('hide-question',I('close'),'icon-btn','aria-label="收起问题"')+'</header><div class="question-popup-body">'+events.map(renderQuestion).join('')+'</div></section>':'';
+}
+function renderSettings(){
+  const host=byId('settings-root');
+  if(state.view!=='settings'){host.innerHTML='';return;}
+  const meta=settingPages[state.settingsPage],query=state.search.trim().toLowerCase();
+  const searchMatches=query?[
+    ['chat','思考与显示模式','思考 thinking 聊天 对话 模式'],
+    ['web','Docling / Tesseract 可执行文件路径','docling tesseract path 路径 ocr 语言'],
+    ['defaults','模型请求重试','重试 retry 规则'],
+    ['storage','存储与可清理项','存储 清理 回收'],
+    ['models','模型服务','模型 服务 deepseek']
+  ].filter(row=>row[2].includes(query)):[];
+  const content=query?'<h2>搜索设置</h2>'+searchMatches.map(([page,label])=>'<button class="search-result" data-search-page="'+page+'">'+I('search')+'<span>'+label+'</span>'+I('arrow-right-s')+'</button>').join('')+(!searchMatches.length?'<p class="setting-hint">没有匹配的示例设置。</p>':''):
+    '<h2>'+meta.title+'</h2><p class="settings-subtitle">'+meta.description+'</p><div class="scope"><span>'+ (state.settingsPage==='chat'?'当前用户的界面偏好':state.settingsPage==='storage'?'存储设备与 Agent 连接分别管理':state.settingsCase==='defaults-project'?'Local · opencr 项目覆盖':'保存到当前 Agent 主机的全局设置；已有项目覆盖优先生效。')+'</span></div>'+
+    ({chat:chatSettings,web:webSettings,models:modelsSettings,defaults:defaultsSettings,storage:storageSettings}[state.settingsPage]());
+  host.innerHTML='<section class="settings-overlay" aria-label="设置">'+settingsNav()+'<div class="settings-main">'+Btn('close-settings',I('close'),'icon-btn settings-close','aria-label="关闭设置"')+
+    '<div class="settings-scroll"><div class="settings-page">'+content+'</div></div><footer class="settings-footer"><span id="settings-feedback">'+H(state.settingsFeedback||'')+'</span><span class="spacer"></span>'+
+    (state.settingsPage==='models'&&state.model.editing?Btn('cancel-model','取消')+Btn('save-model','保存','button primary'):'')+'</footer></div></section>';
+}
+function renderChrome(){
+  byId('titlebar').innerHTML=Btn('sidebar',I('menu-2'),'icon-btn','aria-label="切换项目侧栏"')+Btn('sidebar',I('layout-left'),'icon-btn','aria-label="项目侧栏"')+
+    '<span class="workspace-switch">'+I('chat-1')+'工作台 '+I('arrow-down-s')+'</span><span class="workspace-switch">'+I('target')+'通用 '+I('arrow-down-s')+'</span>'+
+    '<div class="titlebar-title">'+H(currentScene().label)+'<span>D:/project/opencr</span></div><span class="spacer"></span><span class="top-context"><i class="ring"></i>12.0%</span><span class="top-host">'+I('stack')+'Local</span>'+Avatar('dome-ivory')+Btn('top-menu',I('more-2'),'icon-btn','aria-label="更多"');
+  const side=byId('project-sidebar');side.classList.toggle('closed',!state.sidebar);
+  side.innerHTML=Btn('new-chat',I('chat-new')+'新会话','side-action')+Btn('thread-search',I('search')+'搜索会话','side-action')+'<div class="project-label">项目</div><div class="tree-head">'+I('arrow-down-s')+I('folder')+'opencr</div>'+
+    '<div class="session-row active">'+Avatar('pebble-blue')+'<span>'+H(currentScene().label)+'</span></div><div class="session-row">'+Avatar('slant-mint')+'<span>工具与布局检查</span></div><div class="session-row">'+Avatar('notch-ochre')+'<span>文件读写体检</span></div>'+
+    '<div class="sidebar-foot">'+Btn('settings',I('settings-3'),'icon-btn','aria-label="设置"')+Btn('evidence',I('question'),'icon-btn','aria-label="设计依据"')+'</div>';
+  byId('resource-rail').innerHTML=[['chat-1','panel-threads','协作'],['refresh','panel-operations','运行'],['history','history','历史'],['file-code','panel-outputs','文件变更'],['terminal-box','panel-operations','终端'],['task','panel-plan','计划'],['file-text','panel-outputs','文档'],['global','web','网页'],['window','panel-context','工作区']].map(([icon,action,label])=>Btn(action,I(icon),'icon-btn','aria-label="'+label+'" title="'+label+'"')).join('');
+  byId('theme-icon').innerHTML=I(root.dataset.theme==='dark'?'moon':'checkbox-blank-circle');
+  byId('replay-icon').innerHTML=I('refresh');
+}
+function renderControls(){
+  document.querySelectorAll('[data-mode]').forEach(el=>el.setAttribute('aria-pressed',String(el.dataset.mode===state.mode)));
+  document.querySelectorAll('[data-view]').forEach(el=>el.setAttribute('aria-selected',String(el.dataset.view===state.view)));
+  const list=byId('scenario');
+  list.innerHTML=state.view==='settings'?options(settingsCases,state.settingsCase):
+    ['基础','执行','协作','需要介入','故障与边界'].map(group=>'<optgroup label="'+group+'">'+options(scenarios.filter(sc=>sc.group===group).map(sc=>[sc.id,sc.label]),state.scene)+'</optgroup>').join('');
+  const slider=byId('frame-slider');slider.max=currentScene().frames.length-1;slider.value=state.frame;
+  byId('frame-counter').textContent=(state.frame+1)+' / '+currentScene().frames.length;
+  document.querySelector('.playback').hidden=state.view!=='chat';
+  byId('play-button').innerHTML=I(state.playing?'pause':'play')+(state.playing?'暂停':'播放');
+  byId('mode-note').textContent=state.view==='settings'?'现有设置外壳与范围 · 展示五类页面及配置边界状态':state.view==='evidence'?'每一条工具标题都可回到字段；三种模式共用事件。':
+    ({live:'按时间展开：消息、原有思考、工具按发生顺序呈现。',dialogue:'对话优先：每段发言后一个过程摘要，派发独立成行。',sorted:'集中展示回答：过程集中到活动区；回答单独阅读。'}[state.mode]);
+  byId('review-controls').hidden=state.view==='evidence';
+}
+function capturePositions(){
+  const viewport=byId('thread-scroll');if(viewport)state.scroll=viewport.scrollTop;
+  document.querySelectorAll('[data-thinking-scroll]').forEach(el=>state.thoughtScroll.set(el.dataset.thinkingScroll,{top:el.scrollTop,follow:el.scrollHeight-el.scrollTop-el.clientHeight<3}));
+  document.querySelectorAll('[data-output-scroll]').forEach(el=>{
+    const key='output:'+el.dataset.outputScroll;state.thoughtScroll.set(key,{top:el.scrollTop,follow:el.scrollHeight-el.scrollTop-el.clientHeight<3});
+  });
+}
+function restorePositions(){
+  const viewport=byId('thread-scroll');if(viewport)viewport.scrollTop=state.follow?viewport.scrollHeight:state.scroll;
+  document.querySelectorAll('.thinking-preview').forEach(el=>el.scrollTop=el.scrollHeight);
+  document.querySelectorAll('[data-thinking-scroll]').forEach(el=>{const saved=state.thoughtScroll.get(el.dataset.thinkingScroll);el.scrollTop=saved?.follow===false?saved.top:el.scrollHeight;});
+  document.querySelectorAll('[data-output-scroll]').forEach(el=>{const saved=state.thoughtScroll.get('output:'+el.dataset.outputScroll);el.scrollTop=saved?.follow===false?saved.top:el.scrollHeight;});
+}
+function followAfterChange(){if(state.follow)requestAnimationFrame(()=>{const v=byId('thread-scroll');if(v)v.scrollTop=v.scrollHeight;});}
+function render({keepScroll=true}={}){
+  if(keepScroll)capturePositions();
+  const focused=document.activeElement,focusId=focused?.id,selection=focused instanceof HTMLInputElement||focused instanceof HTMLTextAreaElement?[focused.selectionStart,focused.selectionEnd]:null;
+  renderChrome();renderControls();
+  byId('app-wrap').hidden=state.view==='evidence';byId('evidence-page').style.display=state.view==='evidence'?'block':'none';
+  const failed=currentFrame().run.state==='failed';
+  byId('conversation-layout').innerHTML='<section class="chat-area'+(failed?' with-run-error':'')+'">'+(failed?'<div class="run-alert" role="alert"><p>失败</p><p>'+H(currentFrame().runFailure?.message||'本轮执行失败。')+'</p></div>':'')+'<div class="thread-scroll" id="thread-scroll"><div class="transcript">'+renderTranscript()+'</div></div>'+renderComposer()+'</section>'+renderOverview();
+  renderSettings();renderQuestionPopup();
+  if(state.view==='evidence')renderEvidence();
+  document.body.classList.toggle('show-sources',state.sources);
+  document.body.classList.toggle('no-code-wrap',!state.prefs.wrap);
+  restorePositions();
+  if(focusId){const next=byId(focusId);if(next){next.focus({preventScroll:true});if(selection&&typeof next.setSelectionRange==='function'&&!['number','range','checkbox','radio'].includes(next.type)){try{next.setSelectionRange(...selection)}catch{}}}}
+  installResize();
+}
+function renderEvidence(){
+  const rows=[
+    ['文件读取','读取文件 · ThreadPlan.tsx · L70–130','path / files[].path；范围字段存在才显示','没有「计划阅读、编辑状态与保存入口」这样的说明字段。'],
+    ['文件搜索','搜索 · summaryView|overflow','query / queries、paths、records.length','查询内容按原参数展示，不改写成任务意图。'],
+    ['进程','运行进程 · rg -n … · 退出码 0','command + args；snapshot.exitCode','已有 processId 能关联原 spawn 时显示原命令，否则保留 ID。'],
+    ['脚本','运行脚本 / 脚本与进程','可选 arguments.title；已观测子调用分类','缺 title 仍可展示；没有加载的子调用不补造。'],
+    ['子任务','Layout Scout · 检查窄窗口换行','原 name、task、child.state、avatar','任务文本来自现有派发参数。'],
+    ['思考','思考 + 原文单行预览','ChatThinkingContent.thinking','直接沿用现有形式；没有「查看这一段思考」的额外入口。'],
+    ['重试','模型请求正在重试 · 第 2 次','retry_scheduled.attempt、delay_ms','没有原始原因时，不给它编造原因。'],
+    ['计划与概览','原计划、子任务、已确认产出','计划订阅、Thread snapshot、文件回执','独立状态，不从工具名推测或生成计划。']
+  ];
+  byId('evidence-page').innerHTML='<h2>每个界面判断都能回到实际数据</h2><p>这是独立 HTML 设计稿。场景标题属于评审控制；聊天中的正文、思考、参数和回执来自同一组示例事件。工具条目没有额外的意图摘要字段。</p>'+
+    '<table class="evidence-table"><thead><tr><th>内容</th><th>示例呈现</th><th>已有来源</th><th>缺省行为</th></tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(text=>'<td>'+H(text)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'+
+    '<h2>保留的实际形态</h2><table class="evidence-table"><tbody>'+
+    '<tr><td>工作概览</td><td>浮起的独立卡片；完整 280px / 轻览 240px / 关闭；占用布局宽度；小窗口上下排列；可拖动调整。</td><td><code>WorkOverviewControl.tsx<br>styles/workbench.css:210<br>useWorkOverviewStore.ts</code></td></tr>'+
+    '<tr><td>思考</td><td>脑图标 +「思考」+ 单行原文滚动预览；展开后的有界窗口、跟随最新内容与收起动画。</td><td><code>ChatThinkingBlock.tsx<br>styles/thinking.css</code></td></tr>'+
+    '<tr><td>Agent 头像与图标</td><td>直接导出项目已有 SVG 图形与图标，不重新画另一套。</td><td><code>ui/agent-avatar-art.ts<br>icon/sprite.ts</code></td></tr>'+
+    '<tr><td>询问与权限</td><td>问题使用现有可收起浮层；权限保持时间线底部的独立操作。关闭问题不会取消等待。</td><td><code>ThreadQuestions.tsx<br>ThreadQuestion.tsx<br>ThreadPermission.tsx</code></td></tr>'+
+    '<tr><td>设置</td><td>保留现有模态外壳、220px 导航、分组、字段与作用域。调整分层、密度和依赖配置，未画的页面不伪造实现。</td><td><code>SettingsView.tsx<br>sections/shared</code></td></tr></tbody></table>'+
+    '<h2>三种模式的真实区别</h2><table class="evidence-table"><thead><tr><th>模式</th><th>正文与过程</th><th>本稿调整</th></tr></thead><tbody>'+
+    '<tr><td>按时间展开</td><td>按原顺序排列模型正文、原有思考与工具组件。</td><td>用间距与标题事实组织节奏，保留工具各自的展开与用途视图。</td></tr>'+
+    '<tr><td>对话优先</td><td>每段模型发言后只有一个普通过程；新发言封存前段摘要；派发独立。</td><td>展开后直接使用原有思考和工具，避免再造摘要层。</td></tr>'+
+    '<tr><td>集中展示回答</td><td>同轮的工具、思考和伴随工具的正文进入活动区；独立回答集中显示。</td><td>提议把子任务身份与待办保留在外层，内部不重复；其余保留现有投影规则。</td></tr></tbody></table>'+
+    '<h2>逐场景切换三种模式</h2><p>以下每一行都可打开完整工作台。切换模式不替换事件、不预填额外工具说明。</p>'+
+    '<table class="evidence-table matrix"><thead><tr><th>场景</th><th>状态帧</th><th>同一事件的三种呈现</th></tr></thead><tbody>'+
+    scenarios.map(sc=>'<tr><td>'+H(sc.label)+'</td><td>'+sc.frames.length+'</td><td>'+Object.entries(modeNames).map(([mode,label])=>'<button data-case="'+sc.id+'" data-case-mode="'+mode+'">'+label+'</button>').join('')+'</td></tr>').join('')+'</tbody></table>'+
+    '<h2>设置范围</h2><table class="evidence-table"><tbody>'+settingsCases.map(([id,label])=>'<tr><td>'+label+'</td><td><button class="button" data-settings-case="'+id+'">打开</button></td></tr>').join('')+'</tbody></table>'+
+    '<p>未执行项目构建、运行时验证或真实写入。设计中的配置和回执只用于说明呈现；无模型请求、无联网依赖。</p>';
+}
+function inspectEvent(id){
+  const e=allEvents().find(item=>item.id===id);
+  if(!e)return;
+  const info=e.kind==='tool'?toolInfo(e):null;
+  const body=(info?'<dl><dt>标题</dt><dd>'+H(info.label)+'</dd><dt>对象</dt><dd>'+H(info.subject||'未提供；不补造')+'</dd><dt>回执信息</dt><dd>'+H(info.receipt||'未提供')+'</dd><dt>生成来源</dt><dd>'+info.origins.map(H).join('<br>')+'</dd></dl>':'')+
+    '<p style="margin-top:18px">下面是这条内容的示例源数据。模式切换只改变呈现，不给工具追加解释性文案。</p><pre>'+H(JSON.stringify(rawOf(e),null,2))+'</pre>';
+  openInspector('字段来源 · '+(info?.label||e.kind),body);
+}
+function openInspector(title,body){
+  const el=byId('inspector');el.innerHTML='<header class="inspector-head"><span>'+H(title)+'</span>'+Btn('close-inspector',I('close'),'icon-btn','aria-label="关闭字段来源"')+'</header><div class="inspector-body">'+body+'</div>';el.classList.add('open');
+}
+function feedback(text){const node=byId('composer-feedback');if(node)node.textContent=text;}
+function settingsFeedback(text){state.settingsFeedback=text;const node=byId('settings-feedback');if(node)node.textContent=text;}
+function stopPlayback(){clearTimeout(timer);timer=null;state.playing=false;}
+function chooseScene(id,mode){
+  stopPlayback();state.scene=id;state.frame=currentScene().initial??0;
+  if(mode)state.mode=mode;
+  state.view='chat';state.panel='overview';state.planOverride=null;state.editingPlan=false;
+  state.questionHidden=false;state.questionAnswered=false;state.answer='';state.answerText='';state.permissionChoice=null;
+  state.follow=id!=='history';state.scroll=0;
+  byId('inspector').classList.remove('open');render({keepScroll:false});
+}
+function chooseSettings(id){
+  stopPlayback();state.settingsCase=id;state.settingsPage=id.startsWith('web')?'web':id.startsWith('defaults')?'defaults':id.startsWith('storage')?'storage':id;
+  state.view='settings';state.search='';state.settingsFeedback='';state.settingsError=id==='web-failure';
+  if(id.startsWith('web')){state.web.reader=true;state.web.readerModel='';state.web.provider=id==='web-failure'?'exa':'default';state.web.render=false;}
+  render();
+}
+function advance(){
+  if(state.frame>=currentScene().frames.length-1){stopPlayback();renderControls();return false;}
+  state.frame++;render();
+  const active=document.querySelector('.process:last-of-type .disclosure-head .label');if(active)active.classList.add('arriving');
+  return true;
+}
+function play(){
+  if(state.playing){stopPlayback();renderControls();return;}
+  if(currentScene().frames.length<=1)return;
+  if(state.frame===currentScene().frames.length-1){state.frame=0;state.questionAnswered=false;state.permissionChoice=null;}
+  state.playing=true;render();
+  const tick=()=>{if(!state.playing)return;if(advance()&&state.frame<currentScene().frames.length-1)timer=setTimeout(tick,2400);else{stopPlayback();renderControls();}};
+  timer=setTimeout(tick,2200);
+}
+function toggleThought(id){
+  const key=state.scene+':'+id;
+  const section=document.querySelector('[data-thought-id="'+CSS.escape(key)+'"]');if(!section)return;
+  const opened=section.dataset.open!=='true';state.thoughtOpen.set(key,opened);section.dataset.open=String(opened);
+  const heading=section.querySelector('.thinking-heading'),panel=section.querySelector('.thinking-panel'),scroll=section.querySelector('.thinking-scroll');
+  heading.setAttribute('aria-expanded',String(opened));panel.setAttribute('aria-hidden',String(!opened));panel.inert=!opened;scroll.tabIndex=opened?0:-1;
+  requestAnimationFrame(()=>{const saved=state.thoughtScroll.get(key);if(opened&&saved?.follow!==false)scroll.scrollTop=scroll.scrollHeight;followAfterChange();});
+}
+function panel(name){state.panel=name;state.overview='full';render();}
+function installResize(){
+  const handle=byId('overview-resizer');if(!handle)return;
+  const limit=value=>Math.max(240,Math.min(value,Math.max(240,byId('work-area').clientWidth-336)));
+  handle.addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();state.overviewWidth=limit(state.overviewWidth+(event.key==='ArrowLeft'?16:-16));handle.closest('.overview-slot').style.setProperty('--overview-width',state.overviewWidth+'px');handle.setAttribute('aria-valuenow',state.overviewWidth);}});
+  handle.addEventListener('pointerdown',event=>{
+    const x=event.clientX,width=state.overviewWidth;handle.setPointerCapture(event.pointerId);
+    const move=e=>{state.overviewWidth=limit(width+x-e.clientX);handle.closest('.overview-slot').style.setProperty('--overview-width',state.overviewWidth+'px');handle.setAttribute('aria-valuenow',Math.round(state.overviewWidth));};
+    const end=e=>{handle.removeEventListener('pointermove',move);handle.removeEventListener('pointerup',end);handle.removeEventListener('pointercancel',end);if(handle.hasPointerCapture(e.pointerId))handle.releasePointerCapture(e.pointerId);};
+    handle.addEventListener('pointermove',move);handle.addEventListener('pointerup',end);handle.addEventListener('pointercancel',end);
+  });
+}
+document.addEventListener('click',event=>{
+  const button=event.target.closest('button');if(!button||button.disabled)return;
+  if(button.dataset.mode){state.mode=button.dataset.mode;render();return;}
+  if(button.dataset.view){stopPlayback();state.view=button.dataset.view;render();return;}
+  if(button.dataset.case){chooseScene(button.dataset.case,button.dataset.caseMode);return;}
+  if(button.dataset.settingsCase){chooseSettings(button.dataset.settingsCase);return;}
+  if(button.dataset.source){inspectEvent(button.dataset.source);return;}
+  if(button.dataset.fold){setFold(button.dataset.fold);return;}
+  if(button.dataset.think){toggleThought(button.dataset.think);return;}
+  if(button.dataset.thinkFollow){const key=button.dataset.thinkFollow;state.thoughtScroll.set(key,{top:0,follow:true});const node=document.querySelector('[data-thinking-scroll="'+CSS.escape(key)+'"]');if(node)node.scrollTop=node.scrollHeight;button.hidden=true;return;}
+  if(button.dataset.existing){openInspector('保留现有入口','<p>此页保留原有入口和实现。本次 HTML 稿具体展开聊天、网络与文档、模型服务、对话默认和存储；其余页面未伪造内容。</p><p>导航来源：SettingsView 与设置目录。</p>');return;}
+  if(button.dataset.page){state.settingsPage=button.dataset.page;state.search='';state.settingsFeedback='';render();return;}
+  if(button.dataset.searchPage){const query=state.search;state.settingsPage=button.dataset.searchPage;state.search='';render();if(query.includes('路径')||/docling|tesseract|path|ocr/.test(query.toLowerCase())){const el=byId('component-settings');if(el){el.open=true;el.scrollIntoView({block:'center',behavior:'smooth'});}}return;}
+  const action=button.dataset.action;
+  if(!action)return;
+  if(action.startsWith('panel-')){panel(action.slice(6));return;}
+  switch(action){
+    case 'theme':root.dataset.theme=root.dataset.theme==='dark'?'light':'dark';byId('theme-icon').innerHTML=I(root.dataset.theme==='dark'?'moon':'checkbox-blank-circle');break;
+    case 'toggle-sources':state.sources=!state.sources;document.body.classList.toggle('show-sources',state.sources);button.textContent=state.sources?'隐藏字段来源':'显示字段来源';break;
+    case 'close-inspector':byId('inspector').classList.remove('open');break;
+    case 'play':play();break;
+    case 'replay':stopPlayback();state.frame=0;state.questionAnswered=false;state.permissionChoice=null;render();break;
+    case 'next':advance();break;
+    case 'sidebar':state.sidebar=!state.sidebar;byId('project-sidebar').classList.toggle('closed',!state.sidebar);break;
+    case 'new-chat':chooseScene('empty');break;
+    case 'settings':state.view='settings';render();break;
+    case 'close-settings':case 'back-chat':state.view='chat';render();break;
+    case 'evidence':state.view='evidence';render();break;
+    case 'models':state.view='settings';state.settingsPage='models';state.settingsCase='models';render();break;
+    case 'web':state.view='settings';state.settingsPage='web';render();break;
+    case 'overview-open':state.overview='full';state.panel='overview';render();break;
+    case 'overview-compact':state.overview='compact';state.panel='overview';render();break;
+    case 'overview-close':state.overview='closed';render();break;
+    case 'overview-back':state.panel='overview';state.editingPlan=false;render();break;
+    case 'overview-menu':{
+      const old=document.querySelector('.menu-pop');if(old){old.remove();break;}
+      const el=document.createElement('div');el.className='menu-pop';
+      el.innerHTML=[['plan','计划'],['threads','子任务'],['outputs','产出与变更'],['context','上下文'],['memory','记忆'],['followups','后续任务'],['operations','运行详情']].map(([key,label])=>Btn('panel-'+key,label)).join('');
+      byId('work-area').appendChild(el);break;
+    }
+    case 'plan-edit':state.planDraft=(planData()?.items||[]).map(x=>'- ['+(x.status==='completed'?'x':' ')+'] '+x.text).join('\n');state.editingPlan=true;render();byId('plan-editor')?.focus();break;
+    case 'plan-save':state.planOverride={items:state.planDraft.split('\n').filter(x=>x.trim()).map(line=>({text:line.replace(/^-\s*\[[ x]\]\s*/i,''),status:/^-\s*\[x\]/i.test(line)?'completed':'pending'}))};state.editingPlan=false;render();break;
+    case 'plan-cancel':state.editingPlan=false;render();break;
+    case 'child-panel':panel('threads');break;
+    case 'child-stop':button.disabled=true;button.textContent='正在停止';setTimeout(()=>{const e=allEvents().find(x=>x.id===button.dataset.event);if(e?.child)e.child.state='cancelled';render();},600);break;
+    case 'show-question':state.questionHidden=false;renderQuestionPopup();break;
+    case 'hide-question':state.questionHidden=true;render();break;
+    case 'clear-answer':state.answer='';renderQuestionPopup();break;
+    case 'answer':if(state.answer||state.answerText.trim()){state.questionAnswered=true;render();feedback('回答已提交。');}break;
+    case 'cancel-question':state.questionAnswered=true;state.answer='已取消';render();break;
+    case 'allow':state.permissionChoice='allow';render();break;
+    case 'deny':state.permissionChoice='deny';render();break;
+    case 'bottom':state.follow=true;byId('thread-scroll').scrollTo({top:byId('thread-scroll').scrollHeight,behavior:'smooth'});button.hidden=true;break;
+    case 'send':if(state.prompt.trim()){const running=['running','waiting'].includes(currentFrame().run.state);state.prompt='';byId('prompt').value='';feedback(running?'补充已加入示例队列。':'已记录示例输入。');if(running)button.hidden=true;}else byId('prompt')?.focus();break;
+    case 'starter':state.prompt=button.textContent;byId('prompt').value=state.prompt;byId('prompt').focus();break;
+    case 'stop-run':stopPlayback();button.disabled=true;button.textContent='…';feedback('正在请求停止。');setTimeout(()=>{currentFrame().run.state='cancelled';render();},600);break;
+    case 'usage':openInspector('用量','<p>当前示例未附加模型用量回执。真实界面继续使用原请求的渠道、输入、输出和缓存统计；未知值不显示成 0。</p>');break;
+    case 'inspect-operation':{
+      const e=allEvents().find(x=>x.id===button.dataset.event);
+      openInspector('原操作','<p>结果待确认；此处只查看原操作，不重新执行写入。</p><pre>'+H(JSON.stringify(rawOf(e),null,2))+'</pre>'+Btn('next','显示后续确认回执','button'));break;
+    }
+    case 'inspect-file':inspectEvent(button.dataset.event);break;
+    case 'inspect-history':openInspector('本轮事件与呈现数据','<p>以下为本例共用的数据，工具标题没有额外描述字段。</p><pre>'+H(JSON.stringify(currentFrame(),null,2))+'</pre>');break;
+    case 'inspect-scope':openInspector('工作区来源','<p>opencr · D:/project/opencr</p><p>真实导航保留原始 Thread、branch、history item 与文件来源，路径只是显示名称。</p>');break;
+    case 'copy-prompt':if(navigator.clipboard)navigator.clipboard.writeText(currentScene().prompt).then(()=>feedback('已复制。'),()=>openInspector('消息文本','<pre>'+H(currentScene().prompt)+'</pre>'));else openInspector('消息文本','<pre>'+H(currentScene().prompt)+'</pre>');break;
+    case 'save-provider':{
+      const input=byId('provider-value');if(!input?.value.trim()){input?.focus();settingsFeedback('填写示例值后再保存。');break;}
+      button.disabled=true;settingsFeedback('保存中…');setTimeout(()=>{state.settingsError=false;settingsFeedback('已保存');button.disabled=false;button.textContent='保存';const alert=document.querySelector('.settings-page [role="alert"]');alert?.remove();},550);break;
+    }
+    case 'edit-model':state.model.before={name:state.model.name,base:state.model.base,requestModel:state.model.requestModel};state.model.editing=true;render();break;
+    case 'save-model':state.model.editing=false;state.settingsFeedback='已保存';render();break;
+    case 'cancel-model':Object.assign(state.model,state.model.before||{});state.model.editing=false;render();break;
+    case 'add-rule':state.retry.rules.push({field:'message',match:'contains',pattern:'',action:'retry'});render();break;
+    case 'remove-rule':state.retry.rules.splice(Number(button.dataset.index),1);render();break;
+    case 'save-retry':settingsFeedback('已保存重试设置 · 用于之后的新请求');break;
+    case 'inherit-defaults':state.settingsCase='defaults';state.retry={enabled:true,maxRetries:2,initialDelayMs:1000,maxDelayMs:30000,rules:[]};render();settingsFeedback('已恢复继承');break;
+    case 'cleanup-preview':state.storage.cleanPreview=true;render();break;
+    case 'cleanup-cancel':state.storage.cleanPreview=false;render();break;
+    case 'cleanup-confirm':button.disabled=true;button.textContent='正在清理…';setTimeout(()=>{state.storage.cleanPreview=false;state.storage.cleaned=true;render();},650);break;
+    case 'inspect-storage-scope':openInspector('存储统计范围','<p>只统计应用管理的目录。共享数据库和内容寻址对象不重复分摊到工作区；原始项目目录不在扫描范围内。</p>');break;
+    default:openInspector('保留现有操作','<p>这个入口保留现有产品操作。本稿不调用外部服务，也不替换该功能的实现。</p>');break;
+  }
+});
+document.addEventListener('input',event=>{
+  const el=event.target;
+  if(el.id==='prompt'){state.prompt=el.value;const send=document.querySelector('[data-action="send"]');if(send)send.hidden=['running','waiting'].includes(currentFrame().run.state)&&!state.prompt.trim();}
+  if(el.id==='plan-editor')state.planDraft=el.value;
+  if(el.id==='question-free'){state.answerText=el.value;const submit=document.querySelector('[data-action="answer"]');if(submit)submit.disabled=!state.answer&&!state.answerText.trim();}
+  if(el.id==='settings-search'){state.search=el.value;renderSettings();const next=byId('settings-search');next.focus();next.setSelectionRange(next.value.length,next.value.length);}
+  if(el.id==='frame-slider'){stopPlayback();state.frame=Number(el.value);render();}
+  if(el.dataset.webField)state.web[el.dataset.webField]=el.value;
+  if(el.dataset.modelField)state.model[el.dataset.modelField]=el.value;
+  if(el.dataset.retryField)state.retry[el.dataset.retryField]=Number(el.value);
+  if(el.dataset.rule!==undefined)state.retry.rules[Number(el.dataset.rule)][el.dataset.ruleField]=el.value;
+});
+document.addEventListener('change',event=>{
+  const el=event.target;
+  if(el.id==='scenario'){if(state.view==='settings')chooseSettings(el.value);else chooseScene(el.value);return;}
+  if(el.name==='question'){const e=currentFrame().events.find(e=>e.kind==='tool'&&e.call.name==='ask_user');state.answer=e.call.arguments.options[Number(el.value)];renderQuestionPopup();return;}
+  if(el.dataset.pref){
+    const key=el.dataset.pref;
+    if(key.startsWith('web.'))state.web[key.slice(4)]=el.checked;else if(key==='retry.enabled')state.retry.enabled=el.checked;else state.prefs[key]=el.checked;
+    state.settingsFeedback='已保存';render();return;
+  }
+  if(el.dataset.setting==='provider'){state.web.provider=el.value;state.settingsError=false;render();return;}
+  if(el.dataset.setting==='readerModel'){state.web.readerModel=el.value;state.settingsFeedback='已保存';render();return;}
+  if(el.dataset.setting==='activity'){state.prefs.activity=el.value;render();return;}
+  if(el.dataset.rule!==undefined)state.retry.rules[Number(el.dataset.rule)][el.dataset.ruleField]=el.value;
+  if(el.hasAttribute('data-storage-scope')){state.storage.scope=el.value;render();}
+  if(el.dataset.local)settingsFeedback('已保存');
+});
+document.addEventListener('scroll',event=>{
+  const el=event.target;if(!(el instanceof Element))return;
+  if(el.id==='thread-scroll'){state.scroll=el.scrollTop;state.follow=el.scrollHeight-el.scrollTop-el.clientHeight<4;const btn=document.querySelector('[data-action="bottom"]');if(btn)btn.hidden=state.follow;}
+  if(el.dataset.thinkingScroll){const follow=el.scrollHeight-el.scrollTop-el.clientHeight<3;state.thoughtScroll.set(el.dataset.thinkingScroll,{top:el.scrollTop,follow});const btn=el.closest('.thinking-window')?.querySelector('.thinking-follow');if(btn)btn.hidden=follow;}
+  if(el.dataset.outputScroll)state.thoughtScroll.set('output:'+el.dataset.outputScroll,{top:el.scrollTop,follow:el.scrollHeight-el.scrollTop-el.clientHeight<3});
+},true);
+document.addEventListener('transitionend',event=>{if(event.target.classList?.contains('fold')||event.target.classList?.contains('thinking-panel'))followAfterChange();});
+document.addEventListener('keydown',event=>{
+  if(event.key==='Escape'){if(byId('inspector').classList.contains('open'))byId('inspector').classList.remove('open');else if(state.view==='settings'){state.view='chat';render();}else if(!state.questionHidden&&document.querySelector('.question-popup')){state.questionHidden=true;render();}else{state.overview='closed';render();}}
+  if(event.target.id==='prompt'&&event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();document.querySelector('[data-action="send"]')?.click();}
+});
+render({keepScroll:false});
+</script>
+</body>
+</html>
