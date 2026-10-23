@@ -12,15 +12,17 @@ interface ProgressView {
   items: Map<string, StreamingTextPart>;
   calls: Map<string, StreamingToolCall>;
   readers: Map<string, PartialJson>;
+  nextOrder: number;
   retry?: { type: 'retry'; attempt: number; retryAt: number };
 }
 export interface StreamingToolCall {
+  order?: number;
   id: string; name: string; rawName?: string; rawArguments: string; sequence: number; reference?: string; interrupted?: boolean;
   arguments?: import('@varin/protocol').JsonValue;
   gateway?: { name: string; arguments: import('@varin/protocol').JsonValue };
 }
 export interface ToolExecutionProgress { runId: string; operationId: string; toolName: string; details: unknown }
-export type StreamingTextPart = { type: 'text'; text: string } | { type: 'thinking'; thinking: string } | { type: 'retry'; attempt: number; retryAt: number };
+export type StreamingTextPart = { type: 'text'; text: string; id?: string; order?: number } | { type: 'thinking'; thinking: string; id?: string; order?: number } | { type: 'retry'; attempt: number; retryAt: number };
 interface ProviderProgress { kind?: string; data?: { kind?: string; item_id?: string; text?: string; call_id?: string; name?: string; request_id?: string; delta?: string; attempt?: number; delay_ms?: number } }
 
 /** Rebuildable view only. No model history or running state is written by the UI. */
@@ -166,7 +168,7 @@ export class ThreadProjection {
             let progress = this.progress.get(event.runId);
             if (!progress || progress.stream !== stream || progress.requestId !== event.requestId) {
               progress = { stream, requestId: event.requestId, sequence: progress?.stream === stream ? progress.sequence : 0,
-                firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map() };
+                firstObserved: observed, items: new Map(), calls: new Map(), readers: new Map(), nextOrder: 0 };
               this.progress.set(event.runId, progress);
             }
             if (event.sequence !== progress.sequence + 1) {
@@ -190,6 +192,7 @@ export class ThreadProjection {
                   id: data.request_id ? JSON.stringify([event.runId, data.request_id, data.call_id]) : old?.id ?? data.call_id,
                   name: data.name ?? old?.rawName ?? old?.name ?? '', rawName: data.name ?? old?.rawName ?? old?.name,
                   rawArguments: (old?.rawArguments ?? '') + (data.delta ?? ''), sequence: event.sequence,
+                  order: old?.order ?? progress.nextOrder++,
                 });
                 const call = progress.calls.get(data.call_id);
                 if (call && (data.kind === 'tool_call_started' || data.kind === 'tool_arguments_delta')) {
@@ -215,10 +218,13 @@ export class ThreadProjection {
               }
               if (payload.kind === 'provider' && (data?.kind === 'text_delta' || data?.kind === 'reasoning_delta')
                 && typeof data.item_id === 'string' && typeof data.text === 'string') {
-                const old = progress.items.get(data.item_id);
-                progress.items.set(data.item_id, data.kind === 'reasoning_delta'
-                  ? { type: 'thinking', thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text }
-                  : { type: 'text', text: (old?.type === 'text' ? old.text : '') + data.text });
+                const key = `${data.kind}:${data.item_id}`;
+                const old = progress.items.get(key);
+                const identity = { id: `model-item:${new TextEncoder().encode(event.requestId).length}:${event.requestId}:${data.item_id}`,
+                  order: old && old.type !== 'retry' ? old.order : progress.nextOrder++ };
+                progress.items.set(key, data.kind === 'reasoning_delta'
+                  ? { ...identity, type: 'thinking', thinking: (old?.type === 'thinking' ? old.thinking : '') + data.text }
+                  : { ...identity, type: 'text', text: (old?.type === 'text' ? old.text : '') + data.text });
               }
             }
             if (event.runId !== this.activeRunId) { this.activeRunId = event.runId; void this.refresh(); }

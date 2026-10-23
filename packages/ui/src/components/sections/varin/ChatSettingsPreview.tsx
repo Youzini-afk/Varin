@@ -17,7 +17,7 @@ import { ConversationContext, ConversationPreviewContext } from '@/components/co
 import { projectChatTimeline } from '@/components/conversation/chatTimelineProjection';
 import { PierreDiffViewer } from '@/components/views/PierreDiffViewer';
 import './chat-settings-preview.css';
-import { createChatPreviewEntries, CHAT_PREVIEW_CODE } from './chatSettingsPreviewData';
+import { createChatPreviewEntries, createDialoguePreview, CHAT_PREVIEW_CODE } from './chatSettingsPreviewData';
 
 export type ChatPreviewScene = 'conversation' | 'files' | 'input';
 const BEFORE = 'export const validate = (input: string) => {\n  if (!input) return true;\n  return input.trim().length > 0;\n};\n';
@@ -39,13 +39,15 @@ export function ChatSettingsPreview({ scene, onSceneChange }: { scene: ChatPrevi
   const [draft, setDraft] = React.useState('');
   const [sent, setSent] = React.useState<{ text: string; mode: 'sent' | 'queued' | 'steered' }>();
   const viewport = React.useRef<HTMLDivElement>(null);
-  const entries = React.useMemo(() => createChatPreviewEntries(t), [t]);
+  const [activityStep, setActivityStep] = React.useState(0);
+  const dialogueExample = React.useMemo(() => state.layout === 'dialogue' ? createDialoguePreview(t, activityStep) : undefined, [state.layout, t, activityStep]);
+  const entries = React.useMemo(() => dialogueExample?.entries ?? createChatPreviewEntries(t), [t, dialogueExample]);
   const projection = React.useMemo(() => projectChatTimeline(entries), [entries]);
   const item = projection.items[0];
   const turn = item?.kind === 'turn' ? item.turn : undefined;
   const bodyId = React.useId();
   const tabs = React.useRef<Partial<Record<ChatPreviewScene, HTMLButtonElement>>>({});
-  const resetExample = () => { setReset(value => value + 1); setDraft(''); setSent(undefined); setBusy(true); setFileOpen(false); onSceneChange('conversation'); viewport.current?.scrollTo({ top: 0 }); };
+  const resetExample = () => { setReset(value => value + 1); setActivityStep(0); setDraft(''); setSent(undefined); setBusy(true); setFileOpen(false); onSceneChange('conversation'); viewport.current?.scrollTo({ top: 0 }); };
   const diagram = `\`\`\`mermaid\nflowchart LR\n  A["${t('settings.chat.preview.diagram')}"] --> B["${t('settings.chat.preview.diagramCheck')}"] --> C["${t('settings.chat.preview.diagramValid')}"]\n\`\`\``;
 
   return <aside className="settings-chat-preview" aria-label={t('settings.chat.preview.title')}>
@@ -74,12 +76,13 @@ export function ChatSettingsPreview({ scene, onSceneChange }: { scene: ChatPrevi
         {/* Explicitly shadow any enclosing live owner. No extension renderer or real file action runs here. */}
         <ConversationContext.Provider value={null}><ConversationPreviewContext.Provider value>
           {scene === 'conversation' && turn ? <div className="relative px-4 py-5" style={{ fontSize: `${state.fontSize}%`, paddingBlock: `${20 * state.padding / 100}px` }}>
+            {dialogueExample && <div className="mb-3 flex justify-end"><Button variant="ghost" size="sm" onClick={() => setActivityStep(value => (value + 1) % 3)}>{t('settings.chat.preview.nextActivity')}</Button></div>}
             <div className="mx-auto space-y-4 transition-[width]" style={{ width: state.width ? `${Math.min(100, Math.max(30, state.width / 1152 * 100))}%` : '100%' }}>
               <div className={cn(state.sticky && 'sticky top-0 z-10 rounded-lg bg-background/95 py-1 backdrop-blur-sm')}>
                 <ChatTurnUserMessage key={`user:${reset}`} cwd="" entry={turn.userEntry} message={turn.user} />
               </div>
               <ChatTurnAssistantChrome turn={turn} />
-              <ChatTimelineEntryList key={`${reset}:${state.layout}:${state.activity}:${state.commands}:${state.edits}`} cwd="" sessionId="settings-preview" entries={turn.entries} projectedResultByCallId={turn.resultByCallId} toolExecutions={{}} />
+              <ChatTimelineEntryList key={`${reset}:${state.layout}:${state.activity}:${state.commands}:${state.edits}`} cwd="" sessionId={`settings-preview:${reset}`} entries={turn.entries} projectedResultByCallId={turn.resultByCallId} toolExecutions={dialogueExample?.executions ?? {}} turnActive={dialogueExample?.active} />
             </div>
             {state.navigator && <button type="button" aria-label={t('settings.chat.preview.jump')} className="sticky bottom-2 float-right flex flex-col items-center gap-1 rounded px-2 py-3 text-foreground hover:bg-muted/40"
               onClick={() => viewport.current?.scrollTo({ top: 0, behavior: 'smooth' })}><span className="h-5 w-1 rounded-full bg-current" /><span className="typography-micro">1</span></button>}

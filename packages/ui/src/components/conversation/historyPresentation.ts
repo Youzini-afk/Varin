@@ -9,13 +9,37 @@ const json = (value: unknown): JsonValue => value as JsonValue;
 // Dedicated cards keep their original call/history identity through the gateway.
 const presentedCall = presentInvocation<Record<string, unknown>>;
 
+function chatThinking(value: Record<string, unknown>): { key: string; text: string } | undefined {
+  for (const key of ['reasoning_content', 'reasoning']) {
+    if (typeof value[key] === 'string') return { key, text: value[key] };
+  }
+  const parts = Array.isArray(value.reasoning_details) ? value.reasoning_details.flatMap(part => {
+    const detail = object(part);
+    const text = detail.type === 'reasoning.text' ? detail.text : detail.type === 'reasoning.summary' ? detail.summary : undefined;
+    return typeof text === 'string' ? [text] : [];
+  }) : [];
+  return parts.length ? { key: 'reasoning-details', text: parts.join('') } : undefined;
+}
+
+function thinkingIdentity(envelope: Record<string, unknown>, fallback: string): string {
+  const id = typeof envelope.id === 'string' ? envelope.id : fallback;
+  const opaque = object(envelope.opaque);
+  // Chat adapters stream these fields as separate items, then retain them in
+  // the completed :message envelope. Match that original public stream key.
+  if (['openai-completions', 'mistral-conversations'].includes(String(opaque.family)) && id.endsWith(':message')) {
+    const thinking = chatThinking(object(opaque.value));
+    if (thinking) return id.slice(0, -'message'.length) + thinking.key;
+  }
+  return id;
+}
+
 /** Display only the public thinking text stored in the original provider item. Opaque
  * signatures/encrypted payloads stay untouched; this does not change model replay content. */
 function thinkingText(envelope: Record<string, unknown>): string {
   const opaque = object(envelope.opaque), value = object(opaque.value);
   let text: unknown;
   switch (opaque.family) {
-    case 'openai-completions': case 'mistral-conversations': text = value.reasoning_content ?? value.reasoning; break;
+    case 'openai-completions': case 'mistral-conversations': text = chatThinking(value)?.text; break;
     case 'anthropic-messages': if (value.type === 'thinking') text = value.thinking; break;
     case 'openai-responses': case 'openai-codex-responses': case 'azure-openai-responses':
       if (value.type === 'reasoning' && Array.isArray(value.summary)) text = value.summary.map(part => object(part).text).filter(part => typeof part === 'string').join('\n');
@@ -120,7 +144,8 @@ export class HistoryPresentation {
             ...(item.source === 'agent' && typeof sender === 'string' ? { details: { senderThreadId: sender } } : {}) };
         } else if (content.kind === 'text' || content.kind === 'reasoning_summary') {
           const text = String(content.text ?? '');
-          entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', text } : { type: 'thinking', thinking: text }], configuration) };
+          const id = typeof envelope.id === 'string' ? envelope.id : item.id;
+          entry = { ...base, type: 'message', message: assistant(item.id, [content.kind === 'text' ? { type: 'text', id, text } : { type: 'thinking', id, thinking: text }], configuration) };
         } else if (content.kind === 'tool_call') {
           entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'toolCall', id: callKey(item.run_id, request ?? item.id, String(call.call_id)),
             name: String(call.name), arguments: json(call.arguments),
@@ -141,7 +166,7 @@ export class HistoryPresentation {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };
         } else if (content.kind === 'provider_only' && thinking) {
-          entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'thinking', thinking }], configuration) };
+          entry = { ...base, type: 'message', message: assistant(item.id, [{ type: 'thinking', id: thinkingIdentity(envelope, item.id), thinking }], configuration) };
         } else if (content.kind === 'provider_only') continue;
         else if (content.kind === 'media') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: 'media', content: '', display: true, timestamp: 0 } };
@@ -151,7 +176,7 @@ export class HistoryPresentation {
             ...(typeof item.content === 'string' || typeof envelope.text === 'string' ? {} : { details: json(item.content) }) };
         }
         if (entry.type === 'message' && entry.message.role === 'assistant' && thinking && content.kind !== 'provider_only' && content.kind !== 'reasoning_summary') {
-          entry.message.content.unshift({ type: 'thinking', thinking });
+          entry.message.content.unshift({ type: 'thinking', id: thinkingIdentity(envelope, item.id), thinking });
         }
         this.entries.set(item.id, entry);
       }

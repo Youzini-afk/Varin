@@ -641,10 +641,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'chat.render-mode', category: 'chat', owner: 'app',
     field: { path: 'chatRenderMode', kind: 'enum',
-      options: [{ value: 'sorted' }, { value: 'live' }] },
+      options: [{ value: 'sorted' }, { value: 'live' }, { value: 'dialogue' }] },
     apply: 'immediate',
     ui: { page: 'chat', titleKey: 'settings.chat.replyLayout',
-      keywords: ['messages', 'conversation', 'rendering'] },
+      keywords: ['messages', 'conversation', 'rendering', 'dialogue', 'collapsed', '对话优先'] },
   },
   {
     id: 'chat.message-transport', category: 'chat', owner: 'app',

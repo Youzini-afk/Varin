@@ -359,6 +359,17 @@
 }
 .workbench-diff-preview-viewport { transition: height var(--wb-panel-duration) var(--wb-ease); }
 .workbench-status-arrival { animation: wb-action-arrive var(--wb-state-duration) var(--wb-ease) both; }
+.dialogue-activity { min-width: 0; color: var(--muted-foreground); }
+.dialogue-activity-heading { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 30px; padding: 4px 0; cursor: pointer; list-style: none; font-size: var(--text-meta); }
+.dialogue-activity-heading::-webkit-details-marker { display: none; }
+.dialogue-activity-heading:hover { color: var(--foreground); }
+.dialogue-activity-heading:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 4px; }
+.dialogue-activity-chevron { transition: transform var(--wb-state-duration) var(--wb-ease); }
+.dialogue-activity[open] > summary .dialogue-activity-chevron { transform: rotate(90deg); }
+.dialogue-activity-label { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; animation: dialogue-activity-arrive var(--wb-state-duration) var(--wb-ease) both; }
+.dialogue-activity-body { min-width: 0; margin: 5px 0 8px 6px; padding-left: 14px; border-left: 1px solid var(--border); color: var(--foreground); }
+.dialogue-activity-body > * + * { margin-top: 10px; }
+@keyframes dialogue-activity-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 /* Native disclosure keeps its focus, scroll and tool identity throughout a reversible transition. */
 @supports (interpolate-size: allow-keywords) {
   .workbench-disclosure::details-content {
@@ -373,7 +384,8 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .conversation-composer-hints, .workbench-diff-preview-viewport, .workbench-disclosure::details-content { transition: none; }
-  .workbench-status-arrival { animation: none; }
+  .workbench-status-arrival, .dialogue-activity-label { animation: none; }
+  .dialogue-activity-chevron { transition: none; }
 }
 
 .composer-attachment { animation: wb-material-arrive 360ms var(--wb-ease-settle) both; }

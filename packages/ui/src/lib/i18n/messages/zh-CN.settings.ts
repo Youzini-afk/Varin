@@ -1,4 +1,13 @@
 export const settingsDict = {
+  "settings.chat.dialogue": "对话优先",
+  "settings.chat.dialogueHint": "保留每段发言，段落间用一条可展开的动态行显示当前动作，结束后汇总；子 Agent 单独展示。",
+  "settings.chat.dialogueDetailsHint": "过程默认折叠。思考和工具的展开偏好在打开过程后生效。",
+  "settings.chat.preview.nextActivity": "演示下一步",
+  "settings.chat.preview.dialogueNext": "找到原因了，我再确认一下保存入口。",
+  "settings.chat.preview.delegate": "布局检查",
+  "settings.chat.preview.delegateTask": "检查窄面板里的布局和换行。",
+  "settings.varin.visual.option.chatRenderMode.dialogue.label": "对话优先",
+  "settings.varin.visual.option.chatRenderMode.dialogue.description": "正文按顺序展示；每段过程用一条动态折叠行呈现，子 Agent 独立显示。",
   "settings.page.harness.localSemantic.source": "本地模型",
   "settings.page.harness.embeddings.off": "关闭嵌入 · 使用文本检索",
   "settings.page.harness.embeddings.cpu.mode": "本地 CPU 偏好",

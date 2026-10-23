@@ -23,7 +23,9 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { PatchHunkReview } from '@/components/workbench/PatchHunkReview';
-import { useUIStore } from '@/stores/useUIStore';
+import { useUIStore, type ChatRenderMode } from '@/stores/useUIStore';
+import { projectChatDialogue, type DialogueItem, type DialogueActivity } from './chatDialogueProjection';
+import { ChatDialogueActivity } from './ChatDialogueActivity';
 import type {
   ChatSessionSubmissionStatus,
   ChatToolExecutionState,
@@ -683,6 +685,31 @@ const AssistantMessage: React.FC<{
   </div>;
 };
 
+export const ChatDialogueBlock: React.FC<{
+  item: DialogueItem; cwd: string; sessionId: string; executions: Record<string, ChatToolExecutionState>;
+  results: ReadonlyMap<string, ChatToolResultMessage>; active: boolean;
+  expanded?: boolean; onExpandedChange?(open: boolean): void;
+  extensionPresentation?: ReadonlyMap<string, () => React.ReactNode>;
+}> = ({ item, cwd, sessionId, executions, results, active, expanded, onExpandedChange, extensionPresentation }) => {
+  const { t } = useI18n();
+  const preview = React.useContext(ConversationPreviewContext);
+  const renderPart = (part: Exclude<DialogueItem, { kind: 'process' }> | DialogueActivity): React.ReactNode => {
+    if (part.kind === 'entry') return <ChatTimelineEntryList cwd={cwd} sessionId={sessionId} entries={[part.entry]}
+      toolExecutions={executions} projectedResultByCallId={results} part="body" presentationMode="live" extensionPresentation={extensionPresentation} />;
+    return <div className="min-w-0" data-conversation-entry-id={part.sourceId} data-conversation-message-role="assistant">
+      {part.kind === 'text' ? <ChatTextSource entryId={part.sourceId} text={part.content.text} offset={part.offset} contentIndex={part.contentIndex}>
+        <MarkdownRenderer content={part.content.text} messageId={part.id} isStreaming={part.streaming} enableFileReferences={!preview} />
+      </ChatTextSource> : part.kind === 'tool' ? <ChatToolCard call={part.call} cwd={cwd} generating={part.streaming}
+        execution={executions[part.call.id]} executionById={executions} result={results.get(part.call.id)} />
+        : part.kind === 'thinking' ? <ChatThinkingBlock content={part.content} messageId={part.id} streaming={active && part.streaming} label={t('chat.reasoningTrace.thinking')} />
+          : <p role="alert" className="typography-meta text-destructive">{part.text}</p>}
+      {part.extrasId && <EntryExtras itemId={part.extrasId} />}
+    </div>;
+  };
+  return item.kind === 'process' ? <ChatDialogueActivity process={item} executions={executions} results={results}
+    active={active} expanded={expanded} onExpandedChange={onExpandedChange} renderActivity={renderPart} /> : <>{renderPart(item)}</>;
+};
+
 export const ChatSortedActivityGroup: React.FC<{
   cwd: string;
   executionById: Record<string, ChatToolExecutionState>;
@@ -946,6 +973,8 @@ export const ChatTimelineEntryList: React.FC<Omit<
   /** A physical body row uses its logical Run's sorted projection. Activity
    * has its own virtual rows; it must not be mounted again inside the body. */
   sortedPresentation?: ChatSortedTurnProjection;
+  /** Detail rows reuse this renderer without applying the outer dialogue grouping again. */
+  presentationMode?: ChatRenderMode;
   extensionPresentation?: ReadonlyMap<string, () => React.ReactNode>;
 }> = ({
   cwd,
@@ -965,10 +994,13 @@ export const ChatTimelineEntryList: React.FC<Omit<
   part,
   turnActive = liveAssistant?.stopReason === 'pending',
   sortedPresentation,
+  presentationMode,
   extensionPresentation,
 }) => {
   const { t } = useI18n();
-  const chatRenderMode = useUIStore((state) => state.chatRenderMode);
+  const preferredRenderMode = useUIStore((state) => state.chatRenderMode);
+  const showThinking = useUIStore(state => state.showReasoningTraces);
+  const chatRenderMode = presentationMode ?? preferredRenderMode;
   const preview = React.useContext(ConversationPreviewContext);
   const messageRenderers = useWorkbenchMatchRenderers<{
     cwd: string;
@@ -1009,6 +1041,9 @@ export const ChatTimelineEntryList: React.FC<Omit<
     [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
+  const dialogue = React.useMemo(() => chatRenderMode === 'dialogue' && part !== 'footer'
+    ? projectChatDialogue(projection.visibleEntries, projection.liveAssistant, { showThinking, customIds: new Set(extensionEntries.keys()), executions: toolExecutions }) : undefined,
+  [chatRenderMode, part, projection.visibleEntries, projection.liveAssistant, showThinking, extensionEntries, toolExecutions]);
   // The row owns the whole turn, independent of live/sorted presentation.
   // Only assistant prose belongs in copy/memory; thinking and tool output do
   // not. Native discussion/fork actions still need a persisted text message.
@@ -1029,7 +1064,8 @@ export const ChatTimelineEntryList: React.FC<Omit<
     <ToolTargetScope entries={entries} executions={toolExecutions}>
     <ChatToolDisclosureScope key={sessionId} sessionId={sessionId}>
     <div className="flex flex-col gap-3">
-        {part !== 'footer' && projection.visibleEntries.map((entry) => {
+        {part !== 'footer' && (dialogue ? dialogue.map(item => <ChatDialogueBlock key={item.id} item={item} cwd={cwd} sessionId={sessionId}
+          executions={toolExecutions} results={resultByCallId} active={turnActive} extensionPresentation={extensionPresentation} />) : projection.visibleEntries.map((entry) => {
           if (extensionEntries.has(entry.id)) {
             return <React.Fragment key={entry.id}>{extensionEntries.get(entry.id)}</React.Fragment>;
           }
@@ -1209,9 +1245,9 @@ export const ChatTimelineEntryList: React.FC<Omit<
               <pre className="mt-1 whitespace-pre-wrap break-words font-mono typography-micro">{jsonText(entry.data)}</pre>
             </MetaEntry>
           );
-        })}
+        }))}
 
-        {part !== 'footer' && projection.liveAssistant && (() => {
+        {part !== 'footer' && !dialogue && projection.liveAssistant && (() => {
           const displayedMessage = chatRenderMode === 'sorted'
             ? sortedProjection?.answersBySourceId.get(CHAT_SORTED_LIVE_ASSISTANT_ID)
             : projection.liveAssistant;

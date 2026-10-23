@@ -671,7 +671,7 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritat
     }
   }
   if (typeof settings.chatRenderMode === 'string'
-    && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live')) {
+    && (settings.chatRenderMode === 'sorted' || settings.chatRenderMode === 'live' || settings.chatRenderMode === 'dialogue')) {
     if (settings.chatRenderMode !== store.chatRenderMode) {
       store.setChatRenderMode(settings.chatRenderMode);
     }
@@ -1160,7 +1160,7 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
     }
   }
   if (typeof candidate.chatRenderMode === 'string'
-    && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live')) {
+    && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live' || candidate.chatRenderMode === 'dialogue')) {
     result.chatRenderMode = candidate.chatRenderMode;
   }
   if (

@@ -554,7 +554,7 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
     }
     if (typeof candidate.chatRenderMode === 'string') {
       const mode = candidate.chatRenderMode.trim();
-      if (mode === 'sorted' || mode === 'live') {
+      if (mode === 'sorted' || mode === 'live' || mode === 'dialogue') {
         result.chatRenderMode = mode;
       }
     }

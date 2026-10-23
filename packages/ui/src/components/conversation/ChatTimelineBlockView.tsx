@@ -1,10 +1,11 @@
 import React from 'react';
 import type { ChatTimelineProjection } from './chatTimelineProjection';
-import { blockGroupLive, blockGroupSorted, type ChatTimelineBlock } from './chatTimelineBlocks';
-import { ChatSortedActivityGroup, ChatTimelineEntryList, ChatTurnUserMessage, type ChatTimelineProps } from './ChatTimelineEntries';
+import { blockGroupLive, blockGroupSorted, blockGroupDialogue, type ChatTimelineBlock } from './chatTimelineBlocks';
+import { ChatDialogueBlock, ChatSortedActivityGroup, ChatTimelineEntryList, ChatTurnUserMessage, type ChatTimelineProps } from './ChatTimelineEntries';
 import { ChatTurnAssistantChrome } from './ChatTurnAssistantChrome';
 import { useConversationPresentation } from './ConversationContext';
 import { useI18n } from '@/lib/i18n';
+import { useUIStore } from '@/stores/useUIStore';
 
 export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, expanded, onExpandedChange, extensionPresentation, ...props }: Omit<ChatTimelineProps, 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'> & {
   block: ChatTimelineBlock;
@@ -16,6 +17,7 @@ export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, ex
 }) => {
   const presentation = useConversationPresentation();
   const { t } = useI18n();
+  const showThinking = useUIStore(state => state.showReasoningTraces);
   const toolExecutions = presentation.toolExecutions;
   const { cwd, hiddenThinkingLabel, assistantWaiting } = props;
   if (block.kind === 'user') return <div className="chat-message-column py-1.5 bg-background/95" data-turn-entry={block.id} data-turn-id={block.ownerId}>
@@ -26,6 +28,13 @@ export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, ex
   const sortedPresentation = sorted ? blockGroupSorted(group, projection) : undefined;
   let content: React.ReactNode;
   if (block.kind === 'chrome') content = <ChatTurnAssistantChrome entries={group.entries} liveAssistant={liveAssistant} waiting={assistantWaiting} />;
+  else if (block.kind === 'dialogue') {
+    const item = blockGroupDialogue(group, projection, showThinking, toolExecutions).find(item => item.id === block.itemId);
+    if (!item) return null;
+    content = <ChatDialogueBlock item={item} cwd={cwd} sessionId={props.sessionId} executions={toolExecutions}
+      results={projection.resultByCallId} active={props.activeRunId === group.runId || assistantWaiting !== undefined || liveAssistant?.stopReason === 'pending'}
+      expanded={expanded} onExpandedChange={value => onExpandedChange(block.id, value)} extensionPresentation={extensionPresentation} />;
+  }
   else if (block.kind === 'activity-header' || block.kind === 'activity') {
     if (!sortedPresentation) return null;
     const activity = block.kind === 'activity' ? sortedPresentation.activity.filter(item => item.id === block.activityId) : sortedPresentation.activity;

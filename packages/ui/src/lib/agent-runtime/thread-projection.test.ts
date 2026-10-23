@@ -77,7 +77,7 @@ it('shows retry waiting separately and replaces it when the next attempt starts'
     h.listener({ ...delta(2, ''), event: { kind: 'batch', events: [{ kind: 'retry_scheduled', data: { attempt: 1, delay_ms: 5000 } }] } });
     expect(h.parts.mock.lastCall?.[0]).toMatchObject([{ type: 'text', text: 'unfinished' }, { type: 'retry', attempt: 1 }]);
     h.listener(delta(3, 'fresh answer', 'run', 'request:retry:1'));
-    expect(h.parts.mock.lastCall?.[0]).toEqual([{ type: 'text', text: 'fresh answer' }]);
+    expect(h.parts.mock.lastCall?.[0]).toEqual([{ type: 'text', id: 'model-item:15:request:retry:1:assistant', order: 0, text: 'fresh answer' }]);
   } finally { h.projection.close(); }
 });
 
@@ -142,14 +142,17 @@ it('streams thinking and text during the initial snapshot and keeps the next req
     event.event.events.unshift({ kind: 'provider', data: { kind: 'reasoning_delta', item_id: 'reasoning', text: 'Visible thinking' } });
     h.listener(event);
     expect(h.publish).not.toHaveBeenCalled();
-    expect(h.parts).toHaveBeenLastCalledWith([{ type: 'thinking', thinking: 'Visible thinking' }, { type: 'text', text: 'First answer' }]);
+    expect(h.parts).toHaveBeenLastCalledWith([
+      { type: 'thinking', id: 'model-item:7:request:reasoning', order: 0, thinking: 'Visible thinking' },
+      { type: 'text', id: 'model-item:7:request:assistant', order: 1, text: 'First answer' },
+    ]);
     pending.resolve(); await vi.advanceTimersByTimeAsync(0);
     h.listener(delta(2, 'Next answer', 'run', 'next-request'));
     view.history.push({ id: 'old-answer', thread_id: identity.threadId, run_id: 'run', parent: null, source: 'assistant',
       content: { id: 'model-item:7:requestanswer', content: { kind: 'text', text: 'First answer' } }, provider: null });
     h.listener({ cursor: 8, subject: 'run', revision: 2, kind: 'history.appended', data: {} });
     await vi.advanceTimersByTimeAsync(0);
-    expect(h.parts).toHaveBeenLastCalledWith([{ type: 'text', text: 'Next answer' }]);
+    expect(h.parts).toHaveBeenLastCalledWith([{ type: 'text', id: 'model-item:12:next-request:assistant', order: 0, text: 'Next answer' }]);
   } finally { pending.resolve(); h.projection.close(); }
 });
 

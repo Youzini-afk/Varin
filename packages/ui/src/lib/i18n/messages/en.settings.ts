@@ -1,4 +1,13 @@
 export const settingsDict = {
+  "settings.chat.dialogue": "Conversation first",
+  "settings.chat.dialogueHint": "Keep every spoken message in order, with one live activity disclosure between messages. Delegated agents stay visible.",
+  "settings.chat.dialogueDetailsHint": "Activity starts collapsed. Thinking and tool expansion preferences apply after you open it.",
+  "settings.chat.preview.nextActivity": "Preview next action",
+  "settings.chat.preview.dialogueNext": "I found the cause. I am checking the save path before making the change.",
+  "settings.chat.preview.delegate": "Review layout",
+  "settings.chat.preview.delegateTask": "Inspect the narrow panel layout and wrapping.",
+  "settings.varin.visual.option.chatRenderMode.dialogue.label": "Conversation first",
+  "settings.varin.visual.option.chatRenderMode.dialogue.description": "Spoken messages stay in order; each activity segment has one live disclosure. Delegated agents stay visible.",
   "settings.page.harness.localSemantic.source": "Local model",
   "settings.page.harness.embeddings.off": "Embeddings off · text search",
   "settings.page.harness.embeddings.cpu.mode": "Local CPU preference",

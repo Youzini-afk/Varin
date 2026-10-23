@@ -101,8 +101,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   const liveAssistant = React.useMemo(() => progress.length || streamingTools.length ? { ...assistant(`progress:${snapshot?.activeRun?.id ?? key}`, [
     ...progress.filter(part => part.type !== 'retry'),
     ...streamingTools.filter(call => call.name).map(call => ({ type: 'toolCall' as const, id: call.id, name: call.name,
-      arguments: call.arguments ?? {}, gateway: call.gateway, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted })),
-  ], snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
+      arguments: call.arguments ?? {}, gateway: call.gateway, rawArguments: call.rawArguments, sequence: call.sequence, interrupted: call.interrupted, order: call.order })),
+  ].sort((left, right) => (left.order ?? 0) - (right.order ?? 0)), snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
   React.useLayoutEffect(() => {

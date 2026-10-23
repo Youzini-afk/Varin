@@ -15,6 +15,8 @@ export interface ChatUsage {
 }
 
 export interface ChatTextContent {
+  /** Native provider-item identity, shared by transient and persisted rendering. */
+  id?: string;
   text: string;
   type: "text";
 }
@@ -26,6 +28,7 @@ export interface ChatImageContent {
 }
 
 export interface ChatThinkingContent {
+  id?: string;
   redacted?: boolean;
   thinking: string;
   type: "thinking";

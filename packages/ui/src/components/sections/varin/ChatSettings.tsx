@@ -84,10 +84,10 @@ export const ChatSettings: React.FC = () => {
 
     <SettingsSection title={t('settings.chat.execution')} settingsItem="chat.activity-display" contentClassName="space-y-5">
       <SettingsFieldRow label={t('settings.chat.replyLayout')} settingsItem="chat.render-mode"
-        info={t(state.chatRenderMode === 'live' ? 'settings.chat.liveHint' : 'settings.chat.sortedHint')}>
+        info={t(state.chatRenderMode === 'dialogue' ? 'settings.chat.dialogueHint' : state.chatRenderMode === 'live' ? 'settings.chat.liveHint' : 'settings.chat.sortedHint')}>
         <SettingsChipGroup aria-label={t('settings.chat.replyLayout')} value={state.chatRenderMode}
           onChange={mode => save('chatRenderMode', mode, actions.setChatRenderMode)}
-          options={[{ value: 'live', label: t('settings.chat.live') }, { value: 'sorted', label: t('settings.chat.sorted') }]} />
+          options={[{ value: 'live', label: t('settings.chat.live') }, { value: 'dialogue', label: t('settings.chat.dialogue') }, { value: 'sorted', label: t('settings.chat.sorted') }]} />
       </SettingsFieldRow>
       {state.chatRenderMode === 'sorted' ? <SettingsFieldRow label={t('settings.chat.activity')}>
         <SettingsChipGroup aria-label={t('settings.chat.activity')} value={state.activityRenderMode}
@@ -102,6 +102,7 @@ export const ChatSettings: React.FC = () => {
           onChange={value => actions.setCollapsibleThinkingBlocks(!value)} /></div> : null}
       </div>
       <div data-settings-item="chat.expanded-tools" className="divide-y divide-border/40">
+        {state.chatRenderMode === 'dialogue' && <p className="pb-3 typography-meta text-muted-foreground">{t('settings.chat.dialogueDetailsHint')}</p>}
         <Toggle label={t('settings.chat.expandCommands')} checked={state.showExpandedBashTools}
           onChange={v => save('showExpandedBashTools', v, actions.setShowExpandedBashTools)} />
         <Toggle label={t('settings.chat.expandEdits')} checked={state.showExpandedEditTools}

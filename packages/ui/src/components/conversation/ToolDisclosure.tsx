@@ -13,13 +13,15 @@ export function ToolDisclosureScope({ sessionId, children }: { sessionId: string
     <DisclosureContext.Provider value={choices}>{children}</DisclosureContext.Provider>
   </TimelineSessionContext.Provider>;
 }
-export function ToolDisclosure({ id, children, className, initiallyExpanded = false, onExpanded }: {
+export function ToolDisclosure({ id, children, className, initiallyExpanded = false, onExpanded, open: controlledOpen, onOpenChange }: {
   id: string; children: React.ReactNode; className?: string; initiallyExpanded?: boolean; onExpanded?(value: boolean): void;
+  open?: boolean; onOpenChange?(value: boolean): void;
 }) {
   const choices = useToolDisclosureChoices();
   const nestedDetail = React.useContext(ExpandedToolContext);
   const defaultExpanded = initiallyExpanded || nestedDetail && id.startsWith('tool:');
-  const [expanded, setExpanded] = React.useState(() => choices?.get(id) ?? defaultExpanded);
+  const [localExpanded, setExpanded] = React.useState(() => choices?.get(id) ?? defaultExpanded);
+  const expanded = controlledOpen ?? localExpanded;
   const [visited, setVisited] = React.useState(expanded);
   React.useEffect(() => { if (!choices?.has(id)) setExpanded(defaultExpanded); }, [choices, id, defaultExpanded]);
   React.useEffect(() => { if (expanded) setVisited(true); onExpanded?.(expanded); }, [expanded, onExpanded]);
@@ -28,6 +30,7 @@ export function ToolDisclosure({ id, children, className, initiallyExpanded = fa
       if (event.target !== event.currentTarget) return;
       const open = event.currentTarget.open;
       choices?.set(id, open); setExpanded(open);
+      if (open !== expanded) onOpenChange?.(open);
     }}>{expanded || visited ? children : React.Children.toArray(children).slice(0, 1)}</details>;
 }
 

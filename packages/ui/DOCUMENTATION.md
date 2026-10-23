@@ -78,6 +78,17 @@ including gateway targets. It does not fetch additional history or retain a cros
 Missing subjects stay unknown, and requested mutations never substitute for completed receipts.
 Narrow viewports wrap subjects instead of hiding them; original arguments remain in details.
 
+Chat layout offers chronological, grouped-answer, and conversation-first (`dialogue`) modes.
+Conversation-first preserves every spoken message in arrival order. Ordinary tools and public
+thinking between messages share one initially collapsed activity row: the active segment shows
+the current action, while a later spoken message or the end of the Run leaves a receipt-based
+summary. Dispatches (including observed script descendants) and user questions remain independent
+rows. Opening a segment mounts the existing purpose-specific tools, preserving their controls and
+resource identities. Failed, cancelled, and uncertain work stays visible in the collapsed status.
+Provider-item identities and arrival order survive streaming-to-history replacement; disclosure
+choices belong to the original segment and the conversation, rather than the latest render.
+The settings preview uses these same projections with inert, manually stepped examples.
+
 The native Catalog owns accepted input, history, queues and execution receipts. `useThreadStore`
 projects navigation and summary clocks; `ThreadProjection` observes the selected branch. Progress
 streams are transient and sequence-scoped. A lost connection rebuilds from durable history rather than

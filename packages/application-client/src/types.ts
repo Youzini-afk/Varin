@@ -707,7 +707,7 @@ export interface SettingsPayload {
   showExpandedBashTools?: boolean;
   showExpandedEditTools?: boolean;
   chatContentWidth?: number;
-  chatRenderMode?: 'sorted' | 'live';
+  chatRenderMode?: 'sorted' | 'live' | 'dialogue';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';

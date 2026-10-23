@@ -1,6 +1,7 @@
 import { CHAT_SORTED_LIVE_ASSISTANT_ID, projectChatSortedTurn, type ChatSortedTurnProjection } from './chatSortedTurnProjection';
 import { resolveChatTimelineItem, type ChatTimelineEntry, type ChatTimelineProjection, type ChatTimelineTurn } from './chatTimelineProjection';
-import type { ChatAssistantMessage } from './types';
+import type { ChatAssistantMessage, ChatToolExecutionState } from './types';
+import { projectChatDialogue, type DialogueItem } from './chatDialogueProjection';
 
 export interface ChatTimelineBlockGroup {
   id: string;
@@ -19,6 +20,7 @@ export type ChatTimelineBlock = {
   | { kind: 'chrome' | 'footer' | 'activity-header' | 'live-assistant'; group: ChatTimelineBlockGroup }
   | { kind: 'entry'; entry: ChatTimelineEntry; group: ChatTimelineBlockGroup }
   | { kind: 'activity'; activityId: string; sourceId: string; group: ChatTimelineBlockGroup }
+  | { kind: 'dialogue'; itemId: string; group: ChatTimelineBlockGroup }
 );
 export interface ChatTimelineBlocks {
   items: readonly ChatTimelineBlock[];
@@ -27,6 +29,7 @@ export interface ChatTimelineBlocks {
 export type ChatTimelineBlockAliases = Map<string, { runId: string; id: string }>;
 const sortedLive = new WeakMap<ChatTimelineProjection, Map<ChatTimelineBlockGroup, ChatSortedTurnProjection>>();
 const EMPTY_CUSTOM_IDS: ReadonlySet<string> = new Set();
+const dialogues = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; showThinking: boolean; executions?: Record<string, ChatToolExecutionState>; items: DialogueItem[] }>();
 const sameEntries = (a: readonly ChatTimelineEntry[], b: readonly ChatTimelineEntry[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
 
 export function blockGroupLive(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection): ChatAssistantMessage | undefined {
@@ -42,12 +45,22 @@ export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: Chat
   return sorted;
 }
 
+export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
+  const live = blockGroupLive(group, projection), previous = dialogues.get(group);
+  if (previous && previous.live === live && previous.showThinking === showThinking && previous.executions === executions) return previous.items;
+  const items = projectChatDialogue(group.entries, live, { showThinking, customIds: group.customIds, executions });
+  dialogues.set(group, { live, showThinking, executions, items });
+  return items;
+}
+
 /** Logical turns retain navigation/copy semantics. Only these small, native-ID
  * blocks are measured and mounted; loading a missing prompt cannot rename them. */
 export function projectChatTimelineBlocks(
   projection: ChatTimelineProjection,
-  { sorted, expanded, previous, customIds = EMPTY_CUSTOM_IDS, showThinking = true, aliases = new Map() }: {
+  { sorted, dialogue = false, expanded, previous, customIds = EMPTY_CUSTOM_IDS, showThinking = true, aliases = new Map(), executions }: {
     sorted: boolean;
+    dialogue?: boolean;
+    executions?: Record<string, ChatToolExecutionState>;
     expanded(groupId: string): boolean;
     previous?: ChatTimelineBlocks;
     customIds?: ReadonlySet<string>;
@@ -85,6 +98,15 @@ export function projectChatTimelineBlocks(
     const base = { ownerId, group };
     const hasAssistant = entries.some(entry => entry.type === 'message' && entry.message.role === 'assistant') || liveId || !entries.length;
     if (hasAssistant) add({ ...base, kind: 'chrome', id: `chrome:${id}` });
+    if (dialogue) {
+      for (const item of blockGroupDialogue(group, projection, showThinking, executions)) {
+        const sourceId = item.kind === 'process' ? item.activities[0]?.sourceId : item.sourceId;
+        add({ ...base, ownerId: ownerId.startsWith('entry:') && sourceId ? `entry:${sourceId}` : ownerId,
+          kind: 'dialogue', id: `dialogue:${item.id}`, itemId: item.id });
+      }
+      add({ ...base, kind: 'footer', id: `footer:${id}` });
+      return;
+    }
     const presentation = sorted ? blockGroupSorted(group, projection) : undefined;
     const activity = presentation?.activity.filter(item => showThinking || item.kind !== 'thinking');
     if (activity?.length) {

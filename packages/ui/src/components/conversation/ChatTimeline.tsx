@@ -38,7 +38,8 @@ import {
   findChatAssistantWaitingTurnId,
 } from './chatAssistantWaiting';
 import { ChatTimelineBlockView } from './ChatTimelineBlockView';
-import { projectChatTimelineBlocks, type ChatTimelineBlock, type ChatTimelineBlocks, type ChatTimelineBlockAliases } from './chatTimelineBlocks';
+import { projectChatTimelineBlocks, blockGroupDialogue, type ChatTimelineBlock, type ChatTimelineBlocks, type ChatTimelineBlockAliases } from './chatTimelineBlocks';
+import { dialogueContains } from './chatDialogueProjection';
 import { timelinePresentationCache } from './timelinePresentationCache';
 import { ToolTargetScope } from './ToolTargetScope';
 import { ChatContextMenu } from './ChatContextMenu';
@@ -83,7 +84,9 @@ const chatTimelineKeyIntent = (key: string, shiftKey: boolean): ChatTimelineScro
 export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const { t } = useI18n();
   const promptNavigatorEnabled = useUIStore(state => state.promptNavigatorEnabled);
-  const sortedMessages = useUIStore(state => state.chatRenderMode === 'sorted');
+  const renderMode = useUIStore(state => state.chatRenderMode);
+  const sortedMessages = renderMode === 'sorted';
+  const dialogueMessages = renderMode === 'dialogue';
   const stickyUserHeader = useUIStore(state => state.stickyUserHeader);
   const activityRenderMode = useUIStore(state => state.activityRenderMode);
   const showThinking = useUIStore(state => state.showReasoningTraces);
@@ -119,7 +122,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     projection.liveItem,
   ), [projection.items, projection.liveItem, props.assistantWaiting]);
 
-  const [, updateActivity] = React.useReducer(value => value + 1, 0);
+  const [activityRevision, updateActivity] = React.useReducer(value => value + 1, 0);
   const preview = React.useContext(ConversationPreviewContext);
   const messageRenderers = useWorkbenchMatchRenderers<{ cwd: string; entry: ChatSessionEntry; sessionId: string }>('message-renderer', 'chat.timeline.entries', !preview);
   const extensionPresentation = React.useMemo(() => {
@@ -134,11 +137,15 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const customIds = React.useMemo(() => new Set(extensionPresentation.keys()), [extensionPresentation]);
   const activityState = React.useMemo(() => timelinePresentationCache(props.sessionId, 'activity', () => ({ mode: activityRenderMode, choices: new Map<string, boolean>() })), [props.sessionId, activityRenderMode]);
   if (activityState.mode !== activityRenderMode) { activityState.mode = activityRenderMode; activityState.choices.clear(); }
-  const isActivityExpanded = React.useCallback((id: string) => activityState.choices.get(id) ?? activityRenderMode === 'summary', [activityState, activityRenderMode]);
-  const setActivityExpanded = React.useCallback((id: string, expanded: boolean) => { activityState.choices.set(id, expanded); updateActivity(); }, [activityState]);
+  const dialogueChoices = React.useMemo(() => timelinePresentationCache(props.sessionId, 'dialogue-disclosure', () => new Map<string, boolean>()), [props.sessionId]);
+  const isActivityExpanded = React.useCallback((id: string) => id.startsWith('dialogue:')
+    ? dialogueChoices.get(id) ?? false : activityState.choices.get(id) ?? activityRenderMode === 'summary', [activityState, activityRenderMode, dialogueChoices]);
+  const setActivityExpanded = React.useCallback((id: string, expanded: boolean) => {
+    (id.startsWith('dialogue:') ? dialogueChoices : activityState.choices).set(id, expanded); updateActivity();
+  }, [activityState, dialogueChoices]);
   const blocksRef = React.useRef<ChatTimelineBlocks | undefined>(undefined);
   const blockAliases = React.useMemo(() => timelinePresentationCache(props.sessionId, 'block-identities', () => new Map() as ChatTimelineBlockAliases), [props.sessionId]);
-  const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, expanded: isActivityExpanded, previous: blocksRef.current, customIds, showThinking, aliases: blockAliases });
+  const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, dialogue: dialogueMessages, expanded: isActivityExpanded, previous: blocksRef.current, customIds, showThinking, aliases: blockAliases, executions: props.toolExecutions });
   blocksRef.current = blocks;
   const stickyHeaders = React.useMemo(() => !isMobile && stickyUserHeader ? blocks.items.flatMap((block, index) => block.kind === 'user' ? [index] : []) : [], [blocks.items, isMobile, stickyUserHeader]);
   const waitingGroupId = [...blocks.groups.values()].reverse().find(group => group.ownerId === assistantWaitingTurnId)?.id;
@@ -467,6 +474,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
 
   const extraData = React.useMemo(() => ({
     projection,
+    activityRevision,
     activeRunId: props.activeRunId,
     assistantWaiting: props.assistantWaiting,
     assistantWaitingTurnId,
@@ -481,6 +489,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     threadBusyEntryId: props.threadBusyEntryId,
   }), [
     projection,
+    activityRevision,
     props.activeRunId,
     props.assistantWaiting,
     assistantWaitingTurnId,
@@ -506,7 +515,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       hiddenThinkingLabel={props.hiddenThinkingLabel}
       block={block} projection={projection} sorted={sortedMessages}
       extensionPresentation={extensionPresentation}
-      expanded={'group' in block && isActivityExpanded(block.group.id)} onExpandedChange={setActivityExpanded}
+      expanded={block.kind === 'dialogue' ? isActivityExpanded(block.id) : 'group' in block && isActivityExpanded(block.group.id)} onExpandedChange={setActivityExpanded}
       liveUserStatus={props.liveUserStatus}
       onFork={props.onFork}
       onOpenThread={props.onOpenThread}
@@ -619,6 +628,12 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       onRevealEntry={async (entryId) => {
         const source = props.entries.find((entry) => entry.id === entryId);
         const toolCallId = source?.type === 'message' && source.message.role === 'toolResult' ? source.message.toolCallId : undefined;
+        const dialogueBlock = dialogueMessages ? blocks.items.find(block => block.kind === 'dialogue'
+          && blockGroupDialogue(block.group, projection, showThinking, props.toolExecutions).some(item => item.id === block.itemId && dialogueContains(item, entryId, toolCallId))) : undefined;
+        if (dialogueBlock && !isActivityExpanded(dialogueBlock.id)) {
+          setActivityExpanded(dialogueBlock.id, true);
+          await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+        }
         const activityGroup = sortedMessages ? [...blocks.groups.values()].find(group => !group.sorted.answersBySourceId.has(entryId) && group.sorted.activity.some(activity => activity.sourceId === entryId || activity.kind === 'tool' && activity.call.id === toolCallId)) : undefined;
         if (activityGroup && !isActivityExpanded(activityGroup.id)) {
           setActivityExpanded(activityGroup.id, true);
@@ -627,7 +642,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         const currentBlocks = blocksRef.current?.items ?? [];
         const activityIndex = activityGroup ? currentBlocks.findIndex(block => block.kind === 'activity' && block.group.id === activityGroup.id
           && activityGroup.sorted.activity.some(activity => activity.id === block.activityId && (activity.sourceId === entryId || activity.kind === 'tool' && activity.call.id === toolCallId))) : -1;
-        const index = activityIndex >= 0 ? activityIndex : currentBlocks.findIndex(block => block.kind === 'user' ? block.turn.userEntry?.id === entryId
+        const index = dialogueBlock ? currentBlocks.findIndex(block => block.id === dialogueBlock.id) : activityIndex >= 0 ? activityIndex : currentBlocks.findIndex(block => block.kind === 'user' ? block.turn.userEntry?.id === entryId
           : block.kind === 'entry' && (block.entry.id === entryId || toolCallId !== undefined && block.entry.type === 'message' && block.entry.message.role === 'assistant'
             && block.entry.message.content.some(part => part.type === 'toolCall' && part.id === toolCallId)));
         if (index < 0) throw new Error(t('chat.context.sourceUnavailable'));
@@ -638,6 +653,13 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         if (!list || list !== listRef.current || generation !== generationRef.current
           || projectionSessionRef.current !== props.sessionId) return;
         const container = list.getScrollableNode();
+        if (toolCallId) {
+          const disclosure = container?.querySelector<HTMLDetailsElement>(`details[data-conversation-tool-disclosure="${CSS.escape(`tool:${toolCallId}`)}"]`);
+          if (disclosure && !disclosure.open) {
+            disclosure.open = true;
+            await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+          }
+        }
         const selector = toolCallId ? `[data-conversation-source-id="${CSS.escape(`tool-result:${toolCallId}`)}"]`
           : `[data-conversation-entry-id="${CSS.escape(entryId)}"]`;
         const sourceElement = container?.querySelector<HTMLElement>(selector);

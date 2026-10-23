@@ -1,4 +1,13 @@
 export const settingsDict = {
+  "settings.chat.dialogue": "對話優先",
+  "settings.chat.dialogueHint": "保留每段發言，段落間用一條可展開的動態列顯示目前動作，結束後彙整；子 Agent 單獨顯示。",
+  "settings.chat.dialogueDetailsHint": "過程預設收合。思考和工具的展開偏好在開啟過程後生效。",
+  "settings.chat.preview.nextActivity": "示範下一步",
+  "settings.chat.preview.dialogueNext": "找到原因了，我再確認一下儲存入口。",
+  "settings.chat.preview.delegate": "版面檢查",
+  "settings.chat.preview.delegateTask": "檢查窄面板內的版面與換行。",
+  "settings.varin.visual.option.chatRenderMode.dialogue.label": "對話優先",
+  "settings.varin.visual.option.chatRenderMode.dialogue.description": "正文依序顯示；每段過程以一條動態收合列呈現，子 Agent 獨立顯示。",
   "settings.page.harness.localSemantic.source": "本機模型",
   "settings.page.harness.embeddings.off": "關閉嵌入 · 使用文字檢索",
   "settings.page.harness.embeddings.cpu.mode": "本機 CPU 偏好",
