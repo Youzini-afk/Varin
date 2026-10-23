@@ -145,9 +145,9 @@
 .answer-review p,.answer-receipt p{white-space:pre-wrap;overflow-wrap:anywhere}
 .answer-review p{color:var(--muted);margin:5px 0}.answer-receipt details{margin-top:5px}.answer-receipt summary{cursor:pointer}
 .turn-footer{margin-top:22px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;color:var(--muted);font-size:11px}
-.turn-usage{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;font-variant-numeric:tabular-nums;min-width:0}
+.turn-usage{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px 12px;margin-left:auto;font-variant-numeric:tabular-nums;min-width:0}
 .turn-usage>span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
-.turn-actions{display:flex;gap:1px;margin-left:auto;flex-shrink:0}.turn-actions .icon-btn{width:25px;height:25px}
+.turn-actions{display:flex;gap:1px;flex-shrink:0}.turn-actions .icon-btn{width:25px;height:25px}
 .permission-scope{margin:10px 0;line-height:1.7;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
 .permission-scope strong{font-weight:500;color:var(--fg)}
 .permission-notice{margin:10px 0;font-size:12px;color:var(--red)}
@@ -751,11 +751,11 @@ function renderTurnFooter(){
     }).join('');
     return (measurement==='estimated'?'<span title="估算用量">≈</span>':'')+parts+(rows.some(u=>u.unknownReceipts>0)?'<span title="部分请求没有用量回执">用量未完整上报</span>':'');
   }).join('');
-  return '<div class="turn-footer"><div class="turn-usage" aria-label="本轮用量">'+groups+'</div><div class="turn-actions" aria-label="本轮操作">'+
+  return '<div class="turn-footer"><div class="turn-actions" aria-label="本轮操作">'+
     Btn('copy-answer',I('file-copy'),'icon-btn','aria-label="复制回答" title="复制回答"')+
     Btn('open-thread',I('chat-1'),'icon-btn','aria-label="打开关联会话" title="打开关联会话"')+
     Btn('fork-turn',I('git-branch'),'icon-btn','aria-label="从此处分支" title="从此处分支"')+
-    Btn('turn-more',I('more-2'),'icon-btn','aria-label="更多操作" title="更多操作"')+'</div></div>';
+    Btn('turn-more',I('more-2'),'icon-btn','aria-label="更多操作" title="更多操作"')+'</div><div class="turn-usage" aria-label="本轮用量">'+groups+'</div></div>';
 }
 function renderExistingEmpty(){
   return '<div class="existing-empty"><svg width="24" height="24" viewBox="-64 -64 128 128" fill="currentColor" aria-hidden="true"><path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z"/><path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z"/></svg><h1>我们要在 opencr 中做什么？</h1></div>';
@@ -1011,7 +1011,7 @@ function renderEvidence(){
     ['思考','思考 + 原文单行预览','ChatThinkingContent.thinking','直接沿用现有形式；没有「查看这一段思考」的额外入口。'],
     ['重试','模型请求正在重试 · 第 2 次','retry_scheduled.attempt、delay_ms','没有原始原因时，不给它编造原因。'],
     ['计划与概览','原计划、子任务、已确认产出','计划订阅、Thread snapshot、文件回执','独立状态，不从工具名推测或生成计划。'],
-    ['轮末用量','左侧直接显示，右侧操作','ChatUsage 的 input/output/cacheRead/cacheWrite 等','缺失缓存或为 0 时不显示；用量未上报与 0 分开。数字是样稿数据。'],
+    ['轮末用量','左侧操作，右侧直接显示用量','ChatUsage 的 input/output/cacheRead/cacheWrite 等','缺失缓存或为 0 时不显示；用量未上报与 0 分开。数字是样稿数据。'],
     ['多题与多选（提议扩展）','题号导航、检查答案、一次提交','拟扩展 ask_user.questions[] / answers[]','当前接口仅 question + string options、answer:string；多题样稿明确标注 proposed。'],
     ['持续授权（提议扩展）','允许一次 / 一直允许 / 拒绝','已有用户 PermissionRule；拟增加受信 owner 的保存与授权衔接','当前 decidePermission 只接受 allow_once/deny。保存失败继续等待，不报成功。']
   ];
