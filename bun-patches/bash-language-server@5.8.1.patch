@@ -1,0 +1,26 @@
+diff --git a/out/config.js b/out/config.js
+--- a/out/config.js
++++ b/out/config.js
+@@ -87,12 +87,19 @@
+         .default([]),
+     // Controls the executable used for ShellCheck linting information. An empty string will disable linting.
+     shellcheckPath: zod_1.z.string().trim().default('shellcheck'),
+-    shfmt: exports.ShfmtConfigSchema.default({}),
++    shfmt: exports.ShfmtConfigSchema.prefault({}),
+ });
+ // Initialization options override only supplied settings, preserving environment defaults.
+-exports.InitializationOptionsSchema = exports.ConfigSchema.partial().extend({
+-    shfmt: exports.ShfmtConfigSchema.partial().optional(),
++// Backport the Zod 4 migration from bash-language-server commit
++// https://github.com/bash-lsp/bash-language-server/commit/320b3fc77806ec53f220d0dbae767b98b3991f5c
++// Remove defaults before optionalizing so omitted settings preserve environment configuration.
++exports.InitializationOptionsSchema = partialWithoutDefaults(exports.ConfigSchema).extend({
++    shfmt: partialWithoutDefaults(exports.ShfmtConfigSchema).optional(),
+ });
++function partialWithoutDefaults(schema) {
++    const shape = Object.fromEntries(Object.entries(schema.shape).map(([key, value]) => [key, value.unwrap()]));
++    return zod_1.z.object(shape).partial();
++}
+ function getConfigFromEnvironmentVariables() {
+     const rawConfig = {
+         backgroundAnalysisMaxFiles: toNumber(process.env.BACKGROUND_ANALYSIS_MAX_FILES),

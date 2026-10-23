@@ -16,11 +16,89 @@ const cache = createRequire(got.resolve('cacheable-request'));
 const CachePolicy = cache('http-cache-semantics');
 const logging = createRequire(createRequire(get.resolve('global-agent')).resolve('roarr'));
 const { sprintf, vsprintf } = logging('sprintf-js');
+const builtins = createRequire(new URL('../packages/extension-builtins/package.json', import.meta.url));
+const bash = createRequire(builtins.resolve('bash-language-server/package.json'));
+const bashConfig = bash('./out/config.js');
+const { ShellCheckResultSchema } = bash('./out/shellcheck/types.js');
+const mcp = createRequire(web.resolve('@modelcontextprotocol/client'));
 
 test('security exceptions apply only to the pinned, behavior-verified dependency versions', () => {
   assert.equal(micromatch('braces/package.json').version, '3.0.3');
   assert.equal(cache('http-cache-semantics/package.json').version, '4.2.0');
   assert.equal(logging('sprintf-js/package.json').version, '1.1.3');
+});
+
+test('MCP and Bash consumers reject oversized bounded Zod collections before walking elements', () => {
+  for (const consumer of [mcp, bash]) {
+    assert.equal(consumer('zod/package.json').version, '4.6.7');
+    const { z } = consumer('zod');
+    let parsed = 0;
+    const element = z.string().refine(() => { parsed += 1; return true; });
+    for (const [schema, value] of [
+      [z.array(element).max(1), ['one', 'two']],
+      [z.set(element).max(1), new Set(['one', 'two'])],
+      [z.map(element, element).size(1), new Map([['one', '1'], ['two', '2']])],
+    ]) {
+      const result = schema.safeParse(value);
+      assert.equal(result.success, false);
+      assert.equal(result.error.issues.length, 1);
+      assert.equal(result.error.issues[0].code, 'too_big');
+      assert.equal(parsed, 0);
+    }
+    assert.deepEqual(z.array(element).max(1).parse(['one']), ['one']);
+    assert.equal(parsed, 1);
+  }
+});
+
+// Upstream Zod 4 migration: https://github.com/bash-lsp/bash-language-server/commit/320b3fc77806ec53f220d0dbae767b98b3991f5c
+test('Bash configuration retains nested defaults and only supplied initialization options', () => {
+  const defaults = bashConfig.getDefaultConfiguration();
+  assert.deepEqual(defaults.shfmt, {
+    path: 'shfmt', additionalArguments: [], ignoreEditorconfig: false,
+    languageDialect: 'auto', binaryNextLine: false, caseIndent: false,
+    funcNextLine: false, keepPadding: false, simplifyCode: false, spaceRedirects: false,
+  });
+  assert.deepEqual(bashConfig.InitializationOptionsSchema.parse({}), {});
+  assert.deepEqual(bashConfig.InitializationOptionsSchema.parse({
+    backgroundAnalysisMaxFiles: 0, clientSetting: true,
+    shfmt: { path: ' custom-shfmt ', clientSetting: true },
+  }), { backgroundAnalysisMaxFiles: 0, shfmt: { path: 'custom-shfmt' } });
+  assert.deepEqual(bashConfig.ConfigSchema.parse({ shellcheckArguments: ' -e SC2001  -e SC2002 ' }).shellcheckArguments,
+    ['-e', 'SC2001', '-e', 'SC2002']);
+  assert.equal(bashConfig.InitializationOptionsSchema.safeParse({ shellcheckArguments: 42 }).success, false);
+  assert.equal(bashConfig.InitializationOptionsSchema.safeParse({ shfmt: { additionalArguments: [42] } }).success, false);
+});
+
+test('Bash initialization preserves configured environment values and explicit empty tool paths', () => {
+  const before = process.env;
+  try {
+    process.env = {
+      SHELLCHECK_PATH: '', SHFMT_PATH: '', SHFMT_CASE_INDENT: 'true',
+      SHELLCHECK_ARGUMENTS: '-e SC2001', BACKGROUND_ANALYSIS_MAX_FILES: '7',
+    };
+    const { config } = bashConfig.getConfigFromEnvironmentVariables();
+    assert.equal(config.shellcheckPath, '');
+    assert.equal(config.shfmt.path, '');
+    assert.equal(config.shfmt.caseIndent, true);
+    assert.equal(config.backgroundAnalysisMaxFiles, 7);
+    assert.deepEqual(config.shellcheckArguments, ['-e', 'SC2001']);
+    const options = bashConfig.InitializationOptionsSchema.parse({ shfmt: { languageDialect: 'bash' } });
+    assert.deepEqual(options, { shfmt: { languageDialect: 'bash' } });
+  } finally {
+    process.env = before;
+  }
+});
+
+test('Bash ShellCheck schema still accepts diagnostics and rejects malformed fixes', () => {
+  const comment = {
+    file: 'example.sh', line: 1, endLine: 1, column: 6, endColumn: 8,
+    level: 'warning', code: 2086, message: 'Double quote to prevent globbing and word splitting.',
+    fix: { replacements: [{ precedence: 1, line: 1, endLine: 1, column: 6, endColumn: 8,
+      insertionPoint: 'beforeStart', replacement: '"$a"' }] },
+  };
+  const result = { comments: [comment, { ...comment, fix: null }] };
+  assert.deepEqual(ShellCheckResultSchema.parse(result), result);
+  assert.equal(ShellCheckResultSchema.safeParse({ comments: [{ ...comment, fix: { replacements: ['bad'] } }] }).success, false);
 });
 
 test('floating-point formatting handles hostile precision without losing normal formatting', () => {

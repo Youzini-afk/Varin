@@ -16,6 +16,7 @@ private runtime protocol and product surfaces still move together.
 - 修复 Windows 长路径升级卸载与进度展示，以及进程、发现和工具结果处理的回归。
 - 修复回答或取消提问后恢复执行时误将内部回执当作外部输入拒绝的问题，保留原始提问身份与严格输入校验。
 - 修复 Host 静态检查和测试替身与当前执行视图、Computer 可用性及内置语法契约不一致的问题，保留原有校验。
+- 升级 Zod 以修复受限集合校验的内存耗尽漏洞，并保留 Bash 语言服务的默认值及环境配置语义。
 
 ### Release highlights
 
@@ -26,6 +27,7 @@ private runtime protocol and product surfaces still move together.
 - Repair Windows long-path upgrade removal and actual progress reporting, alongside process, discovery and tool-result regressions.
 - Repair continuation after answering or cancelling a question by projecting authenticated answer receipts without weakening external input validation.
 - Align Host lint and test fixtures with current execution-view, Computer availability and bundled-grammar contracts without weakening validation.
+- Upgrade Zod to fix memory exhaustion during bounded collection validation while preserving Bash language-server defaults and environment configuration.
 
 ## 0.9.31 - 2026-10-22
 
