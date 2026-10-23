@@ -222,10 +222,29 @@ function frameRuntime() {
   addEventListener('error', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
   addEventListener('unhandledrejection', () => { renderState = 'error'; send({ type: 'error', message: '页面运行出错，可查看源码继续修改' }); });
   new ResizeObserver(measure).observe(dom());
+  // Overflowing/positioned descendants can change without resizing the work box.
+  // Coalesce DOM, resource and font changes with the normal layout observation.
+  new MutationObserver(measure).observe(dom(), { subtree: true, childList: true, characterData: true, attributes: true });
+  document.addEventListener('load', measure, true);
+  document.fonts.ready.then(measure);
+  document.fonts.addEventListener('loadingdone', measure);
+  addEventListener('resize', measure);
   send({ type: 'ready' });
 }
 export function uiFrameDocument(channel: string, inline = false) {
-  const layout = inline ? 'html,body{height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important;background:transparent!important}body{display:block!important}#work{display:flow-root}' : '';
+  const layout = inline ? `
+    html,body{width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important;background:transparent!important}
+    body{display:block!important}
+    #work{display:flow-root;min-width:0;max-width:100%;overflow-wrap:anywhere}
+    #work :where(*){min-width:0}
+    #work :where(div,main,article,section,header,footer,pre){max-width:100%}
+    /* Preserve intrinsic column proportions and local widget viewports. Text
+       can wrap instead of making the entire document horizontally scroll. */
+    #work :where(table){min-width:0!important;max-width:100%!important}
+    #work :where(th,td){min-width:0!important;overflow-wrap:anywhere;white-space:normal}
+    #work :where(pre,code){white-space:pre-wrap;overflow-wrap:anywhere}
+    #work :where(img,video,svg,canvas){max-width:100%}
+  ` : '';
   return `<!doctype html><html data-channel="${channel}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><base href="https://varin.invalid/"><style id="theme"></style><style>html{color-scheme:light dark}:where(body){margin:0;padding:16px;font:14px/1.55 system-ui}*{box-sizing:border-box}img,canvas,svg{max-width:100%}button,input,select,textarea{font:inherit}button{cursor:pointer}a{color:var(--primary)}:focus-visible{outline:2px solid var(--primary);outline-offset:2px}@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}${layout}</style></head><body><div id="work"></div><script>(${frameRuntime.toString()})()</script></body></html>`;
 }
 export function uiThemeCss(element: Element = document.body) {
