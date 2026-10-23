@@ -1,93 +1,97 @@
 import React from 'react';
 import { resolveHarnessModelSlot, validatePermissionRule, type PermissionMode, type PermissionRule } from '@varin/protocol';
-import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
+import { SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '../shared/SettingsSection';
+import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
-import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
 type RuleRow = { id: string; rule: PermissionRule };
-export function PermissionsSettings(props: HarnessSettingsPageProps) {
-  const { harness, update } = props;
+const toRows = (rules: readonly PermissionRule[]): RuleRow[] => rules.map(rule => ({ id: crypto.randomUUID(), rule: structuredClone(rule) }));
+export function PermissionsSettings({ harness, update, onSaveRules, saving, error }: HarnessSettingsPageProps & {
+  onSaveRules(rules: PermissionRule[]): Promise<boolean>;
+  saving: boolean;
+  error: string | null;
+}) {
   const { t } = useI18n();
-  const rules = harness.permissions?.rules ?? [];
-  const [rows, setRows] = React.useState<RuleRow[]>(() => rules.map((rule) => ({ id: crypto.randomUUID(), rule })));
-  const rowsRef = React.useRef(rows);
-  const [issue, setIssue] = React.useState<string | null>(null);
-  const change = (next: RuleRow[]) => {
-    rowsRef.current = next;
-    setRows(next);
+  const rules = React.useMemo(() => harness.permissions?.rules ?? [], [harness.permissions?.rules]);
+  const current = JSON.stringify(rules);
+  const [baseline, setBaseline] = React.useState(current);
+  const [rows, setRows] = React.useState(() => toRows(rules));
+  const [editing, setEditing] = React.useState<string | null>(null);
+  const [submitting, setSubmitting] = React.useState(false);
+  const alive = React.useRef(true);
+  React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  const dirty = JSON.stringify(rows.map(row => row.rule)) !== baseline;
+  React.useEffect(() => {
+    if (!dirty && current !== baseline) { setRows(toRows(rules)); setBaseline(current); }
+  }, [current, baseline, dirty, rules]);
+  const changedElsewhere = dirty && current !== baseline && !submitting;
+  let issue: string | null = null, validated: PermissionRule[] = [];
+  try {
+    validated = rows.map(({ rule }, index) => validatePermissionRule(rule, String(index + 1)));
+  } catch (failure) { issue = failure instanceof Error ? failure.message : String(failure); }
+  const edit = (id: string, patch: Partial<PermissionRule>) => setRows(previous => previous.map(row => row.id === id ? { ...row, rule: { ...row.rule, ...patch } } : row));
+  const move = (index: number, by: number) => setRows(previous => {
+    const next = [...previous]; [next[index], next[index + by]] = [next[index + by]!, next[index]!]; return next;
+  });
+  const save = async () => {
+    if (issue || changedElsewhere || submitting) return false;
+    setSubmitting(true);
     try {
-      if (next.some(({ rule }) => !rule.tool.trim() || (rule.match && (!rule.match.param.trim() || !rule.match.pattern.trim())))) {
-        setIssue(t('settings.harness.rules.incomplete'));
-        return;
-      }
-      const valid = next.map(({ rule }, index) => validatePermissionRule(rule, String(index + 1)));
-      setIssue(null);
-      update({ permissions: { rules: valid } });
-    } catch (error) { setIssue(error instanceof Error ? error.message : String(error)); }
+      const ok = await onSaveRules(validated);
+      if (ok && alive.current) { setBaseline(JSON.stringify(validated)); setRows(previous => previous.map((row, i) => ({ ...row, rule: validated[i]! }))); }
+      return ok;
+    } finally { if (alive.current) setSubmitting(false); }
   };
-  const edit = (id: string, patch: Partial<PermissionRule>) => change(rowsRef.current.map((row) => row.id === id ? { ...row, rule: { ...row.rule, ...patch } } : row));
-  const editMatch = (id: string, patch: Partial<NonNullable<PermissionRule['match']>>) => {
-    const match = rowsRef.current.find((row) => row.id === id)?.rule.match;
-    if (match) edit(id, { match: { ...match, ...patch } });
-  };
-  const move = (index: number, by: number) => {
-    const next = [...rowsRef.current];
-    [next[index], next[index + by]] = [next[index + by]!, next[index]!];
-    change(next);
-  };
+  const busy = saving || submitting;
   return <>
-    <SettingsSection title={t('settings.page.harness.permissions.mode.label')} settingsItem="harness.permissions.mode">
-      <SettingsRadioGroup aria-label={t('settings.page.harness.permissions.mode.label')} className="space-y-4">
-        {(['normal', 'accept-edits', 'bypass', 'smart'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
-          label={t(`settings.page.harness.permissions.mode.${mode}`)} ariaLabel={t(`settings.page.harness.permissions.mode.${mode}`)}
-          selected={(harness.permissions?.mode ?? 'normal') === mode}
+    <SettingsSection title={t('settings.page.harness.permissions.mode.label')} settingsItem="harness.permissions.mode" divider={false}>
+      <SettingsRadioGroup aria-label={t('settings.page.harness.permissions.mode.label')} className="settings-permission-modes">
+        {(['normal', 'accept-edits', 'smart', 'bypass'] as const).map((mode: PermissionMode) => <SettingsRadioOption key={mode}
+          label={t(`settings.page.harness.permissions.mode.${mode}`)} selected={(harness.permissions?.mode ?? 'normal') === mode}
           disabled={mode === 'smart' && !resolveHarnessModelSlot('permissionJudge', harness.models, null)}
           onSelect={() => update({ permissions: { mode } })} />)}
       </SettingsRadioGroup>
-      <div className="mt-5 border-t border-border/50 pt-3"><HarnessModelField {...props} slot="permissionJudge" />
+      <div className="mt-4"><HarnessModelField harness={harness} update={update} slot="permissionJudge" />
         {!resolveHarnessModelSlot('permissionJudge', harness.models, null) ? <p className="mt-2 typography-meta text-muted-foreground">{t('settings.page.harness.permissions.smartUnavailable')}</p> : null}
       </div>
     </SettingsSection>
-    <SettingsSection title={t('settings.harness.rules.title')} description={t('settings.page.harness.permissions.rules.description')}
-      settingsItem="harness.permissions.rules" headerAction={<Button size="sm" variant="outline" onClick={() => {
-        const next = [...rowsRef.current, { id: crypto.randomUUID(), rule: { tool: '', decision: 'ask' as const } }];
-        rowsRef.current = next; setRows(next); setIssue(t('settings.harness.rules.incomplete'));
-      }}>{t('settings.harness.rules.add')}</Button>}>
-      <div className="space-y-3">
-        {rows.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.harness.rules.empty')}</p> : null}
-        {rows.map(({ id, rule }, index) => <div key={id} className="rounded-lg border border-border/60 p-3 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="w-5 shrink-0 typography-meta text-muted-foreground">{index + 1}</span>
-            <AutoSaveInput value={rule.tool} placeholder={t('settings.harness.rules.tool')} aria-label={t('settings.harness.rules.tool')}
-              onCommit={(tool) => edit(id, { tool: tool.trim() })} />
-            <Select value={rule.decision} onValueChange={(decision) => edit(id, { decision: decision as PermissionRule['decision'] })}>
-              <SelectTrigger size="settings" className="w-28" aria-label={t('settings.harness.rules.decision')}>
-                <SelectValue>{t(`settings.harness.rules.${rule.decision}`)}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>{(['allow', 'ask', 'deny'] as const).map((decision) => <SelectItem key={decision} value={decision}>{t(`settings.harness.rules.${decision}`)}</SelectItem>)}</SelectContent>
-            </Select>
-            <Button variant="ghost" size="icon" disabled={index === 0} aria-label={t('settings.harness.rules.up')} onClick={() => move(index, -1)}><Icon name="arrow-up" className="size-4" /></Button>
-            <Button variant="ghost" size="icon" disabled={index === rows.length - 1} aria-label={t('settings.harness.rules.down')} onClick={() => move(index, 1)}><Icon name="arrow-down" className="size-4" /></Button>
-            <Button variant="ghost" size="icon" aria-label={t('settings.harness.rules.remove')} onClick={() => change(rowsRef.current.filter((row) => row.id !== id))}><Icon name="close" className="size-4" /></Button>
-          </div>
-          {rule.match ? <div className="flex flex-wrap items-center gap-2 pl-7">
-            <AutoSaveInput value={rule.match.param} placeholder={t('settings.harness.rules.param')} aria-label={t('settings.harness.rules.param')}
-              onCommit={(param) => editMatch(id, { param: param.trim() })} />
-            <AutoSaveInput value={rule.match.pattern} placeholder={t('settings.harness.rules.pattern')} aria-label={t('settings.harness.rules.pattern')}
-              onCommit={(pattern) => editMatch(id, { pattern })} />
-            <Button variant="ghost" size="sm" onClick={() => {
-              const next = rowsRef.current.map((row) => { if (row.id !== id) return row; const { match: _match, ...rest } = row.rule; return { ...row, rule: rest }; });
-              change(next);
-            }}>{t('settings.harness.rules.removeMatch')}</Button>
-          </div> : <Button variant="ghost" size="sm" className="ml-7" onClick={() => edit(id, { match: { param: '', pattern: '' } })}>{t('settings.harness.rules.addMatch')}</Button>}
-        </div>)}
-        {issue ? <p role="alert" className="typography-meta text-destructive">{issue}</p> : null}
-      </div>
+    <SettingsSection title={t('settings.harness.rules.title')} description={t('settings.experience.rulesHint')} settingsItem="harness.permissions.rules"
+      headerAction={<Button size="sm" variant="outline" disabled={busy} onClick={() => {
+        const id = crypto.randomUUID(); setRows(previous => [...previous, { id, rule: { tool: '', decision: 'ask' } }]); setEditing(id);
+      }}><Icon name="add" className="size-4" />{t('settings.harness.rules.add')}</Button>}>
+      {!rows.length ? <p className="py-5 typography-meta text-muted-foreground">{t('settings.harness.rules.empty')}</p> : null}
+      <div className="divide-y divide-border/60">{rows.map(({ id, rule }, index) => <article key={id} className="py-3">
+        <div className="flex items-center gap-2">
+          <span className="w-5 shrink-0 typography-micro text-muted-foreground">{index + 1}</span>
+          <button type="button" className="min-w-0 flex-1 text-left" aria-expanded={editing === id} onClick={() => setEditing(editing === id ? null : id)}>
+            <span className="block break-words font-mono typography-meta">{rule.tool || t('settings.harness.rules.tool')}</span>
+            {rule.match ? <span className="block break-words typography-micro text-muted-foreground">{rule.match.param} · {rule.match.pattern}</span> : null}
+          </button>
+          <span className="shrink-0 typography-meta text-muted-foreground">{t(`settings.harness.rules.${rule.decision}`)}</span>
+          <Button variant="ghost" size="icon" disabled={busy || index === 0} aria-label={t('settings.harness.rules.up')} onClick={() => move(index, -1)}><Icon name="arrow-up" className="size-4" /></Button>
+          <Button variant="ghost" size="icon" disabled={busy || index === rows.length - 1} aria-label={t('settings.harness.rules.down')} onClick={() => move(index, 1)}><Icon name="arrow-down" className="size-4" /></Button>
+          <Button variant="ghost" size="icon" disabled={busy} aria-label={t('settings.harness.rules.remove')} onClick={() => setRows(previous => previous.filter(row => row.id !== id))}><Icon name="delete-bin" className="size-4" /></Button>
+        </div>
+        <div className="settings-rule-editor" data-open={editing === id} inert={editing !== id}>
+          <div><fieldset disabled={busy} className="space-y-3 pt-4 pb-2">
+            <div className="flex flex-wrap gap-3"><Input className="min-w-0 flex-1" value={rule.tool} aria-label={t('settings.harness.rules.tool')} placeholder={t('settings.harness.rules.tool')} onChange={event => edit(id, { tool: event.target.value })} />
+              <Select value={rule.decision} onValueChange={decision => edit(id, { decision: decision as PermissionRule['decision'] })}><SelectTrigger size="settings" className="w-28" aria-label={t('settings.harness.rules.decision')}><SelectValue /></SelectTrigger><SelectContent>{(['allow','ask','deny'] as const).map(decision => <SelectItem key={decision} value={decision}>{t(`settings.harness.rules.${decision}`)}</SelectItem>)}</SelectContent></Select>
+            </div>
+            {rule.match ? <><div className="grid gap-3 @xl:grid-cols-2"><Input value={rule.match.param} placeholder={t('settings.harness.rules.param')} aria-label={t('settings.harness.rules.param')} onChange={event => edit(id, { match: { ...rule.match!, param: event.target.value } })} /><Input value={rule.match.pattern} placeholder={t('settings.harness.rules.pattern')} aria-label={t('settings.harness.rules.pattern')} onChange={event => edit(id, { match: { ...rule.match!, pattern: event.target.value } })} /></div>
+              <Button variant="ghost" size="sm" onClick={() => { const { match: _match, ...rest } = rule; setRows(previous => previous.map(row => row.id === id ? { ...row, rule: rest } : row)); }}>{t('settings.harness.rules.removeMatch')}</Button></>
+              : <Button variant="ghost" size="sm" onClick={() => edit(id, { match: { param: '', pattern: '' } })}>{t('settings.harness.rules.addMatch')}</Button>}
+          </fieldset></div>
+        </div>
+      </article>)}</div>
     </SettingsSection>
+    <SettingsActionBar dirty={dirty} saving={busy} onSave={save} saveDisabled={Boolean(issue || changedElsewhere)}
+      onCancel={() => { setRows(toRows(rules)); setBaseline(current); setEditing(null); }}
+      error={changedElsewhere ? t('settings.experience.ruleChanged') : issue || error} />
   </>;
 }

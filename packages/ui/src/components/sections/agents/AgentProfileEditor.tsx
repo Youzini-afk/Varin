@@ -1,4 +1,5 @@
 import React from 'react';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { type ThinkingLevel } from '@varin/protocol';
 import { modelThinkingLevels } from '@varin/application-client';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
@@ -39,6 +40,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
   const [draft, setDraft] = React.useState(() => retained?.values ?? makeDraft());
   const [revision, setRevision] = React.useState(retained?.revision ?? snapshot.revision);
   const [dirty, setDirty] = React.useState(Boolean(retained));
+  const [toolQuery, setToolQuery] = React.useState('');
   const [validationError, setValidationError] = React.useState<string | null>(null);
   const latest = React.useRef({ values: draft, revision, dirty });
   latest.current = { values: draft, revision, dirty };
@@ -113,16 +115,27 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
           </SelectContent></Select></SettingsStackedField>
       </SettingsTwoColumn>
     </SettingsSection>
-    <SettingsSection title={t('settings.agents.instructions')}><Textarea aria-label={t('settings.agents.instructions')} rows={9} className="resize-y font-mono typography-meta" value={draft.instructions} disabled={busy} onChange={event => update({ instructions: event.target.value })} /></SettingsSection>
+    <SettingsSection title={t('settings.agents.instructions')}><Textarea aria-label={t('settings.agents.instructions')} rows={12} className="min-h-64 resize-y font-mono typography-meta leading-relaxed" value={draft.instructions} disabled={busy} onChange={event => update({ instructions: event.target.value })} /></SettingsSection>
     {profile?.automation ? <ContextAgentDetails definition={profile.automation} instructions={draft.instructions} /> : <>
     <SettingsSection title={t('settings.agents.tools')} info={t('settings.agents.runtimeTools')} contentClassName="space-y-3">
       <p className="typography-meta" data-tools-source={source}>{t(`settings.agents.toolsSource.${source}`)}</p>
+      {snapshot.capabilities !== null ? <>
+        <Input value={toolQuery} onChange={event => setToolQuery(event.target.value)} aria-label={t('settings.experience.searchTools')} placeholder={t('settings.experience.searchTools')} />
+        <div className="settings-agent-tools max-h-80 overflow-y-auto">
+          {snapshot.capabilities.filter(tool => tool.name.toLowerCase().includes(toolQuery.toLowerCase())).map(tool => <label key={tool.name} className="flex cursor-pointer items-start gap-3 border-b border-border/40 py-3">
+            <input type="checkbox" className="mt-1" checked={draft.tools.split(/[\n,]/u).map(value => value.trim()).includes(tool.name)} disabled={busy}
+              onChange={event => { const selected = new Set(draft.tools.split(/[\n,]/u).map(value => value.trim()).filter(Boolean)); if (event.target.checked) selected.add(tool.name); else selected.delete(tool.name); update({ tools: [...selected].join(', '), toolsChange: 'explicit' }); }} />
+            <span className="min-w-0"><span className="block break-words font-mono typography-meta">{tool.name}</span><span className="typography-micro text-muted-foreground">{t(`settings.experience.toolSource.${tool.source_requirement}`)}</span></span>
+          </label>)}
+        </div>
+      </> : null}
+      <SettingsDisclosure title={t('settings.agents.tools')} summary={t('settings.experience.registeredNames')}>
       <Textarea aria-label={t('settings.agents.tools')} rows={3} className="font-mono typography-meta" value={draft.tools} disabled={busy} onChange={event => update({ tools: event.target.value, toolsChange: 'explicit' })} />
+      </SettingsDisclosure>
       <div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => update({ tools: '', toolsChange: 'explicit' })}>{t('settings.agents.noTools')}</Button>
         {profile && <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={resetTools}>{t('settings.agents.resetTools')}</Button>}</div>
       {source === 'unconfigured' && <p className="typography-meta text-[var(--status-warning)]">{t('settings.agents.toolsUnconfigured')}</p>}
       {notBuiltin.length > 0 && <p role="status" className="typography-meta text-[var(--status-warning)]">{t('settings.agents.toolsOutsideDirectory', { tools: notBuiltin.join(', ') })}</p>}
-      {snapshot.capabilities !== null && <details className="typography-meta"><summary>{t('settings.agents.availableTools')}</summary><p className="mt-2 break-words font-mono">{snapshot.capabilities.map(capability => capability.name).join(', ') || t('settings.agents.noTools')}</p></details>}
     </SettingsSection>
     <SettingsSection contentClassName="space-y-3">
       <SettingsStackedField label={t('settings.agents.sourceMode')}>

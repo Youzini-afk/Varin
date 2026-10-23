@@ -15,8 +15,8 @@ import { ComputerSettings } from '../computers/ComputerSettings';
 import { BotSettings } from '../bots/BotSettings';
 
 export type HarnessSettingsSection = 'images' | 'tools' | 'permissions' | 'context' | 'retrieval' | 'embeddings' | 'web' | 'computers' | 'bots';
-const pages: Record<Exclude<HarnessSettingsSection, 'context'>, React.ComponentType<HarnessSettingsPageProps>> = {
-  images: ImageToolsSettings, tools: ToolsSettings, permissions: PermissionsSettings,
+const pages: Record<Exclude<HarnessSettingsSection, 'context' | 'permissions'>, React.ComponentType<HarnessSettingsPageProps>> = {
+  images: ImageToolsSettings, tools: ToolsSettings,
   retrieval: RetrievalSettings, embeddings: EmbeddingSettings, web: WebSettings,
   // Self-fetching: the computer and bot catalogs come from the Host service,
   // not harness settings — extra props are ignored.
@@ -24,8 +24,8 @@ const pages: Record<Exclude<HarnessSettingsSection, 'context'>, React.ComponentT
 
 export function HarnessSettingsPage({ section }: { section: HarnessSettingsSection }) {
   const { t } = useI18n();
-  const { harness, reserveRatio, status, error, update, updateReserveRatio, retry, targetKey } = useHarnessSettings();
-  const Page = section === 'context' ? null : pages[section];
+  const { harness, reserveRatio, status, error, update, commit, updateReserveRatio, retry, targetKey } = useHarnessSettings();
+  const Page = section === 'context' || section === 'permissions' ? null : pages[section];
   const selfFetching = section === 'computers' || section === 'bots';
   const showSaveStatus = !selfFetching;
   const content = <>
@@ -40,12 +40,14 @@ export function HarnessSettingsPage({ section }: { section: HarnessSettingsSecti
           ? <BotSettings />
           : section === 'context' && harness
             ? <ContextSettings key={`${targetKey}:${section}`} harness={harness} update={update} reserveRatio={reserveRatio} onReserveRatioChange={updateReserveRatio} />
+          : section === 'permissions' && harness
+            ? <PermissionsSettings key={`${targetKey}:${section}`} harness={harness} update={update} onSaveRules={rules => commit({ permissions: { rules } })} saving={status === 'saving'} error={error} />
             : harness && Page ? <Page key={`${targetKey}:${section}`} harness={harness} update={update} /> : null}
   </>;
   return <SettingsPageLayout title={t(section === 'images' ? 'settings.page.images.title' : `settings.page.harness.page.${section}.title`)}
     description={t(section === 'images' ? 'settings.harness.images.description' : `settings.page.harness.page.${section}.description`)} showSaveStatus={showSaveStatus}
+    scope={!selfFetching ? t('settings.scope.hostGlobalHint') : undefined}
     className="[&>section]:py-5 [&>section]:space-y-4">
-    {!selfFetching ? <p className="mb-5 typography-meta text-muted-foreground">{t('settings.scope.hostGlobalHint')}</p> : null}
     {content}
   </SettingsPageLayout>;
 }

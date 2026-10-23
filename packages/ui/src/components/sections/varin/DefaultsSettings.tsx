@@ -1,4 +1,5 @@
 import React from 'react';
+import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { RetrySettings } from './RetrySettings';
 import { toast } from '@/components/ui';
 import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
@@ -42,12 +43,13 @@ export const DefaultsSettings: React.FC = () => {
   const thinkingLevels = selectedModel ? modelThinkingLevels(selectedModel) : [];
   const save = async (set: Record<string, JsonValue>, remove: string[] = []) => {
     if (!snapshot || saving || currentScope.current !== scopeKey || host !== getRuntimeEndpointGeneration()
-      || trustVersion !== getProjectTrustGeneration() || scope === 'project' && !snapshot.projectTrusted) return;
+      || trustVersion !== getProjectTrustGeneration() || scope === 'project' && !snapshot.projectTrusted) return false;
     const owner = host; const saveScope = scopeKey; setSaving(true); setError(undefined);
     try {
       const next = await api.updateSettings({ cwd, scope, set, remove, expectedRevision: scope === 'global' ? snapshot.globalRevision : snapshot.projectRevision });
-      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) { setSnapshot(next); toast.success(t('settings.defaults.saved')); }
-    } catch (failure) { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setError(failure instanceof Error ? failure.message : String(failure)); }
+      if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) { setSnapshot(next); toast.success(t('settings.defaults.saved')); return true; }
+      return false;
+    } catch (failure) { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setError(failure instanceof Error ? failure.message : String(failure)); return false; }
     finally { if (owner === getRuntimeEndpointGeneration() && saveScope === currentScope.current) setSaving(false); }
   };
   const string = (value: JsonValue | undefined) => typeof value === 'string' ? value : '';
@@ -58,7 +60,7 @@ export const DefaultsSettings: React.FC = () => {
     <ProjectTrustSettings />
     {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
-    <SettingsFieldRow label={t('assistant.scope')}><Select value={scope} disabled={saving} onValueChange={value => setScope(value as 'global' | 'project')}>
+    <SettingsFieldRow label={t('assistant.scope')}><Select value={scope} disabled={saving} onValueChange={value => requestSettingsNavigation(() => setScope(value as 'global' | 'project'))}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
         <SelectItem value="global">{t('assistant.scope.global')}</SelectItem><SelectItem value="project" disabled={!snapshot?.projectTrusted}>{t('assistant.scope.project')}</SelectItem>
       </SelectContent>
@@ -68,7 +70,7 @@ export const DefaultsSettings: React.FC = () => {
       displayModelId={scope === 'project' ? string(snapshot?.global.defaultModel) : undefined}
       placeholder={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
       defaultSelectionLabel={scope === 'project' ? t('settings.bots.model.inherit') : undefined}
-      onChange={(providerId, modelId) => save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel'])} /></SettingsFieldRow>
+      onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']); }} /></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
         <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
@@ -76,11 +78,11 @@ export const DefaultsSettings: React.FC = () => {
     </Select></SettingsFieldRow>
     {scope === 'global' && <SettingsFieldRow label={t('thread.settings.utilityModel')} info={t('settings.varin.defaults.utilityModel.description')} settingsItem="sessions.small-model">
       <ModelSelector {...model(settings.utilityModel)} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
-        onChange={(providerId, modelId) => save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? [] : ['utilityModel'])} />
+        onChange={async (providerId, modelId) => { await save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? [] : ['utilityModel']); }} />
     </SettingsFieldRow>}
     {scope === 'project' && <p className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.projectInheritance')}</p>}
   </SettingsSection>
-  {scope === 'global' && snapshot && <RetrySettings key={`${host}:${JSON.stringify(snapshot.global.retry)}`} value={snapshot.global.retry} disabled={saving} api={api} onSave={save} />}
+  {scope === 'global' && snapshot && <RetrySettings key={host} value={snapshot.global.retry} disabled={saving} api={api} onSave={save} />}
   <SettingsSection title={t('settings.defaults.clientPreferences')}>
     <SettingsCheckboxRow checked={showDeletionDialog} onChange={setShowDeletionDialog} label={t('thread.settings.confirmDelete')} />
   </SettingsSection></>;

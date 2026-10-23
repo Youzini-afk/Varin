@@ -58,5 +58,5 @@ export function useWorkspaceHarnessSettings(cwd?: string, runtime: 'agent' = 'ag
       reportSettingsSaveState(state.status);
     }
   }, [state.status]);
-  return { ...state, update: controller.update, updateReserveRatio: controller.updateReserveRatio, retry: controller.retry, targetKey };
+  return { ...state, update: controller.update, commit: controller.commit, updateReserveRatio: controller.updateReserveRatio, retry: controller.retry, targetKey };
 }

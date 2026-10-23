@@ -1,3 +1,5 @@
+import { SettingsTabs } from '../shared/SettingsTabs';
+import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import React from 'react';
 import type {
   VarinExtensionActualStatus,
@@ -1258,6 +1260,9 @@ const ExtensionInstallSection: React.FC = () => {
 };
 
 export const ExtensionsPage: React.FC = () => {
+  const [tab, setTab] = React.useState<'installed' | 'services' | 'workbench'>('installed');
+  const target = useSettingsSearchTarget();
+  React.useEffect(() => { if (target?.startsWith('extensions.')) setTab(target === 'extensions.workbench' ? 'workbench' : target === 'extensions.routing' ? 'services' : 'installed'); }, [target]);
   const { t } = useI18n();
   const state = useVarinExtensionCatalog();
   const surface = useSurfaceRegistrySnapshot();
@@ -1289,6 +1294,12 @@ export const ExtensionsPage: React.FC = () => {
       )}
       showSaveStatus={false}
     >
+      <SettingsTabs value={tab} onChange={setTab} label={t('settings.page.extensions.title')} items={[
+        { value: 'installed', label: t('settings.experience.installed') },
+        { value: 'services', label: t('settings.varin.extensions.routing.title') },
+        { value: 'workbench', label: t('settings.varin.extensions.workbench.title') },
+      ]} />
+      <div className="settings-tab-panel" hidden={tab !== 'installed'}>
       <SettingsSection divider={false} settingsItem="extensions.catalog">
         {state.error ? (
           <div className="mb-3 rounded-lg border border-[color-mix(in_srgb,var(--status-error)_24%,transparent)] bg-[color-mix(in_srgb,var(--status-error)_7%,transparent)] px-3 py-2 typography-meta text-[var(--status-error)]">
@@ -1324,8 +1335,9 @@ export const ExtensionsPage: React.FC = () => {
         ) : null}
       </SettingsSection>
       <ExtensionInstallSection />
-      <ServiceRoutingSection />
-      <WorkbenchProfileSection />
+      </div>
+      <div className="settings-tab-panel" hidden={tab !== 'services'}><ServiceRoutingSection /></div>
+      <div className="settings-tab-panel" hidden={tab !== 'workbench'}><WorkbenchProfileSection /></div>
     </SettingsPageLayout>
   );
 };

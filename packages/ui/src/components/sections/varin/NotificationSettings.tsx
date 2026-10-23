@@ -1,4 +1,6 @@
 import React from 'react';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
+import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
 import { isDesktopShell } from '@/lib/desktop';
 import { toast } from '@/components/ui';
@@ -65,6 +67,11 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
+
+  const previewTemplate = (value: string) => {
+    const sample: Record<string, string> = { project_name: 'Varin', worktree: 'main', branch: 'main', session_name: t('settings.experience.sampleSession'), agent_name: 'Varin', model_name: 'Assistant', last_message: t('settings.experience.sampleResult') };
+    return value.replace(/\{([a-z_]+)\}/g, (token, name: string) => sample[name] ?? token);
+  };
 
   const [notificationPermission, setNotificationPermission] = React.useState<NotificationPermission>('default');
   const [pushSupported, setPushSupported] = React.useState(false);
@@ -564,11 +571,9 @@ export const NotificationSettings: React.FC = () => {
             >
               <div className="divide-y divide-border/50">
                 {(['completion', 'subtask', 'error', 'question'] as const).map((event: NotificationTemplateEvent) => (
-                  <details key={event} className="group/template py-3">
-                    <summary className="flex cursor-pointer list-none items-center justify-between gap-3 typography-ui-label [&::-webkit-details-marker]:hidden">
-                      {t(TEMPLATE_EVENT_LABEL_KEYS[event])}
-                    <span className="text-muted-foreground">+</span></summary>
-                    <div className="mt-4 space-y-3 pl-1">
+                  <SettingsDisclosure key={event} title={t(TEMPLATE_EVENT_LABEL_KEYS[event])}>
+                    <div className="settings-notification-editor">
+                    <div className="space-y-3">
                       <div>
                         <label htmlFor={`notification-template-${event}-title`} className="typography-meta text-muted-foreground block mb-1">{t('settings.notifications.page.template.field.title')}</label>
                         <Input
@@ -590,7 +595,13 @@ export const NotificationSettings: React.FC = () => {
                         />
                       </div>
                     </div>
-                  </details>
+                    <aside className="settings-notification-preview" aria-label={t('settings.experience.readingPreview')}>
+                      <div className="mb-3 flex items-center gap-2 typography-micro text-muted-foreground"><Icon name="notification-3" className="size-4" />Varin · {t('settings.experience.preview')}</div>
+                      <p className="typography-ui-label">{previewTemplate(notificationTemplates[event].title || t(DEFAULT_NOTIFICATION_TEMPLATES[event].titleKey))}</p>
+                      <p className="mt-2 whitespace-pre-wrap typography-meta text-muted-foreground">{previewTemplate(notificationTemplates[event].message || t(DEFAULT_NOTIFICATION_TEMPLATES[event].messageKey))}</p>
+                    </aside>
+                    </div>
+                  </SettingsDisclosure>
                 ))}
               </div>
             </SettingsSection>

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { Radio } from '@/components/ui/radio';
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
@@ -119,7 +118,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
     <section
       data-settings-item={settingsItem}
       className={cn(
-        'space-y-5',
+        'settings-section space-y-5',
         divider ? 'border-t border-border/60 py-6' : 'pb-6',
         className,
       )}
@@ -145,7 +144,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
           {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
         </div>
       ) : null}
-      <div className={cn(contentClassName)}>{children}</div>
+      <div className={cn('settings-section-content', contentClassName)}>{children}</div>
     </section>
   );
 };
@@ -305,11 +304,11 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
     <div
       data-settings-item={settingsItem}
       className={cn(
-        'flex flex-col gap-3 py-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-8',
+        'settings-field-row flex flex-col gap-3 py-3 @xl:flex-row @xl:items-center @xl:justify-between @xl:gap-8',
         className,
       )}
     >
-      <div className="min-w-0 @xl:w-56 @xl:shrink-0">
+      <div className="min-w-0 @xl:flex-1 @xl:max-w-[32rem]">
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
@@ -383,7 +382,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
   const labelId = React.useId();
   const descriptionId = React.useId();
   return (
-    <div data-settings-item={settingsItem} className={cn('flex items-center justify-between gap-6 py-3', disabled && 'opacity-60', className)}>
+    <div data-settings-item={settingsItem} className={cn('settings-checkbox-row flex items-center justify-between gap-6 py-3', disabled && 'opacity-60', className)}>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
           <label id={labelId} className={cn(SETTINGS_FIELD_LABEL_CLASS, 'cursor-pointer')} onClick={() => { if (!disabled) onChange(!checked); }}>{label}</label>
@@ -418,48 +417,17 @@ export const SettingsRadioOption: React.FC<SettingsRadioOptionProps> = ({
   className,
 }) => {
   return (
-    <div
-      className={cn(
-        'flex cursor-pointer gap-2 py-0.5',
-        description != null ? 'items-start' : 'items-center',
-        disabled && 'cursor-not-allowed opacity-60',
-        className,
-      )}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
-      aria-pressed={selected}
-      aria-disabled={disabled || undefined}
-      onClick={() => {
-        if (!disabled) onSelect();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === ' ' || event.key === 'Enter') {
-          event.preventDefault();
-          if (!disabled) onSelect();
-        }
-      }}
-    >
-      <Radio
-        checked={selected}
-        onChange={onSelect}
-        disabled={disabled}
-        ariaLabel={ariaLabel}
-        className={description != null ? 'mt-0.5' : undefined}
-      />
-      <div className="flex min-w-0 flex-col">
-        <span
-          className={cn(
-            'typography-settings-field-label font-normal',
-            selected ? 'text-foreground' : 'text-foreground/50',
-          )}
-        >
-          {label}
-        </span>
-        {description != null ? (
-          <span className={SETTINGS_HELPER_CLASS}>{description}</span>
-        ) : null}
-      </div>
-    </div>
+    <button type="button" role="radio" aria-checked={selected} aria-label={ariaLabel} disabled={disabled}
+      className={cn('flex w-full cursor-pointer gap-3 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring', description != null ? 'items-start' : 'items-center', disabled && 'cursor-not-allowed opacity-60', className)}
+      onClick={() => { if (!selected) onSelect(); }}>
+      <span aria-hidden className={cn('mt-1 flex size-3.5 shrink-0 items-center justify-center rounded-full border border-border', selected ? 'border-foreground bg-foreground' : 'bg-muted')}>
+        {selected && <span className="size-1.5 rounded-full bg-background" />}
+      </span>
+      <span className="flex min-w-0 flex-col gap-1">
+        <span className={cn('typography-settings-field-label font-normal', selected ? 'text-foreground' : 'text-muted-foreground')}>{label}</span>
+        {description != null ? <span className={SETTINGS_HELPER_CLASS}>{description}</span> : null}
+      </span>
+    </button>
   );
 };
 
@@ -476,7 +444,14 @@ export const SettingsRadioGroup: React.FC<SettingsRadioGroupProps> = ({
   className,
 }) => {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className={cn(SETTINGS_OPTION_STACK_CLASS, className)}>
+    <div role="radiogroup" aria-label={ariaLabel} className={cn(SETTINGS_OPTION_STACK_CLASS, className)} onKeyDown={event => {
+      const direction = event.key === 'ArrowDown' || event.key === 'ArrowRight' ? 1 : event.key === 'ArrowUp' || event.key === 'ArrowLeft' ? -1 : 0;
+      if (!direction) return;
+      const options = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('button[role=radio]:not(:disabled)')];
+      const index = options.indexOf(event.target as HTMLButtonElement);
+      if (index < 0 || !options.length) return;
+      event.preventDefault(); const next = options[(index + direction + options.length) % options.length]!; next.focus(); next.click();
+    }}>
       {children}
     </div>
   );

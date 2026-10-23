@@ -145,7 +145,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     return settingsPageRegistrations.find((registration) => registration.meta.slug === settingsSlug)?.meta ?? null;
   }, [settingsPageRegistrations, settingsSlug]);
 
-  // Nav is always open (collapsed state removed)
+  const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set());
+  React.useEffect(() => {
+    if (!activePageMeta) return;
+    setCollapsedGroups(previous => { if (!previous.has(activePageMeta.group)) return previous; const next = new Set(previous); next.delete(activePageMeta.group); return next; });
+  }, [activePageMeta]);
 
   const getPageTitle = React.useCallback((slug: SettingsPageSlug): string => {
     const meta = settingsPageRegistrations.find((registration) => registration.meta.slug === slug)?.meta;
@@ -272,9 +276,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       if (!target || target.closest('[hidden]')) {
         return;
       }
+      for (let node: HTMLElement | null = target; node && node !== containerRef.current; node = node.parentElement) {
+        if (node instanceof HTMLDetailsElement) node.open = true;
+      }
       observer.disconnect();
       setPendingSearchItemId(null);
-      target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      target.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
       target.setAttribute('data-settings-search-highlight', 'true');
       window.setTimeout(() => {
         target.removeAttribute('data-settings-search-highlight');
@@ -462,15 +469,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                 .filter((entry) => entry.pages.length > 0);
 
               return visibleGroups.map(({ group, pages }, groupIndex) => (
-                <div key={group} className="space-y-0.5">
-                  <div
+                <details key={group} className="settings-nav-group space-y-0.5" open={!collapsedGroups.has(group)} onToggle={event => {
+                  const open = event.currentTarget.open;
+                  setCollapsedGroups(previous => { if (previous.has(group) === !open) return previous; const next = new Set(previous); if (open) next.delete(group); else next.add(group); return next; });
+                }}>
+                  <summary
                     className={cn(
                       'px-3 pb-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground sm:px-2 sm:pb-0.5',
                       groupIndex === 0 ? 'pt-1' : 'pt-4 sm:pt-3',
                     )}
                   >
                     {t(`settings.view.nav.group.${group}`)}
-                  </div>
+                    <Icon name="arrow-right-s" className="size-3" />
+                  </summary>
                   {pages.map((page) => {
                     const selected = settingsSlug === page.slug;
                     const iconName = getSettingsNavIcon(page.slug);
@@ -506,7 +517,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                       </Tooltip>
                     );
                   })}
-                </div>
+                </details>
               ));
             })()}
           </div>
@@ -712,8 +723,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
               </ErrorBoundary>
             </div>
 
-            <div className="flex-1 overflow-hidden bg-background">
-              {renderDesktopContent()}
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
+              {activePageMeta ? <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/40 px-5 pr-10 typography-micro text-muted-foreground">
+                <span>{t(`settings.view.nav.group.${activePageMeta.group}`)}</span><Icon name="arrow-right-s" className="size-3 shrink-0" /><span className="truncate text-foreground">{getPageTitle(settingsSlug)}</span>
+              </div> : null}
+              <div className="min-h-0 flex-1">{renderDesktopContent()}</div>
             </div>
           </>
         )}

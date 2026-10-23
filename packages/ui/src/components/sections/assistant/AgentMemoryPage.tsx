@@ -1,5 +1,6 @@
 import React from 'react';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { agentScopeKey, type AgentMemoryNote, type AgentMemoryScope } from '@varin/protocol';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
@@ -28,13 +29,15 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false, onCont
     setScope(initialKind === 'global' ? { kind: 'global' } : { kind: initialKind, id: initialId });
   }, [settings.runtime, initialKind, initialId]);
   const items = settings.catalog?.memories.filter(note => agentScopeKey(note.scope) === agentScopeKey(scope)
-    && note.content.toLowerCase().includes(query.toLowerCase())) ?? [];
+    && (note.id === draft?.id || note.content.toLowerCase().includes(query.toLowerCase()))) ?? [];
   const hasContent = Boolean(draft || settings.error || settings.catalog?.memories.some(note =>
     !scopes || scopes.some(option => agentScopeKey(option.scope) === agentScopeKey(note.scope))));
   React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const save = async () => {
-    if (!draft || !settings.catalog) return;
-    if (await settings.update('memory', draft)) setDraft(null);
+    if (!draft || !settings.catalog) return false;
+    const saved = await settings.update('memory', draft);
+    if (saved) setDraft(null);
+    return saved;
   };
   const remove = async (note: AgentMemoryNote) => {
     if (!settings.catalog) return;
@@ -47,13 +50,21 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false, onCont
       {scopes.map(option => <option key={agentScopeKey(option.scope)} value={agentScopeKey(option.scope)}>{option.label}</option>)}
     </select>
     : <AgentScopePicker scope={value} disabled={settings.busy} onChange={change} />;
+  const editor = draft ? <div className="settings-memory-editor space-y-3 py-2">
+          <Textarea autoFocus value={draft.content} rows={8} className="min-h-48 max-h-[60vh] resize-y bg-transparent leading-relaxed" aria-label={t('assistant.memory.content')}
+            onChange={event => setDraft({ ...draft, content: event.target.value })} disabled={settings.busy} />
+          <SettingsDisclosure title={t('assistant.move')}>
+            <div className="mt-2 max-w-64">{picker(draft.scope, next => setDraft({ ...draft, scope: next }))}</div>
+          </SettingsDisclosure>
+          <SettingsActionBar placement="inline" saveLabel={t('assistant.save')} dirty={true} saving={settings.busy} saveDisabled={!draft.content.trim()} onSave={save} onCancel={() => setDraft(null)} error={settings.error} />
+        </div> : null;
   const content = <>
     {settings.error ? <div role="alert" className="mb-4 text-destructive">{settings.error}
       <Button variant="ghost" size="sm" onClick={() => void settings.load()}>{t('assistant.reload')}</Button></div> : null}
-    <div className={embedded ? 'grid gap-3' : 'grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]'}>
-      {picker(scope, next => {
+    <div className="space-y-5">
+      <div className="max-w-72">{picker(scope, next => {
         requestSettingsNavigation(() => { setDraft(null); setScope(next); });
-      })}
+      })}</div>
       <div className="min-w-0 space-y-3">
         <div className="flex items-center gap-2">
           <input aria-label={t('assistant.search')} placeholder={t('assistant.search')} value={query}
@@ -62,22 +73,15 @@ export function AgentMemoryPage({ initialScope, scopes, embedded = false, onCont
             <Icon name="add" className="size-4" />{t('assistant.add')}
           </Button>
         </div>
-        {draft ? <div className="space-y-3 rounded-lg border border-primary/40 p-3">
-          <Textarea autoFocus value={draft.content} rows={6} aria-label={t('assistant.memory.content')}
-            onChange={event => setDraft({ ...draft, content: event.target.value })} disabled={settings.busy} />
-          <details><summary className="cursor-pointer typography-meta text-muted-foreground">{t('assistant.move')}</summary>
-            <div className="mt-2 max-w-64">{picker(draft.scope, next => setDraft({ ...draft, scope: next }))}</div>
-          </details>
-          <SettingsActionBar saveLabel={t('assistant.save')} dirty={true} saving={settings.busy} saveDisabled={!draft.content.trim()} onSave={save} onCancel={() => setDraft(null)} error={settings.error} />
-        </div> : null}
+        {draft && draft.id === undefined ? editor : null}
         {!settings.catalog && !settings.error ? <p role="status">{t('common.loading')}</p> : null}
         {settings.catalog && !items.length && !draft ? <p className="py-10 text-center text-muted-foreground typography-meta">{t('assistant.memory.empty')}</p> : null}
         <div className="divide-y divide-border/60">{items.map(note => <article key={note.id} className="group py-4 first:pt-1">
-          <div className="flex items-start gap-3"><p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6">{note.content}</p>
+          {draft?.id === note.id ? editor : <div className="flex items-start gap-3"><p className="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm leading-6">{note.content}</p>
             <div className="flex shrink-0"><Button variant="ghost" size="sm" aria-label={t('assistant.edit')} disabled={settings.busy || !!draft}
               onClick={() => setDraft({ id: note.id, content: note.content, scope: note.scope, revision: settings.catalog!.revision })}><Icon name="edit" className="size-4" /></Button>
               <Button variant="ghost" size="sm" aria-label={t('assistant.delete')} disabled={settings.busy || !!draft} onClick={() => void remove(note)}><Icon name="delete-bin" className="size-4" /></Button></div>
-          </div>
+          </div>}
           <details className="mt-1 typography-micro text-muted-foreground"><summary className="cursor-pointer">{t('assistant.source')}</summary>
             <p className="mt-1 break-all">{note.source?.label ?? '—'} · {new Date(note.updatedAt).toLocaleString()}{note.source?.threadId ? ` · ${note.source.threadId}` : ''}</p>
           </details>

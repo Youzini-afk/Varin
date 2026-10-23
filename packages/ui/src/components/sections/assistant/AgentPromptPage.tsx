@@ -1,5 +1,7 @@
 import { useThreadStore } from '@/stores/useThreadStore';
 import React from 'react';
+import { SettingsTabs } from '../shared/SettingsTabs';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { agentScopeKey, personalizeAgentSystemPrompt, renderAgentSystemPrompt, splitAgentSystemPrompt,
@@ -25,6 +27,7 @@ interface PromptView extends AgentSystemPromptPreview { checkpoint?: AgentSystem
 
 export function AgentPromptPage() {
   const { t } = useI18n();
+  const [pageTab, setPageTab] = React.useState<'custom' | 'preview'>('custom');
   const settings = useAgentSettings();
   const [scope, setScope] = React.useState<AgentMemoryScope>({ kind: 'global' });
   const [loaded, setLoaded] = React.useState<{ owner: string; view: PromptView | null } | null>(null);
@@ -156,13 +159,16 @@ export function AgentPromptPage() {
     return false;
   };
   return <SettingsPageLayout title={t('assistant.prompt.title')} description={t('assistant.prompt.description')} showSaveStatus={false}>
-    <div className="grid gap-6 md:grid-cols-[170px_minmax(0,1fr)]">
+    <div className="space-y-6">
+      <div className="max-w-72">
       <AgentScopePicker scope={scope} disabled={settings.busy} onChange={next => {
         requestSettingsNavigation(() => { setDirty(false); setSaved(false); setScope(next); });
-      }} />
+      }} /></div>
+      <SettingsTabs value={pageTab} onChange={setPageTab} label={t('assistant.prompt.title')} items={[{ value: 'custom', label: t('settings.experience.customInstructions') }, { value: 'preview', label: t('assistant.prompt.effective') }]} />
       <div className="min-w-0 space-y-4">
         {error || settings.error ? <div role="alert" className="text-destructive typography-meta">{error || settings.error}</div> : null}
         {!view && !error && !settings.error ? <p role="status">{t(loading ? 'assistant.prompt.loading' : 'assistant.prompt.noContext')}</p> : null}
+        <div hidden={pageTab !== 'custom'} className="space-y-4">
         <Textarea value={draft} onChange={event => { setDraft(event.target.value); setDirty(true); setSaved(false); }}
           aria-label={t('assistant.prompt.editor')} rows={16} disabled={settings.busy || !view || !settings.catalog}
           className="min-h-80 resize-y font-mono text-sm leading-6" />
@@ -183,7 +189,8 @@ export function AgentPromptPage() {
             {presetText[key].map((_, index) => <option key={index} value={index}>{t(index === 0 ? 'assistant.preset.default' : `assistant.preset.${key}.${index}` as 'assistant.preset.density.1')}</option>)}
           </select>
         </label>)}</div>
-        <section className="space-y-2 border-t pt-4"><div className="flex items-center justify-between gap-2">
+        </div>
+        <section hidden={pageTab !== 'preview'} className="space-y-2"><div className="flex items-center justify-between gap-2">
           <h3 className="typography-ui-label">{t('assistant.prompt.effective')}</h3>
           <Button variant="ghost" size="sm" disabled={loading} onClick={() => void refresh()}>{t('assistant.reload')}</Button>
         </div><p className="typography-micro text-muted-foreground">{t(previewPart === 'tools' ? scope.kind === 'thread' ? 'assistant.prompt.toolSources' : 'assistant.prompt.toolCatalogSources' : scope.kind === 'thread' ? 'assistant.prompt.sources' : 'assistant.prompt.currentSources')}</p>
@@ -193,9 +200,9 @@ export function AgentPromptPage() {
           </div>
           {previewPart === 'tools' && toolsError && !threadId ? <p role="alert" className="typography-meta text-destructive">{toolsError}</p> : <pre className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/20 p-3 text-xs leading-6">{previewPart === 'system' ? preview : toolsLoading && !threadId ? t('common.loading') : toolPreview || t('assistant.prompt.noTools')}</pre>}
         </section>
-        {snapshot?.lastRequest ? <details className="border-t pt-3"><summary className="cursor-pointer typography-meta">{t('assistant.prompt.lastRequest')} · {new Date(snapshot.lastRequest.timestamp).toLocaleTimeString()}</summary>
+        {snapshot?.lastRequest ? <SettingsDisclosure title={t('assistant.prompt.lastRequest')} summary={new Date(snapshot.lastRequest.timestamp).toLocaleTimeString()}>
           <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs leading-6">{snapshot.lastRequest.content}</pre>
-        </details> : null}
+        </SettingsDisclosure> : null}
       </div>
     </div>
     <SettingsActionBar saveLabel={t('assistant.save')} dirty={dirty} saving={settings.busy} saveDisabled={!view || !settings.catalog} onSave={() => save()} onCancel={() => { setDraft(stored); setDirty(false); setError(null); }} error={error || settings.error} />

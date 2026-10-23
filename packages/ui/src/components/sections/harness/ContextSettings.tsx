@@ -5,6 +5,8 @@ import type { HarnessSettingsPageProps } from './harness-settings-state';
 import { AutoSaveInput } from './AutoSaveInput';
 import { HarnessModelField } from './HarnessModelField';
 import { MessageTimeSettings } from './MessageTimeSettings';
+import { ContextBudgetSettings } from './ContextBudgetSettings';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
 import { getRuntimeEndpointGeneration, getRuntimeKey } from '@varin/application-client';
 import { beginAgentProfilesHost, selectAgentProfile, setAgentProfilesQuery } from '../agents/agent-profiles-store';
@@ -15,9 +17,6 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
 }) {
   const { t } = useI18n();
   const recovery = harness.context.compactionRecovery;
-  const validPercent = (value: string): string | null => value.trim() !== '' && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) < 100
-    ? null : t('settings.page.harness.context.reserveRatio.invalid');
-  const percent = Number((reserveRatio * 100).toFixed(6));
   const validSeconds = (value: string): string | null => {
     const millis = Math.round(Number(value) * 1000);
     return Number.isSafeInteger(millis) && millis > 0 && millis <= 2_147_483_647
@@ -27,7 +26,14 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
     ? null : t('settings.page.harness.context.recovery.retries.invalid');
   const setRecovery = (patch: Partial<typeof recovery>) => update({ context: { compactionRecovery: patch } });
   return <>
-    <MessageTimeSettings harness={harness} update={update} />
+    <SettingsSection title={t('settings.contextScale.title')} settingsItem="harness.context" divider={false}>
+      <SettingsCheckboxRow checked={harness.context.backgroundPreparation}
+        onChange={(backgroundPreparation) => update({ context: { backgroundPreparation } })}
+        label={t('settings.page.harness.context.backgroundPreparation')} description={t('settings.page.harness.context.backgroundPreparation.description')} />
+      <ContextBudgetSettings reserveRatio={reserveRatio} preparationWaterline={harness.context.preparationWaterline}
+        backgroundPreparation={harness.context.backgroundPreparation} onReserveRatioChange={onReserveRatioChange}
+        onPreparationWaterlineChange={preparationWaterline => update({ context: { preparationWaterline } })} />
+    </SettingsSection>
     <SettingsSection settingsItem="harness.models.contextCompaction">
       <SettingsPageLink page="agents" description={t('settings.agents.context.configureDescription')} onNavigate={() => {
         beginAgentProfilesHost(JSON.stringify([getRuntimeKey(), getRuntimeEndpointGeneration()]));
@@ -37,23 +43,8 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
     <SettingsSection settingsItem="harness.models.agentPlanning">
       <HarnessModelField harness={harness} update={update} slot="agentPlanning" />
     </SettingsSection>
-    <SettingsSection settingsItem="harness.context">
-      <SettingsFieldRow label={t('settings.page.harness.context.reserveRatio')}
-        description={t('settings.page.harness.context.reserveRatio.description', { threshold: Number((100 - percent).toFixed(6)) })}>
-        <AutoSaveInput className="w-28" type="number" min={0} max={100} step="any"
-          aria-label={t('settings.page.harness.context.reserveRatio')}
-          value={String(percent)} validate={validPercent}
-          onCommit={value => onReserveRatioChange(Number(value) / 100)} />
-        <span className="typography-meta text-muted-foreground">%</span>
-      </SettingsFieldRow>
-      <SettingsCheckboxRow checked={harness.context.backgroundPreparation}
-        onChange={(backgroundPreparation) => update({ context: { backgroundPreparation } })}
-        ariaLabel={t('settings.page.harness.context.backgroundPreparation')}
-        label={t('settings.page.harness.context.backgroundPreparation')}
-        description={t('settings.page.harness.context.backgroundPreparation.description')} />
-    </SettingsSection>
-    <SettingsSection title={t('settings.page.harness.context.recovery.title')}
-      description={t('settings.page.harness.context.recovery.description')} settingsItem="harness.context.compactionRecovery">
+    <SettingsDisclosure title={t('settings.page.harness.context.recovery.title')} settingsItem="harness.context.compactionRecovery">
+      <p className="mb-3 typography-meta text-muted-foreground">{t('settings.page.harness.context.recovery.description')}</p>
       <SettingsCheckboxRow checked={recovery.enabled} onChange={(enabled) => setRecovery({ enabled })}
         ariaLabel={t('settings.page.harness.context.recovery.enabled')}
         label={t('settings.page.harness.context.recovery.enabled')}
@@ -81,12 +72,13 @@ export function ContextSettings({ harness, update, reserveRatio, onReserveRatioC
           value={String(recovery.maxRetries)} validate={validRetries}
           onCommit={(value) => setRecovery({ maxRetries: Number(value) })} />
       </SettingsFieldRow>
-    </SettingsSection>
+    </SettingsDisclosure>
     <SettingsSection title={t('settings.page.harness.nextStep.title')} settingsItem="harness.next-step" contentClassName="space-y-3">
       <SettingsCheckboxRow checked={harness.nextStep.enabled && harness.models.nextStep?.enabled !== false}
         onChange={enabled => update({ nextStep: { enabled }, models: { nextStep: { enabled } } })}
         label={t('settings.page.harness.nextStep.enabled')} description={t('settings.page.harness.nextStep.description')} />
       <HarnessModelField harness={harness} update={update} slot="nextStep" enableControl={false} />
     </SettingsSection>
+    <SettingsDisclosure title={t('settings.experience.messageTime')}><MessageTimeSettings harness={harness} update={update} /></SettingsDisclosure>
   </>;
 }

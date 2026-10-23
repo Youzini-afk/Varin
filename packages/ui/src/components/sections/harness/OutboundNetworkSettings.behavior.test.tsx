@@ -9,7 +9,7 @@ vi.mock('@varin/application-client', () => ({ runtimeFetch: fixture.fetch, regis
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: fixture.translate }) }));
 vi.mock('@/components/ui/button', () => ({ Button: ({ variant: _variant, size: _size, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => <button {...props} /> }));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) => <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
-vi.mock('@/components/sections/shared/SettingsSection', () => ({ SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ children, label }: React.PropsWithChildren<{ label: string }>) => <label data-field={label}>{children}</label> }));
+vi.mock('@/components/sections/shared/SettingsSection', async importOriginal => ({ ...await importOriginal<typeof import('@/components/sections/shared/SettingsSection')>(), SettingsSection: ({ children }: React.PropsWithChildren) => <section>{children}</section>, SettingsFieldRow: ({ children, label }: React.PropsWithChildren<{ label: string }>) => <label data-field={label}>{children}</label> }));
 vi.mock('@/components/ui/select', () => ({ Select: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectContent: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>, SelectValue: () => null, SelectItem: ({ children }: React.PropsWithChildren) => <span>{children}</span> }));
 import { OutboundNetworkSettings } from './OutboundNetworkSettings';
 

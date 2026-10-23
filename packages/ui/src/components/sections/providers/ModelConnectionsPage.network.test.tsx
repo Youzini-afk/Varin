@@ -216,10 +216,11 @@ test('changing the discovery connection retires its old candidates even after th
 
 test('service tab changes retain draft edits; a failed save stays dirty and Cancel restores persisted configuration', async () => {
   await open();
+  await click('settings.experience.connection');
   await edit('settings.models.endpoint', 'http://localhost/unsaved');
-  await click('settings.models.advanced');
+  await click('settings.experience.requests');
   await edit(embeddingLabel, '/unsaved-path');
-  await click('settings.models.connectionModels');
+  await click('settings.experience.connection');
   expect((container.querySelector('[aria-label="settings.models.endpoint"]') as HTMLInputElement).value).toBe('http://localhost/unsaved');
   fixtures.api.save.mockRejectedValueOnce(new Error('Revision conflict'));
   await click('settings.models.save');

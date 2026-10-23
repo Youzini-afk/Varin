@@ -54,7 +54,7 @@ export class PermissionService {
     let fail!: (error: Error) => void;
     const decision = new Promise<'allow_once' | 'deny'>((resolve, reject) => {
       fail = reject;
-      this.pending.set(call.operationId, { permissionId, decide: resolve, call: exactCall, target: exactTarget, persistent: exactScope.persistent, signal });
+      this.pending.set(call.operationId, { permissionId, decide: resolve, call: exactCall, ...(exactTarget ? { target: exactTarget } : {}), ...(exactScope.persistent ? { persistent: exactScope.persistent } : {}), signal });
     });
     // A cancellation during the open transaction must not become an unhandled rejection.
     void decision.catch(() => undefined);
@@ -116,7 +116,7 @@ export class PermissionService {
       if (pending.persistedRule && !(error instanceof HostToolAdmissionError && error.code === 'permission_persisted_request_expired'))
         throw new HostToolAdmissionError('permission_persisted_decision_unconfirmed');
       throw error;
-    } finally { pending.flight = undefined; pending.choice = undefined; }
+    } finally { delete pending.flight; delete pending.choice; }
   }
 }
 const services = new WeakMap<KernelClient, PermissionService>();

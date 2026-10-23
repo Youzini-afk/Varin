@@ -1,4 +1,5 @@
 import React from 'react';
+import type { OperationCancellationReceipt } from '@varin/protocol';
 import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { readUserQuestions, userAnswerText, userQuestionAnswered, type Operation, type QuestionAnswer } from '@varin/protocol';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,7 @@ export function ThreadQuestion({ scopeKey, operation, enabled, onAnswer, onCance
   enabled: boolean;
   onAnswer(answers: QuestionAnswer[]): Promise<Operation>;
   onRead(): Promise<Operation>;
-  onCancel(): Promise<Operation>;
+  onCancel(): Promise<OperationCancellationReceipt>;
 }) {
   const { t } = useI18n();
   const args = (operation.intent as { call?: { arguments?: unknown } })?.call?.arguments;
@@ -74,7 +75,7 @@ export function ThreadQuestion({ scopeKey, operation, enabled, onAnswer, onCance
     }}>
       {draft.review ? <div aria-label={t('chat.question.review')} id={questionId}>
         {questions.map((q, index) => <section key={q.id} className="thread-question-review">
-          <header><p>{q.question}</p><button type="button" disabled={draft.busy} onClick={() => move(index)}>{t('common.edit')}</button></header>
+          <header><p>{q.question}</p><button type="button" disabled={draft.busy} onClick={() => move(index)}>{t('assistant.edit')}</button></header>
           <p className="text-muted-foreground">{userAnswerText(q, draft.answers[q.id]) || t(q.required ? 'chat.question.unanswered' : 'chat.question.skipped')}</p>
         </section>)}
       </div> : <>

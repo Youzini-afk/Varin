@@ -1,4 +1,6 @@
 import React from 'react';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
+import { SettingsPageNav } from '../shared/SettingsPageNav';
 import type { HarnessWebSearchProvider } from '@varin/protocol';
 import { getRuntimeKey, runtimeFetch } from '@varin/application-client';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
@@ -104,7 +106,11 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
     update({ web: { search: { provider: nextProvider, endpoint: nextEndpoint.trim() || undefined, credentialRef: `varin-web-search-${nextProvider}` } } });
   };
   return <>
-
+    <SettingsPageNav label={t('settings.page.harness.page.web.title')} items={[
+      { id: 'harness.web.search', label: t('settings.page.harness.section.web') },
+      { id: 'harness.document-reading', label: t('settings.page.harness.web.documentReading.title') },
+      { id: 'harness.web.domains', label: t('settings.page.harness.web.domains.title') },
+    ]} />
     <SettingsSection title={t('settings.page.harness.section.web')} settingsItem="harness.web.search" contentClassName="space-y-5">
       <SettingsCheckboxRow checked={harness.tools.websearch !== false} onChange={(enabled) => update({ tools: { websearch: enabled } })}
         ariaLabel={t('settings.page.harness.web.search.enabled')} label={t('settings.page.harness.web.search.enabled')} />
@@ -134,6 +140,7 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
       description={t('settings.page.harness.web.documentReading.description')}
       settingsItem="harness.document-reading" contentClassName="space-y-4">
       <HarnessModelField harness={harness} update={update} slot="reader" />
+      <SettingsDisclosure title={t('settings.experience.documentComponents')}>
       <SettingsFieldRow label={t('settings.page.harness.web.documentReading.doclingCommand')}
         description={t('settings.page.harness.web.documentReading.executableHint')}
         controlClassName="@xl:flex-1 @xl:max-w-80">
@@ -157,6 +164,7 @@ export function WebSettings({ harness, update }: HarnessSettingsPageProps) {
       <p className="typography-meta text-muted-foreground">
         {t('settings.page.harness.web.documentReading.defaultsRestored')}
       </p>
+      </SettingsDisclosure>
     </SettingsSection>
     <SettingsSection title={t('settings.page.harness.web.domains.title')} description={t('settings.page.harness.web.domains.description')}
       settingsItem="harness.web.domains" contentClassName="space-y-5">

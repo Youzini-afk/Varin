@@ -1,4 +1,5 @@
 import React from 'react';
+import './settings.css';
 import { SettingsFooterContext } from './settings-context';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from '@/components/icon/Icon';
@@ -23,6 +24,7 @@ interface SettingsPageLayoutProps {
   description?: React.ReactNode;
   /** Optional content rendered at the end of the header row (before save status). */
   headerEnd?: React.ReactNode;
+  scope?: React.ReactNode;
   /** Show persistence feedback for instant-save settings. */
   showSaveStatus?: boolean;
   /** Additional className for the content container */
@@ -44,6 +46,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
   titleAccessory,
   description,
   headerEnd,
+  scope,
   showSaveStatus = false,
 }) => {
   const [footerTarget, setFooterTarget] = React.useState<HTMLDivElement | null>(null);
@@ -59,8 +62,9 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
       className="w-full @container"
     >
       <div
+        data-settings-page
         className={cn(
-          'mx-auto w-full max-w-[1040px] space-y-0 px-5 py-6 @3xl:px-10 @3xl:py-8',
+          'settings-page mx-auto w-full max-w-[1040px] space-y-0 px-5 py-6 @3xl:px-10 @3xl:py-8',
           // The first visible section never needs the top divider, no matter
           // which platform-conditional sections above it rendered null.
           '[&>section:first-of-type]:border-t-0 [&>section:first-of-type]:pt-0',
@@ -69,7 +73,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
         )}
       >
         {hasHeader && (
-          <div className="mb-2 flex items-start justify-between gap-4 pb-6">
+          <div className="settings-page-header mb-2 flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
               {title != null ? (
                 isPlainTitle ? (
@@ -93,6 +97,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
                   description
                 )
               ) : null}
+              {scope ? <div className="settings-page-scope"><Icon name="stack" className="mt-0.5 size-3.5 shrink-0" /><span>{scope}</span></div> : null}
             </div>
             <div className="flex shrink-0 items-center gap-3">
               {headerEnd}

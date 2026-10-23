@@ -40,6 +40,7 @@ export class HarnessSettingsController {
   private confirmed: AgentSettingsSnapshot | null = null;
   private pending: HarnessSettingsPatch[] = [];
   private active: Promise<void> | null = null;
+  private explicitTail: Promise<unknown> = Promise.resolve();
   private refreshRequested = false;
   private listeners = new Set<() => void>();
   private state: HarnessSettingsState = { harness: null, effectivePermissionMode: null, reserveRatio: DEFAULT_COMPACTION_RESERVE_RATIO, status: 'loading', error: null };
@@ -73,6 +74,33 @@ export class HarnessSettingsController {
 
   update = (patch: HarnessSettingsPatch): void => {
     this.enqueue({ harness: patch });
+  };
+
+  /** Drafts remain local on failure; only confirmed explicit writes enter the projection. */
+  commit = (patch: HarnessSettingsPatch): Promise<boolean> => {
+    const job = this.explicitTail.then(async () => {
+      await (this.state.status === 'error' ? this.retry() : this.drain());
+      if (this.state.status === 'error' || !this.confirmed) return false;
+      let saved = false;
+      const operation = Promise.resolve().then(async () => {
+        try {
+          this.project('saving');
+          const next = patchHarnessSettings(this.confirmed!.global, { harness: patch });
+          this.confirmed = await this.transport.write({ harness: next.harness as JsonValue }, this.confirmed!.globalRevision);
+          saved = true; this.project('saved');
+        } catch (failure) {
+          this.project('error', failure instanceof Error ? failure.message : String(failure));
+        }
+      }).finally(() => {
+        this.active = null;
+        if (this.pending.length || this.refreshRequested) void this.drain();
+      });
+      this.active = operation;
+      await operation;
+      return saved;
+    });
+    this.explicitTail = job.catch(() => undefined);
+    return job;
   };
 
   updateReserveRatio = (reserveRatio: number): void => {

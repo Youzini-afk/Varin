@@ -23,7 +23,7 @@ export function createMcpSettings(options: {
   const config = (view: View) => options.authority.configuration(view.spec);
   const snapshot = async (id: string): Promise<McpConfigurationSnapshot> => {
     const view = requireView(id);
-    await options.authority.directory(view.spec, new AbortController().signal);
+    const directory = await options.authority.directory(view.spec, new AbortController().signal);
     requireView(id);
     const loaded = config(view), readiness = await options.authority.inspect(view.spec);
     requireView(id);
@@ -35,8 +35,13 @@ export function createMcpSettings(options: {
         const current = retained && !state.credentialError ? options.authority.snapshot(retained.scope, retained.handle) : undefined;
         const signInRequired = state.status === 'needs-auth' || Object.values(state.directories ?? {}).includes('needs-auth');
         const oauthEligible = mcpOAuthUrl(entry) !== undefined;
+        const liveTools = current?.state === 'connected' && !current.error && state.directories?.tools === 'ready' ? current.tools : undefined;
+        const tools = liveTools
+          ? liveTools.map(tool => ({ name: tool.name, description: tool.description ?? '', inputSchema: tool.inputSchema }))
+          : directory.filter(tool => tool.server === entry.name).map(tool => ({ name: tool.tool, description: tool.description, inputSchema: tool.inputSchema }));
         return { name: entry.name, source: entry.source, ...(entry.override ? { override: entry.override } : {}), enabled: entry.config.enabled !== false,
           exposure: entry.config.exposure ?? 'codemode', status: state.status, cachedToolCount: state.cachedToolCount, connectedToolCount: state.connectedToolCount,
+          tools, toolsSource: liveTools ? 'connection' : 'cache',
           holdsConnection: retained !== undefined, signInRequired,
           canConnect: entry.config.enabled !== false && !state.credentialError,
           canSignIn: oauthEligible && state.hasStoredOAuthGrant !== undefined && (!state.hasStoredOAuthGrant || signInRequired),

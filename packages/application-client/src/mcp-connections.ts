@@ -5,6 +5,9 @@ export interface AuthorizationState { id: string; status: 'pending' | 'completed
 export interface McpConfigurationSource { path: string; scope: 'global' | 'project' }
 export interface McpConfigurationServer {
   name: string; source: string; override?: string; enabled: boolean; exposure: string;
+  /** Settings catalog only; cached declarations do not imply a live connection. */
+  tools?: { name: string; description: string; inputSchema: Record<string, unknown> }[];
+  toolsSource?: 'connection' | 'cache';
   status: string; cachedToolCount: number; connectedToolCount: number; error?: string;
   /** This view owns a holder; releasing it may leave other consumers connected. */
   holdsConnection: boolean;

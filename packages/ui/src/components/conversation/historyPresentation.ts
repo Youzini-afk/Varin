@@ -215,7 +215,7 @@ export class HistoryPresentation {
       const response = object(entry.details), operationId = response.operationId;
       const callId = typeof operationId === 'string' ? operationCalls.get(operationId) : undefined;
       if (!callId) continue;
-      const execution = toolExecutions[callId] ??= { toolCallId: callId, operationId: String(operationId), name: 'ask_user',
+      const execution = toolExecutions[callId] ??= { toolCallId: callId, operationId: String(operationId), name: 'ask_user', args: {},
         status: response.cancelled ? 'cancelled' : 'success' };
       execution.questionResponse = json({ ...(response.cancelled ? { cancelled: true } : { answer: entry.content, answers: response.answers }) });
       joinedAnswers.add(entry.id);

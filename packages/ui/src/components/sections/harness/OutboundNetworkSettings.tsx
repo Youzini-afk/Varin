@@ -3,8 +3,7 @@ import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { getRuntimeApiBaseUrl, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, runtimeFetch } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { SettingsFieldRow, SettingsSection } from '@/components/sections/shared/SettingsSection';
+import { SettingsFieldRow, SettingsSection, SettingsRadioGroup, SettingsRadioOption } from '@/components/sections/shared/SettingsSection';
 import { useI18n } from '@/lib/i18n';
 
 type NetworkSetting = { mode: 'auto' | 'direct' | 'proxy'; proxyUrl: string; noProxy: string; credentialRef?: string };
@@ -150,17 +149,10 @@ function OutboundNetworkContent({ generation }: { generation: number }) {
   };
 
   return <SettingsSection title={t('settings.page.harness.network.title')} description={`${t('settings.page.harness.network.host')} ${host}`} contentClassName="space-y-5">
-    <SettingsFieldRow label={t('settings.page.harness.network.mode')}>
-      <Select value={draft.mode} onValueChange={(mode) => setDraft((current) => ({ ...current, mode: mode as NetworkSetting['mode'] }))} disabled={loading || saving}>
-        <SelectTrigger size="settings" className="w-64"><SelectValue /></SelectTrigger>
-        <SelectContent>
-          <SelectItem value="auto">{t('settings.page.harness.network.auto')}</SelectItem>
-          <SelectItem value="direct">{t('settings.page.harness.network.direct')}</SelectItem>
-          <SelectItem value="proxy">{t('settings.page.harness.network.proxy')}</SelectItem>
-        </SelectContent>
-      </Select>
-    </SettingsFieldRow>
-    {draft.mode === 'auto' ? <p className="typography-meta text-muted-foreground">{t('settings.page.harness.network.autoHint')}</p> : null}
+    <SettingsRadioGroup aria-label={t('settings.page.harness.network.mode')} className="settings-permission-modes">
+      {(['auto', 'direct', 'proxy'] as const).map(mode => <SettingsRadioOption key={mode} selected={draft.mode === mode} label={t(`settings.page.harness.network.${mode}`)} description={mode === 'auto' ? t('settings.page.harness.network.autoHint') : undefined}
+        disabled={loading || saving} onSelect={() => setDraft(current => ({ ...current, mode }))} />)}
+    </SettingsRadioGroup>
     {draft.mode === 'proxy' ? <>
       <SettingsFieldRow label={t('settings.page.harness.network.proxyUrl')} controlClassName="@xl:flex-1 @xl:max-w-80">
         <Input value={draft.proxyUrl} placeholder="http://127.0.0.1:7890" onChange={(event) => setDraft((current) => ({ ...current, proxyUrl: event.target.value }))} disabled={loading || saving} />

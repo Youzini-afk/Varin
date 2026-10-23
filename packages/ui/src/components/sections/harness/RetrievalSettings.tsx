@@ -1,4 +1,5 @@
 import React from 'react';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { SettingsSection, SettingsFieldRow } from '@/components/sections/shared/SettingsSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useConfigurationModels } from './ConfigurationModels';
@@ -8,7 +9,7 @@ import { HarnessModelField } from './HarnessModelField';
 import { InferenceModelField } from './InferenceModelField';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
-export function InferenceSettings({ harness, update, kind }: HarnessSettingsPageProps & { kind: 'embedding' | 'rerank' }) {
+export function InferenceSettings({ harness, update, kind, embedded = false }: HarnessSettingsPageProps & { kind: 'embedding' | 'rerank'; embedded?: boolean }) {
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const binding = harness[kind];
@@ -31,7 +32,7 @@ export function InferenceSettings({ harness, update, kind }: HarnessSettingsPage
     } });
   };
   const defaultLabel = t(kind === 'embedding' ? 'settings.page.harness.embeddings.off' : 'settings.harness.retrieval.off');
-  return <SettingsSection title={t(`settings.page.harness.section.${kind}`)} settingsItem={`harness.${kind}`} contentClassName="space-y-5">
+  return <SettingsSection title={embedded ? undefined : t(`settings.page.harness.section.${kind}`)} divider={!embedded} settingsItem={`harness.${kind}`} contentClassName="space-y-5">
     <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
       <Select value={local ? 'local' : remote ? 'remote' : 'default'} onValueChange={(value) => {
         setLocal(value === 'local'); remoteRef.current = value === 'remote'; setRemote(value === 'remote');
@@ -68,7 +69,7 @@ export function InferenceSettings({ harness, update, kind }: HarnessSettingsPage
   </SettingsSection>;
 }
 
-function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
+function FastDecisionSettings({ harness, update, embedded = false }: HarnessSettingsPageProps & { embedded?: boolean }) {
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const settings = harness.fastDecision;
@@ -99,7 +100,7 @@ function FastDecisionSettings({ harness, update }: HarnessSettingsPageProps) {
     const override = purposes?.[purpose];
     return override === 'off' ? 'off' : override === undefined ? 'default' : 'custom';
   };
-  return <SettingsSection title={t('settings.page.harness.section.fastDecision')} settingsItem="harness.fastDecision" contentClassName="space-y-5">
+  return <SettingsSection title={embedded ? undefined : t('settings.page.harness.section.fastDecision')} divider={!embedded} settingsItem="harness.fastDecision" contentClassName="space-y-5">
     <SettingsFieldRow label={t('settings.harness.retrieval.source')}>
       <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => {
         remoteRef.current = value === 'remote';
@@ -166,7 +167,7 @@ export function RetrievalSettings(props: HarnessSettingsPageProps) {
       description={t('settings.page.harness.codeRetrieval.description')} settingsItem="harness.codeRetrieval">
       <HarnessModelField {...props} slot="explore" />
     </SettingsSection>
-    <InferenceSettings {...props} kind="rerank" />
-    <FastDecisionSettings {...props} />
+    <SettingsDisclosure title={t('settings.page.harness.section.rerank')}><InferenceSettings {...props} kind="rerank" embedded /></SettingsDisclosure>
+    <SettingsDisclosure title={t('settings.page.harness.section.fastDecision')}><FastDecisionSettings {...props} embedded /></SettingsDisclosure>
   </>;
 }

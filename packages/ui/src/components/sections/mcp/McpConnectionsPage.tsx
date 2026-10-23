@@ -1,4 +1,6 @@
 import React from 'react';
+import { SettingsTabs } from '../shared/SettingsTabs';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { Input } from '@/components/ui/input';
@@ -38,6 +40,8 @@ export function McpConnectionsPage() {
   const [busy, setBusy] = React.useState(false);
   const [raw, setRaw] = React.useState(false);
   const [query, setQuery] = React.useState('');
+  const [toolQuery, setToolQuery] = React.useState('');
+  const [tab, setTab] = React.useState<'tools' | 'configuration' | 'diagnostics'>('tools');
   const [showDetail, setShowDetail] = React.useState(false);
   const active = React.useRef<{ view: string; signal: AbortSignal } | null>(null);
   const authId = React.useRef<string | undefined>(undefined);
@@ -103,7 +107,7 @@ export function McpConnectionsPage() {
   }, [api]);
   const select = (next: typeof selection, nextPath = path) => requestSettingsNavigation(() => {
     if (nextPath !== path) preservedDraft.current = false;
-    setSelection(next); setPath(nextPath); setShowDetail(true); setRaw(false);
+    setSelection(next); setPath(nextPath); setShowDetail(true); setRaw(false); setTab(next.mode === 'server' ? 'tools' : 'configuration'); setToolQuery('');
   });
   const selectedServer = selection.mode === 'server' ? snapshot?.servers.find(server => server.name === selection.name) : undefined;
   const navigation = useMcpSettingsTarget(state => state.target);
@@ -115,7 +119,7 @@ export function McpConnectionsPage() {
     const nextPath = server?.source ?? snapshot.sources[0]?.path ?? '';
     setSelection(previous => previous.mode === navigation.selection.mode && previous.name === navigation.selection.name ? previous : navigation.selection);
     setPath(nextPath);
-    setShowDetail(true); setRaw(false);
+    setShowDetail(true); setRaw(false); setTab(navigation.selection.mode === 'server' ? 'tools' : 'configuration');
     if (navigation.selection.signIn && server) {
       if (busy || document?.path !== nextPath) return;
       useMcpSettingsTarget.setState({ target: undefined });
@@ -162,9 +166,29 @@ export function McpConnectionsPage() {
           {selectedServer.holdsConnection ? <p className="typography-meta text-muted-foreground">{t('settings.mcp.disconnectHint')}</p> : null}
           {selectedServer.canSignIn && !selectedServer.signInRequired ? <p className="typography-meta text-muted-foreground">{t('settings.mcp.signInDiscoveryHint')}</p> : null}
           {selectedServer.error ? <p role="alert" className="typography-meta text-destructive">{selectedServer.error}</p> : null}
-          <p className="mt-3 break-all font-mono typography-micro text-muted-foreground">{selectedServer.source}{selectedServer.override ? ` → ${selectedServer.override}` : ''}</p>
+
         </SettingsSection> : null}
         {authorization ? <AuthorizationPanel key={authorization.id} state={authorization} onReply={value => api.reply(snapshot.view, authorization.id, value)} onCancel={() => api.cancelAuthorization(snapshot.view, authorization.id)} /> : null}
+        {selectedServer ? <SettingsTabs label={selectedServer.name} value={tab} onChange={setTab} items={[
+          { value: 'tools', label: t('settings.experience.toolsDirectory') },
+          { value: 'configuration', label: t('settings.mcp.configuration') },
+          { value: 'diagnostics', label: t('settings.experience.diagnostics') },
+        ]} /> : null}
+        {selectedServer && tab === 'tools' ? <div className="space-y-4">
+          <p className="typography-meta text-muted-foreground">{t(selectedServer.toolsSource === 'connection' ? 'settings.experience.liveTools' : 'settings.experience.cachedTools')}</p>
+          <Input value={toolQuery} onChange={event => setToolQuery(event.target.value)} placeholder={t('settings.experience.searchTools')} aria-label={t('settings.experience.searchTools')} />
+          {(selectedServer.tools ?? []).filter(tool => (tool.name + ' ' + tool.description).toLowerCase().includes(toolQuery.toLowerCase())).map(tool => <SettingsDisclosure key={tool.name} title={tool.name}>
+            <p className="whitespace-pre-wrap typography-meta text-muted-foreground">{tool.description}</p>
+            <pre className="mt-3 max-h-80 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted/40 p-3 typography-micro">{JSON.stringify(tool.inputSchema, null, 2)}</pre>
+          </SettingsDisclosure>)}
+          {!selectedServer.tools?.length ? <p className="py-6 typography-meta text-muted-foreground">{t('settings.experience.noToolDeclarations')}</p> : null}
+        </div> : null}
+        {selectedServer && tab === 'diagnostics' ? <dl className="settings-object-list">
+          <div className="py-4"><dt className="typography-ui-label">{t('settings.varin.mcp.config.source.label')}</dt><dd className="mt-2 break-all font-mono typography-meta text-muted-foreground">{selectedServer.source}</dd></div>
+          {selectedServer.override ? <div className="py-4"><dt className="typography-ui-label">{t('settings.experience.overriddenSource')}</dt><dd className="mt-2 break-all font-mono typography-meta text-muted-foreground">{selectedServer.override}</dd></div> : null}
+          <div className="py-4"><dt className="typography-ui-label">{t('settings.experience.toolsDirectory')}</dt><dd className="mt-2 typography-meta text-muted-foreground">{t('settings.mcp.toolCounts', { cached: selectedServer.cachedToolCount, connected: selectedServer.connectedToolCount })} · {selectedServer.exposure}</dd></div>
+        </dl> : null}
+        <div hidden={!!selectedServer && tab !== 'configuration'}>
         <SettingsSection title={t(selection.mode === 'new' ? 'settings.mcp.add' : 'settings.mcp.configuration')}>
           <SettingsFieldRow label={text('settings.varin.mcp.config.source.label')}>
             <Select value={path} disabled={busy} onValueChange={value => select({ mode: selection.mode === 'new' ? 'new' : 'settings' }, value)}><SelectTrigger size="settings" aria-label={text('settings.varin.mcp.config.source.label')}><SelectValue /></SelectTrigger><SelectContent>{snapshot.sources.map(source => <SelectItem key={source.path} value={source.path}>{source.path}</SelectItem>)}</SelectContent></Select>
@@ -177,6 +201,7 @@ export function McpConnectionsPage() {
             <Button className="mt-3" size="sm" variant="ghost" disabled={busy} onClick={() => requestSettingsNavigation(() => { void load(); })}>{text('settings.varin.mcp.config.actions.reload')}</Button>
           </> : null}
         </SettingsSection>
+        </div>
       </div>
       {document ? <SettingsActionBar dirty={dirty} saving={busy} saveDisabled={!valid || !documentAllowed} onSave={save} onCancel={() => { setDraft(document.content); setError(''); }} error={error} /> : null}
     </div> : null}

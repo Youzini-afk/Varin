@@ -8,9 +8,10 @@ import { useDeviceInfo } from '@/lib/device';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { setDirectoryShowHidden, useDirectoryShowHidden } from '@/lib/directoryShowHidden';
 import { Switch } from '@/components/ui/switch';
-import { SettingsSection, SettingsFieldRow, SettingsChipGroup } from '../shared/SettingsSection';
+import { SettingsSection, SettingsFieldRow, SettingsChipGroup, SettingsRadioGroup, SettingsRadioOption } from '../shared/SettingsSection';
 import { SettingsInfoHint } from '../shared/SettingsInfoHint';
 import { ChatWidthSettings } from './ChatWidthSettings';
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import { ChatSettingsPreview, type ChatPreviewScene } from './ChatSettingsPreview';
 
 const Toggle: React.FC<{
@@ -63,32 +64,14 @@ export const ChatSettings: React.FC = () => {
     if (section === 'conversation' || section === 'files' || section === 'input') setPreviewScene(section);
   };
   return <div className="settings-chat-layout">
-    <div className="settings-chat-controls" onFocusCapture={showRelatedPreview} onPointerDownCapture={showRelatedPreview}>
+    <div className="settings-chat-controls @container" onFocusCapture={showRelatedPreview} onPointerDownCapture={showRelatedPreview}>
     <div data-preview-scene="conversation">
-    <SettingsSection divider={false} title={t('settings.chat.reading')} settingsItem="chat.message-appearance" contentClassName="space-y-4">
-      <ChatWidthSettings />
-      <SettingsFieldRow label={t('settings.chat.userFormat')}>
-        <SettingsChipGroup aria-label={t('settings.chat.userFormat')} value={state.userMessageRenderingMode}
-          onChange={value => save('userMessageRenderingMode', value, actions.setUserMessageRenderingMode)}
-          options={[{ value: 'plain', label: t('settings.varin.visual.option.userMessageRendering.plain.label') }, { value: 'markdown', label: 'Markdown' }]} />
-      </SettingsFieldRow>
-      <div className="divide-y divide-border/40">
-        <Toggle label={t('settings.chat.collapseUser')} item="chat.collapsible-user-messages" checked={state.collapsibleUserMessages}
-          onChange={v => save('collapsibleUserMessages', v, actions.setCollapsibleUserMessages)} />
-        <Toggle label={t('settings.chat.stickyUser')} item="chat.sticky-user-header" checked={state.stickyUserHeader}
-          info={t('settings.chat.stickyUserHint')} onChange={v => save('stickyUserHeader', v, actions.setStickyUserHeader)} />
-        <Toggle label={t('settings.chat.navigator')} item="chat.prompt-navigator" checked={state.promptNavigatorEnabled}
-          onChange={v => save('promptNavigatorEnabled', v, actions.setPromptNavigatorEnabled)} />
-      </div>
-    </SettingsSection>
-
-    <SettingsSection title={t('settings.chat.execution')} settingsItem="chat.activity-display" contentClassName="space-y-5">
-      <SettingsFieldRow label={t('settings.chat.replyLayout')} settingsItem="chat.render-mode"
-        info={t(state.chatRenderMode === 'dialogue' ? 'settings.chat.dialogueHint' : state.chatRenderMode === 'live' ? 'settings.chat.liveHint' : 'settings.chat.sortedHint')}>
-        <SettingsChipGroup aria-label={t('settings.chat.replyLayout')} value={state.chatRenderMode}
-          onChange={mode => save('chatRenderMode', mode, actions.setChatRenderMode)}
-          options={[{ value: 'live', label: t('settings.chat.live') }, { value: 'dialogue', label: t('settings.chat.dialogue') }, { value: 'sorted', label: t('settings.chat.sorted') }]} />
-      </SettingsFieldRow>
+    <SettingsSection divider={false} title={t('settings.chat.execution')} settingsItem="chat.activity-display" contentClassName="space-y-5">
+      <div data-settings-item="chat.render-mode"><SettingsRadioGroup aria-label={t('settings.chat.replyLayout')} className="settings-permission-modes">
+        {(['dialogue','live','sorted'] as const).map(mode => <SettingsRadioOption key={mode} selected={state.chatRenderMode === mode}
+          label={t(`settings.chat.${mode}`)} description={t(`settings.chat.${mode}Hint`)}
+          onSelect={() => save('chatRenderMode', mode, actions.setChatRenderMode)} />)}
+      </SettingsRadioGroup></div>
       {state.chatRenderMode === 'sorted' ? <SettingsFieldRow label={t('settings.chat.activity')}>
         <SettingsChipGroup aria-label={t('settings.chat.activity')} value={state.activityRenderMode}
           onChange={v => save('activityRenderMode', v, actions.setActivityRenderMode)}
@@ -110,9 +93,28 @@ export const ChatSettings: React.FC = () => {
       </div>
     </SettingsSection>
 
+
+
+    <SettingsSection title={t('settings.chat.reading')} settingsItem="chat.message-appearance" contentClassName="space-y-4">
+      <ChatWidthSettings />
+      <SettingsFieldRow label={t('settings.chat.userFormat')}>
+        <SettingsChipGroup aria-label={t('settings.chat.userFormat')} value={state.userMessageRenderingMode}
+          onChange={value => save('userMessageRenderingMode', value, actions.setUserMessageRenderingMode)}
+          options={[{ value: 'plain', label: t('settings.varin.visual.option.userMessageRendering.plain.label') }, { value: 'markdown', label: 'Markdown' }]} />
+      </SettingsFieldRow>
+      <div className="divide-y divide-border/40">
+        <Toggle label={t('settings.chat.collapseUser')} item="chat.collapsible-user-messages" checked={state.collapsibleUserMessages}
+          onChange={v => save('collapsibleUserMessages', v, actions.setCollapsibleUserMessages)} />
+        <Toggle label={t('settings.chat.stickyUser')} item="chat.sticky-user-header" checked={state.stickyUserHeader}
+          info={t('settings.chat.stickyUserHint')} onChange={v => save('stickyUserHeader', v, actions.setStickyUserHeader)} />
+        <Toggle label={t('settings.chat.navigator')} item="chat.prompt-navigator" checked={state.promptNavigatorEnabled}
+          onChange={v => save('promptNavigatorEnabled', v, actions.setPromptNavigatorEnabled)} />
+      </div>
+    </SettingsSection>
+
     </div>
     <div data-preview-scene="input">
-    <SettingsSection title={t('settings.chat.input')} settingsItem="chat.composer" contentClassName="space-y-4">
+    <SettingsDisclosure title={t('settings.chat.input')} settingsItem="chat.composer">
       <SettingsFieldRow settingsItem="chat.follow-up-behavior" label={t('settings.chat.busySend')}
         info={t(followUpBehavior === 'queue' ? 'settings.chat.queueHint' : 'settings.chat.steerHint')}>
         <SettingsChipGroup aria-label={t('settings.chat.busySend')} value={followUpBehavior} onChange={setFollowUpBehavior}
@@ -126,11 +128,11 @@ export const ChatSettings: React.FC = () => {
         <Toggle label={t('settings.chat.starters')} item="chat.draft-starters-visible" checked={state.draftStartersVisible}
           onChange={v => save('draftStartersVisible', v, actions.setDraftStartersVisible)} />
       </div>
-    </SettingsSection>
+    </SettingsDisclosure>
 
     </div>
     <div data-preview-scene="files">
-    <SettingsSection title={t('settings.chat.files')} settingsItem="chat.tools-and-files" contentClassName="space-y-4">
+    <SettingsDisclosure title={t('settings.chat.files')} settingsItem="chat.tools-and-files">
       <SettingsFieldRow label={t('settings.chat.diff')} settingsItem="editor.diff-layout">
         <SettingsChipGroup aria-label={t('settings.chat.diff')} value={state.diffLayoutPreference} onChange={actions.setDiffLayoutPreference}
           options={[{ value: 'dynamic', label: t('settings.varin.visual.option.diffLayout.dynamic.label') }, { value: 'inline', label: t('settings.varin.visual.option.diffLayout.inline.label') }, { value: 'side-by-side', label: t('settings.varin.visual.option.diffLayout.sideBySide.label') }]} />
@@ -149,7 +151,7 @@ export const ChatSettings: React.FC = () => {
         <Toggle label={t('settings.varin.defaults.field.openFilesPreview')} item="chat.file-viewer-preview" checked={previewFiles} onChange={changePreviewFiles} />
         <Toggle label={t('settings.varin.visual.field.showDotfiles')} item="chat.dotfiles" checked={directoryShowHidden} onChange={setDirectoryShowHidden} />
       </div>
-    </SettingsSection>
+    </SettingsDisclosure>
     </div>
     </div>
     <ChatSettingsPreview scene={previewScene} onSceneChange={setPreviewScene} />

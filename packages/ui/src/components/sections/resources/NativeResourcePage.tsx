@@ -1,3 +1,4 @@
+import { SettingsDisclosure } from '../shared/SettingsDisclosure';
 import React from 'react';
 import { markdown } from '@codemirror/lang-markdown';
 import type { NativeResourceKind, NativeResourceScope } from '@varin/application-client';
@@ -208,7 +209,7 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
             />
           </div>
 
-          <details className="border-t border-border/60 pt-3"><summary className="cursor-pointer typography-meta text-muted-foreground">{t('settings.varin.resources.sourceDetails')}</summary>
+          <SettingsDisclosure title={t('settings.varin.resources.sourceDetails')}>
           <div className="rounded-lg bg-[var(--surface-elevated)] px-3 py-2">
             <p className="break-all font-mono typography-micro text-muted-foreground">{descriptor.filePath}</p>
             <p className="mt-1 typography-micro text-muted-foreground">
@@ -216,7 +217,7 @@ export const NativeResourcePage: React.FC<NativeResourcePageProps> = ({ kind }) 
               {descriptor.disableModelInvocation ? ` · ${t('settings.varin.skills.modelInvocationDisabled')}` : ''}
             </p>
           </div>
-          </details>
+          </SettingsDisclosure>
           {diagnostics.length > 0 ? (
             <div className="space-y-2">
               {diagnostics.map((diagnostic, index) => (

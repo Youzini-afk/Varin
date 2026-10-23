@@ -94,7 +94,7 @@ test('settings can acquire and release its own holder without disconnecting anot
     const reply = (result: unknown) => Response.json({ jsonrpc: '2.0', id: request.id, result });
     if (request.method === 'server/discover') return Response.json({ jsonrpc: '2.0', id: request.id, error: { code: -32601, message: 'Unsupported' } }, { status: 404 });
     if (request.method === 'initialize') { initializations.push(String(url)); return reply({ protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'fixture', version: '1' } }); }
-    if (request.method === 'tools/list') return reply({ tools: [] });
+    if (request.method === 'tools/list') return reply({ tools: [{ name: 'read_document', description: 'Read a document', inputSchema: { type: 'object', properties: {} } }] });
     return new Response(null, { status: 202 });
   } });
   const lease = await authority.acquire({ ...scope, sessionId: 'other-run' }, { servers: ['test'] });
@@ -102,11 +102,11 @@ test('settings can acquire and release its own holder without disconnecting anot
   const opened = await settings.invoke('open', {}) as McpConfigurationSnapshot;
   expect(opened.servers[0]).toMatchObject({ status: 'connected', holdsConnection: false, canSignIn: true, signInRequired: false, canSignOut: false });
   const command = (command: string) => settings.invoke('command', { view: opened.view, name: 'test', command }) as Promise<McpConfigurationSnapshot>;
-  expect((await command('connect')).servers[0]).toMatchObject({ status: 'connected', holdsConnection: true });
+  expect((await command('connect')).servers[0]).toMatchObject({ status: 'connected', holdsConnection: true, toolsSource: 'connection', tools: [{ name: 'read_document', description: 'Read a document', inputSchema: { type: 'object' } }] });
   expect(initializations).toEqual(['http://localhost:1234/mcp']);
   expect((await command('reconnect')).servers[0]).toMatchObject({ status: 'connected', holdsConnection: true });
   expect(initializations).toEqual(['http://localhost:1234/mcp', 'http://localhost:1234/mcp']);
-  expect((await command('disconnect')).servers[0]).toMatchObject({ status: 'connected', holdsConnection: false });
+  expect((await command('disconnect')).servers[0]).toMatchObject({ status: 'connected', holdsConnection: false, toolsSource: 'cache' });
   expect(lease.inspect().connectedServerCount).toBe(1);
   await command('connect');
   await writeFile(join(directory, 'mcp.json'), JSON.stringify({ mcpServers: { test: { url: 'http://localhost:5678/mcp' } } }));

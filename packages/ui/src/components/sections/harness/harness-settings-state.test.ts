@@ -139,3 +139,37 @@ describe('Harness automatic saving', () => {
     expect(controller.getSnapshot().harness).toMatchObject({ shell: 'wsl', nextStep: { enabled: true } });
   });
 });
+describe('Harness explicit draft saving', () => {
+  it('keeps a failed rule draft out of later automatic writes', async () => {
+    const read = vi.fn(async () => snapshot({ permissions: { rules: [] } }, 'a'));
+    const write = vi.fn().mockRejectedValueOnce(new Error('write failed'))
+      .mockImplementation(async (global: Record<string, JsonValue>) => writtenSnapshot(global, 'b'));
+    const controller = new HarnessSettingsController({ read, write });
+    await controller.load();
+    expect(await controller.commit({ permissions: { rules: [{ tool: 'file_write', decision: 'ask' }] } })).toBe(false);
+    expect(controller.getSnapshot().harness?.permissions?.rules).toEqual([]);
+    controller.update({ context: { backgroundPreparation: false } });
+    await controller.retry();
+    expect(write.mock.calls[1]![0].harness.permissions.rules).toEqual([]);
+    expect(write.mock.calls[1]![0].harness.context.backgroundPreparation).toBe(false);
+  });
+  it('serializes rules behind automatic edits and retains edits made during the save', async () => {
+    const first = deferred<AgentSettingsSnapshot>(), second = deferred<AgentSettingsSnapshot>();
+    const write = vi.fn().mockImplementationOnce(() => first.promise).mockImplementationOnce(() => second.promise)
+      .mockImplementation(async (global: Record<string, JsonValue>) => writtenSnapshot(global, 'd'));
+    const controller = new HarnessSettingsController({ read: async () => snapshot({}, 'a'), write });
+    await controller.load();
+    controller.update({ permissions: { mode: 'accept-edits' } });
+    const saved = controller.commit({ permissions: { rules: [{ tool: 'file_write', decision: 'ask' }] } });
+    expect(write).toHaveBeenCalledTimes(1);
+    first.resolve(writtenSnapshot(write.mock.calls[0]![0], 'b'));
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    controller.update({ context: { backgroundPreparation: false } });
+    expect(write.mock.calls[1]![1]).toBe('b');
+    second.resolve(writtenSnapshot(write.mock.calls[1]![0], 'c'));
+    expect(await saved).toBe(true);
+    await controller.load();
+    expect(write.mock.calls[2]![1]).toBe('c');
+    expect(controller.getSnapshot().harness).toMatchObject({ permissions: { mode: 'accept-edits', rules: [{ tool: 'file_write', decision: 'ask' }] }, context: { backgroundPreparation: false } });
+  });
+});

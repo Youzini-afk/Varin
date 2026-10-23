@@ -6,6 +6,7 @@ import { useI18n } from '@/lib/i18n';
 import { registerSettingsDraft, notifySettingsDraftChanged } from '@/lib/settings/drafts';
 import { cn } from '@/lib/utils';
 import { SettingsFooterContext, SettingsNavigationContext } from './settings-context';
+import './settings.css';
 export interface SettingsActionBarProps {
   dirty: boolean;
   saving?: boolean;
@@ -16,9 +17,10 @@ export interface SettingsActionBarProps {
   error?: string | null;
   children?: React.ReactNode;
   className?: string;
+  placement?: 'page' | 'inline';
 }
 /** One save unit. Docked outside the page scroller, with the owner's real draft/status. */
-export function SettingsActionBar({ dirty, saving = false, onSave, onCancel, saveDisabled = false, saveLabel, error, children, className }: SettingsActionBarProps) {
+export function SettingsActionBar({ dirty, saving = false, onSave, onCancel, saveDisabled = false, saveLabel, error, children, className, placement = 'page' }: SettingsActionBarProps) {
   const { t } = useI18n();
   const target = React.useContext(SettingsFooterContext);
   const guardNavigation = React.useContext(SettingsNavigationContext);
@@ -43,5 +45,9 @@ export function SettingsActionBar({ dirty, saving = false, onSave, onCancel, sav
       <Button type="button" size="sm" disabled={!dirty || saving || saveDisabled || !onSave} onClick={() => { void onSave?.(); }}>{saveLabel ?? t('settings.common.actions.saveChanges')}</Button>
     </div>
   </div>;
-  return target ? createPortal(body, target) : <div className="sticky bottom-0 z-10">{body}</div>;
+  const visible = Boolean(dirty || saving || error || children);
+  const dock = <div className="settings-action-dock" data-visible={visible} data-placement={placement} inert={!visible} aria-hidden={!visible}>
+    <div>{body}</div>
+  </div>;
+  return placement === 'inline' ? dock : target ? createPortal(dock, target) : <div className="sticky bottom-0 z-10">{dock}</div>;
 }

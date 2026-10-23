@@ -1,3 +1,5 @@
+import { SettingsTabs } from '../shared/SettingsTabs';
+import { useSettingsSearchTarget } from '@/lib/settings/search-target';
 import React from 'react';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import { SettingsActionBar } from '@/components/sections/shared/SettingsActionBar';
@@ -37,6 +39,9 @@ export function BotSettings(props: BotSettingsProps = {}) {
 }
 function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: BotSettingsProps) {
   const { t } = useI18n();
+  const [tab, setTab] = React.useState<'profile' | 'work' | 'memory'>('profile');
+  const target = useSettingsSearchTarget();
+  React.useEffect(() => { if (target === 'knowledge.model') setTab('memory'); }, [target]);
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [bots, setBots] = React.useState<BotSummary[] | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(initialBotId ?? null);
@@ -186,7 +191,7 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
       <Button variant="outline" size="sm" className="mt-2" onClick={() => { void refresh(); }}>{t('settings.harness.retry')}</Button>
     </div> : null}
     {!bots && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
-    {bots ? <div className={cn("overflow-hidden rounded-xl border border-border/70 bg-background", !initialBotId && "@3xl:grid @3xl:grid-cols-[220px_minmax(0,1fr)]")}>
+    {bots ? <div className={cn("min-w-0 bg-background", !initialBotId && "@3xl:grid @3xl:grid-cols-[220px_minmax(0,1fr)]")}>
       {!initialBotId ? <aside className={cn("border-border/60 bg-muted/25 p-3 @3xl:block @3xl:border-r", !showDirectory && "hidden")}> <SettingsSection title={t('settings.bots.section.list')} contentClassName="space-y-3" divider={false}>
         {bots.length === 0 ? <p className="typography-meta text-muted-foreground">{t('settings.bots.empty')}</p> : null}
         <ul className="space-y-1">
@@ -219,7 +224,13 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
         <div className="mb-6 flex flex-wrap gap-2"><Button size="sm" disabled={locked} onClick={() => { if (confirmDiscard()) void run('entry', async () => { await openBotEntryFor(selected.id); }); }}><Icon name="chat-1" className="size-4" />{t('settings.bots.openEntry')}</Button>
           <Button variant="outline" size="sm" disabled={busy !== null} onClick={() => setMemoryBot(selected)}>{t('settings.bots.viewMemory')}</Button></div>
       </> : null}
+      {selected ? <SettingsTabs value={tab} onChange={setTab} label={selected.name} items={[
+        { value: 'profile', label: t('settings.bots.section.profile') },
+        { value: 'work', label: t('settings.bots.section.work') },
+        { value: 'memory', label: t('settings.bots.viewMemory') },
+      ]} /> : null}
       <div className="@container">
+      <div className="settings-tab-panel" hidden={tab !== 'profile'}>
       {selected ? <SettingsSection title={t('settings.bots.section.profile')} contentClassName="space-y-5">
         {selected.deletion || !selected.archived ? <BotActivityBanner bot={selected} busy={busy !== null} onAction={(value) => action(selected, value)} /> : null}
         <SettingsFieldRow label={t('settings.bots.name.label')}>
@@ -235,6 +246,8 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
         </SettingsFieldRow>
 
       </SettingsSection> : null}
+      </div>
+      <div className="settings-tab-panel" hidden={tab !== 'work'}>
       {selected ? <SettingsSection title={t('settings.bots.section.work')} contentClassName="space-y-2" description={work ? t('settings.bots.work.summary', { count: work.length }) : undefined}>
         {work === null ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
         {work !== null && work.length === 0
@@ -260,6 +273,11 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
         </ul>
       </SettingsSection> : null}
       </div>
+      <div className="settings-tab-panel" hidden={tab !== 'memory'}>
+        {selected ? <Button variant="outline" size="sm" onClick={() => setMemoryBot(selected)}>{t('settings.bots.viewMemory')} · {selected.name}</Button> : null}
+        <BotMemoryPreferences />
+      </div>
+      </div>
       {selected && !selected.archived && !selected.deletion ? <SettingsActionBar dirty={dirty} saving={busy !== null} onSave={save} onCancel={discardProfile} saveDisabled={!name.trim()} saveLabel={t('settings.bots.save')} error={error} /> : null}
       </div>
     </div> : null}
@@ -279,6 +297,5 @@ function BotSettingsForHost({ initialBotId, onDeleted, onDraftStateChange }: Bot
       void refresh();
     }} /> : null}
     {memoryBot ? <React.Suspense fallback={null}><BotDetailsDialog bot={{ ...memoryBot, tab: 'memory' }} onClose={() => setMemoryBot(null)} /></React.Suspense> : null}
-    <BotMemoryPreferences />
   </>;
 }

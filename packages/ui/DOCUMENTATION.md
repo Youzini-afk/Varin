@@ -245,6 +245,18 @@ Settings UI consumes shared catalog identities and the original domain APIs. Dev
 unsaved field drafts and their opened revisions across refresh; conflict is not an instruction to
 resubmit an entire old document. Same-owner and cross-owner results retain their real atomicity.
 
+The settings shell provides grouped navigation, a compact location header, local tabs, disclosures,
+and an action dock outside the scroller. Editors stay mounted across local tabs; scope/object changes
+use the original draft guards. Appearance, chat, editor, terminal, and notification previews use
+inert samples. Voice model cards and storage cleanup keep their existing domain interactions.
+See [settings composition](src/components/sections/shared/DOCUMENTATION.md).
+
+Model services open on their model collection with separate connection/authentication and request
+configuration tabs. MCP settings project tool declarations from the retained live connection or the
+original directory cache, labeling their source. Configuration, authorization, and connection state
+remain distinct. The tool settings page lists the actual registered catalog; native tool selection is
+edited in Agent profiles rather than through the obsolete global tool-name toggles.
+
 `components/sections/agents` uses `AgentProfilesAPI` for native profiles and exact registered tool names.
 Host changes retire old reads and drafts; omitted tools, empty selection, and reset are distinct.
 Accepted Runs are not rewritten by editing a default. Functional models stay with their owning settings domains.

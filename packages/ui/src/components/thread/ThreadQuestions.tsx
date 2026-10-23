@@ -1,4 +1,5 @@
 import React from 'react';
+import type { OperationCancellationReceipt } from '@varin/protocol';
 import { AnimatePresence, motion } from 'motion/react';
 import { readUserQuestions, type Operation, type QuestionAnswer } from '@varin/protocol';
 import { ThreadQuestion } from './ThreadQuestion';
@@ -14,7 +15,7 @@ export function ThreadQuestions({ scopeKey, operations, enabled, onAnswer, onCan
   revealOperationId?: string;
   operations: Operation[];
   enabled(operation: Operation): boolean;
-  onCancel(operation: Operation): Promise<Operation>;
+  onCancel(operation: Operation): Promise<OperationCancellationReceipt>;
   onRead(operation: Operation): Promise<Operation>;
   onAnswer(operation: Operation, answers: QuestionAnswer[]): Promise<Operation>;
 }) {

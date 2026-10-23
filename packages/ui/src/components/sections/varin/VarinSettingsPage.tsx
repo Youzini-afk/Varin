@@ -1,4 +1,6 @@
 import React from 'react';
+import { ChatSettingsPreview } from './ChatSettingsPreview';
+import { SettingsReadingPreview } from './SettingsReadingPreview';
 import { VarinVisualSettings } from './VarinVisualSettings';
 import { ChatSettings } from './ChatSettings';
 import { AboutSettings } from './AboutSettings';
@@ -132,7 +134,7 @@ export const VarinSettingsPage: React.FC<VarinSettingsPageProps> = ({ section })
             title={pageTitle}
             description={pageDescription}
             showSaveStatus
-            className={section === 'chat' ? 'varin-settings-page-body settings-chat-page' : 'varin-settings-page-body'}
+            className={section === 'chat' ? 'varin-settings-page-body settings-chat-page' : ['visual', 'editor', 'terminal', 'notifications'].includes(section) ? 'varin-settings-page-body settings-wide-page' : 'varin-settings-page-body'}
         >
             {renderSectionContent()}
         </SettingsPageLayout>
@@ -161,28 +163,29 @@ const GeneralSectionContent: React.FC = () => {
 
 // Visual section: Theme Mode, Font Size, Spacing, Input Bar Offset (mobile), Nav Rail
 const VisualSectionContent: React.FC = () => {
-    return <VarinVisualSettings visibleSettings={[
+    const [scene, setScene] = React.useState<import('./ChatSettingsPreview').ChatPreviewScene>('conversation');
+    return <div className="settings-preview-layout"><div className="@container min-w-0"><VarinVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
         'fontSize',
         'spacing',
         'inputBarOffset',
-    ]} />;
+    ]} /></div><div className="settings-preview-pane"><ChatSettingsPreview scene={scene} onSceneChange={setScene} /></div></div>;
 };
 
 const ChatSectionContent: React.FC = () => <ChatSettings />;
 
-const EditorSectionContent: React.FC = () => <VarinVisualSettings visibleSettings={[
+const EditorSectionContent: React.FC = () => <div className="settings-preview-layout"><div className="@container min-w-0"><VarinVisualSettings visibleSettings={[
     'codeFont', 'editorFontSize', 'fileEditorKeymap', 'fileEditorPreferences',
     'autoSaveEnabled', 'expandedEditorToolbar',
-]} />;
+]} /></div><SettingsReadingPreview kind="editor" /></div>;
 
 const TerminalSectionContent: React.FC = () => {
     const { t } = useI18n();
-    return <>
+    return <div className="settings-preview-layout"><div className="@container min-w-0">
         <SettingsPageLink page="editor" description={t('settings.page.editor.title')}>{t('settings.varin.visual.field.codeFont')}</SettingsPageLink>
         <VarinVisualSettings visibleSettings={['terminalFontSize', 'terminalQuickKeys', 'terminalShell', 'terminalLoginShell']} />
-    </>;
+    </div><SettingsReadingPreview kind="terminal" /></div>;
 };
 
 // Defaults retain their Host/project owner; client deletion confirmation is separate.

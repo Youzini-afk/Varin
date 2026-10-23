@@ -20,7 +20,7 @@ it('tests draft rule order without saving and saves that order explicitly', asyn
   const container = document.getElementById('root')!;
   const root = createRoot(container);
   const testRetry = vi.fn<React.ComponentProps<typeof RetrySettings>['api']['testRetry']>(async () => ({ retry: false, reason: 'rule', ruleIndex: 0, delayMs: 0 }));
-  const onSave = vi.fn<React.ComponentProps<typeof RetrySettings>['onSave']>(async () => {});
+  const onSave = vi.fn<React.ComponentProps<typeof RetrySettings>['onSave']>(async () => true).mockResolvedValueOnce(false);
   try {
     await act(async () => root.render(<RetrySettings value={{ rules: [
       { field: 'message', match: 'contains', pattern: 'busy', action: 'retry' },
@@ -34,5 +34,9 @@ it('tests draft rule order without saving and saves that order explicitly', asyn
     expect(onSave).not.toHaveBeenCalled();
     await click('settings.retry.save');
     expect(onSave.mock.calls[0]).toMatchObject([{ retry: { maxRetries: 2, rules: [{ pattern: 'quota' }, { pattern: 'busy' }] } }]);
+    const saveButton = () => [...container.querySelectorAll('button')].find(button => button.textContent === 'settings.retry.save')!;
+    expect(saveButton().disabled).toBe(false);
+    await click('settings.retry.save');
+    expect(saveButton().disabled).toBe(true);
   } finally { await act(async () => root.unmount()); vi.unstubAllGlobals(); }
 });

@@ -325,8 +325,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       note: '{backgroundPreparation: boolean, preparationWaterline: 0<n<1} — user-owned background compaction prep',
       default: { backgroundPreparation: true, preparationWaterline: 0.75 } },
     apply: 'next-run',
-    ui: { page: 'harness-context', titleKey: 'settings.page.harness.context.backgroundPreparation',
-      keywords: ['compaction', 'context'] },
+    ui: { page: 'harness-context', titleKey: 'settings.contextScale.title',
+      keywords: ['compaction', 'context', 'preparationWaterline', 'reserve', 'replacement', '压缩', '准备', '替换', '预留', '水位'] },
   },
   {
     id: 'harness.codeRetrieval', category: 'retrieval', owner: 'agent-settings',

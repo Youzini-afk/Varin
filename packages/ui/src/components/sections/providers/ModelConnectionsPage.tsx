@@ -11,7 +11,8 @@ import { SettingsActionBar } from '../shared/SettingsActionBar';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Switch } from '@/components/ui/switch';
 import { Icon } from '@/components/icon/Icon';
-import { cn } from '@/lib/utils';
+import { SettingsTabs } from '../shared/SettingsTabs';
+import { SettingsPageLink } from '../shared/SettingsPageLink';
 import { useI18n } from '@/lib/i18n';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 
@@ -32,7 +33,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   const [snapshot, setSnapshot] = React.useState<ModelConnectionsSnapshot | null>(null);
   const [draft, setDraft] = React.useState<ModelChannel | null>(null);
   const [query, setQuery] = React.useState('');
-  const [tab, setTab] = React.useState<'connection' | 'advanced'>('connection');
+  const [tab, setTab] = React.useState<'models' | 'connection' | 'advanced'>('models');
   const [selectedModelId, setSelectedModelId] = React.useState<string | null>(null);
   const [openedModels, setOpenedModels] = React.useState<Set<string>>(() => new Set());
   const [secret, setSecret] = React.useState('');
@@ -75,7 +76,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   }, [api]);
   const cancelAuthorization = () => { const id = activeAuthorization.current; activeAuthorization.current = undefined; if (id) void api.cancelAuthorization(id).catch(() => {}); setAuthorization(null); };
   const closeEditor = () => { cancelAuthorization(); setDraft(null); setSecret(''); setError(null); };
-  const choose = (channel: ModelChannel) => { cancelAuthorization(); setSelectedModelId(null); setOpenedModels(new Set()); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setDraft(structuredClone(channel)); setBaseDraft(JSON.stringify(channel)); setBaseRevision(snapshot!.revision); setCandidates([]); setSecret(''); setTab('connection'); setAdding(false); setError(null); };
+  const choose = (channel: ModelChannel) => { cancelAuthorization(); setSelectedModelId(null); setOpenedModels(new Set()); setInvalidFields(new Set()); setEditorGeneration(value => value + 1); setDraft(structuredClone(channel)); setBaseDraft(JSON.stringify(channel)); setBaseRevision(snapshot!.revision); setCandidates([]); setSecret(''); setTab(snapshot!.channels.some(saved => saved.id === channel.id) ? 'models' : 'connection'); setAdding(false); setError(null); };
   const typeInfo = snapshot?.types.find(type => type.id === draft?.type);
   const savedChannel = snapshot?.channels.find(channel => channel.id === draft?.id);
   const accountDirectory = Boolean(draft && savedChannel && !secret && discoveryConfiguration(draft) === discoveryConfiguration(savedChannel));
@@ -178,7 +179,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
       </> : null}
       {!draft && !adding ? <>
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3"><span className="typography-meta text-muted-foreground">{t('settings.models.services')} · {snapshot.channels.length}</span><Input aria-label={t('settings.models.filterServices')} placeholder={t('settings.models.filterServices')} value={query} onChange={event => setQuery(event.target.value)} className="h-9 w-full @lg:w-64" /></div>
-        {snapshot.channels.length === 0 ? <div className="rounded-xl border border-dashed border-border px-6 py-14 text-center"><Icon name="cloud" className="mx-auto mb-4 size-8 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.models.emptyTitle')}</h2><p className="mt-2 typography-meta text-muted-foreground">{t('settings.models.emptyHint')}</p><Button className="mt-5" onClick={() => setAdding(true)}>{t('settings.models.addChannel')}</Button></div> : <div className="divide-y divide-border/60 overflow-hidden rounded-xl border border-border/60">
+        {snapshot.channels.length === 0 ? <div className="rounded-xl border border-dashed border-border px-6 py-14 text-center"><Icon name="cloud" className="mx-auto mb-4 size-8 text-muted-foreground" /><h2 className="typography-ui-label">{t('settings.models.emptyTitle')}</h2><p className="mt-2 typography-meta text-muted-foreground">{t('settings.models.emptyHint')}</p><Button className="mt-5" onClick={() => setAdding(true)}>{t('settings.models.addChannel')}</Button></div> : <div className="settings-object-list divide-y divide-border/60">
           {snapshot.channels.filter(channel => `${channel.name} ${channel.type} ${channel.baseUrl}`.toLowerCase().includes(query.toLowerCase())).map(channel => <div key={channel.id} className="flex items-center gap-4 px-4 py-5 @xl:px-5">
             <ProviderLogo providerId={channel.type} className="size-7 shrink-0" />
             <button type="button" aria-label={channel.name} disabled={busy} onClick={() => choose(channel)} className="min-w-0 flex-1 text-left"><span className="block truncate typography-ui-label">{channel.name}</span><span className="mt-1 block truncate typography-micro text-muted-foreground">{channel.baseUrl}</span><span className="mt-2 block typography-micro text-muted-foreground">{channel.models.filter(model => model.enabled).length} {t('settings.models.models')} · {t(channel.enabled ? 'settings.models.enabled' : 'settings.models.disabled')}</span></button>
@@ -187,18 +188,24 @@ function ModelConnectionsEditor({ host }: { host: number }) {
           </div>)}
         </div>}
       </> : null}
+      {!draft && !adding ? <div className="mt-8">
+        <SettingsPageLink page="sessions">{t('settings.page.sessions.title')}</SettingsPageLink>
+        <SettingsPageLink page="agents">{t('settings.experience.agentModels')}</SettingsPageLink>
+      </div> : null}
       {draft && type ? <div key={`${draft.id}:${draft.type}:${editorGeneration}`}>
         <div hidden={selectedModelId !== null}>
-          <div role="tablist" aria-label={t('settings.models.title')} className="mb-6 flex gap-6 border-b border-border/60">
-            {(['connection', 'advanced'] as const).map(value => <button type="button" key={value} role="tab" aria-selected={tab === value} aria-controls={`model-channel-${value}`} id={`model-tab-${value}`} tabIndex={tab === value ? 0 : -1}
-              onKeyDown={event => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return; event.preventDefault(); const next = event.key === 'Home' ? 'connection' : event.key === 'End' ? 'advanced' : value === 'connection' ? 'advanced' : 'connection'; setTab(next); event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`#model-tab-${next}`)?.focus(); }}
-              onClick={() => setTab(value)} className={cn('border-b-2 pb-3 typography-meta', tab === value ? 'border-foreground font-medium' : 'border-transparent text-muted-foreground')}>{t(value === 'connection' ? 'settings.models.connectionModels' : 'settings.models.advanced')}</button>)}
-          </div>
+          <SettingsTabs value={tab} onChange={setTab} label={t('settings.models.title')} items={[
+            { value: 'models', label: t('settings.models.models'), controls: 'model-channel-models' },
+            { value: 'connection', label: t('settings.experience.connection'), controls: 'model-channel-connection' },
+            { value: 'advanced', label: t('settings.experience.requests'), controls: 'model-channel-connection' },
+          ]} />
+          <div className="settings-tab-panel" hidden={tab === 'models'} id="model-channel-connection" role="tabpanel" aria-label={t(tab === 'advanced' ? 'settings.experience.requests' : 'settings.experience.connection')}>
           <ConnectionSettings draft={draft} type={type} busy={busy} advanced={tab === 'advanced'} secret={secret} authorization={authorization} edit={edit} editConnection={editConnection} validity={validity}
             setSecret={value => { setSecret(value); setCandidates([]); }} cancelAuthorization={cancelAuthorization} onSignIn={signIn}
             onSignOut={() => { void run(async () => { if (draft.authentication.kind === 'credential') await api.removeCredential(draft.authentication.reference); if (alive.current) edit({ authentication: { kind: 'credential', reference: '' } }); }); }}
             onAuthorizationReply={value => api.replyAuthorization(authorization!.id, value)} onAuthorizationCancel={async () => { await api.cancelAuthorization(authorization!.id); if (alive.current) { activeAuthorization.current = undefined; setAuthorization(null); } }} />
-          <div hidden={tab !== 'connection'} id="model-channel-connection" role="tabpanel" aria-labelledby="model-tab-connection">
+          </div>
+          <div className="settings-tab-panel" hidden={tab !== 'models'} id="model-channel-models" role="tabpanel" aria-label={t('settings.models.models')}>
             <ModelSelection models={draft.models} type={type} candidates={candidates} busy={busy} onChange={editModels}
               onFollow={(id, field) => edit({ models: draft.models.map(model => {
                 if (model.id !== id) return model;
@@ -211,7 +218,7 @@ function ModelConnectionsEditor({ host }: { host: number }) {
               validity={(id, field, valid) => validity(`${id}:${field}`, valid)}
               onDiscover={() => run(async () => { const result = await api.discoverDraft({ channel: draft, ...(secret ? { secret } : {}) }); if (alive.current) setCandidates(result.models); })} />
           </div>
-          <div hidden={tab !== 'advanced'} id="model-channel-advanced" role="tabpanel" aria-labelledby="model-tab-advanced" className="mt-6 border-t border-border/60 pt-5"><Button variant="ghost" className="text-destructive" disabled={busy} onClick={() => {
+          <div hidden={tab !== 'advanced'} className="settings-tab-panel mt-6 border-t border-border/60 pt-5"><Button variant="ghost" className="text-destructive" disabled={busy} onClick={() => {
             if (!window.confirm(t('settings.models.removeConfirm'))) return;
             if (savedChannel) void run(async () => { const next = await api.remove(draft.id, baseRevision); if (alive.current) { setSnapshot(next); closeEditor(); } }); else closeEditor();
           }}>{t('settings.models.removeService')}</Button></div>
