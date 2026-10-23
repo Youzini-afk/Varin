@@ -1,30 +1,56 @@
 import React from 'react';
-import { createPortal } from 'react-dom';
-import type { Operation } from '@varin/protocol';
+import { AnimatePresence, motion } from 'motion/react';
+import { readUserQuestions, type Operation, type QuestionAnswer } from '@varin/protocol';
 import { ThreadQuestion } from './ThreadQuestion';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 
-/** Pending native Operations stay answerable after the popup is folded. */
-export function ThreadQuestions({ operations, enabled, onAnswer, onCancel, revealKey }: {
+/** Layout-owned, nonmodal question dock. The composer remains a separate input. */
+export function ThreadQuestions({ scopeKey, operations, enabled, onAnswer, onCancel, onRead, revealKey, revealOperationId }: {
+  scopeKey: string;
   revealKey?: number;
-  operations: Operation[]; enabled(operation: Operation): boolean;
-  onCancel(operation: Operation): Promise<unknown>;
-  onAnswer(operation: Operation, answer: string): Promise<unknown>;
+  revealOperationId?: string;
+  operations: Operation[];
+  enabled(operation: Operation): boolean;
+  onCancel(operation: Operation): Promise<Operation>;
+  onRead(operation: Operation): Promise<Operation>;
+  onAnswer(operation: Operation, answers: QuestionAnswer[]): Promise<Operation>;
 }) {
-  const { t } = useI18n();
-  const [hidden, setHidden] = React.useState<Set<string>>(() => new Set());
-  React.useEffect(() => { if (revealKey) setHidden(new Set()); }, [revealKey]);
+  const { t } = useI18n(), reduced = usePrefersReducedMotion();
+  const [hidden, setHidden] = React.useState(false);
+  const [selected, setSelected] = React.useState<string>();
+  const dock = React.useRef<HTMLElement>(null), reopen = React.useRef<HTMLButtonElement>(null);
+  const returnFocus = React.useRef(false);
+  React.useEffect(() => { if (revealKey) { setHidden(false); if (revealOperationId) setSelected(revealOperationId); } }, [revealKey, revealOperationId]);
   const questions = operations.filter(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal');
-  const open = questions.filter(operation => !hidden.has(operation.id));
-  if (!questions.length) return null;
-  return <>
-    {!open.length && <button type="button" className="chat-input-column mb-2 flex items-center gap-2 typography-meta text-primary" onClick={() => setHidden(new Set())}><Icon name="question" className="size-4" />{t('chat.questionCard.inputNeeded')}</button>}
-    {createPortal(<section hidden={!open.length} role="region" aria-label={t('chat.questionCard.inputNeeded')} className="fixed bottom-4 left-1/2 z-50 w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 rounded-xl border border-border bg-background px-4 py-3 shadow-xl animate-in slide-in-from-bottom-3">
-      <header className="mb-3 flex items-center gap-2"><Icon name="question" className="size-4 text-primary" /><span className="min-w-0 flex-1 typography-ui-label font-medium">{t('chat.questionCard.inputNeeded')}</span>
-        <button type="button" className="rounded p-1 text-muted-foreground hover:bg-interactive-hover" aria-label={t('chat.context.close')} onClick={() => setHidden(new Set(questions.map(question => question.id)))}><Icon name="close" className="size-4" /></button>
-      </header>
-      <div className="max-h-[50vh] space-y-3 overflow-y-auto">{questions.map(operation => <div key={operation.id} hidden={hidden.has(operation.id)}><ThreadQuestion operation={operation} enabled={enabled(operation)} onAnswer={answer => onAnswer(operation, answer)} onCancel={() => onCancel(operation)} /></div>)}</div>
-    </section>, document.body)}
-  </>;
+  const current = questions.find(operation => operation.id === selected) ?? questions.find(enabled) ?? questions[0];
+  React.useEffect(() => {
+    for (const operation of operations) if (operation.executor === 'ask_user' && operation.phase === 'terminal') {
+      useQuestionDraftStore.getState().release(JSON.stringify([scopeKey, operation.id]));
+    }
+  }, [operations, scopeKey]);
+  const close = () => { returnFocus.current = Boolean(dock.current?.contains(document.activeElement)); setHidden(true); };
+  const transition = { duration: reduced ? 0 : .2, ease: [.22, 1, .36, 1] as const };
+  return <div className="chat-input-column thread-questions" onKeyDown={event => {
+    if (event.key === 'Escape' && !hidden) { event.preventDefault(); event.stopPropagation(); close(); }
+  }}>
+    <AnimatePresence initial={false} mode="wait">
+      {current && (hidden ? <motion.button key="reopen" ref={reopen} type="button" className="thread-question-reopen" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={transition}
+        onAnimationComplete={() => { if (returnFocus.current) { reopen.current?.focus({ preventScroll: true }); returnFocus.current = false; } }}
+        onClick={() => setHidden(false)}><Icon name="question" className="size-4" /><span>{t('chat.questionCard.inputNeeded')}{questions.length > 1 && <> · {questions.length}</>}</span><Icon name="arrow-up-s" className="size-4" /></motion.button>
+        : <motion.section key="questions" ref={dock} className="thread-question-dock" aria-label={t('chat.questionCard.inputNeeded')}
+          initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={transition}>
+          <header className="thread-question-header"><Icon name="question" className="size-4" /><span>{t('chat.questionCard.inputNeeded')}</span>
+            <button type="button" aria-label={t('chat.question.fold')} title={t('chat.question.fold')} onClick={close}><Icon name="arrow-down-s" className="size-4" /></button>
+          </header>
+          {questions.length > 1 && <select className="thread-question-requests" aria-label={t('chat.question.requests')} value={current.id} onChange={event => setSelected(event.target.value)}>
+            {questions.map((operation, index) => <option key={operation.id} value={operation.id}>{index + 1} / {questions.length} · {readUserQuestions((operation.intent as { call?: { arguments?: unknown } })?.call?.arguments)[0]?.question}</option>)}
+          </select>}
+          <ThreadQuestion key={current.id} scopeKey={scopeKey} operation={current} enabled={enabled(current)} onAnswer={answers => onAnswer(current, answers)}
+            onCancel={() => onCancel(current)} onRead={() => onRead(current)} />
+        </motion.section>)}
+    </AnimatePresence>
+  </div>;
 }

@@ -46,8 +46,10 @@ export const projectChatUsagePresentation = (
     total: positive(usage.totalTokens),
   };
   const fields = ['input', 'output', 'reasoning', 'cacheRead', 'cacheWrite', 'cacheWrite1h'] as const;
-  const metrics: ChatUsageMetric[] = fields.flatMap(key => usage[key] === undefined ? [] : [{ key, value: usage[key]! }]);
-  return { metrics, values, ...(usage.totalTokens === undefined ? {} : { total: usage.totalTokens }) };
+  const metrics: ChatUsageMetric[] = fields.flatMap(key => usage[key] === undefined || key.startsWith('cache') && positive(usage[key]) === 0 ? [] : [{ key, value: usage[key]! }]);
+  const input = positive(usage.completeInput), cached = positive(usage.cacheRead);
+  const cacheHitPercent = usage.unknownReceipts === 0 && input > 0 && cached > 0 && cached <= input ? cached / input * 100 : undefined;
+  return { metrics, values, ...(cacheHitPercent === undefined ? {} : { cacheHitPercent }), ...(usage.totalTokens === undefined ? {} : { total: usage.totalTokens }) };
 };
 
 export const aggregateChatUsage = (usages: readonly ChatUsage[]): ChatUsage | undefined => {
@@ -64,6 +66,11 @@ export const aggregateChatUsage = (usages: readonly ChatUsage[]): ChatUsage | un
   for (const key of ['input', 'output', 'reasoning', 'cacheRead', 'cacheWrite', 'cacheWrite1h', 'totalTokens'] as const) {
     const known = values.flatMap(usage => usage[key] === undefined ? [] : [usage[key]!]);
     if (known.length) result[key] = known.reduce((a, b) => a + b, 0);
+  }
+  // Do not turn absent cache reports into zero or average per-request rates.
+  if (values.every(usage => Number.isFinite(usage.completeInput) && usage.completeInput! >= 0
+    && Number.isFinite(usage.cacheRead) && usage.cacheRead! >= 0 && usage.cacheRead! <= usage.completeInput!)) {
+    result.completeInput = values.reduce((total, usage) => total + usage.completeInput!, 0);
   }
   return result;
 };

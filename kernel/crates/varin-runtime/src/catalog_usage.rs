@@ -54,6 +54,7 @@ pub struct ModelPresentation {
     pub provider_family: String,
     pub model_id: String,
     pub context_tokens: Option<u64>,
+    pub complete_input_tokens: Option<u64>,
     pub usage: crate::catalog::inference::InferenceUsage,
 }
 pub struct ModelPresentationRead {
@@ -74,8 +75,9 @@ impl ModelPresentationRead {
             let metadata: SnapshotMetadata = serde_json::from_slice(&self.content.load_bytes(&step.request, cancelled)?)?;
             let usage: UsageReceipt = step.usage.map(serde_json::from_value).transpose()?.unwrap_or_default();
             let context_tokens = crate::providers::reported_context_tokens(&metadata.view.binding.provider_family, &usage);
+            let complete_input_tokens = crate::providers::reported_input_tokens(&metadata.view.binding.provider_family, &usage);
             Ok(ModelPresentation { request_id: step.id, provider_family: metadata.view.binding.provider_family,
-                model_id: metadata.view.binding.model, context_tokens, usage: crate::catalog::inference::InferenceUsage {
+                model_id: metadata.view.binding.model, context_tokens, complete_input_tokens, usage: crate::catalog::inference::InferenceUsage {
                     measurement: usage.measurement, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
                     cached_input_tokens: usage.cached_input_tokens, cache_write_tokens: usage.cache_write_tokens,
                     reasoning_tokens: usage.reasoning_tokens, pricing_version: usage.pricing_version,

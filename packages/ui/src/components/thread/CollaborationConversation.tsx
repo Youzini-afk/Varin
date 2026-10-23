@@ -14,6 +14,7 @@ import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { Button } from '@/components/ui/button';
 import { ThreadQuestions } from './ThreadQuestions';
 import { ThreadPermission } from './ThreadPermission';
+import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 
 /** The selected member uses the same history and progress renderer as the main conversation. */
 export function CollaborationConversation({
@@ -40,29 +41,7 @@ export function CollaborationConversation({
   const [toolProgress, setToolProgress] = React.useState<ToolExecutionProgress[]>([]);
   const [error, setError] = React.useState<string>();
   const [retry, setRetry] = React.useState(0);
-  const [pending, setPending] = React.useState(false);
-  const alive = React.useRef(true);
-  const actionInFlight = React.useRef(false);
-  React.useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
-  const act = async (work: () => Promise<unknown>) => {
-    if (actionInFlight.current) return;
-    actionInFlight.current = true;
-    setPending(true);
-    setError(undefined);
-    try {
-      await work();
-    } catch (failure) {
-      if (alive.current) setError(failure instanceof Error ? failure.message : String(failure));
-    } finally {
-      actionInFlight.current = false;
-      if (alive.current) setPending(false);
-    }
-  };
+  const [question, setQuestion] = React.useState<{ id: string; reveal: number }>();
   React.useEffect(() => {
     const projection = new ThreadProjection(
       api,
@@ -96,16 +75,6 @@ export function CollaborationConversation({
             </Button>
           </div>
         )}
-        {snapshot && (
-          <ThreadQuestions
-            operations={snapshot.operations}
-            enabled={(operation) => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
-            onCancel={(operation) => act(() => api.cancelOperation(operation.id))}
-            onAnswer={(operation, answer) =>
-              act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))
-            }
-          />
-        )}
         {!snapshot && !history.ready ? (
           <p role="status" className="p-4 typography-meta text-muted-foreground">
             {t('common.loading')}
@@ -134,6 +103,7 @@ export function CollaborationConversation({
             working={Boolean(branch?.active_run_id) && run?.state !== 'waiting'}
             readOnly
             onQuote={onQuote}
+            onQuestion={id => setQuestion(value => ({ id, reveal: (value?.reveal ?? 0) + 1 }))}
             footer={
               <>
                 {snapshot?.runFailure && (
@@ -143,11 +113,9 @@ export function CollaborationConversation({
                   <ThreadPermission
                     key={operation.id}
                     operation={operation}
-                    enabled={!pending && operation.run_id === run?.id && !run?.cancel_requested}
+                    enabled={!history.connecting && operation.run_id === run?.id && !run?.cancel_requested}
                     onDecide={(permissionId, decision) =>
-                      act(() =>
-                        api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }),
-                      )
+                      api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision })
                     }
                   />
                 ))}
@@ -155,6 +123,10 @@ export function CollaborationConversation({
             }
           />
         )}
+        {snapshot && <ThreadQuestions scopeKey={threadComposerKey(threadHostKey(), identity)} operations={snapshot.operations} revealKey={question?.reveal} revealOperationId={question?.id}
+          enabled={operation => !history.connecting && run?.state === 'waiting' && !run.cancel_requested && run.waiting_on === operation.waiting_on}
+          onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
+          onAnswer={(operation, answers) => api.answerQuestion({ ...identity, operationId: operation.id, answers })} />}
       </div>
     </ReferenceNavigationContext.Provider>
   );

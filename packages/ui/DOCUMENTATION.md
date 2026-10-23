@@ -83,12 +83,39 @@ Conversation-first is the default for unset preferences and resets; saved choice
 Conversation-first preserves every spoken message in arrival order. Ordinary tools and public
 thinking between messages share one initially collapsed activity row: the active segment shows
 the current action, while a later spoken message or the end of the Run leaves a receipt-based
-summary. Dispatches (including observed script descendants) and user questions remain independent
-rows. Opening a segment mounts the existing purpose-specific tools, preserving their controls and
+summary. Dispatches, questions and usable UI/image outputs (including observed script descendants)
+remain independent rows in all three modes. Opening a segment mounts the existing purpose-specific tools, preserving their controls and
 resource identities. Failed, cancelled, and uncertain work stays visible in the collapsed status.
 Provider-item identities and arrival order survive streaming-to-history replacement; disclosure
 choices belong to the original segment and the conversation, rather than the latest render.
 The settings preview uses these same projections with inert, manually stepped examples.
+
+Ordinary successful calls recede without a repeated completed badge. Applied changes, drafts and branch
+edits keep distinct effect labels; activity summaries count confirmed calls, not guessed unique files.
+Follow-up rows distinguish current task state from a recorded invocation and empty lists from creation.
+Script call history loads on expansion; headings only use already observed facts. Sorted activity rows
+remain mounted through collapse so the existing virtual list can measure the height transition.
+
+Turn footers keep actions on the left and usage directly visible on the right. Positive cache read/write
+metrics appear inline. Cache rate is cached reads / complete input, derived by the native provider owner;
+aggregate rates require known, deduplicated receipts and use weighted token totals. Original protocol
+usage is retained independently of this complete-input presentation field.
+
+`ThreadQuestions` owns a nonmodal, composer-width dock above the input. `ask_user` schema 2 accepts
+stable question/option IDs, multiple questions, single/multiple choice and free text. A complete answer
+is submitted once to its original Operation; Catalog validates against the original question and keeps
+its ordinary Wait/history ownership. `question_status` returns both readable and structured answers.
+Memory-only drafts retain selection, text, navigation and scroll per Host/Thread/branch/Operation;
+collapsing, navigating or switching presentation does not discard them. Uncertain submission re-reads
+the original Operation before retrying its frozen intent. Question receipts stay in the original turn.
+
+`ThreadPermission` keeps allow-once / always / deny separate from questions. Always saves a user rule
+through the Host configuration owner before deciding the original permission; partial saving/decision
+failure is shown explicitly. The visible scope currently covers the named extension/MCP capability
+and its arguments on the selected Host. Native source grants still own filesystem/process scope.
+Workspace restrictions take precedence. Subsequent authorization reads current policy; a saved rule
+does not bypass the original owner, pinned invocation or execution checks. Rules remain removable in
+the existing permission settings. Settings page layout is outside this chat implementation.
 
 The native Catalog owns accepted input, history, queues and execution receipts. `useThreadStore`
 projects navigation and summary clocks; `ThreadProjection` observes the selected branch. Progress
@@ -200,8 +227,8 @@ access address; extension review binds the original candidate integrity. Compute
 recorded desktop. Office comparisons require returned before/after readback, while export and the live
 document's dirty flag remain separate. MCP task cancellation, executor stop, retained output and resource
 notifications retain their separate meanings. Follow-up rows consume the existing snapshot and revisioned
-control API; opening history never starts a renderer scheduler. All question choices use one wrapping
-column with native radios, optional additional text and an explicit submit action.
+control API; opening history never starts a renderer scheduler. Question choices use one wrapping
+column with native radios/checkboxes, free text and explicit whole-request submission.
 
 Source files, Git snapshots, material pages, and editor drafts retain their own identities. Explicit
 resource roots resolve through Documents instead of borrowing a conversation's workspace. A file-change

@@ -147,7 +147,7 @@ impl ControlCommands {
     fn finish_question(
         &self,
         operation: &str,
-        answer: Option<String>,
+        answer: Option<Value>,
         cancelled: &AtomicBool,
     ) -> Result<varin_runtime::OperationMetadata, KernelError> {
         let answering = answer.is_some();
@@ -211,7 +211,11 @@ impl ControlCommands {
             }
             "runtime.question.answer" => {
                 let p: QuestionAnswerParams = serde_json::from_value(params)?;
-                let operation = self.finish_question(&p.operation_id, Some(p.answer), cancelled)?;
+                let answers = p.answers.into_iter().map(|answer| json!({
+                    "questionId":answer.question_id,"selectedOptionIds":answer.selected_option_ids,
+                    "text":answer.text,"skipped":answer.skipped.unwrap_or(false)
+                })).collect::<Vec<_>>();
+                let operation = self.finish_question(&p.operation_id, Some(json!(answers)), cancelled)?;
                 let owner = runtime.catalog();
                 let read = owner
                     .lock()

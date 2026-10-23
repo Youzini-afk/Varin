@@ -20,7 +20,7 @@ async function fixture() {
     { name: 'file_read', version: '1', source_requirement: 'source', default_presets: ['worker', 'verifier', 'retrieval'] },
     { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker', 'verifier'] },
     { name: 'process_spawn', version: '1', source_requirement: 'physical', default_presets: ['worker', 'verifier'] },
-    { name: 'ask_user', version: '1', source_requirement: 'none', default_presets: ['worker', 'verifier'] },
+    { name: 'ask_user', version: '2', source_requirement: 'none', default_presets: ['worker', 'verifier'] },
   ];
   return { parent, models, capabilities, changeDefaults() { defaults = 0.9; } };
 }

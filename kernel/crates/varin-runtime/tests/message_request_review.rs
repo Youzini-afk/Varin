@@ -414,7 +414,7 @@ fn request_preserves_real_manual_pause_and_unanswered_question_across_reopen() {
                 call_id: "question".into(),
                 name: "ask_user".into(),
                 schema_version: "1".into(),
-                arguments: json!({"question":"A real unanswered question"}),
+                arguments: json!({"questions":[{"id":"question","question":"A real unanswered question"}]}),
             });
             let wait = f.db.open_question(&call).unwrap();
             f.settle_policy_call(&call, "awaiting_user");

@@ -1,4 +1,7 @@
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
+import { standaloneDescendants } from './standaloneTools';
+import { scriptToolLabels } from './scriptPresentation';
+import { toolSubject } from './toolSubject';
 import React from 'react';
 import { InteractiveUiCard } from '@/components/interactive-ui/InteractiveUiCard';
 import type { JsonValue } from '@varin/protocol';
@@ -593,7 +596,9 @@ const ChatToolSequence: React.FC<{
   generatingCallIds?: ReadonlySet<string>;
   executionById: Record<string, ChatToolExecutionState>;
   resultByCallId: ReadonlyMap<string, ChatToolResultMessage>;
-}> = ({ calls, cwd, generatingCallIds, executionById, resultByCallId }) => {
+  includeStandalone?: boolean;
+}> = ({ calls, cwd, generatingCallIds, executionById, resultByCallId, includeStandalone = true }) => {
+  const independent = includeStandalone ? standaloneDescendants(executionById) : new Map<string, ChatToolCall[]>();
   const projected = groupToolCalls(calls.map((call) => ({
     toolName: call.name,
     toolCallId: call.id,
@@ -604,7 +609,7 @@ const ChatToolSequence: React.FC<{
   })));
   const byId = new Map(calls.map((call) => [call.id, call]));
   return <>{projected.map((group) => group.type === 'single' ? (
-    <ChatToolCard
+    <React.Fragment key={group.entry.toolCallId}><ChatToolCard
       key={group.entry.toolCallId}
       call={byId.get(group.entry.toolCallId)!}
       generating={generatingCallIds?.has(group.entry.toolCallId)}
@@ -612,7 +617,8 @@ const ChatToolSequence: React.FC<{
       execution={executionById[group.entry.toolCallId]}
       executionById={executionById}
       result={resultByCallId.get(group.entry.toolCallId)}
-    />
+    />{(independent.get(group.entry.toolCallId) ?? []).filter(child => !byId.has(child.id)).map(child => <ChatToolCard key={child.id} call={child} cwd={cwd}
+      execution={executionById[child.id]} executionById={executionById} result={resultByCallId.get(child.id)} />)}</React.Fragment>
   ) : (
     <ChatReadOnlyToolGroup
       key={`group:${group.entries[0]!.toolCallId}`}
@@ -724,7 +730,8 @@ export const ChatSortedActivityGroup: React.FC<{
   const activityRenderMode = useUIStore((state) => state.activityRenderMode);
   const preview = React.useContext(ConversationPreviewContext);
   const showThinking = useUIStore(state => state.showReasoningTraces);
-  const activity = projection.activity.filter(item => showThinking || item.kind !== 'thinking');
+  const independent = projection.activity.filter((item): item is Extract<typeof item, { kind: 'tool' }> => item.kind === 'tool' && item.standalone === true);
+  const activity = projection.activity.filter(item => (showThinking || item.kind !== 'thinking') && !(item.kind === 'tool' && item.standalone));
   const [localExpanded, setExpanded] = React.useState(activityRenderMode === 'summary');
   const expanded = controlledExpanded ?? localExpanded;
   React.useEffect(() => {
@@ -745,14 +752,18 @@ export const ChatSortedActivityGroup: React.FC<{
   });
   const latest = activity.at(-1);
   const latestLabel = latest?.kind === 'tool'
-    ? latest.call.name
+    ? toolSubject(latest.call, toolRecord(resultByCallId.get(latest.call.id)?.details ?? executionById[latest.call.id]?.result), t)
+      || (scriptToolLabels[latest.call.name] ? t(scriptToolLabels[latest.call.name]!) : latest.call.name)
     : latest?.kind === 'thinking'
       ? hiddenThinkingLabel
       : latest?.kind === 'justification'
         ? t('chat.reasoningTrace.justification')
         : '';
 
-  if (!activity.length) return null;
+  const independentContent = independent.map(item => <ChatToolCard key={item.id} call={item.call} cwd={cwd} generating={item.streaming}
+    execution={executionById[item.call.id]} executionById={executionById} result={resultByCallId.get(item.call.id)} />);
+  if (part === 'body' && independent.length) return <>{independentContent}</>;
+  if (!activity.length) return part === undefined ? <>{independentContent}</> : null;
   return (
     <section
       className="min-w-0"
@@ -792,6 +803,7 @@ export const ChatSortedActivityGroup: React.FC<{
                 if (candidate.streaming) generatingCallIds.add(candidate.call.id);
               }
               return <ChatToolSequence key={item.id} calls={calls} cwd={cwd}
+                includeStandalone={false}
                 generatingCallIds={generatingCallIds}
                 executionById={executionById} resultByCallId={resultByCallId} />;
             }
@@ -801,11 +813,7 @@ export const ChatSortedActivityGroup: React.FC<{
                   <ChatThinkingBlock content={item.content} messageId={item.id}
                     streaming={item.streaming} label={hiddenThinkingLabel} />
                 ) : (
-                  <div className="rounded-lg bg-background/45 px-2.5 py-2" data-conversation-activity-kind="justification">
-                    <div className="mb-1 flex items-center gap-1.5 typography-meta font-medium text-muted-foreground">
-                      <Icon name="chat-1" className="size-3.5" />
-                      {t('chat.reasoningTrace.justification')}
-                    </div>
+                  <div className="conversation-activity-prose" data-conversation-activity-kind="justification">
                     <ChatTextSource entryId={item.sourceId} text={item.content.text} offset={0}
                       contentIndex={Number(item.id.slice(item.id.lastIndexOf(':') + 1))}>
                       <MarkdownRenderer
@@ -823,6 +831,7 @@ export const ChatSortedActivityGroup: React.FC<{
           })}
         </div>
       ) : null}
+      {part === undefined && independentContent}
     </section>
   );
 };
@@ -1036,9 +1045,9 @@ export const ChatTimelineEntryList: React.FC<Omit<
   );
   const sortedProjection = React.useMemo(
     () => sortedPresentation ?? (chatRenderMode === 'sorted'
-      ? projectChatSortedTurn(builtInEntries, projection.liveAssistant)
+      ? projectChatSortedTurn(builtInEntries, projection.liveAssistant, toolExecutions)
       : undefined),
-    [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation],
+    [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation, toolExecutions],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
   const dialogue = React.useMemo(() => chatRenderMode === 'dialogue' && part !== 'footer'
@@ -1191,6 +1200,10 @@ export const ChatTimelineEntryList: React.FC<Omit<
           }
 
           if (entry.type === 'custom_message') {
+            if (entry.customType === 'question-answer') return <ToolDisclosure key={entry.id} id={'answer:' + entry.id} className="conversation-question-answer">
+              <summary><Icon name={toolRecord(entry.details).cancelled ? 'close' : 'check'} className="size-3.5" />{t(toolRecord(entry.details).cancelled ? 'chat.timeline.tools.cancelled' : 'chat.question.answered')}<Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
+              <div><ChatUserContentView content={entry.content} messageId={entry.id} /></div>
+            </ToolDisclosure>;
             if (entry.customType === 'thread-message') {
               const details = entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details) ? entry.details as Record<string, unknown> : {};
               return <ChatReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}

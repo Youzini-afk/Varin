@@ -1,4 +1,6 @@
 import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
+import { permissionService } from './lib/kernel/permission-service.js';
+import { createPermissionPersistence } from './lib/kernel/permission-persistence.js';
 import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
 import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createKnowledgeEmbeddingOwner } from './lib/knowledge/vectors/embedding-owner.js';
@@ -1609,6 +1611,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   // Extension discovery owns its preparation; unrelated settings, MCP and builtins may start now.
   void modelExtensions.start().catch(() => { /* The owner publishes an unavailable issue; no partial candidate is selected. */ });
   const agentMcpDir = VARIN_DATA_DIR;
+  permissionService(kernelClient).setPersistence(createPermissionPersistence(modelsService.settings, async runId => {
+    const launch = await kernelClient.agentRuntimeRequest<import('./lib/kernel/protocol.generated.js').LaunchIntent | null, 'runtime.launch.inspect'>('runtime.launch.inspect', { runId });
+    const workspace = launch?.selection.source?.resource_owner.kind === 'local'
+      ? await documentsAuthority.admitWorkspaceRegistration(launch.selection.source.workspace_id) : undefined;
+    return workspace && await projectTrust.trusted(workspace.canonicalPath) ? workspace.canonicalPath : undefined;
+  }));
   const agentMcpPolicy = async (cwd: string, trusted: boolean) => {
     const harness = await modelsService.settings.harness(trusted ? cwd : undefined);
     return { mode: harness.permissions?.mode ?? 'normal', rules: harness.permissions?.rules ?? [] };

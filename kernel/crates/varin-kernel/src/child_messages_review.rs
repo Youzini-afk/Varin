@@ -1131,7 +1131,7 @@ fn stopped_job_cannot_answer_a_real_child_question_or_clear_its_recovered_wait()
             call_id: "question".into(),
             name: "ask_user".into(),
             schema_version: crate::questions::schema().version,
-            arguments: json!({"question":"Which result should I use?"}),
+            arguments: json!({"questions":[{"id":"question","question":"Which result should I use?"}]}),
         }],
     );
     let wait = f

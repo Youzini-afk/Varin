@@ -294,6 +294,14 @@ A lost send response must be retried with the same original key and intent. Abor
 closing a UI does not retract a message already accepted by the Catalog. A request can enter the
 current Run or admit a new root/child execution through its existing owner. Manual pauses, unanswered
 questions and Goal limits remain effective. Receipt `acceptedAtMs` is the original committed time.
+
+`answerQuestion` submits an `answers` array to the original question Operation. Each entry carries
+`questionId`, `selectedOptionIds`, `text` and optional `skipped`; the native Catalog validates this against
+the immutable `ask_user` question set before appending user history and continuing the Run. It is a
+whole-request submission, including optional questions, with the original answer receipt reused for
+equal retries. Cancellation uses `cancelOperation`, not a fabricated answer string. Permission decisions
+remain separate: `allow_always` asks the authenticated Host to save the displayed capability rule through
+its settings owner, then resolve the original one-action permission. The renderer cannot supply rules.
 A nullable `replyWait` view reports an Agent's original observation, exact Operation/Run, absolute
 deadline, winning reply/expiry/cancellation and actual lifecycle-history delivery. These are projections,
 not client timers or execution state. User sends have no observation owner and do not accept `wait`.

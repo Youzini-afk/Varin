@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 59;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 60;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1406,13 +1406,14 @@ pub(crate) struct PermissionDecideParams {
     pub(crate) operation_id: String,
     pub(crate) permission_id: String,
     pub(crate) decision: String,
+    pub(crate) persisted_rule: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct QuestionAnswerParams {
     pub(crate) operation_id: String,
-    pub(crate) answer: String,
+    pub(crate) answers: Vec<QuestionAnswer>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3121,6 +3122,15 @@ pub(crate) struct HostToolCall {
     pub(crate) name: String,
     pub(crate) schema_version: String,
     pub(crate) arguments: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct QuestionAnswer {
+    pub(crate) question_id: String,
+    pub(crate) selected_option_ids: Vec<String>,
+    pub(crate) text: String,
+    pub(crate) skipped: Option<bool>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

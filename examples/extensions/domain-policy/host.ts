@@ -88,8 +88,8 @@ export default defineHostExtension({
             return graph('wait_process', 'wait_process', { processId: state.processId });
           }
           if (state.phase === 'plan_update') return graph('question', 'ask_user', {
-            question: 'The example plan is recorded. Type run to execute the fixed Node process probe, or cancel this question to stop the example. Process permission is checked separately.',
-            options: ['run', 'stop'],
+            questions: [{ id: 'probe', question: 'The example plan is recorded. Type run to execute the fixed Node process probe, or cancel this question to stop the example. Process permission is checked separately.',
+              options: [{ id: 'run', label: 'run' }, { id: 'stop', label: 'stop' }] }],
           });
           state.reading = completion.output;
           state.nextChunk = 0;

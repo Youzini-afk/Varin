@@ -339,6 +339,15 @@ pub(super) fn hydrate_operation(
                 record.insert("call".into(), call);
                 record.insert("scope".into(), scope);
             }
+            if operation.executor.as_deref() == Some(super::questions::QUESTION_TOOL) {
+                if let Some(reference) = value.get("answer_ref") {
+                    let (answer, _) = content.load_history_payload(reference)?;
+                    value["answer"] = answer.get("text").cloned().unwrap_or(Value::Null);
+                    if let Some(answers) = answer.get("questionAnswer").and_then(|body| body.get("answers")) {
+                        value["answers"] = answers.clone();
+                    }
+                }
+            }
             Some(crate::output::OperationResult::Control { value })
         }
         Some(OperationResultMetadata::Content { reference }) => {

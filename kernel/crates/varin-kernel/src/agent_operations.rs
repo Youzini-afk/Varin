@@ -89,7 +89,7 @@ pub(super) fn execute(
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
             let operation = catalog
-                .decide_permission(&p.operation_id, &p.permission_id, &p.decision)
+                .decide_permission_with_rule(&p.operation_id, &p.permission_id, &p.decision, p.persisted_rule)
                 .map_err(domain)?;
             catalog.capture_operation_read(operation)
         }

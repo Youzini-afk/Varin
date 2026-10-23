@@ -49,8 +49,8 @@ impl ModelProvider for QuestionModel {
                     call: ToolCall {
                         call_id: "ask".into(),
                         name: "ask_user".into(),
-                        schema_version: "1".into(),
-                        arguments: json!({"question":"Original model question"}),
+                        schema_version: crate::questions::schema().version,
+                        arguments: json!({"questions":[{"id":"question","question":"Original model question"}]}),
                     },
                 },
                 opaque: None,
@@ -68,7 +68,7 @@ fn graph(id: &str, name: &str, arguments: Value) -> PolicyAction {
             call: ToolCall {
                 call_id: id.into(),
                 name: name.into(),
-                schema_version: "1".into(),
+                schema_version: if name == "ask_user" { questions::schema().version } else { "1".into() },
                 arguments,
             },
         }],
@@ -129,7 +129,7 @@ impl AgentPolicy for Sequence {
                 let mut action = graph(
                     "ask",
                     "ask_user",
-                    json!({"question":"Run the bounded probe?","options":["run","cancel"]}),
+                    json!({"questions":[{"id":"question","question":"Run the bounded probe?","options":[{"id":"0","label":"run"},{"id":"1","label":"cancel"}]}]}),
                 );
                 if state.get("mixed").is_some() {
                     let PolicyAction::ToolGraph { nodes } = &mut action else {
@@ -500,7 +500,7 @@ impl Fixture {
         let prepared = owner
             .lock()
             .unwrap()
-            .prepare_question_answer(&operation, answer.map(str::to_owned))
+            .prepare_question_answer(&operation, answer.map(|text| json!([{"questionId":"question","selectedOptionIds":[],"text":text}])))
             .unwrap()
             .load()
             .unwrap();
@@ -594,8 +594,8 @@ fn policy_question_reopen_reads_authentic_answer_without_skipping_private_state(
     let owner = f.runtime.catalog();
     let mut db = owner.lock().unwrap();
     let before = db.history("main").unwrap();
-    assert!(db.answer_question(&operation, "run 原始答复").is_ok());
-    assert!(db.answer_question(&operation, "different answer").is_err());
+    assert!(db.answer_question(&operation, json!([{"questionId":"question","selectedOptionIds":[],"text":"run 原始答复"}])).is_ok());
+    assert!(db.answer_question(&operation, json!([{"questionId":"question","selectedOptionIds":[],"text":"different answer"}])).is_err());
     assert_eq!(db.history("main").unwrap(), before);
     assert!(matches!(
         db.operation(&operation).unwrap().call_completion,
@@ -922,8 +922,8 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
         let call = ToolCall {
             call_id: "ask".into(),
             name: "ask_user".into(),
-            schema_version: "1".into(),
-            arguments: json!({"question":"Original question"}),
+            schema_version: crate::questions::schema().version,
+            arguments: json!({"questions":[{"id":"question","question":"Original question"}]}),
         };
         let frozen = FrozenToolContext {
             child_dispatch: None,
@@ -970,7 +970,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
                     call,
                     contract: ToolContract {
                         name: "ask_user".into(),
-                        schema_version: "1".into(),
+                        schema_version: crate::questions::schema().version,
                         read_only: true,
                         completion: CompletionKind::Job,
                         lifetime: varin_runtime::Lifetime::Thread,

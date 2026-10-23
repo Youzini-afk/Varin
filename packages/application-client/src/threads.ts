@@ -107,7 +107,7 @@ export interface ThreadRunUsage {
   runId: string;
   /** Last original item included in this Run's summary. */
   throughId: string;
-  requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage'>>;
+  requests: Array<Pick<import('@varin/protocol').ModelPresentation, 'requestId' | 'usage' | 'completeInputTokens'>>;
 }
 /** Current file in the historical operation's original source, never the navigation project. */
 export type ThreadFileTarget = { kind: 'document'; workspaceId: string; root: string; resourceId: string }
@@ -459,7 +459,7 @@ export interface ThreadsAPI {
   finishRetrieval(operationId: string): Promise<{ accepted: boolean }>;
   retrievalTrace(operationId: string, cursor?: { headId: string; beforeId: string }, signal?: AbortSignal): Promise<ThreadRetrievalTrace>;
   retrievalFileTarget(operationId: string, itemId: string, path: string, signal?: AbortSignal): Promise<ThreadFileTarget>;
-  decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }): Promise<Operation>;
+  decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'allow_always' | 'deny' }): Promise<Operation>;
   /** Original-owner requests and RPC-error URL choices remain readable after their Run ends. Pages omit original JSON evidence; read/respond return it. */
   listMcpInteractions(input: ThreadIdentity & Omit<McpInteractionListParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<McpInteractionPage>;
   readMcpInteraction(input: ThreadIdentity & McpInteractionReadParams, signal?: AbortSignal): Promise<McpInteractionView>;
@@ -468,7 +468,7 @@ export interface ThreadsAPI {
   reviewMcpSamplingRequest(input: ThreadMcpSamplingRequestReview, signal?: AbortSignal): Promise<McpInteractionView>;
   /** Separately review the original generation before returning its output to the requesting MCP server. */
   reviewMcpSamplingOutput(input: ThreadIdentity & McpSamplingOutputReviewParams, signal?: AbortSignal): Promise<McpInteractionView>;
-  answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }): Promise<Operation>;
+  answerQuestion(input: ThreadIdentity & { operationId: string; answers: import('@varin/protocol').QuestionAnswer[] }): Promise<Operation>;
   resume(runId: string, waitId: string): Promise<PolicyResumeReceipt>;
   retryPreparation(runId: string): Promise<void>;
   events(cursor: number): Promise<RuntimeEvent[]>;

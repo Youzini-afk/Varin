@@ -94,7 +94,7 @@ impl ModelProvider for Provider {
                 let arguments = if self.mode.ends_with("invalid") {
                     json!({})
                 } else if self.mode == "question" {
-                    json!({"question":"Choose a fixture option","options":["A","B"]})
+                    json!({"questions":[{"id":"question","question":"Choose a fixture option","options":[{"id":"0","label":"A"},{"id":"1","label":"B"}]}]})
                 } else {
                     json!({"mode":self.mode.strip_prefix("direct_").unwrap_or(self.mode)})
                 };

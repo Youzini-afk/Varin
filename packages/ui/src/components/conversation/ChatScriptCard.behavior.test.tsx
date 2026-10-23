@@ -39,13 +39,14 @@ it('shows task intent, retained call failures and on-demand output without execu
   const toggle = async (element: HTMLDetailsElement, open: boolean) => act(async () => { element.open = open; element.dispatchEvent(new window.Event('toggle')); });
   try {
     await render();
-    expect(toolCalls).toHaveBeenCalledWith('request:tool:script', expect.any(AbortSignal));
+    expect(toolCalls).not.toHaveBeenCalled();
     expect(container.textContent).toContain('Inspect directory exclusions');
-    expect(container.textContent).toContain('Calls: 2');
-    expect(container.textContent).toContain('1 need attention');
     expect(container.textContent).not.toContain('display-only-script');
     expect(operation).not.toHaveBeenCalled();
     await toggle(container.querySelector('details')! as unknown as HTMLDetailsElement, true);
+    expect(toolCalls).toHaveBeenCalledWith('request:tool:script', expect.any(AbortSignal));
+    expect(container.textContent).toContain('Calls: 2');
+    expect(container.textContent).toContain('1 need attention');
     expect(container.textContent).toContain('Script output');
     expect(container.textContent).toContain('View script');
     const row = container.querySelector('section details')! as unknown as HTMLDetailsElement;

@@ -23,6 +23,7 @@ export const ChatTurnUsageFooter: React.FC<{
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5" data-conversation-turn-footer>
       {actions}
+      <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-x-3 gap-y-1">
       {groups.map(usage => (
         <ChatAssistantUsageFooter
           key={usage.measurement}
@@ -30,6 +31,7 @@ export const ChatTurnUsageFooter: React.FC<{
           usage={usage}
         />
       ))}
+      </div>
     </div>
   );
 };

@@ -27,7 +27,7 @@ export interface ChatTimelineBlocks {
   groups: ReadonlyMap<string, ChatTimelineBlockGroup>;
 }
 export type ChatTimelineBlockAliases = Map<string, { runId: string; id: string }>;
-const sortedLive = new WeakMap<ChatTimelineProjection, Map<ChatTimelineBlockGroup, ChatSortedTurnProjection>>();
+const sortedLive = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; executions?: Record<string, ChatToolExecutionState>; value: ChatSortedTurnProjection }>();
 const EMPTY_CUSTOM_IDS: ReadonlySet<string> = new Set();
 const dialogues = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; showThinking: boolean; executions?: Record<string, ChatToolExecutionState>; items: DialogueItem[] }>();
 const sameEntries = (a: readonly ChatTimelineEntry[], b: readonly ChatTimelineEntry[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
@@ -35,14 +35,14 @@ const sameEntries = (a: readonly ChatTimelineEntry[], b: readonly ChatTimelineEn
 export function blockGroupLive(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection): ChatAssistantMessage | undefined {
   return group.liveId === projection.liveAssistant?.id ? projection.liveAssistant : undefined;
 }
-export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection) {
+export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection, executions?: Record<string, ChatToolExecutionState>) {
   const live = blockGroupLive(group, projection);
-  if (!live) return group.sorted;
-  let cache = sortedLive.get(projection);
-  if (!cache) { cache = new Map(); sortedLive.set(projection, cache); }
-  let sorted = cache.get(group);
-  if (!sorted) { sorted = projectChatSortedTurn(group.entries.filter(entry => !group.customIds.has(entry.id)), live); cache.set(group, sorted); }
-  return sorted;
+  if (!live && !executions) return group.sorted;
+  const previous = sortedLive.get(group);
+  if (previous && previous.live === live && previous.executions === executions) return previous.value;
+  const value = projectChatSortedTurn(group.entries.filter(entry => !group.customIds.has(entry.id)), live, executions);
+  sortedLive.set(group, { live, executions, value });
+  return value;
 }
 
 export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
@@ -107,11 +107,14 @@ export function projectChatTimelineBlocks(
       add({ ...base, kind: 'footer', id: `footer:${id}` });
       return;
     }
-    const presentation = sorted ? blockGroupSorted(group, projection) : undefined;
-    const activity = presentation?.activity.filter(item => showThinking || item.kind !== 'thinking');
+    const presentation = sorted ? blockGroupSorted(group, projection, executions) : undefined;
+    const activity = presentation?.activity.filter(item => (showThinking || item.kind !== 'thinking') && !(item.kind === 'tool' && item.standalone));
     if (activity?.length) {
       add({ ...base, kind: 'activity-header', id: `activity-header:${id}` });
       if (expanded(id)) for (const item of activity) add({ ...base, ownerId: ownerId.startsWith('entry:') ? `entry:${item.sourceId}` : ownerId, kind: 'activity', id: `activity:${item.id}`, activityId: item.id, sourceId: item.sourceId });
+    }
+    for (const item of presentation?.activity ?? []) if (item.kind === 'tool' && item.standalone) {
+      add({ ...base, ownerId: ownerId.startsWith('entry:') ? 'entry:' + item.sourceId : ownerId, kind: 'activity', id: 'activity:' + item.id, activityId: item.id, sourceId: item.sourceId });
     }
     for (const entry of entries) {
       if (entry.type === 'run_usage') continue; // The separate footer owns the Run summary.

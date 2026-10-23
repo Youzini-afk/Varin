@@ -3,6 +3,7 @@ import type { ChatToolCall } from './types';
 import { toolRecord, toolText } from './toolInvocation';
 import { processCommand, type ToolTargets } from './toolTargetContext';
 import { toolValueLabel } from './toolLabels';
+import { readUserQuestions } from '@varin/protocol';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 const words = ['read', 'search', 'update', 'list', 'create', 'add', 'remove', 'share', 'inspect', 'save', 'export', 'open', 'launch',
@@ -57,11 +58,11 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
     }
     case 'settings_action': return subjectJoin(args.id, toolActionLabel(args.verb, t));
     case 'tool_describe': return toolText(args.name) || toolText(args.namespace) || count(data.groups ?? data.tools, t);
-    case 'resource_read': return subjectJoin(args.resourceId, args.relativePath, args.targetPath, args.ref, args.file, args.view);
-    case 'ask_user': return toolText(args.question);
-    case 'question_status': return toolText(args.questionId);
+    case 'resource_read': return subjectJoin(toolText(data.title) || toolText(data.name), args.relativePath, args.targetPath, args.file, args.view);
+    case 'ask_user': return readUserQuestions(args)[0]?.question ?? '';
+    case 'question_status': return toolValueLabel(data.status, t);
     case 'recovery_points': return subjectJoin(paths(args.paths), args.point, args.operation, count(data.points, t));
-    case 'file_restore': return subjectJoin(paths(args.paths), toolText(toolRecord(data.point).label) || toolText(args.point) || toolText(args.undo),
+    case 'file_restore': return subjectJoin(paths(args.paths), toolText(toolRecord(data.point).label),
       Array.isArray(data.appliedPaths) ? t('chat.toolSummary.restoredFiles', { count: data.appliedPaths.length }) : '',
       Array.isArray(data.conflictPaths) && data.conflictPaths.length ? t('chat.tools.restoreConflicts', { count: data.conflictPaths.length }) : '');
     case 'materials': {
@@ -72,7 +73,7 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
     }
     case 'runtime_contract': return subjectJoin(action, args.serviceId ?? args.id ?? args.name ?? args.kind, toolRecord(args.member).name, args.path);
     case 'extension_package': return subjectJoin(action, args.packagePath ?? args.extensionId, toolValueLabel(data.outcome, t));
-    case 'follow_up': return subjectJoin(action, args.instruction ?? data.instruction, args.followupId, count(data.followups, t));
+    case 'follow_up': return subjectJoin(action, args.instruction ?? data.instruction, count(data.followups, t));
   }
   if (call.name.startsWith('environment_forward')) {
     const access = toolRecord(data.access), service = toolRecord(access.service), local = toolRecord(access.access);

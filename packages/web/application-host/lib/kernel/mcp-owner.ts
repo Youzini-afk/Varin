@@ -294,7 +294,7 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         const target = await prepareTarget(selected, call, signal);
         validateTarget(target);
         const authorizedSignal = AbortSignal.any([signal, targetSignal(target)]);
-        const current = await policy();
+        let current = await policy();
         const result = decision(current.value, target);
         if (result.decision === 'deny') throw new HostToolAdmissionError('mcp_permission_denied');
         if (result.decision === 'ask')
@@ -308,9 +308,15 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
               reason: result.reason ?? 'MCP permission required',
             },
             authorizedSignal,
+            { name: target.kind === 'tool' ? target.tool.name : target.permissionName, arguments: target.args },
           );
         authorizedSignal.throwIfAborted();
         assertTarget(target);
+        const latest = await policy();
+        if (latest.generation !== current.generation) {
+          if (decision(latest.value, target).decision !== 'allow') throw new HostToolAdmissionError('mcp_authorization_changed');
+          current = latest;
+        }
         approved.set(call.operationId, {
           identity: JSON.stringify(call),
           policy: current.generation,

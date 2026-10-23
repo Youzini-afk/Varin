@@ -1,5 +1,7 @@
-import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall } from './types';
+import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState } from './types';
 import type { ChatTimelineEntry } from './chatTimelineProjection';
+import { presentInvocation } from './toolInvocation';
+import { isStandaloneTool, standaloneDescendants } from './standaloneTools';
 
 export const CHAT_SORTED_LIVE_ASSISTANT_ID = 'live-assistant';
 
@@ -22,6 +24,7 @@ export type ChatSortedTurnActivityItem =
       call: ChatToolCall;
       id: string;
       kind: 'tool';
+      standalone?: boolean;
       sourceId: string;
       streaming: boolean;
     };
@@ -55,10 +58,12 @@ const assistantSources = (
 export const projectChatSortedTurn = (
   entries: readonly ChatTimelineEntry[],
   liveAssistant?: ChatAssistantMessage,
+  executions?: Record<string, ChatToolExecutionState>,
 ): ChatSortedTurnProjection => {
   const activity: ChatSortedTurnActivityItem[] = [];
   const answersBySourceId = new Map<string, ChatAssistantMessage>();
   let activityAnchorId: string | undefined;
+  const descendants = standaloneDescendants(executions), seen = new Set<string>();
 
   for (const source of assistantSources(entries, liveAssistant)) {
     const { message } = source;
@@ -81,14 +86,23 @@ export const projectChatSortedTurn = (
         continue;
       }
       if (content.type === 'toolCall') {
+        const call = presentInvocation(content);
+        if (seen.has(call.id)) continue;
+        seen.add(call.id);
         activityAnchorId ??= source.id;
         activity.push({
-          call: content,
-          id: `${source.id}:tool:${content.id}`,
+          call,
+          standalone: isStandaloneTool(call.name),
+          id: 'tool:' + call.id,
           kind: 'tool',
           sourceId: source.id,
           streaming,
         });
+        for (const child of descendants.get(call.id) ?? []) {
+          if (seen.has(child.id)) continue;
+          seen.add(child.id);
+          activity.push({ call: child, id: 'tool:' + child.id, kind: 'tool', standalone: true, sourceId: source.id, streaming: false });
+        }
         continue;
       }
       if (!content.text.trim()) continue;

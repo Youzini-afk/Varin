@@ -1,6 +1,7 @@
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
+import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './pt-BR.settings';
 import { toolPurposePtBR } from './tool-purpose-locales';
 
@@ -8,6 +9,7 @@ export const dict: Record<I18nKey, string> = {
   ...enDict,
   ...toolHeadingMessages('pt-BR'),
   ...toolFailureMessages('pt-BR'),
+  ...chatExperienceMessages('pt-BR'),
   ...toolPurposePtBR,
   ...settingsDict,
   "chat.toolResult.fileContents": "Conteúdo do arquivo: {path}",

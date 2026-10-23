@@ -36,6 +36,9 @@ export function ToolDisclosure({ id, children, className, initiallyExpanded = fa
 
 export function ToolStatus({ status, stopped = false, generating = false }: { status: ChatToolExecutionState['status']; stopped?: boolean; generating?: boolean }) {
   const { t } = useI18n();
+  // Successful ordinary calls recede; purpose-specific components keep their
+  // own effect receipts (applied, draft, branch, exit code, and so on).
+  if (status === 'success' && !stopped && !generating) return null;
   return <span className={cn('tool-action-status typography-micro', status === 'error' && 'text-destructive',
     status === 'unknown' && 'text-[var(--status-warning)]')} data-status={status} role={status === 'error' || status === 'waiting' ? 'status' : undefined}>
     <Icon name={stopped ? 'stop' : status === 'running' ? 'loader-4' : status === 'success' ? 'check' : status === 'error' || status === 'unknown'

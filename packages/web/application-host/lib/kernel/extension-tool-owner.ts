@@ -318,8 +318,8 @@ export async function retainExtensionTool(
         const combined = AbortSignal.any([signal, pin.revocationSignal]);
         combined.throwIfAborted();
         const args = validate(call), identity = canonical(call);
-        const current = await policy(call.runId),
-          decision = gate(call, current.value),
+        let current = await policy(call.runId);
+        const decision = gate(call, current.value),
           previous = approved.get(call.operationId);
         if (
           decision.decision === 'deny' ||
@@ -339,9 +339,15 @@ export async function retainExtensionTool(
               reason: decision.reason ?? 'Extension tool permission required',
             },
             combined,
+            { name: call.name, arguments: object(call.arguments) ? call.arguments : { input: call.arguments } },
           );
         combined.throwIfAborted();
         assertAvailable(call);
+        const latest = await policy(call.runId);
+        if (latest.identity !== current.identity) {
+          if (gate(call, latest.value).decision !== 'allow') throw new HostToolAdmissionError('extension_tool_permission_changed');
+          current = latest;
+        }
         approved.set(call.operationId, { identity, policy: current.identity, arguments: args });
       },
       async execute(call, signal, owner): Promise<ToolExecutionReceipt> {

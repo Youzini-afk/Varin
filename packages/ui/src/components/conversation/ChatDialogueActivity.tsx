@@ -7,6 +7,7 @@ import { invocationData, invocationStatus, operationInvocation, toolRecord, tool
 import { fileChangePhase, fileChangeTargets, isFileChangeTool } from './fileChangePreview';
 import { toolSubject } from './toolSubject';
 import { useToolTargets } from './toolTargetContext';
+import { isStandaloneTool } from './standaloneTools';
 import { workToolLabels } from './toolLabels';
 import { scriptDescendants, scriptArguments } from './scriptPresentation';
 import type { DialogueActivity, DialogueProcess } from './chatDialogueProjection';
@@ -23,7 +24,7 @@ const actions: Record<string, I18nKey> = {
   recovery_points: 'chat.dialogue.recovery', file_restore: 'chat.dialogue.restore',
   image_generate: 'chat.dialogue.image', image_edit: 'chat.dialogue.image',
 };
-type Category = 'reads' | 'searches' | 'changes' | 'commands' | 'scripts' | 'processes' | 'web' | 'collaboration' | 'plans' | 'memory' | 'other';
+type Category = 'reads' | 'searches' | 'changes' | 'drafts' | 'branches' | 'commands' | 'scripts' | 'processes' | 'web' | 'collaboration' | 'plans' | 'memory' | 'other';
 const category = (name: string): Category => {
   if (name === 'file_read') return 'reads';
   if (['file_search', 'file_list', 'code_retrieval'].includes(name)) return 'searches';
@@ -47,35 +48,43 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     const status = phase === 'failed' || phase === 'partial' ? 'error' : invocationStatus(result, execution, item.streaming);
     return { item, execution, result, status, phase };
   };
+  const seenOperations = new Set<string>();
   const tools = process.activities.flatMap(item => {
     if (item.kind !== 'tool') return [];
     const root = describe(item, executions[item.call.id], results.get(item.call.id));
     const nested = item.call.name === 'script_run' ? scriptDescendants(item.call.id, executions)
-      .filter(child => child.name !== 'dispatch' && toolRecord(toolRecord(child.operation?.intent).call).name !== 'tool_invoke')
+      .filter(child => !isStandaloneTool(child.name) && toolRecord(toolRecord(child.operation?.intent).call).name !== 'tool_invoke')
       .map(child => describe({ id: `tool:${child.toolCallId}`, kind: 'tool', sourceId: item.sourceId, streaming: false,
         call: { type: 'toolCall', id: child.toolCallId, name: child.name, arguments: child.args ?? {} } }, child,
       child.operation ? operationInvocation(child.operation).result : undefined)) : [];
     // Use already observed nested work; opening a collapsed process does not
     // perform extra reads just to replace the script wrapper's label/count.
-    return [{ ...root, counted: !nested.length || root.status !== 'success' }, ...nested.map(row => ({ ...row, counted: true }))];
+    return [{ ...root, counted: !nested.length }, ...nested.map(row => ({ ...row, counted: true }))];
+  }).filter(row => {
+    const id = row.execution?.operationId ?? row.item.call.id;
+    if (seenOperations.has(id)) return false;
+    seenOperations.add(id); return true;
   });
   const counts = new Map<Category, number>();
-  const changed = new Set<string>();
   for (const { item, status, execution, result, counted } of tools) {
-    if (!counted || status !== 'success') continue;
+    if (!counted) continue;
     const kind = category(item.call.name);
     if (kind === 'changes') {
+      const effects = new Set<Category>();
       for (const file of fileChangeTargets(item.call)) {
-        if (['applied', 'draft', 'branch'].includes(fileChangePhase(execution, result, false, file.path))) changed.add(file.path);
+        const phase = fileChangePhase(execution, result, false, file.path);
+        if (phase === 'applied') effects.add('changes');
+        if (phase === 'draft') effects.add('drafts');
+        if (phase === 'branch') effects.add('branches');
       }
-      if (changed.size) counts.set('changes', changed.size);
-    } else counts.set(kind, (counts.get(kind) ?? 0) + 1);
+      for (const effect of effects) counts.set(effect, (counts.get(effect) ?? 0) + 1);
+    } else if (status === 'success') counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
   const failures = tools.filter(row => row.status === 'error').length;
-  const pending = tools.filter(row => ['running', 'waiting', 'background'].includes(row.status));
+  const pending = tools.filter(row => row.counted && ['running', 'waiting', 'background'].includes(row.status));
   const uncertain = tools.filter(row => row.status === 'unknown' || row.status === 'success' && row.phase === 'preview').length;
   const cancelled = tools.filter(row => row.status === 'cancelled').length;
-  const summary = [...counts].map(([kind, count]) => t(`chat.dialogue.count.${kind}`, { count })).join(' · ')
+  const summary = [...counts].map(([kind, count]) => t(kind === 'reads' ? 'chat.activity.reads' : kind === 'changes' ? 'chat.activity.changes' : `chat.dialogue.count.${kind}`, { count })).join(' · ')
     || t(tools.length ? 'chat.dialogue.tools' : process.activities.some(item => item.kind === 'thinking') ? 'chat.dialogue.thinking' : 'chat.dialogue.records');
   const last = process.activities.at(-1);
   const liveThinking = process.tail && active && last?.kind === 'thinking' && last.streaming;
@@ -109,6 +118,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
       {uncertain > 0 && <span className="shrink-0 typography-micro text-status-warning">{t('chat.dialogue.uncertain', { count: uncertain })}</span>}
       {cancelled > 0 && <span className="shrink-0 typography-micro">{t('chat.dialogue.stopped', { count: cancelled })}</span>}
       {!current && pending.length > 0 && <span className="shrink-0 typography-micro">{t('chat.dialogue.pending', { count: pending.length })}</span>}
+      {current && pending.length > 1 && <span className="shrink-0 typography-micro">{t('chat.activity.otherPending', { count: pending.length - 1 })}</span>}
     </summary>
     <div className="dialogue-activity-body">{process.activities.map(item => <React.Fragment key={item.id}>{renderActivity(item)}</React.Fragment>)}</div>
   </ToolDisclosure>;

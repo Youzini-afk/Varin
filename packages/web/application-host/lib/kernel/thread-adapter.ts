@@ -243,7 +243,7 @@ export class ThreadAdapter {
     if (!this.processTerminals) throw new Error('Process terminals are unavailable');
     return this.processTerminals.openTerminal(input);
   }
-  async decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'deny' }) {
+  async decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'allow_always' | 'deny' }) {
     await this.requireIdentity(input);
     const operation = await this.requireOperation(input.operationId);
     const run = await this.requireRun(operation.run_id);
@@ -287,12 +287,12 @@ export class ThreadAdapter {
     return this.runtime.reviewMcpSamplingOutput({ operationId: input.operationId, interactionId: input.interactionId,
       expectedRevision: input.expectedRevision, action: input.action }, signal);
   }
-  async answerQuestion(input: ThreadIdentity & { operationId: string; answer: string }) {
+  async answerQuestion(input: ThreadIdentity & { operationId: string; answers: import('@varin/protocol').QuestionAnswer[] }) {
     await this.requireIdentity(input);
     const operation = await this.requireOperation(input.operationId);
     const run = await this.requireRun(operation.run_id);
     if (run.branch_id !== input.branchId || run.thread_id !== input.threadId) throw new Error('Question belongs to another branch');
-    const result = await this.runtime.answerQuestion(input.operationId, input.answer);
+    const result = await this.runtime.answerQuestion(input.operationId, input.answers);
     await this.continueLaunch(result.run_id);
     return result;
   }

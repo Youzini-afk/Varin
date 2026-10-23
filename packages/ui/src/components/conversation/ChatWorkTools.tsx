@@ -13,10 +13,12 @@ import { workToolLabels, toolValueLabel } from './toolLabels';
 import { ToolHeadingText } from './ToolHeadingText';
 import { useToolTargets } from './toolTargetContext';
 import { toolSubject } from './toolSubject';
+import { ChatQuestionTool } from './ChatQuestionTool';
 export function ChatWorkTool({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
   const targets = useToolTargets();
+  if (call.name === 'ask_user' || call.name === 'question_status') return <ChatQuestionTool {...{ call, execution, result, status, generating, cwd, output, details }} />;
   const args = toolRecord(call.arguments), data = toolRecord(result?.details ?? execution?.result);
   const plan = call.name === 'todo', memory = call.name === 'memory', settings = call.name.startsWith('settings_');
   const body = toolRecord(data.plan ?? toolRecord(data.mutation).plan);
@@ -45,7 +47,6 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
       {purposeContent}
       {memory && !purposeContent && <>{Boolean(args.scope ?? data.scope) && <p className="typography-micro text-muted-foreground">{t('chat.tools.scope')} · {toolText(data.scope) || toolText(args.scope)}</p>}
         {content && <blockquote className="tool-memory-text">{content}</blockquote>}</>}
-      {call.name === 'ask_user' && typeof args.question === 'string' && <p className="whitespace-pre-wrap typography-meta">{args.question}</p>}
       <ToolResultNotice data={data} status={status} />
       {objectResult && !purposeContent && !(plan && planItems.length || memory && content) && <JsonSummaryView data={data} />}
       {output}{details}

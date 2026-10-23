@@ -137,7 +137,9 @@ export class HistoryPresentation {
         const base = { id: item.id, parentId: item.parent, timestamp: '', runId: item.run_id };
         if (item.source === 'user') {
           const text = typeof item.content === 'string' ? item.content : typeof envelope.text === 'string' ? envelope.text : '';
-          entry = { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
+          entry = typeof object(envelope.questionAnswer).operationId === 'string'
+            ? { ...base, type: 'custom_message', customType: 'question-answer', display: true, content: text, details: json(envelope.questionAnswer) }
+            : { ...base, type: 'message', message: { role: 'user', content: text, timestamp: 0 } };
         } else if (item.source !== 'assistant' && (content.kind === 'text' || content.kind === 'reasoning_summary')) {
           const sender = object(envelope.provenance).thread_id;
           entry = { ...base, type: 'custom_message', customType: item.source === 'agent' ? 'thread-message' : item.source, display: true, content: String(content.text ?? ''),
@@ -207,7 +209,21 @@ export class HistoryPresentation {
         }
       }
     }
-    const visible = new Set(result.map(entry => entry.id));
+    const joinedAnswers = new Set<string>();
+    for (const entry of result) {
+      if (entry.type !== 'custom_message' || entry.customType !== 'question-answer') continue;
+      const response = object(entry.details), operationId = response.operationId;
+      const callId = typeof operationId === 'string' ? operationCalls.get(operationId) : undefined;
+      if (!callId) continue;
+      const execution = toolExecutions[callId] ??= { toolCallId: callId, operationId: String(operationId), name: 'ask_user',
+        status: response.cancelled ? 'cancelled' : 'success' };
+      execution.questionResponse = json({ ...(response.cancelled ? { cancelled: true } : { answer: entry.content, answers: response.answers }) });
+      joinedAnswers.add(entry.id);
+    }
+    // Keep an answer visible on its own at a paginated boundary. Once its
+    // original question is loaded, that row owns the answer disclosure.
+    const presented = result.filter(entry => !joinedAnswers.has(entry.id));
+    const visible = new Set(presented.map(entry => entry.id));
     const lastByRun = new Map<string, string>();
     const cutByRun = new Map(history.map(item => [item.run_id, item.id]));
     for (const item of history) if (visible.has(item.id)) lastByRun.set(item.run_id, item.id);
@@ -215,9 +231,9 @@ export class HistoryPresentation {
       const after = lastByRun.get(run.runId);
       if (!after || cutByRun.get(run.runId) !== run.throughId || !run.requests.length) return [];
       const footer: ChatSessionEntry = { id: `run-usage:${run.runId}`, parentId: after, timestamp: '', type: 'run_usage', runId: run.runId,
-        usages: run.requests.map(({ requestId, usage }) => ({ requestId, measurement: usage.measurement,
+        usages: run.requests.map(({ requestId, usage, completeInputTokens }) => ({ requestId, measurement: usage.measurement,
           unknownReceipts: usage.measurement === 'missing' || usage.inputTokens === null || usage.outputTokens === null ? 1 : 0,
-          ...(usage.inputTokens === null ? {} : { input: usage.inputTokens }),
+          ...(completeInputTokens == null ? usage.inputTokens === null ? {} : { input: usage.inputTokens } : { input: completeInputTokens, completeInput: completeInputTokens }),
           ...(usage.outputTokens === null ? {} : { output: usage.outputTokens }),
           ...(usage.cachedInputTokens === null ? {} : { cacheRead: usage.cachedInputTokens }),
           ...(usage.cacheWriteTokens === null ? {} : { cacheWrite: usage.cacheWriteTokens }),
@@ -225,7 +241,7 @@ export class HistoryPresentation {
         })) };
       return [[after, footer] as const];
     }));
-    return { entries: result.flatMap(entry => footers.has(entry.id) ? [entry, footers.get(entry.id)!] : [entry]), toolExecutions };
+    return { entries: presented.flatMap(entry => footers.has(entry.id) ? [entry, footers.get(entry.id)!] : [entry]), toolExecutions };
   }
 }
 

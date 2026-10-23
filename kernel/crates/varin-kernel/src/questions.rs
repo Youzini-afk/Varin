@@ -7,27 +7,9 @@ use varin_runtime::execution::*;
 use varin_runtime::supervisor::RunStart;
 use varin_runtime::{Catalog, Effect, Lifetime, Outcome};
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Question {
-    question: String,
-    #[serde(default)]
-    options: Vec<String>,
-}
 fn validate(call: &ToolCall) -> Result<(), ExecutionError> {
-    let q: Question = serde_json::from_value(call.arguments.clone()).map_err(|_| {
-        ExecutionError::new(
-            "invalid_question",
-            "question and optional string options are required",
-        )
-    })?;
-    if q.question.trim().is_empty() || q.options.iter().any(|v| v.trim().is_empty()) {
-        return Err(ExecutionError::new(
-            "invalid_question",
-            "question and options must be nonempty",
-        ));
-    }
-    Ok(())
+    varin_runtime::questions::QuestionSet::parse(call.arguments.clone())
+        .map(|_| ()).map_err(|e| ExecutionError::new("invalid_question", e.to_string()))
 }
 pub(crate) fn builtin_schemas(
     mut tools: Vec<crate::run_tools::BuiltinSchema>,
@@ -43,10 +25,10 @@ pub(crate) fn builtin_schemas(
     tools
 }
 pub fn schema() -> ToolSchema {
-    ToolSchema { requirements: None, description: "Ask the user a clarification and wait for their real answer. Answers do not grant tool permissions.".into(), output_schema: None, metadata: None,
+    ToolSchema { requirements: None, description: "Ask one or more questions and wait for the user's complete answer. Each question has a stable id and may offer single or multiple selection; the user can always write their own answer. No answer grants tool permissions.".into(), output_schema: None, metadata: None,
         name: QUESTION_TOOL.into(),
-        version: "1".into(),
-        schema: json!({"type":"object","properties":{"question":{"type":"string","minLength":1},"options":{"type":"array","items":{"type":"string","minLength":1}}},"required":["question"],"additionalProperties":false}),
+        version: "2".into(),
+        schema: varin_runtime::questions::schema(),
     }
 }
 pub fn status_schema() -> ToolSchema {
@@ -132,7 +114,7 @@ impl ToolExecutor for Questions {
             });
         }
         if call.name != QUESTION_TOOL
-            || call.schema_version != "1"
+            || call.schema_version != "2"
             || !request.tools.iter().any(|s| s == &schema())
         {
             return Err(error("question schema is not bound"));
@@ -140,7 +122,7 @@ impl ToolExecutor for Questions {
         validate(call)?;
         Ok(ToolContract {
             name: QUESTION_TOOL.into(),
-            schema_version: "1".into(),
+            schema_version: "2".into(),
             read_only: true,
             completion: CompletionKind::Job,
             lifetime: Lifetime::Thread,

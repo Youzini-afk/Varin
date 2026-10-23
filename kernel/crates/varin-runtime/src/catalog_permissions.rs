@@ -104,6 +104,15 @@ impl Catalog {
         permission_id: &str,
         decision: &str,
     ) -> Result<Operation> {
+        self.decide_permission_with_rule(operation_id, permission_id, decision, None)
+    }
+    pub fn decide_permission_with_rule(
+        &mut self,
+        operation_id: &str,
+        permission_id: &str,
+        decision: &str,
+        persisted_rule: Option<Value>,
+    ) -> Result<Operation> {
         if !matches!(decision, "allow_once" | "deny") {
             return Err(RuntimeError::Invalid("invalid permission decision".into()));
         }
@@ -113,12 +122,13 @@ impl Catalog {
         let mut permission = permission_record(&op, permission_id)?;
         validate_live_permission(&tx, &op, &run, &permission)?;
         if !permission["decision"].is_null() {
-            if permission["decision"] == decision {
+            if permission["decision"] == decision && permission.get("persisted_rule") == persisted_rule.as_ref() {
                 return Ok(op);
             }
             return Err(RuntimeError::Conflict("permission already decided".into()));
         }
         permission["decision"] = json!(decision);
+        if let Some(rule) = persisted_rule { permission["persisted_rule"] = rule; }
         op.result = Some(OperationResultMetadata::Control {
             value: json!({"permission":permission}),
         });
@@ -129,7 +139,7 @@ impl Catalog {
             &op.id,
             op.revision,
             "permission.decided",
-            json!({"permission_id":permission_id,"decision":decision}),
+            json!({"permission_id":permission_id,"decision":decision,"persisted_rule":permission.get("persisted_rule")}),
         )?;
         let mut wait: Wait = record(&tx, "waits", op.waiting_on.as_deref().unwrap())?;
         wait.trigger_cursor = Some(cursor);

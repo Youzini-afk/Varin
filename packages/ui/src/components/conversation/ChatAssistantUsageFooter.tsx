@@ -51,7 +51,7 @@ export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usag
   if (!presentation) return null;
   return (
     <footer
-      className="ml-auto flex w-max max-w-full flex-wrap items-center justify-end gap-x-2.5 gap-y-1 typography-micro text-muted-foreground/65"
+      className="flex w-max max-w-full flex-wrap items-center justify-end gap-x-2.5 gap-y-1 typography-micro text-muted-foreground"
       aria-label={t('chat.messageUsage.label')}
       data-conversation-assistant-usage="true"
       data-conversation-turn-usage="true"
@@ -66,6 +66,10 @@ export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usag
           value={metric.value}
         />
       ))}
+      {presentation.cacheHitPercent !== undefined && <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums"
+        title={t('chat.usage.cacheRateHint')}>
+        {t('chat.usage.cacheRate')} {presentation.cacheHitPercent.toLocaleString(getCurrentIntlLocale(), { maximumFractionDigits: 1 })}%
+      </span>}
       {presentation.total !== undefined ? (
         <UsageMetric
           icon="bar-chart-box"

@@ -9,6 +9,8 @@ export interface ChatUsage {
   cacheWrite?: number;
   cacheWrite1h?: number;
   input?: number;
+  /** Provider-normalized input, including cached reads and writes exactly once. */
+  completeInput?: number;
   output?: number;
   reasoning?: number;
   totalTokens?: number;
@@ -276,6 +278,8 @@ export interface ChatToolExecutionState {
   isError?: boolean;
   name: string;
   partialResult?: JsonValue;
+  /** Authenticated answer history, projected onto its original question. */
+  questionResponse?: JsonValue;
   result?: JsonValue;
   status: 'running' | 'success' | 'error' | 'cancelled' | 'unknown' | 'background' | 'waiting';
   toolCallId: string;

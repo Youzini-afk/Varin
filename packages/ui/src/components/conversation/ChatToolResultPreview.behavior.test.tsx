@@ -160,9 +160,9 @@ it('compares actual Office readback and retains document dirty state after expor
 });
 
 it('keeps long question choices intact and waits for explicit submission', async () => {
-  const answer = vi.fn(async () => {}), option = '保留所有原始记录，并在报告中逐项解释原因。'.repeat(12) + '\n包含每个失败任务的处理建议。';
-  const operation = { id: 'question', phase: 'waiting', intent: { call: { arguments: { question: '选择报告范围', options: [option, '只列摘要'] } } } } as unknown as import('@varin/protocol').Operation;
-  await act(async () => root.render(<ThreadQuestion operation={operation} enabled onAnswer={answer} />));
+  const answer = vi.fn(async () => operation), option = '保留所有原始记录，并在报告中逐项解释原因。'.repeat(12) + '\n包含每个失败任务的处理建议。';
+  const operation = { id: 'question', phase: 'waiting', intent: { call: { arguments: { questions: [{ id: 'question', question: '选择报告范围', options: [option, '只列摘要'].map((label,index) => ({ id: String(index), label })) }] } } } } as unknown as import('@varin/protocol').Operation;
+  await act(async () => root.render(<ThreadQuestion scopeKey="preview-question" operation={operation} enabled onAnswer={answer} onRead={async () => operation} onCancel={async () => operation} />));
   const choices = container.querySelectorAll<HTMLInputElement>('input[type="radio"]');
   expect(choices).toHaveLength(2);
   expect(choices[0]!.parentElement?.textContent).toBe(option);

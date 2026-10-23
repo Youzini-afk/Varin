@@ -11,6 +11,7 @@ import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
 import { presentInvocation, toolRecord } from './toolInvocation';
 import { toolSubject } from './toolSubject';
 import { useToolTargets } from './toolTargetContext';
+import { standaloneDescendants } from './standaloneTools';
 import { orderScriptCalls, scriptArguments, scriptCallStatus, scriptDescendants, scriptOperationId, scriptTitleKey, scriptToolLabels } from './scriptPresentation';
 
 function StatusIcon({ status }: { status: ChatToolExecutionState['status'] }) {
@@ -31,6 +32,7 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
   const [view, setView] = React.useState<{ owner: string; calls: OperationCallSummary[] }>();
   const [error, setError] = React.useState(false);
   const [retry, setRetry] = React.useState(0);
+  const [expanded, setExpanded] = React.useState(false);
   const operationId = scriptOperationId(call, execution);
   const owner = `${generation}:${operationId}`;
   const calls = view?.owner === owner ? view.calls : [];
@@ -41,21 +43,23 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
   const title = typeof args.title === 'string' ? args.title.replace(/\s+/g, ' ').trim() : '';
   React.useEffect(() => {
     setError(false);
-    if (preview || generating || !admitted || result?.notDispatched || call.name !== 'script_run' || !operationId || !api?.toolCalls) return;
+    if (!expanded || preview || generating || !admitted || result?.notDispatched || call.name !== 'script_run' || !operationId || !api?.toolCalls) return;
     const controller = new AbortController();
     void api.toolCalls(operationId, controller.signal).then(value => {
       if (!controller.signal.aborted) setView({ owner, calls: orderScriptCalls(value) });
     }, () => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
-  }, [api, operationId, owner, call.name, preview, generating, admitted, execution?.revision, result?.notDispatched, status, signature, retry]);
+  }, [api, operationId, owner, call.name, preview, generating, admitted, execution?.revision, result?.notDispatched, status, signature, retry, expanded]);
   const liveById = new Map(liveCalls.map(item => [item.operationId, item]));
+  const detached = new Set((standaloneDescendants(executions).get(call.id) ?? []).map(child => executions[child.id]?.operationId).filter(Boolean));
+  const inlineCalls = calls.filter(item => !detached.has(item.operationId));
   const attention = calls.filter(item => ['error', 'unknown'].includes(liveById.get(item.operationId)?.status ?? scriptCallStatus(item))).length;
   const active = calls.filter(item => (liveById.get(item.operationId)?.status ?? scriptCallStatus(item)) === 'running').length;
   const details = result?.details && typeof result.details === 'object' && !Array.isArray(result.details) ? result.details : undefined;
   const valueText = typeof details?.valueText === 'string' ? details.valueText : undefined;
   const failure = typeof details?.error === 'string' ? details.error
     : details?.error && typeof details.error === 'object' && !Array.isArray(details.error) && typeof details.error.message === 'string' ? details.error.message : undefined;
-  return <ToolDisclosure id={'tool:' + call.id} className="tool-script-activity my-1">
+  return <ToolDisclosure id={'tool:' + call.id} className="tool-script-activity my-1" onExpanded={setExpanded}>
     <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 rounded-md px-1 py-1.5 typography-meta text-muted-foreground hover:bg-muted/25 [&::-webkit-details-marker]:hidden">
       <StatusIcon status={status} />
       <span className="min-w-0 flex-1 truncate" title={title || t(scriptTitleKey(call, calls))}>{title || t(scriptTitleKey(call, calls))}</span>
@@ -70,9 +74,9 @@ export function ChatScriptCard({ call, execution, executions = {}, status, resul
       {failure && <p role="alert" className="whitespace-pre-wrap break-words typography-meta text-destructive">{failure}</p>}
       {output}
       {valueText && <pre className="overflow-auto whitespace-pre-wrap break-words rounded-md bg-background/70 p-2 typography-micro">{valueText}</pre>}
-      {calls.length > 0 && <section aria-label={t('chat.script.calls')} className="space-y-1">
+      {inlineCalls.length > 0 && <section aria-label={t('chat.script.calls')} className="space-y-1">
         <p className="typography-micro text-muted-foreground">{t('chat.script.calls')}</p>
-        {calls.map(item => <ScriptCallRow key={`${owner}:${item.operationId}`} call={item} live={liveById.get(item.operationId)} renderCall={renderCall} />)}
+        {inlineCalls.map(item => <ScriptCallRow key={`${owner}:${item.operationId}`} call={item} live={liveById.get(item.operationId)} renderCall={renderCall} />)}
       </section>}
       {error && <p role="alert" className="typography-meta text-muted-foreground">{t('chat.script.loadFailed')} <button type="button" className="underline" onClick={() => setRetry(value => value + 1)}>{t('chat.script.retry')}</button></p>}
       {typeof args.script === 'string' && <details className="group/script"><summary className="cursor-pointer typography-micro text-muted-foreground">{t('chat.script.source')}</summary>

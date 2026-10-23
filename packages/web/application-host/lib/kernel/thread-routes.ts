@@ -101,7 +101,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'process/terminal': ['runtime', 'threadId', 'branchId', 'operationId'],
     'model/select': ['runtime','threadId','branchId','runId','key','model'],
     'permission/decide': ['runtime', 'threadId', 'branchId', 'operationId', 'permissionId', 'decision'],
-    'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answer'],
+    'question/answer': ['runtime', 'threadId', 'branchId', 'operationId', 'answers'],
     'mcp/interactions/list': ['runtime', 'threadId', 'branchId', 'cursor', 'limit'],
     'mcp/interactions/read': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId'],
     'mcp/interactions/respond': ['runtime', 'threadId', 'branchId', 'operationId', 'interactionId', 'expectedRevision', 'response'],
@@ -294,10 +294,13 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     operationId: text(body.operationId), interactionId: text(body.interactionId), expectedRevision: revision(body.expectedRevision),
     action: text(body.action) as McpSamplingOutputAction }, signal));
   post('permission/decide', body => {
-    if (body.decision !== 'allow_once' && body.decision !== 'deny') throw new Error('Invalid permission decision');
+    if (body.decision !== 'allow_once' && body.decision !== 'allow_always' && body.decision !== 'deny') throw new Error('Invalid permission decision');
     return adapter.decidePermission({ ...identity(body), operationId: text(body.operationId), permissionId: text(body.permissionId), decision: body.decision });
   });
-  post('question/answer', body => adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answer: text(body.answer) }));
+  post('question/answer', body => {
+    if (!Array.isArray(body.answers)) throw new Error('Question answers must be an array');
+    return adapter.answerQuestion({ ...identity(body), operationId: text(body.operationId), answers: body.answers as import('@varin/protocol').QuestionAnswer[] });
+  });
   post('messages/send', (body, signal) => {
     const request = object(body.request);
     if (Object.keys(request).some(key => !['key', 'targetThreadId', 'targetBranchId', 'replyTo', 'kind', 'text'].includes(key))) throw new Error('Invalid message field');

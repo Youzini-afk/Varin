@@ -375,7 +375,7 @@ it('reopening a question restores only the selected MCP dependencies while an un
     if (++turns === 1) { held = response; return; }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
     const output = turns === 2
-      ? { id: 'restore-question', type: 'function_call', call_id: 'restore-question-id', name: 'ask_user', arguments: JSON.stringify({ question: 'Continue with the selected service?' }) }
+      ? { id: 'restore-question', type: 'function_call', call_id: 'restore-question-id', name: 'ask_user', arguments: JSON.stringify({ questions: [{ id: 'question', question: 'Continue with the selected service?' }] }) }
       : { id: 'restored-answer', type: 'message', content: [{ type: 'output_text', text: 'continued without waiting for unrelated preparation' }] };
     if (turns === 3) {
       expect(capabilities.some(tool => tool.name.startsWith('mcp__fixture__'))).toBe(true);
@@ -401,7 +401,7 @@ it('reopening a question restores only the selected MCP dependencies while an un
   const selected = (await f.runtime.launch(receipt.run_id))!.selection.mcp_binding;
   await f.close();
   const reopened = await fixture(() => { throw new Error('must use the original provider'); }, f.root, f.endpoint, 'composed');
-  await reopened.api.answerQuestion({ ...identity, operationId: operation.id, answer: 'Continue' });
+  await reopened.api.answerQuestion({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'Continue' }] });
   await expect.poll(async () => (await reopened.api.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   expect(turns).toBe(3);
   expect((await reopened.runtime.launch(receipt.run_id))!.selection.mcp_binding).toEqual(selected);

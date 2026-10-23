@@ -44,7 +44,7 @@ export class HistoryRunUsageReader {
     return [...requests].map(([runId, ids]) => ({ runId, throughId: page.items.slice().reverse().find(item => item.run_id === runId)!.id, requests: [...ids].map(requestId => {
       const view = metadata.get(requestId);
       if (!view) throw new Error('Original history usage is unavailable');
-      return { requestId, usage: view.usage };
+      return { requestId, usage: view.usage, completeInputTokens: view.completeInputTokens };
     }) }));
   }
 

@@ -21,7 +21,7 @@ import { useI18n } from '@/lib/i18n';
 import { toast } from '@/components/ui';
 import type { StreamingToolCall, StreamingTextPart, ToolExecutionProgress } from '@/lib/agent-runtime/thread-projection';
 
-export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, memory, header, footer, liveUser, liveUserStatus, viewId }: {
+export function ConversationTimeline({ api, identity, snapshot, history, runUsage, historyReady, historyReset = 0, earlierHistory, navigation, progress, streamingTools = [], toolProgress = [], cwd, working, readOnly, onQuote, onFork, onRecover, onQuestion, memory, header, footer, liveUser, liveUserStatus, viewId }: {
   api: ThreadsAPI; identity: ThreadIdentity; snapshot?: ThreadSnapshot; history: readonly HistoryItem[];
   runUsage?: readonly import('@varin/application-client').ThreadRunUsage[];
   historyReady?: boolean; historyReset?: number; earlierHistory?: ChatTimelineProps['earlierHistory'];
@@ -31,6 +31,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   toolProgress?: ToolExecutionProgress[];
   liveUser?: ChatUserMessage; liveUserStatus?: ChatSessionSubmissionStatus;
   onFork?(id: string): void; onRecover?(id: string): void; memory?: ThreadMemoryAPI;
+  onQuestion?(operationId: string): void;
   header?: React.ReactNode; footer?: React.ReactNode;
   /** Independent viewport for an embedded conversation; content identity stays with its Thread. */
   viewId?: string;
@@ -147,8 +148,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
-  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, openFile, fileTarget, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
-    [api, identity, head, readOnly, onQuote, openFile, fileTarget, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
+    [api, identity, head, readOnly, onQuote, onQuestion, openFile, fileTarget, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}

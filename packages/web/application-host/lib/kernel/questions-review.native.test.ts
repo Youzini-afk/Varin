@@ -109,7 +109,7 @@ function assertResponsesPairing(body: Record<string, unknown>) {
 function ask(response: ServerResponse, text = 'Which plan should I use?') {
   const suffix = crypto.randomUUID();
   response.writeHead(200, { 'content-type': 'text/event-stream' });
-  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `ask-item-${suffix}`, type: 'function_call', call_id: `ask-call-${suffix}`, name: 'ask_user', arguments: JSON.stringify({ question: text, options: ['Option A', 'Option B'] }) }, { id: `pre-answer-text-${suffix}`, type: 'message', content: [{ type: 'output_text', text: 'I can finish after you choose.' }] }] } })}\n\n`);
+  response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: [{ id: `ask-item-${suffix}`, type: 'function_call', call_id: `ask-call-${suffix}`, name: 'ask_user', arguments: JSON.stringify({ questions: [{ id: 'question', question: text, options: ['Option A', 'Option B'].map((label, index) => ({ id: String(index), label })) }] }) }, { id: `pre-answer-text-${suffix}`, type: 'message', content: [{ type: 'output_text', text: 'I can finish after you choose.' }] }] } })}\n\n`);
 }
 function done(response: ServerResponse) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
@@ -135,15 +135,15 @@ it('ordinary user answers pause the real Run, append once, resume once and canno
   const forkView = await f.api.snapshot(fork);
   expect(forkView.activeRun).toBeNull();
   expect(forkView.operations.some(op => op.id === operation.id)).toBe(false);
-  await expect(f.api.answerQuestion({ ...fork, operationId: operation.id, answer: 'wrong branch answer' })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.answerQuestion({ ...fork, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'wrong branch answer' }] })).rejects.toMatchObject({ status: 400 });
   const other = await f.api.create('question-foreign');
-  await expect(f.api.answerQuestion({ ...other, operationId: operation.id, answer: 'foreign answer' })).rejects.toMatchObject({ status: 400 });
-  const bad = await fetch(`${f.hostUrl}/api/threads/question/answer`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-fixture-auth': 'fixture-client' }, body: JSON.stringify({ ...identity, operationId: operation.id, answer: 'Yes', allowTools: ['process_spawn'] }) });
+  await expect(f.api.answerQuestion({ ...other, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'foreign answer' }] })).rejects.toMatchObject({ status: 400 });
+  const bad = await fetch(`${f.hostUrl}/api/threads/question/answer`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-fixture-auth': 'fixture-client' }, body: JSON.stringify({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'Yes' }], allowTools: ['process_spawn'] }) });
   expect(bad.status).toBe(400);
   expect((await f.api.run(receipt.run_id)).state).toBe('waiting');
   const desired = await f.api.selectModel({...identity,runId:receipt.run_id,key:'question-model-choice',model});
   expect(desired.status).toBe('preparing');
-  const answer = { ...identity, operationId: operation.id, answer: 'Option B, with my specific free-text constraint' };
+  const answer = { ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'Option B, with my specific free-text constraint' }] };
   const [first, duplicate] = await Promise.all([f.api.answerQuestion(answer), f.api.answerQuestion(answer)]).catch(error => { throw new Error(`${String(error)}: ${f.questionErrors.join('; ')}`); });
   expect(duplicate).toEqual(first);
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
@@ -153,13 +153,13 @@ it('ordinary user answers pause the real Run, append once, resume once and canno
   expect((await f.runtime.launch(receipt.run_id))?.selection).toEqual(selected?.selection);
   expect(f.requests[1]!.body.tools).toEqual(f.requests[0]!.body.tools);
   const body = f.requests[1]!.body.input as Array<{ role?: string; content?: unknown }>;
-  expect(JSON.stringify(body.filter(item => item.role === 'user'))).toContain(answer.answer);
-  expect(JSON.stringify(body.filter(item => item.role === 'system'))).not.toContain(answer.answer);
+  expect(JSON.stringify(body.filter(item => item.role === 'user'))).toContain(answer.answers[0]!.text);
+  expect(JSON.stringify(body.filter(item => item.role === 'system'))).not.toContain(answer.answers[0]!.text);
   const history = (await f.api.snapshot(identity)).history;
   expect(history.filter(item => item.id === `question-answer:${operation.id}`)).toHaveLength(1);
-  expect(history.find(item => item.id === `question-answer:${operation.id}`)!.content).toEqual({ text: answer.answer });
+  expect(history.find(item => item.id === `question-answer:${operation.id}`)!.content).toMatchObject({ text: answer.answers[0]!.text, questionAnswer: { operationId: operation.id, answers: answer.answers } });
   expect(await f.api.answerQuestion(answer)).toEqual(first);
-  await expect(f.api.answerQuestion({ ...answer, answer: 'different late answer' })).rejects.toMatchObject({ status: 409 });
+  await expect(f.api.answerQuestion({ ...answer, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'different late answer' }] })).rejects.toMatchObject({ status: 409 });
   expect(calls).toBe(2);
 }, 30_000);
 it('pending question survives Host/kernel reopen and answer resumes its original source without reasking', async () => {
@@ -187,7 +187,7 @@ it('pending question survives Host/kernel reopen and answer resumes its original
   const reopened = await fixture(reply, f.root, f.endpoint);
   expect((await reopened.api.run(receipt.run_id)).state).toBe('waiting');
   expect(calls).toBe(1);
-  await reopened.api.answerQuestion({ ...identity, operationId: operation.id, answer: 'source.txt' });
+  await reopened.api.answerQuestion({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'source.txt' }] });
   await expect.poll(async () => (await reopened.api.run(receipt.run_id)).state).toBe('completed');
   expect(calls).toBe(3);
   expect(read).toContain('pinned before asking');
@@ -202,14 +202,14 @@ it('run cancellation fences late answers and question cancellation resumes with 
   const cancelledRun = await openQuestion(f, 'cancel-question-run');
   await f.api.cancelRun(cancelledRun.receipt.run_id);
   await expect.poll(async () => (await f.api.run(cancelledRun.receipt.run_id)).state).toBe('cancelled');
-  await expect(f.api.answerQuestion({ ...cancelledRun.identity, operationId: cancelledRun.operation.id, answer: 'too late' })).rejects.toMatchObject({ status: 409 });
+  await expect(f.api.answerQuestion({ ...cancelledRun.identity, operationId: cancelledRun.operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'too late' }] })).rejects.toMatchObject({ status: 409 });
   expect((await f.api.snapshot(cancelledRun.identity)).history.some(item => item.id === `question-answer:${cancelledRun.operation.id}`)).toBe(false);
   const cancelledQuestion = await openQuestion(f, 'cancel-question-only');
   const result = await f.api.cancelOperation(cancelledQuestion.operation.id);
   expect(result.outcome).toBe('cancelled');
   await expect.poll(async () => (await f.api.run(cancelledQuestion.receipt.run_id)).state).toBe('completed');
   expect(await f.api.cancelOperation(cancelledQuestion.operation.id)).toEqual(result);
-  await expect(f.api.answerQuestion({ ...cancelledQuestion.identity, operationId: cancelledQuestion.operation.id, answer: 'late choice' })).rejects.toMatchObject({ status: 409 });
+  await expect(f.api.answerQuestion({ ...cancelledQuestion.identity, operationId: cancelledQuestion.operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'late choice' }] })).rejects.toMatchObject({ status: 409 });
   const history = (await f.api.snapshot(cancelledQuestion.identity)).history;
   expect(history.filter(item => item.id === `question-answer:${cancelledQuestion.operation.id}`)).toHaveLength(1);
   expect(JSON.stringify(f.requests.at(-1)!.body)).toContain('cancelled this question');
@@ -221,7 +221,7 @@ it('simultaneous answer and cancel have one durable winner and one continuation'
   const f = await fixture((_body, response) => { if (++calls === 1) ask(response); else done(response); });
   const { identity, receipt, operation } = await openQuestion(f, 'question-race');
   const results = await Promise.allSettled([
-    f.api.answerQuestion({ ...identity, operationId: operation.id, answer: 'race answer' }),
+    f.api.answerQuestion({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'race answer' }] }),
     f.api.cancelOperation(operation.id),
   ]);
   expect(results.filter(result => result.status === 'fulfilled'), f.questionErrors.join('; ')).toHaveLength(1);
@@ -236,7 +236,7 @@ it('multiple outstanding questions park independently and do not generate until 
   const f = await fixture((_body, response) => {
     if (++calls !== 1) { done(response); return; }
     response.writeHead(200, { 'content-type': 'text/event-stream' });
-    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: ['first', 'second'].map(id => ({ id: `${id}-item`, type: 'function_call', call_id: `${id}-call`, name: 'ask_user', arguments: JSON.stringify({ question: `${id} question` }) })) } })}\n\n`);
+    response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: ['first', 'second'].map(id => ({ id: `${id}-item`, type: 'function_call', call_id: `${id}-call`, name: 'ask_user', arguments: JSON.stringify({ questions: [{ id: 'question', question: `${id} question` }] }) })) } })}\n\n`);
   });
   const { identity, receipt } = await openQuestion(f, 'question-batch');
   const before = await f.api.snapshot(identity);
@@ -244,11 +244,11 @@ it('multiple outstanding questions park independently and do not generate until 
   expect(questions).toHaveLength(2);
   const current = questions.find(op => op.waiting_on === before.activeRun!.waiting_on)!;
   const later = questions.find(op => op.id !== current.id)!;
-  await expect(f.api.answerQuestion({ ...identity, operationId: later.id, answer: 'out of order' })).rejects.toMatchObject({ status: 409 });
-  await f.api.answerQuestion({ ...identity, operationId: current.id, answer: 'first actual answer' });
+  await expect(f.api.answerQuestion({ ...identity, operationId: later.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'out of order' }] })).rejects.toMatchObject({ status: 409 });
+  await f.api.answerQuestion({ ...identity, operationId: current.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'first actual answer' }] });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).waiting_on).toBe(later.waiting_on);
   expect(calls).toBe(1);
-  await f.api.answerQuestion({ ...identity, operationId: later.id, answer: 'second actual answer' });
+  await f.api.answerQuestion({ ...identity, operationId: later.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'second actual answer' }] });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   expect(calls).toBe(2);
   assertResponsesPairing(f.requests[1]!.body);
@@ -261,7 +261,7 @@ it('Anthropic continuation keeps tool-result blocks ahead of authenticated answe
     const asking = ++calls === 1;
     const events = [
       { type: 'message_start', message: { id: `anthropic-${calls}`, type: 'message', role: 'assistant', content: [], model: 'fixture-model', usage: { input_tokens: 5, output_tokens: 0 } } },
-      { type: 'content_block_start', index: 0, content_block: asking ? { type: 'tool_use', id: 'anthropic-ask', name: 'ask_user', input: { question: 'Choose a destination', options: ['North', 'South'] } } : { type: 'text', text: 'Completed after the real answer' } },
+      { type: 'content_block_start', index: 0, content_block: asking ? { type: 'tool_use', id: 'anthropic-ask', name: 'ask_user', input: { questions: [{ id: 'question', question: 'Choose a destination', options: ['North', 'South'].map((label, index) => ({ id: String(index), label })) }] } } : { type: 'text', text: 'Completed after the real answer' } },
       { type: 'content_block_stop', index: 0 },
       { type: 'message_delta', delta: { stop_reason: asking ? 'tool_use' : 'end_turn' }, usage: { output_tokens: 6 } },
       { type: 'message_stop' },
@@ -270,7 +270,7 @@ it('Anthropic continuation keeps tool-result blocks ahead of authenticated answe
     response.end(events.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(''));
   }, undefined, undefined, 'anthropic-messages');
   const { identity, receipt, operation } = await openQuestion(f, 'anthropic-question');
-  await f.api.answerQuestion({ ...identity, operationId: operation.id, answer: 'South by the safe route' });
+  await f.api.answerQuestion({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'South by the safe route' }] });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state).toBe('completed');
   expect(calls).toBe(2);
   const pending = new Set<string>();

@@ -140,12 +140,23 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const dialogueChoices = React.useMemo(() => timelinePresentationCache(props.sessionId, 'dialogue-disclosure', () => new Map<string, boolean>()), [props.sessionId]);
   const isActivityExpanded = React.useCallback((id: string) => id.startsWith('dialogue:')
     ? dialogueChoices.get(id) ?? false : activityState.choices.get(id) ?? activityRenderMode === 'summary', [activityState, activityRenderMode, dialogueChoices]);
+  const activityTransitions = React.useMemo(() => new Map<string, { phase: 'opening' | 'closing'; timer: ReturnType<typeof setTimeout> }>(), [props.sessionId, renderMode, activityRenderMode]);
+  React.useEffect(() => () => { for (const item of activityTransitions.values()) clearTimeout(item.timer); activityTransitions.clear(); }, [activityTransitions]);
   const setActivityExpanded = React.useCallback((id: string, expanded: boolean) => {
-    (id.startsWith('dialogue:') ? dialogueChoices : activityState.choices).set(id, expanded); updateActivity();
-  }, [activityState, dialogueChoices]);
+    (id.startsWith('dialogue:') ? dialogueChoices : activityState.choices).set(id, expanded);
+    const previous = activityTransitions.get(id);
+    if (previous) clearTimeout(previous.timer);
+    activityTransitions.delete(id);
+    if (!id.startsWith('dialogue:') && !prefersReducedMotion()) {
+      // Retain virtual rows through their closing motion. The list measures the
+      // changing height and keeps its existing reading-position ownership.
+      activityTransitions.set(id, { phase: expanded ? 'opening' : 'closing', timer: setTimeout(() => { activityTransitions.delete(id); updateActivity(); }, 220) });
+    }
+    updateActivity();
+  }, [activityState, dialogueChoices, activityTransitions]);
   const blocksRef = React.useRef<ChatTimelineBlocks | undefined>(undefined);
   const blockAliases = React.useMemo(() => timelinePresentationCache(props.sessionId, 'block-identities', () => new Map() as ChatTimelineBlockAliases), [props.sessionId]);
-  const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, dialogue: dialogueMessages, expanded: isActivityExpanded, previous: blocksRef.current, customIds, showThinking, aliases: blockAliases, executions: props.toolExecutions });
+  const blocks = projectChatTimelineBlocks(projection, { sorted: sortedMessages, dialogue: dialogueMessages, expanded: id => isActivityExpanded(id) || activityTransitions.get(id)?.phase === 'closing', previous: blocksRef.current, customIds, showThinking, aliases: blockAliases, executions: props.toolExecutions });
   blocksRef.current = blocks;
   const stickyHeaders = React.useMemo(() => !isMobile && stickyUserHeader ? blocks.items.flatMap((block, index) => block.kind === 'user' ? [index] : []) : [], [blocks.items, isMobile, stickyUserHeader]);
   const waitingGroupId = [...blocks.groups.values()].reverse().find(group => group.ownerId === assistantWaitingTurnId)?.id;
@@ -514,6 +525,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       forkBusyEntryId={props.forkBusyEntryId}
       hiddenThinkingLabel={props.hiddenThinkingLabel}
       block={block} projection={projection} sorted={sortedMessages}
+      activityTransition={'group' in block ? activityTransitions.get(block.group.id)?.phase : undefined}
       extensionPresentation={extensionPresentation}
       expanded={block.kind === 'dialogue' ? isActivityExpanded(block.id) : 'group' in block && isActivityExpanded(block.group.id)} onExpandedChange={setActivityExpanded}
       liveUserStatus={props.liveUserStatus}
@@ -536,6 +548,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     sortedMessages,
     isActivityExpanded,
     setActivityExpanded,
+    activityTransitions,
     extensionPresentation,
     props.liveUserStatus,
     props.onFork,

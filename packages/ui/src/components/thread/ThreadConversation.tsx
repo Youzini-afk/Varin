@@ -369,8 +369,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const contentOwner = `${host}:${draftKey}`;
   const [focusedOverview, setFocusedOverview] = React.useState<{ owner: string; section: OverviewPeekSection }>();
   const [questionReveal, setQuestionReveal] = React.useState(0);
+  const [questionOperation, setQuestionOperation] = React.useState<string>();
   const permissions = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => { if (questionReveal) permissions.current?.scrollIntoView({ block: 'nearest' }); }, [questionReveal]);
   const showOverview = (section: OverviewPeekSection) => {
     setFocusedOverview({ owner: contentOwner, section });
     disclosure(overviewKey, 'overview', true);
@@ -382,7 +382,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     request={focusedOverview?.owner === contentOwner ? focusedOverview : undefined} pending={pending} readOnly={readOnly}
     workspacePath={emptyWorkspacePath} hasComputer={hasComputer} error={error}
     recoveryAttention={recovery.error || recovery.unavailable || undefined}
-    onAttention={() => { setQuestionReveal(value => value + 1); disclosure(overviewKey, 'overview', false); disclosure(overviewKey, 'compact', false); }}
+    onAttention={() => {
+      if (snapshot?.operations.some(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal')) setQuestionReveal(value => value + 1);
+      else permissions.current?.scrollIntoView({ block: 'nearest' });
+      disclosure(overviewKey, 'overview', false); disclosure(overviewKey, 'compact', false);
+    }}
     refresh={async () => { await projection.current?.refresh(); }} act={act} openProcess={openProcessTerminal}
     details={{
       goals: !readOnly && snapshot ? <ThreadGoal api={api.goals} identity={identity} goals={snapshot.goals} sourceRunId={run?.id} refresh={async () => { await projection.current?.refresh(); }} /> : undefined,
@@ -437,8 +441,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
       onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('recovery'); void recovery.recover(entry.id); }} />}
-    {!readOnly && snapshot && <ThreadQuestions key={draftKey} revealKey={questionReveal} operations={snapshot.operations} enabled={operation => !pending && run?.state === 'waiting' && run.waiting_on === operation.waiting_on}
-      onCancel={operation => act(() => api.cancelOperation(operation.id))} onAnswer={(operation, answer) => act(() => api.answerQuestion({ ...identity, operationId: operation.id, answer }))} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
@@ -449,10 +451,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       progress={snapshot && !history.connecting ? progress : []} streamingTools={snapshot && !history.connecting ? streamingTools : []} toolProgress={toolProgress} cwd={emptyWorkspacePath ?? ''} working={active && !history.connecting && !launch?.preparation_failure && !pause} readOnly={readOnly || !snapshot || history.connecting}
       memory={snapshot?.thread.bot_id ? memorySelection : undefined}
       onQuote={quote => { if (!readOnly && currentViewScope.current === viewScope) { setText(current => [current.trimEnd(), quote].filter(Boolean).join('\n\n')); messageInput.current?.focus(); } }}
+      onQuestion={operationId => { setQuestionOperation(operationId); setQuestionReveal(value => value + 1); }}
       onFork={!readOnly && snapshot && !history.connecting && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
       onRecover={!readOnly && !history.connecting && !pending && !active && snapshot ? id => { showOverview('recovery'); void recovery.recover(id); } : undefined}
       footer={<><div ref={permissions}>{snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
-        <ThreadPermission operation={operation} enabled={!readOnly && !pending && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => act(() => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision }))} />
+        <ThreadPermission operation={operation} enabled={!readOnly && !history.connecting && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision })} />
       </div>)}</div>
       {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
         models={models} selectedModel={samplingModel} modelError={modelError} />}
@@ -461,7 +464,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     </div>
     {empty && <div className="min-h-6 flex-1" />}
-    {!readOnly && <div className="shrink-0 space-y-5 pb-4">
+    {!readOnly && <div className="thread-composer-stack shrink-0 space-y-5 pb-4">
+    {snapshot && <ThreadQuestions key={draftKey} scopeKey={draftKey} revealKey={questionReveal} revealOperationId={questionOperation} operations={snapshot.operations}
+      enabled={operation => !history.connecting && run?.state === 'waiting' && !run.cancel_requested && run.waiting_on === operation.waiting_on}
+      onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
+      onAnswer={(operation, answers) => api.answerQuestion({ ...identity, operationId: operation.id, answers })} />}
     {empty && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
     {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
     <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}

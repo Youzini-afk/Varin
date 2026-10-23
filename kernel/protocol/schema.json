@@ -739,6 +739,7 @@
   "PermissionOpenParams",
   "PermissionDecideParams",
   "QuestionAnswerParams",
+  "QuestionAnswer",
   "OperationParams",
   "HistoryParams",
   "EventsParams",
@@ -863,7 +864,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 59,
+  "protocolVersion": 60,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1639,7 +1640,7 @@
 "KnowledgeInferenceStatus":{"fields":{"operationId":{"type":"string"},"runId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"inference":{"type":"InferenceStatus[]"},"cancelled":{"type":"boolean"},"finished":{"type":"boolean"}},"rustType":"varin_runtime::catalog::knowledge_inference::KnowledgeInferenceStatus"},
 "KnowledgeInferenceView":{"fields":{"operationId":{"type":"string"},"runId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"},"recipe":{"type":"unknown"},"inference":{"type":"Operation[]"},"cancelled":{"type":"boolean"},"finished":{"type":"boolean"}},"rustType":"varin_runtime::catalog::knowledge_inference::KnowledgeInferenceView"},
 "ModelPresentationParams": {"fields":{"requestIds":{"type":"string[]"}},"rustType":"varin_runtime::catalog::usage::ModelPresentationParams"},
-    "ModelPresentation": {"raw":"export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; usage: InferenceUsage; }"},
+    "ModelPresentation": {"raw":"export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; }"},
     "ThreadUsageParams":{"fields":{"threadId":{"type":"string"},"branchId":{"type":"string"}},"rustType":"varin_runtime::catalog::usage::ThreadUsageParams"},
 "UsageTokenCount":{"raw":"export interface UsageTokenCount { known: string | null; missing: number; }"},
 "ThreadUsageRow":{"raw":"export interface ThreadUsageRow { kind: 'conversation' | 'context' | 'planning' | 'mcp_sampling' | 'auxiliary'; providerId: string | null; providerFamily: string | null; modelId: string; measurement: 'missing' | 'estimated' | 'actual'; requests: number; pendingRequests: number; inputTokens: UsageTokenCount; outputTokens: UsageTokenCount; cachedInputTokens: UsageTokenCount; cacheWriteTokens: UsageTokenCount; reasoningTokens: UsageTokenCount; }"},
@@ -2230,8 +2231,9 @@
     "PolicyResumeReceipt": {"fields": {"run_id": {"type": "string"}, "action_id": {"type": "string"}, "wait_id": {"type": "string"}, "cursor": {"type": "number"}}},
     "PolicyPauseInfo": {"fields": {"action_id": {"type": "string"}, "wait_id": {"type": "string"}, "reason": {"type": "string"}}},
     "PermissionOpenParams": {"fields": {"operationId": {"type": "string"}, "permissionId": {"type": "string"}, "call": {"type": "HostToolCall"}, "scope": {"type": "unknown"}}},
-    "PermissionDecideParams": {"fields": {"operationId": {"type": "string"}, "permissionId": {"type": "string"}, "decision": {"type": "string"}}},
-    "QuestionAnswerParams": {"fields": {"operationId": {"type": "string"}, "answer": {"type": "string"}}},
+    "PermissionDecideParams": {"fields": {"operationId": {"type": "string"}, "permissionId": {"type": "string"}, "decision": {"type": "string"}, "persistedRule": {"type": "unknown", "optional": true}}},
+    "QuestionAnswer": {"fields": {"questionId": {"type": "string"}, "selectedOptionIds": {"type": "string[]"}, "text": {"type": "string"}, "skipped": {"type": "boolean", "optional": true}}},
+    "QuestionAnswerParams": {"fields": {"operationId": {"type": "string"}, "answers": {"type": "QuestionAnswer[]"}}},
     "OperationParams": {"fields": {"operationId": {"type": "string"}}},
     "HistoryParams": {"fields": {"branchId": {"type": "string"}}},
     "EventsParams": {"fields": {"cursor": {"type": "number"}, "limit": {"type": "number"}}},

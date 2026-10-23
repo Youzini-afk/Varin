@@ -1,6 +1,7 @@
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
+import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './zh-CN.settings';
 import { toolMessagesZhCN } from './tool-interactions';
 
@@ -55,6 +56,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.dialogue.count.other": "完成了 {count} 项其他操作",
   ...toolHeadingMessages('zh-CN'),
   ...toolFailureMessages('zh-CN'),
+  ...chatExperienceMessages('zh-CN'),
   ...toolMessagesZhCN,
   'contextPanel.recovery.files.previewUnavailable': '文件预览暂不可用。',
   'contextPanel.recovery.files.previewChanged': '预览期间文件发生了变化，请刷新查看当前版本。',

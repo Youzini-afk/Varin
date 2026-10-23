@@ -81,7 +81,7 @@ export interface ModelPresentationParams {
   requestIds: string[];
 }
 
-export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; usage: InferenceUsage; }
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; }
 
 export interface ThreadUsageParams {
   threadId: string;
@@ -1506,7 +1506,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 59; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 60; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2366,11 +2366,19 @@ export interface PermissionDecideParams {
   operationId: string;
   permissionId: string;
   decision: string;
+  persistedRule?: unknown;
+}
+
+export interface QuestionAnswer {
+  questionId: string;
+  selectedOptionIds: string[];
+  text: string;
+  skipped?: boolean;
 }
 
 export interface QuestionAnswerParams {
   operationId: string;
-  answer: string;
+  answers: QuestionAnswer[];
 }
 
 export interface OperationParams {

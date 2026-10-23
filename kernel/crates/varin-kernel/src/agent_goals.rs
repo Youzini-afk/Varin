@@ -523,8 +523,8 @@ mod waiting_tests {
                         call: ToolCall {
                             call_id: "ask".into(),
                             name: varin_runtime::catalog::questions::QUESTION_TOOL.into(),
-                            schema_version: "1".into(),
-                            arguments: json!({"question":"Which original option?"}),
+                            schema_version: crate::questions::schema().version,
+                            arguments: json!({"questions":[{"id":"question","question":"Which original option?"}]}),
                         },
                     },
                     opaque: None,
@@ -670,7 +670,7 @@ mod waiting_tests {
             catalog
                 .lock()
                 .unwrap()
-                .prepare_question_answer(operation, Some("the real user answer".into()))
+                .prepare_question_answer(operation, Some(json!([{"questionId":"question","selectedOptionIds":[],"text":"the real user answer"}])))
                 .unwrap()
         }
         .load()

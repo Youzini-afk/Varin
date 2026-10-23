@@ -1,6 +1,7 @@
 import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState } from './types';
 import type { ChatTimelineEntry } from './chatTimelineProjection';
 import { presentInvocation } from './toolInvocation';
+import { isStandaloneTool, standaloneDescendants } from './standaloneTools';
 
 type Source = { id: string; sourceId: string; streaming: boolean; extrasId?: string };
 export type DialogueActivity = Source & (
@@ -30,19 +31,7 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
   const seen = new Set<string>();
   let process: DialogueProcess | undefined;
   let runId: string | null | undefined;
-  const delegated = new Map<string, ChatToolCall[]>();
-  for (const execution of Object.values(executions ?? {})) {
-    if (execution.name !== 'dispatch' || !execution.parentToolCallId) continue;
-    let parent = execution.parentToolCallId;
-    const visited = new Set([execution.toolCallId]);
-    while (!visited.has(parent) && executions?.[parent]?.parentToolCallId) {
-      visited.add(parent); parent = executions[parent]!.parentToolCallId!;
-    }
-    if (visited.has(parent)) continue;
-    const calls = delegated.get(parent) ?? [];
-    calls.push({ type: 'toolCall', id: execution.toolCallId, name: execution.name, arguments: execution.args ?? {} });
-    delegated.set(parent, calls);
-  }
+  const delegated = standaloneDescendants(executions);
   const seal = () => { if (process) process.tail = false; process = undefined; };
   const append = (activity: DialogueActivity) => {
     if (!process) { process = { kind: 'process', id: `process:${activity.id}`, activities: [], tail: true }; items.push(process); }
@@ -65,7 +54,7 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
       } else {
         const call = presentInvocation(content);
         const tool = { ...source, kind: 'tool' as const, call, streaming: source.streaming && !call.interrupted };
-        if (call.name === 'dispatch' || call.name === 'ask_user') items.push(tool);
+        if (isStandaloneTool(call.name)) items.push(tool);
         else append(tool);
         // A dispatch inside script_run has the same native child owner. Keep it
         // visible beside the parent process instead of burying it in the script.
@@ -88,7 +77,7 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
     }
     if (entry.type === 'message' && entry.message.role === 'system') continue;
     const item: DialogueActivity & { kind: 'entry' } = { id: `entry:${entry.id}`, kind: 'entry', entry, sourceId: entry.id, streaming: false };
-    const standalone = customIds.has(entry.id) || entry.type === 'custom_message' && entry.customType === 'thread-message'
+    const standalone = customIds.has(entry.id) || entry.type === 'custom_message' && ['thread-message', 'question-answer'].includes(entry.customType)
       || entry.type === 'message' && (entry.message.role === 'user'
         || entry.message.role === 'custom' && ['thread-message', 'media'].includes(entry.message.customType));
     if (standalone) { seal(); items.push(item); } else append(item);

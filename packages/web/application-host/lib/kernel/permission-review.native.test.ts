@@ -150,7 +150,7 @@ it('real permission flow remains undispatched until exact allow-once and never t
   expect(f.effects).toEqual([]); expect(operation.effect).toBe('none');
   expect(permission.call).toMatchObject({ operationId: operation.id, runId: receipt.run_id, name: 'fixture_send', schemaVersion: 'schema-1', arguments: { text: 'only this approved text' } });
   expect(permission.actor.account).toBe('fixture-local-handle');
-  await expect(f.api.answerQuestion({ ...identity, operationId: operation.id, answer: 'yes, allow it' })).rejects.toMatchObject({ status: 400 });
+  await expect(f.api.answerQuestion({ ...identity, operationId: operation.id, answers: [{ questionId: 'question', selectedOptionIds: [], text: 'yes, allow it' }] })).rejects.toMatchObject({ status: 400 });
   const fork = await f.api.fork({ ...identity, key: 'foreign-permission-branch', headId: receipt.input_id });
   await expect(f.api.decidePermission({ ...fork, operationId: operation.id, permissionId: permission.id, decision: 'allow_once' })).rejects.toMatchObject({ status: 400 });
   await expect(f.api.decidePermission({ ...identity, operationId: operation.id, permissionId: 'different-permission', decision: 'allow_once' })).rejects.toMatchObject({ status: 400 });

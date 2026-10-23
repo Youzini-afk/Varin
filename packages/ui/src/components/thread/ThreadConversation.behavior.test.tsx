@@ -15,6 +15,7 @@ import { ThreadConversation } from './ThreadConversation';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
+import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { ChatView } from '@/components/views/ChatView';
@@ -190,6 +191,7 @@ function fixture(active = false) {
 let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
+  useQuestionDraftStore.setState({ drafts: {} });
   translations.dictionary = {};
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
@@ -1458,7 +1460,7 @@ it('does not silently discard a prepared workspace when a live run appears befor
 it('answers a policy-node question explicitly, keeps the draft on failure and disables a stale question', async () => {
   const f = fixture(true);
   const operationId = 'ui-run:policy:question-action:node:ask';
-  const operation: ThreadSnapshot['operations'][number] = { id: operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: `question:${operationId}`, intent: { kind: 'tool', origin: { kind: 'policy_action', action_id: 'ui-run:policy:question-action', node_id: 'ask' }, call: { call_id: 'ask', name: 'ask_user', schema_version: '1', arguments: { question: 'Which approach?', options: ['Option A', 'Option B'] } } }, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: operationId, phase: 'awaiting_user', effect: 'none', lifetime: 'thread' }, execution_owner: null };
+  const operation: ThreadSnapshot['operations'][number] = { id: operationId, run_id: 'ui-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: `question:${operationId}`, intent: { kind: 'tool', origin: { kind: 'policy_action', action_id: 'ui-run:policy:question-action', node_id: 'ask' }, call: { call_id: 'ask', name: 'ask_user', schema_version: '2', arguments: { questions: [{ id: 'question', question: 'Which approach?', options: ['Option A', 'Option B'].map((label,index) => ({id: String(index), label})) }] } } }, result: null, external_receipt: null, call_completion: { kind: 'job_accepted', operation_id: operationId, phase: 'awaiting_user', effect: 'none', lifetime: 'thread' }, execution_owner: null };
   f.view.activeRun!.state = 'waiting'; f.view.activeRun!.waiting_on = operation.waiting_on;
   f.view.operations = [operation];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>().mockRejectedValueOnce(new Error('uncertain answer acceptance')).mockImplementation(async () => {
@@ -1466,19 +1468,19 @@ it('answers a policy-node question explicitly, keeps the draft on failure and di
     f.view.activeRun!.waiting_on = 'question:another-operation';
     return f.view.operations[0]!;
   });
-  f.api.answerQuestion = answer;
+  f.api.answerQuestion = answer; f.api.operation = async () => f.view.operations[0]!;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   expect(answer).not.toHaveBeenCalled();
-  await act(async () => { button('Option B').click(); });
+  await act(async () => { container.querySelectorAll<HTMLInputElement>('input[type=radio]')[1]!.click(); });
   expect(answer).not.toHaveBeenCalled();
   await edit('[aria-label="chat.questionCard.yourAnswer"]', 'Option B with detail');
-  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  await submitForm(document.querySelector<HTMLFormElement>('form.thread-question-form')!);
   expect(document.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.value).toBe('Option B with detail');
   expect(container.textContent).toContain('uncertain answer acceptance');
-  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
-  expect(answer.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, answer: 'Option B with detail' });
+  await submitForm(document.querySelector<HTMLFormElement>('form.thread-question-form')!);
+  expect(answer.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, answers: [{questionId: 'question', selectedOptionIds: ['1'], text: 'Option B with detail', skipped: false}] });
   expect(answer.mock.calls[1]![0]).toEqual(answer.mock.calls[0]![0]);
-  expect(document.querySelector('form[aria-label="chat.questionCard.inputNeeded"]')).toBeNull();
+  expect(document.querySelector('form.thread-question-form')).toBeNull();
   expect(answer).toHaveBeenCalledTimes(2);
 });
 
@@ -1487,16 +1489,16 @@ it('keeps a sibling branch question non-actionable while viewing an earlier conv
   const fork = { ...identity, branchId: 'earlier-fork-branch' };
   f.view.identity = fork;
   f.view.thread.branches.push({ branch_id: fork.branchId, head: 'earlier-user', active_run_id: null, latest_run: null });
-  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { question: 'Original branch clarification', options: ['Proceed'] } } }, result: null, external_receipt: null, call_completion: null, execution_owner: null }];
+  f.view.operations = [{ id: 'source-question-op', run_id: 'source-run', epoch: 1, revision: 2, phase: 'waiting', outcome: null, effect: 'none', cancel_requested: false, lifetime: 'thread', handed_off: true, executor: 'ask_user', waiting_on: 'question:source-question-op', intent: { call: { arguments: { questions: [{ id: 'question', question: 'Original branch clarification', options: ['Proceed'].map((label,index) => ({id: String(index), label})) }] } } }, result: null, external_receipt: null, call_completion: null, execution_owner: null }];
   const answer = vi.fn<ThreadsAPI['answerQuestion']>();
   const cancel = vi.fn<ThreadsAPI['cancelOperation']>();
   f.api.answerQuestion = answer; f.api.cancelOperation = cancel;
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={fork} />); });
-  expect(button('Proceed').disabled).toBe(true);
+  expect(container.querySelector<HTMLInputElement>('input[type=radio]')!.disabled).toBe(true);
   expect(button('chat.questionCard.submit').disabled).toBe(true);
   expect(document.querySelector<HTMLTextAreaElement>('[aria-label="chat.questionCard.yourAnswer"]')!.disabled).toBe(true);
   expect(button('Cancel operation')).toBeUndefined();
-  await submitForm(document.querySelector<HTMLFormElement>('form[aria-label="chat.questionCard.inputNeeded"]')!);
+  await submitForm(document.querySelector<HTMLFormElement>('form.thread-question-form')!);
   expect(answer).not.toHaveBeenCalled(); expect(cancel).not.toHaveBeenCalled();
 });
 
@@ -1514,14 +1516,15 @@ it('permission UI sends only an explicit one-action decision and cannot approve 
   await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
   expect(decide).not.toHaveBeenCalled(); expect(answer).not.toHaveBeenCalled();
   expect(container.textContent).toContain('chosen-target'); expect(container.textContent).toContain('selected-account');
-  await act(async () => { button('Allow once').click(); });
+  await act(async () => { button('chat.permission.once').click(); });
   expect(container.textContent).toContain('decision transport unavailable');
-  await act(async () => { button('Allow once').click(); });
+  await act(async () => { button('chat.permission.once').click(); });
   expect(decide.mock.calls[0]![0]).toEqual({ ...identity, operationId: operation.id, permissionId: permission.id, decision: 'allow_once' });
   expect(decide.mock.calls[1]![0]).toEqual(decide.mock.calls[0]![0]); expect(answer).not.toHaveBeenCalled();
   f.view.operations = [{ ...operation, run_id: 'sibling-run' }];
   await act(async () => { f.emit({ cursor: 20, subject: 'sibling-run', revision: 2, kind: 'permission.opened', data: {} }); });
-  expect(button('Allow once').disabled).toBe(true); expect(button('Deny').disabled).toBe(true);
+  expect(button('chat.permission.once')?.disabled ?? true).toBe(true); expect(button('chat.permission.deny')?.disabled ?? true).toBe(true);
+  expect(decide).toHaveBeenCalledTimes(2);
 });
 
 it('requires an explicit live workspace choice and discloses direct effects before sending its prepared identity', async () => {

@@ -7,7 +7,8 @@ pub struct QuestionAnswerPreparation {
     operation_id: String,
     run_id: String,
     epoch: u64,
-    answer: Option<String>,
+    answers: Option<Value>,
+    call: super::tool_content::ToolCallMetadata,
     content: crate::content::ContentStore,
     publication: crate::content::ContentPublication,
 }
@@ -22,14 +23,18 @@ pub struct PreparedQuestionAnswer {
 }
 impl QuestionAnswerPreparation {
     pub fn load(self) -> Result<PreparedQuestionAnswer> {
-        let answer = self.answer.as_deref().unwrap_or(
-            "The user cancelled this question. Continue without assuming an answer or permission.",
-        );
-        if answer.trim().is_empty() {
-            return Err(RuntimeError::Invalid("answer is empty".into()));
-        }
-        let content = self.content.save_history(&json!({"text":answer}), &None)?;
-        let (outcome, result) = if self.answer.is_some() {
+        let answered = self.answers.is_some();
+        let body = if let Some(answers) = self.answers {
+            let call = self.call.load(&self.content)?;
+            let questions = crate::questions::QuestionSet::parse(call.arguments)?;
+            let (answers, text) = questions.answer(answers)?;
+            json!({"text":text,"questionAnswer":{"operationId":self.operation_id,"answers":answers}})
+        } else {
+            json!({"text":"The user cancelled this question. Continue without assuming an answer or permission.",
+                "questionAnswer":{"operationId":self.operation_id,"cancelled":true}})
+        };
+        let content = self.content.save_history(&body, &None)?;
+        let (outcome, result) = if answered {
             (Outcome::Succeeded, json!({"answer_ref":content}))
         } else {
             (Outcome::Cancelled, json!({"cancelled":true}))
@@ -129,10 +134,10 @@ impl Catalog {
     /// Answer receipt, conversation delivery, terminal operation and continuation commit together.
     /// Equal retries return the original receipt; cancellation and conflicting answers are rejected.
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
-    pub fn answer_question(&mut self, operation_id: &str, answer: &str) -> Result<Operation> {
+    pub fn answer_question(&mut self, operation_id: &str, answers: Value) -> Result<Operation> {
         let _synchronous = self.content.begin_synchronous()?;
         let prepared = self
-            .prepare_question_answer(operation_id, Some(answer.into()))?
+            .prepare_question_answer(operation_id, Some(answers))?
             .load()?;
         self.admit_question_answer(prepared)
     }
@@ -145,17 +150,19 @@ impl Catalog {
     pub fn prepare_question_answer(
         &self,
         operation_id: &str,
-        answer: Option<String>,
+        answers: Option<Value>,
     ) -> Result<QuestionAnswerPreparation> {
         let original = self.operation(operation_id)?;
         if original.executor.as_deref() != Some(QUESTION_TOOL) {
             return Err(RuntimeError::Invalid("not a user question".into()));
         }
+        let call = super::tool_content::ToolIntent::from_operation(&original)?.call().clone();
         Ok(QuestionAnswerPreparation {
             operation_id: operation_id.into(),
             run_id: original.run_id,
             epoch: self.epoch,
-            answer,
+            answers,
+            call,
             content: self.content.clone(),
             publication: self.content.begin_publication(),
         })
@@ -351,6 +358,9 @@ impl QuestionStatusRead {
                 .as_str()
                 .ok_or_else(|| RuntimeError::Invalid("question answer body missing".into()))?;
             value["answer"] = json!(text);
+            if let Some(answers) = answer.content.get("questionAnswer").and_then(|body| body.get("answers")) {
+                value["answers"] = answers.clone();
+            }
             value["historyId"] = json!(answer.id);
         }
         Ok(PreparedQuestionStatus {

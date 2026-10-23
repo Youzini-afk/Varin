@@ -579,7 +579,7 @@ export class AgentRuntimeClient {
   decidePermission(
     operationId: string,
     permissionId: string,
-    decision: 'allow_once' | 'deny',
+    decision: 'allow_once' | 'allow_always' | 'deny',
   ): Promise<Operation> {
     return permissionService(this.kernel).decide(
       operationId,
@@ -589,12 +589,12 @@ export class AgentRuntimeClient {
   }
   answerQuestion(
     operationId: string,
-    answer: string,
+    answers: import('@varin/protocol').QuestionAnswer[],
     signal?: AbortSignal,
   ): Promise<Operation> {
     return this.kernel.agentRuntimeRequest(
       'runtime.question.answer',
-      { operationId, answer },
+      { operationId, answers },
       signal,
     );
   }
