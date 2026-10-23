@@ -31,3 +31,7 @@
 - [application-client](../packages/application-client/README.md)、[protocol](../packages/protocol/README.md)、[extension-host](../packages/extension-host/README.md)
 
 具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。
+
+## 正在评审的设计
+
+- [聊天与设置的整体体验](design/chat-settings-experience.md)：阅读层级、任务状态、布局与动态、设置结构和保存语义。设计提案，尚未全部实施。
