@@ -114,7 +114,9 @@ jobs:
         env:
           VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/kernel/target/release/varin-kernel
           RUST_BACKTRACE: 1
-        run: bun run test:rust
+        # Report failures from every test binary in one round; Cargo still fails
+        # the step if any binary fails, and the execution timeout bounds hangs.
+        run: bun run test:rust --no-fail-fast
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:packages
       - if: needs.changes.outputs.code == 'true'

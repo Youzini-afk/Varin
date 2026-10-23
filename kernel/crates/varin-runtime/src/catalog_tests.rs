@@ -2960,6 +2960,7 @@ fn cancelling_reopened_summary_closes_all_prepared_nodes_without_touching_other_
         },
     });
     let job = db.create_context_job(request, launch, json!({})).unwrap();
+    let selection = db.launch_intent(&job.receipt.run_id).unwrap().unwrap().selection;
     let compiler = db.capture_context_job(&job.receipt.run_id).unwrap().compiler().unwrap();
     let epoch = db.epoch();
     let run = db.run(&job.receipt.run_id).unwrap();
@@ -2976,7 +2977,9 @@ fn cancelling_reopened_summary_closes_all_prepared_nodes_without_touching_other_
             step: index as u64 + 1,
             history_range: snapshot.view.binding.history_range.clone(),
         };
-        snapshot.view.binding.tool_schema_generation = 0;
+        // The summary owner freezes its query capability rather than the conversation tools.
+        snapshot.view.binding.tools = selection.tools.clone();
+        snapshot.view.binding.tool_schema_generation = selection.tool_schema_generation;
         snapshot.view.binding.instruction_sources = context.instruction_sources;
         snapshot.view.binding.memory_checkpoint = context.memory_checkpoint;
         snapshot.view.binding.resource_checkpoint_id = context.resource_checkpoint_id;
