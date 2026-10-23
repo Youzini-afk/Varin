@@ -298,14 +298,38 @@ renderers.images = () => head('图像生成与编辑','分别指定模型，保�
  section('编辑图像',row('编辑模型',select('编辑模型',['未选择','已配置的图像编辑模型']),'生成与编辑可以使用不同的模型。'))+
  route('管理模型服务','models');
 
-renderers.context = () => head('上下文管理','让长对话保持连续，按需要整理上下文。')+
- section('上下文预留',row('预留比例',numbered('15','%','上下文预留'),'为生成内容和后续操作预留一部分模型窗口。')+
- '<div class="meter"><span style="width:85%"></span><span class="reserve" style="width:15%"></span></div><div class="actions small muted" style="justify-content:space-between"><span>上下文 85%</span><span>预留 15%</span></div>'+
- row('后台准备',toggle('后台准备'),'提前准备下一次请求所需的上下文。'))+
+const percentText=n=>Number(n.toFixed(2)).toString();
+function contextBoundaries(){
+ const replace=100-Number(val('上下文预留',15));
+ const prepare=replace*Number(val('压缩准备水位',0.75));
+ return {replace,prepare,enabled:val('后台准备',true)};
+}
+function contextScale(){
+ const {replace,prepare,enabled}=contextBoundaries();
+ return `<div class="context-scale ${enabled?'':'preparation-off'}" id="context-scale" style="--prepare:${prepare}%;--replace:${replace}%">
+ <div class="context-axis"><span>0%</span><span>模型上下文窗口 · 100%</span></div>
+ <div class="context-track"><div class="context-ordinary"></div><div class="context-preparing"></div><div class="context-reserved"></div>
+ <button class="context-marker preparation-marker" data-action="context-edit:prepare" aria-label="调整开始后台压缩的基准位置" ${enabled?'':'disabled'}></button>
+ <span class="context-position preparation-label" data-context-label="prepare">压缩 · ${percentText(prepare)}%</span>
+ <button class="context-marker replacement-marker" data-action="context-edit:replace" aria-label="调整上下文替换位置"></button>
+ <span class="context-position replacement-label" data-context-label="replace">替换 · ${percentText(replace)}%</span></div>
+ <div class="context-legend"><span><i class="ordinary"></i>继续使用当前上下文</span><span data-context-preparation><i class="preparing"></i>后台准备摘要</span><span><i class="reserved"></i>预留空间 <b data-context-reserve>${percentText(100-replace)}%</b></span></div>
+ </div>
+ <div class="context-boundaries">
+ <div class="context-boundary"><label for="context-prepare"><span class="context-dot preparing"></span>开始后台压缩 <small>基准</small></label><div class="actions"><input id="context-prepare" data-context-threshold="prepare" class="number-field" type="number" step="any" value="${percentText(prepare)}" ${enabled?'':'disabled'}><span class="small muted">%</span></div><p>提前准备压缩摘要，对话继续进行。实际准备时机可根据耗时与上下文增长提前。</p></div>
+ <div class="context-boundary"><label for="context-replace"><span class="context-dot reserved"></span>替换上下文</label><div class="actions"><input id="context-replace" data-context-threshold="replace" class="number-field" type="number" step="any" value="${percentText(replace)}"><span class="small muted">%</span></div><p>输入用量超过此位置时切换压缩结果；尚未就绪则等待。<span data-context-reserve-note>对应预留 ${percentText(100-replace)}%。</span></p></div>
+ </div><p id="context-boundary-error" class="error-inline" role="alert"></p>
+ <p class="hint">两个位置都按整个模型窗口显示。点击比例条标记或直接修改下方数值。</p>`;
+}
+renderers.context = () => head('上下文管理','让长对话保持连续，提前压缩，在需要时替换。')+
+ section('压缩与替换',row('后台压缩准备',toggle('后台准备'),'开启后，提前准备摘要，减少切换时的等待。')+
+ contextScale()+
+ fold('比例如何计算','可用输入预算与预留',`<p class="hint">替换位置 = 100% − 预留比例。后台压缩的基准位置 = 替换位置 × 准备水位。当前准备水位为可用输入预算的 <span data-context-waterline>${percentText(Number(val('压缩准备水位',0.75))*100)}%</span>。</p><p class="hint">调整替换位置时，准备水位保持不变，后台压缩标记会按比例移动。关闭后台准备仍会在需要替换时进行压缩。</p>`))+
  section('整理与辅助',objectRow('上下文整理 Agent','在 Agent 配置中管理其模型、指令和行为。','goto:agents','layers')+row('计划辅助模型',modelSelect('计划辅助模型'))+row('下一步辅助',toggle('下一步辅助',false))+
  (val('下一步辅助',false)?row('下一步模型',modelSelect('下一步模型')):''))+
  fold('整理失败后的恢复','恢复开关与等待条件',row('自动恢复',toggle('整理恢复'))+row('流式空闲等待',numbered('60','s','整理空闲'))+row('响应等待',numbered('120','s','整理响应'))+row('重试次数',numbered('2','次','整理重试')))+
  fold('消息时间','沿现有策略',row('附加消息时间',toggle('附加消息时间',true)));
+
 renderers.retrieval = () => head('代码检索','检索入口保持轻量，可选能力分别解释。')+
  section('快速检索',row('检索模型',modelSelect('检索模型'),'跟随主模型，或选择适合探索任务的普通对话模型。'))+
  section('可选能力',fold('重排','沿默认或单独配置',row('来源',select('重排来源',['默认','模型服务']))+row('服务',select('重排服务',['选择服务']))+field('模型 ID','重排模型','rerank-v3.5')+field('接口路径','重排路径','/rerank'))+
@@ -326,16 +350,37 @@ renderers.notifications = () => head('通知','先决定什么时候提醒，再
  fold('浏览器推送','当前浏览器的订阅',row('订阅推送',toggle('推送',false),'仅在支持的浏览器环境显示。'))
  }</div><aside class="preview"><div class="preview-label"><span>通知预览</span><span>示例内容</span></div><div class="preview-window" style="padding:20px"><div class="actions small muted">${icon('bell')} Varin <span style="margin-left:auto">现在</span></div><h3 style="margin:14px 0 6px">需要你的回答</h3><p class="small muted">计划面板更新时，如何处理正在编辑的草稿？</p></div><p class="preview-footer">通知最终使用系统样式；是否显示取决于系统通知权限。</p></aside></div>`;
 
+const speechModels=[
+ ['whisper-turbo','Whisper large-v3 Turbo','100 种语言','564 MB',true],
+ ['qwen-asr','Qwen3-ASR 0.6B','30 种语言','879 MB'],
+ ['sensevoice','SenseVoice Small','中文 · 英语 · 日语 · 韩语 · 粤语','166 MB'],
+ ['parakeet-v2','Parakeet v2','英语','483 MB'],
+ ['parakeet-v3','Parakeet v3','25 种语言','488 MB'],
+ ['whisper-base','Whisper base','99 种语言','208 MB'],
+ ['whisper-tiny','Whisper tiny','99 种语言','117 MB']
+];
+function speechModelGrid(){
+ return '<div class="speech-model-grid" role="group" aria-label="本地语音识别模型">'+speechModels.map(([id,name,languages,size,preferred])=>{
+ const selected=val('本地语音模型','whisper-turbo')===id;
+ return `<div class="speech-model ${selected?'selected':''}">
+ <button class="speech-model-select" data-choice="${id}" data-key="本地语音模型" aria-pressed="${selected}">
+ <span class="radio-dot"></span><span><strong>${name} ${preferred?tag('默认'):''}</strong><small>${languages}</small><small>下载 ${size}</small></span></button>
+ <button class="icon-button speech-model-download" data-action="speech-download:${id}" aria-label="下载 ${name}"><svg class="i" viewBox="0 0 24 24"><path d="M12 3v13m-5-5 5 5 5-5M5 20h14"/></svg></button></div>`;
+ }).join('')+'</div>';
+}
 renderers.voice = () => head('语音','分别设置回答朗读和语音输入。')+
- tabs([['playback','朗读'],['recognition','语音输入']],state.tabs.voice||'playback','voice')+
- ((state.tabs.voice||'playback')==='playback'?
- section('朗读',row('启用朗读',toggle('朗读启用',false))+row('播放提供方',select('播放提供方',['浏览器语音','本地模型','OpenAI','OpenAI 兼容','macOS say']))+
- row('声音',select('朗读声音',['跟随提供方默认','已安装声音']))+row('输入内容',select('朗读内容',['完整回答','摘要'])))+
- section('试听与音量',`<div class="resource-line">${icon('sound')}<div><p>准备好后，可以继续下一步。</p><small>点击试听，听听当前声音与语速。</small></div>${btn('试听','voice-preview','','sound')}</div>`+
- row('语速',input('语速','1','range','min="0.5" max="2" step="0.1"'))+row('音调',input('音调','1','range','min="0.5" max="2" step="0.1"'))+row('音量',input('音量','80','range','min="0" max="100"'))):
- section('语音输入',row('启用听写',toggle('听写启用',true))+row('识别提供方',select('识别提供方',['本地模型','OpenAI','OpenAI 兼容']))+row('语言',select('识别语言',['自动识别','中文','English'])))+
- section('识别模型',objectRow('本地语音模型','查看下载进度和已安装的识别模型。','speech-models','database')+fold('服务连接','地址与模型 ID',field('服务地址','STT地址','https://api.example.test/v1')+field('模型 ID','STT模型','')))+
- fold('停止识别条件','静音检测与持续时间',row('静音阈值',input('静音阈值','50','range','min="0" max="100"'))+row('保持时间',numbered('1000','ms','静音保持'))));
+ '<div class="page-nav"><button data-anchor="voice-playback">朗读</button><button data-anchor="voice-input">语音输入</button></div>'+
+ '<div id="voice-playback">'+section('朗读',row('启用朗读',toggle('朗读启用',false))+
+ (val('朗读启用',false)?row('播放提供方',select('播放提供方',['浏览器语音','本地模型','OpenAI','OpenAI 兼容','macOS say']))+
+ row('声音',select('朗读声音',['跟随提供方默认','已安装声音']))+row('输入内容',select('朗读内容',['完整回答','摘要']))+
+ `<div class="resource-line">${icon('sound')}<div><p>准备好后，可以继续下一步。</p><small>点击试听，听听当前声音与语速。</small></div>${btn('试听','voice-preview','','sound')}</div>`+
+ fold('声音参数','语速、音调与音量',row('语速',input('语速','1','range','min="0.5" max="2" step="0.1"'))+row('音调',input('音调','1','range','min="0.5" max="2" step="0.1"'))+row('音量',input('音量','80','range','min="0" max="100"'))):''))+'</div>'+
+ '<div id="voice-input">'+section('语音输入',row('启用语音输入',toggle('听写启用',true))+
+ (val('听写启用',true)?row('识别提供方',select('识别提供方',['本地模型','OpenAI 兼容服务']))+
+ (val('识别提供方','本地模型')==='本地模型'?'<div class="small-label" style="margin:22px 0 8px">模型</div>'+speechModelGrid():
+ field('服务地址','STT地址','http://localhost:8001/v1')+field('API Key','STT密钥','','按服务要求填写。','password')+field('模型 ID','STT模型','')+
+ fold('停止识别条件','静音检测与持续时间',row('静音阈值',numbered('-40','dB','静音阈值'))+row('保持时间',numbered('1000','ms','静音保持'))))+
+ row('语言',select('识别语言',['自动检测','中文','English'])):''))+'</div>';
 
 renderers.shortcuts = () => head('快捷键','直接按动作查找，点击键位录入新的组合。',btn('恢复默认','reset-shortcuts','ghost'))+
  `<div class="list-toolbar">${input('搜索快捷键','','search','placeholder="搜索动作或快捷键" data-list-filter')}<span>点击键位开始录入</span></div><table class="table"><thead><tr><th>动作</th><th style="width:32%">快捷键</th><th style="width:60px"></th></tr></thead><tbody>${[
@@ -511,7 +556,7 @@ const designNotes = {
  chat:['真实聊天预览、三种模式和细分偏好','预览继续就近联动；思考与工具、阅读、输入各有归属。'],
  sessions:['主机 / 项目继承和独立重试保存','先默认模型，再请求策略，设备偏好单独标明。'],
  notifications:['事件分类、测试通知和模板','事件开关直达，文案在对应预览旁编辑。'],
- voice:['播放与识别的不同提供方','按任务分为两个完整配置面，避免依赖参数交叉。'],
+ voice:['现有语音分区与本地模型卡片','保留两列模型选择、语言覆盖、大小和下载操作；窄屏改单列。'],
  shortcuts:['按动作录入、冲突处理、恢复默认','可扫描的动作表，键位在原行编辑。'],
  storage:['分类占用、设备范围和清理预览','保留数据构成，强调可清理对象及实际回执。'],
  history:['会话与文件恢复各自的保存单元','保留期、位置迁移和项目覆盖在原领域内组织。'],
@@ -526,7 +571,7 @@ const designNotes = {
  images:['生成 / 编辑各自的模型选择','两种用途并列理解，不额外增加未经支持的图像设置。'],
  computers:['桌面目录、实际状态与默认目标','在具体桌面行查看和处理问题。'],
  permissions:['规则顺序、参数匹配、项目约束','默认策略与规则表分层，支持单条编辑和顺序调整。'],
- context:['上下文预留与现有整理/恢复策略','可视化比例辅助理解，实际数值和能力仍由原 owner 解释。'],
+ context:['预留决定的替换边界与后台压缩准备水位','同一比例条呈现基准压缩点、替换点和预留区；准备可能自适应提前。'],
  projects:['项目选择、身份、目录、动作与工作副本','延续分栏；每类配置有清晰页内入口与保存边界。'],
  editor:['共享字体和编辑偏好','以代码阅读预览连接设置效果，行为项紧凑成组。'],
  terminal:['Shell 选择、字号与快速按键','保留终端样式预览，共享字体明确导航。'],
@@ -683,6 +728,26 @@ function previewStyle(){
  const preview=$('#live-preview');
  if(preview){preview.querySelector('.mini-chat').style.fontSize=(Number(val('界面字号',14))-1)+'px';const padding=val('内容留白','标准');preview.querySelector('.mini-chat').style.padding=padding==='紧凑'?'16px':padding==='舒展'?'27px':'22px 20px';preview.querySelector('.preview-window').style.borderRadius=val('圆角',8)+'px';}
 }
+function updateContextScale(){
+ const scale=$('#context-scale');if(!scale)return;
+ const {replace,prepare}=contextBoundaries();
+ scale.style.setProperty('--prepare',prepare+'%');scale.style.setProperty('--replace',replace+'%');
+ $('[data-context-label=prepare]').textContent='压缩 · '+percentText(prepare)+'%';
+ $('[data-context-label=replace]').textContent='替换 · '+percentText(replace)+'%';
+ $('[data-context-reserve]').textContent=percentText(100-replace)+'%';
+ $('[data-context-reserve-note]').textContent='对应预留 '+percentText(100-replace)+'%。';
+ $('[data-context-waterline]').textContent=percentText(Number(val('压缩准备水位',0.75))*100)+'%';
+ $('#context-prepare').value=percentText(prepare);$('#context-replace').value=percentText(replace);
+}
+function changeContextBoundary(input){
+ const v=Number(input.value),{replace}=contextBoundaries(),prepare=input.dataset.contextThreshold==='prepare';
+ const valid=input.value.trim()!==''&&Number.isFinite(v)&&v>0&&(prepare?v<replace:v<=100);
+ const error=valid?'':prepare?'开始后台压缩的位置需大于 0%，并早于替换位置。':'替换位置需大于 0%，且不超过模型窗口的 100%。';
+ input.setCustomValidity(error);$('#context-boundary-error').textContent=error;
+ if(!valid)return;
+ if(prepare)mark('压缩准备水位',v/replace);else mark('上下文预留',100-v);
+ updateContextScale();
+}
 function updateSpecificPreviews(){
  const set=(key,text)=>{const n=$('[data-model-preview="'+key+'"]');if(n)n.textContent=text;};
  if(state.page==='models'&&state.detail==='model'){
@@ -838,6 +903,8 @@ function handle(action){
  if(actions[action])return actions[action]();
  const [kind,...tail]=action.split(':'), value=tail.join(':');
  if(kind==='goto')return go(value);
+ if(kind==='context-edit'){const input=$('#context-'+value);input?.focus();input?.select();return;}
+ if(kind==='speech-download')return toast('下载流程示意：正式界面在当前模型卡片显示进度、取消和失败重试。');
  if(kind==='permission-edit')return permissionEditor(Number(value));
  if(['permission-up','permission-down','permission-delete'].includes(kind)){
   const rules=[...permissionRules()],i=Number(value);
@@ -901,10 +968,11 @@ document.addEventListener('input',event=>{
 });
 document.addEventListener('change',event=>{
  const t=event.target;
+ if(t.dataset.contextThreshold)return changeContextBoundary(t);
  if(t.dataset.local||t.closest('.dialog')||!t.dataset.key)return;
  if(t.type!=='checkbox'&&t.tagName!=='SELECT')return;
  mark(t.dataset.key,t.type==='checkbox'?t.checked:t.value);
- const contextual=['用途-对话','用途-快速决策','用途-图像生成','用途-图像编辑','决策预设','图像预设','thinking','展开思考','展开命令','展开编辑','搜索提供商','域名白名单','范围','自动清理会话','下一步辅助','隧道模式','MCP配置来源','记忆范围','Skill范围','项目恢复位置'];
+ const contextual=['后台准备','朗读启用','听写启用','识别提供方','用途-对话','用途-快速决策','用途-图像生成','用途-图像编辑','决策预设','图像预设','thinking','展开思考','展开命令','展开编辑','搜索提供商','域名白名单','范围','自动清理会话','下一步辅助','隧道模式','MCP配置来源','记忆范围','Skill范围','项目恢复位置'];
  if(contextual.includes(t.dataset.key))render(true);else{previewStyle();updateSpecificPreviews();}
 });
 $('#search').addEventListener('keydown',e=>{if(e.key==='Enter'){$('#nav .nav-link')?.click();}if(e.key==='Escape'){e.target.value='';renderNav();e.target.blur();}});
