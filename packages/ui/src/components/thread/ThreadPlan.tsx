@@ -12,7 +12,7 @@ import type { PlanSummary } from '@/lib/planSummary';
 
 type Props = { api: ThreadPlanAPI; identity: ThreadIdentity; contextRevision?: number; onContentChange?(present: boolean): void; readOnly?: boolean;
   onSummaryChange?(summary: PlanSummary): void;
-  summaryView?: { open: boolean; onToggle(): void; onInspect(): void } };
+  summaryView?: { onInspect(): void } };
 type ReadFailure = 'failed' | 'not-ready' | 'unsupported';
 const scopeFailure = (error: unknown): Exclude<ReadFailure, 'failed'> | null => error instanceof ThreadRequestError
   ? error.code === 'plan-not-ready' ? 'not-ready' : error.code === 'plan-unsupported' ? 'unsupported' : null
@@ -35,6 +35,28 @@ function PlanCard({ api, identity, contextRevision, host, onContentChange, onSum
   const [draft, setDraft] = React.useState('');
   const [basis, setBasis] = React.useState<ThreadPlanState>();
   const [saving, setSaving] = React.useState(false);
+  const editor = React.useRef<HTMLTextAreaElement>(null);
+  const summaryOnly = Boolean(summaryView);
+  React.useLayoutEffect(() => {
+    const element = editor.current;
+    if (!element || !editing || summaryOnly || readOnly
+      || typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')) return;
+    // Older browser clients share the same full-height editing surface.
+    const fit = () => {
+      element.style.height = 'auto';
+      element.style.height = `${element.scrollHeight}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    let width = element.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (element.clientWidth === width) return;
+      width = element.clientWidth;
+      fit();
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [draft, editing, summaryOnly, readOnly]);
   const hasContent = Boolean(state?.plan?.content.trim() || editing || saveError || readError === 'failed');
   React.useEffect(() => { onContentChange?.(hasContent); }, [hasContent, onContentChange]);
   const lifecycle = React.useRef(0);
@@ -110,40 +132,72 @@ function PlanCard({ api, identity, contextRevision, host, onContentChange, onSum
   const summary = React.useMemo(() => summarizePlan(state?.plan?.content ?? ''), [state?.plan?.content]);
   React.useEffect(() => { onSummaryChange?.(summary); }, [summary, onSummaryChange]);
   const changed = editing && basis && state && (basis.headId !== state.headId || basis.plan?.ref !== state.plan?.ref);
+  const cancelEdit = () => {
+    setEditing(false); setDraft(''); setBasis(undefined); setConflict(false); setSaveError(''); request.current = null;
+  };
+  const startEdit = () => {
+    setBasis(state); setDraft(state?.plan?.content ?? ''); setEditing(true); setSaveError('');
+  };
+  const currentPlan = state && <div aria-label="Current plan" className="thread-plan-content min-w-0">
+    {!state.plan?.content ? <p>{t('chat.plan.empty')}</p>
+      : <MarkdownRenderer messageId={`plan:${state.plan.ref}`} content={state.plan.content} />}
+  </div>;
+  // The overview is a reading shortcut. Keep the current step and its neighbours
+  // in source order; the full plan and editing remain in the dedicated view.
+  let focusIndex = summary.items.findIndex(item => item.status === 'in_progress');
+  if (focusIndex < 0) focusIndex = summary.items.findIndex(item => item.status === 'blocked');
+  if (focusIndex < 0) focusIndex = summary.items.findIndex(item => item.status !== 'completed');
+  if (focusIndex < 0) focusIndex = summary.items.length - 1;
+  const previewStart = Math.max(0, Math.min(focusIndex, summary.items.length - 3));
+  const previewItems = summary.items.slice(previewStart, previewStart + 3);
+  const omittedItems = summary.total - previewItems.length;
   if (summaryView) return hasContent ? <section className="thread-overview-section" aria-label={t('chat.plan.title')}>
-    <div className="thread-overview-section-heading"><button type="button" className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left typography-ui-label font-medium" aria-expanded={summaryView.open} onClick={summaryView.onToggle}>
-      {t('harness.overview.plan')}<span className="flex items-center gap-2 typography-micro font-normal tabular-nums text-muted-foreground">{summary.total > 0 && `${summary.done} / ${summary.total}`}<Icon name={summaryView.open ? 'arrow-down-s' : 'arrow-right-s'} className="size-3.5" /></span>
-    </button><button type="button" aria-label={t('harness.overview.planDetails')} className="rounded p-1 text-muted-foreground hover:bg-interactive-hover" onClick={summaryView.onInspect}><Icon name="more" className="size-4" /></button></div>
-    {summaryView.open && <div className="space-y-1.5">
-      {readError === 'failed' && <button type="button" className="typography-meta text-status-warning" onClick={summaryView.onInspect}>{t('chat.plan.unavailable')}</button>}
-      {summary.items.length ? summary.items.map((item, index) => <div key={index} className={`flex items-start gap-2 typography-meta ${item.status === 'completed' ? 'text-muted-foreground' : ''}`}>
-        <Icon name={item.status === 'completed' ? 'check' : item.status === 'in_progress' ? 'loader-4' : item.status === 'blocked' ? 'error-warning' : 'record-circle'} className="mt-0.5 size-3.5 shrink-0" /><span>{item.text}</span>
-      </div>) : state?.plan && <MarkdownRenderer messageId={`plan:${state.plan.ref}`} content={state.plan.content} />}
-    </div>}
+    <button type="button" className="thread-plan-summary group block w-full min-w-0 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      aria-label={t('harness.overview.planDetails')} onClick={summaryView.onInspect}>
+      <span className="mb-2 flex min-w-0 items-center justify-between gap-2 typography-ui-label font-medium">
+        {t('harness.overview.plan')}<span className="flex shrink-0 items-center gap-2 typography-micro font-normal tabular-nums text-muted-foreground">{summary.total > 0 && `${summary.done} / ${summary.total}`}<Icon name="arrow-right-s" className="size-3.5 transition-transform group-hover:translate-x-0.5" /></span>
+      </span>
+      <span className="block space-y-2">
+        {readError === 'failed' && <span className="block typography-meta text-status-warning">{t('chat.plan.unavailable')}</span>}
+        {previewItems.length ? previewItems.map((item, index) => <span key={previewStart + index} className={`flex min-w-0 items-start gap-2 typography-meta ${item.status === 'completed' ? 'text-muted-foreground' : ''}`}>
+          <Icon name={item.status === 'completed' ? 'check' : item.status === 'in_progress' ? 'loader-4' : item.status === 'blocked' ? 'error-warning' : 'record-circle'} className="mt-0.5 size-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 line-clamp-2 [overflow-wrap:anywhere]" title={item.text}>{item.text}</span>
+        </span>) : state?.plan && <span className="line-clamp-3 whitespace-pre-wrap typography-meta [overflow-wrap:anywhere]">{state.plan.content}</span>}
+      </span>
+      <span className="mt-2 block typography-micro text-muted-foreground transition-colors group-hover:text-foreground">
+        {omittedItems > 0 && <>{t('harness.overview.planRemaining', { count: omittedItems })} · </>}{t('harness.overview.planDetails')}
+      </span>
+    </button>
   </section> : null;
-  return <section aria-label="Conversation plan" className="mx-auto max-w-3xl space-y-2 rounded border p-3 text-sm">
-    <div className="font-medium">{t('chat.plan.title')}{summary.total > 0 ? ` · ${summary.done}/${summary.total}` : ''}</div>
+  return <section aria-label="Conversation plan" className="thread-plan-detail mx-auto min-w-0 max-w-3xl space-y-3 text-sm">
+    <div className="thread-plan-toolbar sticky top-0 z-10 flex min-w-0 flex-wrap items-center justify-between gap-2 py-2">
+      <span className="typography-ui-label font-medium">{t('chat.plan.title')}{summary.total > 0 && <span className="ml-2 typography-micro font-normal tabular-nums text-muted-foreground">{summary.done}/{summary.total}</span>}</span>
+      {!readOnly && (editing ? <div className="flex items-center gap-1">
+        <Button variant="ghost" size="sm" disabled={saving} onClick={cancelEdit}>{t('chat.plan.cancel')}</Button>
+        <Button size="sm" disabled={saving || loading || Boolean(readError) || conflict} onClick={() => void save()}>{t(saving ? 'chat.plan.saving' : 'chat.plan.save')}</Button>
+      </div> : !readError || readError === 'failed' ? <Button variant="ghost" size="sm" disabled={!state || loading || Boolean(readError) || saving} onClick={startEdit}>
+        {t(state?.plan ? 'chat.plan.edit' : 'chat.plan.create')}
+      </Button> : null)}
+    </div>
     {loading && <p role="status">{t('common.loading')}</p>}
     {readError === 'failed' && <p role="alert">{t('chat.plan.unavailable')} <Button variant="ghost" size="sm" onClick={() => void refresh()}>{t('chat.mcp.refresh')}</Button></p>}
     {readError === 'not-ready' && <p role="status">{t('chat.plan.notReady')}</p>}
     {readError === 'unsupported' && <p role="status">{t('chat.plan.unsupported')}</p>}
-    {state && <div aria-label="Current plan">
-      {state.plan === null ? <p>{t('chat.plan.empty')}</p> : state.plan.content === '' ? <p>{t('chat.plan.empty')}</p>
-        : <MarkdownRenderer messageId={`plan:${state.plan.ref}`} content={state.plan.content} />}
-    </div>}
     {saveError && <p role="alert">{saveError}</p>}
-    {!readOnly && (editing ? <>
-      <Textarea aria-label="Edit conversation plan" value={draft} disabled={saving || readError === 'not-ready' || readError === 'unsupported'} onChange={event => setDraft(event.target.value)} />
+    {editing && !readOnly ? <>
       {changed && !conflict && <p role="status">{t('chat.plan.conflict')}</p>}
-      {(changed || conflict) && <Button variant="outline" size="sm" disabled={saving || loading || Boolean(readError) || !state} onClick={() => {
-        setBasis(state); setConflict(false); setSaveError(''); request.current = null;
-      }}>{t('chat.plan.rebase')}</Button>}
-      <div className="flex gap-2">
-        <Button size="sm" disabled={saving || loading || Boolean(readError) || conflict} onClick={() => void save()}>{t(saving ? 'chat.plan.saving' : 'chat.plan.save')}</Button>
-        <Button variant="ghost" size="sm" disabled={saving} onClick={() => { setEditing(false); setDraft(''); setBasis(undefined); setConflict(false); setSaveError(''); request.current = null; }}>{t('chat.plan.cancel')}</Button>
-      </div>
-    </> : !readError || readError === 'failed' ? <Button variant="outline" size="sm" disabled={!state || loading || Boolean(readError) || saving} onClick={() => {
-      setBasis(state); setDraft(state?.plan?.content ?? ''); setEditing(true); setSaveError('');
-    }}>{t(state?.plan ? 'chat.plan.edit' : 'chat.plan.create')}</Button> : null)}
+      {(changed || conflict) && <div className="space-y-2">
+        {state && <details className="min-w-0 rounded-md border border-border/60 p-2">
+          <summary className="cursor-pointer typography-meta text-muted-foreground">{t('chat.plan.latest')}</summary>
+          <div className="mt-2">{currentPlan}</div>
+        </details>}
+        <Button variant="outline" size="sm" className="h-auto max-w-full whitespace-normal text-left" disabled={saving || loading || Boolean(readError) || !state} onClick={() => {
+          setBasis(state); setConflict(false); setSaveError(''); request.current = null;
+        }}>{t('chat.plan.rebase')}</Button>
+      </div>}
+      <Textarea ref={editor} simple autoFocus rows={12} aria-label="Edit conversation plan" className="thread-plan-editor min-h-72 min-w-0 rounded-md px-1 py-2 leading-relaxed"
+        value={draft} disabled={saving || readError === 'not-ready' || readError === 'unsupported'} onChange={event => setDraft(event.target.value)}
+        onKeyDown={event => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); void save(); } }} />
+    </> : currentPlan}
   </section>;
 }

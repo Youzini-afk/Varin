@@ -53,7 +53,6 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const { t } = useI18n();
   const open = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
   const compact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
-  const planOpen = useWorkOverviewStore(state => state.bySession[sessionKey]?.plan ?? true);
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const usage = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]?.usage);
   const [detail, setDetail] = React.useState<Section>();
@@ -117,7 +116,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   };
   const status = <div className="mb-4 space-y-2">
     <div className="flex items-center gap-2 typography-ui-label font-medium"><span className={cn('size-1.5 shrink-0 rounded-full', attention ? 'bg-status-warning' : run?.state === 'completed' ? 'bg-status-success' : 'bg-primary')} />{t(statusKey)}</div>
-    {statusDetail && <p className="break-words pl-3.5 typography-meta text-muted-foreground">{statusDetail}</p>}
+    {statusDetail && <p className={cn('min-w-0 pl-3.5 typography-meta text-muted-foreground [overflow-wrap:anywhere]', !attention && 'line-clamp-2')} title={statusDetail}>{statusDetail}</p>}
     {(question || permission) && <button type="button" className="thread-overview-action typography-meta text-primary" onClick={onAttention}>{t('harness.overview.handleRequest')}<Icon name="external-link" className="size-3.5" /></button>}
     {failedChildren.length > 0 && <button type="button" className="thread-overview-action typography-meta" onClick={() => show('threads')}>{t('harness.overview.inspectTasks')}<Icon name="arrow-right-s" className="size-3.5" /></button>}
     {recoveryAttention && <button type="button" className="thread-overview-action typography-meta" onClick={() => show('recovery')}>{t('harness.overview.recovery')}<Icon name="arrow-right-s" className="size-3.5" /></button>}
@@ -149,7 +148,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
       {runningChildren.map(row => <button type="button" key={row.child.operation_id} className="thread-overview-action typography-meta" onClick={() => show('threads')}><AgentAvatar identity={row.child.child_thread_id} avatar={row.child.avatar} size={22} /><span className="min-w-0 flex-1 truncate">{row.child.name || row.child.input.name || row.task}</span><ChildState state={row.state} /></button>)}{outputSummary}</>}>
     <div hidden={Boolean(detail)}>{status}</div>
     <div hidden={Boolean(detail && detail !== 'plan')}>{api.plan && <ThreadPlan api={api.plan} identity={identity} readOnly={readOnly} contextRevision={snapshot?.context.checkpoint?.revision} onContentChange={setHasPlan} onSummaryChange={setPlan}
-      summaryView={detail === 'plan' ? undefined : { open: planOpen, onToggle: () => disclosure(sessionKey, 'plan', !planOpen), onInspect: () => show('plan') }} />}</div>
+      summaryView={detail === 'plan' ? undefined : { onInspect: () => show('plan') }} />}</div>
     {!detail && goal && <div className="thread-overview-section">{action('goals', 'target', goal.objective, <ChildState state={goal.state} />)}</div>}
     <section hidden={Boolean(detail && detail !== 'threads')} className="thread-overview-section">
       {(hasChildren || detail === 'threads') && <>{!detail && <div className="thread-overview-section-heading typography-ui-label font-medium"><span>{t('harness.overview.threads')}</span>{runningChildren.length > 0 && <span className="typography-micro font-normal text-muted-foreground">{t('harness.overview.activeTasks', { count: runningChildren.length })}</span>}</div>}{childTasks}</>}

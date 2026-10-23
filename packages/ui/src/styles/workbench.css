@@ -224,10 +224,17 @@
 .workbench-overview-resizer:hover, .workbench-overview-resizer:focus-visible { background: color-mix(in srgb, var(--primary-base) 20%, transparent); }
 .thread-overview-section { margin-top: 24px; }
 .thread-overview-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
-.thread-overview-action { display: flex; width: 100%; align-items: center; gap: 8px; padding: 7px 4px; text-align: left; border-radius: 6px; }
+.thread-work-overview { overflow-wrap: anywhere; }
+.thread-work-overview > *, .thread-overview-section, .thread-overview-detail { min-width: 0; max-width: 100%; }
+.thread-overview-action { display: flex; width: 100%; min-width: 0; align-items: center; gap: 8px; padding: 7px 4px; text-align: left; border-radius: 6px; }
 .thread-overview-action:hover { background: var(--interactive-hover); }
 .thread-overview-detail { padding-bottom: 16px; }
 .thread-overview-detail > details { max-height: none; overflow: visible; }
+.thread-plan-summary { transition: background-color var(--wb-state-duration) var(--wb-ease); }
+.thread-plan-summary:hover { background: var(--interactive-hover); }
+.thread-plan-toolbar { background: var(--surface-elevated, var(--background)); }
+.thread-plan-content .markdown-content :is(p, li, a, code[data-markdown="inline-code"]) { overflow-wrap: anywhere; }
+.thread-plan-editor { field-sizing: content; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 @container thread-conversation (max-width: 600px) {
   .thread-conversation-layout:has(.workbench-overview-control:not([data-view="closed"])) { flex-direction: column; }
   .workbench-overview-control[data-view="full"],

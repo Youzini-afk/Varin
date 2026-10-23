@@ -24,6 +24,10 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
   const { t } = useI18n();
   const id = React.useId();
   const root = React.useRef<HTMLElement>(null);
+  const detailViewport = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    if (detailViewport.current) detailViewport.current.scrollTop = 0;
+  }, [detailTitle]);
   const trigger = React.useRef<HTMLButtonElement>(null);
   const width = useWorkOverviewStore(state => state.panelWidth);
   const setWidth = useWorkOverviewStore(state => state.setPanelWidth);
@@ -44,7 +48,7 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
     </div>
     {compactOpen && <section id={id} aria-label={t('harness.overview.peek')} data-harness-overview-peek="true" className="workbench-overview-peek workbench-overview-card pointer-events-auto flex min-h-0 w-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-1 px-3"><span className="min-w-0 flex-1 truncate typography-ui-label font-medium">{t('harness.overview.title')}</span><button type="button" onClick={close} className={iconButton} aria-label={t('dialog.common.actions.close')}><Icon name="close" className="size-4" /></button></header>
-      <div className="min-h-0 overflow-y-auto px-3 pb-3">
+      <div className="thread-work-overview min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 pb-3">
         {status}
         {compactContent ?? rows.map(row => <button key={row.id} type="button" onClick={() => openFull(row.section)} className="mt-3 flex w-full items-start gap-2 rounded-md py-1.5 text-left hover:bg-interactive-hover">
           <Icon name={row.icon} className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1 typography-meta"><span className="flex justify-between gap-2"><span>{row.label}</span><span className="text-muted-foreground">{row.value}</span></span>{row.description && <span className="mt-1 block truncate typography-micro text-muted-foreground">{row.description}</span>}</span>
@@ -65,7 +69,7 @@ export function WorkOverviewControl({ open, compactOpen, attention, onOpenChange
         <button type="button" className={iconButton} onClick={() => onCompactChange(true)} aria-label={t('harness.overview.peek')}><Icon name="arrow-down-s" className="size-4" /></button>
         <button type="button" className={iconButton} onClick={close} aria-label={t('harness.overview.collapse')}><Icon name="close" className="size-4" /></button>
       </header>
-      <div className="thread-work-overview min-h-0 overflow-y-auto px-3 pb-3">{children}</div>
+      <div ref={detailViewport} className="thread-work-overview min-h-0 min-w-0 overflow-x-hidden overflow-y-auto px-3 pb-3">{children}</div>
     </section>
   </aside>;
 }

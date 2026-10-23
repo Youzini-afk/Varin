@@ -95,6 +95,10 @@ full views use compact floating cards in a reserved layout column, so neither co
 or composer. Cards fit their content with internal scrolling when needed; the full card has a resizable
 width. Narrow conversations stack the card above the chat. Disclosure and width state remain outside
 streaming timeline subscriptions. Empty capability categories are not shown.
+Plan summaries show up to three steps around the current work, with two wrapped lines per
+step and a link to the full plan. The plan detail switches its content area between reading
+and editing, grows the editor with its text, and keeps save/cancel controls in view. Concurrent
+plan changes retain the draft and offer the latest revision for comparison before rebasing.
 Workspace, goal, follow-up, memory, research and recovery editors mount on first inspection and retain
 their drafts across panel navigation. Context resources and compression jobs share the context detail.
 The plan reader stays subscribed to its existing branch events, while tool/operation bodies are read
