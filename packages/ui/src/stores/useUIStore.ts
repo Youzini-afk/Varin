@@ -864,7 +864,7 @@ export const useUIStore = create<UIStore>()(
         sessionGoalDefaultBudgetEnabled: false,
         sessionGoalDefaultBudget: 200_000,
         collapsibleThinkingBlocks: true,
-        chatRenderMode: 'live',
+        chatRenderMode: 'dialogue',
         activityRenderMode: 'summary',
         showDeletionDialog: true,
         serverPermissionAutoAcceptEnabled: false,

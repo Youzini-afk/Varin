@@ -79,6 +79,7 @@ Missing subjects stay unknown, and requested mutations never substitute for comp
 Narrow viewports wrap subjects instead of hiding them; original arguments remain in details.
 
 Chat layout offers chronological, grouped-answer, and conversation-first (`dialogue`) modes.
+Conversation-first is the default for unset preferences and resets; saved choices retain their mode.
 Conversation-first preserves every spoken message in arrival order. Ordinary tools and public
 thinking between messages share one initially collapsed activity row: the active segment shows
 the current action, while a later spoken message or the end of the Run leaves a receipt-based
