@@ -3,10 +3,12 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { DocumentReadRequest, ExperimentArtifactView, ExperimentAttemptView, FetchResult } from '@varin/protocol';
+import type { AgentSettingsSnapshot } from '@varin/application-client';
 
 const mocks = vi.hoisted(() => ({
   runtimeKey: 'runtime-a',
   runtimeFetch: vi.fn(),
+  readModelSettings: vi.fn<(cwd?: string, signal?: AbortSignal) => Promise<AgentSettingsSnapshot>>(),
   addRegion: vi.fn(),
   translate: (key: string) => key,
   generation: 1, changed: new Set<() => void>(), changing: new Set<() => void>(),
@@ -21,6 +23,11 @@ vi.mock('@varin/application-client', async (importOriginal) => {
     subscribeRuntimeEndpointWillChange: (listener: () => void) => { mocks.changing.add(listener); return () => mocks.changing.delete(listener); },
     runtimeFetch: mocks.runtimeFetch,
     getRuntimeKey: () => mocks.runtimeKey,
+    // The real conversation reads model defaults through this separate owner.
+    createModelConnectionsHttpAPI: (host?: number) => ({
+      ...actual.createModelConnectionsHttpAPI(host),
+      readSettings: mocks.readModelSettings,
+    }),
   };
 });
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -152,6 +159,10 @@ beforeEach(() => {
   resetEditorContextAttachments();
   mocks.runtimeKey = 'runtime-a'; mocks.generation = 1;
   mocks.runtimeFetch.mockReset();
+  mocks.readModelSettings.mockReset().mockResolvedValue({
+    global: {}, globalRevision: 'fixture-global',
+    project: {}, projectRevision: 'fixture-project', projectTrusted: false,
+  });
   mocks.addRegion.mockReset().mockReturnValue('added');
   mocks.translate = (key: string) => key;
   priorObjectUrl = URL.createObjectURL;
@@ -412,6 +423,7 @@ function artifactConversationFixture() {
   };
   const open = async () => {
     await renderConversation();
+    expect(mocks.readModelSettings).toHaveBeenCalledWith(undefined, expect.any(AbortSignal));
     // Research details mount on first inspection, just like the real overview path.
     expect(f.api.scopes).not.toHaveBeenCalled();
     const overview = container.querySelector<HTMLElement>('.workbench-overview-control')!;

@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   activateRelayTunnel as activateRegisteredRelayTunnel,
   deactivateRelayTunnel as deactivateRegisteredRelayTunnel,
@@ -18,6 +18,30 @@ import {
   getActiveRelayDescriptor,
 } from './relay/runtime-tunnel';
 import { registerRelayTransport } from './relay/register-transport';
+
+const fixtureFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
+let previousFetch: typeof fetch;
+
+beforeEach(() => {
+  previousFetch = globalThis.fetch;
+  fixtureFetch.mockClear();
+  // Endpoint switching owns URL-auth minting; keep synthetic Hosts in memory.
+  globalThis.fetch = fixtureFetch;
+});
+
+afterEach(async () => {
+  // Minting awaits credentials before reaching fetch, including in sync tests.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  try {
+    for (const [input, init] of fixtureFetch.mock.calls) {
+      expect(input).toMatch(/^https:\/\/(runtime-(before|after|a|b)|remote)\.example\/auth\/url-token$/);
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
 
 describe('runtime endpoint switching', () => {
   test('uses the registered UI relay lifecycle without importing it into application-client', () => {

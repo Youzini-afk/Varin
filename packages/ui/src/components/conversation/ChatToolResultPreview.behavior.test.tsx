@@ -39,13 +39,23 @@ function history(data: JsonValue, outcome: Outcome = 'succeeded', name = 'file_r
 
 let root: Root;
 let container: HTMLDivElement;
+const fixtureFetch = vi.fn<typeof fetch>(() => { throw new Error('Tool result previews must not fetch remote resources'); });
 beforeEach(() => {
+  fixtureFetch.mockClear();
+  vi.stubGlobal('fetch', fixtureFetch);
   const { document, window } = parseHTML('<!doctype html><html><body></body></html>');
   for (const [name, value] of Object.entries({ document, window, HTMLElement: window.HTMLElement, Element: window.Element, Node: window.Node, IS_REACT_ACT_ENVIRONMENT: true })) vi.stubGlobal(name, value);
   useUIStore.setState({ chatRenderMode: 'live' });
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
 });
-afterEach(() => { act(() => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => {
+  try {
+    act(() => root.unmount());
+    expect(fixtureFetch).not.toHaveBeenCalled();
+  } finally {
+    container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+  }
+});
 
 async function render(data: JsonValue, outcome?: Outcome, name?: string, args?: JsonValue) {
   const projected = new HistoryPresentation('audit').project(history(data, outcome, name, args), undefined);
@@ -75,8 +85,11 @@ it('renders the native file body as readable text while retaining original argum
   expect(tool.textContent).toContain('Original input');
   const raw = [...tool.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Original result');
   expect(raw?.querySelector('pre')?.textContent).toBe(JSON.stringify(auditRead, null, 2));
-  expect(tool.querySelector('summary')?.textContent).toContain('audit-note.txt');
-  expect(tool.querySelector('summary')?.textContent).toContain('Completed');
+  const summary = tool.querySelector('summary')?.textContent;
+  expect(summary).toContain('Read file');
+  expect(summary).toContain('audit-note.txt');
+  // Ordinary success is represented by the receipt, not a repeated status badge.
+  expect(summary).not.toContain('Completed');
 });
 
 it('keeps file text literal, including HTML, Markdown, whitespace and long lines', async () => {

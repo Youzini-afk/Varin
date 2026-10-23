@@ -16,7 +16,6 @@ declare module 'electron' {
     __varinPinned?: boolean | undefined;
     __varinRuntimeConfig?: RendererRuntimeConfig | undefined;
     __varinTitleBarOverlayEnabled?: boolean | undefined;
-    setTrafficLightPosition?(position: { x: number; y: number }): void;
   }
 }
 

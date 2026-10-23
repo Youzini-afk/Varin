@@ -21,6 +21,12 @@ claim to migrate that unused public declaration surface. Remove the patch when u
 published Bash release containing this migration, retaining the real configuration and packaged-LSP
 regressions. Do not replace it with an unreviewed snapshot of upstream main.
 
+The Host uses body-parser 2.4 with its supported qs range; compressed-body regressions run through
+the installed Express parser and Host middleware, including decoded limits and trailing-byte cleanup.
+Electron 44.9.3 includes the compromised-intermediate-certificate mitigation. Notification HTTPS
+authentication and event streams use standard certificate verification: untrusted/self-signed
+endpoints must establish trust rather than relying on the former verification bypass.
+
 Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
 including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
 webhook, so GitHub's

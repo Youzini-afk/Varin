@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { switchRuntimeEndpoint, type ThreadIdentity } from '@varin/application-client';
 import type { ThreadUsage } from '@varin/protocol';
 const api = vi.hoisted(() => ({ usage: vi.fn(), observe: vi.fn() }));
+const fixtureFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
 vi.mock('@/components/sections/harness/ConfigurationModels', () => ({ useModelChannels: () => ({ channels: [
   { id: 'channel:a', name: 'First channel', models: [{ id: 'shared', name: 'Shared model' }] },
   { id: 'channel:b', name: 'Second channel', models: [{ id: 'shared', name: 'Shared model' }] },
@@ -23,13 +24,31 @@ const snapshot = (modelId = 'reported-model'): ThreadUsage => ({ threadId: ident
     cacheWriteTokens: { known: null, missing: 2 }, reasoningTokens: { known: null, missing: 2 } }],
 });
 beforeEach(() => {
+  fixtureFetch.mockClear();
+  // Host changes mint URL auth independently of the mocked ThreadsAPI.
+  vi.stubGlobal('fetch', fixtureFetch);
   const { window } = parseHTML('<html><body><div id="root"></div></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('CustomEvent', window.CustomEvent); vi.stubGlobal('document', window.document); vi.stubGlobal('HTMLElement', window.HTMLElement);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = window.document.getElementById('root')! as unknown as HTMLElement; root = createRoot(container);
   api.usage.mockReset(); api.observe.mockReset().mockImplementation(() => new Promise(() => {}));
   useThreadStore.setState({ selectedIdentity: identity });
 });
-afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
+afterEach(async () => {
+  try {
+    await act(async () => root.unmount());
+    // Let credential preparation finish before restoring the native transport.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    for (const [input, init] of fixtureFetch.mock.calls) {
+      expect(input).toBe('http://usage-next.test/auth/url-token');
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      expect(Array.from(new Headers(init?.headers).entries())).toEqual([]);
+      expect(init?.credentials).toBe('include');
+    }
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 it('renders original branch measurements without zero-filling missing values or rounding large token counts', async () => {
   const value = snapshot(); value.rows.push({ ...value.rows[0]!, modelId: 'estimated-model', measurement: 'estimated' }); api.usage.mockResolvedValue(value);
   await render();

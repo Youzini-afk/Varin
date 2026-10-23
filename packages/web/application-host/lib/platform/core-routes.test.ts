@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { PassThrough } from 'node:stream';
+import * as zlib from 'node:zlib';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
@@ -9,9 +11,87 @@ import {
   registerServerStatusRoutes,
 } from './core-routes.js';
 
+// Run the production parser registration without a listener, using real byte streams.
+async function parseCommonBody(path: string, bytes: Buffer, headers: Record<string, string> = {}) {
+  const router = express.Router();
+  registerCommonRequestMiddleware(router as unknown as express.Express, { express });
+  const req = Object.assign(new PassThrough(), {
+    method: 'POST', url: path, path,
+    headers: { 'content-type': 'application/json', 'content-length': String(bytes.length), ...headers },
+  });
+  try {
+    return await new Promise<{ status: number; body: unknown }>((resolve, reject) => {
+      const res = {
+        statusCode: 200,
+        status(status: number) { this.statusCode = status; return this; },
+        json(body: unknown) { resolve({ status: this.statusCode, body }); return this; },
+      };
+      router.use((request, response) => {
+        const remaining: Buffer[] = [];
+        const finish = () => response.json({ parsed: request.body, unparsed: Buffer.concat(remaining).toString() });
+        if (request.readableEnded) finish();
+        else request.on('data', chunk => remaining.push(chunk)).once('end', finish);
+      });
+      router.use((error: { status?: number; type?: string }, _request: Request, response: Response, _next: NextFunction) => {
+        response.status(error.status ?? 500).json({ type: error.type });
+      });
+      router(req as unknown as Request, res as unknown as Response, reject);
+      req.end(bytes);
+    });
+  } finally {
+    req.destroy();
+  }
+}
+
+const bodyEncoders = [
+  { encoding: 'identity', encode: (bytes: Buffer) => bytes },
+  { encoding: 'gzip', encode: zlib.gzipSync },
+  { encoding: 'deflate', encode: zlib.deflateSync },
+  { encoding: 'br', encode: zlib.brotliCompressSync },
+  ...(typeof zlib.zstdCompressSync === 'function' ? [{ encoding: 'zstd', encode: zlib.zstdCompressSync }] : []),
+];
+
 describe('core-routes', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it.each(bodyEncoders)('preserves JSON and extended forms with $encoding request bodies', async ({ encoding, encode }) => {
+    const headers = { 'content-encoding': encoding };
+    const json = await parseCommonBody('/api/threads/submit', encode(Buffer.from('{"text":"你好","items":[1,2]}')), headers);
+    expect(json).toEqual({ status: 200, body: { parsed: { text: '你好', items: [1, 2] }, unparsed: '' } });
+    const form = await parseCommonBody('/api/config/settings', encode(Buffer.from('name=Varin&scope[project]=workspace&items[]=one&items[]=two')),
+      { ...headers, 'content-type': 'application/x-www-form-urlencoded' });
+    expect(form).toEqual({ status: 200, body: { parsed: { name: 'Varin', scope: { project: 'workspace' }, items: ['one', 'two'] }, unparsed: '' } });
+  });
+
+  it.each([
+    { path: '/api/behavior', limit: 1024 * 1024 },
+    { path: '/api/smart-search', limit: 256 * 1024 },
+  ])('enforces the decoded JSON limit for $path even with a small gzip frame', async ({ path, limit }) => {
+    const headers = { 'content-encoding': 'gzip' };
+    const atLimit = JSON.stringify({ text: 'x'.repeat(limit - 11) });
+    expect(Buffer.byteLength(atLimit)).toBe(limit);
+    const accepted = await parseCommonBody(path, zlib.gzipSync(atLimit), headers);
+    expect(accepted.status).toBe(200);
+    expect(accepted.body).toMatchObject({ parsed: { text: 'x'.repeat(limit - 11) } });
+    const rejected = await parseCommonBody(path, zlib.gzipSync(`${atLimit} `), headers);
+    expect(rejected).toEqual({ status: 413, body: { type: 'entity.too.large' } });
+  });
+
+  it('retains the real Thread body ceiling and pre-admission classification without allocating a 50 MB fixture', async () => {
+    expect(await parseCommonBody('/api/threads/submit', Buffer.from('{}'), { 'content-length': String(50 * 1024 * 1024 + 1) }))
+      .toEqual({ status: 413, body: { code: 'http-body-too-large', admission: 'not_started' } });
+    expect(await parseCommonBody('/api/threads/submit', zlib.gzipSync('{'), { 'content-encoding': 'gzip' }))
+      .toEqual({ status: 400, body: { code: 'thread-request-invalid', admission: 'not_started' } });
+  });
+
+  it('leaves multipart uploads and unregistered API JSON streams for their route owners', async () => {
+    const multipart = '--upload\r\nContent-Disposition: form-data; name="files"; filename="hello.txt"\r\nContent-Type: text/plain\r\n\r\nhello\r\n--upload--\r\n';
+    expect(await parseCommonBody('/api/workspace/upload', Buffer.from(multipart), { 'content-type': 'multipart/form-data; boundary=upload' }))
+      .toEqual({ status: 200, body: { parsed: undefined, unparsed: multipart } });
+    expect(await parseCommonBody('/api/unregistered', Buffer.from('{"route":"owned"}')))
+      .toEqual({ status: 200, body: { parsed: undefined, unparsed: '{"route":"owned"}' } });
   });
 
   it('marks only the Thread JSON parser rejection as not admitted', async () => {

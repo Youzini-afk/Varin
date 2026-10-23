@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   configureRuntimeUrlResolver,
   createRuntimeUrlResolver,
@@ -6,6 +7,27 @@ import {
   setRuntimeUrlResolver,
 } from '@varin/application-client';
 import { setLocalRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders, setRuntimeUrlAuthToken } from '@varin/application-client';
+
+const authFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
+beforeEach(() => {
+  authFetch.mockClear();
+  // URL construction may start a background token mint; it must not contact a
+  // real desktop Host, and a missing token must leave these URL assertions intact.
+  vi.stubGlobal('fetch', authFetch);
+});
+afterEach(async () => {
+  try {
+    await setImmediate();
+    for (const [input, init] of authFetch.mock.calls) {
+      expect(input).toMatch(/^(http:\/\/127\.0\.0\.1:57123)?\/auth\/url-token$/);
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      expect(init?.credentials).toBe('include');
+    }
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
 
 describe('createRuntimeUrlResolver', () => {
   const withWindow = <T>(value: unknown, callback: () => T): T => {

@@ -181,7 +181,6 @@ export class NotificationListener {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(body),
         },
-        rejectUnauthorized: false,
       }, (res) => {
         res.on('data', () => { /* drain response body */ });
         res.on('end', () => {
@@ -226,7 +225,6 @@ export class NotificationListener {
     const req = mod.request(url, {
       method: 'GET',
       headers,
-      rejectUnauthorized: false,
     }, (res) => {
       if (res.statusCode === 401 || res.statusCode === 403) {
         this.#getLogger().warn('[notification-listener] auth rejected, clearing session cookie');

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'vitest';
 import http from 'node:http';
+import https from 'node:https';
 import type { Server } from 'node:http';
 import type { IncomingHttpHeaders } from 'node:http';
 
@@ -14,12 +15,33 @@ const noopLogger = {
   error() {},
 };
 
-const listen = async (server: Server): Promise<string> => {
+// Test-only localhost identity, deliberately absent from every trust store.
+// Keeping the fixture here avoids requiring OpenSSL on desktop test runners.
+const untrustedLocalhostIdentity = {
+  key: `-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgl5n/vi2VeXjmJQw3
+RqDoLy9SF9kutivDjhMtxg5dQlKhRANCAAQrzvRbzr7V5A3+Ti4Y/wqCMe4l+jNu
+qxiq9jdVEKG12rwJDH3kx9Hmc9OAHGEW0yTYYZbr840hTXGSqqWJ/Ul8
+-----END PRIVATE KEY-----`,
+  cert: `-----BEGIN CERTIFICATE-----
+MIIBmzCCAUGgAwIBAgIUEmyaZy2DG5qJXlaYxI7f2TNo6SQwCgYIKoZIzj0EAwIw
+FDESMBAGA1UEAwwJbG9jYWxob3N0MCAXDTI2MTAyMzIyNDg1OVoYDzIxMjYwOTI5
+MjI0ODU5WjAUMRIwEAYDVQQDDAlsb2NhbGhvc3QwWTATBgcqhkjOPQIBBggqhkjO
+PQMBBwNCAAQrzvRbzr7V5A3+Ti4Y/wqCMe4l+jNuqxiq9jdVEKG12rwJDH3kx9Hm
+c9OAHGEW0yTYYZbr840hTXGSqqWJ/Ul8o28wbTAdBgNVHQ4EFgQUq8pa5jotEN+v
+FFqCv/zKRzQEIC8wHwYDVR0jBBgwFoAUq8pa5jotEN+vFFqCv/zKRzQEIC8wDwYD
+VR0TAQH/BAUwAwEB/zAaBgNVHREEEzARgglsb2NhbGhvc3SHBH8AAAEwCgYIKoZI
+zj0EAwIDSAAwRQIhAI5dTHH4iUp2wtusybea3uyvyL+NVXAmYaUR74GKFc74AiBL
+8CKvax0i/BkjU/X0s/KNp5dFfabZ7Ie2hCaeoAKXWg==
+-----END CERTIFICATE-----`,
+};
+
+const listen = async (server: Server, protocol = 'http'): Promise<string> => {
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   servers.push(server);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
-  return `http://127.0.0.1:${address.port}`;
+  return `${protocol}://127.0.0.1:${address.port}`;
 };
 
 afterEach(async () => {
@@ -40,6 +62,86 @@ describe('NotificationListener', () => {
     if (!headers) throw new Error('Expected request headers to be observed');
     return headers;
   };
+
+  test.each([
+    { name: 'password authentication', auth: { password: 'local-test-password' } },
+    { name: 'bearer-authenticated notifications', auth: { clientToken: 'remote-test-token' } },
+  ])('rejects an untrusted HTTPS server before sending $name', async ({ auth }) => {
+    const requests: string[] = [];
+    const warnings: string[] = [];
+    let finish: (outcome: 'rejected' | 'received') => void = () => {};
+    const outcome = new Promise<'rejected' | 'received'>((resolve) => { finish = resolve; });
+    const server = https.createServer(untrustedLocalhostIdentity, (req, res) => {
+      requests.push(req.url || '');
+      finish('received');
+      res.writeHead(req.url === '/auth/session' ? 204 : 200);
+      res.end();
+    });
+    const serverUrl = await listen(server, 'https');
+    const listener = new NotificationListener({
+      ...auth,
+      serverUrl,
+      requestHeaders: { 'CF-Access-Client-Secret': 'test-access-secret' },
+      logger: {
+        ...noopLogger,
+        warn(...values: unknown[]) {
+          warnings.push(values.join(' '));
+          finish('rejected');
+        },
+      },
+      onNotification: () => {},
+    });
+    listeners.push(listener);
+
+    await listener.start();
+    expect(await outcome).toBe('rejected');
+    listener.stop();
+
+    expect(requests).toEqual([]);
+    expect(listener.isConnected()).toBe(false);
+    expect(warnings.join('\n')).toMatch(/self-signed certificate/i);
+  });
+
+  test('authenticates and receives notifications over ordinary HTTP loopback', async () => {
+    let passwordBody = '';
+    let streamCookie: string | undefined;
+    let finish: (detail: unknown) => void = () => {};
+    const received = new Promise<unknown>((resolve) => { finish = resolve; });
+    const server = http.createServer((req, res) => {
+      if (req.url === '/auth/session') {
+        req.setEncoding('utf8');
+        req.on('data', (chunk: string) => { passwordBody += chunk; });
+        req.on('end', () => {
+          res.writeHead(204, { 'Set-Cookie': 'session=local-test-session; HttpOnly' });
+          res.end();
+        });
+        return;
+      }
+      if (req.url === '/api/notifications/stream') {
+        streamCookie = req.headers.cookie;
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.end(`data: ${JSON.stringify({ type: 'varin:notification', properties: { threadId: 'thread:local', title: 'Ready' } })}\n\n`);
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    const serverUrl = await listen(server);
+    const listener = new NotificationListener({
+      serverUrl,
+      password: 'local-test-password',
+      logger: noopLogger,
+      onNotification: finish,
+    });
+    listeners.push(listener);
+
+    await listener.start();
+    expect(await received).toMatchObject({ threadId: 'thread:local', sourceUrl: serverUrl });
+    listener.stop();
+
+    expect(JSON.parse(passwordBody)).toEqual({ password: 'local-test-password' });
+    expect(streamCookie).toBe('session=local-test-session');
+  });
 
   test('forwards sanitized custom requestHeaders to /auth/session', async () => {
     let observedAuthHeaders: IncomingHttpHeaders | null = null;

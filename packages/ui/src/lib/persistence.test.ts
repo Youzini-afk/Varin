@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { RuntimeAPIs, SettingsPayload } from '@varin/application-client';
 import type { DesktopSettings } from '@/lib/desktop';
@@ -80,6 +80,34 @@ const getWindow = (): TestWindow => {
 };
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const fixtureFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
+let previousFetch: typeof fetch;
+
+beforeEach(() => {
+  previousFetch = globalThis.fetch;
+  fixtureFetch.mockClear();
+  // Runtime switches mint URL-auth tokens even when settings use an in-memory API.
+  // Never let these synthetic runtime endpoints reach the native transport.
+  globalThis.fetch = fixtureFetch;
+});
+
+afterEach(async () => {
+  // The URL-auth mint starts after asynchronous credential resolution. Drain it
+  // while the fixture transport is still installed, including in synchronous tests.
+  await delay(0);
+  try {
+    for (const [input, init] of fixtureFetch.mock.calls) {
+      expect(input).toMatch(/^https:\/\/(settings|failed-save|load|mirror|preferences)-[ab]\.example\/auth\/url-token$/);
+      expect(init?.method).toBe('POST');
+      expect(init?.body).toBeUndefined();
+      expect(Array.from(new Headers(init?.headers).entries())).toEqual([]);
+      expect(init?.credentials).toBe('include');
+    }
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 const deferred = <T>() => {
   let resolve!: (value: T) => void;
   let reject!: (reason?: unknown) => void;
@@ -354,6 +382,10 @@ describe('updateDesktopSettings', () => {
     await update;
 
     expect(useUIStore.getState().terminalShell).toBe('fish');
+    expect(fixtureFetch).toHaveBeenCalledWith(
+      'https://settings-b.example/auth/url-token',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 
   test('ignores an older save response after a newer save completes on the same runtime', async () => {

@@ -2423,7 +2423,7 @@ const createBrowserWindow = ({
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition?.({ x: 16, y: 17 });
+        browserWindow.setWindowButtonPosition({ x: 16, y: 17 });
       } catch { /* best-effort traffic-light reset; window may be destroyed mid-animation */ }
     };
     browserWindow.on('minimize', () => {
@@ -2841,7 +2841,7 @@ const createMiniChatWindow = async ({
       if (browserWindow.isDestroyed()) return;
       try {
         browserWindow.setWindowButtonVisibility(true);
-        browserWindow.setTrafficLightPosition?.({ x: 16, y: 17 });
+        browserWindow.setWindowButtonPosition({ x: 16, y: 17 });
       } catch { /* best-effort traffic-light reset; window may be destroyed mid-animation */ }
     };
     // Suppress vibrancy only around minimize/restore, never on a plain show.

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 // Resolve from real consumers, rather than Bun's editable top-level patch copies.
@@ -21,6 +22,80 @@ const bash = createRequire(builtins.resolve('bash-language-server/package.json')
 const bashConfig = bash('./out/config.js');
 const { ShellCheckResultSchema } = bash('./out/shellcheck/types.js');
 const mcp = createRequire(web.resolve('@modelcontextprotocol/client'));
+
+// GHSA-27r3-jxmh-p828: send the trailing bytes only after the compressed frame
+// has parsed. Isolate the old uncaught decoder error, with no listener or large body.
+test('Express drains late compressed-body bytes without crashing or detaching other consumers', () => {
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { createRequire } from 'node:module';
+    import { createHash } from 'node:crypto';
+    import { once } from 'node:events';
+    import { PassThrough } from 'node:stream';
+    import { gzipSync, deflateSync } from 'node:zlib';
+    const express = createRequire(import.meta.url)(process.argv[1]);
+    const timeout = setTimeout(() => { throw new Error('Compressed request did not finish'); }, 3000);
+    try {
+      for (const [encoding, compress] of [['gzip', gzipSync], ['deflate', deflateSync]]) {
+        for (const otherConsumer of [false, true]) {
+          const first = Buffer.concat([compress('{"ok":true}'), Buffer.from([0])]);
+          const trailing = Buffer.alloc(1024, 0x58);
+          const req = Object.assign(new PassThrough(), { headers: {
+            'content-type': 'application/json', 'content-encoding': encoding,
+            'content-length': String(first.length + trailing.length),
+          } });
+          const drained = once(req, 'end');
+          const hash = otherConsumer ? createHash('sha256') : undefined;
+          const hashed = hash ? once(hash, 'finish') : Promise.resolve();
+          if (hash) req.pipe(hash);
+          try {
+            const parsed = new Promise((resolve, reject) => {
+              express.json()(req, {}, error => error ? reject(error) : resolve(req.body));
+            });
+            req.write(first);
+            assert.deepEqual(await parsed, { ok: true });
+            assert.equal(req.readableEnded, false, 'the trailer must arrive after parsing');
+            req.end(trailing);
+            await Promise.all([drained, hashed]);
+            if (hash) assert.equal(hash.digest('hex'),
+              createHash('sha256').update(first).update(trailing).digest('hex'));
+          } finally {
+            req.destroy();
+            hash?.destroy();
+          }
+        }
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  `, web.resolve('express')], { encoding: 'utf8', windowsHide: true, timeout: 5000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
+
+test('Express rejects an aborted JSON body once and releases its body-reader listeners', { timeout: 1000 }, async () => {
+  const req = Object.assign(new PassThrough(), {
+    headers: { 'content-type': 'application/json', 'content-length': '100' },
+  });
+  let completions = 0;
+  try {
+    const outcome = new Promise(resolve => web('express').json()(req, {}, error => {
+      completions += 1;
+      resolve(error);
+    }));
+    req.write('{"text":');
+    req.emit('aborted');
+    req.destroy();
+    const error = await outcome;
+    assert.equal(error.status, 400);
+    assert.equal(error.type, 'request.aborted');
+    assert.equal(error.code, 'ECONNABORTED');
+    assert.equal(req.body, undefined);
+    assert.equal(completions, 1);
+    for (const event of ['aborted', 'data', 'end', 'error', 'close']) assert.equal(req.listenerCount(event), 0, event);
+  } finally {
+    req.destroy();
+  }
+});
 
 test('security exceptions apply only to the pinned, behavior-verified dependency versions', () => {
   assert.equal(micromatch('braces/package.json').version, '3.0.3');

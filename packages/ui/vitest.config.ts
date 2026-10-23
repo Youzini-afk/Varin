@@ -11,6 +11,7 @@ export default defineConfig({
     ],
   },
   test: {
+    setupFiles: ['./src/test/network-guard.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
     exclude: configDefaults.exclude,
     // This suite is large enough to saturate a machine, which starves timing-sensitive assertions

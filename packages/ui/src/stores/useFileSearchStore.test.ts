@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { registerRuntimeAPIs } from '@/lib/runtime-api/registry';
 import { switchRuntimeEndpoint } from '@varin/application-client';
@@ -10,6 +10,8 @@ type Deferred<T> = {
 };
 
 const searchRequests: Array<Deferred<Array<{ path: string }>>> = [];
+const fixtureFetch = vi.fn<typeof fetch>(async () => new Response(null, { status: 404 }));
+let previousFetch: typeof fetch;
 
 const createDeferred = <T>(): Deferred<T> => {
   let resolve!: (value: T) => void;
@@ -38,6 +40,10 @@ const hit = (path: string) => ({
 
 describe('useFileSearchStore', () => {
   beforeEach(() => {
+    previousFetch = globalThis.fetch;
+    fixtureFetch.mockClear();
+    // The search API is in memory, but endpoint switching also mints URL auth.
+    globalThis.fetch = fixtureFetch;
     searchRequests.length = 0;
     switchRuntimeEndpoint({ apiBaseUrl: 'http://runtime-a.local', runtimeKey: 'runtime-a' });
     registerRuntimeAPIs({
@@ -48,6 +54,22 @@ describe('useFileSearchStore', () => {
       cacheKeys: [],
       inFlight: {},
     });
+  });
+
+  afterEach(async () => {
+    // Keep the fixture boundary installed through asynchronous URL-auth minting.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    try {
+      for (const [input, init] of fixtureFetch.mock.calls) {
+        expect(input).toMatch(/^http:\/\/runtime-[ab]\.local\/auth\/url-token$/);
+        expect(init?.method).toBe('POST');
+        expect(init?.body).toBeUndefined();
+        expect(Array.from(new Headers(init?.headers).entries())).toEqual([]);
+        expect(init?.credentials).toBe('include');
+      }
+    } finally {
+      globalThis.fetch = previousFetch;
+    }
   });
 
   test('does not cache a stale in-flight search after invalidation', async () => {
