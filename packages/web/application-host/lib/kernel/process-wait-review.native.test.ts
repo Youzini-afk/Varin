@@ -245,8 +245,9 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });
     if (revoked === 'none') {
       expect(JSON.parse(readResult)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
-      expect(readResult).toContain(Buffer.from('process-wait-real-output').toString('base64'));
-      expect(readResult).toContain('"text":"process-wait-real-output"');
+      const observed = JSON.parse(readResult) as { content: { chunks: Array<{ text: string; bytesBase64?: string }> } };
+      expect(observed.content.chunks.map(chunk => chunk.text).join('')).toBe('process-wait-real-output');
+      expect(observed.content.chunks.every(chunk => chunk.bytesBase64 === undefined)).toBe(true);
       const history = await f.runtime.history(identity.branchId);
       expect(history.filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
       foreign = true;
@@ -508,7 +509,8 @@ it('rebuilds only Host continuation service while its kernel keeps the original 
     await fs.writeFile(path.join(f.root, 'release-process'), 'release');
     await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
     expect(errors).toEqual([]); expect(turn).toBe(4);
-    expect(readResult).toContain(Buffer.from('host-service-recovered-output').toString('base64'));
+    const observed = JSON.parse(readResult) as { content: { chunks: Array<{ text: string }> } };
+    expect(observed.content.chunks.map(chunk => chunk.text).join('')).toBe('host-service-recovered-output');
     expect(readResult).toContain('succeeded'); expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     expect(await fs.readFile(path.join(f.root, 'spawn-count'), 'utf8')).toBe('1');
     expect((await f.runtime.history(identity.branchId)).filter(item => JSON.stringify(item.content).includes('Job lifecycle data'))).toHaveLength(1);
@@ -599,8 +601,8 @@ it.each(['process_stopped', 'at', 'any', 'all'] as const)('admits one %s follow-
     await replacement.recover();
     await expect.poll(async () => (await f.runtime.run(continuedRunId!)).state, { timeout: 15_000 }).toBe('completed');
     expect(readResult).toContain(!waitsForStop ? 'running' : 'succeeded');
-    const observed = JSON.parse(readResult) as { content: { chunks: Array<{ bytesBase64: string }> } };
-    expect(Buffer.concat(observed.content.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString())
+    const observed = JSON.parse(readResult) as { content: { chunks: Array<{ text: string }> } };
+    expect(observed.content.chunks.map(chunk => chunk.text).join(''))
       .toBe(!waitsForStop ? 'original-live-process-output' : 'original-live-process-outputone-shot-process-output');
     expect((await f.api.followups.register(command)).occurrence!.delivery).toMatchObject({ input_id: continuation.input_id, run_id: continuation.run_id, state: 'delivered' });
     for (const action of ['pause', 'resume', 'cancel'] as const) {

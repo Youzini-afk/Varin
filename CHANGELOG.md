@@ -14,6 +14,7 @@ private runtime protocol and product surfaces still move together.
 - 重整设置导航、编辑器与上下文控制，集中管理项目信任并在创建项目时复核目录。
 - 恢复记忆与知识的可选本地嵌入组件，改进索引清理的协作取消、恢复与进度反馈。
 - 修复 Windows 长路径升级卸载与进度展示，以及进程、发现和工具结果处理的回归。
+- 修复回答或取消提问后恢复执行时误将内部回执当作外部输入拒绝的问题，保留原始提问身份与严格输入校验。
 - 修复 Host 静态检查和测试替身与当前执行视图、Computer 可用性及内置语法契约不一致的问题，保留原有校验。
 
 ### Release highlights
@@ -23,6 +24,7 @@ private runtime protocol and product surfaces still move together.
 - Redesign settings navigation and context controls; centralize project trust and review folders during project creation.
 - Restore optional local embeddings for memory and knowledge, with cooperative, resumable and observable index cleanup.
 - Repair Windows long-path upgrade removal and actual progress reporting, alongside process, discovery and tool-result regressions.
+- Repair continuation after answering or cancelling a question by projecting authenticated answer receipts without weakening external input validation.
 - Align Host lint and test fixtures with current execution-view, Computer availability and bundled-grammar contracts without weakening validation.
 
 ## 0.9.31 - 2026-10-22

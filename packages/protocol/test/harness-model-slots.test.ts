@@ -73,6 +73,11 @@ describe('Runtime tool selections', () => {
     const native = observePresets({}, model, settings.agents, undefined, 'agent', { ...builtinTools, worker: ['file_write'] });
     assert.deepEqual(native.find(p => p.id === 'worker')?.definition.tools, ['file_write']);
     assert.deepEqual(native.find(p => p.id === 'custom:reader')?.definition.tools, ['file_read']);
-    assert.equal(native.find(p => p.id === 'retrieval')?.availability, 'unconfigured');
+    const retrieval = native.find(p => p.id === 'retrieval');
+    assert.equal(retrieval?.availability, 'available');
+    assert.deepEqual(retrieval?.model, model);
+    assert.equal(retrieval?.modelSource, 'inherit');
+    assert.equal(observePresets({ retrievalAgent: { inherit: false } }, model, {}, undefined, 'agent', builtinTools)
+      .find(p => p.id === 'retrieval')?.availability, 'unconfigured');
   });
 });

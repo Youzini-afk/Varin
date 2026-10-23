@@ -137,7 +137,13 @@ it('explicit live source reads current disk and shares actual root with list, se
   expect(outputs[0]).toContain('changed after preparation');
   expect(outputs.at(-2)).toContain('process.txt');
   expect(outputs.at(-1)).toContain('conditional live edit process same root');
-  for (const output of [outputs[0], outputs.at(-2), outputs.at(-1)]) expect(JSON.parse(output!).content.source).toMatchObject({ mode: 'live_root', rootId: prepared.source.mode === 'live_root' ? prepared.source.liveRoot.rootId : '', liveRoot: prepared.source.mode === 'live_root' ? prepared.source.liveRoot : null });
+  if (prepared.source.mode !== 'live_root') throw new Error('expected live source');
+  expect(JSON.parse(outputs[0]!).content.source).toEqual({ mode: 'live_root', rootId: prepared.source.liveRoot.rootId, liveRoot: prepared.source.liveRoot });
+  // Native paged discovery identifies the physical source by its registered root;
+  // the durable launch retains the complete live-source admission below.
+  for (const output of [outputs.at(-2), outputs.at(-1)]) {
+    expect(JSON.parse(output!).content.source).toEqual({ rootId: prepared.source.liveRoot.rootId });
+  }
   expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('conditional live edit');
   expect(await fs.readFile(path.join(f.workspace, 'process.txt'), 'utf8')).toBe('conditional live edit process same root');
   expect((await f.runtime.launch(receipt.run_id))?.selection.source).toMatchObject({ mode: 'live_root', live_root: prepared.source.mode === 'live_root' ? prepared.source.liveRoot : null, branch_id: null, revision: null, environment_run_id: null });
@@ -353,41 +359,60 @@ it('live read and discovery do not authorize a returned path that escapes its re
   expect(await fs.readFile(path.join(outside, 'private.txt'), 'utf8')).toBe('UNAUTHORIZED OUTSIDE CONTENT');
 }, 30_000);
 
-it('the kernel refuses process effects attached to a fixed branch even with a valid live root grant', async () => {
-  let calls = 0;
-  const f = await fixture((_body, response) => { if (++calls === 1) tool(response, 'process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'require("node:fs").writeFileSync("forbidden.txt","wrong fixed-source effect")'], mode: 'pipe' }, 1); else done(response); });
-  const identity = await f.api.create('fixed-process-refusal');
+it('fixed branch commands use an isolated execution view even when the binding includes a valid live root', async () => {
+  let serial = 0; let processId = ''; let read: { content: { source: { rootId: string } } } | undefined;
+  const f = await fixture((body, response) => {
+    const output = lastOutput(body);
+    const result = output ? JSON.parse(responsesMetadataText(output.output)) : undefined;
+    if (!output) tool(response, 'process_spawn', { cwd: '', command: process.execPath,
+      args: ['-e', 'const fs=require("node:fs");fs.writeFileSync("generated.txt",fs.readFileSync("source.txt","utf8")+" isolated command")'], mode: 'pipe' }, ++serial);
+    else if (String(output.call_id).startsWith('process_spawn-')) {
+      processId = result.operation_id;
+      tool(response, 'process_inspect', { processId }, ++serial);
+    } else if (String(output.call_id).startsWith('process_inspect-')) {
+      if (result.content.writerActive) tool(response, 'process_inspect', { processId }, ++serial);
+      else tool(response, 'file_read', { path: 'generated.txt' }, ++serial);
+    } else { read = result; done(response); }
+  });
+  await fs.writeFile(path.join(f.workspace, 'source.txt'), 'immutable baseline');
+  const identity = await f.api.create('fixed-process-isolation');
   const prepared = await f.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
-  if (prepared.source.mode === 'live_root') throw new Error('expected fixed branch');
+  if (prepared.source.mode !== 'fixed_branch') throw new Error('expected fixed branch');
   const source = prepared.source;
-  const pending = await f.runtime.submit({ key: 'fixed-process', threadId: identity.threadId, branchId: identity.branchId, expectedHead: null, input: { text: 'fixed source must not execute process' },
+  await fs.writeFile(path.join(f.workspace, 'source.txt'), 'later live contents');
+  const pending = await f.runtime.submit({ key: 'fixed-process', threadId: identity.threadId, branchId: identity.branchId, expectedHead: null, input: { text: 'execute only the selected fixed source' },
     configuration: { providerFamily: 'openai-responses', model: 'fixture', endpoint: f.endpoint, allowAnonymous: true, configurationGeneration: 1, maxOutputTokens: 32 } });
   const grant = await f.kernel.issueGrant({ grantId: 'fixed-process-attempt', owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId, threadId: identity.threadId, runId: pending.run_id,
     capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const registered = await f.kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: f.workspace });
   await f.runtime.startRun(pending.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
     workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, sourceMode: 'fixed_branch', rootId: registered.rootId,
-    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn'] });
-  await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('waiting');
-  expect(f.requests).toHaveLength(0);
-  await expect(fs.access(path.join(f.workspace, 'forbidden.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
-  await f.runtime.cancelRun(pending.run_id);
+    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn', 'process_inspect', 'file_read'] });
+  await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('completed');
+  expect(read).toMatchObject({ outcome: 'succeeded', content: { source: { mode: 'materialized', base: { branchId: source.branchId, revision: source.revision } } } });
+  expect(JSON.stringify(read)).toContain('immutable baseline isolated command');
+  expect(JSON.stringify(read)).not.toContain('later live contents');
+  expect(read!.content.source.rootId).not.toBe(registered.rootId);
+  expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('later live contents');
+  await expect(fs.access(path.join(f.workspace, 'generated.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
   await f.kernel.revokeGrant(grant.grantId);
 }, 30_000);
 
-it('source preparation selects language tools for every admitted source mode', async () => {
+it('source preparation exposes code retrieval without retired language tools for every admitted source mode', async () => {
   const f = await fixture((_body, response) => done(response));
   await fs.writeFile(path.join(f.workspace, 'source.ts'), 'export const value = 1;\n');
   const identity = await f.api.create('language-source-selection');
-  const languageTools = ['language_definition', 'language_references', 'language_diagnostics'];
+  const sourceTools = ['file_read', 'file_list', 'file_search', 'code_retrieval', 'process_spawn'];
   const live = await f.api.prepareSource({ ...identity, key: 'live-language', resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
   expect(live.source.mode).toBe('live_root');
-  expect(live.source.tools).toEqual(expect.arrayContaining(languageTools));
+  expect(live.source.tools).toEqual(expect.arrayContaining(sourceTools));
+  expect(live.source.tools.some(tool => tool.startsWith('language_'))).toBe(false);
   for (const mode of ['fixed_branch', 'materialized'] as const) {
     const prepared = await f.api.prepareSource({ ...identity, key: `switch-${mode}`, resourceOwner: { kind: 'local' as const }, workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode });
     expect(prepared.source.mode).toBe(mode);
-    expect(prepared.source.tools).toEqual(expect.arrayContaining(languageTools));
-    expect(prepared.source.tools).toContain('file_read');
+    expect(prepared.source.tools).toEqual(expect.arrayContaining(sourceTools));
+    expect(prepared.source.tools.some(tool => tool.startsWith('language_'))).toBe(false);
+    expect(prepared.source.tools.includes('file_write')).toBe(mode === 'materialized');
   }
   expect(f.requests).toHaveLength(0);
 }, 30_000);

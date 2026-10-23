@@ -214,14 +214,17 @@ it('keeps nested Git visibility under a non-Git project parent and checks exact 
   assert.deepEqual(exact.records.filter(record => record.kind === 'entry' && data(record).kind === 'file').map(record => record.path), ['nested/literal[1].ts']);
 });
 
-it('reads unsupported Scala as native text units and searches the same source revision', async () => {
+it.each([
+  { languageId: 'scala', name: 'Main.scala', supported: true },
+  { languageId: 'plaintext', name: 'Main.txt', supported: false },
+])('reads $languageId native units and searches the same source revision', async ({ languageId, name, supported }) => {
   const f = await fixture();
   execFileSync('git', ['init', '--quiet'], { cwd: f.workspace, stdio: 'ignore' });
   await fs.writeFile(path.join(f.workspace, '.gitignore'), 'data/raw/\n');
   const selected = path.join(f.workspace, 'data/raw');
   await fs.mkdir(selected, { recursive: true });
-  const file = path.join(selected, 'Main.scala');
-  const documentId = 'data/raw/Main.scala';
+  const file = path.join(selected, name);
+  const documentId = `data/raw/${name}`;
   const text = 'object Main {\n  def uniqueScalaMarker = 42\n}\n';
   await fs.writeFile(file, text);
   const documents = createDocumentAuthority({ hostId: 'scala-index', dataDir: path.join(f.root, 'documents'),
@@ -229,9 +232,17 @@ it('reads unsupported Scala as native text units and searches the same source re
   cleanup.push(() => documents.dispose());
   const { workspaceId } = await documents.resolveWorkspace({ path: f.workspace });
   const provider = createTreeSitterStructureProvider({ compute: f.service });
-  const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: documentId, languageId: 'scala' });
+  const units = await provider.unitsFile!({ workspaceId, root: f.workspace, path: documentId, languageId });
   assert.equal(units.status, 'ready', JSON.stringify(units));
-  assert.ok(units.units.length > 0 && units.units.every(unit => unit.fallback && unit.parentKind === 'file'));
+  assert.ok(units.units.length > 0, JSON.stringify(units));
+  if (supported) {
+    assert.ok(units.recipeId, 'bundled Scala must use a registered native grammar');
+    assert.ok(units.units.some(unit => !unit.fallback && unit.parentName === 'uniqueScalaMarker' && unit.text.includes('def uniqueScalaMarker = 42')), JSON.stringify(units));
+  } else {
+    assert.equal(units.recipeId, undefined);
+    assert.ok(units.units.every(unit => unit.fallback && unit.parentKind === 'file'));
+    assert.equal(units.units.map(unit => unit.text).join(''), text);
+  }
   const search = () => f.service.directory(f.workspace,{operation:'search',lane:'foreground',paths:[documentId],query:'uniqueScalaMarker',respectGitignore:false});
   const result=await search();
   const hit=result.records.find(row=>row.kind==='hit' && row.path===documentId);
@@ -239,7 +250,9 @@ it('reads unsupported Scala as native text units and searches the same source re
   assert.equal(hit.revision, units.revision);
   await fs.writeFile(file, '// changed\n' + text);
   const changed = await search();
-  assert.ok(changed.records.filter(row=>row.kind==='hit').every(hit => hit.revision !== units.revision));
+  const changedHit = changed.records.find(row => row.kind === 'hit' && row.path === documentId);
+  assert.ok(changedHit, JSON.stringify(changed));
+  assert.notEqual(changedHit.revision, units.revision);
 }, 30000);
 
 it('resolves directory aliases within the admitted root and rejects aliases outside it', async () => {

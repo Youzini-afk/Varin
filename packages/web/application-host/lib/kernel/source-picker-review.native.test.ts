@@ -108,9 +108,11 @@ it('prepares saved disk through real Documents and capture; concurrent and reope
   expect(first.source.workspaceId).toBe((await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId);
   expect(first.source.tools).toContain('file_read');
   expect(first.source.tools).toContain('code_retrieval');
-  expect(first.source.tools).toContain('language_definition');
+  expect(first.source.tools.some(tool => tool.startsWith('language_'))).toBe(false);
   expect(first.source.tools).not.toEqual(expect.arrayContaining(['file_write']));
-  expect(first.source.tools).not.toContain('process_spawn');
+  // Commands are admitted against a lazy isolated view; direct mutation of the
+  // immutable baseline remains unavailable.
+  expect(first.source.tools).toContain('process_spawn');
   expect(first.source.revision).toBe(0);
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'changed disk after capture');
   expect(await f.api.prepareSource(request)).toEqual(first);

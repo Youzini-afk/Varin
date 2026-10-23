@@ -1250,7 +1250,11 @@ it('keeps large UTF-8 reports as references with bounded Wait preview and exact 
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.report).not.toHaveProperty('text');
-  expect(JSON.stringify(await h.runtime.children()).length).toBeLessThan(20_000);
+  const listed = await h.runtime.children();
+  expect(listed.find(item => item.operation_id === operationId)?.report).toEqual(child.report);
+  // The list carries references, not the report body. Unrelated selected tool
+  // schemas may grow without changing this content-storage contract.
+  expect(JSON.stringify(listed)).not.toContain(report.slice(0, 256));
   expect(waitPayload.length).toBeLessThan(70_000);
   expect(waitPayload).toContain('partial');
   const itemId = child.report!.history_ids.at(-1)!;
