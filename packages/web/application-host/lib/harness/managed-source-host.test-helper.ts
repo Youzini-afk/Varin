@@ -531,11 +531,14 @@ async function run(frame: Record<string, unknown>) {
   for (;;) {
     const output = data(await execute('process_read', { processId: spawn.operationId, cursor: 0, maxBytes: 4096 }));
     assert(Array.isArray(output.chunks), JSON.stringify(output));
-    const bytes = Buffer.concat(output.chunks.map(chunk => {
-      assert(chunk && typeof chunk === 'object' && typeof chunk.bytesBase64 === 'string', JSON.stringify(output));
-      return Buffer.from(chunk.bytesBase64, 'base64');
-    }));
-    if (bytes.toString('utf8').includes('B_PROCESS_OUTPUT')) break;
+    // The model-facing process_read defaults to decoded text. Raw native
+    // process observations above retain their separate byte transport contract.
+    const text = output.chunks.map(chunk => {
+      assert(chunk && typeof chunk === 'object' && typeof chunk.text === 'string', JSON.stringify(output));
+      assert.equal(chunk.bytesBase64, undefined, JSON.stringify(output));
+      return chunk.text;
+    }).join('');
+    if (text.includes('B_PROCESS_OUTPUT')) break;
     assert(Date.now() < end, `Original B process output is unavailable: ${JSON.stringify(output)}`); await new Promise(resolve => setTimeout(resolve, 10));
   }
   const rebound = await service.bind({ coordinatorHostId: HOST_A, source: selected,

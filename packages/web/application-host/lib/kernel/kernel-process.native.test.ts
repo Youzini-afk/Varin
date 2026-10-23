@@ -111,7 +111,10 @@ vitestIt.skipIf(!available || process.platform !== 'win32')('Windows cmd PTY sta
   await f.client.processSpawn(params);
   const read = await drain(f.client, params.processId);
   const output = stripVTControlCharacters(read.stdout.toString('utf8'));
-  assert(output.toLowerCase().includes(path.join(f.workspace, 'child').toLowerCase()), output);
+  // Windows temp paths can contain an 8.3 alias (RUNNER~1), while cmd prints
+  // the canonical long path selected by the native process owner.
+  const expectedCwd = await fs.realpath(path.join(f.workspace, 'child'));
+  assert.equal(output.trim().toLowerCase(), expectedCwd.toLowerCase());
   assert(!output.includes('UNC'), output);
 }, 30_000);
 

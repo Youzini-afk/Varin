@@ -75,7 +75,7 @@ impl ModelProvider for Provider {
                 assert_eq!(
                     result["parameters"]["required"],
                     json!([if self.mode == "question" {
-                        "question"
+                        "questions"
                     } else {
                         "mode"
                     }])

@@ -96,9 +96,17 @@ jobs:
       # Rust state-machine/unit tests have one Linux owner. The release-binary
       # acceptance above and on Windows exercises the Host/native boundary.
       - if: needs.changes.outputs.rust == 'true'
+        name: Build Rust workspace tests
+        run: bun run test:rust --no-run
+      # Keep cold compilation outside the execution budget. Successful workspace
+      # execution takes about 90 seconds; ten minutes allows runner variance but
+      # fails visibly if a test retains a worker or waits indefinitely.
+      - if: needs.changes.outputs.rust == 'true'
         name: Test Rust workspace
+        timeout-minutes: 10
         env:
           VARIN_TEST_KERNEL_EXECUTABLE: ${{ github.workspace }}/kernel/target/release/varin-kernel
+          RUST_BACKTRACE: 1
         run: bun run test:rust
       - if: needs.changes.outputs.code == 'true'
         run: bun run test:packages

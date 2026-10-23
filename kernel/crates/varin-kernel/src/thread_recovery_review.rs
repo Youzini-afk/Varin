@@ -7,6 +7,7 @@ use crate::{
 };
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex, mpsc};
+use std::time::{Duration, Instant};
 use varin_runtime::execution::*;
 use varin_runtime::supervisor::RunSupervisor;
 use varin_runtime::{Catalog, Outcome, RunState, SubmitInput};
@@ -265,7 +266,26 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
             catalog: runtime.catalog(),
         });
         let handle = runtime.start(&run.id, start).unwrap();
-        assert_eq!(handle.wait().unwrap().state, RunState::Completed);
+        // Use the production terminal observer: it releases the Run's retained tool,
+        // model and policy owners as well as waiting for the actual worker completion.
+        assembly.observe_completion(handle);
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let state = loop {
+            let state = owner.lock().unwrap().run(&run.id).unwrap().state;
+            if state.terminal() {
+                break state;
+            }
+            if Instant::now() >= deadline {
+                runtime.cancel_control(&run.id);
+                panic!(
+                    "run {} ({text}) did not complete; host finished: {}",
+                    run.id,
+                    host.is_finished()
+                );
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert_eq!(state, RunState::Completed);
         runtime.reap().unwrap();
         receipt
     };
@@ -367,6 +387,14 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
     drop(runtime);
     drop(storage);
     drop(owner);
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !host.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "Host fixture did not drain after terminal Run owners were released; an output sender is still retained"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
     host.join().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
