@@ -8,3 +8,4 @@ EXPORTS
   Retry
   Extract
   RemoveData
+  RemoveInstall

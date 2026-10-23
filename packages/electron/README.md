@@ -150,6 +150,15 @@ workbench accent preference. Its vector geometry is generated from the versioned
 MSVC builds a small x86 Unicode DLL for NSIS on both Windows x64 and
 ARM64 builders. No browser or additional desktop runtime is started for setup.
 
+Upgrades run the remover embedded in the new package against the registered installation, so a fix
+to removal also takes effect when upgrading an older build. File moves use extended Windows paths
+and a temporary sibling on the installation volume. No complete tree is copied to the system temp
+drive. A failed move restores already moved files; directory junctions move as links. The temporary
+tree is removed before success is reported. File failures surface their path and allow an explicit
+retry after the remover exits, rather than silently repeating the whole uninstall.
+The preparation/removal phase uses an indeterminate indicator; only extraction shows a measured
+percentage from 7-Zip.
+
 Uninstall keeps data by default. Explicit cleanup names the initiating user's default application
 data directory; UAC elevation does not substitute the administrator's profile. Project directories,
 custom data roots and external index locations remain outside that cleanup. Directory junctions and
@@ -161,11 +170,11 @@ use the stock 7z extraction path. Stock electron-builder first expands the whole
 `$PLUGINSDIR`, then copies that complete tree into `$INSTDIR`; tens of thousands of small runtime files
 therefore hit the filesystem twice. Varin's `customExtractUsing7za` hook runs a pinned x86 `7za.exe`
 directly against `$INSTDIR`, checks its exit status, and retries a failed interactive extraction. App
-shutdown, old-version uninstall, registry/shortcut handling, updater cache and archive production remain
-electron-builder-owned.
+shutdown, uninstall registration/shortcut handling, updater cache and archive production remain
+electron-builder-owned; Varin supplies the long-path-safe installation-file removal hook.
 
 `bun-patches/app-builder-lib@26.17.0.patch` adds narrow hooks for page composition, extraction and
-application-data cleanup to the regular NSIS template. `prepare-installer-tool.cjs` stages the
+application-data cleanup and current-package upgrade removal to the regular NSIS template. `prepare-installer-tool.cjs` stages the
 checksum-pinned Windows 7-Zip binary, its licenses, localized strings and the native UI plugin;
 the installer embeds that helper in its private plugin directory rather than requiring 7-Zip on the
 user's machine. `scripts/nsis-archive.test.mjs` exercises real 7z creation, differential blockmaps,

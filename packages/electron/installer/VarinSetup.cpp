@@ -411,7 +411,8 @@ extern "C" __declspec(dllexport) void __cdecl TextStyle(HWND, int size, wchar_t*
 extern "C" __declspec(dllexport) void __cdecl Progress(HWND parent, int size, wchar_t*, Stack** stack, void*) {
   Call call{size, stack};
   HWND page = reinterpret_cast<HWND>(wcstoull(call.pop().c_str(), nullptr, 0));
-  const auto title = call.pop(), description = call.pop(), details = call.pop(), mode = call.pop();
+  const auto title = call.pop(), description = call.pop(), details = call.pop();
+  call.pop(); // Operation kind is retained in the NSIS plugin contract.
   move(page, 30, 50, 560, 396);
   SetPropW(page,L"VarinScene",reinterpret_cast<HANDLE>(2));
   SetWindowSubclass(page, windowProc, 1, 0); EnumChildWindows(page, styleChild, 0);
@@ -427,7 +428,9 @@ extern "C" __declspec(dllexport) void __cdecl Progress(HWND parent, int size, wc
   SetPropW(GetDlgItem(page,1027),L"VarinLink",reinterpret_cast<HANDLE>(1));
   SetWindowTextW(GetDlgItem(page, 1027), details.c_str());
   move(GetDlgItem(page, 1004), 0, 177, 560, 5);
-  if (mode == L"uninstall") {
+  // Before extraction the work has no measurable percentage. NSIS instruction
+  // count is not file progress, especially while waiting for an uninstaller.
+  {
     HWND progress = GetDlgItem(page, 1004);
     SetWindowLongPtrW(progress, GWL_STYLE, GetWindowLongPtrW(progress, GWL_STYLE) | PBS_MARQUEE);
     SendMessageW(progress, PBM_SETMARQUEE, TRUE, 0);
@@ -499,6 +502,11 @@ extern "C" __declspec(dllexport) void __cdecl Extract(HWND parent, int size, wch
   HWND progress = reinterpret_cast<HWND>(wcstoull(call.pop().c_str(), nullptr, 0));
   HWND status = reinterpret_cast<HWND>(wcstoull(call.pop().c_str(), nullptr, 0));
   const auto label = call.pop();
+  SendMessageW(progress, PBM_SETMARQUEE, FALSE, 0);
+  SendMessageW(progress, PBM_SETRANGE32, 0, 100);
+  SendMessageW(progress, PBM_SETPOS, 0, 0);
+  SetWindowTextW(GetDlgItem(GetParent(progress), 9002), label.c_str());
+  ShowWindow(status, SW_SHOW);
   Handle reader, writer, input, job, process, thread;
   SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
   DWORD code = 0;
@@ -628,3 +636,5 @@ extern "C" __declspec(dllexport) void __cdecl RemoveData(HWND, int size, wchar_t
   call.push(failure ? failedPath + L": " + systemError(failure) : L"");
   call.push(std::to_wstring(failure));
 }
+
+#include "installation-files.h"

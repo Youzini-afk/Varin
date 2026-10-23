@@ -43,6 +43,12 @@ Var VarinProgressStatus
     SetErrorLevel 2
     Quit
   varin_extract_done:
+    !ifdef VARIN_FINALIZE_LABEL
+      SendMessage $VarinProgressBar ${PBM_SETMARQUEE} 1 0
+      GetDlgItem $R2 $VarinProgressPage 9002
+      SendMessage $R2 ${WM_SETTEXT} 0 "STR:${VARIN_FINALIZE_LABEL}"
+      SendMessage $VarinProgressStatus ${WM_SETTEXT} 0 "STR:"
+    !endif
     Pop $R2
     Pop $R0
     Pop $R1

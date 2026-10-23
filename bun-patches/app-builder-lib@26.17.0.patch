@@ -18,6 +18,21 @@ index f5470bf..0512f99 100644
    DoneExtract7za:
 +  !endif
  !macroend
+diff --git a/templates/nsis/include/installUtil.nsh b/templates/nsis/include/installUtil.nsh
+--- a/templates/nsis/include/installUtil.nsh
++++ b/templates/nsis/include/installUtil.nsh
+@@ -206,6 +206,11 @@
+     StrCpy $0 "$0 --updated"
+   ${endif}
+ 
++  !ifmacrodef customUninstallOldVersion
++    !insertmacro customUninstallOldVersion "$installationDir" "$0" "$R0"
++    Return
++  !endif
++
+   StrCpy $uninstallerFileNameTemp "$PLUGINSDIR\old-uninstaller.exe"
+   !insertmacro copyFile "$uninstallerFileName" "$uninstallerFileNameTemp"
+ 
 diff --git a/templates/nsis/assistedInstaller.nsh b/templates/nsis/assistedInstaller.nsh
 --- a/templates/nsis/assistedInstaller.nsh
 +++ b/templates/nsis/assistedInstaller.nsh

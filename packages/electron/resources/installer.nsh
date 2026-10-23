@@ -5,6 +5,7 @@
 !include "${__FILEDIR__}\installer-tools\installer-generated.nsh"
 !addplugindir /x86-unicode "${__FILEDIR__}\installer-tools"
 !define VARIN_EXTRACT_LABEL "$(VarinExtracting)"
+!define VARIN_FINALIZE_LABEL "$(VarinFinalizing)"
 !define VARIN_EXTRACT_INLINE_RETRY
 
 Var VarinPage
@@ -144,6 +145,7 @@ Var VarinProgressDescription
 
 !include "${__FILEDIR__}\installer-install.nsh"
 !include "${__FILEDIR__}\installer-uninstall.nsh"
+!include "${__FILEDIR__}\installer-upgrade.nsh"
 !macro customAssistedPages
   !ifndef BUILD_UNINSTALLER
     !insertmacro VarinThemeFunctions ""

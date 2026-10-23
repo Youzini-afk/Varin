@@ -1,4 +1,37 @@
 !ifdef BUILD_UNINSTALLER
+Var VarinRemovalCode
+Var VarinRemovalDetail
+Var VarinRemovalFile
+Var VarinRemovalReceipt
+!macro customRemoveFiles
+  ; The executable runs outside INSTDIR. Release its working directory too.
+  SetOutPath $TEMP
+varin_remove_retry:
+  VarinSetup::RemoveInstall "$INSTDIR"
+  Pop $VarinRemovalCode
+  Pop $VarinRemovalDetail
+  ${If} $VarinRemovalCode != "0"
+    DetailPrint "$VarinRemovalDetail"
+    ${GetParameters} $VarinRemovalReceipt
+    ClearErrors
+    ${GetOptions} $VarinRemovalReceipt "--varin-removal-result=" $VarinRemovalReceipt
+    ${IfNot} ${Errors}
+      FileOpen $VarinRemovalFile "$VarinRemovalReceipt" w
+      ${IfNot} ${Errors}
+        FileWriteUTF16LE $VarinRemovalFile "$VarinRemovalDetail"
+        FileClose $VarinRemovalFile
+      ${EndIf}
+    ${EndIf}
+    IfSilent varin_remove_failed
+    VarinSetup::Retry "$VarinProgressPage" "$(VarinRemoveFailed)" "$VarinRemovalDetail" "$(VarinRetryInstall)" "$(VarinExit)"
+    Pop $VarinRemovalCode
+    StrCmp "$VarinRemovalCode" "retry" varin_remove_retry
+varin_remove_failed:
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+!macroend
+
 !macro customUnInit
   StrCpy $VarinRemoveData "0"
   StrCpy $VarinDataFailed "0"
