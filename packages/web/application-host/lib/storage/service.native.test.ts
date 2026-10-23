@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createKernelClient } from '../kernel/kernel-client.js';
-import { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
 import { createStorageService } from './service.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
@@ -23,8 +22,7 @@ it('confirms a Host preview against real Rust references, removes only its origi
   const protectedBody = Buffer.from('referenced again');
   const second = await actor.putBlob(protectedBody, 'second');
   await actor.releaseBlob(first.ownerId); await actor.releaseBlob(second.ownerId);
-  const indexes = createSemanticIndexManagement(data, 'storage-fixture'); await indexes.load();
-  const service = createStorageService({ hostId: 'storage-fixture', name: 'Native fixture', dataDirectory: data, speechModelsDirectory: path.join(data, 'speech-models'), indexes, kernel, devices: async () => [], workspaces: async () => [] });
+  const service = createStorageService({ hostId: 'storage-fixture', name: 'Native fixture', dataDirectory: data, speechModelsDirectory: path.join(data, 'speech-models'), kernel, devices: async () => [], workspaces: async () => [] });
   const preview = await service.preview({ kind: 'shared' });
   expect(preview.issues).toEqual([]);
   expect(preview.candidates).toHaveLength(1);

@@ -1,7 +1,7 @@
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
-export type StorageCategoryId = 'recovery' | 'copies' | 'conversations' | 'indexes' | 'models' | 'other';
+export type StorageCategoryId = 'recovery' | 'copies' | 'conversations' | 'embeddings' | 'models' | 'other';
 export type StorageScope = { kind: 'all' } | { kind: 'shared' } | { kind: 'workspace'; workspaceId: string };
 export type StorageAvailability = 'ready' | 'offline' | 'restricted' | 'unsupported' | 'unavailable';
 /** A selected configured connection, bound to its observed Host and mount identity. */
@@ -28,7 +28,7 @@ export interface StorageInventory {
 }
 export interface StorageCleanupCandidate {
   id: string;
-  kind: 'unreferenced-objects' | 'retained-index' | 'retired-code-model';
+  kind: 'unreferenced-objects';
   bytes: number;
   count: number;
   location: string;

@@ -9,7 +9,7 @@ import type { StorageCleanupPreview, StorageInventory, StorageTarget } from '@va
 import { FULL_CONTROL_CAPABILITIES } from '../client-auth/remote-clients.js';
 import { createManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
 import { registerManagedRemoteRoutes } from '../harness/managed-remote-routes.js';
-import { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
+import { semanticRootDir } from '../knowledge/semantic/identity.js';
 import { createStorageService } from './service.js';
 import { createStorageCoordinator } from './coordinator.js';
 import { registerStorageRoutes } from './routes.js';
@@ -20,15 +20,19 @@ async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'varin-storage-two-hosts-')); cleanups.push(() => rm(root, { recursive: true, force: true }));
   const make = async (id: string) => {
     const data = path.join(root, id); await mkdir(data);
-    const previous = createSemanticIndexManagement(data, id); await previous.load(); const old = previous.activeDirectory();
-    await write(path.join(old, 'workspace', `${id}-workspace`, 'cache'), `${id} disposable`);
-    await previous.save({ storageDirectory: path.join(root, `${id}-active`) }, (await previous.read()).revision);
-    const indexes = createSemanticIndexManagement(data, id); await indexes.load();
-    await write(path.join(indexes.activeDirectory(), 'workspace', `${id}-workspace`, 'cache'), `${id} ACTIVE`);
-    const service = createStorageService({ hostId: id, name: id, dataDirectory: data, speechModelsDirectory: path.join(data, 'models'), indexes,
+    const old = path.join(data, 'kernel');
+    const active = semanticRootDir(data, id);
+    const disposable = path.join(old, 'workspace', `${id}-workspace`, 'cache');
+    await write(disposable, `${id} disposable`);
+    await write(path.join(active, 'knowledge-user', 'user', 'space', 'data.vec'), `${id} ACTIVE`);
+    const kernel = {
+      health: vi.fn(async () => ({ storageRoot: old, gcPreview: { objects: [{ hash: `${id}-hash`, byteLength: Buffer.byteLength(`${id} disposable`) }], retainedObjects: 0 } })),
+      collectStorageObjects: vi.fn(async () => { await rm(disposable); return { byteLengthReclaimed: Buffer.byteLength(`${id} disposable`), deletedBlobs: 1, cleanupFailures: [] }; }),
+    };
+    const service = createStorageService({ hostId: id, name: id, dataDirectory: data, speechModelsDirectory: path.join(data, 'models'),
       workspaces: async () => [{ workspaceId: `${id}-workspace`, canonicalPath: `/original/${id}` }], devices: async () => [],
-      kernel: { health: vi.fn(async () => ({ storageRoot: path.join(data, 'kernel'), gcPreview: { objects: [], retainedObjects: 0 } })), collectStorageObjects: vi.fn() } });
-    return { data, old, indexes, service };
+      kernel });
+    return { data, old, active, kernel, service };
   };
   const a = await make('host-a'), b = await make('host-b');
   let capabilities: string[] = [...FULL_CONTROL_CAPABILITIES], allowedDirectories: string[] = [], hostId = 'host-b', storageSupported = true, disconnected = false, dropReceipt = false, denied = false, invalidIdentity = false;
@@ -67,10 +71,10 @@ async function fixture() {
     changeEndpoint: () => { settings = { desktopHosts: [{ ...settings.desktopHosts[0]!, apiUrl: `${endpoint}/new-mount` }] }; }, changeHost: () => { hostId = 'replacement'; },
     offline: () => { disconnected = true; }, deny: () => { denied = true; }, unsupported: () => { storageSupported = false; }, loseReceipt: () => { dropReceipt = true; }, corruptIdentity: () => { invalidIdentity = true; } };
 }
-const bScope = { kind: 'workspace' as const, workspaceId: 'host-b-workspace' };
+const bScope = { kind: 'all' as const };
 const previewFor = async (f: Awaited<ReturnType<typeof fixture>>) => (await (await f.post('preview', { scope: bScope, target: f.target })).json()) as StorageCleanupPreview;
 const confirmation = (preview: StorageCleanupPreview) => ({ previewId: preview.id, candidateIds: preview.candidates.map(item => item.id) });
-it('measures and cleans only the independently selected resource Host and its workspace over authenticated HTTP', async () => {
+it('measures and cleans only the independently selected resource Host and its shared objects over authenticated HTTP', async () => {
   const f = await fixture(); expect(f.target).toMatchObject({ id: 'connection:b', hostId: 'host-b' });
   const inventory = await (await f.post('inventory', { scope: bScope, target: f.target })).json() as StorageInventory;
   expect(inventory.device.id).toBe('connection:b'); expect(inventory.device.current).toBe(false);
@@ -80,13 +84,13 @@ it('measures and cleans only the independently selected resource Host and its wo
   const body = confirmation(preview); expect((await f.post('cleanup', body, 'other-principal')).status).toBe(403);
   expect(await (await f.post('cleanup', body)).json()).toMatchObject({ previewId: preview.id, state: 'complete', bytesReclaimed: Buffer.byteLength('host-b disposable') });
   expect(await readFile(path.join(f.a.old, 'workspace/host-a-workspace/cache'), 'utf8')).toBe('host-a disposable');
-  expect(await readFile(path.join(f.b.indexes.activeDirectory(), 'workspace/host-b-workspace/cache'), 'utf8')).toBe('host-b ACTIVE');
+  expect(await readFile(path.join(f.b.active, 'knowledge-user/user/space/data.vec'), 'utf8')).toBe('host-b ACTIVE');
   await expect(readFile(path.join(f.b.old, 'workspace/host-b-workspace/cache'))).rejects.toMatchObject({ code: 'ENOENT' });
   const forwarded = f.remoteCalls.find(item => item.url.endsWith('/storage/cleanup'))!;
   expect(forwarded.body).toEqual({ previewId: expect.any(String), candidateIds: body.candidateIds }); expect(forwarded.body.previewId).not.toBe(preview.id);
 });
 it('replays the original target preview after a lost completion response without deleting twice', async () => {
-  const f = await fixture(), remove = vi.spyOn(f.b.indexes, 'removeRetainedScope'); const body = confirmation(await previewFor(f));
+  const f = await fixture(), remove = f.b.kernel.collectStorageObjects; const body = confirmation(await previewFor(f));
   f.loseReceipt(); expect((await f.post('cleanup', body)).status).toBe(503);
   let now = Date.now(); vi.spyOn(Date, 'now').mockImplementation(() => now); now += 11 * 60_000;
   // Both coordinators prune previews here, but B's receipt and A's unresolved

@@ -1,4 +1,4 @@
-# Shared vector storage, inference and retired code-cache maintenance
+# Shared vector storage and inference
 
 Automatic code-semantic indexing and the old Explore decision/selection loop are retired.
 Quick retrieval executes ordinary native Agent tools; it does not open a code vector reader,
@@ -32,21 +32,9 @@ Current-format corruption remains an error and cannot be converted to empty data
 The database worker remains the storage writer. Host facades do not reopen its database as
 a concurrent fallback. Process disconnect, mutation outcome and confirmed close are distinct.
 
-## Old code-cache cleanup
+## Embedding request settings
 
-`index-management.ts` retains registered storage directories and the usage view. Production
-`IndexDirectoryManager` is maintenance-only: add/resume/rebuild cannot start new indexing.
-Removing a registered directory runs the original workspace maintenance gate, then
-`cache-maintenance-engine.ts` removes only its owned code generations/publications.
-Whole-workspace removal does not need to open a corrupted database; partial-directory removal
-preserves other registered scopes and compacts the remaining store.
-
-The KnowledgeStore owner separately clears retired file/symbol rows and releases their
-receipts. It keeps plans and user knowledge. Errors leave the directory, stage and retryable
-state visible rather than indefinitely reporting cleanup in progress.
-
-Inactive retained index locations use the original Storage preview/confirmation path.
-The exclusively owned `optional-components/local-semantic` model/runtime/install cache is
-also a cleanup candidate. Directory identity and measured content fingerprint are rechecked
-before removal. Speech models, Bot knowledge and original projects are outside that cleanup
-scope. No full backup is created for rebuildable caches.
+`vectors/request-settings.ts` owns Host-wide concurrency and background request spacing for
+memory and Bot knowledge vectors. The selected model remains in the existing Harness settings.
+Unconfigured recall stays text-only. Scheduler changes take effect at the next Host startup.
+The settings page does not scan source directories or manage retired code indexes.

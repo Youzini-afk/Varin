@@ -130,7 +130,7 @@ export interface GitIdentityStore {
 }
 
 export interface SettingsActionDeps {
-  semanticIndex?(): Pick<ReturnType<typeof import('../knowledge/semantic/index-management.js').createSemanticIndexManagement>, 'read' | 'save' | 'active' | 'activeDirectory' | 'configuredDirectory'>;
+  embeddingRequests?(): ReturnType<typeof import('../knowledge/vectors/request-settings.js').createEmbeddingRequestSettings>;
   models?(): import('../models/service.js').ModelsService | null;
   modelFetch?: import('./egress.js').EgressFetch;
   mcpSettings?(): Pick<ReturnType<typeof import('../mcp/settings.js').createMcpSettings>, 'invoke'> | null;
@@ -843,25 +843,24 @@ const notificationsAdapter = (): SettingsActionAdapter => ({
 
 export function createSettingsActionRegistry(deps: SettingsActionDeps) {
   const adapters = new Map<string, SettingsActionAdapter>([
-    ['service:semantic-index', {
+    ['service:embedding-requests', {
       verbs: ['read', 'write'],
       async describe() {
-        const owner = deps.semanticIndex?.();
-        if (!owner) return { unavailable: 'Index settings are unavailable' };
+        const owner = deps.embeddingRequests?.();
+        if (!owner) return { unavailable: 'Embedding request settings are unavailable' };
         const saved = await owner.read();
-        return { data: { config: saved.config, revision: saved.revision, activeConfig: owner.active(),
-          activeDirectory: owner.activeDirectory(), configuredDirectory: owner.configuredDirectory(saved.config) },
+        return { data: { config: saved.config, revision: saved.revision, activeConfig: owner.active() },
           ...(saved.error ? { unavailable: saved.error } : {}) };
       },
       async invoke(_ctx, _entry, verb, args) {
-        const owner = deps.semanticIndex?.();
-        if (!owner) return unavailable('Index settings are unavailable');
+        const owner = deps.embeddingRequests?.();
+        if (!owner) return unavailable('Embedding request settings are unavailable');
         try {
           if (verb === 'read') {
             const saved = await owner.read();
             return saved.error ? { status: 'failed', detail: saved.error, data: saved } : { status: 'applied', data: saved };
           }
-          if (verb !== 'write') return unavailable(`Unsupported index action: ${verb}`);
+          if (verb !== 'write') return unavailable(`Unsupported embedding request action: ${verb}`);
           const saved = await owner.save(args.config, needString(args, 'revision'));
           return { status: 'applied', data: { ...saved, activeConfig: owner.active() } };
         } catch (error) { return wrapError(error); }

@@ -2,28 +2,25 @@ import { randomUUID } from 'node:crypto';
 import { lstat, statfs } from 'node:fs/promises';
 import path from 'node:path';
 import type { StorageCategoryId, StorageCleanupCandidate, StorageCleanupPreview, StorageCleanupReceipt, StorageDevice, StorageInventory, StorageScope } from '@varin/application-client';
-import type { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
+import { semanticRootDir } from '../knowledge/semantic/identity.js';
 import { measureDirectory, within } from './measure.js';
-import { inspectRetiredCodeModel, removeRetiredCodeModel } from './retired-code-model.js';
 
-type IndexManagement = ReturnType<typeof createSemanticIndexManagement>;
 interface Options {
   hostId: string; name: string; dataDirectory: string; speechModelsDirectory: string;
   workspaces(): Promise<Array<{ workspaceId: string; canonicalPath: string }>>;
   devices(): Promise<StorageDevice[]>;
-  indexes: IndexManagement;
   kernel: {
     health(options: { gcPreview: true }): Promise<{ storageRoot: string; gcPreview?: { objects: Array<{ hash: string; byteLength: number }>; retainedObjects: number } }>;
     collectStorageObjects(operationId: string, hashes: string[]): Promise<Record<string, unknown>>;
   };
 }
-type Candidate = StorageCleanupCandidate & { hashes?: string[]; directory?: string; workspaceId?: string; fingerprint?: string; revision?: string };
+type Candidate = StorageCleanupCandidate & { hashes: string[] };
 const PREVIEW_LIFETIME_MS = 10 * 60_000;
 // Completed effects remain replayable for a day after completion, independent of
 // their admission deadline. Running operations are never evicted.
 const RECEIPT_LIFETIME_MS = 24 * 60 * 60_000;
 interface StoredPreview { completedAt?: number; principal: string; public: StorageCleanupPreview; candidates: Candidate[]; receipt?: StorageCleanupReceipt; running?: Promise<StorageCleanupReceipt>; selected?: string[] }
-const categories: StorageCategoryId[] = ['recovery', 'copies', 'conversations', 'indexes', 'models', 'other'];
+const categories: StorageCategoryId[] = ['recovery', 'copies', 'conversations', 'embeddings', 'models', 'other'];
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 export class StorageServiceError extends Error {
   constructor(readonly status: number, readonly code: string, text: string) { super(text); }
@@ -43,31 +40,22 @@ export function createStorageService(options: Options) {
     if (scope.kind === 'workspace' && !registrations.some(item => item.workspaceId === scope.workspaceId)) throw new StorageServiceError(404, 'workspace-unavailable', 'Workspace registration is unavailable');
     return registrations;
   };
-  const roots = async () => {
-    const saved = await options.indexes.read();
-    const indexes = [...new Set([options.indexes.activeDirectory(), ...saved.retainedDirectories])];
-    const all = [...new Set([options.dataDirectory, options.speechModelsDirectory, ...indexes].map(value => path.resolve(value)))];
-    // Nested roots are scanned once and classified by their most specific owner.
-    return { saved, indexes, roots: all.filter(root => !all.some(other => other !== root && within(other, root))) };
-  };
+  const embeddingsRoot = semanticRootDir(options.dataDirectory, options.hostId);
+  const allRoots = [...new Set([options.dataDirectory, options.speechModelsDirectory].map(value => path.resolve(value)))];
+  const roots = allRoots.filter(root => !allRoots.some(other => other !== root && within(other, root)));
   const inventory = async (scope: StorageScope, signal?: AbortSignal): Promise<StorageInventory> => {
     const registrations = await knownWorkspaces(scope);
-    const owned = await roots();
     const ids = new Set(registrations.map(item => item.workspaceId));
     const buckets = new Map<string, Map<StorageCategoryId, number>>();
     const shared = new Map<StorageCategoryId, number>();
     const physical = new Map<string, { bytes: number; category: StorageCategoryId; workspace?: string }>(), issues: string[] = [];
-    if (owned.saved.error) issues.push(owned.saved.error);
     // Optional model/cache directories may not exist yet. The owning Host data
     // root is mandatory: losing it must never turn a whole-Host scan into zero.
     try {
       if (!(await lstat(options.dataDirectory)).isDirectory()) issues.push(`Managed application root is not a directory: ${options.dataDirectory}`);
     } catch (error) { issues.push(`${(error as NodeJS.ErrnoException).code ?? 'unavailable'}: managed application root ${options.dataDirectory}`); }
     const classify = (filename: string): { category: StorageCategoryId; workspace?: string } => {
-      for (const root of owned.indexes) if (within(root, filename)) {
-        const segments = path.relative(root, filename).split(path.sep);
-        return { category: 'indexes', ...(segments[0] === 'workspace' && segments[1] !== undefined && ids.has(segments[1]) ? { workspace: segments[1] } : {}) };
-      }
+      if (within(embeddingsRoot, filename)) return { category: 'embeddings' };
       if (within(options.speechModelsDirectory, filename) || within(path.join(options.dataDirectory, 'optional-components'), filename)) return { category: 'models' };
       const relative = path.relative(options.dataDirectory, filename).split(path.sep);
       if (relative[0] === 'kernel') {
@@ -82,7 +70,7 @@ export function createStorageService(options: Options) {
       }
       return { category: 'other' };
     };
-    for (const root of owned.roots) {
+    for (const root of roots) {
       const measured = await measureDirectory(root, signal);
       issues.push(...measured.issues);
       for (const file of measured.files) {
@@ -106,7 +94,7 @@ export function createStorageService(options: Options) {
     const selected = scope.kind === 'workspace' ? buckets.get(scope.workspaceId) ?? new Map() : new Map(shared);
     if (scope.kind === 'all') for (const bucket of buckets.values()) for (const [id, bytes] of bucket) selected.set(id, (selected.get(id) ?? 0) + bytes);
     const volumes: StorageInventory['volumes'] = [], devices = new Set<number>();
-    for (const root of owned.roots) {
+    for (const root of roots) {
       try {
         const entry = await lstat(root);
         if (devices.has(entry.dev)) continue;
@@ -131,11 +119,6 @@ export function createStorageService(options: Options) {
     // never appear as workspace-exclusive bytes or a workspace cleanup action.
     if (scope.kind !== 'workspace') {
       try {
-        const model = await inspectRetiredCodeModel(options.dataDirectory);
-        if (model?.bytes) candidates.push({ id: randomUUID(), kind: 'retired-code-model', location: model.directory,
-          bytes: model.bytes, count: model.files.length, fingerprint: model.fingerprint });
-      } catch (error) { issues.push(message(error)); }
-      try {
         const health = await options.kernel.health({ gcPreview: true });
         if (!health.gcPreview) issues.push('Native storage cleanup preview is unavailable');
         else if (health.gcPreview.objects.length) candidates.push({ id: randomUUID(), kind: 'unreferenced-objects',
@@ -143,20 +126,6 @@ export function createStorageService(options: Options) {
           hashes: health.gcPreview.objects.map(item => item.hash) });
       } catch (error) { issues.push(message(error)); }
     }
-    try {
-      const saved = await options.indexes.read();
-      if (saved.error) issues.push(saved.error);
-      else for (const directory of saved.retainedDirectories.filter(candidate => scope.kind !== 'all' || !saved.retainedDirectories.some(other => other !== candidate && within(other, candidate)))) {
-        if (path.resolve(directory) === path.resolve(options.indexes.activeDirectory())) continue;
-        // Shared selection must not accidentally delete workspace-exclusive caches.
-        if (scope.kind === 'shared') continue;
-        const workspaceId = scope.kind === 'workspace' ? scope.workspaceId : undefined;
-        const target = workspaceId ? path.join(directory, 'workspace', workspaceId) : directory;
-        const measured = await measureDirectory(target);
-        if (measured.issues.length) { issues.push(...measured.issues); continue; }
-        if (measured.bytes) candidates.push({ id: randomUUID(), kind: 'retained-index', location: target, bytes: measured.bytes, count: measured.files.length, directory, ...(workspaceId ? { workspaceId } : {}), fingerprint: measured.fingerprint, revision: saved.revision });
-      }
-    } catch (error) { issues.push(message(error)); }
     const result: StorageCleanupPreview = { id: randomUUID(), deviceId: device.id, scope, createdAt: new Date(now).toISOString(), expiresAt: new Date(now + PREVIEW_LIFETIME_MS).toISOString(), candidates: candidates.map(({ id, kind, location, bytes, count }) => ({ id, kind, location, bytes, count })), issues };
     previews.set(result.id, { principal, public: result, candidates });
     return result;
@@ -183,7 +152,6 @@ export function createStorageService(options: Options) {
         receipt.state = 'partial'; receipt.failures.push({ id: 'scope', message: message(error) });
         stored.receipt = receipt; stored.completedAt = Date.now(); return receipt;
       }
-      let indexRevision = stored.candidates.find(item => item.kind === 'retained-index')?.revision;
       for (const item of stored.candidates.filter(candidate => selected.includes(candidate.id))) {
         try {
           if (item.kind === 'unreferenced-objects') {
@@ -192,12 +160,6 @@ export function createStorageService(options: Options) {
             if (typeof bytes !== 'number' || typeof count !== 'number' || !Array.isArray(result.cleanupFailures)) throw new Error('Native storage returned an incomplete cleanup receipt');
             receipt.bytesReclaimed += bytes; receipt.objectsDeleted += count;
             if (result.cleanupFailures.length) throw new Error(result.cleanupFailures.map(String).join('; '));
-          } else if (item.kind === 'retired-code-model') {
-            const result = await removeRetiredCodeModel(options.dataDirectory, item.fingerprint!);
-            receipt.bytesReclaimed += result.bytesReclaimed; receipt.objectsDeleted += result.filesDeleted;
-          } else {
-            const result = await options.indexes.removeRetainedScope(item.directory!, indexRevision!, { ...(item.workspaceId ? { workspaceId: item.workspaceId } : {}), fingerprint: item.fingerprint! });
-            receipt.bytesReclaimed += result.bytesReclaimed; receipt.objectsDeleted += result.filesDeleted; indexRevision = result.revision;
           }
           receipt.completed.push(item.id);
         } catch (error) { receipt.failures.push({ id: item.id, message: message(error) }); }

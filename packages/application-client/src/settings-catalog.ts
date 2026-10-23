@@ -91,7 +91,7 @@ export interface SettingsActionRef {
     | 'runtime:providers'
     | 'runtime:mcp' | 'runtime:language-support'
     | 'service:git' | 'service:tunnel'
-    | 'service:extension-packages' | 'service:extensions' | 'service:agents' | 'service:semantic-index'
+    | 'service:extension-packages' | 'service:extensions' | 'service:agents' | 'service:embedding-requests'
     | 'service:notifications' | 'service:projects' | 'service:remote-instances'
     | 'tool:resource' | 'tool:extension' | 'page:ui';
   /** What the agent can actually do without opening the UI. */
@@ -342,17 +342,17 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.embedding', category: 'retrieval', owner: 'agent-settings',
     field: { path: 'harness.embedding', kind: 'json', scope: 'user',
-      note: 'dedicated embedding backend {provider, model, endpoint?, credentialRef?}; user-owned' },
+      note: 'memory and knowledge embedding backend {protocol:"openai-compatible", providerId, modelId}; unconfigured recall uses text search' },
     apply: 'next-run',
-    ui: { page: 'harness-index', titleKey: 'settings.page.harness.section.embedding',
-      keywords: ['embedding', 'MiniLM', 'vector'] },
+    ui: { page: 'harness-embeddings', titleKey: 'settings.page.harness.section.embedding',
+      keywords: ['memory', 'knowledge', 'embedding', 'vector'] },
   },
   {
-    id: 'harness.semanticIndex', category: 'retrieval', owner: 'action',
-    actionRef: { domain: 'service:semantic-index', verbs: ['read', 'write'], note: 'write replaces config; supply config and revision from read' },
+    id: 'harness.embeddingRequests', category: 'retrieval', owner: 'action',
+    actionRef: { domain: 'service:embedding-requests', verbs: ['read', 'write'], note: 'write replaces {concurrentRequests: positive integer, requestIntervalMs: non-negative timer milliseconds}; supply config and revision from read' },
     apply: 'restart',
-    ui: { page: 'harness-index', titleKey: 'settings.page.harness.page.index.title',
-      keywords: ['index', 'storage', 'progress', 'concurrency', 'embedding'] },
+    ui: { page: 'harness-embeddings', titleKey: 'settings.page.harness.embeddings.requests.title',
+      keywords: ['memory', 'knowledge', 'concurrency', 'interval', 'embedding'] },
   },
   {
     id: 'harness.rerank', category: 'retrieval', owner: 'agent-settings',

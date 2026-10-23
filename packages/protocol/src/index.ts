@@ -24,7 +24,6 @@ export * from "./environment-access.js";
 export * from "./utf8.js";
 export * from "./work-focus.js";
 export * from "./research-search.js";
-export * from "./harness-local-semantic.js";
 export * from "./permission-gate.js";
 
 export * from "./types.js";

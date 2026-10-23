@@ -8,7 +8,6 @@ import {
   openWorkspaceKnowledge, type KnowledgeStore,
 } from "./store.js";
 import { KnowledgeStoreProcess, knowledgeStoreProcess } from "./store-process.js";
-import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance.js";
 import type { PlanView } from "@varin/protocol";
 import type { StoreRequest } from "./store-protocol.js";
 
@@ -39,20 +38,18 @@ afterEach(async () => {
 });
 
 describe("knowledge storage process", () => {
-  it("drains already admitted requests before retiring a cache process", async () => {
+  it("drains already admitted requests before retiring a storage process", async () => {
     const root = await mkdtemp(join(tmpdir(), "varin-semantic-retirement-"));
     roots.push(root);
     const owner = new KnowledgeStoreProcess();
     const id = owner.register({ revision: () => {}, notify: () => {} });
-    const admitted = owner.request(id, "semantic", ["purge", {
-      semanticDirectory: join(root, "semantic"), workspaceId: "workspace", resourceRoot: root, removedDirectory: root,
-    }]);
+    const admitted = owner.request(id, "semantic", ["inference-open", { dataDir: root, hostId: "host" }]);
     const retired = owner.retire();
     try {
       await expect(admitted).resolves.toBeUndefined();
       await retired;
       expect(owner.child.exitCode).toBe(0);
-      await expect(owner.request(id, "semantic", ["purge", {}])).rejects.toThrow("closing");
+      await expect(owner.request(id, "semantic", ["inference-open", {}])).rejects.toThrow("closing");
     } finally { await owner.release(id); }
   });
 
@@ -91,7 +88,7 @@ describe("knowledge storage process", () => {
       expect((await store.getFileRelations("consumer-0.ts"))?.documentRevision).toBe("c2");
     } finally { observe.mockRestore(); await refresh; }
   });
-  it("commits a plan while derived-index maintenance is stalled", async () => {
+  it("commits a plan while independent inference storage is stalled", async () => {
     const { root, store } = await fixture();
     const owner = knowledgeStoreProcess("semantic");
     const send = owner.child.send;
@@ -103,7 +100,8 @@ describe("knowledge storage process", () => {
       admitted();
       return true;
     });
-    const maintenance = purgeSemanticWorkspaceCache({ semanticDirectory: join(root, "semantic"), workspaceId: "workspace", resourceRoot: root, removedDirectory: root });
+    const id = owner.register({ revision: () => {}, notify: () => {} });
+    const maintenance = owner.request(id, "semantic", ["inference-open", { dataDir: root, hostId: "host" }]);
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await started;
@@ -118,6 +116,8 @@ describe("knowledge storage process", () => {
       held.mockRestore();
       resume?.();
       await maintenance;
+      await owner.request(id, "semantic", ["inference-close"]);
+      await owner.release(id);
     }
   });
 

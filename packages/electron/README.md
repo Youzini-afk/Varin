@@ -206,41 +206,18 @@ completed extraction by SHA-256 outside the timed interval, and records timeouts
 registry changes, shortcuts, app shutdown and old-version uninstall, so it is not a full upgrade
 benchmark. Do not disable antivirus or replace installation safety checks to improve the measurement.
 
-### Optional local semantic component
-
-The base installer does not include Bekko model weights, transformers.js, or ONNX Runtime. Lexical and structural
-retrieval remain available; configured remote embedding keeps its existing path. Settings → Agent
-Harness → Retrieval installs local inference only when requested, or imports a downloaded `.tar.gz`.
-Installation checks the platform, file digests and a real vector before activating the component in
-the current Host. It does not require npm, Bun or Python on the user's machine.
-The release default is the pinned multilingual Bekko a8m encoder (384 dimensions);
-custom model archives remain explicit imports. Local CPU settings offer automatic,
-lower-CPU and faster-indexing modes plus an optional inference-thread ceiling.
-
-Build its separate native archive with `bun run --cwd packages/electron package:local-semantic`.
-This is the only build path that downloads the pinned model and prepares Node ONNX. It emits
-`Varin-local-semantic-<version>-<platform>-<arch>.tar.gz` and a checksum into `dist`; the release
-workflow publishes these alongside, rather than inside, the application. The archive excludes the
-unused browser ONNX distribution. Component build verification and installation checks own its
-inference and import behavior.
-
 ### Native libraries built from source
 
-Two native recipes supply binaries absent from the pinned npm packages:
+The native preparation recipe supplies a binary absent from the pinned npm package:
 
 - Windows ARM64 builds TriviumDB 0.8.10 from commit
   `221a628209838483e20296d29bcf35fc3e2dd156`. The preparation step patches
   upstream's x64-only Windows loader to select the added ARM64 binary.
   The native runner needs Rust and the ARM64 MSVC toolchain.
-- The optional semantic component's `prepare-onnx-runtime.mjs` builds macOS Intel ONNX Runtime 1.24.3 CPU and Node-API libraries from commit
-  `3a728b75062256951b6e19ce718907cf1a1d4cf0`, matching the installed JavaScript API. The
-  build uses Xcode command-line tools, Python 3, CMake 3.28 or newer, and Ninja.
-
-These recipes run for their respective base or optional component builds. They validate the installed
-dependency version, build from the fixed source revision, and check the resulting architecture.
+The recipe runs during the corresponding application build. It validates the installed
+dependency version, builds from the fixed source revision, and checks the resulting architecture.
 Verified payloads and hash receipts are cached under `~/.cache/varin-native`; release jobs cache
-only those outputs, not source checkouts or build directories. The optional component build runs real
-Bekko inference through Electron, so successful compilation alone does not establish runtime support.
+only those outputs, not source checkouts or build directories.
 
 macOS builds produce `dmg` and `zip` artifacts. Windows builds produce an NSIS installer. Linux builds produce an AppImage for the native x64 or arm64 host.
 

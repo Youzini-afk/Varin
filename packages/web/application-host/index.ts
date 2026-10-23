@@ -163,11 +163,9 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createContextObservationPublication } from './lib/knowledge/context-publication.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
-import { createProjectIndexScope, insideDirectory, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
-import { createIndexDirectoryManager, type IndexRemovalProgress } from './lib/knowledge/index-directories.js';
-import { purgeSemanticWorkspaceCache } from './lib/knowledge/semantic/cache-maintenance.js';
+import { createProjectIndexScope, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
 import { projectFolders, projectContainsPath } from '@varin/application-client';
-import { createSemanticIndexManagement, DEFAULT_SEMANTIC_INDEX_CONFIGURATION, registerSemanticIndexRoutes } from './lib/knowledge/semantic/index-management.js';
+import { createEmbeddingRequestSettings, DEFAULT_EMBEDDING_REQUEST_CONFIGURATION, registerEmbeddingRequestRoutes } from './lib/knowledge/vectors/request-settings.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
 import { createKnowledgeVectorRuntime } from './lib/knowledge/vectors/index.js';
@@ -1179,7 +1177,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Agent tools and user settings surfaces share the same native owners and CAS.
   const settingsActionRegistry = createSettingsActionRegistry({
-    semanticIndex: () => semanticIndexManagement,
+    embeddingRequests: () => embeddingRequestSettings,
     models: () => modelsService,
     modelFetch: (input, init) => egressRuntime.fetch(input, init),
     mcpSettings: () => mcpSettings,
@@ -2400,16 +2398,14 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       resolveInstalledLanguage: (languageId) => languageSupportRuntime.installedStructureSpec(languageId),
     });
   const structureSource = createStructureSource([syntaxStructure]);
-  // Legacy cache ownership is retained only for explicit reclamation.
-  const semanticIndexManagement = createSemanticIndexManagement(VARIN_DATA_DIR, hostId);
-  const semanticIndexLoad = await semanticIndexManagement.load().catch((error: unknown) => ({
-    config: DEFAULT_SEMANTIC_INDEX_CONFIGURATION, error: errorMessage(error),
+  const embeddingRequestSettings = createEmbeddingRequestSettings(VARIN_DATA_DIR);
+  const embeddingRequestLoad = await embeddingRequestSettings.load().catch((error: unknown) => ({
+    config: DEFAULT_EMBEDDING_REQUEST_CONFIGURATION, error: errorMessage(error),
   }));
-  if (semanticIndexLoad.error) console.error('[HarnessKnowledge] Index settings need repair:', semanticIndexLoad.error);
-  const semanticIndexConfig = semanticIndexLoad.config;
+  if (embeddingRequestLoad.error) console.error('[HarnessKnowledge] Embedding request settings need repair:', embeddingRequestLoad.error);
   const semanticScheduler = createEmbedScheduler({
-    concurrency: semanticIndexConfig.concurrentRequests,
-    backgroundIntervalMs: semanticIndexConfig.requestIntervalMs,
+    concurrency: embeddingRequestLoad.config.concurrentRequests,
+    backgroundIntervalMs: embeddingRequestLoad.config.requestIntervalMs,
   });
   const semanticVectorCache = createVectorCache();
   const semanticInference = createSemanticInference(modelsService, {
@@ -2443,83 +2439,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const knowledgeEmbedding = createKnowledgeEmbeddingOwner(kernelClient, semanticInference);
   const unsubscribeKnowledgeEmbedding = settingsRuntime.subscribe(() => knowledgeVectors?.refreshAll());
-  const indexDirectories = createIndexDirectoryManager({
-    maintenanceOnly: true,
-    dataDir: VARIN_DATA_DIR,
-    resolve: async (directory) => {
-      const { workspaceId } = await documentsAuthority.resolveWorkspace({ path: directory });
-      const { root } = await documentsAuthority.inspectWorkspace(workspaceId);
-      return { path: root, workspaceId };
-    },
-    apply: async () => {},
-    check: async () => { throw new Error('Code indexes are retired'); },
-    purge: async (directory, cleanup) => semanticIndexManagement.withCacheMaintenance(async () => {
-      const failures: Error[] = [];
-      let activePhase: IndexRemovalProgress['phase'] = 'waiting';
-      const progress = (value: IndexRemovalProgress) => { activePhase = value.phase; cleanup.onProgress(value); };
-      const attempt = async (phase: 'stopping' | 'receipts' | 'symbols', work: () => Promise<void>) => {
-        cleanup.signal.throwIfAborted();
-        progress({ phase });
-        try { await work(); }
-        catch (error) {
-          cleanup.signal.throwIfAborted();
-          failures.push(new Error(`${activePhase}: ${errorMessage(error)}`, { cause: error }));
-        }
-      };
-      const saved = await semanticIndexManagement.read();
-      const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
-      const preserved: string[] = [];
-      for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
-        cleanup.signal.throwIfAborted();
-        if (!insideDirectory(directory, resource.canonicalPath) && !insideDirectory(resource.canonicalPath, directory)) continue;
-        if (preserved.some((candidate) => insideDirectory(candidate, resource.canonicalPath))) continue;
-        await attempt('stopping', async () => {
-          cleanup.signal.throwIfAborted();
-          progress({ phase: 'vectors' });
-          for (const semanticDirectory of caches) await purgeSemanticWorkspaceCache({ semanticDirectory,
-            workspaceId: resource.workspaceId, resourceRoot: resource.canonicalPath, removedDirectory: directory, preserveDirectories: preserved });
-        });
-        if (insideDirectory(directory, resource.canonicalPath)
-          && !preserved.some(candidate => insideDirectory(resource.canonicalPath, candidate))) {
-          await attempt('receipts', () => semanticInference.retireIndexWorkspace(resource.workspaceId));
-        }
-        const storeFile = path.join(VARIN_DATA_DIR, 'knowledge', hostId, `${knowledgeStoreKeyForScope(resource.workspaceId)}.tdb`);
-        if (fs.existsSync(storeFile)) await attempt('symbols', async () => {
-          const store = await getKnowledgeStoreForScope(resource.workspaceId);
-          const relative = path.relative(resource.canonicalPath, directory).split(path.sep).join('/') || '.';
-          const roots = insideDirectory(directory, resource.canonicalPath) ? ['.'] : [relative];
-          const result = await store.purgeFileCatalog({ roots, preservedRoots: [] }, {
-            signal: cleanup.signal,
-            onProgress: value => progress({ phase: 'symbols', completed: value.completed, total: value.total, unit: value.phase }),
-          });
-          if (result.removedNodes) { progress({ phase: 'compacting' }); await store.compact(); }
-        });
-      }
-      if (failures.length) throw new AggregateError(failures, `Index cleanup failed: ${failures.map(failure => failure.message).join('; ')}`);
-    }),
-    cached: async () => {
-      const saved = await semanticIndexManagement.read();
-      const caches = [...new Set([semanticIndexManagement.activeDirectory(), ...saved.retainedDirectories])];
-      const result: Array<{ path: string; workspaceId: string }> = [];
-      for (const resource of await documentsAuthority.listWorkspaceRegistrations()) {
-        if (caches.some((cache) => fs.existsSync(path.join(cache, 'workspace', resource.workspaceId)))) {
-          result.push({ path: resource.canonicalPath, workspaceId: resource.workspaceId });
-        }
-      }
-      return result;
-    },
-    onError: (error) => console.error('[ProjectIndex]', errorMessage(error)),
-  });
-  registerSemanticIndexRoutes(app, {
-    management: semanticIndexManagement,
-    directories: indexDirectories,
-    ...(uiAuthController ? { requireAuth: uiAuthController.requireAuth } : {}),
-  });
+  registerEmbeddingRequestRoutes(app, embeddingRequestSettings, uiAuthController.requireAuth);
   const storageService = createStorageService({
     hostId, name: os.hostname(), dataDirectory: VARIN_DATA_DIR,
     speechModelsDirectory: path.join(VARIN_USER_CONFIG_ROOT, 'speech-models'),
     workspaces: () => documentsAuthority.listWorkspaceRegistrations(),
-    indexes: semanticIndexManagement, kernel: kernelClient,
+    kernel: kernelClient,
     devices: async () => {
       const statuses = await connections.statusesWithDefaults();
       return readHostConnections(connections.settingsStore).hosts.map(host => {
@@ -2538,7 +2463,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     cache: semanticVectorCache,
     resolveEmbedder: knowledgeEmbedding.resolve,
   });
-  await indexDirectories.load();
   const observeKnowledgeGitStatus = createGitStatusObserver({
     resolveWorkspaceId: (scope) => documentsAuthority.resolveScopeId(scope),
     observe: (event) => knowledgeContextRuntime.observeGitStatus(event),
@@ -2893,7 +2817,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // Semantic and graph observers still read Documents and use the kernel
       // services. Stop them while those owners are alive; otherwise each late
       // document event can race a disposed mutation authority during shutdown.
-      await shutdown.run('indexDirectories.dispose', () => indexDirectories.dispose());
       observeKnowledgeDocumentMutation = () => undefined;
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];

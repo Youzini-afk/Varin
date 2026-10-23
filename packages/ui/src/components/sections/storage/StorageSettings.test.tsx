@@ -29,7 +29,7 @@ const select = async (label: string, value: string) => act(async () => {
   element.dispatchEvent(new window.Event('change', { bubbles: true }));
 });
 function inventory(): StorageInventory { return { device: { id: 'host', name: 'Host fixture', current: true, state: 'ready' }, devices: [{ id: 'host', name: 'Host fixture', current: true, state: 'ready' }], scope: { kind: 'all' }, scannedAt: '2026-10-16T00:00:00Z', state: 'ready', canCleanup: true, measurement: 'logical-file-length', root: '/fixture-only', bytes: 17, hostBytes: 17, sharedBytes: 17,
-  categories: [{ id: 'recovery', bytes: 17 }, ...(['copies', 'conversations', 'indexes', 'models', 'other'] as const).map(id => ({ id, bytes: 0 }))], workspaces: [], issues: [], volumes: [] }; }
+  categories: [{ id: 'recovery', bytes: 17 }, ...(['copies', 'conversations', 'embeddings', 'models', 'other'] as const).map(id => ({ id, bytes: 0 }))], workspaces: [], issues: [], volumes: [] }; }
 it('shows unknown rather than zero when the managed root cannot be read', async () => {
   mocks.inventory.mockResolvedValue({ ...inventory(), state: 'partial', bytes: 0, categories: inventory().categories.map(item => ({ ...item, bytes: 0 })), issues: ['EACCES: /fixture-only'] });
   await act(async () => root.render(<StorageSettings />));
@@ -115,7 +115,7 @@ function remoteFixture(): StorageInventory {
 it('selects resource Host B and its workspace without switching the Agent endpoint or navigating to A history', async () => {
   const generation = getRuntimeEndpointGeneration(), local = remoteFixture();
   mocks.inventory.mockImplementation(async (scope, _signal, requestedTarget) => requestedTarget ? { ...local, device: local.devices[1], scope, bytes: 29, root: '/resource-b', workspaces: [{ id: 'b-project', name: 'B project', path: '/b/project', bytes: 29 }] } : local);
-  mocks.preview.mockResolvedValue({ id: 'b-preview', deviceId: target.id, scope: { kind: 'workspace', workspaceId: 'b-project' }, candidates: [{ id: 'b-cache', kind: 'retained-index', bytes: 12, count: 1, location: '/resource-b/cache' }], issues: [] });
+  mocks.preview.mockResolvedValue({ id: 'b-preview', deviceId: target.id, scope: { kind: 'workspace', workspaceId: 'b-project' }, candidates: [{ id: 'b-cache', kind: 'unreferenced-objects', bytes: 12, count: 1, location: '/resource-b/cache' }], issues: [] });
   mocks.cleanup.mockResolvedValue({ previewId: 'b-preview', state: 'complete', bytesReclaimed: 12, objectsDeleted: 1, completed: ['b-cache'], failures: [] });
   await act(async () => root.render(<StorageSettings />));
   await select('Device', target.id);
@@ -153,7 +153,7 @@ it('shows an unavailable resource honestly and offers an explicit return-and-rec
 });
 it('locks the confirmed selection after a lost receipt and retries that original confirmation', async () => {
   mocks.inventory.mockResolvedValue(inventory());
-  mocks.preview.mockResolvedValue({ id: 'original-preview', deviceId: 'host', scope: { kind: 'all' }, candidates: [{ id: 'original-cache', kind: 'retained-index', bytes: 17, count: 1, location: '/fixture-only/cache' }], issues: [] });
+  mocks.preview.mockResolvedValue({ id: 'original-preview', deviceId: 'host', scope: { kind: 'all' }, candidates: [{ id: 'original-cache', kind: 'unreferenced-objects', bytes: 17, count: 1, location: '/fixture-only/cache' }], issues: [] });
   mocks.cleanup.mockRejectedValueOnce(new Error('Lost response')).mockResolvedValueOnce({ previewId: 'original-preview', state: 'complete', bytesReclaimed: 17, objectsDeleted: 1, completed: ['original-cache'], failures: [] });
   await act(async () => root.render(<StorageSettings />)); await act(async () => button('Inspect cleanup candidates').click());
   await act(async () => button('Confirm cleanup').click());

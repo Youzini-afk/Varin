@@ -11,7 +11,7 @@ const sameScope = (a: StorageScope | undefined, b: StorageScope) => a?.kind === 
 const amount = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(item => typeof item === 'string');
 const date = (value: unknown) => typeof value === 'string' && Number.isFinite(Date.parse(value));
-const categoryIds = new Set(['recovery', 'copies', 'conversations', 'indexes', 'models', 'other']);
+const categoryIds = new Set(['recovery', 'copies', 'conversations', 'embeddings', 'models', 'other']);
 interface RemotePreview {
   principal: string; owner: ManagedHostSourceOwner; remoteId: string; preview: StorageCleanupPreview;
   acceptedAt?: number; completedAt?: number; selected?: string[]; running?: Promise<StorageCleanupReceipt>; receipt?: StorageCleanupReceipt;
@@ -72,7 +72,7 @@ export function createStorageCoordinator(local: LocalStorage, remote: RemoteStor
     try {
       const owner = ownerOf(target), original = await remote.storage(owner, 'preview', { scope });
       if (!original || original.deviceId !== owner.hostId || !sameScope(original.scope, scope) || typeof original.id !== 'string' || !original.id || !date(original.createdAt) || !date(original.expiresAt)
-        || !Array.isArray(original.candidates) || original.candidates.some(item => !item || typeof item.id !== 'string' || !item.id || !['unreferenced-objects', 'retained-index', 'retired-code-model'].includes(item.kind) || typeof item.location !== 'string' || !amount(item.bytes) || !amount(item.count))
+        || !Array.isArray(original.candidates) || original.candidates.some(item => !item || typeof item.id !== 'string' || !item.id || item.kind !== 'unreferenced-objects' || typeof item.location !== 'string' || !amount(item.bytes) || !amount(item.count))
         || new Set(original.candidates.map(item => item.id)).size !== original.candidates.length || !strings(original.issues)) {
         throw new StorageServiceError(502, 'unconfirmed-preview', 'The selected Host did not confirm the requested cleanup scope');
       }

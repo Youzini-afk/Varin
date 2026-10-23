@@ -5,7 +5,7 @@ import path from 'node:path';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
-import { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
+import { semanticRootDir } from '../knowledge/semantic/identity.js';
 import { createStorageService } from './service.js';
 import { registerStorageRoutes } from './routes.js';
 import { measureDirectory } from './measure.js';
@@ -16,15 +16,10 @@ const write = async (filename: string, value: string) => { await mkdir(path.dirn
 async function fixture() {
   const root = await mkdtemp(path.join(tmpdir(), 'varin-storage-settings-')); roots.push(root);
   const data = path.join(root, 'data'), models = path.join(root, 'models');
-  const original = createSemanticIndexManagement(data, 'host');
-  await original.load();
-  const old = original.activeDirectory();
-  await write(path.join(old, 'workspace', 'workspace-a', 'index.tdb'), 'old-a');
-  await write(path.join(old, 'workspace', 'workspace-b', 'index.tdb'), 'old-b-longer');
-  await original.save({ storageDirectory: path.join(root, 'custom') }, (await original.read()).revision);
-  const indexes = createSemanticIndexManagement(data, 'host'); await indexes.load();
-  const active = indexes.activeDirectory();
-  await write(path.join(active, 'workspace', 'workspace-a', 'index.tdb'), 'active-a');
+  const active = semanticRootDir(data, 'host');
+  await write(path.join(data, 'knowledge', 'host', 'workspace-a.tdb'), 'workspace-a');
+  await write(path.join(data, 'knowledge', 'host', 'workspace-b.tdb'), 'workspace-b-longer');
+  await write(path.join(active, 'knowledge-user', 'user', 'space', 'data.vec'), 'memory-vectors');
   await write(path.join(data, 'kernel', 'host', 'objects', 'body'), 'shared-object');
   await write(path.join(data, 'kernel', 'host', 'agent-runtime', 'catalog.sqlite'), 'conversation');
   await write(path.join(data, 'kernel', 'host', 'managed', 'source'), 'copy');
@@ -32,38 +27,22 @@ async function fixture() {
   await write(path.join(root, 'original-project', 'keep.txt'), 'ORIGINAL USER PROJECT');
   const collect = vi.fn(async () => ({ byteLengthReclaimed: 17, deletedBlobs: 1, cleanupFailures: [] }));
   const kernel = { health: vi.fn(async () => ({ storageRoot: path.join(data, 'kernel', 'host'), gcPreview: { objects: [{ hash: 'sha256-fixture-only', byteLength: 17 }], retainedObjects: 4 } })), collectStorageObjects: collect };
-  const service = createStorageService({ hostId: 'host', name: 'Fixture Host', dataDirectory: data, speechModelsDirectory: models, indexes, kernel,
+  const service = createStorageService({ hostId: 'host', name: 'Fixture Host', dataDirectory: data, speechModelsDirectory: models, kernel,
     workspaces: async () => ['workspace-a', 'workspace-b'].map(workspaceId => ({ workspaceId, canonicalPath: path.join(root, 'original-project', workspaceId) })),
     devices: async () => [{ id: 'remote', name: 'Remote fixture', current: false, state: 'unsupported' }],
   });
-  return { root, data, models, old, active, indexes, kernel, service };
+  return { root, data, models, active, kernel, service };
 }
 
 describe('managed storage inventory and scoped cleanup', () => {
-  it('reclaims only the retired code model through a confirmed unchanged shared preview', async () => {
-    const f=await fixture();
-    const retired=path.join(f.data,'optional-components','local-semantic','versions','one','model.bin');
-    await write(retired,'retired-code-model');
-    const scoped=await f.service.preview({kind:'workspace',workspaceId:'workspace-a'});
-    expect(scoped.candidates.some(item=>item.kind==='retired-code-model')).toBe(false);
-    const stale=await f.service.preview({kind:'shared'});const before=stale.candidates.find(item=>item.kind==='retired-code-model')!;
-    await write(retired,'retired-code-model-changed');
-    expect((await f.service.cleanup(stale.id,[before.id])).state).toBe('partial');
-    const preview=await f.service.preview({kind:'shared'});const candidate=preview.candidates.find(item=>item.kind==='retired-code-model')!;
-    const receipt=await f.service.cleanup(preview.id,[candidate.id]);
-    expect(receipt).toMatchObject({state:'complete',bytesReclaimed:Buffer.byteLength('retired-code-model-changed')});
-    await expect(readFile(retired)).rejects.toMatchObject({code:'ENOENT'});
-    expect(await readFile(path.join(f.models,'model.bin'),'utf8')).toBe('model');
-    expect(await f.service.cleanup(preview.id,[candidate.id])).toEqual(receipt);
-  });
   it('measures real owned files once, excludes original projects, and does not repeat shared data per workspace', async () => {
     const f = await fixture();
     const all = await f.service.inventory({ kind: 'all' });
     const a = await f.service.inventory({ kind: 'workspace', workspaceId: 'workspace-a' });
     const b = await f.service.inventory({ kind: 'workspace', workspaceId: 'workspace-b' });
     const shared = await f.service.inventory({ kind: 'shared' });
-    expect(a.bytes).toBe(Buffer.byteLength('old-aactive-a'));
-    expect(b.bytes).toBe(Buffer.byteLength('old-b-longer'));
+    expect(a.bytes).toBe(Buffer.byteLength('workspace-a'));
+    expect(b.bytes).toBe(Buffer.byteLength('workspace-b-longer'));
     expect(all.bytes).toBe(a.bytes + b.bytes + shared.bytes);
     expect(all.categories.reduce((sum, item) => sum + item.bytes, 0)).toBe(all.bytes);
     expect(all.categories.find(item => item.id === 'models')?.bytes).toBe(5);
@@ -77,25 +56,23 @@ describe('managed storage inventory and scoped cleanup', () => {
 
   it('moves a hard-linked object used by two workspaces into the shared bucket and refuses to follow links', async () => {
     const f = await fixture();
-    const first = path.join(f.active, 'workspace', 'workspace-a', 'index.tdb');
-    await mkdir(path.join(f.active, 'workspace', 'workspace-b'), { recursive: true });
-    await link(first, path.join(f.active, 'workspace', 'workspace-b', 'same.tdb'));
+    const first = path.join(f.data, 'knowledge', 'host', 'workspace-a.tdb');
+    await link(first, path.join(f.data, 'knowledge', 'host', 'workspace-b.tdb.part'));
     const before = await f.service.inventory({ kind: 'all' });
-    await symlink(path.join(f.root, 'original-project'), path.join(f.data, 'external-project'));
+    await symlink(path.join(f.root, 'original-project'), path.join(f.data, 'external-project'), process.platform === 'win32' ? 'junction' : 'dir');
     const all = await f.service.inventory({ kind: 'all' });
     expect(all.bytes).toBe(before.bytes);
     expect(all.state).toBe('partial');
     expect(all.issues[0]).toContain('Symbolic link');
     const a = await f.service.inventory({ kind: 'workspace', workspaceId: 'workspace-a' });
-    expect(a.bytes).toBe(5);
+    expect(a.bytes).toBe(0);
     expect((await measureDirectory(path.join(f.data, 'external-project'))).bytes).toBe(0);
   });
 
   it('reports a missing mandatory Host root as incomplete, even when optional model and cache roots are absent', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'varin-storage-missing-root-')); roots.push(root);
     const data = path.join(root, 'missing-data');
-    const indexes = createSemanticIndexManagement(data, 'host'); await indexes.load();
-    const service = createStorageService({ hostId: 'host', name: 'Missing root fixture', dataDirectory: data, speechModelsDirectory: path.join(root, 'absent-models'), indexes,
+    const service = createStorageService({ hostId: 'host', name: 'Missing root fixture', dataDirectory: data, speechModelsDirectory: path.join(root, 'absent-models'),
       workspaces: async () => [], devices: async () => [], kernel: { health: vi.fn(), collectStorageObjects: vi.fn() } });
     const result = await service.inventory({ kind: 'all' });
     expect(result.state).toBe('partial');
@@ -103,32 +80,15 @@ describe('managed storage inventory and scoped cleanup', () => {
     expect(result.volumes[0]).toMatchObject({ state: 'unavailable', totalBytes: null, availableBytes: null });
   });
 
-  it('previews and removes only one workspace inactive cache, preserving active, shared, other workspace and original files', async () => {
+  it('keeps knowledge vectors and workspace data out of cleanup candidates', async () => {
     const f = await fixture();
-    const preview = await f.service.preview({ kind: 'workspace', workspaceId: 'workspace-a' });
-    expect(preview.candidates).toHaveLength(1);
-    expect(preview.candidates[0]?.bytes).toBe(5);
-    expect(f.kernel.health).not.toHaveBeenCalled();
-    const result = await f.service.cleanup(preview.id, preview.candidates.map(item => item.id));
-    expect(result).toMatchObject({ state: 'complete', bytesReclaimed: 5, objectsDeleted: 1 });
-    await expect(readFile(path.join(f.old, 'workspace', 'workspace-a', 'index.tdb'))).rejects.toMatchObject({ code: 'ENOENT' });
-    expect(await readFile(path.join(f.old, 'workspace', 'workspace-b', 'index.tdb'), 'utf8')).toBe('old-b-longer');
-    expect(await readFile(path.join(f.active, 'workspace', 'workspace-a', 'index.tdb'), 'utf8')).toBe('active-a');
-    expect(await readFile(path.join(f.root, 'original-project', 'keep.txt'), 'utf8')).toBe('ORIGINAL USER PROJECT');
-    expect(f.kernel.collectStorageObjects).not.toHaveBeenCalled();
-    expect(await f.service.cleanup(preview.id, preview.candidates.map(item => item.id))).toEqual(result);
-  });
-
-  it('refuses changed cache contents and invalid candidates rather than expanding a confirmation', async () => {
-    const f = await fixture();
-    const preview = await f.service.preview({ kind: 'workspace', workspaceId: 'workspace-a' });
-    await write(path.join(f.old, 'workspace', 'workspace-a', 'new.tdb'), 'NEW DATA');
+    expect((await f.service.preview({ kind: 'workspace', workspaceId: 'workspace-a' })).candidates).toEqual([]);
+    const inventory = await f.service.inventory({ kind: 'shared' });
+    expect(inventory.categories.find(item => item.id === 'embeddings')?.bytes).toBe(Buffer.byteLength('memory-vectors'));
+    const preview = await f.service.preview({ kind: 'shared' });
     await expect(f.service.cleanup(preview.id, ['../../original-project'])).rejects.toThrow('Select only');
-    const result = await f.service.cleanup(preview.id, preview.candidates.map(item => item.id));
-    expect(result.state).toBe('partial');
-    expect(result.bytesReclaimed).toBe(0);
-    expect(result.failures[0]?.message).toContain('changed after preview');
-    expect(await readFile(path.join(f.old, 'workspace', 'workspace-a', 'new.tdb'), 'utf8')).toBe('NEW DATA');
+    await f.service.cleanup(preview.id, preview.candidates.map(item => item.id));
+    expect(await readFile(path.join(f.active, 'knowledge-user', 'user', 'space', 'data.vec'), 'utf8')).toBe('memory-vectors');
   });
 
   it('uses only previewed native hashes, reports physical cleanup failures, and replays one receipt', async () => {
@@ -148,16 +108,15 @@ describe('managed storage inventory and scoped cleanup', () => {
     const f = await fixture();
     let now = Date.now();
     vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const completed = await f.service.preview({ kind: 'workspace', workspaceId: 'workspace-a' });
+    const completed = await f.service.preview({ kind: 'shared' });
     const ids = completed.candidates.map(item => item.id);
     const receipt = await f.service.cleanup(completed.id, ids);
-    const unaccepted = await f.service.preview({ kind: 'workspace', workspaceId: 'workspace-b' });
+    const unaccepted = await f.service.preview({ kind: 'shared' });
     now += 11 * 60_000;
     // Creating another preview triggers pruning, which must not erase receipts.
     await f.service.preview({ kind: 'shared' });
     expect(await f.service.cleanup(completed.id, ids)).toEqual(receipt);
     await expect(f.service.cleanup(unaccepted.id, unaccepted.candidates.map(item => item.id))).rejects.toThrow('expired');
-    expect(await readFile(path.join(f.old, 'workspace', 'workspace-b', 'index.tdb'), 'utf8')).toBe('old-b-longer');
     now += 24 * 60 * 60_000;
     await expect(f.service.cleanup(completed.id, ids)).rejects.toThrow('replay window');
   });

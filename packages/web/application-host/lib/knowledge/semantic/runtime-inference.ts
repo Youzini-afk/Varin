@@ -564,7 +564,6 @@ export function createSemanticInference(
       ? decision.capture(purpose) : Promise.resolve({ status: "unavailable", message: "Native decision inference is unavailable." }),
     inferenceFacts: (filter?: SemanticInferenceFactFilter) => options.ledger
       ? options.ledger.list(filter) : Promise.reject(new SemanticInferenceError('unavailable', 'embedding-ledger-unavailable')),
-    retireIndexWorkspace: (workspaceId: string) => options.ledger?.retireScope(workspaceId) ?? Promise.resolve(),
     stats: () => ({ activeLeases: controllers.size, activeRequests: transports.size,
       activeCalls: pending.size, pendingSettlements }),
     describe: async (): Promise<SemanticInferenceDescription> => {

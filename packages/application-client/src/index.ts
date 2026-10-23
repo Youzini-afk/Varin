@@ -37,6 +37,7 @@ export * from "./documents-workspace-edit.js";
 export * from './resource-management.js';
 
 export * from "./storage.js";
+export * from "./embedding-requests.js";
 
 export * from "./host-connections.js";
 export * from './model-capabilities.js';

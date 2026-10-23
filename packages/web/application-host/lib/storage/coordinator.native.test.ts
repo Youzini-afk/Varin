@@ -11,7 +11,6 @@ import { createKernelClient } from '../kernel/kernel-client.js';
 import { createManagedRemoteTargetRegistry } from '../harness/managed-remote-client.js';
 import { createManagedRemoteExecutionService } from '../harness/managed-remote-service.js';
 import { registerManagedRemoteRoutes } from '../harness/managed-remote-routes.js';
-import { createSemanticIndexManagement } from '../knowledge/semantic/index-management.js';
 import { createStorageService } from './service.js';
 import { createStorageCoordinator } from './coordinator.js';
 import { registerStorageRoutes } from './routes.js';
@@ -28,8 +27,7 @@ it('keeps Agent Host A intact while resource Host B rechecks real Rust reference
     const kernel = createKernelClient({ hostId, storageRoot: path.join(data, 'kernel'), buildVersion, kernelPath, allowCargoDevRunner: false });
     cleanups.push(() => kernel.close()); await kernel.start();
     const actor = kernel.scoped(await kernel.issueGrant({ grantId: 'fixture', owningWorkspace: 'workspace', executionWorkspace: 'workspace', pathScopes: [''], capabilities: ['storage.read', 'storage.write', 'storage.gc'] }));
-    const indexes = createSemanticIndexManagement(data, hostId); await indexes.load();
-    const service = createStorageService({ hostId, name: hostId, dataDirectory: data, speechModelsDirectory: path.join(data, 'models'), indexes, kernel, devices: async () => [], workspaces: async () => [] });
+    const service = createStorageService({ hostId, name: hostId, dataDirectory: data, speechModelsDirectory: path.join(data, 'models'), kernel, devices: async () => [], workspaces: async () => [] });
     return { hostId, data, kernel, actor, service };
   };
   const a = await make('native-agent-a'), b = await make('native-resource-b');

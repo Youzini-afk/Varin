@@ -2,7 +2,6 @@
 import { openKnowledgeStoreEngine, type KnowledgeStoreEngine } from "./store-engine.js";
 import { createSemanticStoreEngine, type SemanticStoreEngine } from "./semantic/store-engine.js";
 import { isSemanticStoreMethod } from "./semantic/store-protocol.js";
-import { purgeSemanticWorkspaceCache } from "./semantic/cache-maintenance-engine.js";
 import type { SemanticStoreOpenOptions } from "./semantic/store-contract.js";
 import { spaceIdOf } from "./semantic/identity.js";
 import { resolve } from "node:path";
@@ -93,9 +92,6 @@ async function handle(requests: StoreRequest[]): Promise<void> {
             value = await Reflect.apply(shared.store[action as "admit" | "settle" | "read" | "list" | "retireScope"], shared.store, args);
           }
           responses.push({ id: first.id, ok: true, value });
-        } else if (method === "purge") {
-          await purgeSemanticWorkspaceCache(args[0] as Parameters<typeof purgeSemanticWorkspaceCache>[0]);
-          responses.push({ id: first.id, ok: true, value: undefined });
         } else if (method === "open") {
           if (semanticStores.has(first.storeId) || stores.has(first.storeId) || inferenceHandles.has(first.storeId)) throw new Error("Storage handle already exists");
           const input = args[0] as SemanticStoreOpenOptions;
