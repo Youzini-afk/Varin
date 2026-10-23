@@ -10,7 +10,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 type Review = { snapshot: ProjectTrust; decision: boolean; settle(accepted: boolean): void };
 
 /** The displayed canonical root is also the Host's revision-checked mutation target. */
-export function ProjectTrustSettings({ directory: selectedDirectory }: { directory?: string | null }) {
+export function ProjectTrustSettings({ directory: selectedDirectory, label, showDescription = true }: {
+  directory?: string | null; label?: string; showDescription?: boolean;
+}) {
   const { t } = useI18n();
   const currentDirectory = useDirectoryStore(state => state.currentDirectory);
   const directory = selectedDirectory === undefined ? currentDirectory : selectedDirectory;
@@ -70,16 +72,16 @@ export function ProjectTrustSettings({ directory: selectedDirectory }: { directo
 
   if (!directory) return null;
   const error = saveError || readError;
-  return <section className="space-y-2 rounded-md border border-border/60 p-3" aria-label={t('settings.projectTrust.title')}>
+  return <section className="space-y-2 py-3" aria-label={t('settings.projectTrust.title')}>
     <div className="flex flex-wrap items-center gap-2">
-      <span className="flex-1 typography-ui-label">{t('settings.projectTrust.title')}</span>
+      <span className="min-w-0 flex-1 break-words typography-ui-label">{label ?? t('settings.projectTrust.title')}</span>
       <span className="typography-meta text-muted-foreground">{snapshot ? t(snapshot.decision === true ? 'settings.projectTrust.trusted' : 'settings.projectTrust.untrusted') : t('settings.projectTrust.checking')}</span>
       <Button size="sm" variant="outline" disabled={!snapshot || busy} onClick={() => void change(snapshot?.decision !== true)}>
         {t(snapshot?.decision === true ? 'settings.projectTrust.revoke' : 'settings.projectTrust.trust')}
       </Button>
     </div>
     <p className="break-all typography-micro text-muted-foreground">{snapshot?.path ?? directory}</p>
-    <p className="typography-meta text-muted-foreground">{t('settings.projectTrust.description')}</p>
+    {showDescription ? <p className="typography-meta text-muted-foreground">{t('settings.projectTrust.description')}</p> : null}
     {error ? <p role="alert" className="typography-meta text-destructive">{error} <Button size="sm" variant="ghost" disabled={busy} onClick={() => { setSaveError(''); setReload(value => value + 1); }}>{t('assistant.reload')}</Button></p> : null}
     <Dialog open={review !== null} onOpenChange={open => { if (!open) finishReview(false); }}>
       <DialogContent><DialogHeader>

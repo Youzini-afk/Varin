@@ -1,5 +1,4 @@
 import React from 'react';
-import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
 import type { NativeResourceKind, NativeResourceScope } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import { SettingsProjectSelector } from '@/components/sections/shared/SettingsProjectSelector';
@@ -39,7 +38,7 @@ const NAME_ERROR_KEYS = {
 
 export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ kind, onItemSelect }) => {
   const { t } = useI18n();
-  const { resourceTarget, targetKey, projectDirectory, trustVersion } = useResourceManagementTarget();
+  const { resourceTarget, targetKey, trustVersion } = useResourceManagementTarget();
   const pane = useResourceLibraryStore((state) => state.panes[kind]);
   const loadCatalog = useResourceLibraryStore((state) => state.loadCatalog);
   const selectResource = useResourceLibraryStore((state) => state.selectResource);
@@ -126,7 +125,6 @@ export const NativeResourceSidebar: React.FC<NativeResourceSidebarProps> = ({ ki
           </div>
         </div>
         <SettingsProjectSelector />
-        <ProjectTrustSettings directory={projectDirectory} />
         <div className="relative">
           <Icon name="search" className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input

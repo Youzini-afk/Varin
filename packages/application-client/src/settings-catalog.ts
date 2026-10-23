@@ -1087,6 +1087,12 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
 
   // ── Projects ─────────────────────────────────────────────────────────────
   {
+    id: 'projects.trust', category: 'projects', owner: 'action', apply: 'manual',
+    actionRef: { domain: 'page:ui', note: 'User-confirmed trust for canonical project folders. The settings catalog cannot grant trust.' },
+    ui: { page: 'projects', titleKey: 'settings.projectTrust.title', descriptionKey: 'settings.projectTrust.description',
+      keywords: ['trust', 'trusted', 'untrusted', 'workspace', '信任', '撤销信任'] },
+  },
+  {
     id: 'projects.name', category: 'projects', owner: 'action',
     actionRef: { domain: 'service:projects', verbs: ['rename'],
       note: 'project metadata lives inside the projects[] entries of the app document; edits need a target project id' },
@@ -1096,7 +1102,7 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'projects.default-model', category: 'projects', owner: 'action',
     actionRef: { domain: 'service:projects', verbs: ['set-default-model'],
-      note: 'per-project defaultModel inside the projects[] entries' },
+      note: 'project-scoped defaultProvider/defaultModel and defaultThinkingLevel in the original Agent settings owner' },
     ui: { page: 'projects', titleKey: 'settings.projects.page.field.defaultModel',
       descriptionKey: 'settings.projects.page.field.defaultModelDescription',
       keywords: ['model', 'new chat', 'project default'] },

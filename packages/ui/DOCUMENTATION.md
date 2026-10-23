@@ -251,6 +251,14 @@ use the original draft guards. Appearance, chat, editor, terminal, and notificat
 inert samples. Voice model cards and storage cleanup keep their existing domain interactions.
 See [settings composition](src/components/sections/shared/DOCUMENTATION.md).
 
+Project trust is managed in the selected project's identity/defaults page, per canonical folder.
+Skills and MCP settings do not duplicate the grant controls. Project creation reviews previously
+untrusted folders before activation; the explicit choice may grant trust or keep existing decisions.
+Already trusted folders reuse their decision. Multi-folder grants re-read the shared trust revision
+and retain the reviewed canonical path; cancelled or retired Host views cannot grant trust.
+Conversation defaults edit Host-global values. Project model and thinking overrides live with the
+project and restore inheritance by deleting overrides.
+
 Model services open on their model collection with separate connection/authentication and request
 configuration tabs. MCP settings project tool declarations from the retained live connection or the
 original directory cache, labeling their source. Configuration, authorization, and connection state

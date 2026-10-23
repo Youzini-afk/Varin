@@ -1,4 +1,6 @@
 import React from 'react';
+import { projectFolders } from '@varin/application-client';
+import { ProjectTrustSettings } from '../shared/ProjectTrustSettings';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Icon } from '@/components/icon/Icon';
@@ -75,8 +77,15 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
         />
       </ProjectSettingsSubsection>
 
+      <ProjectSettingsSubsection title={t('settings.projectTrust.title')} description={t('settings.projectTrust.description')} settingsItem="projects.trust">
+        <div className="divide-y divide-border/50">
+          {projectFolders(project).map(directory => <ProjectTrustSettings key={directory} directory={directory}
+            label={directory.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || directory} showDescription={false} />)}
+        </div>
+      </ProjectSettingsSubsection>
+
       <ProjectSettingsSubsection
-        title={t('settings.projects.page.field.defaultModel')}
+        title={t('settings.varin.defaults.title')}
         info={t('settings.projects.page.field.defaultModelDescription')}
         settingsItem="projects.default-model"
       >

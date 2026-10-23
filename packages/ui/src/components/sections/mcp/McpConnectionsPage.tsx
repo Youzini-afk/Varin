@@ -6,7 +6,6 @@ import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { Input } from '@/components/ui/input';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
-import { ProjectTrustSettings } from '@/components/sections/shared/ProjectTrustSettings';
 import { getProjectTrustGeneration, subscribeProjectTrustChanges } from '@/lib/projectTrust';
 import { json } from '@codemirror/lang-json';
 import { parse, type ParseError } from 'jsonc-parser';
@@ -135,7 +134,6 @@ export function McpConnectionsPage() {
     }
   });
   return <SettingsPageLayout title={t('settings.mcp.title')} description={t('settings.mcp.managementHint')}>
-    <ProjectTrustSettings />
     {error ? <p role="alert" className="mb-4 typography-meta text-destructive">{error}</p> : null}
     {snapshot?.issues.map((issue, index) => <p key={index} role="alert" className="typography-meta text-destructive">{issue}</p>)}
     {!snapshot && !error ? <p role="status" className="typography-meta text-muted-foreground">{t('common.loading')}</p> : null}
