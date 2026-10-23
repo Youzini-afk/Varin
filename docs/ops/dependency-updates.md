@@ -12,6 +12,15 @@ consumers before their version-based advisories are excluded. `sprintf-js` has n
 version; its patch keeps numeric precision within the ECMAScript-supported range while preserving
 normal formatting. Every other advisory still fails the audit.
 
+Zod is pinned to the published 4.6.7 fix for bounded-collection validation. MCP and the other
+consumers already support Zod 4; published Bash language server 5.8.1 still depends on Zod 3.
+Its runtime-only patch backports the [upstream Zod 4 configuration migration](https://github.com/bash-lsp/bash-language-server/commit/320b3fc77806ec53f220d0dbae767b98b3991f5c),
+preserving nested defaults and omitted initialization options rather than overwriting environment
+settings. Varin bundles the CLI JavaScript, not Bash's TypeScript declarations; the patch does not
+claim to migrate that unused public declaration surface. Remove the patch when upgrading to a
+published Bash release containing this migration, retaining the real configuration and packaged-LSP
+regressions. Do not replace it with an unreviewed snapshot of upstream main.
+
 Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
 including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
 webhook, so GitHub's

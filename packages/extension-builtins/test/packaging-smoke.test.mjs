@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { access, cp, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -177,7 +177,7 @@ class LspClient {
 const startServer = (descriptor) => new LspClient(spawn(
   descriptor.command,
   descriptor.args,
-  { cwd: descriptor.cwd, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
+  { cwd: descriptor.cwd, env: descriptor.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true },
 ));
 
 const fileNameForProvider = (providerId) => ({
@@ -316,6 +316,85 @@ test('built-in Host entrypoint registers and runs every packaged language provid
     }
     for (const disposer of effects.reverse()) await disposer();
   } finally {
+    await rm(temporaryRoot, { force: true, recursive: true, maxRetries: 20, retryDelay: 100 });
+  }
+});
+
+test('packaged Bash formatter preserves environment settings when initialization overrides one setting', async () => {
+  const temporaryRoot = await mkdtemp(join(tmpdir(), 'varin-bash-configuration-'));
+  const copiedRoot = join(temporaryRoot, 'language-servers');
+  const fixturePath = join(temporaryRoot, 'formatter fixture.cjs');
+  const invocationPath = join(temporaryRoot, 'formatter-invocation.json');
+  const sourcePath = join(temporaryRoot, 'sample.sh');
+  const uri = pathToFileURL(sourcePath).toString();
+  const source = 'greeting=world\necho    "$greeting"\n';
+  const formatted = 'greeting=world\necho "$greeting"\n';
+  let server;
+  try {
+    await cp(languageServersRoot, copiedRoot, { recursive: true });
+    await writeFile(sourcePath, source, 'utf8');
+    await writeFile(join(temporaryRoot, '.editorconfig'), [
+      'root = true',
+      '[*.sh]',
+      'shell_variant = bash',
+      'binary_next_line = false',
+      'switch_case_indent = false',
+      '',
+    ].join('\n'), 'utf8');
+    // Node is the real spawned formatter, avoiding shfmt installation, shell wrappers,
+    // executable permissions, and platform-specific quoting (including paths with spaces).
+    await writeFile(fixturePath, `
+      const { readFileSync, writeFileSync } = require('node:fs');
+      const input = readFileSync(0, 'utf8');
+      writeFileSync(${JSON.stringify(invocationPath)}, JSON.stringify({ args: process.argv.slice(2), input }));
+      process.stdout.write(input.replace('echo    ', 'echo '));
+    `, 'utf8');
+    server = startServer({
+      command: process.execPath,
+      args: [join(copiedRoot, 'runtime', 'bash-language-server.cjs'), 'start'],
+      cwd: copiedRoot,
+      env: {
+        ...process.env,
+        BACKGROUND_ANALYSIS_MAX_FILES: '0',
+        BASH_IDE_LOG_LEVEL: 'error',
+        SHELLCHECK_PATH: '',
+        SHFMT_PATH: process.execPath,
+        SHFMT_IGNORE_EDITORCONFIG: 'true',
+        SHFMT_LANGUAGE_DIALECT: 'posix',
+        SHFMT_BINARY_NEXT_LINE: 'true',
+        SHFMT_CASE_INDENT: '1',
+        SHFMT_FUNC_NEXT_LINE: 'false',
+        SHFMT_KEEP_PADDING: 'false',
+        SHFMT_SIMPLIFY_CODE: 'false',
+        SHFMT_SPACE_REDIRECTS: 'false',
+      },
+    });
+    const initialized = await server.initialize(pathToFileURL(temporaryRoot).toString(), {
+      // Omitted options must not acquire Zod defaults and replace the environment.
+      shfmt: { additionalArguments: [fixturePath] },
+    });
+    assert.equal(initialized.capabilities.documentFormattingProvider, true);
+    server.notification('textDocument/didOpen', {
+      textDocument: { uri, languageId: 'shellscript', version: 1, text: source },
+    });
+    await server.waitForNotification((message) => (
+      message.method === 'textDocument/publishDiagnostics' && message.params?.uri === uri
+    ));
+    const edits = await server.request('textDocument/formatting', {
+      textDocument: { uri },
+      options: { insertSpaces: true, tabSize: 2 },
+    });
+    assert.equal(edits?.length, 1, 'the environment-configured formatter must run');
+    assert.equal(edits[0].newText, formatted);
+    const invocation = JSON.parse(await readFile(invocationPath, 'utf8'));
+    assert.equal(invocation.input, source, 'the formatter must receive the opened document');
+    assert.deepEqual(
+      invocation.args.filter((argument) => !argument.startsWith('--filename=')),
+      ['-i=2', '-bn', '-ci', '-ln=posix', '-'],
+      'environment flags must survive the partial initialization options and conflicting .editorconfig',
+    );
+  } finally {
+    if (server) await server.stop();
     await rm(temporaryRoot, { force: true, recursive: true, maxRetries: 20, retryDelay: 100 });
   }
 });
