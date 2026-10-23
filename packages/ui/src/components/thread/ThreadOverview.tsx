@@ -1,4 +1,5 @@
 import React from 'react';
+import { pendingFollowup } from '@/lib/followupPresentation';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
@@ -81,7 +82,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const question = waiting?.executor === 'ask_user';
   const permission = waiting?.waiting_on?.startsWith('permission:');
   const goal = snapshot?.goals.find(value => value.control !== 'complete' && value.control !== 'cancelled');
-  const followups = snapshot?.followups.filter(value => value.actor.kind !== 'goal' && value.state !== 'cancelled' && !value.exhausted) ?? [];
+  const followups = snapshot?.followups.filter(pendingFollowup) ?? [];
   const attention = Boolean(question || permission || run?.state === 'failed' || failedChildren.length || recoveryAttention || error);
   const statusKey: I18nKey = question ? 'harness.overview.awaitAnswer' : permission ? 'harness.overview.awaitPermission'
     : run?.state === 'failed' ? 'harness.threads.state.failed' : failedChildren.length || error || recoveryAttention ? 'harness.overview.needsAttention'

@@ -2,6 +2,7 @@ import React from 'react';
 import type { Followup, FollowupView } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
+import { pendingFollowup, followupStatus } from '@/lib/followupPresentation';
 import { JsonSummaryView } from '@/components/chat/message/parts/JsonSummaryView';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { ToolStatus, ToolDisclosure } from './ToolDisclosure';
@@ -48,9 +49,9 @@ function FollowupRecord({ id, data, args }: { id: string; data: Record<string, u
     {sources.length > 1 && <p className="typography-micro text-muted-foreground">{t(trigger.kind === 'any' ? 'chat.tools.anyCondition' : 'chat.tools.allConditions')}</p>}
     <ol className="tool-follow-conditions">{sources.map((source, index) => <Condition key={index} source={source} observed={Boolean(item?.sources.find(value => value.source_index === index)?.observed)}
       inactive={item?.state === 'cancelled' || item?.state === 'paused' ? item.state : undefined} />)}</ol>
-    <div className="tool-inline-actions"><span className="typography-micro" role="status">{item ? toolValueLabel(item.state, t) : t('chat.dialogue.unconfirmed', { action: t('chat.tools.followup') })}</span>
+    <div className="tool-inline-actions"><span className="typography-micro" role="status">{item ? followupStatus(item, t) : t('chat.dialogue.unconfirmed', { action: t('chat.tools.followup') })}</span>
       {conversation && id && <button type="button" disabled={action.busy} onClick={refresh}>{t('chat.tools.refresh')}</button>}
-      {conversation && !conversation.readOnly && item && item.state !== 'cancelled' && !item.exhausted && <button type="button" disabled={action.busy} onClick={() => control(item.state === 'paused' ? 'resume' : 'pause')}>{t(item.state === 'paused' ? 'chat.tools.resumeFollowup' : 'chat.tools.pauseFollowup')}</button>}
+      {conversation && !conversation.readOnly && item && pendingFollowup(item) && <button type="button" disabled={action.busy} onClick={() => control(item.state === 'paused' ? 'resume' : 'pause')}>{t(item.state === 'paused' ? 'chat.tools.resumeFollowup' : 'chat.tools.pauseFollowup')}</button>}
       {conversation && id && <button type="button" aria-expanded={open} disabled={action.busy} onClick={() => { setOpen(!open); if (!open) void action.run(async signal => ({ view: await conversation.api.followups.get(conversation.identity, id, signal), history: await conversation.api.followups.occurrences(conversation.identity, id) }), value => { setLoaded(value.view); setHistory(value.history); }); }}>{t('chat.tools.triggerHistory')}</button>}</div>
     {item?.state === 'paused' && <p className="typography-micro text-muted-foreground">{t('chat.tools.pausedConditions')}</p>}
     {item?.occurrence?.delivery && <p className="typography-meta">{t('chat.tools.continuation')} · {toolValueLabel(item.occurrence.delivery.state, t)}{item.occurrence.delivery.failure_code ? ' · ' + item.occurrence.delivery.failure_code : ''}</p>}

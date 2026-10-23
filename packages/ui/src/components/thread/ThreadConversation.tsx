@@ -470,7 +470,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onRead={operation => api.operation(operation.id)} onCancel={operation => api.cancelOperation(operation.id)}
       onAnswer={(operation, answers) => api.answerQuestion({ ...identity, operationId: operation.id, answers })} />}
     {empty && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center"><VarinLogo width={24} height={24} decorative className="text-muted-foreground" /><h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{emptyWorkspacePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(emptyWorkspacePath) }) : t('chat.emptyState.draftTitle')}</h1></div>}
-    {snapshot && <ThreadWorkStrips api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
+    {snapshot && <ThreadWorkStrips key={`${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} goals={snapshot.goals} followups={snapshot.followups} pending={pending} act={act} onGoal={() => showOverview('goals')} onFollowups={() => showOverview('followups')} />}
     <div className="chat-input-column conversation-composer-queue">{snapshot && <ThreadInputQueue key={`${host}:${identity.threadId}:${identity.branchId}`}
       api={api} identity={identity} inputs={snapshot.inputs} pending={pending}
       onSave={async (input, text, images) => {

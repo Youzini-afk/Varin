@@ -1,10 +1,12 @@
 import { settingsDict } from './en.settings';
+import { followupPanelEn } from './followups';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
+  ...followupPanelEn,
   "chat.dialogue.read": "Read files",
   "chat.dialogue.list": "Browse files",
   "chat.dialogue.search": "Search files",

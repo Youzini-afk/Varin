@@ -15,6 +15,7 @@ import { ThreadConversation } from './ThreadConversation';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
+import { followupPanelEn } from '@/lib/i18n/messages/followups';
 import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
@@ -192,7 +193,7 @@ let root: Root;
 let container: HTMLDivElement;
 beforeEach(() => {
   useQuestionDraftStore.setState({ drafts: {} });
-  translations.dictionary = {};
+  translations.dictionary = { ...followupPanelEn };
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
@@ -204,7 +205,9 @@ beforeEach(() => {
   resetEditorContextAttachments();
   endpoint.generation = 1; endpoint.hostKey = 'host-a';
   recoveryService.api = undefined;
-  useUIStore.setState({ recoveryPreference: 'conversation' });
+  // Recovery assertions count individual messages independently of the default
+  // dialogue grouping. Presentation-specific cases choose their mode below.
+  useUIStore.setState({ recoveryPreference: 'conversation', chatRenderMode: 'live' });
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const documents: Pick<DocumentsAPI, 'resolveWorkspace'> = { resolveWorkspace: async () => ({ workspaceId: 'canonical-source-workspace', hostId: 'fixture-host', epoch: 1 }) };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
@@ -616,7 +619,7 @@ it('registers a process follow-up through an uncertain reply and preserves the a
   await act(async () => button('Retry original follow-up').click());
   expect(register.mock.calls[1]![0]).toEqual(register.mock.calls[0]![0]);
   expect(register.mock.calls[0]![0]).toMatchObject({ ...identity, runId: 'ui-run', trigger: { kind: 'process_stopped', operationId: 'process:original' }, instruction: 'Read the original output.' });
-  expect(get).not.toHaveBeenCalled();
+  expect(get).toHaveBeenCalledWith(identity, followup.id, expect.any(AbortSignal));
   await act(async () => button('Read follow-up instruction').click());
   expect(get).toHaveBeenCalledWith(identity, followup.id, expect.any(AbortSignal));
   expect(container.textContent).toContain('Read the original output.');
@@ -638,6 +641,57 @@ it('registers a process follow-up through an uncertain reply and preserves the a
   f.view.followups = [{ ...followup, goal_id: 'goal-owner', actor: { kind: 'goal', goal_id: 'goal-owner' }, occurrence: null }];
   await act(async () => f.emit({ cursor: 7, subject: followup.id, revision: 6, kind: 'followup.changed', data: {} }));
   expect(container.querySelector('[aria-label="Pending follow-up"]')).toBeNull(); expect(button('Pause follow-up')).toBeUndefined();
+});
+
+it('keeps consumed timed follow-ups out of the composer and cancels pending work from its localized overview', async () => {
+  translations.dictionary = zhCN;
+  useUIStore.setState({ chatRenderMode: 'dialogue' });
+  const f = fixture(true);
+  const completed = { ...logFollowup(), id: 'timer:delivered', repeat: 'once' as const, sources: [],
+    trigger: { kind: 'at' as const, at_ms: 1_700_000_000_000 },
+    wait: { id: 'wait:delivered', kind: 'at' as const, after_cursor: 1, trigger_cursor: 2, state: 'consumed' as const } };
+  const waiting = { ...completed, id: 'timer:pending', trigger: { kind: 'at' as const, at_ms: 1_900_000_000_000 },
+    wait: { ...completed.wait, id: 'wait:pending', state: 'waiting' as const, trigger_cursor: null } };
+  f.view.followups = [completed, waiting];
+  f.api.followups.get = async (_identity, id) => ({ followup: f.view.followups.find(item => item.id === id)!, instruction: '检查构建结果并总结失败原因。', registration_trigger: null });
+  let finish!: (value: ThreadSnapshot['followups'][number]) => void;
+  const control = vi.fn<ThreadsAPI['followups']['control']>(() => new Promise(resolve => { finish = resolve; }));
+  f.api.followups.control = control;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const timedButton = (at: number) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(element => element.textContent?.startsWith(new Date(at).toLocaleString()));
+  expect(timedButton(completed.trigger.at_ms)).toBeUndefined();
+  await act(async () => timedButton(waiting.trigger.at_ms)!.click());
+  expect(button('安排接续')).toBeDefined();
+  expect(container.querySelector('[aria-label="Pending follow-up"]')?.textContent).toContain('检查构建结果并总结失败原因。');
+  expect(container.querySelector('[aria-label="Pending follow-up"]')?.textContent).toContain('等待触发');
+  await act(async () => button('取消').click());
+  expect(button('正在取消…').disabled).toBe(true);
+  expect(control).toHaveBeenCalledExactlyOnceWith({ ...identity, followupId: waiting.id, expectedRevision: waiting.revision, action: 'cancel' });
+  await act(async () => {
+    const cancelled = { ...waiting, state: 'cancelled' as const, revision: waiting.revision + 1 };
+    f.view.followups = [completed, cancelled]; finish(cancelled);
+  });
+  expect(button('取消')).toBeUndefined(); expect(button('取消接续')).toBeUndefined();
+  expect(container.textContent).toContain('当前没有待接续任务');
+  await act(async () => button('历史接续（2）').click());
+  const past = [...container.querySelectorAll('[aria-label="Past follow-up"]')];
+  expect(past).toHaveLength(2); expect(past[0]!.textContent).toContain('已接续'); expect(past[1]!.textContent).toContain('已取消');
+  expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+});
+
+it('shows failed follow-up cancellation beside the composer and leaves the task available to retry', async () => {
+  const f = fixture(true); const waiting = { ...logFollowup(), repeat: 'once' as const, sources: [],
+    trigger: { kind: 'at' as const, at_ms: 1_900_000_000_000 }, wait: { ...logFollowup().wait, kind: 'at' as const } };
+  f.view.followups = [waiting];
+  const control = vi.fn<ThreadsAPI['followups']['control']>().mockRejectedValueOnce(new Error('Host temporarily unavailable'))
+    .mockImplementation(async () => { const cancelled = { ...waiting, state: 'cancelled' as const, revision: waiting.revision + 1 }; f.view.followups = [cancelled]; return cancelled; });
+  f.api.followups.control = control;
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await act(async () => button('chat.followup.action.cancel').click());
+  expect(button('chat.followup.action.cancel').disabled).toBe(false);
+  expect([...container.querySelectorAll('[role="alert"]')].some(element => element.textContent?.includes('Host temporarily unavailable'))).toBe(true);
+  await act(async () => button('chat.followup.action.cancel').click());
+  expect(control).toHaveBeenCalledTimes(2); expect(button('chat.followup.action.cancel')).toBeUndefined();
 });
 
 it('retains an exact absolute time across an uncertain retry and exposes explicit Goal follow-ups without reviving the stopped Run', async () => {
@@ -2065,7 +2119,8 @@ it('keeps repeating controls after delivery and reads each historical occurrence
   await act(async () => button('Past follow-ups (1)').click());
   await act(async () => button('Read occurrence history').click());
   expect(history().textContent).toContain('input:first');
-  expect(container.textContent).toContain('Repeating authorization cancelled');
+  expect(container.textContent).toContain('chat.followup.status.cancelled');
+  expect(button('Cancel follow-up')).toBeUndefined();
   expect(f.cancelRun).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });
 
@@ -2479,7 +2534,7 @@ it('moves exhausted logs into history only after pending deliveries finish, with
   followup.sources[0]!.observed = { accepted_cursor: 15, trigger_cursor: 15, evidence: followup.occurrence.evidence as Extract<typeof followup.occurrence.evidence, { kind: 'log_literal' }> };
   await act(async () => f.emit({ cursor: 16, subject: followup.id, revision: 4, kind: 'followup.changed', data: {} }));
   expect(container.querySelector('[aria-label="Pending follow-up"]')).not.toBeNull();
-  expect(container.textContent).toContain('Log observation ended'); expect(container.textContent).not.toContain('Continuing to observe changes');
+  expect(container.textContent).toContain('Observation ended'); expect(container.textContent).not.toContain('Continuing to observe changes');
   expect(button('Cancel follow-up')).toBeDefined();
   expect(followup.sources[0]!.log!.offset).toBe(100);
 });

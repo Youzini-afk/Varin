@@ -3,10 +3,12 @@ import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
 import { settingsDict } from './zh-CN.settings';
+import { followupPanelZhCN } from './followups';
 import { toolMessagesZhCN } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...followupPanelZhCN,
   "chat.dialogue.read": "读取文件",
   "chat.dialogue.list": "浏览文件",
   "chat.dialogue.search": "搜索文件",
