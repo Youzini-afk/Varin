@@ -306,6 +306,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.fileChange.previewLabel': "{path} 的修改",
   'chat.fileChange.deleteFile': "刪除此檔案",
   'chat.fileChange.empty': "尚無可預覽的行",
+  'chat.fileChange.pendingPath': "檔案路徑待接收",
+  'chat.fileChange.receivingContent': "正在接收檔案內容…",
   'chat.fileChange.writeHint': "這是整份檔案的寫入內容，尚未與原檔案比較。",
   'chat.fileChange.writeContent': "寫入內容預覽",
   'chat.fileChange.latest': "回到最新",

@@ -190,6 +190,10 @@ column with native radios, optional additional text and an explicit submit actio
 Source files, Git snapshots, material pages, and editor drafts retain their own identities. Explicit
 resource roots resolve through Documents instead of borrowing a conversation's workspace. A file-change
 preview only describes received arguments until a real result supplies its mutation outcome.
+File write/edit previews appear while arguments stream, even when content precedes the path;
+the completed path fills the same preview without resetting its reading position. Wrapped,
+measured rows keep long lines within the viewport, and the inner scroll follows incoming
+content until the user scrolls up. Explicit navigation resumes following or jumps between edits.
 
 ## Settings and authoring conventions
 

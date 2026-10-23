@@ -8,6 +8,7 @@ export interface FileChangeLine {
 }
 
 export interface FileChangePreview {
+  /** Empty only while a streamed call has not supplied a complete path yet. */
   path: string;
   operation: 'add' | 'update' | 'delete' | 'write';
   lines: FileChangeLine[];
@@ -91,25 +92,28 @@ export function projectFileChanges(call: ChatToolCall, generating = false): File
     }
     return files.map(withCounts);
   }
-  if (typeof args.path !== 'string' || !args.path) return [];
-  if (call.name === 'file_write' && typeof args.content === 'string') {
-    return [{ path: args.path, operation: 'write', lines: linesOf(args.content).map(text => ({ kind: 'add', text })) }];
+  const path = typeof args.path === 'string' ? args.path : '';
+  // JSON property order is not guaranteed. Content can arrive before the path;
+  // display it immediately without inventing a navigable file identity.
+  if (!path && !generating) return [];
+  if (call.name === 'file_write' && (generating || typeof args.content === 'string')) {
+    return [{ path, operation: 'write', lines: linesOf(typeof args.content === 'string' ? args.content : '').map(text => ({ kind: 'add', text })) }];
   }
-  if (call.name === 'file_edit' && Array.isArray(args.edits)) {
+  if (call.name === 'file_edit' && (generating || Array.isArray(args.edits))) {
     const lines: FileChangeLine[] = [];
-    for (const value of args.edits) {
+    for (const value of Array.isArray(args.edits) ? args.edits : []) {
       const edit = record(value);
-      if (!edit || typeof edit.oldText !== 'string') continue;
+      if (!edit || (typeof edit.oldText !== 'string' && (!generating || typeof edit.newText !== 'string'))) continue;
       if (lines.length) lines.push({ kind: 'hunk', text: '…' });
       // Until newText arrives, this is the proposed removal. Empty newText is
       // an intentional deletion and must not be confused with a missing field.
-      for (const part of diffLines(edit.oldText, typeof edit.newText === 'string' ? edit.newText : '')) {
+      for (const part of diffLines(typeof edit.oldText === 'string' ? edit.oldText : '', typeof edit.newText === 'string' ? edit.newText : '')) {
         for (const text of linesOf(part.value)) {
           lines.push({ kind: part.added ? 'add' : part.removed ? 'remove' : 'context', text });
         }
       }
     }
-    return [withCounts({ path: args.path, operation: 'update', lines })];
+    return [withCounts({ path, operation: 'update', lines })];
   }
   return [];
 }

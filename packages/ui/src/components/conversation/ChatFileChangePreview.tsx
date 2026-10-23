@@ -97,45 +97,57 @@ export const ChatFileChangePreview: React.FC<{
   const busy = phase === 'generating' || phase === 'applying';
   const failed = phase === 'failed' || phase === 'partial';
   const hasLines = file.lines.length > 0;
-  const pause = () => { view.following = false; following.current = false; setPaused(true); };
+  const totalHeight = virtualizer.getTotalSize();
+  const viewportHeight = virtualizer.scrollRect?.height;
+  const pathLabel = file.path || t('chat.fileChange.pendingPath');
+  const pause = () => {
+    view.following = false;
+    following.current = false;
+    virtualizer.cancelScroll();
+    setPaused(true);
+  };
   const follow = React.useCallback(() => {
     view.following = true;
     following.current = true;
     setPaused(false);
-    const element = viewport.current;
-    if (element) {
-      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-      previousTop.current = element.scrollTop;
-      view.scrollTop = element.scrollTop;
-    }
-  }, [view]);
+    virtualizer.scrollToEnd();
+  }, [view, virtualizer]);
 
   React.useLayoutEffect(() => {
     views?.set(previewId, view);
     const element = viewport.current;
     if (!element) return;
     element.scrollTop = view.scrollTop;
+    let width = element.clientWidth;
     const measure = () => {
       const size = Number.parseFloat(getComputedStyle(element).fontSize);
       if (Number.isFinite(size) && size > 0) setRowHeight(Math.ceil(size * 1.65));
+      // Wrapped rows have different heights after the sidebar/window resizes,
+      // including rows currently outside the virtual viewport.
+      if (element.clientWidth !== width) {
+        width = element.clientWidth;
+        virtualizer.measure();
+      }
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [previewId, view, views, hasLines]);
+  }, [previewId, view, views, hasLines, virtualizer]);
   React.useLayoutEffect(() => { virtualizer.measure(); }, [rowHeight, virtualizer]);
   React.useLayoutEffect(() => {
     // This scroll owner moves only the inner preview. The timeline continues
     // to own page following and its extra manual-scrolling space.
-    if (following.current) follow();
-  }, [file.lines, rowHeight, expanded, follow]);
+    // Reconcile again when wrapped rows are measured, including a growing last
+    // line with no newline. Never steal the scroll position from manual reading.
+    if (following.current && hasLines) virtualizer.scrollToEnd();
+  }, [file.lines, rowHeight, expanded, totalHeight, viewportHeight, hasLines, virtualizer]);
 
   const navigateChange = (direction: -1 | 1) => {
     const element = viewport.current;
     if (!element) return;
-    const current = Math.round(element.scrollTop / rowHeight);
+    const current = virtualizer.getVirtualItemForOffset(element.scrollTop)?.index ?? 0;
     const starts = file.lines.flatMap((line, index) => {
       const changed = line.kind === 'add' || line.kind === 'remove';
       const prior = file.lines[index - 1];
@@ -144,8 +156,7 @@ export const ChatFileChangePreview: React.FC<{
     const target = direction > 0 ? starts.find(index => index > current) : starts.reverse().find(index => index < current);
     if (target === undefined) return;
     pause();
-    element.scrollTop = target * rowHeight;
-    previousTop.current = element.scrollTop;
+    virtualizer.scrollToIndex(target, { align: 'start' });
   };
 
   return <section className="my-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/20"
@@ -153,10 +164,10 @@ export const ChatFileChangePreview: React.FC<{
     <header className="flex min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 typography-meta">
       {showFileIcons || busy || failed ? <Icon name={busy ? 'loader-4' : failed ? 'error-warning' : 'file-code'}
         className={cn('size-3.5 shrink-0', busy && 'animate-spin', failed && 'text-[var(--status-error)]')} /> : null}
-      <button type="button" title={file.path} data-varin-file-path={file.path}
-        disabled={!onOpen || file.operation === 'delete'} onClick={onOpen}
+      <button type="button" title={pathLabel} data-varin-file-path={file.path || undefined}
+        disabled={!file.path || !onOpen || file.operation === 'delete'} onClick={onOpen}
         className="min-w-0 flex-1 truncate text-left text-muted-foreground enabled:hover:text-foreground enabled:hover:underline">
-        {file.path.replace(/\\/g, '/').split('/').at(-1)}
+        {file.path ? file.path.replace(/\\/g, '/').split('/').at(-1) : pathLabel}
       </button>
       {file.counts ? <span className="flex shrink-0 gap-1.5 font-mono typography-micro tabular-nums">
         <span className="text-[var(--status-success)]">+{file.counts.added}</span>
@@ -171,15 +182,14 @@ export const ChatFileChangePreview: React.FC<{
         <Icon name={expanded ? 'arrow-up-s' : 'arrow-down-s'} className="size-3.5" />
       </button>
     </header>
-    {file.lines.length ? <div ref={viewport} role="region" data-conversation-tool-scroll="true" aria-label={t('chat.fileChange.previewLabel', { path: file.path })}
-      tabIndex={0} className="workbench-diff-preview-viewport overflow-auto overscroll-contain font-mono typography-code outline-offset-[-2px]"
-      style={{ height: Math.min(file.lines.length, expanded ? 24 : 8) * rowHeight, overflowAnchor: 'none' }}
+    {file.lines.length ? <div ref={viewport} role="region" data-conversation-tool-scroll="true" aria-label={t('chat.fileChange.previewLabel', { path: pathLabel })}
+      tabIndex={0} className="workbench-diff-preview-viewport overflow-x-hidden overflow-y-auto overscroll-contain font-mono typography-code outline-offset-[-2px]"
+      style={{ height: Math.min(totalHeight, (expanded ? 24 : 8) * rowHeight), overflowAnchor: 'none', scrollbarGutter: 'stable' }}
       onWheel={event => { if (event.deltaY < 0) pause(); }}
       onPointerDown={pause}
       onKeyDown={event => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) pause(); }}
       onScroll={event => {
         const element = event.currentTarget;
-        if (element.scrollTop < previousTop.current) pause();
         if (element.scrollTop > previousTop.current && element.scrollHeight - element.clientHeight - element.scrollTop <= 1) {
           following.current = true;
           view.following = true;
@@ -188,26 +198,26 @@ export const ChatFileChangePreview: React.FC<{
         previousTop.current = element.scrollTop;
         view.scrollTop = element.scrollTop;
       }}>
-      <div style={{ height: virtualizer.getTotalSize(), minWidth: '100%', width: 'max-content', position: 'relative' }}>
+      <div style={{ height: totalHeight, width: '100%', position: 'relative' }}>
         {virtualizer.getVirtualItems().map(item => {
           const line = file.lines[item.index]!;
-          return <div key={item.key} data-change-kind={line.kind}
-            className={cn('absolute left-0 flex w-max min-w-full whitespace-pre pr-3',
+          return <div key={item.key} ref={virtualizer.measureElement} data-index={item.index} data-change-kind={line.kind}
+            className={cn('absolute left-0 flex w-full min-w-0 pr-3',
               line.kind === 'add' && 'bg-[var(--status-success)]/10',
               line.kind === 'remove' && 'bg-[var(--status-error)]/10',
               line.kind === 'hunk' && 'text-muted-foreground bg-muted/25')}
-            style={{ top: item.start, height: rowHeight, lineHeight: `${rowHeight}px` }}>
-            <span aria-hidden="true" className={cn('sticky left-0 w-7 shrink-0 select-none text-center',
+            style={{ top: item.start, minHeight: rowHeight, lineHeight: `${rowHeight}px` }}>
+            <span aria-hidden="true" className={cn('w-7 shrink-0 select-none text-center',
               line.kind === 'add' ? 'text-[var(--status-success)]' : line.kind === 'remove' ? 'text-[var(--status-error)]' : 'text-muted-foreground')}>
               {line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' '}
             </span>
             {html?.[item.index] !== undefined
-              ? <span dangerouslySetInnerHTML={{ __html: html[item.index]! }} />
-              : <span>{line.text || ' '}</span>}
+              ? <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: html[item.index]! }} />
+              : <span className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{line.text || ' '}</span>}
           </div>;
         })}
       </div>
-    </div> : <p className="px-3 py-2 typography-meta text-muted-foreground">{t(file.operation === 'delete' ? 'chat.fileChange.deleteFile' : 'chat.fileChange.empty')}</p>}
+    </div> : <p className="px-3 py-2 typography-meta text-muted-foreground">{t(file.operation === 'delete' ? 'chat.fileChange.deleteFile' : phase === 'generating' ? 'chat.fileChange.receivingContent' : 'chat.fileChange.empty')}</p>}
     <footer className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-1.5 typography-micro text-muted-foreground">
       <span key={phase} role="status" className={cn('workbench-status-arrival', failed && 'text-[var(--status-error)]')}>{t(`chat.fileChange.${phase}`)}</span>
       {file.operation === 'write' ? <span title={t('chat.fileChange.writeHint')}>{t('chat.fileChange.writeContent')}</span> : null}

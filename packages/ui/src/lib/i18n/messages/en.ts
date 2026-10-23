@@ -348,6 +348,8 @@ export const dict = {
   'chat.fileChange.previewLabel': "Changes to {path}",
   'chat.fileChange.deleteFile': "Delete this file",
   'chat.fileChange.empty': "No lines to preview",
+  'chat.fileChange.pendingPath': "Waiting for file path",
+  'chat.fileChange.receivingContent': "Receiving file content…",
   'chat.fileChange.writeHint': "Full file content; the original file was not compared.",
   'chat.fileChange.writeContent': "Write content preview",
   'chat.fileChange.latest': "Back to latest",

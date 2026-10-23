@@ -429,10 +429,10 @@ const ChatToolCard: React.FC<{
   const applyPatchFiles = call.name === 'apply_patch' ? getApplyPatchFileEntries(result?.details ?? transientOutput) : [];
   return (
     <>
-    {fileChanges.map((file, index) => <ChatFileChangePreview key={`${index}:${file.path}`} file={file}
-      previewId={`${call.id}:${index}:${file.path}`}
+    {fileChanges.map((file, index) => <ChatFileChangePreview key={index} file={file}
+      previewId={`${call.id}:${index}`}
       phase={fileChangePhase(execution, result, generating, file.path)}
-      onOpen={file.operation === 'delete' || !conversation || generating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
+      onOpen={!file.path || file.operation === 'delete' || !conversation || generating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
       initiallyExpanded={isFileChangeTool(call.name) && expandEdits}
