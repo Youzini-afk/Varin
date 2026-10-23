@@ -82,8 +82,9 @@ Chat layout offers chronological, grouped-answer, and conversation-first (`dialo
 Conversation-first is the default for unset preferences and resets; saved choices retain their mode.
 Conversation-first preserves every spoken message in arrival order. Ordinary tools and public
 thinking between messages share one initially collapsed activity row: the active segment shows
-the current action, while a later spoken message or the end of the Run leaves a receipt-based
-summary. Dispatches, questions and usable UI/image outputs (including observed script descendants)
+the current action. While public thinking streams, its header reuses the single-line scrolling
+preview; thinking-only history retains that preview. A later spoken message or the end of a mixed
+segment leaves a receipt-based tool summary. Redacted thinking never contributes preview text. Dispatches, questions and usable UI/image outputs (including observed script descendants)
 remain independent rows in all three modes. Opening a segment mounts the existing purpose-specific tools, preserving their controls and
 resource identities. Failed, cancelled, and uncertain work stays visible in the collapsed status.
 Provider-item identities and arrival order survive streaming-to-history replacement; disclosure

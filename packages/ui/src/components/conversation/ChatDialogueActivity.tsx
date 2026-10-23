@@ -2,6 +2,7 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
+import { ThinkingPreview } from './ThinkingPreview';
 import { ToolDisclosure } from './ToolDisclosure';
 import { invocationData, invocationStatus, operationInvocation, toolRecord, toolText } from './toolInvocation';
 import { fileChangePhase, fileChangeTargets, isFileChangeTool } from './fileChangePreview';
@@ -88,6 +89,9 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     || t(tools.length ? 'chat.dialogue.tools' : process.activities.some(item => item.kind === 'thinking') ? 'chat.dialogue.thinking' : 'chat.dialogue.records');
   const last = process.activities.at(-1);
   const liveThinking = process.tail && active && last?.kind === 'thinking' && last.streaming;
+  // Keep the current public thought visible in the one-line process header. Completed
+  // mixed segments retain their tool receipts; thinking-only segments retain their preview.
+  const thinking = last?.kind === 'thinking' && (liveThinking || process.activities.every(item => item.kind === 'thinking')) ? last : undefined;
   const current = process.tail && active && !liveThinking ? pending.at(-1) ?? tools.at(-1) : undefined;
   let label = liveThinking ? t('chat.dialogue.thinkingNow') : summary;
   let subject = '';
@@ -110,9 +114,13 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   return <ToolDisclosure id={`dialogue:${process.id}`} className="dialogue-activity" open={expanded} onOpenChange={onExpandedChange}>
     <summary className="dialogue-activity-heading">
       <Icon name="arrow-right-s" className="dialogue-activity-chevron size-3.5 shrink-0" />
-      <span key={current?.item.id ?? (liveThinking ? last?.id : 'summary')} className="dialogue-activity-label" title={title}>
+      <span key={current?.item.id ?? thinking?.id ?? 'summary'} className="dialogue-activity-label" title={title}>
         {busy && <Icon name="loader-4" className="size-3 shrink-0 animate-spin motion-reduce:animate-none" />}
-        <span className="min-w-0 truncate">{label}{subject && <> · {subject.replace(/\s+/g, ' ').trim()}</>}</span>
+        {thinking ? <>
+          <span className="shrink-0">{label}</span>
+          {thinking.content.redacted ? <span className="min-w-0 truncate">{t('chat.reasoningTrace.unavailable')}</span>
+            : <ThinkingPreview text={thinking.content.thinking} streaming={Boolean(liveThinking)} active />}
+        </> : <span className="min-w-0 truncate">{label}{subject && <> · {subject.replace(/\s+/g, ' ').trim()}</>}</span>}
       </span>
       {failures > 0 && <span className="shrink-0 typography-micro text-destructive">{t('chat.dialogue.failures', { count: failures })}</span>}
       {uncertain > 0 && <span className="shrink-0 typography-micro text-status-warning">{t('chat.dialogue.uncertain', { count: uncertain })}</span>}
