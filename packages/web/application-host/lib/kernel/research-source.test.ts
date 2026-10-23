@@ -20,6 +20,8 @@ async function fixture(mode:LaunchSource['mode']='fixed_branch'){
  const branch={workspaceId:'ws',branchId:'source',revision:7,view:'revision',root:'sha256-exact',entries:[]};
  const api={
   async readBranch(){return structuredClone(branch);},
+  // This source has not prepared a mutable execution view.
+  async executionViewInspect(){return null;},
   async pinBranch(p:{operationId:string;pinId:string;branchId:string}){const result={pinId:p.pinId,branchId:p.branchId,workspaceId:'ws',revision:7,view:'revision',root:branch.root};pins.add(p.pinId);operations.set(p.operationId,{operationId:p.operationId,kind:'branch.pin',state:pendingPin?'pending':'committed',result});if(losePin){losePin=false;throw new Error('Pin ACK lost');}return result;},
   async unpinBranch(p:{pinId:string}){pins.delete(p.pinId);return {};},
   async getOperation(id:string){return operations.get(id)??null;},

@@ -54,6 +54,8 @@ function fixture(mode: 'live_root' | 'fixed_branch', hold?: 'file.capture' | 'st
           execution_workspace: p.executionWorkspace, thread_id: p.threadId, run_id: p.runId, capabilities: p.capabilities, path_scopes: p.pathScopes }); break;
         case 'authority.grant.revoke': reply(frame, { revoked: true }); break;
         case 'file.root.register': reply(frame, { rootId: source.live_root!.rootId, canonicalRoot: source.live_root!.canonicalRoot }); break;
+        // Fixed document reads have no prepared mutable execution view.
+        case 'file.executionView.inspect': reply(frame, null); break;
         case 'file.capture': reply(frame, { path: 'paper.pdf', stateJson: JSON.stringify(state), ownerId: 'capture-owner' }); break;
         case 'branch.read': reply(frame, { workspaceId: 'workspace', branchId: 'fixed', revision: 7, view: 'revision', root: 'fixed-root',
           entries: p.includeEntries === false ? [] : [{ path: 'paper.pdf', state }] }); break;

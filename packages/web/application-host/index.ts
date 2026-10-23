@@ -168,8 +168,7 @@ import { openWorkspaceKnowledge, type KnowledgeStore } from './lib/knowledge/sto
 import { createKnowledgeContextRuntime } from './lib/knowledge/context-runtime.js';
 import { createContextObservationPublication } from './lib/knowledge/context-publication.js';
 import { createGitStatusObserver } from './lib/knowledge/git-status-runtime.js';
-import { createProjectIndexScope, excludedFromIndex, indexPathAllowed } from './lib/knowledge/index-scope.js';
-import { projectFolders, projectContainsPath } from '@varin/application-client';
+import { projectContainsPath } from '@varin/application-client';
 import { createEmbeddingRequestSettings, DEFAULT_EMBEDDING_REQUEST_CONFIGURATION, registerEmbeddingRequestRoutes } from './lib/knowledge/vectors/request-settings.js';
 import { createEmbedScheduler } from './lib/knowledge/semantic/embed-scheduler.js';
 import { createVectorCache } from './lib/knowledge/semantic/vector-cache.js';
@@ -179,7 +178,7 @@ import { recallMemories } from './lib/memory/memory-recall.js';
 
 import { openUserKnowledgeStore } from './lib/harness/recall-tool.js';
 
-import { threadScopeId, isThreadScopeId, threadIdFromScopeId, isThreadStoreKey, isBotStoreKey, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
+import { threadScopeId, isThreadScopeId, threadIdFromScopeId, isBotScopeId, botIdFromScopeId, botScopeId, knowledgeStoreKeyForScope, scopeOfScopeId } from './lib/harness/owner-scope.js';
 import { createMemoryService } from './lib/memory/memory-service.js';
 import { createMemoryOrganizer } from './lib/memory/memory-organizer.js';
 

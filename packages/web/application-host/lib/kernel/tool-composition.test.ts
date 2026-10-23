@@ -166,6 +166,8 @@ function setup(initial: ExtensionToolLease[] = [], failRegistration = 0) {
     issueGrant: async () => ({ grantId: 'source-grant' }),
     revokeGrant: async () => ({}),
     scoped: () => ({
+      // Fixed source admission precedes any mutable execution view.
+      executionViewInspect: async () => null,
       readBranch: async () => ({
         workspaceId: 'workspace',
         branchId: 'source',

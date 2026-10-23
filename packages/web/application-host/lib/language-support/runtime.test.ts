@@ -13,6 +13,21 @@ const file = (relativePath: string): FileSearchItem => ({
 });
 
 describe("createLanguageSupportRuntime", () => {
+  it("keeps bundled Swift authoritative rather than requesting a downloadable grammar", async () => {
+    const runtime = createLanguageSupportRuntime({
+      installableLanguageIds: () => ["swift"],
+      inspectWorkspace: async () => ({ root: "/ws" }),
+      searchFilesystemFiles: async () => [file("app.swift")],
+    });
+    runtime.noteRequest("swift", "ws-1");
+    expect(runtime.peekWanted("ws-1")).toEqual([]);
+    expect((await runtime.getStatus({ workspaceId: "ws-1" })).languages[0]).toMatchObject({
+      languageId: "swift", grammarStatus: "bundled", wanted: false,
+    });
+  });
+
+  // Fish and MDX are recognized file languages without bundled grammars, so these
+  // fixtures exercise on-demand installation independently of the bundled catalog.
   it('prepares only on an explicit request and keeps cached inventory separate from server status', async () => {
     let scans = 0;
     let preparations = 0;
@@ -90,17 +105,17 @@ describe("createLanguageSupportRuntime", () => {
 
   it("records wanted only for installable languages that are not present, and still leaves structure unsupported", async () => {
     const runtime = createLanguageSupportRuntime({
-      installableLanguageIds: () => ["swift"],
+      installableLanguageIds: () => ["fish"],
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.swift"), file("main.ts")],
+      searchFilesystemFiles: async () => [file("app.fish"), file("main.ts")],
     });
-    runtime.noteRequest("swift", "ws-1");
+    runtime.noteRequest("fish", "ws-1");
     runtime.noteRequest("typescript", "ws-1");
-    runtime.noteRequest("swift");
-    expect(runtime.peekWanted("ws-1")).toEqual(["swift"]);
+    runtime.noteRequest("fish");
+    expect(runtime.peekWanted("ws-1")).toEqual(["fish"]);
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.languages[0]).toMatchObject({
-      languageId: "swift",
+      languageId: "fish",
       grammarStatus: "available",
       wanted: true,
       fileCount: 1,
@@ -132,7 +147,7 @@ describe("createLanguageSupportRuntime", () => {
       inspectWorkspace: async () => ({ root: "/ws" }),
       searchFilesystemFiles: async () => [],
     });
-    await expect(runtime.install({ languageId: "swift" })).resolves.toMatchObject({
+    await expect(runtime.install({ languageId: "fish" })).resolves.toMatchObject({
       status: "failed",
       reason: "unsupported",
     });
@@ -141,19 +156,19 @@ describe("createLanguageSupportRuntime", () => {
   it("delegates install to the injected installer and attaches pack metadata", async () => {
     const runtime = createLanguageSupportRuntime({
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.swift")],
+      searchFilesystemFiles: async () => [file("app.fish")],
       manifest: {
         generatedAt: "2026-09-07",
         minCompatibleAbi: 13,
         maxCompatibleAbi: 15,
         packs: {
-          swift: {
-            languageId: "swift",
-            packageName: "tree-sitter-swift",
+          fish: {
+            languageId: "fish",
+            packageName: "tree-sitter-fish",
             version: "0.7.1",
-            tarballUrl: "https://example.test/swift.tgz",
-            wasmPath: "package/tree-sitter-swift.wasm",
-            grammarFile: "tree-sitter-swift.wasm",
+            tarballUrl: "https://example.test/fish.tgz",
+            wasmPath: "package/tree-sitter-fish.wasm",
+            grammarFile: "tree-sitter-fish.wasm",
             integrity: "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             bytes: 12,
             abi: 15,
@@ -173,11 +188,11 @@ describe("createLanguageSupportRuntime", () => {
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.grammarStore).toBe("ready");
     expect(status.languages[0]).toMatchObject({
-      languageId: "swift",
+      languageId: "fish",
       grammarStatus: "available",
-      pack: { abi: 15, packageName: "tree-sitter-swift", version: "0.7.1", providesOutline: false },
+      pack: { abi: 15, packageName: "tree-sitter-fish", version: "0.7.1", providesOutline: false },
     });
-    await expect(runtime.install({ languageId: "swift" })).resolves.toMatchObject({
+    await expect(runtime.install({ languageId: "fish" })).resolves.toMatchObject({
       status: "ready",
       grammarStatus: "installed",
     });
@@ -188,30 +203,30 @@ describe("createLanguageSupportRuntime", () => {
     const wasm = new Uint8Array([1, 2, 3]);
     const tags = new TextEncoder().encode("(class_declaration) @definition.class");
     store.put(
-      "swift",
+      "fish",
       wasm,
-      { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-swift.wasm" },
+      { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-fish.wasm" },
       { bytes: tags, integrity: grammarIntegrityOf(tags) },
     );
-    store.put("markdown", wasm, { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-markdown.wasm" });
+    store.put("mdx", wasm, { integrity: grammarIntegrityOf(wasm), source: "manifest", grammarFile: "tree-sitter-mdx.wasm" });
     const runtime = createLanguageSupportRuntime({
       store,
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.swift"), file("README.md")],
+      searchFilesystemFiles: async () => [file("app.fish"), file("README.mdx")],
     });
 
-    expect(runtime.installedStructureSpec("swift")).toMatchObject({ grammarFile: "tree-sitter-swift.wasm" });
+    expect(runtime.installedStructureSpec("fish")).toMatchObject({ grammarFile: "tree-sitter-fish.wasm" });
     // A grammar with no query cannot outline, so it is not wired at all.
-    expect(runtime.installedStructureSpec("markdown")).toBeNull();
+    expect(runtime.installedStructureSpec("mdx")).toBeNull();
     expect(runtime.installedStructureSpec("typescript")).toBeNull();
 
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
-    expect(byLanguage.get("swift")).toMatchObject({
+    expect(byLanguage.get("fish")).toMatchObject({
       grammarStatus: "installed",
       capabilities: { outline: true, classifyHits: true, literalCalls: false, imports: false },
     });
-    expect(byLanguage.get("markdown")).toMatchObject({
+    expect(byLanguage.get("mdx")).toMatchObject({
       grammarStatus: "installed",
       capabilities: { outline: false, classifyHits: false, literalCalls: false, imports: false },
     });
@@ -220,25 +235,25 @@ describe("createLanguageSupportRuntime", () => {
   it("reports an unreadable index as unknown instead of nothing installed", async () => {
     const store = createGrammarStore(mkdtempSync(join(tmpdir(), "varin-language-support-")));
     const wasm = new Uint8Array([4, 5, 6]);
-    store.put("swift", wasm, {
+    store.put("fish", wasm, {
       integrity: grammarIntegrityOf(wasm),
       source: "manifest",
-      grammarFile: "tree-sitter-swift.wasm",
+      grammarFile: "tree-sitter-fish.wasm",
     });
     writeFileSync(join(store.root, "index.json"), "{ broken", "utf8");
     const runtime = createLanguageSupportRuntime({
       store,
       inspectWorkspace: async () => ({ root: "/ws" }),
-      searchFilesystemFiles: async () => [file("app.swift"), file("main.ts")],
+      searchFilesystemFiles: async () => [file("app.fish"), file("main.ts")],
     });
 
     const status = await runtime.getStatus({ workspaceId: "ws-1" });
     expect(status.grammarStore).toBe("unreadable");
     const byLanguage = new Map(status.languages.map((row) => [row.languageId, row]));
-    expect(byLanguage.get("swift")?.grammarStatus).toBe("unknown");
+    expect(byLanguage.get("fish")?.grammarStatus).toBe("unknown");
     // The bundled table is still authoritative on its own.
     expect(byLanguage.get("typescript")?.grammarStatus).toBe("bundled");
     // Demand tracking must not turn a broken index into a structure failure.
-    expect(() => runtime.noteRequest("swift", "ws-1")).not.toThrow();
+    expect(() => runtime.noteRequest("fish", "ws-1")).not.toThrow();
   });
 });
