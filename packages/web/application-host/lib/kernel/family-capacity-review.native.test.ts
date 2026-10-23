@@ -1,5 +1,6 @@
 import { guardProviderReply } from './provider-response.test-helper.js';
 import { resourceScopeFixture } from './resource-scope.test-helper.js';
+import { readProcThreadNames } from './proc-thread-names.test-helper.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -95,7 +96,7 @@ it.each([1, 3])('real FileSearch uses configured %i-worker budget and scoped adm
   // Linux observes actual worker threads rather than trusting a second configured scalar.
   if (process.platform === 'linux') {
     const taskRoot = `/proc/${child.pid}/task`;
-    const names = await Promise.all((await fs.readdir(taskRoot)).map(async tid => (await fs.readFile(path.join(taskRoot, tid, 'comm'), 'utf8')).trim()));
+    const names = await readProcThreadNames(taskRoot);
     expect(names.filter(name => name.startsWith('compute-read-'))).toHaveLength(capacity);
     expect(names.filter(name => name === 'compute-index')).toHaveLength(1);
   }

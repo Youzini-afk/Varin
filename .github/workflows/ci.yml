@@ -98,17 +98,24 @@ jobs:
       - if: needs.changes.outputs.code == 'true'
         run: bun run lint
       - if: needs.changes.outputs.code == 'true'
-        name: Build and verify native kernel authority
-        run: node scripts/test-kernel-authority.mjs --build
+        id: native-build
+        name: Build native kernel authority
+        run: node scripts/test-kernel-authority.mjs --build-only
+      - if: needs.changes.outputs.code == 'true'
+        name: Verify native kernel authority
+        run: node scripts/test-kernel-authority.mjs
       # Rust state-machine/unit tests have one Linux owner. The release-binary
       # acceptance above and on Windows exercises the Host/native boundary.
-      - if: needs.changes.outputs.rust == 'true'
+      # An acceptance failure stays red but must not hide independent Rust
+      # results when their required native artifact was successfully built.
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.native-build.outcome == 'success' }}
+        id: rust-build
         name: Build Rust workspace tests
         run: bun run test:rust --no-run
       # Keep cold compilation outside the execution budget. Successful workspace
       # execution takes about 90 seconds; ten minutes allows runner variance but
       # fails visibly if a test retains a worker or waits indefinitely.
-      - if: needs.changes.outputs.rust == 'true'
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
         name: Test Rust workspace
         timeout-minutes: 10
         env:
@@ -117,7 +124,9 @@ jobs:
         # Report failures from every test binary in one round; Cargo still fails
         # the step if any binary fails, and the execution timeout bounds hangs.
         run: bun run test:rust --no-fail-fast
-      - if: needs.changes.outputs.code == 'true'
+      # Type preparation and the native artifact are also the prerequisites for
+      # package suites; collect their results even if native/Rust tests failed.
+      - if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && steps.native-build.outcome == 'success' }}
         run: bun run test:packages
       - if: needs.changes.outputs.code == 'true'
         name: Test desktop driver protocols on a private D-Bus

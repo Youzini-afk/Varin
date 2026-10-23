@@ -81,7 +81,8 @@ Node 测试包可用 `node --import tsx --test packages/<包>/test/<文件>.test
 
 `test:tooling` 是 CI 中轻量工具测试的统一入口；`test:cloud` 是其子集，无需顺序重复运行。
 CI 的手动运行会对所选 ref 执行完整 code/Rust 检查，不依赖最近一次提交的差异；普通 push/PR
-仍按改动范围选择检查。Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
+仍按改动范围选择检查。原生构建成功后，即使 Host 验收失败，也继续收集独立的 Rust 和包测试结果，
+任何失败仍使 CI 失败。Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
 Linux driver 的私有 D-Bus 协议测试使用
 `dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
 需要系统 `python3-gi` 与 `dbus`，不连接真实桌面或请求屏幕授权。
