@@ -33,6 +33,11 @@ test('Computer settings hide declarations during preparation without acquiring a
     const run = { runId: 'root-run', threadId: 'root', source: null };
     const available = await opened.computer.prepareConfiguration(run, []);
     assert(COMPUTER_TOOL_DECLARATIONS.every(tool => available.enabled!(tool)));
+    const unavailable = new Error('Desktop capability registry unavailable');
+    opened.computers.applicationToolAvailability = async () => { throw unavailable; };
+    const isolated = await opened.computer.prepareConfiguration(run, []);
+    assert.throws(() => isolated(COMPUTER_TOOL_DECLARATIONS.find(tool => tool.tool?.name === 'computer_browser_read')!), unavailable);
+    assert.equal(typeof isolated(COMPUTER_TOOL_DECLARATIONS.find(tool => tool.tool?.name === 'computer_apps')!), 'string');
     opened.disable();
     const disabled = await opened.computer.prepareConfiguration(run, []);
     assert(COMPUTER_TOOL_DECLARATIONS.every(tool => !disabled.enabled!(tool)));
@@ -53,11 +58,12 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
   const calls: string[] = [];
   const requests: Array<Omit<DriverRequest, 'id'>> = [];
   let applicationReply: ((op: Omit<DriverRequest, 'id'>) => Promise<DriverResponse>) | undefined;
+  let applicationTools: { browser: boolean; office: boolean } | undefined;
   const driver: ComputerDriverSession = { capabilities: null, alive: () => true, cancel: () => true, dispose: () => {},
     interrupt: async () => { releases++; input.reject(new Error('original input interrupted without a final action response')); return { released: releaseSucceeds }; },
     async request(op, dispatch) {
       dispatch?.beforeDispatch?.(); calls.push(String(op.tool)); requests.push(structuredClone(op));
-      if (op.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready' } });
+      if (op.tool === 'capabilities') return response({ capabilities: { platform: 'windows', driver: 'controlled', status: 'ready', ...(applicationTools ? { applicationTools } : {}) } });
       if (op.tool === 'get_app_state') return response({ snapshot: { app: { name: 'editor', pid: 3, windowTitle: 'Controlled' },
         windowBounds: { x: 0, y: 0, width: 100, height: 100 }, treeLines: ['0 Edit'], elements: [{ index: 0, name: 'Edit', controlType: 'Edit' }] } });
       if (op.tool === 'type_text' && blockInput) { started.resolve(); return input.promise; }
@@ -137,6 +143,7 @@ async function fixture(records = new Map<string, KernelRecordResult>(), remote: 
     return { content, receipt };
   }
   return { computer, computers, kernel, calls, requests, records, invoke, started, dataDir, releases: () => releases,
+    applicationSupport: (support: { browser: boolean; office: boolean }) => { applicationTools = support; },
     applicationReply: (reply: NonNullable<typeof applicationReply>) => { applicationReply = reply; },
     blockApplication: () => { applicationReply = async () => { started.resolve(); return input.promise; }; },
     controlFacts, controlCancels,
@@ -622,6 +629,20 @@ test('reopened idle Thread Stop captures returned handoff after ACK without touc
     assert.ok(second.controlCancels.some(command => command.pendingEventIds.includes(id)));
     assert.equal(records.get('computer.desktop:unrelated'), unrelated);
   } finally { await second.cleanup(); }
+});
+
+test('known unsupported application protocols are not offered or sent to a desktop driver', async () => {
+  const f = await fixture();
+  try {
+    f.applicationSupport({ browser: false, office: false });
+    await f.computers.probe('local-console');
+    const prepared = await f.computer.prepareConfiguration({ runId: 'root-run', threadId: 'root', source: null }, []);
+    for (const declaration of COMPUTER_TOOL_DECLARATIONS.filter(item => /\.(browser|office)(_read)?$/.test(item.id))) assert.equal(prepared.enabled!(declaration), false);
+    const rejected = await f.invoke('browser_read', { desktopId: 'local-console', op: 'status' });
+    assert.equal(rejected.receipt.completion.kind, 'result');
+    if (rejected.receipt.completion.kind === 'result') { assert.equal(rejected.receipt.completion.outcome, 'failed'); assert.equal(rejected.receipt.completion.effect, 'none'); }
+    assert.equal(f.requests.filter(request => request.tool === 'browser').length, 0);
+  } finally { await f.cleanup(); }
 });
 
 test('ordinary application tools preserve original driver input, actor evidence, epochs and typed screenshot bytes', async () => {

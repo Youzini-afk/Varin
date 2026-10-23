@@ -7,6 +7,13 @@ import type {
   ScholarlySearchResult,
 } from "@varin/protocol";
 import { HarnessServiceError } from "./service-error.js";
+import { EgressError, type EgressFetch } from './egress.js';
+
+class ScholarlyHttpError extends Error {
+  constructor(readonly status: number, readonly retryAfter: string | null) {
+    super(`scholarly provider returned HTTP ${status}`);
+  }
+}
 
 type SearchParams = ScholarlySearchParams;
 
@@ -16,7 +23,7 @@ export interface ScholarlySearchService {
 }
 
 interface ScholarlySearchDeps {
-  fetch?: typeof globalThis.fetch;
+  fetch?: EgressFetch;
 }
 
 const DEFAULT_LIMIT = 10;
@@ -167,12 +174,12 @@ const semanticScholarPaper = (value: unknown): ScholarlyPaper | null => {
 };
 
 const requestJson = async (
-  fetcher: typeof globalThis.fetch,
+  fetcher: EgressFetch,
   url: URL,
   signal: AbortSignal,
 ): Promise<Record<string, unknown>> => {
   signal.throwIfAborted();
-  const response = await fetcher(url, {
+  const response = await fetcher(url.href, {
     signal,
     headers: { Accept: "application/json", "User-Agent": "Varin scholarly search" },
   });
@@ -181,7 +188,7 @@ const requestJson = async (
   if (!response.ok) {
     await response.body?.cancel();
     signal.throwIfAborted();
-    throw new Error(`scholarly provider returned HTTP ${response.status}`);
+    throw new ScholarlyHttpError(response.status, response.headers.get('retry-after'));
   }
   // The original body must finish (or reject after transport cancellation) before
   // this read can report stopped. Never race an abort.
@@ -462,6 +469,8 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
           status: "failed",
           ...(action === "relations" ? { relation: { kind: params.relation!, source: { provider, id: provider === "openalex" ? openAlexWorkId(text(params.paperId)) : text(params.paperId) } } } : {}),
           message: error instanceof Error ? error.message : String(error),
+          code: error instanceof EgressError ? error.kind : error instanceof ScholarlyHttpError ? 'http' : 'provider_response',
+          ...(error instanceof ScholarlyHttpError ? { httpStatus: error.status, ...(error.retryAfter ? { retryAfter: error.retryAfter } : {}) } : {}),
         });
       }
     },

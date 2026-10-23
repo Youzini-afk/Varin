@@ -192,6 +192,7 @@ impl ImmutableReadTask {
                 },
                 _ => {value["bytesBase64"]=json!(BASE64.encode(&bytes[left..right]));value["encoding"]=json!("base64");}
             }
+            value["returnedBytes"] = json!(value["nextOffset"].as_u64().unwrap() - value["offset"].as_u64().unwrap());
             value = json!({"path":path,"source":source,"missing":false,"content":value});
         } else {
             value["bytesBase64"] = Value::String(BASE64.encode(bytes));

@@ -20,7 +20,7 @@ export const createDesktopNetworkFetch = (networkSession: Session) => (
   try { prepared = new Request(url, init); }
   catch (error) { reject(error); return; }
   const outbound = net.request({
-    url,
+    url: prepared.url,
     method: prepared.method,
     session: networkSession,
     redirect: 'manual',

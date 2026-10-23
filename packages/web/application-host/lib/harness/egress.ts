@@ -278,7 +278,10 @@ const extractCauseCodes = (error: unknown): { codes: Set<string>; messages: stri
     if (depth > 4 || value === null || typeof value !== "object") return;
     const err = value as { code?: unknown; message?: unknown; cause?: unknown; errors?: unknown };
     if (typeof err.code === "string") codes.add(err.code);
-    if (typeof err.message === "string") messages.push(err.message);
+    if (typeof err.message === "string") {
+      messages.push(err.message);
+      for (const code of err.message.match(/\bERR_[A-Z0-9_]+\b/g) ?? []) codes.add(code);
+    }
     if (err.cause !== undefined && err.cause !== value) walk(err.cause, depth + 1);
     if (Array.isArray(err.errors)) for (const e of err.errors) walk(e, depth + 1);
   };
@@ -286,7 +289,7 @@ const extractCauseCodes = (error: unknown): { codes: Set<string>; messages: stri
   return { codes, messages };
 };
 
-const DNS_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "ENODATA", "ESERVFAIL", "EBADNAME"]);
+const DNS_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "ENODATA", "ESERVFAIL", "EBADNAME", "ERR_NAME_NOT_RESOLVED", "ERR_DNS_TIMED_OUT"]);
 const TLS_CODES = [
   "CERT_", "ERR_TLS", "UNABLE_TO_", "DEPTH_ZERO", "SELF_SIGNED",
   "SSL_", "TLS_", "EPROTO", "X509",
@@ -294,6 +297,7 @@ const TLS_CODES = [
 const CONNECT_CODES = new Set([
   "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EHOSTUNREACH", "ENETUNREACH",
   "EPIPE", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_SOCKET", "UND_ERR_CONNECT",
+  "ERR_CONNECTION_REFUSED", "ERR_CONNECTION_RESET", "ERR_CONNECTION_CLOSED", "ERR_CONNECTION_ABORTED", "ERR_NETWORK_CHANGED", "ERR_INTERNET_DISCONNECTED",
 ]);
 
 /**
@@ -318,6 +322,12 @@ export const classifyEgressError = (error: unknown, mode: "direct" | "proxy" = "
   }
   const { codes, messages } = extractCauseCodes(error);
   const joined = messages.join(" ").toLowerCase();
+  if (codes.has('ERR_INVALID_URL') || messages.some(message => message === 'Invalid URL')) {
+    return new EgressError('scheme-denied', 'Invalid request URL; provide an absolute HTTP(S) URL string', { cause: error });
+  }
+  if (codes.has('ERR_TIMED_OUT') || codes.has('UND_ERR_HEADERS_TIMEOUT') || codes.has('UND_ERR_BODY_TIMEOUT')) {
+    return new EgressError('timeout', 'Request timed out', { cause: error });
+  }
   for (const code of codes) {
     if (DNS_CODES.has(code)) return new EgressError("dns", `DNS resolution failed (${code})`, { cause: error });
     if (TLS_CODES.some((t) => code.includes(t))) {

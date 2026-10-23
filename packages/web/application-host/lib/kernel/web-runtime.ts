@@ -83,13 +83,21 @@ function decode(method: string, value: unknown) {
   return { selected, input: parseVarinToolJson(value) };
 }
 
-/** Only the original producer knows which fields carry pixels. Keep all other
- * domain metadata intact, including unknown/partial errors and source identity. */
+/** Keep source identities and requested content, without embedding a second
+ * copy of the retained document layout inside each snapshot reference. */
 export function webOutput(result: FetchResult | WebSearchResult): OutputBody<IncomingMedia> {
   const parts: OutputPart<IncomingMedia>[] = [];
+  const snapshotRef = (snapshot: NonNullable<Extract<FetchResult, { status: 'ok' }>['snapshot']>) => {
+    if (snapshot.document?.kind !== 'pdf') return snapshot;
+    const { structure: _structure, document, ...identity } = snapshot;
+    return { ...identity, ...(document ? { document: { kind: document.kind, parser: document.parser,
+      ...(document.pageCount === undefined ? {} : { pageCount: document.pageCount }),
+      ...(document.sourceSnapshotId ? { sourceSnapshotId: document.sourceSnapshotId } : {}),
+      ...(document.source ? { source: document.source } : {}) } } : {}) };
+  };
   const project = (value: FetchResult): unknown => {
     if (value.status !== 'ok') return value;
-    const { pageImage, pageImages, ...metadata } = value;
+    const { pageImage, pageImages, snapshot, sourceSnapshot, ...metadata } = value;
     const images = new Map<string, number>();
     const image = (value: NonNullable<Extract<FetchResult, { status: 'ok' }>['pageImage']>) => {
       const { data, ...imageMetadata } = value;
@@ -98,7 +106,9 @@ export function webOutput(result: FetchResult | WebSearchResult): OutputBody<Inc
       if (!images.has(key)) { parts.push({ kind: 'media', media: { media_type: value.mimeType, data_base64: data } }); images.set(key, partIndex); }
       return { ...imageMetadata, partIndex };
     };
-    return { ...metadata, ...(pageImage ? { pageImage: image(pageImage) } : {}),
+    return { ...metadata, ...(snapshot ? { snapshot: snapshotRef(snapshot) } : {}),
+      ...(sourceSnapshot && sourceSnapshot.snapshotId !== snapshot?.snapshotId ? { sourceSnapshot: snapshotRef(sourceSnapshot) } : {}),
+      ...(pageImage ? { pageImage: image(pageImage) } : {}),
       ...(pageImages ? { pageImages: pageImages.map(image) } : {}) };
   };
   const data = 'items' in result

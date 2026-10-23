@@ -481,6 +481,9 @@ describe("diagnose", () => {
 
 describe("classifyEgressError", () => {
   it("maps TLS and timeout codes", () => {
+    expect(classifyEgressError(new Error('Invalid URL'))).toMatchObject({ kind: 'scheme-denied' });
+    expect(classifyEgressError(new Error('net::ERR_NAME_NOT_RESOLVED at https://secret.invalid/?token=private')).message).toBe('DNS resolution failed (ERR_NAME_NOT_RESOLVED)');
+    expect(classifyEgressError(new Error('net::ERR_TIMED_OUT')).kind).toBe('timeout');
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("bad"), { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" }) })).kind).toBe("tls");
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("t"), { code: "UND_ERR_CONNECT_TIMEOUT" }) })).kind).toBe("connect");
     expect(classifyEgressError(Object.assign(new Error("x"), { cause: Object.assign(new Error("t"), { code: "ECONNREFUSED" }) }), "proxy").kind).toBe("proxy-unavailable");

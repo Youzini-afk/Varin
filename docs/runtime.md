@@ -162,6 +162,9 @@ Bot Sleep 路径，不能把已知取消改写成无关失败。已发出的副�
 
 脚本嵌套调用复用 ToolDirectory、授权和资源准入。回执关联外层 invocation，不能伪造模型
 tool/result 对。持久脚本、PTY、研究 Job 和 MCP Task 各有实际寿命和输出所有者。
+`tool_describe.invocation` 给模型函数调用模板；`scriptInvocation` 给脚本 `tools.invoke` 模板，两者不混用包装层。
+脚本先检查 `completion.kind`，`result` 的业务数据在 `completion.content.data`，媒体在 `parts`；`not_dispatched` 表示尚未派发，
+`job_accepted` 表示工作已受理，不能只判断 `outcome`。嵌套调用拒绝保留原错误 `code` 和 `message`。
 `script_run.title` 是发起模型提供的任务说明，随原调用保存；脚本正文与执行权限仍走原合同。
 聊天折叠行展示任务说明、调用数量和异常提示，展开后读取 Catalog 中原嵌套 Operation 的调用树，
 具体参数与结果按需读取。脚本已完成和内部调用失败、仍在运行或效果未知分别展示，历史重载不会丢弃调用明细。

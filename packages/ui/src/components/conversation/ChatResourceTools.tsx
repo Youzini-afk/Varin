@@ -157,7 +157,9 @@ export function ChatRecoveryTools({ call, execution, result, status, generating,
       </div>)}
       {Boolean(args.point || data.point) && <p className="typography-micro text-muted-foreground">{t('chat.tools.fromRecoveryPoint')} · {toolText(args.point) || toolText(toolRecord(data.point).label) || toolText(toolRecord(data.point).id) || toolText(data.point)}</p>}
       {files.map((file, index) => <div key={index} className="tool-recovery-file"><ToolFileLink callId={call.id} path={toolText(file.path)} />
-        <span className={'typography-micro ' + (conflicts.includes(file.path) ? 'text-destructive' : 'text-muted-foreground')}>{toolText(file.status) || (applied.includes(file.path) ? t('chat.tools.restored') : '')}</span></div>)}
+        <span className={'typography-micro ' + (conflicts.includes(file.path) ? 'text-destructive' : 'text-muted-foreground')}>
+          {file.change === 'deleted' ? t('diffView.change.deleted') : file.change === 'created' ? t('diffView.change.new') : file.change === 'updated' ? t('diffView.change.modified')
+            : toolValueLabel(file.status, t) || (applied.includes(file.path) ? t('chat.tools.restored') : '')}</span></div>)}
       {conflicts.length > 0 && <p className="typography-meta text-destructive">{t('chat.tools.restoreConflicts', { count: conflicts.length })}</p>}
       <ToolResultNotice data={data} status={status} />{output}{details}
     </div>

@@ -3669,6 +3669,9 @@ export interface KernelProcessSnapshot {
   workspaceId: string;
   cwd: string;
   mode: string;
+  stdinMode?: string;
+  input?: KernelProcessInput;
+  outputCodePage?: number | null;
   status: "starting" | "running" | "exited" | "failed" | "unknown" | "released";
   pid: number | null;
   exitCode: number | null;
@@ -3678,6 +3681,12 @@ export interface KernelProcessSnapshot {
   outputAvailable: boolean;
   outputComplete?: boolean;
   outputError?: string | null;
+}
+
+export interface KernelProcessInput {
+  writable: boolean;
+  eofSupported: boolean;
+  lineEnding: string;
 }
 
 export interface KernelProcessOutputChunk {
@@ -5277,7 +5286,7 @@ export interface FamilyHistoryEntry {
   source: string;
   kind: string;
   body: unknown | null;
-  preview: string;
+  preview?: string;
   bodyBytes: number;
   bodyTruncated: boolean;
   tool: FamilyToolAssociation | null;

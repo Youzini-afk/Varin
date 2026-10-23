@@ -11,6 +11,9 @@ const json = (value: unknown): Response => new Response(JSON.stringify(value), {
 describe("scholarly search service", () => {
   it("normalizes OpenAlex metadata without treating it as read content", async () => {
     const fetch = vi.fn(async (input: Parameters<typeof globalThis.fetch>[0]) => {
+      // Electron's ClientRequest accepts construction with an URL object but
+      // rejects it as Invalid URL when the request is sent.
+      expect(typeof input).toBe('string');
       expect(String(input)).toContain("api.openalex.org/works");
       expect(new URL(String(input)).searchParams.get("search")).toBe("agent retrieval");
       expect(new URL(String(input)).searchParams.get("cursor")).toBe("*");
@@ -54,6 +57,7 @@ describe("scholarly search service", () => {
       provider: "openalex",
       papers: [],
       message: expect.stringContaining("HTTP 503"),
+      code: 'http', httpStatus: 503,
     });
   });
 

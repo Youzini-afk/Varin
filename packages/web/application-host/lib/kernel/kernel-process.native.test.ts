@@ -105,6 +105,16 @@ async function drain(client: KernelScopedClient, processId: string, start = 0) {
   }
 }
 
+vitestIt.skipIf(!available || process.platform !== 'win32')('Windows cmd PTY starts in the admitted source directory', async () => {
+  const f = await fixture();
+  const params = { ...f.spawn('cmd-cwd', '', 'pty'), command: 'cmd.exe', args: ['/d', '/c', 'cd'] };
+  await f.client.processSpawn(params);
+  const read = await drain(f.client, params.processId);
+  const output = stripVTControlCharacters(read.stdout.toString('utf8'));
+  assert(output.toLowerCase().includes(path.join(f.workspace, 'child').toLowerCase()), output);
+  assert(!output.includes('UNC'), output);
+}, 30_000);
+
 it("native process pipes preserve binary stdout/stderr, bounded cursors and the actual exit code", async () => {
   const f = await fixture();
   const params = f.spawn("binary", "process.stdout.write(Buffer.from([0,255,128,65,10]));process.stderr.write('error-stream');process.exitCode=7");

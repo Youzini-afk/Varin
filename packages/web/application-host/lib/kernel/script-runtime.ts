@@ -6,7 +6,7 @@ import type { HostCapabilityCallContext, HostCapabilityHandler } from '@varin/ex
 import { SCRIPT_PROTOCOL_VERSION, ScriptFrameDecoder, encodeScriptFrame, parseScriptWorkerFrame, type ScriptHostFrame, type ScriptWorkerFrame } from '@varin/script-runtime';
 import { compileToolJsonSchema } from '../models/schema.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
-import type { KernelClient } from './kernel-client.js';
+import { KernelClientError, type KernelClient } from './kernel-client.js';
 import type { ExtensionToolOwnerOptions } from './extension-tool-owner.js';
 import type { KernelMethod, KernelMethodParams, NodeBinding, Operation, OutputPart, IncomingMedia } from './protocol.generated.js';
 import type { ToolExecutionReceipt } from './tool-bridge.js';
@@ -184,16 +184,17 @@ export function createScriptRuntime(options: {
       });
       if (environment.accepting) await send(environment, { type: 'receipt', cellId: cell.id, requestId: frame.requestId, receipt } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
     }).catch(async error => {
-      if (environment.accepting) await send(environment, { type: 'rejected', cellId: cell.id, requestId: frame.requestId, error: { message: errorText(error) } } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
+      if (environment.accepting) await send(environment, { type: 'rejected', cellId: cell.id, requestId: frame.requestId,
+        error: { message: errorText(error), ...(error instanceof KernelClientError ? { code: error.code } : {}) } } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
     });
     cell.callbacks.add(work);
     void work.finally(() => cell.callbacks.delete(work)).catch(options.onError);
   };
   const openEnvironment = async (authority: ToolInvocationAuthority, params: Record<string, JsonValue>, signal: AbortSignal): Promise<ToolExecutionReceipt> => {
-    const requestedCwd = typeof params.cwd === 'string' ? params.cwd : '';
-    if (requestedCwd.includes('\\') || requestedCwd.includes('\0') || requestedCwd.includes(':') || requestedCwd.startsWith('/')
-      || requestedCwd.split('/').some(part => part === '.' || part === '..')) {
-      return undispatchedToolReceipt('cwd must be relative to the selected source root, using forward slashes; use an empty string for the root');
+    const requestedCwd = (typeof params.cwd === 'string' ? params.cwd : '').replaceAll('\\', '/');
+    if (requestedCwd.includes('\0') || requestedCwd.includes(':') || requestedCwd.startsWith('/')
+      || requestedCwd.split('/').some(part => part === '..')) {
+      return undispatchedToolReceipt('cwd must be relative to the selected source root; an empty string or . selects the root. Parent traversal is not allowed.');
     }
     await recovering;
     signal.throwIfAborted();
@@ -216,7 +217,7 @@ export function createScriptRuntime(options: {
       enteredProcess = true;
       const address = { coordinatorHostId: runtime.coordinatorHostId, authorityId: source.kind === 'managed' ? source.binding.authorityId : '',
         resourceEpoch: source.kind === 'managed' ? source.binding.resourceEpoch : '', processId: authority.operationId };
-      const cwd = typeof params.cwd === 'string' ? params.cwd : '';
+      const cwd = requestedCwd.split('/').filter(part => part && part !== '.').join('/');
       const initial = source.kind === 'local'
         ? await source.client.processSpawn({ ...scriptNodeSpawnInput(node), processId: authority.operationId,
           workspaceId: selection.workspaceId, rootId, cwd })

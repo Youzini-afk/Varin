@@ -142,6 +142,7 @@ impl FileReadTask {
                 content["eof"] = json!(self.end >= position);
             }
         }
+        content["returnedBytes"] = json!(content["nextOffset"].as_u64().unwrap() - content["offset"].as_u64().unwrap());
         Ok(PreparedFileRead {
             value: json!({"path":self.params["path"],"source":{"rootId":self.params["rootId"]},
             "missing":false,"readVersion":version,"content":content}),

@@ -34,7 +34,8 @@ export interface VarinExtensionServiceContract {
 }
 
 export type VarinRuntimeContractRequest = VarinRuntimeSourceRequest
-  | { action: 'list'; kind: 'service' | 'ui_slot' }
+  | { action: 'list'; kind: 'service'; serviceId?: string }
+  | { action: 'list'; kind: 'ui_slot' }
   | { action: 'describe'; kind: 'service'; serviceId: string; version: number; extensionId?: string;
       member?: { kind: 'method' | 'event'; name: string } }
   | { action: 'describe'; kind: 'ui_slot'; id: string };
@@ -124,7 +125,8 @@ const objectSchema = (properties: JsonObject, required: string[]): JsonObject =>
 /** The normal tool and author/API query decoder share this declaration. */
 export const VARIN_RUNTIME_CONTRACT_REQUEST_SCHEMA: JsonObject = {
   oneOf: [VARIN_RUNTIME_SOURCE_REQUEST_SCHEMA,
-    objectSchema({ action: { const: 'list' }, kind: { enum: ['service', 'ui_slot'] } }, ['action', 'kind']),
+    objectSchema({ action: { const: 'list' }, kind: { const: 'service' }, serviceId: { ...textSchema, description: 'Filter by exact service ID. Use describe with a version to inspect one contract.' } }, ['action', 'kind']),
+    objectSchema({ action: { const: 'list' }, kind: { const: 'ui_slot' } }, ['action', 'kind']),
     objectSchema({ action: { const: 'describe' }, kind: { const: 'service' }, serviceId: textSchema,
       version: { type: 'integer', minimum: 1 }, extensionId: textSchema,
       member: objectSchema({ kind: { enum: ['method', 'event'] }, name: textSchema }, ['kind', 'name']),
@@ -155,8 +157,9 @@ export function parseVarinRuntimeContractRequest(value: unknown): VarinRuntimeCo
   const raw = record(value, 'Contract query');
   if (raw.kind === 'source') return parseVarinRuntimeSourceRequest(value);
   if (raw.action === 'list' && (raw.kind === 'service' || raw.kind === 'ui_slot')) {
-    fields(raw, ['action', 'kind'], 'Contract query');
-    return { action: 'list', kind: raw.kind };
+    fields(raw, raw.kind === 'service' ? ['action', 'kind', 'serviceId'] : ['action', 'kind'], 'Contract query');
+    return raw.kind === 'service' ? { action: 'list', kind: 'service', ...(raw.serviceId === undefined ? {} : { serviceId: text(raw.serviceId, 'Service ID') }) }
+      : { action: 'list', kind: 'ui_slot' };
   }
   if (raw.action === 'describe' && raw.kind === 'ui_slot') {
     fields(raw, ['action', 'kind', 'id'], 'Contract query');

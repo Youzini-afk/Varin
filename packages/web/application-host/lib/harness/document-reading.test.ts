@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { WebSnapshotRef } from "@varin/protocol";
+import { webOutput } from '../kernel/web-runtime.js';
 import { createDocumentReader } from "./document-reading.js";
 import type { ThreadMaterialAuthority, WebSnapshotDraft, WebMaterialStore } from "./web-materials.js";
 import type { createPdfEngine } from "./pdf-engine.js";
@@ -126,6 +127,12 @@ describe("independent document reading", () => {
     expect(native.status).toBe("ok");
     if (native.status !== "ok") return;
     expect(native.markdown).toBe("native page 2");
+    const delivered = webOutput(native).data as { markdown: string; snapshot: { snapshotId: string; structure?: unknown; document: { pages?: unknown } }; structure?: unknown };
+    expect(delivered.markdown).toBe('native page 2');
+    expect(delivered.snapshot.snapshotId).toBe(native.snapshot!.snapshotId);
+    expect(delivered.snapshot.structure).toBeUndefined();
+    expect(delivered.snapshot.document.pages).toBeUndefined();
+    expect(delivered.structure).toBeUndefined();
     expect(native.analysis?.pages).toEqual([2]);
     expect(f.engine.extractPage).toHaveBeenCalledTimes(1);
 

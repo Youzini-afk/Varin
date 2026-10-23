@@ -281,7 +281,7 @@ describe('plan independent owner review, real TriviumDB', () => {
     const reopened = await f.open();
     const receiptChannel = channel(reopened, { planContains: async () => { throw new Error('An original receipt must not resolve a new history view'); } } as unknown as AgentRuntimeClient);
     const recovered = await receiptChannel.request('original-receipt', { ...query, action: 'receipt' });
-    expect(recovered.result).toEqual({ status: 'ready', plan: committed.plan, mutation: committed });
+    expect(recovered.result).toEqual({ status: 'ready', plan: { ...committed.plan, items: [{ text: 'Child own plan', status: 'pending' }] }, mutation: committed });
     const restoredPlans = new PlanService(runtime, async () => reopened);
     expect((await restoredPlans.read(identity(v))).plan?.content).toBe('Newer child user plan');
     expect((await restoredPlans.read(identity(views.get('child-fork')!))).plan).toEqual(committed.plan);

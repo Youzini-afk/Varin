@@ -198,7 +198,9 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         const self = await participant(owners.runtime, authority.threadId, authority.threadId, context.signal,
           { runId: authority.runId, branchId: run.branch_id });
         const peerId = (method === 'submit' ? input.target : input.source) ?? self.member.parentThreadId;
-        if (!peerId) throw new Error('Specify the related Agent');
+        if (!peerId) throw Object.assign(new Error(method === 'submit'
+          ? 'This is a root Agent with no parent to submit to. Set target to a related Agent from threads, or keep the work in this task.'
+          : 'This Agent has no parent to update from. Set source to a related Agent from threads.'), { code: method === 'submit' ? 'target_required' : 'source_required' });
         const peer = await participant(owners.runtime, authority.threadId, peerId, context.signal);
         const [source, target] = method === 'submit' ? [self, peer] : [peer, self];
         if (source.member.threadId === target.member.threadId) throw new Error('Select another Agent');
@@ -249,7 +251,8 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         }
         return { executor_stopped: !dispatched || (error instanceof UnconfirmedIntegrationCommitError && error.executorStopped),
           completion: { kind: 'result', outcome: dispatched ? 'indeterminate' : 'failed', effect: dispatched ? 'unknown' : 'none',
-          content: { data: { status: 'failed', error: error instanceof Error ? error.message : String(error) }, parts: [] } } };
+          content: { data: { status: 'failed', code: error instanceof Error && 'code' in error && typeof error.code === 'string' ? error.code : 'code_exchange_failed',
+            message: error instanceof Error ? error.message : String(error) }, parts: [] } } };
       } finally {
         for (const scope of opened.reverse()) await scope.release().catch(error => owners.onCleanupError(authority.operationId, error));
       }

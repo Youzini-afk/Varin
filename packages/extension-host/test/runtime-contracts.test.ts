@@ -50,6 +50,11 @@ test('cold service discovery shares scoped routing without migration, activation
   const h = await fixture();
   try {
     await h.install('example.first'); await h.install('example.second');
+    const listed = await h.query({ action: 'list', kind: 'service', serviceId });
+    assert.ok(listed.action === 'list' && listed.kind === 'service');
+    assert.deepEqual(listed.entries.map(entry => entry.serviceId), [serviceId]);
+    const absent = await h.query({ action: 'list', kind: 'service', serviceId: 'absent.service' });
+    assert.ok(absent.action === 'list'); assert.deepEqual(absent.entries, []);
     h.runtime.workbench.read = async () => { throw new Error('A metadata query must not run workbench migration'); };
     h.runtime.workbench.setWorkspaceScopeResolver(async () => { throw new Error('A metadata query must not resolve/migrate workspace paths'); });
     const request = { action: 'describe', kind: 'service', serviceId, version: 1, member: { kind: 'method', name: 'read' } } as const;

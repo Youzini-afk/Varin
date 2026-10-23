@@ -74,7 +74,7 @@ def capabilities():
             pointer = active and bool(session.devices & 2) and any(target["logical"] for target in session.streams.values())
             keyboard = active and bool(session.devices & 1)
             state = session.state
-        return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1",
+        return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1", "applicationTools": {"browser": True, "office": True},
                 "observeTree": False, "elementAction": False, "screenshot": active,
                 "coordinateInput": pointer, "textInput": keyboard, "drag": pointer,
                 "multiWindow": True, "interruptibleInput": True, "occludedCapture": True,
@@ -83,7 +83,7 @@ def capabilities():
                 "availableDevices": available["devices"],
                 **({} if active else {"detail": "Observe Shared desktop or open the viewer to request screen and input authorization"})}
     except Exception:
-        return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1",
+        return {"platform": "linux", "driver": "linux-portal", "driverVersion": "1", "applicationTools": {"browser": True, "office": True},
                 "observeTree": False, "elementAction": False, "screenshot": False,
                 "coordinateInput": False, "textInput": False, "drag": False,
                 "sessionType": "wayland", "status": "unavailable",

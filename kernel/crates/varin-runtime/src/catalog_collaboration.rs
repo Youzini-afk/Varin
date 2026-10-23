@@ -340,7 +340,7 @@ impl Catalog {
             .is_some_and(|r| r.history_ids.iter().any(|id| id == item_id))
         {
             return Err(RuntimeError::Invalid(
-                "item is not a report of this child".into(),
+                "not_a_report_item: itemId must be one of child_status.report.history_ids for this child; read child_status to select the report item".into(),
             ));
         }
         Ok(child_content::ChildReportRead::new(

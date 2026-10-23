@@ -423,6 +423,8 @@ fn agent_file_read_pages_by_default_without_limiting_explicit_or_internal_reads(
     fs::write(f.root.join("work/body.txt"), &body).unwrap();
     let first = f.read(json!({"path":"body.txt"}));
     let mut text = first["content"]["text"].as_str().unwrap().to_string();
+    assert_eq!(first["content"]["returnedBytes"], text.len());
+    assert_eq!(first["content"]["byteLength"], body.len());
     // The byte target expands by at most three bytes to finish a UTF-8 character.
     assert!(text.len() <= 65536 + 3 && text.len() < body.len());
     let mut page = first.clone();
@@ -457,9 +459,12 @@ fn healthcheck_file_contracts_keep_line_endings_and_distinguish_invalid_targets(
         ToolCompletion::Result { outcome: Outcome::Failed, content, .. } if content.data["error"] == "not_a_file"));
     let missing = f.call("file_list", json!({"paths":["tree/missing"]}));
     assert!(serde_json::to_string(&missing).unwrap().contains("Discovery path does not exist: tree/missing"));
+    fs::write(f.root.join("work/tree/second.txt"), "second entry").unwrap();
     let small = f.call("file_list", json!({"paths":["tree"],"maxBytes":1}));
     let ToolCompletion::Result { content, .. } = small else { panic!("{small:?}") };
     assert_eq!(content.data["records"].as_array().unwrap().len(), 1);
+    assert_eq!(content.data["records"][0]["path"],"tree/crlf.txt");
+    assert!(content.data["scannedFiles"].as_u64().unwrap() >= 1);
     assert!(content.data["nextCursor"].is_string());
     let bad = f.try_call("file_list", json!({"cursor":"not-a-real-cursor"})).unwrap_err();
     assert_eq!(bad.code, "invalid_tool_arguments");
@@ -641,7 +646,7 @@ fn directory_pages_cover_the_remaining_paths_without_entering_excluded_copies() 
         }
         assert!(seen.len() < 20, "cursor failed to advance");
     }
-    assert_eq!(seen, ["", "a", "a/sub", "a/sub/file", "a.txt", "b", "z"]);
+    assert_eq!(seen, ["a", "a/sub", "a/sub/file", "a.txt", "b", "z"]);
 }
 
 #[test]
@@ -661,10 +666,10 @@ fn explicit_paths_reach_dependencies_worktrees_and_ignored_files_without_filter_
         let mut paths=content.data["records"].as_array().unwrap().iter().map(|r|r["path"].as_str().unwrap().to_string()).collect::<Vec<_>>();
         paths.sort();paths
     };
-    assert_eq!(query("file_list",json!({})), ["", ".git", ".gitignore", ".worktrees", "build", "debug.log", "node_modules", "source.txt"]);
+    assert_eq!(query("file_list",json!({})), [".git", ".gitignore", ".worktrees", "build", "debug.log", "node_modules", "source.txt"]);
     assert_eq!(query("file_search",json!({"query":"needle"})), ["source.txt"]);
     assert_eq!(query("file_search",json!({"query":"needle","paths":["node_modules/pkg",".worktrees/copy",".git/config","build","debug.log"]})),
         [".git/config", ".worktrees/copy/source.txt", "build/output.txt", "debug.log", "node_modules/pkg/index.js"]);
     assert_eq!(query("file_search",json!({"query":"needle","paths":["","node_modules/pkg"]})), ["node_modules/pkg/index.js", "source.txt"]);
-    assert_eq!(query("file_list",json!({"paths":["node_modules/pkg"]})), ["node_modules/pkg", "node_modules/pkg/index.js", "node_modules/pkg/node_modules"]);
+    assert_eq!(query("file_list",json!({"paths":["node_modules/pkg"]})), ["node_modules/pkg/index.js", "node_modules/pkg/node_modules"]);
 }

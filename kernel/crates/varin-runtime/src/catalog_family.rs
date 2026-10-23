@@ -206,7 +206,8 @@ pub struct HistoryEntry {
     pub source: HistorySource,
     pub kind: String,
     pub body: Option<Value>,
-    pub preview: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
     pub body_bytes: usize,
     pub body_truncated: bool,
     pub tool: Option<ToolAssociation>,
@@ -1064,7 +1065,7 @@ impl FamilyRead {
                 source: item.source,
                 kind,
                 body: (!body_truncated).then_some(body),
-                preview: serialized[..end].into(),
+                preview: body_truncated.then(|| serialized[..end].into()),
                 body_bytes: serialized.len(),
                 body_truncated,
                 tool,

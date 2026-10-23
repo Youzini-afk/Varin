@@ -77,6 +77,28 @@ fn send_data(output: &DataOutput, event: Value) -> io::Result<()> {
         &event,
     )
 }
+// Keep canonical paths for resource identity, but don't hand cmd.exe a verbatim
+// namespace it treats as an unsupported UNC cwd and silently replaces with Windows.
+fn child_cwd(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        use std::path::{Component, Prefix};
+        if let Some(Component::Prefix(prefix)) = path.components().next() {
+            let wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+            let ordinary = match prefix.kind() {
+                Prefix::VerbatimDisk(_) => Some(wide[4..].to_vec()),
+                Prefix::VerbatimUNC(_, _) => Some([vec![b'\\' as u16; 2], wide[8..].to_vec()].concat()),
+                _ => None,
+            };
+            if let Some(wide) = ordinary {
+                return std::borrow::Cow::Owned(PathBuf::from(std::ffi::OsString::from_wide(&wide)));
+            }
+        }
+    }
+    std::borrow::Cow::Borrowed(path)
+}
+
 fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     platform::prepare_guardian()?;
@@ -99,7 +121,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
         }
         let mut command = CommandBuilder::new(&config.command);
         command.args(&config.args);
-        command.cwd(&config.cwd);
+        command.cwd(child_cwd(&config.cwd).as_os_str());
         command.env_clear();
         for entry in &config.env {
             command.env(&entry.name, &entry.value);
@@ -116,7 +138,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
         let mut command = Command::new(&config.command);
         command
             .args(&config.args)
-            .current_dir(&config.cwd)
+            .current_dir(child_cwd(&config.cwd))
             .env_clear()
             .envs(config.env.iter().map(|v| (&v.name, &v.value)))
             .stdin(if config.stdin_mode.as_deref() == Some("null") { Stdio::null() } else { Stdio::piped() })

@@ -113,6 +113,8 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
         }
         if !files.is_empty()&&!files.contains_key(path){return Ok(true);}
         if params.operation=="list"{
+            if matches!(&document.state, PathState::Directory{..}) && (path.is_empty() || params.paths.as_ref().is_some_and(|roots| roots.contains(path))) { return Ok(true); }
+            if matches!(&document.state, PathState::RegularFile{..}) { shared.scanned(); }
             if name_matcher.as_ref().is_some_and(|q|!path.to_lowercase().contains(q)){return Ok(true);}
             let kind=match &document.state{PathState::Directory{..}=>"directory",PathState::Symlink{..}=>"symlink",PathState::RegularFile{..}=>"file",_=>"unsupported"};
             let mut data=json!({"kind":kind,"state":document.state});

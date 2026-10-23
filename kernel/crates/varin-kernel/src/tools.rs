@@ -327,6 +327,9 @@ struct ProcessReadArgs {
     process_id: String,
     cursor: u64,
     max_bytes: Option<u64>,
+    #[serde(default)]
+    mode: crate::process::text::Mode,
+    encoding: Option<String>,
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -352,6 +355,7 @@ struct ProcessSpawnArgs {
     #[serde(default)]
     wait_ms: u64,
     max_output_bytes: Option<u64>,
+    output_encoding: Option<String>,
 }
 fn default_process_mode() -> String { "pipe".into() }
 #[derive(Debug, Clone)]
@@ -538,6 +542,7 @@ impl ResourceOperation {
                 }
             }
             Self::ProcessSpawn(args) => {
+                crate::process::text::validate_encoding(args.output_encoding.as_deref()).map_err(|message| ExecutionError::new("invalid_tool_arguments",message))?;
                 if args.wait_ms > 9_007_199_254_740_991 || args.max_output_bytes.is_some_and(|value|value==0 || value > crate::process::CHUNK_BYTES as u64) {
                     return Err(ExecutionError::new("invalid_tool_arguments","waitMs must be a nonnegative safe integer and maxOutputBytes must fit one process output page"));
                 }
@@ -560,11 +565,11 @@ impl ResourceOperation {
                     "processId is empty",
                 ));
             }
-            Self::ProcessRead(args) if args.process_id.is_empty() || args.max_bytes == Some(0) => {
-                return Err(ExecutionError::new(
-                    "invalid_tool_arguments",
-                    "invalid process output identity or range",
-                ));
+            Self::ProcessRead(args) => {
+                crate::process::text::validate_encoding(args.encoding.as_deref()).map_err(|message| ExecutionError::new("invalid_tool_arguments",message))?;
+                if args.process_id.is_empty() || args.max_bytes == Some(0) {
+                    return Err(ExecutionError::new("invalid_tool_arguments", "invalid process output identity or range"));
+                }
             }
             Self::ProcessWrite(args) if args.process_id.is_empty() => {
                 return Err(ExecutionError::new(
@@ -2360,6 +2365,7 @@ impl KernelToolExecutor {
             };
         }
         let spawn_args = if let ResourceOperation::ProcessSpawn(args) = &operation { Some(args.clone()) } else { None };
+        let output_options = if let ResourceOperation::ProcessRead(args) = &operation { Some((args.mode.clone(),args.encoding.clone())) } else { None };
         let spawn = spawn_args.is_some();
         let read = matches!(operation, ResourceOperation::FileRead(_));
         let mutation = matches!(operation, ResourceOperation::FileMutation(_));
@@ -2394,7 +2400,13 @@ impl KernelToolExecutor {
                         }
                         match self.resources.observe_process(&self.binding,context,&context.operation_id,&context.run_id,None,
                             Some((0,args.max_output_bytes)),false,&CancellationToken::default()) {
-                            Ok(output) => { result["observation"] = output; },
+                            Ok(mut output) => {
+                                crate::process::text::project(&mut output, &crate::process::text::Mode::Text, args.output_encoding.as_deref());
+                                if let Some(current) = output["process"].as_object() {
+                                    result.as_object_mut().expect("process record").extend(current.clone());
+                                }
+                                result["observation"] = output;
+                            },
                             Err(error) => { result["observationError"] = json!({"code":error.code,"message":error.message}); },
                         }
                         result["command"] = json!(args.command);
@@ -2456,11 +2468,11 @@ impl KernelToolExecutor {
                 },
                 content: result.into(),
             },
-            Ok(result) => ToolCompletion::Result {
+            Ok(mut result) => { if let Some((mode,encoding)) = output_options { crate::process::text::project(&mut result, &mode, encoding.as_deref()); } ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
                 content: result.into(),
-            },
+            } },
             Err(failure) if !failure.dispatched => ToolCompletion::NotDispatched {
                 reason: failure.error.to_string(),
             },
@@ -2649,7 +2661,9 @@ fn tool_schema(kind: ToolKind) -> Value {
         ToolKind::FileRead => return read::schema(),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
-            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1}}),
+            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1},
+                "mode":{"type":"string","enum":["text","raw"],"default":"text","description":"text decodes readable output and removes ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
+                "encoding":{"type":"string","description":"Text encoding override, such as utf-8, gbk, shift_jis or utf-16le. Auto uses BOM/UTF-8, then the actual Windows source Host's codepage hint."}}),
             vec!["processId", "cursor"],
         ),
         ToolKind::ProcessWrite => (
@@ -2665,6 +2679,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             "shellCommand":{"type":"string","minLength":1,"description":"Shell text for pipelines, redirection or multiline commands. Runs in the actual execution Host's shell: PowerShell on Windows, /bin/sh on Unix. Mutually exclusive with command/args."},
             "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe the original process until exit or this interval. Zero returns immediately. Never a kill timeout."},
             "maxOutputBytes":{"type":"integer","minimum":1,"maximum":crate::process::CHUNK_BYTES,"description":"Initial output page. Continue with process_read at observation.nextCursor."},
+            "outputEncoding":{"type":"string","description":"Encoding override for the initial text output, for example gbk or utf-16le; omitted uses automatic decoding."},
             "env":{"type":"array","description":"Complete process environment. Omit to inherit this execution environment; an empty array starts with no environment variables.","items":{"type":"object","additionalProperties":false,"properties":{"name":{"type":"string"},"value":{"type":"string"}},"required":["name","value"]}},
             "mode":{"type":"string","enum":["pipe","pty"]},"cols":{"type":"integer","minimum":1,"maximum":65535},"rows":{"type":"integer","minimum":1,"maximum":65535},"windowsRawArguments":{"type":"string"}}),
             vec![],

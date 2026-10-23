@@ -77,12 +77,22 @@ export function createComputerRuntime({ kernel, runtime, computers, enabled }: {
       value => ({ value }), error => ({ error }),
     );
     const available = required.length > 0 || await enabled(run.runId);
+    const applicationSupport = !required.length && available ? await computers.applicationToolAvailability().then(
+      value => ({ value }), error => ({ error }),
+    ) : { value: undefined };
+    const applications = 'value' in applicationSupport ? applicationSupport.value : undefined;
     return extendToolConfiguration(undefined, (descriptor, original) => {
       if (!COMPUTER_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return original ?? null;
       if (original !== undefined) { configuration(original); return original; }
+      if (/^varin\.computer\.(?:browser|office)(?:_read)?$/.test(descriptor.id) && 'error' in applicationSupport) throw applicationSupport.error;
       if ('error' in capturedDefault) throw capturedDefault.error;
       return JSON.stringify({ version: 1, defaultDesktopId: capturedDefault.value });
-    }, descriptor => COMPUTER_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version) ? available : undefined);
+    }, descriptor => {
+      if (!COMPUTER_TOOL_DECLARATIONS.some(entry => entry.id === descriptor.id && entry.version === descriptor.version)) return undefined;
+      if (applications && /^varin\.computer\.browser(?:_read)?$/.test(descriptor.id)) return available && applications.browser;
+      if (applications && /^varin\.computer\.office(?:_read)?$/.test(descriptor.id)) return available && applications.office;
+      return available;
+    });
   };
   const hostEpoch = computers.controlOwnerEpoch;
   const decisions = new Map<string, Promise<ComputerRequestRecord>>();

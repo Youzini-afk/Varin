@@ -6,6 +6,7 @@ pub(crate) mod platform;
 pub(crate) mod receipt_wake;
 pub(crate) mod subscriptions;
 pub(crate) mod worker;
+pub(crate) mod text;
 use crate::{
     error::KernelError,
     protocol::{read_frame, write_frame},

@@ -1,7 +1,7 @@
 import { withPlanSelection } from './plan-resolution.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 /** Private kernel requests already carry the admitted Catalog identity. */
-import { renderTodoPlan, isTodoItemStatus, type TodoItem, type PlanView, type PlanOrigin, type PlanSnapshot, type PlanMutationResult } from '@varin/protocol';
+import { renderTodoPlan, parseTodoPlan, isTodoItemStatus, type TodoItem, type PlanView, type PlanOrigin, type PlanSnapshot, type PlanMutationResult } from '@varin/protocol';
 import { KnowledgeMutationError, type KnowledgeStore } from '../knowledge/store.js';
 export interface PlanQuery {
   action: 'read' | 'mutate' | 'receipt';
@@ -17,7 +17,7 @@ export interface PlanExecutionReceipt {
   outcome: 'failed' | 'indeterminate';
   effect: 'none' | 'unknown';
 }
-export type PlanResult = { status:'ready'; plan:PlanSnapshot|null; mutation?:PlanMutationResult|null; executionReceipt?:PlanExecutionReceipt }
+export type PlanResult = { status:'ready'; plan:(PlanSnapshot & {items:TodoItem[]})|null; mutation?:PlanMutationResult|null; executionReceipt?:PlanExecutionReceipt }
   | { status:'rejected'|'unknown'; message:string; mutationNotStarted?:true };
 export type PlanOwner = (query:PlanQuery, signal:AbortSignal)=>Promise<PlanResult>;
 export function createPlanOwner(getStore:()=>Promise<KnowledgeStore>, runtime: AgentRuntimeClient):PlanOwner {
@@ -31,7 +31,8 @@ export function createPlanOwner(getStore:()=>Promise<KnowledgeStore>, runtime: A
       if (query.action === 'read') {
         if (args.action !== 'read' || Object.keys(args).some(key=>key!=='action')) throw new KnowledgeMutationError('invalid','Invalid plan read');
         const store = await getStore();
-        return {status:'ready',plan:await withPlanSelection(store,runtime,query.view,selection=>store.readPlan(query.view,selection),signal)};
+        const plan = await withPlanSelection(store,runtime,query.view,selection=>store.readPlan(query.view,selection),signal);
+        return {status:'ready',plan:plan ? {...plan,items:parseTodoPlan(plan.content)} : null};
       }
       if (args.action !== 'update' || Object.keys(args).some(key=>!['action','expectedRef','items'].includes(key))
         || !(args.expectedRef === undefined || args.expectedRef === null || typeof args.expectedRef === 'string' && args.expectedRef.length > 0)
@@ -55,7 +56,8 @@ export function createPlanOwner(getStore:()=>Promise<KnowledgeStore>, runtime: A
             throw error;
           }
         },signal);
-      return {status:'ready',plan:mutation?.plan??null,mutation};
+      const plan = mutation?.plan;
+      return {status:'ready',plan:plan ? {...plan,items:parseTodoPlan(plan.content)} : null,mutation};
     } catch(error) {
       return {status:!mutationStarted && error instanceof KnowledgeMutationError?'rejected':'unknown',
         ...(!mutationStarted && query.action === 'mutate' ? {mutationNotStarted:true as const} : {}),

@@ -532,6 +532,8 @@ export interface ComputerService {
   desktopLifecycle(desktopId: string, action: "start" | "stop", dispatch?: ComputerDesktopDispatch): Promise<ComputerDesktopChangeResult>;
   mediaTarget(desktopId: string): Promise<{ socketPath: string } | { url: string; headers: Record<string, string> }>;
   list(options?: { localOnly?: boolean }): Promise<ComputerListResult>;
+  /** Read known driver support without launching or warming desktop helpers. */
+  applicationToolAvailability(): Promise<{ browser: boolean; office: boolean }>;
   workDesktops(scopeId: string): Promise<ComputerDesktop[]>;
   reconcileControlEvents(): Promise<void>;
   inspectArtifact(desktopId: string, relativePath: string): Promise<DesktopArtifactVersion>;
@@ -996,7 +998,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
   };
   const scopedEpoch = (epoch: string) => {
     const admission = automation.context.getStore();
-    return admission ? `${epoch}:${admission.key}` : epoch;
+    return admission ? createHash('sha256').update(JSON.stringify([epoch, admission.key])).digest('hex') : epoch;
   };
   const modelEpoch = (id: string) => scopedEpoch(controlState(id).automationEpoch);
   const clearFeedback = (id: string) => {
@@ -1600,6 +1602,16 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     await Promise.all([driverPool.acquire(id), driverPool.acquire(id, 'capture')]);
   };
 
+  const applicationToolAvailability: ComputerService['applicationToolAvailability'] = async () => {
+    await ensureLocal();
+    const desktops = (await listRecords('computer.desktop')).map(parseDesktop).filter((value): value is ComputerDesktop => value !== null);
+    const supports = (desktop: ComputerDesktop, tool: 'browser' | 'office') => desktop.capabilities?.applicationTools?.[tool]
+      // These are the resident built-in driver implementations. Unknown custom
+      // and remote drivers remain discoverable until they report capabilities.
+      ?? (desktop.id === LOCAL_DESKTOP_ID && !options.createDriver ? platform === 'linux' : undefined);
+    return { browser: desktops.some(desktop => supports(desktop, 'browser') !== false),
+      office: desktops.some(desktop => supports(desktop, 'office') !== false) };
+  };
   const list: ComputerService["list"] = async (listOptions) => {
     await ensureLocal();
     await refreshManagedDesktop();
@@ -2610,6 +2622,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       const response = await enqueue(id, writes ? "action" : "observe", async () => {
         const { driver } = await driverFor(id);
         assertAdmission();
+        const capabilities = driver.capabilities ?? (await driver.request({ tool: 'capabilities' })).capabilities as ComputerCapabilities | undefined;
+        if (capabilities?.applicationTools?.[tool] === false) {
+          return { id: '', ok: false, rejected: true, code: 'computer_application_unavailable',
+            error: `${tool} application protocol is unavailable on desktop ${id} (${capabilities.driver}). Use computer_apps and computer_observe for this desktop, or select a desktop whose driver supports ${tool}.`,
+            receipt: { effect: 'none', reason: { code: 'unsupported', message: `${tool} protocol is unsupported by this driver` }, recovery: 'observe', dispatchedEvents: 0 } } satisfies DriverResponse & { code: string };
+        }
         await recordUsage(id).catch(() => undefined);
         assertAdmission();
         if (writes) { await markInputOwner(id, driver); assertAdmission(); }
@@ -3866,7 +3884,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     activities: (work) => [...lanes.entries()].flatMap(([desktopId, lane]) => lane.activity && (!work || lane.activity.execution && sameComputerWork(lane.activity.execution.work, work)) ? [{ desktopId, activity: { ...lane.activity } }] : []),
     preparationTarget, prepareDesktop, desktopLifecycle, mediaTarget,
     inspectArtifact, registerArtifact, listArtifacts, openDesktopArtifact, openArtifact,
-    list, workDesktops, reconcileControlEvents,
+    list, applicationToolAvailability, workDesktops, reconcileControlEvents,
     ensureLocal,
     probe,
     listApps,

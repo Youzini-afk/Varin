@@ -114,7 +114,13 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       const summary = { kind: 'ui', ref: version.ref, title: version.title, entry: version.entry, files: Object.keys(version.files), revision: version.revision };
       if (view === 'summary') return { status: 'ready', ...summary,
         views: [...views].filter(([, v]) => v.root === root && v.source.ref === version.ref).map(([ref]) => ref) };
-      if (view !== 'source') throw new UiContentError('Use an explicit ui-view: or ui-snapshot: reference for a screen or interaction state');
+      if (view !== 'source') {
+        const candidates = [...views].filter(([, v]) => v.root === root && v.source.ref === version.ref).map(([ref]) => ref);
+        return { status: 'view_required', code: 'ui_view_required', ...summary, views: candidates,
+          message: candidates.length ? 'Select one of views and repeat this read with its ui-view: reference. Each view has its own live state.'
+            : 'No live view is connected for this revision. Open this content in the chat, then read summary to discover its ui-view: reference. Source is available with view: source.',
+          next: candidates.map(ref => ({ kind: 'ui', ref, view })) };
+      }
       if (!input.file) return { status: 'ready', ...summary };
       const text = await store.file(root, version.ref, input.file);
       return sourcePage(text, input, version.ref);

@@ -1310,7 +1310,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   // Scholarly APIs share the same egress authority — proxies and SSRF
   // classification apply identically to every outbound consumer.
-  const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  const researchSearchService = createResearchSearchService({ fetch: egressRuntime.fetch });
   // ── Phase 2: Knowledge store, memory agent, observers ────────────
   // Knowledge stores are opened lazily per workspace and cached.
   const knowledgeStores = new Map<string, KnowledgeStore>();

@@ -86,6 +86,7 @@ resource_read({ kind: "ui", ref: "ui-selection:…", view: "structure" });
 ```
 
 `summary` 返回简短元数据与可用实例；`source` 返回目录或指定文件；`state`、`screen`、`structure` 读取实例或固定快照。
+用作品引用请求实例画面或结构时返回 `view_required`、可用 `views` 和完整续读参数；没有实例时提示打开作品，不把源码当成实际画面。
 长正文沿现有读取分页默认值返回 `next`，`offset/limit` 为 UTF-8 字节。续读绑定固定修订或快照，不在分页中重新取实时状态。
 图像走工具媒体块，不作为 base64 正文；不支持图像的模型收到明确省略说明，来源和文字保持可读。
 

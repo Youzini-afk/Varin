@@ -73,7 +73,7 @@ Windows 和不支持的根保留 unknown coverage，完整复核目录 inventory
 
 Agent 的物理文件读取在后台流式哈希，只保留所请求的片段；完整读取和部分读取都返回原文件的 `readVersion`。
 该版本由根、路径与内容状态决定，同一文件跨 Run 保持稳定；读写权限由原 grant 独立校验。UTF-8 文本的片段边界会扩展到完整字符，
-翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。
+翻页使用返回的 `nextOffset`；二进制片段保留精确字节和明确的 base64 编码。`byteLength` 是整文件长度，`returnedBytes` 是本页实际返回字节数。
 Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一致；`length` 可显式扩大。
 `content.eof` 为 false 时继续传 `content.nextOffset`，到 true 停止；跨页核对 `readVersion`，避免拼接不同版本。
 此默认只在工具参数入口应用，底层文件修改、结构分析等完整读取不受影响。
@@ -85,7 +85,8 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 `mode: create` 明确要求目标不存在，`mode: replace` 要求目标存在且提供版本；省略 mode 时按观察到的状态写入。
 缺失版本仍校验“目标不存在”，其他写入者先创建文件后，旧缺失版本发生冲突。文本修改准备在一次读取中
 取得正文和版本状态，提交时沿原 `file.apply` 校验当前文件，工具回执直接提供结构化 `state`；响应帧大小只约束发往调用方的正文。
-`file_list` 默认列当前目录，`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
+`file_list` 默认列当前目录的内容，不把被查询目录自身混入条目；`scannedFiles` 统计实际遇到的普通文件。
+`recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；游标绑定来源及生效过滤条件，拒绝格式错误或换查询续读，页面大小可调整。实时目录变化后仍按路径继续，非固定快照。
 `includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
 显式指定但不存在的路径返回读取失败及路径。`maxBytes` 是分页目标，首条记录可以超过该目标，以便小预算仍能推进游标。
@@ -107,7 +108,12 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 `process_stop` 随进程启动能力常驻，使用 `processId` 请求原 guardian 停止进程及其子进程。同一 Thread/branch
 在相同来源上的后续 Run 也可停止原进程。回执区分已请求停止与已确认退出；`wait_process` 等待原退出回执，
 `process_read` 继续读取保留的输出。
-输出块保留精确的 `bytesBase64` 和游标；完整 UTF-8 文本块同时返回 `text`，二进制或跨字符边界的块由原始字节重组。
+底层输出块保留精确的 `bytesBase64` 和字节游标，终端及 LSP/DAP 等协议消费者继续读原始字节。
+Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 控制序列；`mode: raw` 返回原始字节。
+自动解码先看 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；`encodingSource` 标明依据，不把代码页默认值伪称为检测结果。
+已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页保留字节并提示处理方式。
+`process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
+Windows 启动时将规范化路径转换为子进程可用的目录表示，内部资源身份仍保留规范化路径。
 进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
@@ -119,6 +125,8 @@ grant retirement 与 revocation 分开：前者在真实 drain 后关闭旧 call
 直到自己的 reader、process 和回执归档完成。原来源仅支持精确限定的 successor 读取，不继承全部旧控制权限。
 
 ## 受影响文件恢复
+
+`file_restore` 对实际应用的每个文件返回 `change: created | updated | deleted`；undo 和回执恢复使用同一前后状态计算。
 
 Recovery 保存工具实际改过的文件。首次写入时创建绑定原始输入的轻量记录，在效果前保存原内容，之后记录实际结果；
 同一输入下重复写入保留第一次 before 和最后 after。Run 结束事件自动完成已有记录，启动恢复及面板读取补齐遗漏的结算，

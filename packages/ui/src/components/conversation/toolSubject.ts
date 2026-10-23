@@ -62,7 +62,7 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
     case 'ask_user': return readUserQuestions(args)[0]?.question ?? '';
     case 'question_status': return toolValueLabel(data.status, t);
     case 'recovery_points': return subjectJoin(paths(args.paths), args.point, args.operation, count(data.points, t));
-    case 'file_restore': return subjectJoin(paths(args.paths), toolText(toolRecord(data.point).label),
+    case 'file_restore': return subjectJoin(paths(args.paths), toolText(toolRecord(data.point).label) || toolText(data.point) || toolText(args.point) || toolText(args.undo),
       Array.isArray(data.appliedPaths) ? t('chat.toolSummary.restoredFiles', { count: data.appliedPaths.length }) : '',
       Array.isArray(data.conflictPaths) && data.conflictPaths.length ? t('chat.tools.restoreConflicts', { count: data.conflictPaths.length }) : '');
     case 'materials': {

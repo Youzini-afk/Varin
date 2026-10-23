@@ -177,6 +177,7 @@ export function queryRuntimeContracts(state: VarinExtensionHostStateSnapshot,
     }
     for (const provider of state.services.providers) services.set(`${provider.descriptor.id}@${provider.descriptor.version}`, provider.descriptor);
     const entries = [...services.values()].sort((a, b) => a.id.localeCompare(b.id) || a.version - b.version)
+      .filter(service => request.serviceId === undefined || service.id === request.serviceId)
       .map(service => serviceSummary(state, service.id, service.version, scope, artifactIdentityForOwner, compositionForOwner));
     return { ...basis, action: 'list', kind: 'service', entries };
   }

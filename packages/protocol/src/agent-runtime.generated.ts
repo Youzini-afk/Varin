@@ -2968,7 +2968,7 @@ export interface FamilyHistoryEntry {
   source: string;
   kind: string;
   body: unknown | null;
-  preview: string;
+  preview?: string;
   bodyBytes: number;
   bodyTruncated: boolean;
   tool: FamilyToolAssociation | null;

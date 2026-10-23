@@ -945,6 +945,7 @@ def driver_capabilities():
         "platform": "linux",
         "driver": "linux-atspi",
         "driverVersion": DRIVER_VERSION,
+        "applicationTools": {"browser": True, "office": True},
         "observeTree": True,
         "screenshot": not wayland and Gdk is not None,
         "elementAction": True,

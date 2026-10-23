@@ -35,6 +35,11 @@ See [Computer admission and feedback](../web/application-host/lib/computer/DOCUM
 | `release_input` | release the synthetic buttons/keys this driver pressed, rather than every desktop modifier |
 | `capture_frame` / `inject_input` | viewer frames and human input; successful down/move/up requests preserve a gesture across frame requests until explicit release, cancellation, failure or EOF |
 
+`applicationTools.browser` / `applicationTools.office` declare implemented application protocols,
+independently of whether an application is running. The Host uses known target capabilities for tool
+discovery, preserves unknown/custom/remote targets, and rejects unsupported application operations
+before dispatch. Native Windows/macOS drivers currently report false; the Linux bridges report true.
+
 Action params mirror the Open Computer Use schema (`app`, `element`,
 `x`/`y`, `from_x`/`from_y`/`to_x`/`to_y`, `click_count`, `mouse_button`,
 `click_method`, `direction`, `pages`, `text`, `key`, `value`, `action`,

@@ -154,6 +154,7 @@ fn project_range(mut observation: Value, args: &FileReadArgs) -> Value {
     };
     value["offset"] = json!(base + start as u64);
     value["nextOffset"] = json!(base + end as u64);
+    value["returnedBytes"] = json!(end - start);
     value["eof"] = json!(base + end as u64 >= total);
     if content["text"].is_string() {
         value["text"] = json!(std::str::from_utf8(&bytes[start..end]).expect("aligned text page"));

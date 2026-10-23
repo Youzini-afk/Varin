@@ -298,6 +298,7 @@ fn anchors_pagination_run_selection_search_and_semantic_item_expansion_are_fixed
     assert!(!first.has_later);
     assert!(!first.scan_complete);
     assert!(first.items[0].body_truncated);
+    assert!(first.items[0].preview.is_some());
     let captured =
         f.db.capture_family_read(
             &child.child_thread_id,
@@ -824,8 +825,9 @@ fn opaque_provider_continuations_are_retained_but_never_returned_or_searched() {
         request(recent(1)),
     );
     let body = page.items[0].body.as_ref().unwrap();
+    assert!(page.items[0].preview.is_none());
     assert!(body["opaque"].is_null());
-    assert!(!page.items[0].preview.contains("OPAQUE_SECRET"));
+    assert!(!serde_json::to_string(&page.items[0]).unwrap().contains("OPAQUE_SECRET"));
     let expanded =
         f.db.capture_family_read(
             &child.child_thread_id,

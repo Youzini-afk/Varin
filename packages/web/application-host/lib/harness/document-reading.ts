@@ -310,7 +310,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
       contentType: snapshot.contentType ?? "application/pdf", ...(snapshot.title ? { title: snapshot.title } : {}),
       markdown, bytes: Buffer.byteLength(markdown), fromCache: false, rendered: false, snapshot,
       ...(sourceRef ? { sourceSnapshot: sourceRef } : {}),
-      ...(snapshot.structure ? { structure: snapshot.structure } : {}),
+      ...(request.view === 'structure' && snapshot.structure ? { structure: snapshot.structure } : {}),
     });
     const recheck = async (): Promise<boolean> => {
       checkAbort(ctx.signal);

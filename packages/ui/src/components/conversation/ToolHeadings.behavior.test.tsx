@@ -98,6 +98,19 @@ it('summarizes real work targets without presenting requested changes as complet
   expect(rows[2]?.text).toContain('browser'); expect(rows[3]?.text).toContain('references/layout.md');
 });
 
+it('renders complete history bodies and the actual restored file change', async () => {
+  await render([
+    ...call('history', 'read_thread', { query: { kind: 'recent' } }, { page: { items: [{ id: 'entry', source: 'assistant', kind: 'text', body: { text: 'Retained report body' }, bodyTruncated: false }] } }),
+    ...call('restore', 'file_restore', { point: 'current:before' }, { status: 'applied', files: [{ path: 'new.txt', status: 'applied', change: 'deleted' }], appliedPaths: ['new.txt'], conflictPaths: [] }),
+  ]);
+  await act(async () => {
+    const history = container.querySelector<HTMLDetailsElement>('details[data-conversation-tool-disclosure^="tool:"]')!;
+    history.open = true; history.dispatchEvent(new window.Event('toggle'));
+  });
+  expect(container.textContent).toContain('Retained report body');
+  expect(container.textContent).toContain(dict['diffView.change.deleted']);
+});
+
 it('includes the requested computer action, document range and MCP query in their headings', async () => {
   await render([
     ...call('office', 'computer_office', { op: 'act', act: { kind: 'write', doc: 'Budget.ods', sheet: 'Forecast', range: 'B2:D8', values: [[1]] } }),

@@ -28,6 +28,7 @@ final class DesktopDriver {
     func capabilities() -> JSONObject {
         let accessibility = AXIsProcessTrusted(), screen = CGPreflightScreenCaptureAccess()
         return ["platform": "macos", "driver": "macos-native", "driverVersion": "1", "sessionType": "aqua",
+            "applicationTools": ["browser": false, "office": false],
             "observeTree": accessibility, "elementAction": accessibility, "screenshot": screen,
             "coordinateInput": accessibility, "textInput": accessibility, "drag": accessibility,
             "multiWindow": true, "interruptibleInput": true, "occludedCapture": true,

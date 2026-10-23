@@ -547,7 +547,10 @@ impl Storage {
             None,
         )?;
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
-            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":stdin_mode,"status":"starting","pid":null,"exitCode":null,"signal":null,
+            "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":if mode=="pty" {"pty"} else {stdin_mode},
+            "input":{"writable":stdin_mode!="null","eofSupported":mode=="pipe"&&stdin_mode!="null","lineEnding":if mode=="pty"&&cfg!(windows){"\r"}else{"\n"}},
+            "outputCodePage":if mode=="pty" {Some(65001)} else {process::text::code_page()},
+            "status":"starting","pid":null,"exitCode":null,"signal":null,
             "reason":null,"writerActive":true,"outputAvailable":false});
         let job_name = process::job_name(&self.root, id);
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",

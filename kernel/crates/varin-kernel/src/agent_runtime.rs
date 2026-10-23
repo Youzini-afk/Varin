@@ -2357,12 +2357,7 @@ pub(crate) fn spawn(
                                                     )
                                                 },
                                             )
-                                            .map_err(|error| {
-                                                KernelError::Operation(format!(
-                                                    "{}: {}",
-                                                    error.code, error.message
-                                                ))
-                                            })?;
+                                            .map_err(KernelError::Execution)?;
                                         Ok(serde_json::to_value(receipt)?)
                                     })();
                                     let response = match result {

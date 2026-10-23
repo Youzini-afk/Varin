@@ -339,6 +339,8 @@ export interface ComputerCapabilities {
   /** Driver implementation identity, e.g. `windows-uia`, `linux-atspi`. */
   driver: string;
   driverVersion?: string;
+  /** Application protocols implemented by this driver, independent of whether an app is running. */
+  applicationTools?: { browser: boolean; office: boolean };
   /** Accessibility/UIA tree reading. */
   observeTree: boolean;
   /** Window/desktop image capture. */

@@ -40,7 +40,7 @@ impl LineRead {
     pub(crate) fn content(self, total: u64) -> Value {
         let offset = self.start.unwrap_or(total);
         let next = if self.start.is_some() { self.end } else { total };
-        let mut value = json!({"byteLength":total,"offset":offset,"nextOffset":next,"eof":next >= total,
+        let mut value = json!({"byteLength":total,"returnedBytes":next-offset,"offset":offset,"nextOffset":next,"eof":next >= total,
             "startLine":self.first,"endLine":self.last_read,"nextLine":if next < total { self.last_read.map(|line| line + 1) } else { None }});
         match String::from_utf8(self.bytes) {
             Ok(text) if !text.contains('\0') => value["text"] = json!(text),

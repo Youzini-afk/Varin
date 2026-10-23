@@ -70,4 +70,7 @@ export interface ScholarlySearchResult {
   /** Edge kinds this provider can actually serve. */
   relationKinds?: ScholarlyRelationKind[];
   message?: string;
+  code?: string;
+  httpStatus?: number;
+  retryAfter?: string;
 }

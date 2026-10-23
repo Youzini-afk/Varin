@@ -19,6 +19,9 @@ struct ReadHandle {
     process_id: String,
     cursor: u64,
     max_bytes: Option<u64>,
+    #[serde(default)]
+    mode: crate::process::text::Mode,
+    encoding: Option<String>,
 }
 fn interacts(name: &str) -> bool {
     matches!(name, "process_write" | "process_resize")
@@ -298,12 +301,13 @@ impl ProcessWaitTools {
         if !self.binding.enabled_tools.contains(&kind) {
             return Err(error("process observation tool is not selected"));
         }
-        let (id, read) = if call.name == "process_read" {
+        let (id, read, mode, encoding) = if call.name == "process_read" {
             let h: ReadHandle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            (h.process_id, Some((h.cursor, h.max_bytes)))
+            crate::process::text::validate_encoding(h.encoding.as_deref()).map_err(error)?;
+            (h.process_id, Some((h.cursor, h.max_bytes)), h.mode, h.encoding)
         } else {
             let h: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            (h.process_id, None)
+            (h.process_id, None, crate::process::text::Mode::Text, None)
         };
         let source_run_id = self.check_owner(c, &id)?;
         let lineage = self
@@ -312,7 +316,7 @@ impl ProcessWaitTools {
             .map_err(error)?
             .process_result_lineage(&c.run_id, &id)
             .map_err(error)?;
-        self.resources.observe_process(
+        let mut value = self.resources.observe_process(
             &self.binding,
             c,
             &id,
@@ -321,7 +325,9 @@ impl ProcessWaitTools {
             read,
             authorize_only,
             cancel,
-        )
+        )?;
+        if !authorize_only { crate::process::text::project(&mut value, &mode, encoding.as_deref()); }
+        Ok(value)
     }
 }
 impl ToolExecutor for ProcessWaitTools {

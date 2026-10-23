@@ -4,6 +4,16 @@ use crate::protocol_generated::KernelFileRecoveryParams;
 use serde::{Deserialize, Serialize};
 use varin_runtime::catalog::journal::JournalAnchor;
 
+fn restored_file(file: &Value, status: &str) -> Result<Value, KernelError> {
+    let mut result = json!({"path":file["path"],"status":status});
+    if status == "applied" {
+        let before: Value = serde_json::from_str(file["safetyJson"].as_str().ok_or_else(|| KernelError::Storage("Restore before state is missing".into()))?)?;
+        let after: Value = serde_json::from_str(file["targetJson"].as_str().ok_or_else(|| KernelError::Storage("Restore target state is missing".into()))?)?;
+        result["change"] = json!(if after["kind"] == "missing" { "deleted" } else if before["kind"] == "missing" { "created" } else { "updated" });
+    }
+    Ok(result)
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RecoveryPointsArgs {
@@ -983,10 +993,11 @@ impl Storage {
                 }
                 *dispatched = true;
                 match self.file_apply(&params, grant) {
-                    Ok(receipt) => results.push(json!({"path":path,"status":receipt["status"]})),
+                    Ok(receipt) => results.push(restored_file(file,receipt["status"].as_str().unwrap_or("unknown"))?),
                     Err(error) => {
                         let receipt=self.file_operation_reconcile(&json!({"workspaceId":workspace,"rootId":root,"operationId":format!("{operation}:file:{index}")}),grant)?;
-                        results.push(json!({"path":path,"status":if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("failed")},"message":error.to_string()}));
+                        let mut result = restored_file(file,if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("failed")})?;
+                        result["message"] = json!(error.to_string()); results.push(result);
                     }
                 }
             }
@@ -1086,7 +1097,7 @@ impl Storage {
         let mut results = row["data"]["files"].as_array().cloned().unwrap_or_default();
         for (index, file) in row["files"].as_array().into_iter().flatten().enumerate() {
             let receipt=self.file_operation_reconcile(&json!({"workspaceId":workspace,"rootId":root,"operationId":format!("{operation}:file:{index}")}),grant)?;
-            results.push(json!({"path":file["path"],"status":if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("interrupted")}}));
+            results.push(restored_file(file,if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("interrupted")})?);
         }
         self.finish_file_restore(workspace, operation, results, grant)
     }
@@ -1257,6 +1268,7 @@ mod tests {
         f.write("a.txt", "C");
         let restored = f.restore("restore-1", Some("current:before"), None);
         assert_eq!(restored["status"], "applied");
+        assert_eq!(restored["files"][0]["change"], "updated");
         assert_eq!(fs::read_to_string(f.workspace.join("a.txt")).unwrap(), "A");
         assert_eq!(
             f.restore("restore-1", Some("current:before"), None),
@@ -1292,6 +1304,16 @@ mod tests {
             json!(format!("sha256-{}", hex::encode(Sha256::digest(b"C"))))
         );
         f.close();
+    }
+
+    #[test]
+    fn restore_and_undo_report_deletion_and_creation() {
+        let mut f = Fixture::new(); f.write("new.txt", "created");
+        let removed = f.restore("remove-new", Some("current:before"), None);
+        assert_eq!(removed["files"][0]["change"],"deleted"); assert!(!f.workspace.join("new.txt").exists());
+        let recreated = f.restore("undo-remove", None, Some("remove-new"));
+        assert_eq!(recreated["files"][0]["change"],"created");
+        assert_eq!(fs::read_to_string(f.workspace.join("new.txt")).unwrap(),"created");
     }
 
     #[test]

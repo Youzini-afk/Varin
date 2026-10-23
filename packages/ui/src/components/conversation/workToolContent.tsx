@@ -114,7 +114,8 @@ export function workToolContent(call: ChatToolCall, data: Record<string, unknown
     if (!Array.isArray(page.items)) return null;
     return <div className="tool-thread-excerpts">{records(page.items).map((entry, index) => <div key={toolText(entry.id) || index}>
       <p className="typography-micro text-muted-foreground">{toolText(entry.source)} · {toolText(entry.kind)}</p>
-      <p className="whitespace-pre-wrap typography-meta">{toolText(entry.preview)}</p>
+      {entry.bodyTruncated === true ? <p className="whitespace-pre-wrap typography-meta">{toolText(entry.preview)}</p>
+        : <JsonSummaryView data={entry.body} />}
       {entry.bodyTruncated === true && <p className="typography-micro text-muted-foreground">{t('chat.tools.partialResult')}</p>}
     </div>)}</div>;
   }

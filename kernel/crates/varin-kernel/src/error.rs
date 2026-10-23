@@ -39,6 +39,8 @@ impl std::fmt::Display for FileObservationSourceCode {
 
 #[derive(Debug, Error)]
 pub(crate) enum KernelError {
+    #[error("{0}")]
+    Execution(varin_runtime::execution::ExecutionError),
     #[error("protocol error: {0}")]
     Protocol(String),
     #[error("storage error: {0}")]
@@ -81,8 +83,9 @@ impl From<serde_json::Error> for KernelError {
     }
 }
 
-pub(crate) fn error_code(error: &KernelError) -> &'static str {
+pub(crate) fn error_code(error: &KernelError) -> &str {
     match error {
+        KernelError::Execution(error) => &error.code,
         KernelError::ContextJobAlreadyAdmitted => "context-job-already-admitted",
         KernelError::RecordRevisionConflict => "record-revision-conflict",
         KernelError::Protocol(_) => "protocol-error",
@@ -99,7 +102,8 @@ pub(crate) fn error_code(error: &KernelError) -> &'static str {
 }
 
 pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
-    serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": error.to_string(), "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
+    let message = match error { KernelError::Execution(error) => error.message.clone(), _ => error.to_string() };
+    serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": message, "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
 }
 
 #[cfg(test)]

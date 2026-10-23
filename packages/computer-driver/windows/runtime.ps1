@@ -1104,6 +1104,7 @@ function Get-DriverCapabilities {
         platform = "windows"
         driver = "windows-uia"
         driverVersion = $script:VarinComputerDriverVersion
+        applicationTools = @{ browser = $false; office = $false }
         observeTree = $true
         screenshot = $true
         elementAction = $true

@@ -415,7 +415,11 @@ struct Reply {
     error: Option<crate::protocol_generated::HostToolErrorMarker>,
 }
 fn failed(code: &str) -> ExecutionError {
-    ExecutionError::new(code, code)
+    ExecutionError::new(code, match code {
+        "host_tool_authorization_failed" => "The selected tool was not authorized for this invocation; check the current tool selection and permission decision.",
+        "host_tool_call_binding_changed" | "host_tool_frozen_schema_changed" => "The original tool binding changed; prepare a new invocation with its current declaration.",
+        _ => return ExecutionError::new(code, code.replace('_', " ")),
+    })
 }
 fn unknown() -> ToolCompletion {
     ToolCompletion::Result {

@@ -183,6 +183,8 @@ impl Call {
                         "namespace":disclosure::namespace(&tool.name),"description":tool.description,"parameters":tool.schema,
                         "outputSchema":tool.output_schema,"metadata":tool.metadata,
                         "directlyCallable":disclosure::is_declared(tool),
+                        "scriptInvocation":{"function":"tools.invoke","arguments":{"name":tool.name,"arguments":{}},
+                            "instruction":"Inside script_run, fill arguments.arguments with the target parameters. Do not copy the model tool_invoke reference wrapper here. Read result.completion.kind first; result completion data is at result.completion.content.data, and media at result.completion.content.parts."},
                         "invocation":if disclosure::is_declared(tool) {
                             json!({"tool":tool.name,"arguments":{},"instruction":"Fill arguments using parameters. This function is declared in the current model request."})
                         } else {
