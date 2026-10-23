@@ -2079,8 +2079,6 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "Moteur",
   "settings.harness.retrieval.remote": "Service distant",
   "settings.harness.retrieval.off": "Sans reclassement dédié",
-  "settings.page.harness.localSemantic.title": "Recherche sémantique locale",
-  "settings.page.harness.localSemantic.description": "Composant local facultatif pour la recherche sémantique du code. Les recherches lexicale et structurelle restent disponibles sans installation.",
   "settings.page.harness.localSemantic.status.label": "Composant",
   "settings.page.harness.localSemantic.status.unknown": "Inconnu",
   "settings.page.harness.localSemantic.status.notInstalled": "Non installé",

@@ -215,7 +215,6 @@ jobs:
       - name: Prepare target native libraries
         run: |
           node packages/electron/scripts/prepare-native-runtime.mjs
-          node packages/electron/scripts/prepare-onnx-runtime.mjs
 
       - name: Cache verified native libraries
         if: steps.native-cache.outcome == 'success' && steps.native-cache.outputs.cache-hit != 'true'
@@ -317,6 +316,9 @@ jobs:
           done <<< "$runtime_native_modules"
           node .release-automation/packages/electron/scripts/smoke-desktop-unpacked.mjs "$executable"
 
+      - name: Build optional local embedding component
+        run: bun run --cwd packages/electron package:local-semantic
+
       - name: Stage Windows release assets
         if: matrix.platform == 'windows'
         shell: pwsh
@@ -353,6 +355,11 @@ jobs:
             "packages/electron/dist/Varin-${{ steps.source.outputs.version }}-mac-${{ matrix.architecture }}.zip.blockmap"; do
             if [ -f "$optional" ]; then cp "$optional" packages/electron/release-assets/; fi
           done
+
+      - name: Stage local embedding component
+        shell: bash
+        run: |
+          cp packages/electron/dist/Varin-local-semantic-*.tar.gz packages/electron/dist/Varin-local-semantic-*.tar.gz.sha256 packages/electron/release-assets/
 
       - name: Upload verified native package
         uses: actions/upload-artifact@v7

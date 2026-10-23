@@ -1,0 +1,7 @@
+{
+  "name": "varin-local-embedding-runtime",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": { "@huggingface/transformers": "4.3.1" },
+  "trustedDependencies": ["onnxruntime-node", "sharp"]
+}

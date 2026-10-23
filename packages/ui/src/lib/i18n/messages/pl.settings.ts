@@ -2262,8 +2262,6 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "Silnik",
   "settings.harness.retrieval.remote": "Usługa zdalna",
   "settings.harness.retrieval.off": "Bez dedykowanego rerankera",
-  "settings.page.harness.localSemantic.title": "Lokalne wyszukiwanie semantyczne",
-  "settings.page.harness.localSemantic.description": "Opcjonalny komponent lokalny do semantycznego wyszukiwania kodu. Bez instalacji nadal działa wyszukiwanie leksykalne i strukturalne.",
   "settings.page.harness.localSemantic.status.label": "Komponent",
   "settings.page.harness.localSemantic.status.unknown": "Nieznany",
   "settings.page.harness.localSemantic.status.notInstalled": "Nie zainstalowano",

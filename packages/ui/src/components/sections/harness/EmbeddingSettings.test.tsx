@@ -8,6 +8,12 @@ const fixture = vi.hoisted(() => ({ read: vi.fn(), save: vi.fn() }));
 vi.mock('@varin/application-client', async importOriginal => ({ ...await importOriginal<object>(), createEmbeddingRequestsHttpAPI: () => fixture }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('./RetrievalSettings', () => ({ InferenceSettings: () => <p>Embedding model</p> }));
+vi.mock('@/components/ui/select', () => ({
+  Select: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  SelectItem: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
+  SelectTrigger: ({ children }: { children: React.ReactNode }) => <div>{children}</div>, SelectValue: () => null,
+}));
 vi.mock('@/components/ui/input', () => ({ Input: ({ onChange, ...props }: React.InputHTMLAttributes<HTMLInputElement>) =>
   <input {...props} onInput={event => onChange?.(event as unknown as React.ChangeEvent<HTMLInputElement>)} /> }));
 const { EmbeddingSettings } = await import('./EmbeddingSettings');
@@ -31,7 +37,7 @@ it('preserves a failed request-settings draft and saves against the last acknowl
   });
   await type('4');
   await click('settings.common.actions.saveChanges');
-  expect(fixture.save).toHaveBeenCalledWith({ concurrentRequests: 4, requestIntervalMs: 0 }, 'original');
+  expect(fixture.save).toHaveBeenCalledWith({ concurrentRequests: 4, requestIntervalMs: 0, localCpuMode: 'auto', localCpuThreads: null }, 'original');
   expect(input.value).toBe('4'); expect(container.textContent).toContain('changed elsewhere');
   await click('settings.common.actions.cancel'); expect(input.value).toBe('1');
   fixture.save.mockResolvedValue({ config: { ...config, concurrentRequests: 2 }, activeConfig: config, revision: 'saved', restartRequired: true });

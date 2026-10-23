@@ -1949,8 +1949,6 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "バックエンド",
   "settings.harness.retrieval.remote": "リモートサービス",
   "settings.harness.retrieval.off": "専用再ランキングなし",
-  "settings.page.harness.localSemantic.title": "ローカル意味検索",
-  "settings.page.harness.localSemantic.description": "コード検索に使う任意のローカルコンポーネントです。未インストールでも字句・構造検索を利用できます。",
   "settings.page.harness.localSemantic.status.label": "コンポーネント",
   "settings.page.harness.localSemantic.status.unknown": "不明",
   "settings.page.harness.localSemantic.status.notInstalled": "未インストール",

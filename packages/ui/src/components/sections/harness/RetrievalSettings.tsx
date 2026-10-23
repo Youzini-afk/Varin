@@ -12,9 +12,10 @@ export function InferenceSettings({ harness, update, kind }: HarnessSettingsPage
   const { t } = useI18n();
   const { providers, modelsFor } = useConfigurationModels();
   const binding = harness[kind];
-  const [remote, setRemote] = React.useState(Boolean(binding));
+  const [local, setLocal] = React.useState(kind === 'embedding' && binding?.protocol === 'local');
+  const [remote, setRemote] = React.useState(Boolean(binding && binding.protocol !== 'local'));
   const remoteRef = React.useRef(remote);
-  const [fields, setFields] = React.useState({ providerId: binding?.providerId ?? '', modelId: binding?.modelId ?? '', endpoint: kind === 'rerank' ? harness.rerank?.endpoint ?? '' : '' });
+  const [fields, setFields] = React.useState({ providerId: binding?.protocol === 'local' ? '' : binding?.providerId ?? '', modelId: binding?.protocol === 'local' ? '' : binding?.modelId ?? '', endpoint: kind === 'rerank' ? harness.rerank?.endpoint ?? '' : '' });
   const current = React.useRef(fields);
   const commit = (patch: Partial<typeof fields>) => {
     if (!remoteRef.current) return;
@@ -29,12 +30,17 @@ export function InferenceSettings({ harness, update, kind }: HarnessSettingsPage
       ...(kind === 'rerank' ? { endpoint: next.endpoint.trim() || undefined } : {}),
     } });
   };
-  const defaultLabel = t('settings.harness.retrieval.off');
+  const defaultLabel = t(kind === 'embedding' ? 'settings.page.harness.embeddings.off' : 'settings.harness.retrieval.off');
   return <SettingsSection title={t(`settings.page.harness.section.${kind}`)} settingsItem={`harness.${kind}`} contentClassName="space-y-5">
     <SettingsFieldRow label={t('settings.harness.retrieval.source')} description={kind === 'embedding' ? t('settings.page.harness.section.embedding.description') : undefined}>
-      <Select value={remote ? 'remote' : 'default'} onValueChange={(value) => { remoteRef.current = value === 'remote'; setRemote(value === 'remote'); if (value === 'default') update({ [kind]: undefined }); else commit({}); }}>
-        <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}><SelectValue>{remote ? t('settings.harness.retrieval.remote') : defaultLabel}</SelectValue></SelectTrigger>
-        <SelectContent><SelectItem value="default">{defaultLabel}</SelectItem><SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem></SelectContent>
+      <Select value={local ? 'local' : remote ? 'remote' : 'default'} onValueChange={(value) => {
+        setLocal(value === 'local'); remoteRef.current = value === 'remote'; setRemote(value === 'remote');
+        if (value === 'local') update({ embedding: { protocol: 'local', providerId: 'local', modelId: 'installed', dimensions: undefined, maxTokens: undefined } });
+        else if (value === 'default') update({ [kind]: undefined });
+        else { update({ [kind]: undefined }); commit({}); }
+      }}>
+        <SelectTrigger size="settings" className="w-64" aria-label={t('settings.harness.retrieval.source')}><SelectValue>{local ? t('settings.page.harness.localSemantic.source') : remote ? t('settings.harness.retrieval.remote') : defaultLabel}</SelectValue></SelectTrigger>
+        <SelectContent><SelectItem value="default">{defaultLabel}</SelectItem>{kind === 'embedding' ? <SelectItem value="local">{t('settings.page.harness.localSemantic.source')}</SelectItem> : null}<SelectItem value="remote">{t('settings.harness.retrieval.remote')}</SelectItem></SelectContent>
       </Select>
     </SettingsFieldRow>
     {remote ? <>

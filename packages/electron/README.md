@@ -208,6 +208,23 @@ benchmark. Do not disable antivirus or replace installation safety checks to imp
 
 ### Native libraries built from source
 
+The optional memory/knowledge embedding component is built separately with
+`bun run --cwd packages/electron package:local-semantic`. It produces
+`Varin-local-semantic-<version>-<platform>-<arch>.tar.gz` and its checksum. Settings →
+Memory and knowledge embeddings selects, installs or imports it. Normal app startup
+does not download the component; the selected encoder loads on demand.
+
+Its pinned Transformers/ONNX dependency graph lives in `scripts/local-embedding-runtime`.
+The component builder installs that graph into an isolated temporary directory, validates
+a real vector through Electron's Node Worker, and packages the model, runtime and licenses.
+The Host loads only the pure JavaScript tokenizer; ONNX stays in the disposable Worker.
+Replacing a component drains its original requests, releases the old encoder and reclaims
+the previous component files. Failed validation keeps the current component active.
+The base application has no Transformers/ONNX dependency for embeddings. On macOS Intel,
+the optional builder prepares ONNX Runtime 1.30.0 from its pinned source revision when
+upstream does not provide the native binary. Desktop release jobs publish the component
+archive alongside the application; no code-index runtime is included.
+
 The native preparation recipe supplies a binary absent from the pinned npm package:
 
 - Windows ARM64 builds TriviumDB 0.8.10 from commit

@@ -19,7 +19,13 @@ headroom and batching remain shared consumers' contracts.
 
 Decision and rerank adapters remain for explicit supported consumers. Quick code retrieval
 does not use them; invalid ordinary-model configuration does not fall back to these paths.
-The retired local semantic component is no longer downloaded, prepared or started.
+The optional local encoder serves memory and knowledge embeddings when explicitly selected.
+Its component manager validates imports and installs; its retained Worker generation loads on demand.
+The Host tokenizes with the component's pure JavaScript tokenizer. Native ONNX loads only in
+the Worker, so retiring that Worker releases the old component's native files. Replacements
+wait for original request settlement before releasing cached leases and reclaiming those files.
+The component does not register or scan code roots. Local CPU preferences come from knowledge
+embedding request settings rather than a code-index manager.
 
 ## Shared storage
 

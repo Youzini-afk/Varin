@@ -103,6 +103,8 @@ pub(super) fn input_fingerprint(body: &Value) -> Result<Option<String>> {
     // Content preparation calls this outside the Catalog mutex. Only compact digests enter intents.
     let input = if let Some(input) = body.get("wire").and_then(|v| v.get("input")) {
         Some(input.clone())
+    } else if let Some(input) = body.get("texts") {
+        Some(input.clone())
     } else {
         body.get("params")
             .and_then(|v| v.get("items"))
@@ -159,7 +161,9 @@ pub(super) fn validate_request(
         || p.binding != frozen.binding
         || body.input_fingerprint.as_ref() != Some(&frozen.input_fingerprint)
         || p.request["purpose"] != expected_purpose
-        || p.request["wire"].get("dimensions").and_then(Value::as_u64) != frozen.dimensions
+        || (if matches!(frozen.binding.executor, inference::InferenceExecutor::LocalComponent { .. }) {
+            p.request.get("dimensions")
+        } else { p.request["wire"].get("dimensions") }).and_then(Value::as_u64) != frozen.dimensions
     {
         return Err(invalid());
     }
@@ -239,6 +243,19 @@ impl Catalog {
         {
             return Err(invalid());
         }
+        let executor = if binding["protocol"] == "local" {
+            let executor: inference::InferenceExecutor = serde_json::from_value(identity["executor"].clone())?;
+            if !matches!(&executor, inference::InferenceExecutor::LocalComponent { manifest_digest, worker_protocol, .. }
+                if *worker_protocol == 1 && binding["configurationId"] == format!("local-component:{manifest_digest}"))
+                || binding.get("dimensions").and_then(Value::as_u64).is_none_or(|n| n == 0)
+                || binding.get("maxTokens").and_then(Value::as_u64).is_none_or(|n| n == 0) {
+                return Err(invalid());
+            }
+            serde_json::to_value(executor)?
+        } else {
+            if binding["protocol"] != "openai-compatible" { return Err(invalid()); }
+            json!({"kind":"http","api":identity["protocol"],"endpoint":identity["endpoint"],"credentialScope":identity["credentialScope"]})
+        };
         let frozen = Intent {
             kind: KIND.into(),
             scope_id: p.scope_id.clone(),
@@ -247,7 +264,7 @@ impl Catalog {
             recipe_ref: body.reference,
             binding: serde_json::from_value(
                 json!({"requestKind":"model_compute","purpose":p.purpose,"providerId":identity["providerId"],"modelId":identity["modelId"],"configurationId":identity["configurationId"],
-          "executor":{"kind":"http","api":identity["protocol"],"endpoint":identity["endpoint"],"credentialScope":identity["credentialScope"]}}),
+          "executor":executor}),
             )?,
         };
         if let Some(old) = optional_record::<Operation>(&self.db, "operations", &id)? {

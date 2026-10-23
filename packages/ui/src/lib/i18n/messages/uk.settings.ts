@@ -2260,8 +2260,6 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "Механізм",
   "settings.harness.retrieval.remote": "Віддалений сервіс",
   "settings.harness.retrieval.off": "Без окремого ранжувальника",
-  "settings.page.harness.localSemantic.title": "Локальний семантичний пошук",
-  "settings.page.harness.localSemantic.description": "Необов’язковий локальний компонент для семантичного пошуку коду. Без встановлення доступні лексичний і структурний пошук.",
   "settings.page.harness.localSemantic.status.label": "Компонент",
   "settings.page.harness.localSemantic.status.unknown": "Невідомо",
   "settings.page.harness.localSemantic.status.notInstalled": "Не встановлено",

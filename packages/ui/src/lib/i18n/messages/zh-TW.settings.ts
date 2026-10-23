@@ -1,4 +1,13 @@
 export const settingsDict = {
+  "settings.page.harness.localSemantic.source": "本機模型",
+  "settings.page.harness.embeddings.off": "關閉嵌入 · 使用文字檢索",
+  "settings.page.harness.embeddings.cpu.mode": "本機 CPU 偏好",
+  "settings.page.harness.embeddings.cpu.auto": "自動",
+  "settings.page.harness.embeddings.cpu.efficient": "減少 CPU 使用",
+  "settings.page.harness.embeddings.cpu.performance": "優先嵌入速度",
+  "settings.page.harness.embeddings.cpu.threads": "推理執行緒上限",
+  "settings.page.harness.embeddings.cpu.threadsDescription": "留空由系統選擇。CPU 設定重新啟動 Host 後生效。",
+
   "settings.page.harness.page.embeddings.title": "記憶與知識嵌入",
   "settings.page.harness.page.embeddings.description": "設定記憶與 Bot 知識使用的嵌入模型和請求節奏。",
   "settings.page.harness.embeddings.requests.title": "嵌入請求",
@@ -8,7 +17,7 @@ export const settingsDict = {
   "settings.page.harness.embeddings.requests.invalid": "並行數須為正整數，間隔須為計時器支援範圍內的非負整數。",
   "settings.page.harness.embeddings.requests.restartRequired": "已儲存，重新啟動 Host 後套用請求設定。",
   "settings.page.harness.embeddings.requests.reload": "重新載入請求設定",
-  "settings.page.harness.section.embedding.description": "為記憶與 Bot 知識檢索設定嵌入模型；未設定時使用文字檢索。",
+  "settings.page.harness.section.embedding.description": "為記憶與 Bot 知識選擇本機模型元件或遠端模型服務；關閉嵌入時使用文字檢索。",
 
   'settings.harness.retrieval.selectOrdinaryModel': '请选择支持工具调用的普通模型，或明确选择沿用当前会话模型。旧快速决策和重排配置不会自动改用其他服务。',
   'settings.agents.sourceMode': '文件环境',
@@ -2346,8 +2355,8 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "檢索後端",
   "settings.harness.retrieval.remote": "遠端服務",
   "settings.harness.retrieval.off": "不使用專用重排",
-  "settings.page.harness.localSemantic.title": "本機語意檢索",
-  "settings.page.harness.localSemantic.description": "用於程式碼檢索的選用本機元件。未安裝時仍可使用詞法與結構檢索。",
+  "settings.page.harness.localSemantic.title": "本機嵌入模型",
+  "settings.page.harness.localSemantic.description": "用於記憶與 Bot 知識嵌入的可選模型元件。安裝或匯入後按需載入。",
   "settings.page.harness.localSemantic.status.label": "元件",
   "settings.page.harness.localSemantic.status.unknown": "未知",
   "settings.page.harness.localSemantic.status.notInstalled": "未安裝",

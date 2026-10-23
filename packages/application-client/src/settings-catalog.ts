@@ -342,14 +342,14 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.embedding', category: 'retrieval', owner: 'agent-settings',
     field: { path: 'harness.embedding', kind: 'json', scope: 'user',
-      note: 'memory and knowledge embedding backend {protocol:"openai-compatible", providerId, modelId}; unconfigured recall uses text search' },
+      note: 'memory and knowledge embeddings: {protocol:"local",providerId:"local",modelId:"installed"} selects the installed component; {protocol:"openai-compatible",providerId,modelId} selects a model service; absent uses text search' },
     apply: 'next-run',
     ui: { page: 'harness-embeddings', titleKey: 'settings.page.harness.section.embedding',
-      keywords: ['memory', 'knowledge', 'embedding', 'vector'] },
+      keywords: ['memory', 'knowledge', 'embedding', 'vector', 'local', 'offline'] },
   },
   {
     id: 'harness.embeddingRequests', category: 'retrieval', owner: 'action',
-    actionRef: { domain: 'service:embedding-requests', verbs: ['read', 'write'], note: 'write replaces {concurrentRequests: positive integer, requestIntervalMs: non-negative timer milliseconds}; supply config and revision from read' },
+    actionRef: { domain: 'service:embedding-requests', verbs: ['read', 'write'], note: 'write replaces {concurrentRequests: positive integer, requestIntervalMs: non-negative timer milliseconds, localCpuMode?: auto|efficient|performance, localCpuThreads?: positive integer|null}; supply config and revision from read' },
     apply: 'restart',
     ui: { page: 'harness-embeddings', titleKey: 'settings.page.harness.embeddings.requests.title',
       keywords: ['memory', 'knowledge', 'concurrency', 'interval', 'embedding'] },

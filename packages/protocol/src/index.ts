@@ -7,6 +7,7 @@ export * from "./language-id.js";
 export * from "./harness-settings.js";
 export * from "./message-time.js";
 export * from "./harness-inference.js";
+export * from "./harness-local-semantic.js";
 export * from "./harness-fast-decision.js";
 export * from "./harness-computer.js";
 export * from "./harness-model-slots.js";

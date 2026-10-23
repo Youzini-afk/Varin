@@ -265,7 +265,7 @@ export const VARIN_BUILTIN_HARNESS_EXTENSION = definition({
       group: "harness",
       icon: "database-2",
       id: "varin.builtin.harness.page.embeddings",
-      keywords: ["memory", "knowledge", "embedding", "vector", "concurrency"],
+      keywords: ["memory", "knowledge", "embedding", "vector", "concurrency", "local", "offline", "CPU"],
       kind: "single",
       order: 5,
       slug: "harness-embeddings",

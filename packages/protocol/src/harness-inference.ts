@@ -8,12 +8,12 @@ import type {
  * The Host model owner resolves credentials and submits only authorized text.
  */
 
-/** Remote embedding window. Not the local MiniLM 512-token limit. */
+/** Default remote embedding window; local components declare their actual model context. */
 export const REMOTE_EMBEDDING_DEFAULT_MAX_TOKENS = 8192;
 
 export type HarnessEmbedPurpose = "document" | "query";
 
-export type HarnessEmbeddingProtocol = "openai-compatible";
+export type HarnessEmbeddingProtocol = "openai-compatible" | "local";
 
 export interface HarnessEmbeddingSettings {
   protocol: HarnessEmbeddingProtocol;
@@ -181,9 +181,15 @@ export function parseHarnessEmbeddingSettings(value: unknown): HarnessEmbeddingS
   if (!isRecord(value)) {
     throw new HarnessInferenceSettingsValidationError("harness.embedding must be an object");
   }
+  if (value.protocol === "local") {
+    if (value.providerId !== "local" || value.modelId !== "installed") {
+      throw new HarnessInferenceSettingsValidationError('Local embedding selects providerId "local" and modelId "installed"');
+    }
+    return { protocol: "local", providerId: "local", modelId: "installed" };
+  }
   if (value.protocol !== "openai-compatible") {
     throw new HarnessInferenceSettingsValidationError(
-      "harness.embedding.protocol must be openai-compatible",
+      "harness.embedding.protocol must be openai-compatible or local",
     );
   }
   const providerId = requiredNonEmpty(value.providerId, "harness.embedding.providerId");

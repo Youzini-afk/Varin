@@ -12,14 +12,18 @@ export const DEFAULT_EMBEDDING_REQUEST_CONFIGURATION: EmbeddingRequestConfigurat
 function parseConfiguration(value: unknown): EmbeddingRequestConfiguration {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid embedding request configuration');
   const input = value as Record<string, unknown>;
-  const unknown = Object.keys(input).filter(key => key !== 'concurrentRequests' && key !== 'requestIntervalMs');
+  const unknown = Object.keys(input).filter(key => !['concurrentRequests', 'requestIntervalMs', 'localCpuMode', 'localCpuThreads'].includes(key));
   if (unknown.length) throw new Error(`Unsupported embedding request settings: ${unknown.join(', ')}`);
   const concurrentRequests = input.concurrentRequests ?? 1;
   const requestIntervalMs = input.requestIntervalMs ?? 0;
   if (!Number.isSafeInteger(concurrentRequests) || Number(concurrentRequests) < 1) throw new Error('Concurrent requests must be a positive integer');
   // Node timers use a signed 32-bit millisecond duration.
   if (!Number.isSafeInteger(requestIntervalMs) || Number(requestIntervalMs) < 0 || Number(requestIntervalMs) > 2_147_483_647) throw new Error('Request interval must be a non-negative timer duration');
-  return { concurrentRequests: Number(concurrentRequests), requestIntervalMs: Number(requestIntervalMs) };
+  if (input.localCpuMode !== undefined && !['auto', 'efficient', 'performance'].includes(String(input.localCpuMode))) throw new Error('Invalid local CPU mode');
+  if (input.localCpuThreads != null && (!Number.isSafeInteger(input.localCpuThreads) || Number(input.localCpuThreads) < 1)) throw new Error('Local CPU threads must be a positive integer or automatic');
+  return { concurrentRequests: Number(concurrentRequests), requestIntervalMs: Number(requestIntervalMs),
+    ...(input.localCpuMode === undefined ? {} : { localCpuMode: input.localCpuMode as NonNullable<EmbeddingRequestConfiguration['localCpuMode']> }),
+    ...(input.localCpuThreads === undefined ? {} : { localCpuThreads: input.localCpuThreads as number | null }) };
 }
 
 const revisionOf = (text: string) => createHash('sha256').update(text).digest('hex');

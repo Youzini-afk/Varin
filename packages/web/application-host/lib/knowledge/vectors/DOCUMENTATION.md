@@ -9,7 +9,8 @@ Host-only writer. Not the authoritative workspace or user `.tdb`.
 - `releaseScope` retires a deleted owner, cancels/drains its builds and searches and closes its vector
   stores before file cleanup. It prevents late work from reopening or republishing that scope while
   leaving other owners running.
-- Embedding uses native Host inference with the configured knowledge model and credential selection. Unconfigured knowledge recall stays text-only and never claims `via:vector` or falls back to MiniLM.
+- Embedding explicitly selects an installed local component or the configured remote model. Unconfigured recall stays text-only.
+- Local work retains the actual component manifest/model generation and uses the same KnowledgeInference UtilityRun and native inference receipts as remote work. Completed local vectors are recovered from the original receipt. Selection changes stop new work on old leases, while dispatched Worker work drains before its receipt settles.
 - Search builds Top-K inside the accepted, valid, in-scope id set, then re-checks authority revision. Text and vector ranks merge with RRF.
 - `searchDocumentScores` validates expected document revisions and computes each document's exact
   best block score in one admitted semantic-owner operation. Document Top-K is applied after all

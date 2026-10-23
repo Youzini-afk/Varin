@@ -1,7 +1,11 @@
 import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration } from './transport/runtime-switch.js';
 
-export interface EmbeddingRequestConfiguration { concurrentRequests: number; requestIntervalMs: number }
+export interface EmbeddingRequestConfiguration {
+  concurrentRequests: number; requestIntervalMs: number;
+  localCpuMode?: 'auto' | 'efficient' | 'performance';
+  localCpuThreads?: number | null;
+}
 export interface EmbeddingRequestSettings {
   config: EmbeddingRequestConfiguration;
   activeConfig: EmbeddingRequestConfiguration;
@@ -14,7 +18,9 @@ const isConfiguration = (value: unknown): value is EmbeddingRequestConfiguration
   if (!value || typeof value !== 'object') return false;
   const config = value as EmbeddingRequestConfiguration;
   return Number.isSafeInteger(config.concurrentRequests) && config.concurrentRequests > 0
-    && Number.isSafeInteger(config.requestIntervalMs) && config.requestIntervalMs >= 0 && config.requestIntervalMs <= 2_147_483_647;
+    && Number.isSafeInteger(config.requestIntervalMs) && config.requestIntervalMs >= 0 && config.requestIntervalMs <= 2_147_483_647
+    && (config.localCpuMode === undefined || ['auto', 'efficient', 'performance'].includes(config.localCpuMode))
+    && (config.localCpuThreads == null || Number.isSafeInteger(config.localCpuThreads) && config.localCpuThreads > 0);
 };
 
 /** A settings revision belongs to the Host on which it was read. */

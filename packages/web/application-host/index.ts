@@ -1,3 +1,6 @@
+import { createLocalSemanticEmbedder } from './lib/knowledge/semantic/local-embedder.js';
+import { createLocalSemanticComponentManager } from './lib/knowledge/semantic/local-component.js';
+import { registerLocalSemanticComponentRoutes } from './lib/knowledge/semantic/local-component-routes.js';
 import { createKnowledgeEmbeddingOwner } from './lib/knowledge/vectors/embedding-owner.js';
 import { createStorageService } from './lib/storage/service.js';
 import { registerStorageRoutes } from './lib/storage/routes.js';
@@ -2437,7 +2440,26 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     try { response.json({ models: await imageRuntimeOwner.current!.models() }); }
     catch { response.status(503).json({ error: 'Image model catalog is unavailable' }); }
   });
-  const knowledgeEmbedding = createKnowledgeEmbeddingOwner(kernelClient, semanticInference);
+  let localKnowledgeEmbedder: ReturnType<typeof createLocalSemanticEmbedder> | undefined;
+  const localKnowledgeComponent = createLocalSemanticComponentManager({
+    dataDir: VARIN_DATA_DIR, version: VARIN_VERSION,
+    onEnabled: async () => {
+      const previous = localKnowledgeEmbedder;
+      localKnowledgeEmbedder = undefined;
+      knowledgeVectors?.refreshAll();
+      if (previous) {
+        await Promise.all([knowledgeEmbedding.retireLocal(previous), previous.retire!()]);
+      }
+    },
+  });
+  registerLocalSemanticComponentRoutes(app, { manager: localKnowledgeComponent, requireAuth: uiAuthController.requireAuth });
+  const knowledgeEmbedding = createKnowledgeEmbeddingOwner(kernelClient, semanticInference, {
+    resolve: () => localKnowledgeEmbedder ??= createLocalSemanticEmbedder({ dataDir: VARIN_DATA_DIR,
+      cpu: { mode: embeddingRequestSettings.active().localCpuMode ?? 'auto', maxThreads: embeddingRequestSettings.active().localCpuThreads ?? null } }),
+    close: async () => {
+      await localKnowledgeEmbedder?.retire?.();
+    },
+  });
   const unsubscribeKnowledgeEmbedding = settingsRuntime.subscribe(() => knowledgeVectors?.refreshAll());
   registerEmbeddingRequestRoutes(app, embeddingRequestSettings, uiAuthController.requireAuth);
   const storageService = createStorageService({
@@ -2825,6 +2847,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         if (result.status === 'rejected') inferenceShutdownErrors.push(result.reason);
       }
       unsubscribeKnowledgeEmbedding();
+      await shutdown.run('localKnowledgeComponent.dispose', () => localKnowledgeComponent.dispose());
       await shutdown.run('knowledgeEmbedding.close', () => knowledgeEmbedding.close());
       await shutdown.run('semanticInference.close', () => semanticInference.close().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
       // Stop producers and drain their receipts while process grants are valid.

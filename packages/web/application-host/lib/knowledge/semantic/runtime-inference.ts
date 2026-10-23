@@ -172,6 +172,7 @@ export function createSemanticInference(
     try {
       if (closed) return fail('unavailable', 'embedding-owner-closed');
       const settings = settingsFrom(await readGlobalSettings());
+      if (settings.protocol === 'local') return fail('unconfigured', 'embedding-local-selected');
       const capturedRevocation = revocationGeneration;
       const ledger = options.ledger;
       const provider = capturedProvider = await authority.resolveEmbeddingBinding(settings.providerId, settings.modelId);
@@ -183,7 +184,7 @@ export function createSemanticInference(
         maxTokens: Math.min(settings.maxTokens ?? Infinity, Math.max(1, Math.floor(capacity * 0.9))),
         configurationId: provider.tokenizer ? digest(JSON.stringify([provider.configurationId, provider.tokenizer])).slice(0, 16) : provider.configurationId });
       const identity: SemanticInferenceIdentity = Object.freeze({ providerId: binding.providerId,
-        modelId: binding.modelId, protocol: binding.protocol, configurationId: binding.configurationId,
+        modelId: binding.modelId, protocol: 'openai-compatible', configurationId: binding.configurationId,
         endpoint: provider.requestUrl, credentialScope: Object.freeze({ ...provider.credentialScope }) });
       const credentials = capturedCredentials = new ExistingHostCredentialOwner({ providerId: provider.credentialRef,
         providerFamily: 'openai-completions', endpoint: provider.requestUrl,
@@ -364,7 +365,7 @@ export function createSemanticInference(
                 || params.operationIdentity.stage !== 'document-embedding') return fail('invalid', 'embedding-operation-identity-invalid');
               await validateDelivery();
               const operation: SemanticInferenceLedgerIdentity = {
-                providerId: binding.providerId, modelId: binding.modelId, protocol: binding.protocol,
+                providerId: binding.providerId, modelId: binding.modelId, protocol: 'openai-compatible',
                 configurationId: binding.configurationId, endpointHash: digest(provider.requestUrl),
                 credentialScopeHash: digest(JSON.stringify(identity.credentialScope)),
                 ...(binding.dimensions === undefined ? {} : { dimensions: binding.dimensions }),

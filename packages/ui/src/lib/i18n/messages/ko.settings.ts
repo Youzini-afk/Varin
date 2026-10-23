@@ -2262,8 +2262,6 @@ export const settingsDict = {
   "settings.harness.retrieval.source": "백엔드",
   "settings.harness.retrieval.remote": "원격 서비스",
   "settings.harness.retrieval.off": "전용 재순위 사용 안 함",
-  "settings.page.harness.localSemantic.title": "로컬 의미 검색",
-  "settings.page.harness.localSemantic.description": "코드 검색에 사용할 수 있는 선택적 로컬 구성 요소입니다. 설치하지 않아도 어휘 및 구조 검색을 사용할 수 있습니다.",
   "settings.page.harness.localSemantic.status.label": "구성 요소",
   "settings.page.harness.localSemantic.status.unknown": "알 수 없음",
   "settings.page.harness.localSemantic.status.notInstalled": "설치되지 않음",
