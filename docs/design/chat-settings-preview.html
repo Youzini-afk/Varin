@@ -253,8 +253,9 @@ const finalText=message('r4','计划摘要会保留当前步骤附近的条目�
 const mainEvents=[...baseIntro,message('r2','预览直接显示了完整计划。我会保留当前步骤的摘要，并让编辑区替换原来的正文。'),searchEvent,procEvent,childA];
 const scene=(id,label,group,prompt,frames,extra={})=>({id,label,group,prompt,frames,...extra});
 // All counts below are fixture receipts, in the existing ChatUsage shape.
+// Fixture input includes cached tokens. The basis is preview metadata, not a current ChatUsage field.
 const fixtureUsage={measurement:'actual',unknownReceipts:0,input:12480,output:1108,cacheRead:10240,cacheWrite:1024,totalTokens:13588};
-const frame=(events,state='running',extra={})=>({events,run:{state},plan:clone(planFixture),...(state==='completed'?{usages:[clone(fixtureUsage)]}:{}),...extra});
+const frame=(events,state='running',extra={})=>({events,run:{state},plan:clone(planFixture),...(state==='completed'?{usages:[clone(fixtureUsage)],usageInputBasis:'includes-cache'}:{}),...extra});
 // Proposed ask_user contract. The existing single-question call remains represented separately.
 const questionSet={questions:[
   {id:'draft',question:'计划更新时，如果你正在编辑一份草稿，应当怎样处理？',selection:'single',options:[
@@ -749,7 +750,10 @@ function renderTurnFooter(){
       if(!values.length||(key.startsWith('cache')||key==='reasoning')&&sum===0)return [];
       return ['<span title="'+label+'">'+I(icon)+(key.startsWith('cache')?label+' ':'')+sum.toLocaleString('zh-CN')+'</span>'];
     }).join('');
-    return (measurement==='estimated'?'<span title="估算用量">≈</span>':'')+parts+(rows.some(u=>u.unknownReceipts>0)?'<span title="部分请求没有用量回执">用量未完整上报</span>':'');
+    const cacheRead=rows.reduce((sum,u)=>sum+(u.cacheRead||0),0),input=rows.reduce((sum,u)=>sum+(u.input||0),0);
+    const knownBasis=currentFrame().usageInputBasis==='includes-cache'&&rows.every(u=>u.unknownReceipts===0&&Number.isFinite(u.input)&&u.input>=0&&Number.isFinite(u.cacheRead)&&u.cacheRead>=0&&u.cacheRead<=u.input);
+    const cacheRate=knownBasis&&cacheRead>0&&input>0?'<span title="缓存命中率：缓存读取量 ÷ 完整输入量；缓存创建不计入命中">缓存率 '+(cacheRead/input*100).toLocaleString('zh-CN',{maximumFractionDigits:1})+'%</span>':'';
+    return (measurement==='estimated'?'<span title="估算用量">≈</span>':'')+parts+cacheRate+(rows.some(u=>u.unknownReceipts>0)?'<span title="部分请求没有用量回执">用量未完整上报</span>':'');
   }).join('');
   return '<div class="turn-footer"><div class="turn-actions" aria-label="本轮操作">'+
     Btn('copy-answer',I('file-copy'),'icon-btn','aria-label="复制回答" title="复制回答"')+
@@ -1011,7 +1015,7 @@ function renderEvidence(){
     ['思考','思考 + 原文单行预览','ChatThinkingContent.thinking','直接沿用现有形式；没有「查看这一段思考」的额外入口。'],
     ['重试','模型请求正在重试 · 第 2 次','retry_scheduled.attempt、delay_ms','没有原始原因时，不给它编造原因。'],
     ['计划与概览','原计划、子任务、已确认产出','计划订阅、Thread snapshot、文件回执','独立状态，不从工具名推测或生成计划。'],
-    ['轮末用量','左侧操作，右侧直接显示用量','ChatUsage 的 input/output/cacheRead/cacheWrite 等','缺失缓存或为 0 时不显示；用量未上报与 0 分开。数字是样稿数据。'],
+    ['轮末用量','左侧操作，右侧直接显示用量和缓存率','ChatUsage 的 input/output/cacheRead/cacheWrite 等；缓存率需先统一渠道输入口径','缓存读取大于 0 且完整输入量已知时显示缓存率。usageInputBasis 是样稿口径标注，尚非产品字段；数值为示例。'],
     ['多题与多选（提议扩展）','题号导航、检查答案、一次提交','拟扩展 ask_user.questions[] / answers[]','当前接口仅 question + string options、answer:string；多题样稿明确标注 proposed。'],
     ['持续授权（提议扩展）','允许一次 / 一直允许 / 拒绝','已有用户 PermissionRule；拟增加受信 owner 的保存与授权衔接','当前 decidePermission 只接受 allow_once/deny。保存失败继续等待，不报成功。']
   ];
