@@ -4302,3 +4302,35 @@ fn message_sent_time_survives_retry_queue_edit_and_reopen_as_context_data() {
 
 #[path = "catalog_cancel_recovery_tests.rs"]
 mod cancelled_recovery;
+
+#[test]
+fn question_history_projects_answer_without_accepting_receipt_metadata_as_user_input() {
+    use crate::execution::{Content, Provenance};
+    let id = "question-answer:original-operation";
+    for metadata in [
+        json!({"operationId":"original-operation","answers":[{"questionId":"question","selectedOptionIds":[],"text":"Take the safe route","skipped":false}]}),
+        json!({"operationId":"original-operation","cancelled":true}),
+    ] {
+        let body = json!({"text":"Take the safe route","questionAnswer":metadata});
+        let items = execution_persistence::history_input_items(id, HistorySource::User, &body).unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].id, id);
+        assert!(matches!(&items[0].content, Content::Text { text } if text == "Take the safe route"));
+        assert!(matches!(&items[0].provenance, Provenance::UserInstruction { input_id } if input_id == id));
+        assert!(execution_persistence::history_input_items("other-history", HistorySource::User, &body).is_err());
+        assert!(execution_persistence::user_input_items(id, &body).is_err());
+        let mut extra = body;
+        extra["allowTools"] = json!(["process_spawn"]);
+        assert!(execution_persistence::history_input_items(id, HistorySource::User, &extra).is_err());
+    }
+    for metadata in [
+        json!({"operationId":"original-operation","cancelled":false}),
+        json!({"operationId":"original-operation","answers":[]}),
+        json!({"operationId":"original-operation","answers":[{"text":"missing answer identity"}]}),
+        json!({"operationId":"original-operation","cancelled":true,"answers":[]}),
+        json!({"operationId":"original-operation","cancelled":true,"allowTools":["process_spawn"]}),
+    ] {
+        let body = json!({"text":"answer","questionAnswer":metadata});
+        assert!(execution_persistence::history_input_items(id, HistorySource::User, &body).is_err());
+    }
+}

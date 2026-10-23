@@ -4,6 +4,7 @@ use super::context_jobs::require_ancestor;
 use super::tool_content::{ToolCallMetadata, ToolIntent};
 use super::*;
 use crate::execution::*;
+use serde::Deserialize;
 use std::sync::{Arc, Mutex};
 
 /// HTTP diagnostics are prepared by the model transport, including credential redaction.
@@ -2241,6 +2242,32 @@ pub(super) fn history_input_items(
     content: &Value,
 ) -> Result<crate::execution::ConversationHistory> {
     if source == HistorySource::User {
+        if let Some(answer) = content.get("questionAnswer") {
+            // Question settlement writes receipt metadata beside the authenticated answer.
+            // It remains durable for question_status/UI, but is not an external input field
+            // or model instruction. Only project it from its original history identity;
+            // user_input_items must continue rejecting it at ordinary input admission.
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase", deny_unknown_fields)]
+            struct AnswerReceipt {
+                operation_id: String,
+                answers: Option<Vec<crate::questions::QuestionAnswer>>,
+                cancelled: Option<bool>,
+            }
+            let receipt: AnswerReceipt = serde_json::from_value(answer.clone())?;
+            let valid_outcome = matches!((&receipt.answers, receipt.cancelled),
+                (Some(answers), None) if !answers.is_empty())
+                || matches!((&receipt.answers, receipt.cancelled), (None, Some(true)));
+            if receipt.operation_id.is_empty() || !valid_outcome {
+                return Err(RuntimeError::Invalid("question answer receipt is malformed".into()));
+            }
+            if id != format!("question-answer:{}", receipt.operation_id) {
+                return Err(RuntimeError::Invalid("question answer history identity changed".into()));
+            }
+            let mut input = content.clone();
+            input.as_object_mut().expect("question answer object").remove("questionAnswer");
+            return user_input_items(id, &input);
+        }
         return user_input_items(id, content);
     }
     if source == HistorySource::Environment {
