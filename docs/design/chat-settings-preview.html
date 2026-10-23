@@ -115,7 +115,49 @@
 }
 
 :root{--muted:#a4a4a4}[data-theme=light]{--muted:#696969}.tool-heading-shell{display:flex;align-items:center;min-width:0}.tool-heading-shell>.tool-head,.tool-heading-shell>.disclosure-head{flex:1;min-width:0}.setting-row input[type=number]{width:110px}.settings-section{max-width:760px}
-.question-popup{position:absolute;bottom:16px;left:50%;transform:translateX(-50%);width:calc(100% - 32px);max-width:512px;z-index:20;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--bg);box-shadow:0 15px 70px #0006}.question-popup>header{display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px}.question-popup>header>span{flex:1}.question-popup-body{max-height:50vh;overflow:auto;scrollbar-width:thin}.question-popup .request-block{margin:0;border:0;padding:0}.no-code-wrap .console-output,.no-code-wrap .read-code code{white-space:pre;overflow-x:auto}.no-code-wrap .diff-body{overflow-x:auto}.no-code-wrap .diff-line{min-width:max-content}.no-code-wrap .diff-line>span:last-child{white-space:pre}
+.question-root{max-width:850px;width:100%;margin:0 auto;min-height:0;display:flex;flex-direction:column;flex:0 1 auto}
+.question-root:empty{display:none}
+.composer-area{display:flex;flex-direction:column;min-height:0;max-height:100%;gap:12px}
+.composer-area>.composer{width:100%;flex-shrink:0}
+.composer-area>.composer-feedback:empty,.composer-area>.queue[hidden]{display:none}
+.question-dock{display:flex;flex-direction:column;min-height:0;max-height:min(490px,52dvh);border:1px solid var(--line);border-radius:13px;background:var(--bg);box-shadow:0 5px 22px #0002;overflow:hidden}
+.question-dock>header{display:flex;align-items:center;gap:8px;padding:12px 17px;flex-shrink:0;font-size:13px}
+.question-dock>header>strong{font-weight:500;flex:1}
+.question-requests{margin:0 17px 9px;width:calc(100% - 34px);flex-shrink:0;font-size:12px;min-width:0}
+.question-nav{display:flex;align-items:center;gap:6px;padding:0 17px 9px;flex-shrink:0;flex-wrap:wrap}
+.question-nav button{height:27px;min-width:31px;padding:0 7px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;gap:3px;border:1px solid var(--line);color:var(--muted);font-size:11px}
+.question-nav button[aria-current=step]{background:var(--hover);border-color:var(--muted);color:var(--fg)}
+.question-nav .question-progress{margin-left:auto;color:var(--muted);font-size:11px}
+.question-dock-body{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;min-height:0;padding:3px 17px 5px;scrollbar-width:thin;scrollbar-gutter:stable}
+.question-dock-body h3{font-size:14px;font-weight:500;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 4px}
+.question-kind{color:var(--muted);font-size:11px}
+.question-dock .question-options{gap:7px;margin:12px 0}
+.question-dock .question-option{padding:9px 12px;cursor:pointer}
+.question-dock .question-option:focus-within{outline:2px solid var(--muted);outline-offset:2px}
+.question-dock .question-free{min-height:66px;max-height:160px;resize:vertical;line-height:1.65;margin-top:9px}
+.question-dock .actions{padding:10px 17px;border-top:1px solid var(--line);margin:0;flex-shrink:0;gap:8px}
+.question-dock .actions .spacer{flex:1}
+.question-dock .question-error{margin:0 17px 10px;color:var(--red);font-size:12px;line-height:1.6}
+.question-reopen{display:flex;align-items:center;gap:8px;width:100%;font-size:12px;padding:7px 2px;color:var(--muted)}
+.question-reopen span{flex:1;text-align:left}
+.answer-review{padding:10px 0;border-bottom:1px solid var(--weak);font-size:12px;line-height:1.7}
+.answer-review header{display:flex;align-items:flex-start;gap:12px}.answer-review header span{flex:1;overflow-wrap:anywhere}
+.answer-review p,.answer-receipt p{white-space:pre-wrap;overflow-wrap:anywhere}
+.answer-review p{color:var(--muted);margin:5px 0}.answer-receipt details{margin-top:5px}.answer-receipt summary{cursor:pointer}
+.turn-footer{margin-top:22px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 16px;color:var(--muted);font-size:11px}
+.turn-usage{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px;font-variant-numeric:tabular-nums;min-width:0}
+.turn-usage>span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.turn-actions{display:flex;gap:1px;margin-left:auto;flex-shrink:0}.turn-actions .icon-btn{width:25px;height:25px}
+.permission-scope{margin:10px 0;line-height:1.7;font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.permission-scope strong{font-weight:500;color:var(--fg)}
+.permission-notice{margin:10px 0;font-size:12px;color:var(--red)}
+.existing-empty{display:flex;flex-direction:column;align-items:center;gap:20px;margin:0 0 9px;text-align:center;color:var(--muted)}
+.existing-empty h1{font-weight:500;font-size:clamp(24px,2vw,30px);letter-spacing:-.5px;color:var(--fg)}
+.chat-area.empty-state{grid-template-rows:minmax(24px,1fr) auto minmax(24px,1fr)}
+.chat-area.empty-state:after{content:""}
+.chat-area.empty-state .composer-area{padding-bottom:16px}
+@media(max-height:650px){.question-dock{max-height:45dvh}.question-dock>header{padding-block:8px}.question-dock .actions{padding-block:7px}}
+.no-code-wrap .console-output,.no-code-wrap .read-code code{white-space:pre;overflow-x:auto}.no-code-wrap .diff-body{overflow-x:auto}.no-code-wrap .diff-line{min-width:max-content}.no-code-wrap .diff-line>span:last-child{white-space:pre}
 .chat-area.with-run-error{grid-template-rows:auto minmax(0,1fr) auto}.run-alert{padding:12px 26px 0;color:var(--red);font-size:13px;overflow-wrap:anywhere}.run-alert p+p{margin-top:3px}
 @container conversation (max-width:600px){.conversation-layout:has(.overview-slot:not([data-view=closed])){flex-direction:column}.overview-slot[data-view=full],.overview-slot[data-view=compact]{order:-1;width:100%;max-width:none;max-height:45%;padding:8px 12px;display:flex;flex-direction:column}.overview-card{width:100%}.overview-resizer{display:none}.overview-status{margin-bottom:10px}.overview-section{margin-top:15px}.transcript{padding:25px 22px}.composer-area{padding-inline:14px}.overview-content{max-height:100%}}
 @media(min-width:1760px){.app{margin-inline:auto}}@media(max-width:1100px){.project-sidebar{width:178px}.settings-page{padding:30px}.titlebar-title{max-width:220px}.top-context{display:none}.retry-rule{grid-template-columns:1fr 1fr}.retry-rule input{grid-column:1/-1}.retry-rule .icon-btn{grid-column:2;justify-self:end}.settings-nav{width:200px}.transcript{padding-inline:25px}}
@@ -143,7 +185,6 @@
       <main class="work-area" id="work-area"><div class="conversation-layout" id="conversation-layout"></div></main>
       <nav class="resource-rail" id="resource-rail" aria-label="资源面板"></nav>
       <div id="settings-root"></div>
-      <div id="question-root"></div>
       <aside class="inspector" id="inspector" aria-label="设计稿字段来源"></aside>
     </div>
   </section>
@@ -211,7 +252,25 @@ const editEvent=tool('r3:edit','file_edit',{path:planPath,readVersion:'read-vers
 const finalText=message('r4','计划摘要会保留当前步骤附近的条目，点击后进入完整计划。\n\n编辑在原位置进行；长内容跟随面板宽度换行。', 'stop');
 const mainEvents=[...baseIntro,message('r2','预览直接显示了完整计划。我会保留当前步骤的摘要，并让编辑区替换原来的正文。'),searchEvent,procEvent,childA];
 const scene=(id,label,group,prompt,frames,extra={})=>({id,label,group,prompt,frames,...extra});
-const frame=(events,state='running',extra={})=>({events,run:{state},plan:clone(planFixture),...extra});
+// All counts below are fixture receipts, in the existing ChatUsage shape.
+const fixtureUsage={measurement:'actual',unknownReceipts:0,input:12480,output:1108,cacheRead:10240,cacheWrite:1024,totalTokens:13588};
+const frame=(events,state='running',extra={})=>({events,run:{state},plan:clone(planFixture),...(state==='completed'?{usages:[clone(fixtureUsage)]}:{}),...extra});
+// Proposed ask_user contract. The existing single-question call remains represented separately.
+const questionSet={questions:[
+  {id:'draft',question:'计划更新时，如果你正在编辑一份草稿，应当怎样处理？',selection:'single',options:[
+    {id:'keep',label:'保留我的草稿，并提供查看最新计划的入口；等我完成比较后，再决定是否合并更新。'},
+    {id:'compare',label:'把最新计划与我的草稿放在一起比较，由我选择需要保留的内容；比较时仍然可以继续编辑。'}
+  ]},
+  {id:'details',question:'这次希望一起调整哪些交互？',selection:'multiple',options:[
+    {id:'wrap',label:'长路径、工具名和计划条目自动换行，窄窗口也能读完整，不出现横向滚动。'},
+    {id:'summary',label:'工作概览只展示当前步骤附近的计划摘要，点击后进入完整计划面板。'},
+    {id:'inline',label:'计划直接在原位置编辑，保存、取消和并发更新提示始终可访问。'},
+    {id:'motion',label:'面板展开、收起有连续的过渡，用户查看旧内容时不被新消息拉回底部。'}
+  ]},
+  {id:'notes',question:'还有需要保留的使用习惯或细节吗？',required:false}
+]};
+const multiQuestion=id=>tool(id,'ask_user',clone(questionSet),undefined,'running',{operationId:'operation:'+id,contract:'proposed: questions[] + structured answers[]'});
+const alwaysScope={host:'Local',account:'当前用户',tool:'file_write',path:'D:/reports/plan-review.md',scope:'此文件；当前用户在此主机的会话',contract:'proposed: persist user rule + decide original operation'};
 const scenarios=[
   scene('mixed','常规执行与阶段转换','基础','工作概览里的计划太长了，帮我调整摘要、换行和编辑方式。',[
     frame(baseIntro.slice(0,2)),frame(baseIntro),frame(mainEvents),
@@ -289,8 +348,27 @@ const scenarios=[
   scene('history','长会话 · 上翻阅读与新内容','基础','继续处理下一处布局。',[
     frame([...Array.from({length:9},(_,i)=>({kind:'history-turn',id:'history-'+i,prompt:'检查第 '+(i+1)+' 处布局。',events:[message('h'+i,'我先读取相关文件。'),tool('h'+i+':read','file_read',{path:'packages/ui/src/components/thread/Section'+(i+1)+'.tsx',startLine:1,endLine:80},{records:[]}),message('h'+i+'a','这一处内容需要自然换行，下一步继续检查相邻组件。','stop')]})),...mainEvents])
   ],{initial:0}),
-  scene('empty','新会话 · 输入与配置','基础','',[frame([], 'idle',{plan:null})],{initial:0})
+  scene('empty','新会话 · 沿用现有界面','基础','',[frame([], 'idle',{plan:null})],{initial:0})
 ];
+scenarios.push(
+  scene('question-multi','询问 · 多题、单选与多选','需要介入','一起调整计划面板的交互。',[
+    frame([message('qm','有几处交互偏好需要确认，可以一起回答。'),multiQuestion('qm:ask')],'waiting',{plan:null})
+  ],{initial:0}),
+  scene('question-requests','询问 · 多个独立请求','需要介入','确认计划面板和报告的设置。',[
+    frame([multiQuestion('qr:plan'),tool('qr:report','ask_user',{question:'本次报告保存在哪里？',options:['docs/plan-notes.md','.varin-healthcheck/plan-review.md']},undefined,'running',{operationId:'operation:report'})],'waiting',{plan:null})
+  ],{initial:0}),
+  scene('question-save-failure','询问 · 提交失败保留草稿','故障与边界','确认这些交互偏好。',[
+    frame([multiQuestion('qf:ask')],'waiting',{plan:null})
+  ],{initial:0,answerFailureOnce:true}),
+  scene('usage','轮末 · 直接显示用量与操作','基础','解释一下计划摘要的取舍。',[
+    frame([message('usage-answer','摘要围绕当前步骤保留前后关系，完整计划仍可随时打开。','stop')],'completed',{plan:null}),
+    frame([message('usage-answer','摘要围绕当前步骤保留前后关系，完整计划仍可随时打开。','stop')],'completed',{plan:null,usages:[{measurement:'actual',unknownReceipts:0,input:3400,output:480,cacheRead:0,cacheWrite:0,totalTokens:3880}]}),
+    frame([message('usage-answer','摘要围绕当前步骤保留前后关系，完整计划仍可随时打开。','stop')],'completed',{plan:null,usages:[{measurement:'missing',unknownReceipts:1}]})
+  ],{initial:0})
+);
+const permissionScene=scenarios.find(sc=>sc.id==='permission');
+permissionScene.frames[0].events.find(e=>e.kind==='permission').alwaysScope=clone(alwaysScope);
+scenarios.push(scene('permission-save-failure','权限 · 持续授权保存失败','故障与边界',permissionScene.prompt,[clone(permissionScene.frames[0])],{initial:0,permissionFailureOnce:true}));
 const settingsCases=[
   ['chat','聊天 · 三种模式与原有开关'],['web','网络与文档 · 辅助模型未选'],
   ['web-remote','网络与文档 · 平台不可用'],['web-failure','网络与文档 · 保存失败'],
@@ -313,8 +391,9 @@ historyScenario.frames.push(frame([...clone(historyScenario.frames[0].events),me
 const state={
   view:'chat',mode:'dialogue',scene:'mixed',frame:2,playing:false,sources:false,
   sidebar:true,overview:'full',overviewWidth:280,panel:'overview',open:new Set(),
-  thoughtOpen:new Map(),thoughtScroll:new Map(),follow:true,scroll:0,prompt:'',answer:'',answerText:'',
-  planDraft:'',editingPlan:false,planOverride:null,questionAnswered:false,questionHidden:false,permissionChoice:null,
+  thoughtOpen:new Map(),thoughtScroll:new Map(),follow:true,scroll:0,prompt:'',
+  planDraft:'',editingPlan:false,planOverride:null,questionHidden:false,questionDrafts:{},questionActive:null,questionReceipts:{},questionScroll:{},
+  permissionChoices:{},permissionErrors:{},permissionRules:{},
   settingsCase:'web',settingsPage:'web',search:'',settingsFeedback:'',settingsError:false,
   prefs:{thinking:true,autoThinking:false,commands:false,edits:true,wrap:true,activity:'collapsed'},
   web:{enabled:true,provider:'default',reader:true,readerModel:'',render:false,docling:'docling',tesseract:'tesseract',language:'eng'},
@@ -327,9 +406,12 @@ const currentScene=()=>scenarios.find(item=>item.id===state.scene);
 const currentFrame=()=>currentScene().frames[state.frame];
 const modeNames={live:'按时间展开',dialogue:'对话优先',sorted:'集中展示回答'};
 const I=(name,cls='')=>'<svg class="'+cls+'" viewBox="0 0 24 24" aria-hidden="true">'+(ICONS[name]||ICONS['question'])+'</svg>';
+// Existing project icons used by the turn footer.
+ICONS['archive-stack']='<path d="M4 5H20V3H4V5ZM20 9H4V7H20V9ZM3 11H10V13H14V11H21V20C21 20.5523 20.5523 21 20 21H4C3.44772 21 3 20.5523 3 20V11ZM16 13V15H8V13H5V19H19V13H16Z" fill="currentColor"/>';
+ICONS['git-branch']='<path d="M7.10508 15.2101C8.21506 15.6501 9 16.7334 9 18C9 19.6569 7.65685 21 6 21C4.34315 21 3 19.6569 3 18C3 16.6938 3.83481 15.5825 5 15.1707V8.82929C3.83481 8.41746 3 7.30622 3 6C3 4.34315 4.34315 3 6 3C7.65685 3 9 4.34315 9 6C9 7.30622 8.16519 8.41746 7 8.82929V11.9996C7.83566 11.3719 8.87439 11 10 11H14C15.3835 11 16.5482 10.0635 16.8949 8.78991C15.7849 8.34988 15 7.26661 15 6C15 4.34315 16.3431 3 18 3C19.6569 3 21 4.34315 21 6C21 7.3332 20.1303 8.46329 18.9274 8.85392C18.5222 11.2085 16.4703 13 14 13H10C8.61653 13 7.45179 13.9365 7.10508 15.2101ZM6 17C5.44772 17 5 17.4477 5 18C5 18.5523 5.44772 19 6 19C6.55228 19 7 18.5523 7 18C7 17.4477 6.55228 17 6 17ZM6 5C5.44772 5 5 5.44772 5 6C5 6.55228 5.44772 7 6 7C6.55228 7 7 6.55228 7 6C7 5.44772 6.55228 5 6 5ZM18 5C17.4477 5 17 5.44772 17 6C17 6.55228 17.4477 7 18 7C18.5523 7 19 6.55228 19 6C19 5.44772 18.5523 5 18 5Z" fill="currentColor"/>';
 const Avatar=id=>'<span class="agent-avatar">'+AVATARS[id||'slant-mint']+'</span>';
 const Btn=(action,label,cls='text-btn',attr='')=>'<button type="button" class="'+cls+'" data-action="'+action+'" '+attr+'>'+label+'</button>';
-const rawOf=e=>e.kind==='tool'?{call:e.call,execution:e.execution,result:e.result,...(e.generating?{streamingArguments:true}:{}),...(e.child?{childFromThreadSnapshot:e.child}:{}),...(e.children?{observedChildren:e.children.map(rawOf),childrenComplete:e.childrenComplete}:{})}:e;
+const rawOf=e=>e.kind==='tool'?{...(e.contract?{proposal:e.contract}:{}),call:e.call,execution:e.execution,result:e.result,...(e.generating?{streamingArguments:true}:{}),...(e.child?{childFromThreadSnapshot:e.child}:{}),...(e.children?{observedChildren:e.children.map(rawOf),childrenComplete:e.childrenComplete}:{})}:e;
 const allEvents=(events=currentFrame().events)=>events.flatMap(e=>[e,...(e.children?allEvents(e.children):[]),...(e.kind==='history-turn'?allEvents(e.events):[])]);
 const root=document.documentElement;
 const byId=id=>document.getElementById(id);
@@ -394,7 +476,7 @@ function toolInfo(e){
     origins=['call.arguments.action','result.details.followup.state / trigger.path','result.details.followups'];
   } else if(n==='dispatch'){
     label=e.child?.name||d.name||a.name||'子任务';subject=a.task||'';origins=['child.name / result.details.name / call.arguments.name','call.arguments.task','child.state'];
-  } else if(n==='ask_user'){label='询问';subject=a.question||'';origins=['call.arguments.question','call.arguments.options'];}
+  } else if(n==='ask_user'){label='询问';subject=a.questions?.[0]?.question||a.question||'';origins=a.questions?['提议扩展：call.arguments.questions[]','question / selection / options / required']:['call.arguments.question','call.arguments.options'];}
   else{subject='';origins=['call.name；通用参数没有可确定标题时留空'];}
   return {label,subject,receipt,symbol,origins};
 }
@@ -451,26 +533,103 @@ function renderChild(e){
     (d.report?.detail?'<p class="task-detail" style="margin-top:13px">'+H(d.report.detail)+'</p>':'')+rawDetails(e)+'</div>';
   return Fold(e.id,head,body,{cls:'delegation',headClass:'tool-head',source:e.id});
 }
+function questionsFor(e){
+  const a=e.call.arguments||{};
+  return a.questions||[{id:'question',question:a.question,selection:'single',options:(a.options||[]).map((label,i)=>({id:String(i),label}))}];
+}
+function questionDraft(e){
+  const draft=state.questionDrafts[e.id]??={index:0,review:false,answers:{},attempts:0,pending:false,error:''};
+  for(const q of questionsFor(e))draft.answers[q.id]??={selectedOptionIds:[],text:''};
+  return draft;
+}
+const hasAnswer=a=>Boolean(a&&(a.selectedOptionIds.length||a.text.trim()));
+const pendingQuestions=()=>allEvents().filter(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result&&!state.questionReceipts[e.id]);
+function activeQuestion(){
+  const pending=pendingQuestions();
+  return pending.find(e=>e.id===state.questionActive)||pending[0];
+}
+function answerText(q,a){
+  return [...(q.options||[]).filter(o=>a?.selectedOptionIds.includes(o.id)).map(o=>o.label),a?.text?.trim()].filter(Boolean).join('\n');
+}
+function questionResponse(e){
+  const draft=questionDraft(e);
+  if(!e.call.arguments.questions)return {answer:answerText(questionsFor(e)[0],draft.answers.question)};
+  return {status:'answered',answers:questionsFor(e).map(q=>({questionId:q.id,...clone(draft.answers[q.id]),...(!hasAnswer(draft.answers[q.id])?{skipped:true}:{})}))};
+}
+function questionReady(e){
+  const draft=questionDraft(e);
+  return !draft.pending&&questionsFor(e).every(q=>q.required===false||hasAnswer(draft.answers[q.id]));
+}
 function renderQuestion(e){
-  const a=e.call.arguments||{},answer=e.result?.details?.answer;
-  if(answer||state.questionAnswered)return '<div class="inline-state">'+I('check')+'<div><p>已回答</p><p class="muted">'+H(answer||[state.answer,state.answerText].filter(Boolean).join('\n\n'))+'</p></div></div>';
-  return '<section class="request-block" data-question="'+e.id+'"><h3>'+H(a.question)+'</h3><div class="question-options">'+(a.options||[]).map((option,index)=>
-    '<label class="question-option"><input type="radio" name="question" value="'+index+'" '+(state.answer===option?'checked':'')+'><span>'+H(option)+'</span></label>').join('')+'</div>'+
-    (state.answer?Btn('clear-answer','清除选择'):'')+'<textarea class="question-free" id="question-free" aria-label="你的回答" placeholder="你的回答，也可以补充说明…">'+H(state.answerText)+'</textarea>'+
-    '<div class="actions">'+Btn('answer','提交','button primary',!state.answer&&!state.answerText.trim()?'disabled':'')+Btn('cancel-question','取消','button')+
-    '<button class="source-mark" data-source="'+e.id+'">字段</button></div></section>';
+  const result=e.result?.details||state.questionReceipts[e.id];
+  if(result?.status==='cancelled')return '<div class="inline-state muted">'+I('close')+'<div>已取消回答</div></div>';
+  const qs=questionsFor(e);
+  const content=result?.answer?'<p>'+H(result.answer)+'</p>':qs.map((q,i)=>{
+    const a=result?.answers?.find(a=>a.questionId===q.id);
+    return '<p class="small">'+(qs.length>1?(i+1)+'. ':'')+H(q.question)+'</p><p class="muted small">'+H(a?.skipped?'未填写（选填）':answerText(q,a))+'</p>';
+  }).join('');
+  return '<div class="inline-state answer-receipt">'+I('check')+'<div><details><summary>已回答'+(qs.length>1?' · '+qs.length+' 个问题':'')+'</summary>'+content+'</details></div><button class="source-mark" data-source="'+e.id+'">字段</button></div>';
+}
+function renderQuestionFields(e){
+  const qs=questionsFor(e),d=questionDraft(e),q=qs[d.index],a=d.answers[q.id];
+  if(d.review)return '<div class="question-review">'+qs.map((item,i)=>'<section class="answer-review"><header><span>'+H(item.question)+'</span>'+Btn('question-step','编辑','text-btn','data-index="'+i+'" '+(d.pending?'disabled':''))+'</header><p>'+H(answerText(item,d.answers[item.id])||(item.required===false?'未填写（选填）':'尚未回答'))+'</p></section>').join('')+'</div>';
+  const multiple=q.selection==='multiple',qid='question-'+q.id;
+  return '<h3 id="'+qid+'">'+H(q.question)+'</h3><p class="question-kind">'+(q.options?.length?(multiple?'可多选':'单选')+' · 可以补充或直接输入自己的答案':'自由回答')+(q.required===false?' · 选填':'')+'</p>'+
+    '<div class="question-options" role="'+(multiple?'group':'radiogroup')+'" aria-labelledby="'+qid+'">'+(q.options||[]).map((o,i)=>
+      '<label class="question-option"><input id="'+qid+'-option-'+i+'" type="'+(multiple?'checkbox':'radio')+'" name="'+qid+'" data-question-choice="'+H(q.id)+'" value="'+H(o.id)+'" '+(a.selectedOptionIds.includes(o.id)?'checked ':'')+(d.pending?'disabled':'')+'><span>'+H(o.label)+'</span></label>').join('')+'</div>'+
+    (a.selectedOptionIds.length?Btn('clear-answer','清除选择','text-btn',d.pending?'disabled':''):'')+
+    '<textarea class="question-free" id="question-free-'+q.id+'" data-question-text="'+H(q.id)+'" aria-label="'+H(q.question)+'：你的回答" placeholder="'+(q.options?.length?'也可以直接输入你的回答，或补充说明…':'输入你的回答…')+'" '+(d.pending?'disabled':'')+'>'+H(a.text)+'</textarea>';
+}
+function renderQuestionDock(){
+  const host=byId('question-root');if(!host)return;
+  const events=pendingQuestions(),e=activeQuestion();
+  if(state.view!=='chat'||!e){host.innerHTML='';return;}
+  const focused=document.activeElement,focusId=focused?.id,body=host.querySelector('.question-dock-body');
+  if(body)state.questionScroll[body.dataset.questionScroll]=body.scrollTop;
+  if(state.questionHidden){
+    host.innerHTML=Btn('show-question',I('question')+'<span>需要你的回答'+(events.length>1?' · '+events.length+' 个请求':'')+'</span>'+I('arrow-up'),'question-reopen');return;
+  }
+  const qs=questionsFor(e),d=questionDraft(e),answered=qs.filter(q=>hasAnswer(d.answers[q.id])).length,scrollKey=e.id+':'+(d.review?'review':d.index);
+  host.innerHTML='<section class="question-dock" role="region" aria-label="需要你的回答"><header>'+I('question')+'<strong>需要你的回答</strong>'+
+    '<button class="source-mark" data-source="'+H(e.id)+'">字段</button>'+Btn('hide-question',I('arrow-down-s'),'icon-btn','aria-label="收起问题，保留草稿" title="收起问题，保留草稿"')+'</header>'+
+    (events.length>1?'<select class="question-requests" id="question-request" aria-label="待回答的请求">'+events.map((item,i)=>'<option value="'+H(item.id)+'" '+(item.id===e.id?'selected':'')+'>'+H((i+1)+' / '+events.length+' · '+questionsFor(item)[0].question)+'</option>').join('')+'</select>':'')+
+    (qs.length>1?'<nav class="question-nav" aria-label="选择问题">'+qs.map((q,i)=>Btn('question-step',(hasAnswer(d.answers[q.id])?I('check'):'')+(i+1),'','data-index="'+i+'" aria-label="第 '+(i+1)+' 题'+(hasAnswer(d.answers[q.id])?'，已填写':'')+'" '+(!d.review&&d.index===i?'aria-current="step"':'')+(d.pending?' disabled':''))).join('')+
+      Btn('question-review','检查答案','','aria-label="检查全部答案" '+(d.review?'aria-current="step"':'')+(d.pending?' disabled':''))+'<span class="question-progress" id="question-progress">已填写 '+answered+' / '+qs.length+'</span></nav>':'')+
+    '<div class="question-dock-body" data-question-scroll="'+H(scrollKey)+'">'+renderQuestionFields(e)+'</div>'+
+    (d.error?'<p class="question-error" role="alert">'+H(d.error)+'</p>':'')+
+    '<footer class="actions">'+(qs.length>1&&!d.review?Btn('question-prev','上一题','text-btn',!d.index||d.pending?'disabled':'')+Btn('question-next',d.index===qs.length-1?'检查答案':'下一题','text-btn',d.pending?'disabled':''):'')+
+    '<span class="spacer"></span>'+Btn('cancel-question','取消回答','text-btn',d.pending?'disabled':'')+
+    Btn('answer',d.pending?'正在提交…':qs.length>1?'提交全部回答':'提交回答','button primary',questionReady(e)?'':'disabled')+'</footer></section>';
+  const nextBody=host.querySelector('.question-dock-body');if(nextBody)nextBody.scrollTop=state.questionScroll[scrollKey]||0;
+  if(focusId&&host.contains(focused)===false){const next=byId(focusId);if(next&&focusId.startsWith('question-'))next.focus({preventScroll:true});}
+}
+function refreshQuestionProgress(){
+  const e=activeQuestion();if(!e)return;
+  const qs=questionsFor(e),d=questionDraft(e),submit=document.querySelector('[data-action="answer"]');
+  if(submit)submit.disabled=!questionReady(e);
+  const progress=byId('question-progress');if(progress)progress.textContent='已填写 '+qs.filter(q=>hasAnswer(d.answers[q.id])).length+' / '+qs.length;
+  document.querySelectorAll('.question-nav [data-index]').forEach(button=>{
+    const index=Number(button.dataset.index),answered=hasAnswer(d.answers[qs[index].id]);
+    button.innerHTML=(answered?I('check'):'')+(index+1);button.setAttribute('aria-label','第 '+(index+1)+' 题'+(answered?'，已填写':''));
+  });
 }
 function renderPermission(e){
-  const p=e.operation.result.value.permission;
-  return '<section class="request-block"><h3>是否允许这次工具操作？</h3><p>'+H(p.call.name)+' · '+H(p.call.arguments.path||'')+'</p><p class="setting-hint">'+H(p.scope.reason)+' 本次决定仅适用于这次操作及其参数。</p>'+
-    '<details class="tool-raw"><summary>查看精确参数与作用范围</summary><pre>'+H(JSON.stringify(p,null,2))+'</pre></details>'+
-    (state.permissionChoice?'<p class="small">'+(state.permissionChoice==='allow'?'已允许一次':'已拒绝')+'</p>':'<div class="actions">'+Btn('allow','允许一次','button primary')+Btn('deny','拒绝','button')+'</div>')+'</section>';
+  const p=e.operation.result.value.permission,choice=state.permissionChoices[e.id],attr='data-permission="'+e.id+'"';
+  const scope=e.alwaysScope;
+  return '<section class="request-block"><h3>是否允许这次工具操作？</h3><p>'+H(p.call.name)+' · '+H(p.call.arguments.path||'')+'</p><p class="setting-hint">'+H(p.scope.reason)+'</p>'+
+    (scope?'<p class="permission-scope"><strong>一直允许的范围</strong>：'+H(scope.tool)+' 写入此文件<br>'+H(scope.path)+'<br>'+H(scope.account)+' · '+H(scope.host)+' · 此主机的会话；可在「工具与执行」中撤销。</p>':'')+
+    '<details class="tool-raw"><summary>查看精确参数与作用范围</summary><pre>'+H(JSON.stringify({permission:p,...(scope?{proposedPersistentScope:scope}:{})},null,2))+'</pre></details>'+
+    (state.permissionErrors[e.id]?'<p class="permission-notice" role="alert">'+H(state.permissionErrors[e.id])+'</p>':'')+
+    (choice?'<p class="small">'+({allow_once:'已允许一次',allow_always:'已保存持续授权 · 本次操作已获准',deny:'已拒绝',saving:'正在保存授权…'}[choice])+'</p>'+
+      (choice==='allow_always'?Btn('manage-permission',state.permissionRules[e.id]?'管理持续授权':'持续授权已撤销','text-btn',attr):''):
+      '<div class="actions">'+Btn('allow','允许一次','button primary',attr)+(scope?Btn('allow-always','一直允许','button',attr):'')+Btn('deny','拒绝','button',attr)+'</div>')+'</section>';
 }
 function renderTool(e){
   if(e.call.name==='dispatch')return renderChild(e);
   if(e.call.name==='ask_user'){
-    if(e.result||state.questionAnswered)return renderQuestion(e);
-    return '<div class="inline-state">'+I('question')+'<div><p>'+H(e.call.arguments.question)+'</p>'+Btn('show-question','等待回答 · 打开问题')+'</div><button class="source-mark" data-source="'+e.id+'">字段</button></div>';
+    if(e.result||state.questionReceipts[e.id])return renderQuestion(e);
+    const qs=questionsFor(e);
+    return '<div class="inline-state">'+I('question')+'<div><p>'+H(qs[0].question)+(qs.length>1?' <span class="muted">等 '+qs.length+' 个问题</span>':'')+'</p>'+Btn('show-question','等待回答 · 打开问题','text-btn','data-request="'+e.id+'"')+'</div><button class="source-mark" data-source="'+e.id+'">字段</button></div>';
   }
   const info=toolInfo(e),a=e.call.arguments||{},d=e.result?.details??e.execution?.result??{},status=statusOf(e);
   let receipt=info.receipt,body='';
@@ -581,18 +740,39 @@ function renderEvents(events,runState=currentFrame().run.state){
   return history.map(e=>renderEvent(e)).join('')+processGroup(activity,'activity-'+(events[0]?.id||'empty'),active,true)+standalone.map(e=>renderEvent(e)).join('')+answers.map(e=>renderEvent(e)).join('');
 }
 function filesInFrame(){return allEvents().filter(e=>e.kind==='tool'&&['file_write','file_edit'].includes(e.call.name)&&(e.result?.details?.applied===true||e.result?.details?.status==='applied'));}
+function renderTurnFooter(){
+  const metrics=[['input','arrow-down','输入'],['output','arrow-up','输出'],['cacheRead','database-2','缓存读取'],['cacheWrite','archive-stack','缓存创建'],['cacheWrite1h','time','缓存创建（1h）'],['reasoning','brain','推理']];
+  const usages=currentFrame().usages||[],groups=['actual','estimated','missing'].map(measurement=>{
+    const rows=usages.filter(u=>u.measurement===measurement);if(!rows.length)return '';
+    const parts=metrics.flatMap(([key,icon,label])=>{
+      const values=rows.map(u=>u[key]).filter(v=>typeof v==='number'),sum=values.reduce((a,b)=>a+b,0);
+      if(!values.length||(key.startsWith('cache')||key==='reasoning')&&sum===0)return [];
+      return ['<span title="'+label+'">'+I(icon)+(key.startsWith('cache')?label+' ':'')+sum.toLocaleString('zh-CN')+'</span>'];
+    }).join('');
+    return (measurement==='estimated'?'<span title="估算用量">≈</span>':'')+parts+(rows.some(u=>u.unknownReceipts>0)?'<span title="部分请求没有用量回执">用量未完整上报</span>':'');
+  }).join('');
+  return '<div class="turn-footer"><div class="turn-usage" aria-label="本轮用量">'+groups+'</div><div class="turn-actions" aria-label="本轮操作">'+
+    Btn('copy-answer',I('file-copy'),'icon-btn','aria-label="复制回答" title="复制回答"')+
+    Btn('open-thread',I('chat-1'),'icon-btn','aria-label="打开关联会话" title="打开关联会话"')+
+    Btn('fork-turn',I('git-branch'),'icon-btn','aria-label="从此处分支" title="从此处分支"')+
+    Btn('turn-more',I('more-2'),'icon-btn','aria-label="更多操作" title="更多操作"')+'</div></div>';
+}
+function renderExistingEmpty(){
+  return '<div class="existing-empty"><svg width="24" height="24" viewBox="-64 -64 128 128" fill="currentColor" aria-hidden="true"><path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z"/><path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z"/></svg><h1>我们要在 opencr 中做什么？</h1></div>';
+}
 function renderTranscript(){
   const sc=currentScene(),f=currentFrame();
-  if(state.scene==='empty')return '<div class="empty-chat"><h2>有什么想一起完成的？</h2><p>opencr · 当前项目</p><div class="starter-list">'+Btn('starter','检查当前项目的结构')+Btn('starter','继续修改工作概览')+'</div></div>';
+  if(state.scene==='empty')return '';
   return '<div class="user-message">'+H(sc.prompt)+'</div><div class="user-actions">'+Btn('copy-prompt',I('file-copy'),'icon-btn','aria-label="复制消息"')+Btn('inspect-history',I('history'),'icon-btn','aria-label="查看本轮来源"')+'</div>'+
     renderEvents(f.events)+f.events.filter(e=>e.kind==='permission').map(renderPermission).join('')+
     (f.run.state==='cancelled'?'<div class="inline-state muted">'+I('stop-circle')+'<span>本轮已取消。已应用的文件修改保留。</span></div>':'')+
-    (f.run.state==='completed'?'<div class="run-footer">'+I('check')+'<span>本轮已完成</span>'+Btn('usage','用量 '+I('arrow-right-s'))+'</div>':'');
+    (f.run.state==='completed'?renderTurnFooter():'');
 }
 function renderComposer(){
   const active=['running','waiting'].includes(currentFrame().run.state);
   return '<div class="composer-area">'+Btn('bottom',I('arrow-down')+'滚动到底部','new-content',state.follow?'hidden':'')+
-    (state.questionHidden&&!state.questionAnswered&&currentFrame().events.some(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result)?Btn('show-question',I('question')+'需要你的回答','text-btn'):'')+
+    '<div class="question-root" id="question-root"></div>'+
+    (state.scene==='empty'?renderExistingEmpty():'')+
     '<div class="queue" id="queue-feedback" hidden></div><div class="composer"><textarea id="prompt" aria-label="输入消息" placeholder="描述你想做的事…" rows="1">'+H(state.prompt)+'</textarea>'+
     '<div class="composer-bottom">'+Btn('attachments',I('add'),'icon-btn','aria-label="添加附件"')+Btn('permission-panel',I('shield-check'),'icon-btn','aria-label="执行权限"')+
     Btn('goals',I('target'),'icon-btn','aria-label="目标"')+'<span class="composer-select">'+I('folder')+'opencr</span><span class="spacer"></span>'+
@@ -601,7 +781,7 @@ function renderComposer(){
     (active?Btn('stop-run',I('stop'),'submit','aria-label="停止当前工作"'):'')+Btn('send',I('arrow-up'),'submit','aria-label="发送消息" '+(active&&!state.prompt.trim()?'hidden':''))+'</div></div><div id="composer-feedback" class="composer-feedback"></div></div>';
 }
 function overviewStatus(){
-  const f=currentFrame(),failed=allEvents().filter(e=>e.child?.state==='failed'),q=f.events.some(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result&&!state.questionAnswered),p=f.events.some(e=>e.kind==='permission'&&!state.permissionChoice);
+  const f=currentFrame(),failed=allEvents().filter(e=>e.child?.state==='failed'),q=pendingQuestions().length,p=f.events.some(e=>e.kind==='permission'&&!state.permissionChoices[e.id]);
   return q?'等待你的回答':p?'等待授权':f.run.state==='failed'?'失败':failed.length?'有工作需要处理':({completed:'本轮已完成',cancelled:'已取消',waiting:'等待中',idle:'准备就绪'}[f.run.state]||'正在工作');
 }
 const planData=()=>state.planOverride||( ['mixed','parallel','history'].includes(state.scene)?currentFrame().plan:null);
@@ -747,11 +927,6 @@ function storageSettings(){
     (state.storage.cleaned?'<p class="setting-hint">样稿回执：已移除 128 MiB；需重新统计后更新占用。</p>':'')+'</section>'+
     '<section class="settings-section"><h3>按工作区查看</h3><p class="setting-hint">只显示可明确归属的数据，共享对象与数据库只计一次。</p>'+Btn('inspect-storage-scope',I('folder')+'opencr '+I('arrow-right-s'),'button')+'</section>';
 }
-function renderQuestionPopup(){
-  const events=currentFrame().events.filter(e=>e.kind==='tool'&&e.call.name==='ask_user'&&!e.result);
-  byId('question-root').innerHTML=state.view==='chat'&&events.length&&!state.questionAnswered&&!state.questionHidden?
-    '<section class="question-popup" aria-label="需要你的回答"><header>'+I('question')+'<span>需要你的回答</span>'+Btn('hide-question',I('close'),'icon-btn','aria-label="收起问题"')+'</header><div class="question-popup-body">'+events.map(renderQuestion).join('')+'</div></section>':'';
-}
 function renderSettings(){
   const host=byId('settings-root');
   if(state.view!=='settings'){host.innerHTML='';return;}
@@ -798,6 +973,7 @@ function renderControls(){
 }
 function capturePositions(){
   const viewport=byId('thread-scroll');if(viewport)state.scroll=viewport.scrollTop;
+  const questionBody=document.querySelector('.question-dock-body');if(questionBody)state.questionScroll[questionBody.dataset.questionScroll]=questionBody.scrollTop;
   document.querySelectorAll('[data-thinking-scroll]').forEach(el=>state.thoughtScroll.set(el.dataset.thinkingScroll,{top:el.scrollTop,follow:el.scrollHeight-el.scrollTop-el.clientHeight<3}));
   document.querySelectorAll('[data-output-scroll]').forEach(el=>{
     const key='output:'+el.dataset.outputScroll;state.thoughtScroll.set(key,{top:el.scrollTop,follow:el.scrollHeight-el.scrollTop-el.clientHeight<3});
@@ -816,8 +992,8 @@ function render({keepScroll=true}={}){
   renderChrome();renderControls();
   byId('app-wrap').hidden=state.view==='evidence';byId('evidence-page').style.display=state.view==='evidence'?'block':'none';
   const failed=currentFrame().run.state==='failed';
-  byId('conversation-layout').innerHTML='<section class="chat-area'+(failed?' with-run-error':'')+'">'+(failed?'<div class="run-alert" role="alert"><p>失败</p><p>'+H(currentFrame().runFailure?.message||'本轮执行失败。')+'</p></div>':'')+'<div class="thread-scroll" id="thread-scroll"><div class="transcript">'+renderTranscript()+'</div></div>'+renderComposer()+'</section>'+renderOverview();
-  renderSettings();renderQuestionPopup();
+  byId('conversation-layout').innerHTML='<section class="chat-area'+(failed?' with-run-error':'')+(state.scene==='empty'?' empty-state':'')+'">'+(failed?'<div class="run-alert" role="alert"><p>失败</p><p>'+H(currentFrame().runFailure?.message||'本轮执行失败。')+'</p></div>':'')+'<div class="thread-scroll" id="thread-scroll"><div class="transcript">'+renderTranscript()+'</div></div>'+renderComposer()+'</section>'+(state.scene==='empty'?'':renderOverview());
+  renderSettings();renderQuestionDock();
   if(state.view==='evidence')renderEvidence();
   document.body.classList.toggle('show-sources',state.sources);
   document.body.classList.toggle('no-code-wrap',!state.prefs.wrap);
@@ -834,7 +1010,10 @@ function renderEvidence(){
     ['子任务','Layout Scout · 检查窄窗口换行','原 name、task、child.state、avatar','任务文本来自现有派发参数。'],
     ['思考','思考 + 原文单行预览','ChatThinkingContent.thinking','直接沿用现有形式；没有「查看这一段思考」的额外入口。'],
     ['重试','模型请求正在重试 · 第 2 次','retry_scheduled.attempt、delay_ms','没有原始原因时，不给它编造原因。'],
-    ['计划与概览','原计划、子任务、已确认产出','计划订阅、Thread snapshot、文件回执','独立状态，不从工具名推测或生成计划。']
+    ['计划与概览','原计划、子任务、已确认产出','计划订阅、Thread snapshot、文件回执','独立状态，不从工具名推测或生成计划。'],
+    ['轮末用量','左侧直接显示，右侧操作','ChatUsage 的 input/output/cacheRead/cacheWrite 等','缺失缓存或为 0 时不显示；用量未上报与 0 分开。数字是样稿数据。'],
+    ['多题与多选（提议扩展）','题号导航、检查答案、一次提交','拟扩展 ask_user.questions[] / answers[]','当前接口仅 question + string options、answer:string；多题样稿明确标注 proposed。'],
+    ['持续授权（提议扩展）','允许一次 / 一直允许 / 拒绝','已有用户 PermissionRule；拟增加受信 owner 的保存与授权衔接','当前 decidePermission 只接受 allow_once/deny。保存失败继续等待，不报成功。']
   ];
   byId('evidence-page').innerHTML='<h2>每个界面判断都能回到实际数据</h2><p>这是独立 HTML 设计稿。场景标题属于评审控制；聊天中的正文、思考、参数和回执来自同一组示例事件。工具条目没有额外的意图摘要字段。</p>'+
     '<table class="evidence-table"><thead><tr><th>内容</th><th>示例呈现</th><th>已有来源</th><th>缺省行为</th></tr></thead><tbody>'+rows.map(row=>'<tr>'+row.map(text=>'<td>'+H(text)+'</td>').join('')+'</tr>').join('')+'</tbody></table>'+
@@ -842,7 +1021,8 @@ function renderEvidence(){
     '<tr><td>工作概览</td><td>浮起的独立卡片；完整 280px / 轻览 240px / 关闭；占用布局宽度；小窗口上下排列；可拖动调整。</td><td><code>WorkOverviewControl.tsx<br>styles/workbench.css:210<br>useWorkOverviewStore.ts</code></td></tr>'+
     '<tr><td>思考</td><td>脑图标 +「思考」+ 单行原文滚动预览；展开后的有界窗口、跟随最新内容与收起动画。</td><td><code>ChatThinkingBlock.tsx<br>styles/thinking.css</code></td></tr>'+
     '<tr><td>Agent 头像与图标</td><td>直接导出项目已有 SVG 图形与图标，不重新画另一套。</td><td><code>ui/agent-avatar-art.ts<br>icon/sprite.ts</code></td></tr>'+
-    '<tr><td>询问与权限</td><td>问题使用现有可收起浮层；权限保持时间线底部的独立操作。关闭问题不会取消等待。</td><td><code>ThreadQuestions.tsx<br>ThreadQuestion.tsx<br>ThreadPermission.tsx</code></td></tr>'+
+    '<tr><td>询问与权限</td><td>问题改到输入框上方，与输入框等宽、独立滚动；输入框可继续打字。多题、多选、多个独立请求各自保留草稿。权限保持时间线底部，增加有明确范围的持续授权。</td><td><code>ThreadQuestions.tsx<br>ThreadQuestion.tsx<br>ThreadPermission.tsx</code>（待改造）</td></tr>'+
+    '<tr><td>新会话</td><td>沿用现有 Varin 标志、项目标题与输入区；撤掉样稿自行添加的开场文案和建议按钮。</td><td><code>ThreadConversation.tsx<br>ui/varin-mark.ts<br>i18n/messages/zh-CN.ts</code></td></tr>'+
     '<tr><td>设置</td><td>保留现有模态外壳、220px 导航、分组、字段与作用域。调整分层、密度和依赖配置，未画的页面不伪造实现。</td><td><code>SettingsView.tsx<br>sections/shared</code></td></tr></tbody></table>'+
     '<h2>三种模式的真实区别</h2><table class="evidence-table"><thead><tr><th>模式</th><th>正文与过程</th><th>本稿调整</th></tr></thead><tbody>'+
     '<tr><td>按时间展开</td><td>按原顺序排列模型正文、原有思考与工具组件。</td><td>用间距与标题事实组织节奏，保留工具各自的展开与用途视图。</td></tr>'+
@@ -867,12 +1047,62 @@ function openInspector(title,body){
 }
 function feedback(text){const node=byId('composer-feedback');if(node)node.textContent=text;}
 function settingsFeedback(text){state.settingsFeedback=text;const node=byId('settings-feedback');if(node)node.textContent=text;}
+function resetRequests(){
+  state.questionHidden=false;state.questionDrafts={};state.questionActive=null;state.questionReceipts={};state.questionScroll={};
+  state.permissionChoices={};state.permissionErrors={};state.permissionRules={};
+}
+function moveQuestion(index,review=false){
+  const e=activeQuestion();if(!e)return;
+  const d=questionDraft(e);if(d.pending)return;
+  d.index=Math.max(0,Math.min(index,questionsFor(e).length-1));d.review=review;
+  renderQuestionDock();
+}
+function hideQuestionDock(){
+  const dock=document.querySelector('.question-dock');
+  const hadFocus=Boolean(dock?.contains(document.activeElement));
+  const finish=()=>{state.questionHidden=true;renderQuestionDock();if(hadFocus)document.querySelector('.question-reopen')?.focus({preventScroll:true});};
+  if(dock&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+    const scope=state.scene;
+    dock.animate([{height:dock.offsetHeight+'px',opacity:1},{height:'32px',opacity:0}],{duration:180,easing:'ease-in-out',fill:'forwards'}).finished.then(()=>{
+      if(scope!==state.scene)return;finish();
+    }).catch(()=>{});
+  }else finish();
+}
+function submitQuestion(){
+  const e=activeQuestion();if(!e||!questionReady(e))return;
+  const d=questionDraft(e),response=questionResponse(e),scope=state.scene;
+  d.pending=true;d.error='';d.attempts++;renderQuestionDock();
+  setTimeout(()=>{
+    if(scope!==state.scene||state.questionDrafts[e.id]!==d)return;
+    d.pending=false;
+    if(!pendingQuestions().some(q=>q.id===e.id))return;
+    if(currentScene().answerFailureOnce&&d.attempts===1){
+      d.error='回答尚未提交成功。已保留全部选择和文字，请重试。';renderQuestionDock();return;
+    }
+    state.questionReceipts[e.id]=response;render();feedback('回答已提交。'+(pendingQuestions().length?'还有 '+pendingQuestions().length+' 个请求等待回答。':''));
+  },450);
+}
+function saveAlwaysPermission(id){
+  const e=currentFrame().events.find(e=>e.id===id),scope=state.scene;
+  if(!e?.alwaysScope||state.permissionChoices[id])return;
+  const failedBefore=Boolean(state.permissionErrors[id]);
+  state.permissionChoices[id]='saving';delete state.permissionErrors[id];render();
+  setTimeout(()=>{
+    if(scope!==state.scene||!currentFrame().events.some(e=>e.id===id)||state.permissionChoices[id]!=='saving')return;
+    if(currentScene().permissionFailureOnce&&!failedBefore){
+      delete state.permissionChoices[id];state.permissionErrors[id]='持续授权未保存，本次操作仍在等待。可以重试，或仅允许这一次。';
+    }else{
+      state.permissionChoices[id]='allow_always';state.permissionRules[id]=clone(e.alwaysScope);
+    }
+    render();
+  },450);
+}
 function stopPlayback(){clearTimeout(timer);timer=null;state.playing=false;}
 function chooseScene(id,mode){
   stopPlayback();state.scene=id;state.frame=currentScene().initial??0;
   if(mode)state.mode=mode;
   state.view='chat';state.panel='overview';state.planOverride=null;state.editingPlan=false;
-  state.questionHidden=false;state.questionAnswered=false;state.answer='';state.answerText='';state.permissionChoice=null;
+  resetRequests();
   state.follow=id!=='history';state.scroll=0;
   byId('inspector').classList.remove('open');render({keepScroll:false});
 }
@@ -891,7 +1121,7 @@ function advance(){
 function play(){
   if(state.playing){stopPlayback();renderControls();return;}
   if(currentScene().frames.length<=1)return;
-  if(state.frame===currentScene().frames.length-1){state.frame=0;state.questionAnswered=false;state.permissionChoice=null;}
+  if(state.frame===currentScene().frames.length-1){state.frame=0;resetRequests();}
   state.playing=true;render();
   const tick=()=>{if(!state.playing)return;if(advance()&&state.frame<currentScene().frames.length-1)timer=setTimeout(tick,2400);else{stopPlayback();renderControls();}};
   timer=setTimeout(tick,2200);
@@ -937,7 +1167,7 @@ document.addEventListener('click',event=>{
     case 'toggle-sources':state.sources=!state.sources;document.body.classList.toggle('show-sources',state.sources);button.textContent=state.sources?'隐藏字段来源':'显示字段来源';break;
     case 'close-inspector':byId('inspector').classList.remove('open');break;
     case 'play':play();break;
-    case 'replay':stopPlayback();state.frame=0;state.questionAnswered=false;state.permissionChoice=null;render();break;
+    case 'replay':stopPlayback();state.frame=0;resetRequests();render();break;
     case 'next':advance();break;
     case 'sidebar':state.sidebar=!state.sidebar;byId('project-sidebar').classList.toggle('closed',!state.sidebar);break;
     case 'new-chat':chooseScene('empty');break;
@@ -961,18 +1191,30 @@ document.addEventListener('click',event=>{
     case 'plan-cancel':state.editingPlan=false;render();break;
     case 'child-panel':panel('threads');break;
     case 'child-stop':button.disabled=true;button.textContent='正在停止';setTimeout(()=>{const e=allEvents().find(x=>x.id===button.dataset.event);if(e?.child)e.child.state='cancelled';render();},600);break;
-    case 'show-question':state.questionHidden=false;renderQuestionPopup();break;
-    case 'hide-question':state.questionHidden=true;render();break;
-    case 'clear-answer':state.answer='';renderQuestionPopup();break;
-    case 'answer':if(state.answer||state.answerText.trim()){state.questionAnswered=true;render();feedback('回答已提交。');}break;
-    case 'cancel-question':state.questionAnswered=true;state.answer='已取消';render();break;
-    case 'allow':state.permissionChoice='allow';render();break;
-    case 'deny':state.permissionChoice='deny';render();break;
+    case 'show-question':if(button.dataset.request)state.questionActive=button.dataset.request;state.questionHidden=false;renderQuestionDock();break;
+    case 'hide-question':hideQuestionDock();break;
+    case 'question-step':moveQuestion(Number(button.dataset.index));break;
+    case 'question-prev':{const e=activeQuestion();if(e)moveQuestion(questionDraft(e).index-1);break;}
+    case 'question-next':{const e=activeQuestion();if(e){const d=questionDraft(e);moveQuestion(d.index+1,d.index===questionsFor(e).length-1);}break;}
+    case 'question-review':{const e=activeQuestion();if(e)moveQuestion(questionDraft(e).index,true);break;}
+    case 'clear-answer':{const e=activeQuestion();if(e){const d=questionDraft(e);d.answers[questionsFor(e)[d.index].id].selectedOptionIds=[];renderQuestionDock();}break;}
+    case 'answer':submitQuestion();break;
+    case 'cancel-question':{const e=activeQuestion();if(e){state.questionReceipts[e.id]={status:'cancelled'};render();}break;}
+    case 'allow':case 'deny':state.permissionChoices[button.dataset.permission]=action==='allow'?'allow_once':'deny';delete state.permissionErrors[button.dataset.permission];render();break;
+    case 'allow-always':saveAlwaysPermission(button.dataset.permission);break;
+    case 'manage-permission':{
+      const id=button.dataset.permission,rule=state.permissionRules[id];
+      openInspector('持续授权 · 工具与执行',rule?'<p>'+H(rule.host)+' · '+H(rule.account)+'</p><p>'+H(rule.tool)+' 写入 '+H(rule.path)+'</p><p>撤销后，后续匹配操作重新按权限规则判断；已经获准的这次操作保留原决定。</p>'+Btn('revoke-permission','撤销持续授权','button','data-permission="'+id+'"'):'<p>这条持续授权已撤销。本次操作的授权记录保留。</p>');break;
+    }
+    case 'revoke-permission':delete state.permissionRules[button.dataset.permission];byId('inspector').classList.remove('open');render();feedback('持续授权已撤销。');break;
     case 'bottom':state.follow=true;byId('thread-scroll').scrollTo({top:byId('thread-scroll').scrollHeight,behavior:'smooth'});button.hidden=true;break;
     case 'send':if(state.prompt.trim()){const running=['running','waiting'].includes(currentFrame().run.state);state.prompt='';byId('prompt').value='';feedback(running?'补充已加入示例队列。':'已记录示例输入。');if(running)button.hidden=true;}else byId('prompt')?.focus();break;
-    case 'starter':state.prompt=button.textContent;byId('prompt').value=state.prompt;byId('prompt').focus();break;
     case 'stop-run':stopPlayback();button.disabled=true;button.textContent='…';feedback('正在请求停止。');setTimeout(()=>{currentFrame().run.state='cancelled';render();},600);break;
-    case 'usage':openInspector('用量','<p>当前示例未附加模型用量回执。真实界面继续使用原请求的渠道、输入、输出和缓存统计；未知值不显示成 0。</p>');break;
+    case 'copy-answer':{
+      const text=currentFrame().events.filter(e=>e.kind==='text').map(e=>e.text).join('\n\n');
+      if(navigator.clipboard)navigator.clipboard.writeText(text).then(()=>feedback('已复制回答。'),()=>openInspector('回答文本','<pre>'+H(text)+'</pre>'));
+      else openInspector('回答文本','<pre>'+H(text)+'</pre>');break;
+    }
     case 'inspect-operation':{
       const e=allEvents().find(x=>x.id===button.dataset.event);
       openInspector('原操作','<p>结果待确认；此处只查看原操作，不重新执行写入。</p><pre>'+H(JSON.stringify(rawOf(e),null,2))+'</pre>'+Btn('next','显示后续确认回执','button'));break;
@@ -1003,7 +1245,7 @@ document.addEventListener('input',event=>{
   const el=event.target;
   if(el.id==='prompt'){state.prompt=el.value;const send=document.querySelector('[data-action="send"]');if(send)send.hidden=['running','waiting'].includes(currentFrame().run.state)&&!state.prompt.trim();}
   if(el.id==='plan-editor')state.planDraft=el.value;
-  if(el.id==='question-free'){state.answerText=el.value;const submit=document.querySelector('[data-action="answer"]');if(submit)submit.disabled=!state.answer&&!state.answerText.trim();}
+  if(el.dataset.questionText){const e=activeQuestion();if(e){questionDraft(e).answers[el.dataset.questionText].text=el.value;refreshQuestionProgress();}}
   if(el.id==='settings-search'){state.search=el.value;renderSettings();const next=byId('settings-search');next.focus();next.setSelectionRange(next.value.length,next.value.length);}
   if(el.id==='frame-slider'){stopPlayback();state.frame=Number(el.value);render();}
   if(el.dataset.webField)state.web[el.dataset.webField]=el.value;
@@ -1014,7 +1256,13 @@ document.addEventListener('input',event=>{
 document.addEventListener('change',event=>{
   const el=event.target;
   if(el.id==='scenario'){if(state.view==='settings')chooseSettings(el.value);else chooseScene(el.value);return;}
-  if(el.name==='question'){const e=currentFrame().events.find(e=>e.kind==='tool'&&e.call.name==='ask_user');state.answer=e.call.arguments.options[Number(el.value)];renderQuestionPopup();return;}
+  if(el.id==='question-request'){state.questionActive=el.value;renderQuestionDock();return;}
+  if(el.dataset.questionChoice){
+    const e=activeQuestion();if(!e)return;
+    const d=questionDraft(e),q=questionsFor(e).find(q=>q.id===el.dataset.questionChoice),a=d.answers[q.id];
+    a.selectedOptionIds=q.selection==='multiple'?(el.checked?[...a.selectedOptionIds,el.value]:a.selectedOptionIds.filter(id=>id!==el.value)):[el.value];
+    renderQuestionDock();return;
+  }
   if(el.dataset.pref){
     const key=el.dataset.pref;
     if(key.startsWith('web.'))state.web[key.slice(4)]=el.checked;else if(key==='retry.enabled')state.retry.enabled=el.checked;else state.prefs[key]=el.checked;
@@ -1035,10 +1283,12 @@ document.addEventListener('scroll',event=>{
 },true);
 document.addEventListener('transitionend',event=>{if(event.target.classList?.contains('fold')||event.target.classList?.contains('thinking-panel'))followAfterChange();});
 document.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){if(byId('inspector').classList.contains('open'))byId('inspector').classList.remove('open');else if(state.view==='settings'){state.view='chat';render();}else if(!state.questionHidden&&document.querySelector('.question-popup')){state.questionHidden=true;render();}else{state.overview='closed';render();}}
+  if(event.key==='Escape'){if(byId('inspector').classList.contains('open'))byId('inspector').classList.remove('open');else if(state.view==='settings'){state.view='chat';render();}else if(!state.questionHidden&&document.querySelector('.question-dock')){hideQuestionDock();}else{state.overview='closed';render();}}
   if(event.target.id==='prompt'&&event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();document.querySelector('[data-action="send"]')?.click();}
 });
-render({keepScroll:false});
+const initialScene=new URLSearchParams(location.search).get('scene');
+if(scenarios.some(sc=>sc.id===initialScene))chooseScene(initialScene);
+else render({keepScroll:false});
 </script>
 </body>
 </html>
