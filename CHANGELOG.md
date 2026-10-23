@@ -5,6 +5,26 @@ private runtime protocol and product surfaces still move together.
 
 ## Unreleased
 
+## 0.9.32 - 2026-10-23
+
+### 更新摘要
+
+- 将代码检索转为原生 investigation，改进结构化源码读取与按用途呈现的资源工具，保留原始执行控制和错误诊断。
+- 默认采用对话优先布局，支持折叠的实时活动、思考预览、流式文件预览与可编辑计划；统一后续任务生命周期和操作说明。
+- 重整设置导航、编辑器与上下文控制，集中管理项目信任并在创建项目时复核目录。
+- 恢复记忆与知识的可选本地嵌入组件，改进索引清理的协作取消、恢复与进度反馈。
+- 修复 Windows 长路径升级卸载与进度展示，以及进程、发现和工具结果处理的回归。
+- 修复 Host 静态检查和测试替身与当前执行视图、Computer 可用性及内置语法契约不一致的问题，保留原有校验。
+
+### Release highlights
+
+- Move code retrieval to native investigations and improve structural source reads and purpose-specific resource tools while retaining execution controls and failure diagnostics.
+- Default to a conversation-first layout with collapsible live activity, thinking and file previews, editable plans, and consistent follow-up task controls.
+- Redesign settings navigation and context controls; centralize project trust and review folders during project creation.
+- Restore optional local embeddings for memory and knowledge, with cooperative, resumable and observable index cleanup.
+- Repair Windows long-path upgrade removal and actual progress reporting, alongside process, discovery and tool-result regressions.
+- Align Host lint and test fixtures with current execution-view, Computer availability and bundled-grammar contracts without weakening validation.
+
 ## 0.9.31 - 2026-10-22
 
 ### 更新摘要
