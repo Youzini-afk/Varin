@@ -744,8 +744,10 @@ fn compaction_retains_resources_at_the_summary_boundary_and_rejects_earlier_cuts
         plan_hash: job.compaction.plan_hash.clone(), node_id: execution.plan.nodes()[0].id.clone(),
     });
     let mut binding = binding(&job.receipt.branch_id, Some(job.receipt.input_id.clone()));
-    binding.tools.clear();
-    binding.tool_schema_generation = 0;
+    // Summary requests use the capabilities frozen by the context-job owner.
+    let selection = db.launch_intent(&job.receipt.run_id).unwrap().unwrap().selection;
+    binding.tools = varin_runtime::tool_disclosure::request_tools(&selection.tools, false, None);
+    binding.tool_schema_generation = selection.tool_schema_generation;
     let snapshot = RequestSnapshot {
         view: RequestView {
             request_id: "summary-step".into(),

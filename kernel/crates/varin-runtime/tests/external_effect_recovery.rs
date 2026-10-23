@@ -583,10 +583,19 @@ fn cancelled_recovery_body_failure_retains_intent_and_receipt_then_retries_real_
             .unwrap();
         // Completion is reapable even if its actual thread return races this wake.
         supervisor.advance_pending().unwrap();
+        // Releasing the original worker emits one launch-availability hint. Consume
+        // that drain notification before checking that the failed boundary stays idle.
+        wakes
+            .try_recv()
+            .expect("original worker drain must notify launch consumers");
         assert!(supervisor.status().unwrap().is_empty());
         assert!(supervisor.execution_failure(&f.run).unwrap().is_some());
         for _ in 0..3 {
             supervisor.reconcile_message_requests().unwrap();
+            assert!(
+                supervisor.status().unwrap().is_empty(),
+                "unchanged body failure must not launch another recovery worker"
+            );
         }
         assert!(
             wakes.try_recv().is_err(),
