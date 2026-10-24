@@ -583,6 +583,16 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
       keywords: ['density', 'compact', 'comfortable', 'spacing'] },
   },
   {
+    id: 'appearance.motion', category: 'appearance', owner: 'app',
+    field: { path: 'motionPreference', kind: 'enum',
+      options: [{ value: 'full' }, { value: 'reduced' }, { value: 'off' }],
+      note: 'the operating system reduced-motion setting lowers full to reduced' },
+    apply: 'immediate',
+    ui: { page: 'appearance', titleKey: 'settings.varin.visual.section.motion',
+      descriptionKey: 'settings.varin.visual.section.motionDescription',
+      keywords: ['motion', 'animation', 'reduced motion', 'transition', '动效', '动画'] },
+  },
+  {
     id: 'appearance.input-bar-offset', category: 'appearance', owner: 'app',
     field: { path: 'inputBarOffset', kind: 'number', min: 0, max: 100, integer: true, unit: 'px' },
     apply: 'immediate',

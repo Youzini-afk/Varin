@@ -6,6 +6,7 @@ import { VarinApplication } from './apps/VarinApplication'
 import { SessionAuthGate } from './components/auth/SessionAuthGate'
 import { ThemeSystemProvider } from './contexts/ThemeSystemContext'
 import { ThemeProvider } from './components/providers/ThemeProvider'
+import { MotionProvider } from './components/providers/MotionProvider'
 import './lib/debug'
 import { initializeAppearancePreferences } from './lib/persistence'
 import { startAppearanceAutoSave } from './lib/appearanceAutoSave'
@@ -53,9 +54,11 @@ createRoot(rootElement).render(
     <I18nProvider>
       <ThemeSystemProvider>
         <ThemeProvider>
-          <SessionAuthGate apis={runtimeAPIs}>
-            <VarinApplication apis={runtimeAPIs} />
-          </SessionAuthGate>
+          <MotionProvider>
+            <SessionAuthGate apis={runtimeAPIs}>
+              <VarinApplication apis={runtimeAPIs} />
+            </SessionAuthGate>
+          </MotionProvider>
         </ThemeProvider>
       </ThemeSystemProvider>
     </I18nProvider>

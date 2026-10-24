@@ -38,6 +38,9 @@ import {
     SettingsInset,
     SettingsCheckboxRow,
     SettingsChipGroup,
+    SettingsRadioGroup,
+    SettingsRadioOption,
+    SETTINGS_HELPER_CLASS,
     SETTINGS_SELECT_TRIGGER_CLASS,
     SETTINGS_SELECT_SIZE,
     SETTINGS_ICON_BUTTON_CLASS,
@@ -54,6 +57,8 @@ import { Icon } from '@/components/icon/Icon';
 import { FileEditorPreferencesSettings } from './FileEditorPreferencesSettings';
 import { ThemePicker } from './ThemePicker';
 import { AppearanceThemePreview } from './AppearanceThemePreview';
+import { useMotionLevel } from '@/hooks/usePrefersReducedMotion';
+import { MOTION_PREFERENCES, type MotionPreference } from '@/lib/motion/preference';
 
 interface Option<T extends string> {
     id: T;
@@ -132,6 +137,12 @@ const TIME_FORMAT_OPTIONS: Option<'auto' | '12h' | '24h'>[] = [
     },
 ];
 
+const MOTION_OPTIONS: Option<MotionPreference>[] = MOTION_PREFERENCES.map((id) => ({
+    id,
+    labelKey: `settings.varin.visual.option.motion.${id}.label`,
+    descriptionKey: `settings.varin.visual.option.motion.${id}.description`,
+}));
+
 const WEEK_START_OPTIONS: Option<'auto' | 'monday' | 'sunday'>[] = [
     {
         id: 'auto',
@@ -170,7 +181,8 @@ type VisibleSetting =
     | 'fileEditorKeymap'
     | 'fileEditorPreferences'
     | 'expandedEditorToolbar'
-    | 'autoSaveEnabled';
+    | 'autoSaveEnabled'
+    | 'motion';
 
 const WINDOW_CONTROLS_POSITION_OPTIONS: Array<{ id: DesktopWindowControlsPosition; labelKey: string }> = [
     { id: 'left', labelKey: 'settings.varin.desktopNetwork.option.windowControlsLeft' },
@@ -282,6 +294,14 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
         setTimeFormatPreference(value);
         void updateDesktopSettings({ timeFormatPreference: value });
     }, [setTimeFormatPreference]);
+
+    const motionPreference = useUIStore(state => state.motionPreference);
+    const setMotionPreference = useUIStore(state => state.setMotionPreference);
+    const motionLevel = useMotionLevel();
+    const handleMotionPreferenceChange = React.useCallback((value: MotionPreference) => {
+        setMotionPreference(value);
+        void updateDesktopSettings({ motionPreference: value });
+    }, [setMotionPreference]);
 
     const handleWeekStartPreferenceChange = React.useCallback((value: 'auto' | 'monday' | 'sunday') => {
         setWeekStartPreference(value);
@@ -682,6 +702,29 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                         </div>
                                     )}
                                 </div>
+                            </SettingsSection>
+                        )}
+
+                        {shouldShow('motion') && (
+                            <SettingsSection
+                                title={t('settings.varin.visual.section.motion')}
+                                description={t('settings.varin.visual.section.motionDescription')}
+                                settingsItem="appearance.motion"
+                            >
+                                <SettingsRadioGroup aria-label={t('settings.varin.visual.section.motion')}>
+                                    {MOTION_OPTIONS.map((option) => (
+                                        <SettingsRadioOption
+                                            key={option.id}
+                                            selected={motionPreference === option.id}
+                                            onSelect={() => handleMotionPreferenceChange(option.id)}
+                                            label={tUnsafe(option.labelKey)}
+                                            description={option.descriptionKey ? tUnsafe(option.descriptionKey) : undefined}
+                                        />
+                                    ))}
+                                </SettingsRadioGroup>
+                                {motionPreference === 'full' && motionLevel === 'reduced' && (
+                                    <p role="status" className={SETTINGS_HELPER_CLASS}>{t('settings.varin.visual.option.motion.systemReduced')}</p>
+                                )}
                             </SettingsSection>
                         )}
 

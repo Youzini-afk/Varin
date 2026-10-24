@@ -20,7 +20,9 @@ import {
   type FileEditorSettings,
   type FileEditorSettingsPatch,
 } from '@/lib/file-editor-settings';
+import { isMotionPreference, type MotionPreference } from '@/lib/motion/preference';
 
+export type { MotionPreference } from '@/lib/motion/preference';
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
 export type PendingDiffScope = 'working' | 'staged';
 export type ContextPanelMode = 'threads' | 'diff' | 'file' | 'context' | 'recovery' | 'plan' | 'chat' | 'browser' | 'git' | 'pr' | 'notes' | 'terminal' | 'computer' | 'ui' | 'material';
@@ -549,6 +551,8 @@ interface UIStore {
   collapsibleThinkingBlocks: boolean;
   chatRenderMode: ChatRenderMode;
   activityRenderMode: ActivityRenderMode;
+  /** Appearance → interface motion. The OS reduced-motion setting can still lower `full`. */
+  motionPreference: MotionPreference;
   showDeletionDialog: boolean;
   serverPermissionAutoAcceptEnabled: boolean;
   autoDeleteEnabled: boolean;
@@ -710,6 +714,7 @@ interface UIStore {
   setCollapsibleThinkingBlocks: (value: boolean) => void;
   setChatRenderMode: (value: ChatRenderMode) => void;
   setActivityRenderMode: (value: ActivityRenderMode) => void;
+  setMotionPreference: (value: MotionPreference) => void;
   setShowDeletionDialog: (value: boolean) => void;
   setServerPermissionAutoAcceptEnabled: (value: boolean) => void;
   setAutoDeleteEnabled: (value: boolean) => void;
@@ -867,6 +872,7 @@ export const useUIStore = create<UIStore>()(
         collapsibleThinkingBlocks: true,
         chatRenderMode: 'dialogue',
         activityRenderMode: 'summary',
+        motionPreference: 'full',
         showDeletionDialog: true,
         serverPermissionAutoAcceptEnabled: false,
         autoDeleteEnabled: false,
@@ -1633,6 +1639,10 @@ export const useUIStore = create<UIStore>()(
           set({ chatRenderMode: value });
         },
 
+        setMotionPreference: (value) => {
+          if (isMotionPreference(value)) set({ motionPreference: value });
+        },
+
         setActivityRenderMode: (value) => {
           set({ activityRenderMode: value });
         },
@@ -2248,6 +2258,7 @@ export const useUIStore = create<UIStore>()(
             contextRailOrder: (saved.contextRailOrder ?? current.contextRailOrder)
               .filter(id => CONTEXT_SURFACES.some(surface => surface.id === id)),
             chatContentWidth: isChatContentWidth(saved.chatContentWidth) ? saved.chatContentWidth : DEFAULT_CHAT_CONTENT_WIDTH,
+            motionPreference: isMotionPreference(saved.motionPreference) ? saved.motionPreference : current.motionPreference,
             fileEditorSettings: normalizeFileEditorSettings(
               saved.fileEditorSettings,
               current.fileEditorSettings,
@@ -2282,6 +2293,7 @@ export const useUIStore = create<UIStore>()(
           collapsibleThinkingBlocks: state.collapsibleThinkingBlocks,
           chatRenderMode: state.chatRenderMode,
           activityRenderMode: state.activityRenderMode,
+          motionPreference: state.motionPreference,
           showDeletionDialog: state.showDeletionDialog,
           serverPermissionAutoAcceptEnabled: state.serverPermissionAutoAcceptEnabled,
           autoDeleteEnabled: state.autoDeleteEnabled,

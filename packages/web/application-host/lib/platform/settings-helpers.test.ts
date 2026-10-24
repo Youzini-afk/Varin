@@ -81,6 +81,16 @@ describe('settings helpers', () => {
     expect(configuredVmProviders(response)).toEqual([{ id: 'hv1', kind: 'libvirt', uri: 'qemu+ssh://host/system', storagePool: 'data' }]);
     expect(helpers.sanitizeSettingsUpdate({ computerVmProviders: [] })).toEqual({ computerVmProviders: [] });
   });
+  it('keeps the interface motion preference through the settings write/read path', () => {
+    const helpers = createTestHelpers();
+    for (const motionPreference of ['full', 'reduced', 'off']) {
+      const saved = helpers.mergePersistedSettings({}, helpers.sanitizeSettingsUpdate({ motionPreference }));
+      expect(helpers.formatSettingsResponse(saved).motionPreference).toBe(motionPreference);
+    }
+    expect(helpers.sanitizeSettingsUpdate({ motionPreference: ' off ' })).toEqual({ motionPreference: 'off' });
+    expect(helpers.sanitizeSettingsUpdate({ motionPreference: 'none' })).toEqual({});
+    expect(helpers.sanitizeSettingsUpdate({ motionPreference: false })).toEqual({});
+  });
   it('preserves an explicit no-workspace selection', () => {
     const helpers = createTestHelpers();
 

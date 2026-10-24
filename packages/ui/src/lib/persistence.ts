@@ -22,6 +22,7 @@ import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/theme
 import { DEFAULT_OPEN_IN_APP_ID } from '@/lib/openInApps';
 import { applyAuthoritativeSettings } from '@/lib/settingsApplication';
 import { sanitizeFileEditorSettingsPatch } from '@/lib/file-editor-settings';
+import { isMotionPreference } from '@/lib/motion/preference';
 import {
   usePreferencesStore,
   type PreferencesState,
@@ -496,6 +497,7 @@ const materializeAuthoritativeUiSettings = (settings: DesktopSettings): DesktopS
     desktopWindowControlsPosition: defaults.desktopWindowControlsPosition,
     desktopWindowControlsStyle: defaults.desktopWindowControlsStyle,
     chatRenderMode: defaults.chatRenderMode,
+    motionPreference: defaults.motionPreference,
     activityRenderMode: defaults.activityRenderMode,
     mermaidRenderingMode: defaults.mermaidRenderingMode,
     userMessageRenderingMode: defaults.userMessageRenderingMode,
@@ -676,6 +678,9 @@ const applyDesktopUiPreferences = (settings: DesktopSettings) => applyAuthoritat
     if (settings.chatRenderMode !== store.chatRenderMode) {
       store.setChatRenderMode(settings.chatRenderMode);
     }
+  }
+  if (isMotionPreference(settings.motionPreference) && settings.motionPreference !== store.motionPreference) {
+    store.setMotionPreference(settings.motionPreference);
   }
   if (
     settings.recoveryPreference === 'conversation'
@@ -1163,6 +1168,9 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.chatRenderMode === 'string'
     && (candidate.chatRenderMode === 'sorted' || candidate.chatRenderMode === 'live' || candidate.chatRenderMode === 'dialogue')) {
     result.chatRenderMode = candidate.chatRenderMode;
+  }
+  if (isMotionPreference(candidate.motionPreference)) {
+    result.motionPreference = candidate.motionPreference;
   }
   if (
     candidate.recoveryPreference === 'conversation'

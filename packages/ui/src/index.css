@@ -3,6 +3,7 @@
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
 @import "./styles/mobile.css";
+@import "./styles/motion.css";
 @import "./styles/workbench.css";
 @import "./styles/tool-interactions.css";
 @import "./styles/thinking.css";

@@ -5,6 +5,7 @@ import '@/styles/application';
 import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import { MotionProvider } from '@/components/providers/MotionProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
@@ -47,9 +48,11 @@ export function renderElectronMiniChatApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <SessionAuthGate apis={apis}>
-              <ElectronMiniChatApp apis={apis} />
-            </SessionAuthGate>
+            <MotionProvider>
+              <SessionAuthGate apis={apis}>
+                <ElectronMiniChatApp apis={apis} />
+              </SessionAuthGate>
+            </MotionProvider>
           </ThemeProvider>
         </ThemeSystemProvider>
       </I18nProvider>

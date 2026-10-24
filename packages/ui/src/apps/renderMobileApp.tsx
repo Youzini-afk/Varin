@@ -5,6 +5,7 @@ import '@/styles/application';
 import '@/lib/debug';
 import { DiffWorkerProvider } from '@/contexts/DiffWorkerProvider';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
+import { MotionProvider } from '@/components/providers/MotionProvider';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@varin/application-client';
 import { startAppearanceAutoSave } from '@/lib/appearanceAutoSave';
@@ -84,9 +85,11 @@ export function renderMobileApp(apis: RuntimeAPIs) {
       <I18nProvider>
         <ThemeSystemProvider>
           <ThemeProvider>
-            <DiffWorkerProvider>
-              {isNativeShell ? app : <SessionAuthGate apis={resolvedApis}>{app}</SessionAuthGate>}
-            </DiffWorkerProvider>
+            <MotionProvider>
+              <DiffWorkerProvider>
+                {isNativeShell ? app : <SessionAuthGate apis={resolvedApis}>{app}</SessionAuthGate>}
+              </DiffWorkerProvider>
+            </MotionProvider>
           </ThemeProvider>
         </ThemeSystemProvider>
       </I18nProvider>

@@ -150,6 +150,8 @@ export type DesktopSettings = {
   timeFormatPreference?: 'auto' | '12h' | '24h';
   weekStartPreference?: 'auto' | 'sunday' | 'monday';
   chatRenderMode?: 'sorted' | 'live' | 'dialogue';
+  /** Appearance → interface motion; the OS reduced-motion setting still applies to `full`. */
+  motionPreference?: 'full' | 'reduced' | 'off';
   messageStreamTransport?: 'auto' | 'ws' | 'sse';
   activityRenderMode?: 'collapsed' | 'summary';
   mermaidRenderingMode?: 'svg' | 'ascii';

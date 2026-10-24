@@ -1,0 +1,66 @@
+/*
+ * Motion tokens. Generated from lib/motion/tokens.ts (tokens.test.ts keeps them in sync).
+ * Spring durations are the full settle time; the visible movement ends earlier.
+ * Use `calc(var(--motion-dur-glide))` with `var(--motion-ease-glide)`.
+ */
+:root {
+  --motion-ease-out: cubic-bezier(.22, 1, .36, 1);
+  --motion-ease-exit: cubic-bezier(.4, 0, 1, 1);
+  --motion-dur-fade: 160ms;
+  --motion-dur-exit: 110ms;
+  --motion-ease-snap: cubic-bezier(.22, 1, .36, 1);
+  --motion-dur-snap: 200ms;
+  --motion-ease-glide: cubic-bezier(.22, 1, .36, 1);
+  --motion-dur-glide: 340ms;
+  --motion-ease-travel: cubic-bezier(.22, 1, .36, 1);
+  --motion-dur-travel: 520ms;
+  --motion-ease-settle: cubic-bezier(.34, 1.32, .64, 1);
+  --motion-dur-settle: 460ms;
+}
+
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --motion-ease-snap: linear(0, 0.0532, 0.163, 0.2799, 0.4056, 0.5195, 0.6176, 0.6992, 0.7656, 0.8148, 0.8576, 0.891, 0.917, 0.937, 0.9512, 0.9631, 0.9722, 0.9791, 0.9843, 0.988, 0.991, 0.9933, 0.995, 0.9962, 0.9972, 0.9979, 0.9984, 1);
+    --motion-dur-snap: 319ms;
+    --motion-ease-glide: linear(0, 0.0185, 0.0625, 0.1223, 0.1906, 0.2686, 0.3405, 0.4099, 0.4755, 0.5365, 0.5922, 0.6428, 0.6882, 0.7287, 0.7674, 0.7988, 0.8263, 0.8503, 0.8713, 0.8895, 0.9053, 0.9189, 0.9306, 0.9415, 0.9501, 0.9575, 0.9638, 0.9692, 0.9738, 0.9778, 0.9811, 0.984, 0.9866, 0.9886, 0.9904, 0.9919, 0.9931, 0.9942, 0.9951, 0.9958, 0.9965, 0.9971, 0.9975, 0.9979, 0.9982, 1);
+    --motion-dur-glide: 545ms;
+    --motion-ease-travel: linear(0, 0.008, 0.0283, 0.0581, 0.0949, 0.1367, 0.1819, 0.229, 0.2771, 0.3252, 0.3727, 0.419, 0.4637, 0.5065, 0.5472, 0.5857, 0.6219, 0.6557, 0.6873, 0.7166, 0.7437, 0.7686, 0.7916, 0.8126, 0.8318, 0.8494, 0.8653, 0.8798, 0.8929, 0.9037, 0.9145, 0.9242, 0.9329, 0.9407, 0.9477, 0.954, 0.9595, 0.9645, 0.9689, 0.9728, 0.9763, 0.9794, 0.9821, 0.9845, 0.9866, 0.9884, 0.99, 0.9915, 0.9927, 0.9938, 0.9947, 0.9955, 0.9962, 0.9968, 0.9974, 0.9978, 0.9982, 1);
+    --motion-dur-travel: 683ms;
+    --motion-ease-settle: linear(0, 0.0114, 0.0406, 0.0838, 0.1374, 0.1983, 0.2639, 0.3319, 0.4006, 0.4683, 0.534, 0.5966, 0.6555, 0.7102, 0.7603, 0.8058, 0.8465, 0.8826, 0.9142, 0.9416, 0.9649, 0.9845, 1.0006, 1.0137, 1.024, 1.0319, 1.0376, 1.0415, 1.0436, 1.0447, 1.0446, 1.0437, 1.042, 1.0398, 1.0373, 1.0344, 1.0314, 1.0283, 1.0253, 1.0223, 1.0194, 1.0167, 1.0141, 1.0118, 1.0097, 1.0077, 1.006, 1.0045, 1.0032, 1.0021, 1.0011, 1.0003, 0.9997, 0.9991, 1);
+    --motion-dur-settle: 647ms;
+  }
+}
+
+/*
+ * User motion level (Appearance → 界面动效), also set to "reduced" when the
+ * OS asks for reduced motion. "reduced" keeps colour and opacity changes and
+ * ends movement instantly; "off" ends every transition and animation.
+ */
+:root[data-motion="reduced"] {
+  --wb-panel-duration: 0ms;
+  --wb-travel-duration: 0ms;
+}
+:root[data-motion="reduced"] *,
+:root[data-motion="reduced"] *::before,
+:root[data-motion="reduced"] *::after {
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+  transition-property: opacity, color, background-color, border-color, outline-color, fill, stroke, box-shadow !important;
+  scroll-behavior: auto !important;
+}
+:root[data-motion="off"] {
+  --wb-panel-duration: 0ms;
+  --wb-state-duration: 0ms;
+  --wb-travel-duration: 0ms;
+}
+:root[data-motion="off"] *,
+:root[data-motion="off"] *::before,
+:root[data-motion="off"] *::after {
+  animation-duration: .01ms !important;
+  animation-iteration-count: 1 !important;
+  animation-delay: 0s !important;
+  transition-duration: .01ms !important;
+  transition-delay: 0s !important;
+  scroll-behavior: auto !important;
+}

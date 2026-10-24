@@ -31,6 +31,7 @@ Use these for architecture, then the local owner below for implementation change
 | Purpose-specific tools | `ChatDelegation`, `ChatResourceTools`, `ChatSourceTools`, `ChatProcessTool`, `ChatWorkTools`, `ChatMaterialsTool`, `ChatEnvironmentTools`, `ChatComputerTools`, `ChatFollowupTool`, `ChatMcpTool`; `toolInvocation` preserves gateway and native operation ownership |
 | Interactive content | `src/lib/interactive-ui`, `src/components/interactive-ui`; [contract and lifecycle](../../docs/interactive-content.md) |
 | Theme and shared chrome | `src/lib/theme`, `src/styles`, and `src/components/ui` |
+| Motion tokens and preference | `src/lib/motion`, `src/styles/motion.css`, `MotionProvider`; see [Motion](#motion) |
 | Icons | [Sprite-backed Icon contract](src/components/icon/README.md) |
 
 Lower framework-neutral `lib` owners do not import official `workbenches`. Narrow `features`
@@ -67,6 +68,30 @@ Connected workbench mounts participate in the existing Surface preparation lease
 mounts validate before publication; closure, replacement, and render failure fence that lease. Once the
 Host confirms durable selection, local mount cleanup cannot claim the catalog or an external effect
 rolled back. Detailed lifecycle mechanics belong to the extension packages.
+
+## Motion
+
+The product uses four springs and two tweens from `lib/motion/tokens.ts`:
+- `snap`: hover pills, menus, press.
+- `glide`: the default, for arrivals, selection and size changes.
+- `travel`: cross-region movement.
+- `settle`: arrival moments only.
+- `TWEENS.fade` is 160ms; `TWEENS.exit` is 110ms.
+
+The same spring drives every motion layer:
+- motion components use `springTransition(token)`;
+- WAAPI uses `springTiming(token)`;
+- CSS uses `var(--motion-ease-<token>)` over `var(--motion-dur-<token>)`.
+
+`styles/motion.css` holds the generated `linear()` curves, and `tokens.test.ts` fails when they drift from the TypeScript springs. The older `--wb-*` durations remain for existing rules and follow the same levels.
+
+`motionPreference` (Appearance → 界面动效) is `full`, `reduced` or `off`. It is persisted with the other app settings and synced through desktop settings. When the OS asks for reduced motion, `full` resolves to `reduced`.
+
+`MotionProvider` wraps each React root. It writes `:root[data-motion]` and configures `MotionConfig`:
+- Under `reduced`, CSS keeps opacity and colour changes and ends movement immediately.
+- Under `off`, CSS ends every transition and animation.
+
+`usePrefersReducedMotion()` and `prefersReducedMotion()` return true for either reduced level, so existing callers follow the user's choice. `useMotionLevel()` exposes the three-way level for code that treats `reduced` and `off` differently. Reading pauses, such as a preview that stays briefly before retracting, keep their time under every level because they are reading time rather than animation. The design and phased plan are in [motion and interaction](../../docs/design/motion-and-interaction.md).
 
 ## Conversation and resource projections
 

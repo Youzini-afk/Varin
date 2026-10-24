@@ -558,6 +558,12 @@ export const createSettingsHelpers = (dependencies: SettingsHelpersDependencies)
         result.chatRenderMode = mode;
       }
     }
+    if (typeof candidate.motionPreference === 'string') {
+      const preference = candidate.motionPreference.trim();
+      if (preference === 'full' || preference === 'reduced' || preference === 'off') {
+        result.motionPreference = preference;
+      }
+    }
     if (typeof candidate.messageStreamTransport === 'string') {
       const mode = candidate.messageStreamTransport.trim();
       if (mode === 'auto' || mode === 'ws' || mode === 'sse') {

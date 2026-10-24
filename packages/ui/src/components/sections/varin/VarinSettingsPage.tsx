@@ -167,6 +167,7 @@ const VisualSectionContent: React.FC = () => {
     return <div className="settings-preview-layout"><div className="@container min-w-0"><VarinVisualSettings visibleSettings={[
         'theme',
         'windowControlsPosition',
+        'motion',
         'fontSize',
         'spacing',
         'inputBarOffset',
