@@ -1,4 +1,4 @@
-//! A read projection of original family messages and dispatches; no separate chat ledger.
+//! A read projection of original family messages, dispatches and reports; no chat ledger.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -35,10 +35,28 @@ pub struct Dispatch {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Report {
+    pub operation_id: String,
+    pub execution_id: String,
+    pub sender_thread_id: String,
+    pub sender_branch_id: String,
+    pub target_thread_id: String,
+    pub target_branch_id: String,
+    pub accepted_cursor: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accepted_at_ms: Option<u64>,
+    pub outcome: Outcome,
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Page {
     pub root_thread_id: String,
     pub messages: Vec<Entry>,
     pub dispatches: Vec<Dispatch>,
+    pub reports: Vec<Report>,
     pub participants: Vec<Participant>,
     pub before: Option<u64>,
     pub after: Option<u64>,
@@ -92,6 +110,35 @@ impl Catalog {
     }
 }
 impl Read {
+    /// Retain the complete last assistant response, including separate text parts.
+    /// Earlier commentary separated by tool work stays in the member's conversation.
+    fn report_text(&self, db: &Connection, report: &collaboration::ChildReport, cancel: &dyn Fn() -> bool) -> Result<String> {
+        let reported = report.history_ids.iter().collect::<BTreeSet<_>>();
+        let mut next = report.history_ids.last().cloned();
+        let mut parts = Vec::new();
+        while let Some(id) = next {
+            if cancel() { return Err(RuntimeError::DispatchCancelled); }
+            let item: HistoryItem = record(db, "history", &id)?;
+            if item.source != HistorySource::Assistant || report.run_id.as_deref() != Some(item.run_id.as_str()) { break; }
+            let (body, _) = self.content.load_stored_history_payload(&item.content, cancel)?;
+            let message: crate::execution::ConversationItem<crate::output::StoredMedia> = serde_json::from_value(body)?;
+            match message.content {
+                crate::execution::Content::ToolCall { .. } => break,
+                crate::execution::Content::Text { text } if reported.contains(&id) => parts.push(text),
+                crate::execution::Content::Output { output } if reported.contains(&id) => {
+                    let mut text = output.parts.into_iter().filter_map(|part| match part {
+                        crate::output::OutputPart::Text { text } => Some(text), _ => None,
+                    }).collect::<Vec<_>>();
+                    if !output.data.is_null() { text.push(format!("```json\n{}\n```", serde_json::to_string_pretty(&output.data)?)); }
+                    parts.push(text.join("\n"));
+                }
+                _ => {}
+            }
+            next = item.parent;
+        }
+        parts.reverse();
+        Ok(parts.join("\n\n"))
+    }
     pub fn load(self, cancel: &dyn Fn() -> bool) -> Result<Page> {
         let check = || {
             if cancel() {
@@ -108,7 +155,7 @@ impl Read {
         let event_cursor = db.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
             read_number(r, 0)
         })?;
-        // Both domains use the original immutable admission event cursor. A new message,
+        // All domains use their original immutable event cursor. A new message,
         // child continuation or renamed member cannot move an older page boundary.
         let (range, order, bound) = if let Some(after) = self.after {
             (">", "ASC", sql_number(after)?)
@@ -119,7 +166,10 @@ impl Read {
                 self.before.map(sql_number).transpose()?.unwrap_or(i64::MAX),
             )
         };
-        let sql = format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id),
+        // Retrieval workers publish through the same input queue, but they are private
+        // tool executions, not collaboration members. Exclude them before pagination
+        // so their results cannot introduce messages, participants or page boundaries.
+        let sql = format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id JOIN operations owner ON owner.id=c.id WHERE coalesce(json_extract(owner.body,'$.executor'),'')!='code_retrieval'),
             feed(kind,body,content,extra,cursor,accepted_at_ms) AS (
                 SELECT 'message',q.body,c.intent,c.id,q.cursor,0
                 FROM input_queue q JOIN commands c ON c.id=json_extract(q.body,'$.origin.command_key')
@@ -131,6 +181,11 @@ impl Read {
                 JOIN threads t ON t.id=c.child_thread_id JOIN operations o ON o.id=c.id
                 WHERE json_extract(c.body,'$.parent_thread_id') IN (SELECT id FROM family)
                   AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval'
+                UNION ALL
+                SELECT 'report',c.body,d.body,c.id,e.cursor,json_extract(e.data,'$.atMs')
+                FROM delegated_executions d JOIN child_tasks c ON c.id=d.child_operation_id
+                JOIN events e ON e.subject=d.id AND e.kind='child.report_ready'
+                WHERE c.child_thread_id IN (SELECT id FROM family) AND json_extract(d.body,'$.report') IS NOT NULL
             ) SELECT kind,body,content,extra,cursor,accepted_at_ms FROM feed
             WHERE cursor {range} ?2 ORDER BY cursor {order} LIMIT ?3");
         let mut statement = db.prepare(&sql)?;
@@ -142,24 +197,42 @@ impl Read {
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
                     read_number(r, 4)?,
-                    read_number(r, 5)?,
+                    r.get::<_, Option<i64>>(5)?.map(|_| read_number(r, 5)).transpose()?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let more = records.len() > self.limit;
         let mut messages = Vec::new();
         let mut dispatches = Vec::new();
+        let mut reports = Vec::new();
         let mut cursors = Vec::new();
         let mut participants = BTreeSet::new();
         for (kind, body, content, command, cursor, accepted_at_ms) in records.into_iter().take(self.limit) {
             check()?;
             cursors.push(cursor);
-            if kind == "dispatch" {
+            if kind == "dispatch" || kind == "report" {
                 let child: super::super::delegated::ChildRelation = serde_json::from_str(&body)?;
                 let execution: super::super::delegated::DelegatedExecution = serde_json::from_str(&content)?;
-                let input: super::super::dispatch::DispatchInput = serde_json::from_value(self.content.load_cancellable(&execution.input_ref, cancel)?)?;
                 participants.insert(child.parent_thread_id.clone());
                 participants.insert(child.child_thread_id.clone());
+                if kind == "report" {
+                    let report = execution.report.as_ref().expect("selected report");
+                    reports.push(Report {
+                        operation_id: child.operation_id,
+                        execution_id: execution.execution_id,
+                        sender_thread_id: child.child_thread_id,
+                        sender_branch_id: child.child_branch_id,
+                        target_thread_id: child.parent_thread_id,
+                        target_branch_id: child.parent_branch_id,
+                        accepted_cursor: cursor,
+                        accepted_at_ms,
+                        outcome: report.outcome,
+                        text: self.report_text(&db, report, cancel)?,
+                        detail: report.detail.clone(),
+                    });
+                    continue;
+                }
+                let input: super::super::dispatch::DispatchInput = serde_json::from_value(self.content.load_cancellable(&execution.input_ref, cancel)?)?;
                 dispatches.push(Dispatch {
                     operation_id: child.operation_id,
                     execution_id: execution.execution_id,
@@ -168,7 +241,7 @@ impl Read {
                     target_thread_id: child.child_thread_id,
                     target_branch_id: child.child_branch_id,
                     accepted_cursor: cursor,
-                    accepted_at_ms,
+                    accepted_at_ms: accepted_at_ms.expect("dispatch admission timestamp"),
                     preset: input.preset,
                     task: input.task,
                 });
@@ -201,6 +274,7 @@ impl Read {
         if self.after.is_none() {
             messages.reverse();
             dispatches.reverse();
+            reports.reverse();
             cursors.reverse();
         }
         let before = (more && self.after.is_none()).then(|| cursors.first().copied()).flatten();
@@ -217,6 +291,7 @@ impl Read {
             root_thread_id: root,
             messages,
             dispatches,
+            reports,
             participants,
             before,
             after,

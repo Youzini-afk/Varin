@@ -61,8 +61,10 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
 }) {
   const { t } = useI18n();
   const message = item.kind === 'message' ? item.message : undefined;
-  const record = item.kind === 'message' ? item.message : item.dispatch;
-  const text = item.kind === 'message' ? item.message.text : item.dispatch.task;
+  const report = item.kind === 'report' ? item.report : undefined;
+  const record = item.kind === 'message' ? item.message : item.kind === 'dispatch' ? item.dispatch : item.report;
+  const text = item.kind === 'message' ? item.message.text : item.kind === 'dispatch' ? item.dispatch.task
+    : [item.report.text, item.report.detail].filter(Boolean).join('\n\n');
   const outgoing = message?.actor.kind === 'user';
   const find = (id: string) => members.find(member => member.threadId === id);
   const name = (id: string) => find(id)?.name || find(id)?.agentId || id;
@@ -79,7 +81,7 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
     {avatar && <AgentAvatar identity={threadId} avatar={find(threadId)?.avatar} size={16} />}
     <span>{name(threadId)}</span>
   </button>;
-  const replyLabel = t(item.kind === 'dispatch' ? 'collaboration.send' : 'chat.messages.reply');
+  const replyLabel = t(item.kind === 'message' ? 'chat.messages.reply' : 'collaboration.send');
   return <ContextMenu>
     <ContextMenuTrigger asChild>
       <article className="collaboration-message" data-message-id={item.id} data-kind={item.kind} data-outgoing={Boolean(outgoing)}>
@@ -100,12 +102,17 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
               <span>{t('collaboration.dispatch')}</span>
               {item.dispatch.preset && <span className="collaboration-dispatch-preset">{item.dispatch.preset}</span>}
             </div>}
+            {report && <div className="collaboration-dispatch-label">
+              <Icon name="reply" className="size-3.5" />
+              <span>{t('collaboration.report')}</span>
+              {report.outcome !== 'succeeded' && <ChildState state={report.outcome} />}
+            </div>}
             {message?.replyTo && <div className="collaboration-message-quote">
               <Icon name="reply" className="size-3 shrink-0" />
               <span>{original ? original.codeExchangeOperationId ? t('collaboration.fileExchange') : original.text : t('collaboration.earlierMessage')}</span>
             </div>}
             {exchange && message ? <CollaborationExchangeCard message={message} onOpen={() => onExchange(message)} />
-              : <CollaborationMessageBody id={item.id} text={text} expanded={expanded} onExpandedChange={onExpandedChange} />}
+              : text && <CollaborationMessageBody id={item.id} text={text} expanded={expanded} onExpandedChange={onExpandedChange} />}
             {item.kind === 'dispatch' && <div className="collaboration-dispatch-footer">
               <button type="button" onClick={() => onMember(targetId, targetBranch)}>
                 {t('collaboration.openAgent')}<Icon name="arrow-right-s" className="size-3.5" />
@@ -114,11 +121,16 @@ export function CollaborationMessage({ item, members, original, expanded, onExpa
                 <ChildState state={target.detail.state} />
               </span>}
             </div>}
+            {report && <div className="collaboration-dispatch-footer">
+              <button type="button" onClick={() => onMember(sourceId, sourceBranch)}>
+                {t('collaboration.openAgent')}<Icon name="arrow-right-s" className="size-3.5" />
+              </button>
+            </div>}
           </div>
           <div className="collaboration-message-footer">
-            <time dateTime={new Date(item.acceptedAtMs).toISOString()} title={new Date(item.acceptedAtMs).toLocaleString()}>
+            {item.acceptedAtMs !== undefined && <time dateTime={new Date(item.acceptedAtMs).toISOString()} title={new Date(item.acceptedAtMs).toLocaleString()}>
               {new Date(item.acceptedAtMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-            </time>
+            </time>}
             {message?.activation.state === 'failed' ? <span role="status" title={message.activation.code} className="text-destructive">{t('chat.messages.failed')}</span>
               : message?.state === 'cancelled' ? <span>{t('chat.messages.cancelled')}</span>
                 : outgoing && message?.state === 'queued' ? <span>{t('chat.messages.queued')}</span> : null}

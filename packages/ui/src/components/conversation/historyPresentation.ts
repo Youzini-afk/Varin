@@ -143,7 +143,10 @@ export class HistoryPresentation {
         } else if (item.source !== 'assistant' && (content.kind === 'text' || content.kind === 'reasoning_summary')) {
           const sender = object(envelope.provenance).thread_id;
           entry = { ...base, type: 'custom_message', customType: item.source === 'agent' ? 'thread-message' : item.source, display: true, content: String(content.text ?? ''),
-            ...(item.source === 'agent' && typeof sender === 'string' ? { details: { senderThreadId: sender } } : {}) };
+            ...(item.source === 'agent' && typeof sender === 'string' ? { details: {
+              senderThreadId: sender, targetThreadId: item.thread_id,
+              ...(typeof envelope.id === 'string' ? { messageId: envelope.id } : {}),
+            } } : {}) };
         } else if (content.kind === 'text' || content.kind === 'reasoning_summary') {
           const text = String(content.text ?? '');
           const id = typeof envelope.id === 'string' ? envelope.id : item.id;

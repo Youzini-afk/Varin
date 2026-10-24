@@ -1174,6 +1174,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
                 const details = message.details && typeof message.details === 'object' && !Array.isArray(message.details) ? message.details as Record<string, unknown> : {};
                 return <ChatReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
                   senderThreadId={typeof details.senderThreadId === 'string' ? details.senderThreadId : undefined}
+                  targetThreadId={typeof details.targetThreadId === 'string' ? details.targetThreadId : undefined}
                   id={typeof details.messageId === 'string' ? details.messageId : undefined} content={chatContentText(message.content)} />;
               }
               return (
@@ -1216,6 +1217,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
               const details = entry.details && typeof entry.details === 'object' && !Array.isArray(entry.details) ? entry.details as Record<string, unknown> : {};
               return <ChatReceivedThreadMessage key={entry.id} entryId={entry.id} sessionId={sessionId}
                 senderThreadId={typeof details.senderThreadId === 'string' ? details.senderThreadId : undefined}
+                targetThreadId={typeof details.targetThreadId === 'string' ? details.targetThreadId : undefined}
                 id={typeof details.messageId === 'string' ? details.messageId : undefined} content={chatContentText(entry.content)} />;
             }
             return (

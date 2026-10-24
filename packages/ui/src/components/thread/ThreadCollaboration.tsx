@@ -267,9 +267,9 @@ function CollaborationRoomContent({
   );
   const [expandedMessages, setExpandedMessages] = React.useState(() => new Set<string>());
   const renderMessage = ({ item, index }: { item: CollaborationFeedItem; index: number }) => {
-    const day = new Date(item.acceptedAtMs).toLocaleDateString();
+    const day = item.acceptedAtMs === undefined ? undefined : new Date(item.acceptedAtMs).toLocaleDateString();
     const previous = state.items[index - 1];
-    const showDay = !previous || day !== new Date(previous.acceptedAtMs).toLocaleDateString();
+    const showDay = day && (!previous || previous.acceptedAtMs === undefined || day !== new Date(previous.acceptedAtMs).toLocaleDateString());
     const original = item.kind === 'message' && item.message.replyTo
       ? state.messages.find(message => message.messageId === item.message.replyTo) : undefined;
     return <div className="px-3 pb-4 sm:px-4">
@@ -289,10 +289,11 @@ function CollaborationRoomContent({
         onMember={openMember}
         onReply={entry => {
           if (entry.kind === 'message') { reply(entry.message); return; }
+          const target = entry.kind === 'dispatch'
+            ? { runtime: 'agent' as const, threadId: entry.dispatch.targetThreadId, branchId: entry.dispatch.targetBranchId }
+            : { runtime: 'agent' as const, threadId: entry.report.senderThreadId, branchId: entry.report.senderBranchId };
           useThreadDraftStore.getState().patch(roomKey, draft => ({
-            collaboration: draft.collaboration?.attempts ? draft.collaboration : { targets: [{
-              runtime: 'agent', threadId: entry.dispatch.targetThreadId, branchId: entry.dispatch.targetBranchId,
-            }] },
+            collaboration: draft.collaboration?.attempts ? draft.collaboration : { targets: [target] },
           }));
           select();
         }}

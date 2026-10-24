@@ -85,3 +85,37 @@
 @media (prefers-reduced-motion: reduce) {
   .collaboration-message-window, .collaboration-message-menu { transition: none; }
 }
+
+/* Chat keeps the exchange in the reading flow, with a folded preview by default. */
+.chat-agent-message { display: flex; align-items: flex-start; gap: 0.625rem; min-width: 0; margin-block: 0.75rem; }
+.chat-agent-message[data-outgoing="true"] { flex-direction: row-reverse; }
+.chat-agent-message-avatar { flex-shrink: 0; margin-top: 0.125rem; }
+.chat-agent-message-column { min-width: 0; width: min(calc(100% - 2.25rem), 42rem); }
+.chat-agent-message-route { display: flex; align-items: center; gap: 0.375rem; min-width: 0; margin: 0 0 0.375rem 0.125rem; color: var(--muted-foreground); font-size: var(--text-micro); }
+.chat-agent-message-route > button { display: inline-flex; align-items: center; gap: 0.25rem; min-width: 0; max-width: 47%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-agent-message-route > button span { overflow: hidden; text-overflow: ellipsis; }
+.chat-agent-message-route > button:first-child { color: var(--foreground); font-weight: 500; }
+.chat-agent-message-route > button:hover:not(:disabled) { color: var(--primary); }
+.chat-agent-message-bubble { min-width: 0; border: 1px solid color-mix(in srgb, var(--border) 55%, transparent); border-radius: 0.25rem 1rem 1rem 1rem; background: color-mix(in srgb, var(--surface-elevated) 72%, var(--background)); overflow: hidden; }
+.chat-agent-message[data-outgoing="true"] .chat-agent-message-bubble { border-radius: 1rem 0.25rem 1rem 1rem; border-color: color-mix(in srgb, var(--primary) 13%, var(--border)); background: color-mix(in srgb, var(--primary) 7%, var(--surface-elevated)); }
+.chat-agent-message[data-outgoing="true"] .chat-agent-message-route { justify-content: flex-end; }
+.chat-agent-message-toggle { display: grid; width: 100%; padding: 0.625rem 0.875rem; text-align: left; }
+.chat-agent-message-toggle:hover { background: color-mix(in srgb, var(--foreground) 2%, transparent); }
+.chat-agent-message-toggle:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: inherit; }
+.chat-agent-message-heading { display: flex; align-items: center; gap: 0.5rem; min-width: 0; color: var(--muted-foreground); font-size: var(--text-micro); }
+.chat-agent-message-heading > :first-child { margin-right: auto; }
+.chat-agent-message-chevron { transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1); }
+.chat-agent-message-bubble[data-expanded="true"] .chat-agent-message-chevron { transform: rotate(180deg); }
+.chat-agent-message-preview-reveal { display: grid; grid-template-rows: 1fr; opacity: 1; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 160ms ease; }
+.chat-agent-message-bubble[data-expanded="true"] .chat-agent-message-preview-reveal { grid-template-rows: 0fr; opacity: 0; }
+.chat-agent-message-preview-inner { min-height: 0; overflow: hidden; }
+.chat-agent-message-preview { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; padding-top: 0.375rem; overflow: hidden; overflow-wrap: anywhere; color: var(--muted-foreground); font-size: var(--text-meta); line-height: 1.65; }
+.chat-agent-message-reveal { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 220ms cubic-bezier(0.2, 0.7, 0.2, 1), opacity 160ms ease; }
+.chat-agent-message-bubble[data-expanded="true"] .chat-agent-message-reveal { grid-template-rows: 1fr; opacity: 1; }
+.chat-agent-message-reveal-inner { min-height: 0; overflow: hidden; }
+.chat-agent-message-content { max-height: min(70vh, 36rem); overflow-y: auto; overscroll-behavior: contain; padding: 0 0.875rem 0.875rem; overflow-wrap: anywhere; font-size: var(--text-meta); line-height: 1.7; }
+.chat-agent-message-content pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chat-agent-message-action { display: inline-flex; margin-top: 0.5rem; color: var(--muted-foreground); font-size: var(--text-micro); }
+.chat-agent-message-action:hover { color: var(--foreground); }
+.chat-agent-message-receipt { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px solid var(--border); }
+@media (prefers-reduced-motion: reduce) { .chat-agent-message-reveal, .chat-agent-message-preview-reveal, .chat-agent-message-chevron { transition: none; } }

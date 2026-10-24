@@ -94,9 +94,57 @@ fn family_feed_reads_peer_and_user_messages_once_and_pages_across_new_acceptance
     let replied = send(&mut f, "feed-reply", "thread:parent", "branch:parent", reply);
     assert_eq!(replied.identity.target_thread_id, child.child_thread_id);
     assert_eq!(replied.identity.actor, MessageActor::User);
-    let mut internal = Fixture::new_internal_retrieval();
-    internal.accept();
-    assert!(internal.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, None, None).unwrap().load(&|| false).unwrap().dispatches.is_empty());
+}
+#[test]
+fn family_feed_excludes_retrieval_results_without_changing_native_delivery_or_pagination() {
+    let mut f = Fixture::new_internal_retrieval();
+    let child = f.accept();
+    let before = send(&mut f, "before-retrieval", "thread:parent", "branch:parent",
+        input("thread:parent", "branch:parent", "visible before retrieval"));
+    f.db.fail_child_preparation(&child.operation_id, "retrieval source unavailable").unwrap();
+    f.db.mark_child_resources_released(&child.execution_id).unwrap();
+    let owner = std::sync::Mutex::new(f.db);
+    varin_runtime::catalog::child_delivery::reconcile_reports(&owner).unwrap();
+    let mut db = owner.lock().unwrap();
+    let result = db.capture_message("thread:parent", "branch:parent", &format!("message:{}", child.operation_id))
+        .unwrap().load().unwrap();
+    assert!(result.text.contains("retrieval source unavailable"));
+    assert_eq!(result.summary.receipt.identity.sender_thread_id, child.child_thread_id);
+    assert_eq!(result.summary.receipt.identity.target_thread_id, "thread:parent");
+
+    let read = |db: &Catalog, before, after| db.capture_message_feed(
+        "thread:parent".into(), "branch:parent".into(), before, after, Some(1)
+    ).unwrap().load(&|| false).unwrap();
+    let page = read(&db, None, None);
+    assert_eq!(page.messages.len(), 1);
+    assert_eq!(page.messages[0].message.summary.receipt, before);
+    assert!(page.dispatches.is_empty());
+    assert!(page.reports.is_empty());
+    assert!(page.before.is_none());
+    assert_eq!(page.participants.len(), 1);
+    assert_eq!(page.participants[0].thread_id, "thread:parent");
+    let delta = read(&db, None, Some(before.accepted_cursor));
+    assert!(delta.messages.is_empty());
+    assert!(delta.dispatches.is_empty());
+    assert!(delta.reports.is_empty());
+    assert!(delta.participants.is_empty());
+    assert!(delta.after.is_none());
+
+    let prepared = db.prepare_user_message("after-retrieval".into(), "thread:parent".into(), "branch:parent".into(),
+        input("thread:parent", "branch:parent", "visible after retrieval")).unwrap().load().unwrap();
+    let after = db.admit_message(prepared).unwrap().receipt;
+    let page = read(&db, None, None);
+    assert_eq!(page.messages[0].message.summary.receipt, after);
+    let older = read(&db, page.before, None);
+    assert_eq!(older.messages[0].message.summary.receipt, before);
+    assert!(older.before.is_none());
+    let delta = read(&db, None, Some(before.accepted_cursor));
+    assert_eq!(delta.messages.len(), 1);
+    assert_eq!(delta.messages[0].message.summary.receipt, after);
+    assert!(delta.after.is_none());
+    drop(db);
+    drop(owner);
+    std::fs::remove_dir_all(f.root).unwrap();
 }
 #[test]
 fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact() {

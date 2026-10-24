@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { ThreadsAPI, ThreadIdentity } from '@varin/application-client';
-import type { FamilyMember, MessageFeedDispatch, MessageFeedEntry, RuntimeEvent } from '@varin/protocol';
+import type { FamilyMember, MessageFeedDispatch, MessageFeedEntry, MessageFeedReport, RuntimeEvent } from '@varin/protocol';
 import { CollaborationFeed } from './collaborationFeed';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
@@ -25,6 +25,7 @@ const message = (id: number): MessageFeedEntry => ({
 function fixture() {
   const records = [message(1), message(2), message(3)];
   const dispatches: MessageFeedDispatch[] = [];
+  const reports: MessageFeedReport[] = [];
   let listener: (event: RuntimeEvent) => void = () => {};
   const member = (id: string, current = true): FamilyMember => ({
     threadId: id,
@@ -39,7 +40,7 @@ function fixture() {
   const api = {
     messages: {
       feed: vi.fn<NonNullable<ThreadsAPI['messages']>['feed']>(async (_identity, request) => {
-        const matching = [...records, ...dispatches].sort((a, b) => a.acceptedCursor - b.acceptedCursor).filter((item) =>
+        const matching = [...records, ...dispatches, ...reports].sort((a, b) => a.acceptedCursor - b.acceptedCursor).filter((item) =>
           request.before !== undefined
             ? item.acceptedCursor < request.before
             : request.after !== undefined
@@ -51,6 +52,7 @@ function fixture() {
           rootThreadId: 'root',
           messages: structuredClone(selected.filter((item): item is MessageFeedEntry => 'messageId' in item)),
           dispatches: structuredClone(selected.filter((item): item is MessageFeedDispatch => 'task' in item)),
+          reports: structuredClone(selected.filter((item): item is MessageFeedReport => 'outcome' in item)),
           participants: ['worker', 'reviewer'].map((threadId) => ({
             threadId,
             name: threadId,
@@ -59,7 +61,7 @@ function fixture() {
           })),
           before: request.after === undefined && matching.length > 2 ? selected[0]!.acceptedCursor : null,
           after: request.after !== undefined && matching.length > 2 ? selected.at(-1)!.acceptedCursor : null,
-          eventCursor: Math.max(...records.map(item => item.acceptedCursor), ...dispatches.map(item => item.acceptedCursor)),
+          eventCursor: Math.max(...records.map(item => item.acceptedCursor), ...dispatches.map(item => item.acceptedCursor), ...reports.map(item => item.acceptedCursor)),
         };
       }),
       get: vi.fn(async (_identity: ThreadIdentity, id: string) =>
@@ -78,7 +80,7 @@ function fixture() {
       await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }),
   };
-  return { api: api as unknown as ThreadsAPI, records, dispatches, readers: api, emit: (event: RuntimeEvent) => listener(event) };
+  return { api: api as unknown as ThreadsAPI, records, dispatches, reports, readers: api, emit: (event: RuntimeEvent) => listener(event) };
 }
 it('keeps peer messages, prepended history and new pages in one ordered feed, while refreshing original delivery state', async () => {
   const f = fixture();
@@ -148,6 +150,28 @@ it('merges original dispatches with messages, including dispatch-only delta page
   await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('message:message-5'));
   expect(f.readers.messages.feed).toHaveBeenCalledWith(identity, { after: 4 }, expect.any(AbortSignal));
   expect(feed.getSnapshot().items.map(item => item.acceptedCursor)).toEqual([0, 1, 2, 3, 4, 5]);
+  feed.close();
+});
+
+it('reads new report-only pages on completion and retains separate replies from later executions', async () => {
+  const f = fixture();
+  const report = (id: number): MessageFeedReport => ({ operationId: 'original-dispatch', executionId: `execution-${id}`,
+    senderThreadId: 'worker', senderBranchId: 'worker-branch', targetThreadId: 'root', targetBranchId: 'original-root-branch',
+    acceptedCursor: id, acceptedAtMs: id, text: `Final reply ${id}`, outcome: 'succeeded' });
+  f.reports.push(report(0));
+  const feed = new CollaborationFeed(f.api, identity);
+  await feed.start();
+  await feed.earlier();
+  expect(feed.getSnapshot().items[0]).toMatchObject({ kind: 'report', report: { text: 'Final reply 0' } });
+  f.reports.push(report(4), report(5), report(6));
+  f.emit({ cursor: 6, subject: 'execution-6', revision: 2, kind: 'child.report_ready', data: {} });
+  await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('report:execution-6'));
+  expect(f.readers.messages.feed).toHaveBeenCalledWith(identity, { after: 5 }, expect.any(AbortSignal));
+  expect(feed.getSnapshot().items.filter(item => item.kind === 'report').map(item => item.id)).toEqual([
+    'report:execution-0', 'report:execution-4', 'report:execution-5', 'report:execution-6',
+  ]);
+  await feed.refresh();
+  expect(feed.getSnapshot().items.map(item => item.acceptedCursor)).toEqual([0, 1, 2, 3, 4, 5, 6]);
   feed.close();
 });
 

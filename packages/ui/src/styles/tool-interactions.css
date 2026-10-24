@@ -163,7 +163,7 @@
 .tool-action-status[data-status="error"] { color: var(--destructive); }
 .tool-action-status[data-status="unknown"], .tool-action-status[data-status="waiting"] { color: var(--status-warning, var(--chart-5)); }
 .tool-delegation { margin-block: 5px; }
-.tool-delegation, .tool-message-sent { container: tool-members / inline-size; }
+.tool-delegation { container: tool-members / inline-size; }
 .tool-member-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 3px; border-radius: 5px; cursor: pointer; list-style: none; }
 .tool-member-line:hover { background: var(--interactive-hover); }
 .tool-member-purpose { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -243,8 +243,6 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
 .tool-settings-request { display: grid; gap: 5px; }
 .tool-artifact-heading { display: flex; align-items: center; gap: 8px; padding-block: 7px; }
 .tool-media-result, .tool-computer-event { margin-block: 14px; }
-.tool-member-reply { display: flex; gap: 9px; margin-block: 14px; min-width: 0; }
-.tool-reply-byline { margin-bottom: 5px; color: var(--muted-foreground); font-size: var(--text-micro); }
 .tool-memory-notes, .tool-settings-changes, .tool-capability-list, .tool-thread-excerpts, .tool-followup-record { display: grid; gap: 12px; }
 .tool-memory-note, .tool-followup-record > div { display: grid; gap: 5px; }
 .tool-setting-fields { display: grid; margin: 0; font-size: var(--text-meta); }
@@ -259,7 +257,6 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
 .tool-member-line:focus-visible, .tool-resource-summary:focus-visible, .tool-command-heading:focus-visible, .tool-work-heading:focus-visible,
 .tool-file-link:focus-visible, .tool-inline-actions button:focus-visible, .tool-thread-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
 .tool-source-results > li { animation: tool-source-arrive 180ms var(--wb-ease) both; }
-.tool-member-reply { animation: tool-reply-arrive 220ms var(--wb-ease) both; }
 @keyframes tool-source-arrive { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tool-reply-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 640px) {
@@ -282,6 +279,6 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
 @media (prefers-reduced-motion: reduce) {
   .tool-disclosure-chevron { transition: none; }
   .tool-action-status .animate-spin { animation: none; }
-  .tool-source-results > li, .tool-member-reply { animation: none; }
+  .tool-source-results > li, .tool-material-reader { animation: none; }
   .tool-inline-actions button, .tool-file-link, .tool-member-line, .tool-resource-summary, .tool-work-heading, .tool-source-link { transition: none; }
 }

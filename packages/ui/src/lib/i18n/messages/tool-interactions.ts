@@ -1,5 +1,12 @@
 const rows = [
   ['collaboration.dispatch', 'Delegated task', '派发任务', '派發任務'],
+  ['collaboration.report', 'Task reply', '任务回复', '任務回覆'],
+  ['chat.agentMessage.agent', 'Agent', 'Agent', 'Agent'],
+  ['chat.agentMessage.message', 'Message', '消息', '訊息'],
+  ['chat.agentMessage.expand', 'Expand message', '展开消息', '展開訊息'],
+  ['chat.agentMessage.collapse', 'Collapse message', '收起消息', '收起訊息'],
+  ['chat.agentMessage.readReport', 'Read complete report', '读取完整报告', '讀取完整報告'],
+  ['chat.agentMessage.receipt', 'Delivery receipt and details', '发送回执与详情', '傳送回執與詳情'],
   ['collaboration.openAgent', 'View Agent conversation', '查看 Agent 对话', '查看 Agent 對話'],
   ['collaboration.agentState', 'Current Agent state', 'Agent 当前状态', 'Agent 目前狀態'],
   ['collaboration.expandMessage', 'Read full message', '展开全文', '展開全文'],

@@ -8,14 +8,14 @@ import { parseThreadOutput } from '@/lib/agent-runtime/thread-content';
 import { ThreadOutput } from './ThreadMedia';
 import { useI18n } from '@/lib/i18n';
 
-type Props = { api: ThreadsAPI; identity: ThreadIdentity; operationId: string; executionId?: string; itemId: string };
+type Props = { api: ThreadsAPI; identity: ThreadIdentity; operationId: string; executionId?: string; itemId: string; autoRead?: boolean };
 
 /** Dispatch and subsequent execution reports retain their exact original history owner. */
 export function ThreadChildReport(props: Props) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   return <ReportView key={JSON.stringify([host, props.identity, props.operationId, props.executionId, props.itemId])} {...props} host={host} />;
 }
-function ReportView({ api, identity, operationId, executionId, itemId, host }: Props & { host: number }) {
+function ReportView({ api, identity, operationId, executionId, itemId, host, autoRead = false }: Props & { host: number }) {
   const { t } = useI18n();
   const [page, setPage] = React.useState<ChildReportPage>();
   const [output, setOutput] = React.useState<OutputBody>();
@@ -74,6 +74,9 @@ function ReportView({ api, identity, operationId, executionId, itemId, host }: P
       if (current()) setError(value instanceof Error ? value.message : 'Report unavailable. Retry the original report.');
     } finally { if (current()) { request.current = null; setLoading(false); setProgress(undefined); } }
   };
+  const readRef = React.useRef(read);
+  readRef.current = read;
+  React.useEffect(() => { if (autoRead) void readRef.current(); }, [autoRead]);
   return <div aria-label={t('chat.children.report')} className="space-y-1 typography-meta">
     {error && <p role="alert">{error}</p>}
     {page?.format === 'text' && <MarkdownRenderer messageId={`${page.execution_id}:${itemId}`} content={page.text} />}

@@ -54,13 +54,14 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
       } else {
         const call = presentInvocation(content);
         const tool = { ...source, kind: 'tool' as const, call, streaming: source.streaming && !call.interrupted };
-        if (isStandaloneTool(call.name)) items.push(tool);
+        if (isStandaloneTool(call.name)) { if (call.name === 'send') seal(); items.push(tool); }
         else append(tool);
         // A dispatch inside script_run has the same native child owner. Keep it
         // visible beside the parent process instead of burying it in the script.
         for (const child of delegated.get(call.id) ?? []) {
           const id = `tool:${child.id}`;
           if (seen.has(id)) continue;
+          if (child.name === 'send') seal();
           seen.add(id); items.push({ id, sourceId, streaming: false, kind: 'tool', call: child });
         }
       }

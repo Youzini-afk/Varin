@@ -2,7 +2,7 @@ import type { ChatToolCall, ChatToolExecutionState } from './types';
 import { toolRecord } from './toolInvocation';
 
 /** Existing collaboration, user input and usable output views stay independent. */
-export const isStandaloneTool = (name: string) => ['dispatch', 'ask_user', 'render_ui', 'image_generate', 'image_edit'].includes(name);
+export const isStandaloneTool = (name: string) => ['dispatch', 'send', 'ask_user', 'render_ui', 'image_generate', 'image_edit'].includes(name);
 
 /** Already observed descendants only. No extra reads to fill a heading. */
 export function standaloneDescendants(executions: Record<string, ChatToolExecutionState> = {}): Map<string, ChatToolCall[]> {

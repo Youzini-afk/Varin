@@ -1761,6 +1761,52 @@ fn independent_child_report_body_failure_keeps_healthy_report_and_receipt_admiss
 }
 
 #[test]
+fn collaboration_reply_keeps_multipart_final_output_and_leaves_earlier_work_in_member_history() {
+    use varin_runtime::output::{OutputBody, OutputPart, ResolvedMedia};
+    let mut f = Fixture::new();
+    let child = f.accept();
+    f.settle_exchange();
+    let (source, proposal, basis) = child_context(&child);
+    let child = f.db.prepare_child(&child.execution_id, source, proposal, basis).unwrap();
+    let run = child.receipt.as_ref().unwrap().run_id.clone();
+    let epoch = f.db.epoch();
+    f.db.commit_execution(&run, epoch, &ExecutionRecord::StateChanged { state: RunState::Runnable, waiting_on: None }).unwrap();
+    let output: [(HistorySource, Content<ResolvedMedia>); 4] = [
+        (HistorySource::Assistant, Content::Text { text: "Earlier progress before reading".into() }),
+        (HistorySource::Tool, Content::Text { text: "Original file evidence".into() }),
+        (HistorySource::Assistant, Content::Text { text: "Final answer, first part".into() }),
+        (HistorySource::Assistant, Content::Output { output: OutputBody {
+            data: serde_json::Value::Null, parts: vec![OutputPart::Text { text: "Final answer, second part".into() }],
+        } }),
+    ];
+    for (index, (source, content)) in output.into_iter().enumerate() {
+        let head = f.db.head(&child.child_branch_id).unwrap();
+        f.db.append_history(&run, epoch, head.as_deref(), source,
+            serde_json::to_value(ConversationItem {
+                id: format!("child-body-{index}"), resource_activation: None,
+                provenance: if source == HistorySource::Assistant { Provenance::Assistant } else { Provenance::ToolData { call_id: "read".into() } },
+                content, opaque: None,
+            }).unwrap(), None).unwrap();
+    }
+    f.db.commit_execution(&run, epoch, &ExecutionRecord::StateChanged { state: RunState::Completed, waiting_on: None }).unwrap();
+    f.db.reconcile_child_reports().unwrap();
+    let read = || f.db.capture_message_feed(child.parent_thread_id.clone(), child.parent_branch_id.clone(), None, Some(child.cursor), Some(1))
+        .unwrap().load(&|| false).unwrap();
+    let page = read();
+    assert!(page.messages.is_empty());
+    assert!(page.dispatches.is_empty());
+    assert_eq!(page.reports.len(), 1);
+    assert_eq!(page.reports[0].text, "Final answer, first part\n\nFinal answer, second part");
+    assert_eq!(page.reports[0].outcome, Outcome::Succeeded);
+    assert!(page.after.is_none());
+    assert_eq!(read().reports[0].accepted_cursor, page.reports[0].accepted_cursor);
+    assert_eq!(f.db.delegated_execution(&child.execution_id).unwrap().report.unwrap().history_ids.len(), 3);
+    let root = f.root.clone();
+    drop(f);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
     use varin_runtime::catalog::navigation::NavigationCommand;
     for (state, has_output, outcome) in [
@@ -1875,6 +1921,23 @@ fn child_report_keeps_its_terminal_history_when_navigation_precedes_delivery() {
                 "{timing} {state:?}"
             );
             assert_eq!(f.db.head(&child.child_branch_id).unwrap(), navigation_head);
+            let feed = f.db.capture_message_feed(child.parent_thread_id.clone(), child.parent_branch_id.clone(), None, None, Some(1))
+                .unwrap().load(&|| false).unwrap();
+            assert_eq!(feed.reports.len(), 1);
+            let reply = &feed.reports[0];
+            assert_eq!(reply.execution_id, child.execution_id);
+            assert_eq!(reply.sender_thread_id, child.child_thread_id);
+            assert_eq!(reply.sender_branch_id, child.child_branch_id);
+            assert_eq!(reply.target_thread_id, child.parent_thread_id);
+            assert_eq!(reply.target_branch_id, child.parent_branch_id);
+            assert_eq!(reply.outcome, outcome);
+            assert_eq!(reply.text, if has_output { "Original child result before navigation" } else { "" });
+            assert_eq!(reply.detail, report.detail);
+            assert!(reply.accepted_at_ms.is_some());
+            let older = f.db.capture_message_feed(child.parent_thread_id.clone(), child.parent_branch_id.clone(), feed.before, None, Some(1))
+                .unwrap().load(&|| false).unwrap();
+            assert_eq!(older.dispatches.len(), 1);
+            assert!(older.before.is_none());
             f.db.reconcile_child_reports().unwrap();
             assert_eq!(
                 f.db.delegated_execution(&child.execution_id)

@@ -95,3 +95,28 @@ it('keeps user identity distinct from the sending Thread and shows the actual re
   expect(container.textContent).toContain('YouToLayout review');
   expect(container.textContent).toContain(dict['chat.messages.queued']);
 });
+
+it('shows a final task reply from the child to its organizer and opens the original child branch', async () => {
+  const onMember = vi.fn();
+  const item: CollaborationFeedItem = { id: 'report:execution', kind: 'report', acceptedCursor: 3, acceptedAtMs: 3000,
+    report: { operationId: 'original', executionId: 'execution', senderThreadId: 'worker', senderBranchId: 'original-worker-branch',
+      targetThreadId: 'parent', targetBranchId: 'original-parent-branch', acceptedCursor: 3, acceptedAtMs: 3000,
+      outcome: 'succeeded', text: 'Final answer from the child' } };
+  await act(async () => root.render(<CollaborationMessage item={item} members={members} expanded={false}
+    onExpandedChange={() => {}} onMember={onMember} onReply={() => {}} onCopy={() => {}} onExchange={() => {}} />));
+  expect(container.textContent).toContain('Layout reviewToMain Agent');
+  expect(container.textContent).toContain(dict['collaboration.report']);
+  expect(container.textContent).toContain('Final answer from the child');
+  const open = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === dict['collaboration.openAgent'])!;
+  await act(async () => open.click());
+  expect(onMember).toHaveBeenCalledWith('worker', 'original-worker-branch');
+  const target = container.querySelector<HTMLButtonElement>('[aria-label="View Main Agent’s conversation"]')!;
+  await act(async () => target.click());
+  expect(onMember).toHaveBeenCalledWith('parent', 'original-parent-branch');
+  await act(async () => root.render(<CollaborationMessage item={{ ...item, acceptedAtMs: undefined,
+    report: { ...item.report, outcome: 'failed', text: '', detail: 'Original failure detail' } }} members={members} expanded={false}
+    onExpandedChange={() => {}} onMember={onMember} onReply={() => {}} onCopy={() => {}} onExchange={() => {}} />));
+  expect(container.textContent).toContain('Original failure detail');
+  expect(container.textContent).toContain(dict['harness.threads.state.failed']);
+  expect(container.querySelector('time')).toBeNull();
+});

@@ -160,14 +160,24 @@ the list. Renaming uses the Thread catalog owner, and an uncertain instruction r
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
-The right-hand Collaboration surface reads original family dispatches and peer messages in one native
-admission-cursor feed. Dispatches retain their original task and exact parent/child branches; later
+The right-hand Collaboration surface reads original family dispatches, peer messages and final reports in one native
+event-cursor feed. Reports project the last assistant response from immutable execution history as child-to-organizer
+replies, preserving multipart text and original outcome. Each continuation retains its own execution identity;
+reading the room never publishes another message or invokes a model. Dispatches retain their original task and exact parent/child branches; later
 continuations never substitute their input. Internal code retrieval stays outside the room. Its virtual
-list prefetches older entries and merges by original message/dispatch identity, including dispatch-only pages.
+list prefetches older entries and merges by original message/dispatch/execution identity, including dispatch-only and report-only pages.
 `CollaborationMessage` shows explicit sender/recipient routes and message bubbles. User messages align
 right; Agents retain their avatars. Rendered body height determines long-message folding, including later
 font/image/reflow changes. Expansion remains keyed to the entry in its room, animates in place and pauses
-automatic following; copy and reply still use original full text and native message identities.
+automatic following; copy uses original full text. Messages retain native reply identities; dispatches and reports
+open a new send to the exact child branch without inventing a reply-to message ID.
+Inside chat, `ChatAgentMessageBubble` presents received messages, task reports and native `send` calls
+as separate directed bubbles in every render mode. They start folded with a literal two-line preview;
+the timeline's existing disclosure cache retains manual choices. Preview and body animate together,
+and expanded long text scrolls within a wrapping window. Native message/report envelopes are unwrapped
+only under their original history holders; message-body JSON remains opaque and model context is unchanged.
+Partial report previews retain explicit access to the original execution's paged report reader, loaded
+only after the user asks. Failure/cancellation details and original send receipts remain inspectable.
 Member selection mounts one original Thread history/progress reader with a separate viewport key; main
 conversation scroll state stays independent. Completed members are paged through the native history
 directory. User replies and per-recipient send attempts use the original message admission API, with

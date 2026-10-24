@@ -3,6 +3,7 @@ import type {
   FamilyMember,
   MessageFeedEntry,
   MessageFeedDispatch,
+  MessageFeedReport,
   MessageFeedPage,
   MessageParticipant,
   RuntimeEvent,
@@ -14,8 +15,8 @@ export type CollaborationMember = MessageParticipant & {
 export type CollaborationFeedItem = {
   id: string;
   acceptedCursor: number;
-  acceptedAtMs: number;
-} & ({ kind: 'message'; message: MessageFeedEntry } | { kind: 'dispatch'; dispatch: MessageFeedDispatch });
+  acceptedAtMs?: number;
+} & ({ kind: 'message'; message: MessageFeedEntry } | { kind: 'dispatch'; dispatch: MessageFeedDispatch } | { kind: 'report'; report: MessageFeedReport });
 export interface CollaborationFeedState {
   rootThreadId: string;
   messages: MessageFeedEntry[];
@@ -38,6 +39,7 @@ export class CollaborationFeed {
   private listeners = new Set<() => void>();
   private messages = new Map<string, MessageFeedEntry>();
   private dispatches = new Map<string, MessageFeedDispatch>();
+  private reports = new Map<string, MessageFeedReport>();
   private members = new Map<string, CollaborationMember>();
   private value: CollaborationFeedState = {
     rootThreadId: "",
@@ -82,6 +84,8 @@ export class CollaborationFeed {
           acceptedCursor: message.acceptedCursor, acceptedAtMs: message.acceptedAtMs, message })),
         ...[...this.dispatches.values()].map(dispatch => ({ kind: 'dispatch' as const, id: `dispatch:${dispatch.operationId}`,
           acceptedCursor: dispatch.acceptedCursor, acceptedAtMs: dispatch.acceptedAtMs, dispatch })),
+        ...[...this.reports.values()].map(report => ({ kind: 'report' as const, id: `report:${report.executionId}`,
+          acceptedCursor: report.acceptedCursor, acceptedAtMs: report.acceptedAtMs, report })),
       ].sort((a, b) => a.acceptedCursor - b.acceptedCursor),
       members: [...this.members.values()],
     };
@@ -95,6 +99,10 @@ export class CollaborationFeed {
     for (const dispatch of page.dispatches ?? []) {
       this.dispatches.set(dispatch.operationId, dispatch);
       this.latest = Math.max(this.latest, dispatch.acceptedCursor);
+    }
+    for (const report of page.reports ?? []) {
+      this.reports.set(report.executionId, report);
+      this.latest = Math.max(this.latest, report.acceptedCursor);
     }
     for (const member of page.participants) {
       const existing = this.members.get(member.threadId);
@@ -195,7 +203,7 @@ export class CollaborationFeed {
       return;
     const message = this.messages.get(event.subject);
     if (message) this.changingMessages.add(message.messageId);
-    if (event.kind === "message.accepted" || event.kind === "child.accepted") this.feedDirty = true;
+    if (event.kind === "message.accepted" || event.kind === "child.accepted" || event.kind === "child.report_ready") this.feedDirty = true;
     if (event.kind.startsWith("thread.") && this.members.has(event.subject))
       this.changingMembers.add(event.subject);
     if (/^(thread\.|child\.|run\.|delivery\.)/.test(event.kind)) {
