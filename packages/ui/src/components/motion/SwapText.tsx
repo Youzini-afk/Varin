@@ -19,7 +19,13 @@ const cubic = (points: readonly number[]) => `cubic-bezier(${points.join(', ')})
  * Reduced motion cross-fades without movement; off swaps directly. The wait is
  * reading time and applies at every level.
  */
-export function SwapText({ text, live = false, className }: { text: string; live?: boolean; className?: string }) {
+export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_MS }: {
+  text: string;
+  live?: boolean;
+  className?: string;
+  /** Minimum time a text stays; counters that only roll pass 0. */
+  hold?: number;
+}) {
   const [shown, setShown] = React.useState(text);
   const shownAt = React.useRef(0);
   const host = React.useRef<HTMLSpanElement>(null);
@@ -28,11 +34,11 @@ export function SwapText({ text, live = false, className }: { text: string; live
 
   React.useEffect(() => {
     if (text === shown) return undefined;
-    const wait = shownAt.current + SWAP_TEXT_MIN_MS - Date.now();
+    const wait = shownAt.current + hold - Date.now();
     if (wait <= 0) { setShown(text); return undefined; }
     const timer = setTimeout(() => setShown(text), wait);
     return () => clearTimeout(timer);
-  }, [text, shown]);
+  }, [text, shown, hold]);
 
   React.useLayoutEffect(() => {
     const before = previous.current;

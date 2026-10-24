@@ -62,6 +62,15 @@ const history = (turns: number): ChatSessionEntry[] => {
 
 interface FrameSample {
   t: number;
+  /** The last file change card: phase, name, visible rows, remounted rows, ghosts. */
+  card: {
+    phase: string;
+    name: string;
+    rows: Array<{ key: string; kind: string; top: number; bottom: number; opacity: number; pending: boolean; ahead: boolean; caret: boolean }>;
+    remounts: number;
+    ghosts: number;
+    height: number;
+  } | null;
   /** The last process row's label: identity, text, running state, leaving layers. */
   activity: { id: number; text: string; title: string; live: boolean; leaving: number; spinner: boolean } | null;
   /** Lines of a code fence still streaming, and how many of them have colour. */
@@ -94,6 +103,10 @@ interface LabState {
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 let labelIds = 0;
 const labelIdentity = new WeakMap<Element, number>();
+// Diff rows by key: a key that comes back on a new element was remounted.
+const rowElements = new Map<string, Element>();
+let previousRowKeys = new Set<string>();
+let rowRemounts = 0;
 
 const scroller = () => document.querySelector<HTMLElement>('[data-conversation-timeline="true"]');
 
@@ -135,11 +148,34 @@ function Lab() {
         const markdown = [...node.querySelectorAll<HTMLElement>('[data-markdown-content]')].at(-1);
         const caret = markdown?.querySelector<HTMLElement>('.markdown-caret');
         const openFence = markdown?.querySelector<HTMLElement>('pre:not([data-md-lang]) > code[class*="language-"]');
+        const card = [...node.querySelectorAll<HTMLElement>('[data-conversation-file-preview]')].at(-1);
+        const rows = card ? [...card.querySelectorAll<HTMLElement>('[data-row-key]')].filter(row => !row.closest('[aria-hidden="true"]')) : [];
+        // A key present in consecutive samples on a different element was remounted.
+        const present = new Set<string>();
+        for (const row of rows) {
+          const key = row.dataset.rowKey!;
+          const known = rowElements.get(key);
+          if (known && known !== row && previousRowKeys.has(key)) rowRemounts += 1;
+          rowElements.set(key, row);
+          present.add(key);
+        }
+        previousRowKeys = present;
         const activity = [...node.querySelectorAll<HTMLElement>('.dialogue-activity-label')].at(-1);
         if (activity && !labelIdentity.has(activity)) labelIdentity.set(activity, ++labelIds);
         const swap = activity?.querySelector('.swap-text');
         if (swap && !labelIdentity.has(swap)) labelIdentity.set(swap, ++labelIds);
         recording.push({
+          card: card ? {
+            phase: card.dataset.phase ?? '',
+            name: card.querySelector('header .swap-text-current')?.textContent ?? '',
+            rows: rows.map(row => {
+              const rect = row.getBoundingClientRect();
+              return { key: row.dataset.rowKey!, kind: row.dataset.changeKind!, top: rect.top, bottom: rect.bottom, opacity: Number(getComputedStyle(row).opacity), pending: row.hasAttribute('data-pending'), ahead: row.hasAttribute('data-ahead'), caret: Boolean(row.querySelector('.workbench-diff-caret')) };
+            }),
+            remounts: rowRemounts,
+            ghosts: card.querySelectorAll('[aria-hidden="true"] > [data-row-key]').length,
+            height: card.querySelector<HTMLElement>('[data-conversation-tool-scroll]')?.getBoundingClientRect().height ?? 0,
+          } : null,
           activity: activity ? {
             id: labelIdentity.get(activity)!,
             text: activity.querySelector('.swap-text-current')?.textContent ?? '',
@@ -241,6 +277,42 @@ function Lab() {
           await sleep(60 * pace);
         }
         persist(id, [{ type: 'text', id: `${id}:text`, text: answer }], 'stop');
+        setState(current => ({ ...current, activeRunId: undefined }));
+      },
+      /**
+       * A `file_edit` whose arguments stream in network chunks, then applies.
+       * `pathLast` sends the path after the edits, as JSON order allows.
+       */
+      async fileEdit({ pace = 1, pathLast = false, chunk = 18, interval = 48 } = {}) {
+        const runId = `run-file-${Date.now()}`;
+        const id = `a-file-${runId}`;
+        const callId = `edit-${runId}`;
+        const path = 'src/auth/login.ts';
+        const oldText = 'export async function login(user: User) {\n  const token = await issue(user);\n  cache.set(user.id, token);\n  return token;\n}\n';
+        const newText = 'export async function login(user: User) {\n  const token = await issue(user, { refresh: true });\n  sessions.remember(user.id, token);\n  cache.set(user.id, token);\n  return token;\n}\n';
+        const fields = [oldText, newText];
+        const total = fields.join('').length;
+        const argumentsAt = (received: number): Record<string, unknown> => {
+          let left = received;
+          const take = (text: string) => { const part = text.slice(0, Math.max(0, left)); left -= part.length; return part; };
+          const old = take(oldText);
+          const edits = [old.length < oldText.length ? { oldText: old } : { oldText: old, newText: take(newText) }];
+          const hasPath = !pathLast || received >= total;
+          return hasPath ? { path, edits } : { edits };
+        };
+        for (let received = 0; received <= total; received += chunk) {
+          const message = assistant(id, [{ type: 'toolCall', id: callId, name: 'file_edit', arguments: argumentsAt(received) as Extract<ChatAssistantContent, { type: 'toolCall' }>['arguments'] }], 'pending');
+          setState(current => ({ ...current, activeRunId: runId, liveAssistant: message }));
+          await sleep(interval * pace);
+        }
+        const final = assistant(id, [{ type: 'toolCall', id: callId, name: 'file_edit', arguments: argumentsAt(total) as Extract<ChatAssistantContent, { type: 'toolCall' }>['arguments'] }], 'toolUse');
+        setState(current => ({ ...current, liveAssistant: undefined, entries: [...current.entries, messageEntry(final, runId)],
+          executions: { ...current.executions, [callId]: { toolCallId: callId, name: 'file_edit', args: argumentsAt(total) as ChatToolExecutionState['args'], status: 'running' } } }));
+        await sleep(420 * pace);
+        setState(current => ({ ...current,
+          executions: { ...current.executions, [callId]: { toolCallId: callId, name: 'file_edit', args: argumentsAt(total) as ChatToolExecutionState['args'], status: 'success', result: { status: 'applied' } } },
+          entries: [...current.entries, messageEntry({ role: 'toolResult', toolCallId: callId, toolName: 'file_edit', content: [{ type: 'text', text: 'applied' }], details: { status: 'applied' }, isError: false, timestamp: sequence }, runId)] }));
+        await sleep(200 * pace);
         setState(current => ({ ...current, activeRunId: undefined }));
       },
       /** Submit a user turn and anchor it, as ThreadConversation does once the Host accepts it. */

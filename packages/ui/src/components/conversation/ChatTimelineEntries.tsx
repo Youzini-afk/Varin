@@ -53,7 +53,9 @@ import {
 } from './chatSortedTurnProjection';
 import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
 import { ChatFileChangePreview, ChatFileChangePreviewScope } from './ChatFileChangePreview';
-import { fileChangePhase, isFileChangeTool, projectFileChanges } from './fileChangePreview';
+import { fileChangePhase, fileChangeStreamLength, isFileChangeTool, paceFileChangeCall, projectFileChanges } from './fileChangePreview';
+import { usePacedLength } from '@/components/chat/usePacedText';
+import { CODE_PACE } from '@/lib/motion/pace';
 import { ChatExploreCard, ChatExploreScope } from './ChatExploreCard';
 import { explorePresentation } from './explorePresentation';
 import { ChatThreadMessageCard } from './ChatThreadMessageCard';
@@ -373,7 +375,15 @@ const ChatToolCard: React.FC<{
   const sessionId = React.useContext(TimelineSessionContext);
   const conversation = useOptionalConversationPresentation();
   const extensionRendered = preview ? undefined : renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
-  const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(call, generating) : [], [call, generating, extensionRendered]);
+  // File changes stream at typing pace: the preview reads the arguments as far
+  // as they are revealed, and keeps "generating" until the rest has drained.
+  const changesFiles = extensionRendered === undefined && isFileChangeTool(call.name);
+  const pacedFile = usePacedLength(changesFiles ? fileChangeStreamLength(call) : 0, changesFiles && generating,
+    { key: `file-change:${call.id}`, profile: CODE_PACE, joinReveal: 240 });
+  const fileGenerating = generating || (changesFiles && pacedFile.revealing);
+  const pacedCall = React.useMemo(() => changesFiles && pacedFile.revealing ? paceFileChangeCall(call, pacedFile.shown) : call,
+    [call, changesFiles, pacedFile.revealing, pacedFile.shown]);
+  const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(pacedCall, fileGenerating) : [], [pacedCall, fileGenerating, extensionRendered]);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   if (call.name === 'render_ui') {
     const projected = conversation?.uiCards?.[call.id];
@@ -440,8 +450,8 @@ const ChatToolCard: React.FC<{
     <>
     {fileChanges.map((file, index) => <ChatFileChangePreview key={index} file={file}
       previewId={`${call.id}:${index}`}
-      phase={fileChangePhase(execution, result, generating, file.path)}
-      onOpen={!file.path || file.operation === 'delete' || !conversation || generating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
+      phase={fileChangePhase(execution, result, fileGenerating, file.path)}
+      onOpen={!file.path || file.operation === 'delete' || !conversation || fileGenerating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
       initiallyExpanded={isFileChangeTool(call.name) && expandEdits}

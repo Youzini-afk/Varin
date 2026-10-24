@@ -357,7 +357,18 @@
   .ide-editor-indent, .ide-editor-eol { display: none; }
   .ide-editor-status { gap: 8px; }
 }
-.workbench-diff-preview-viewport { transition: height var(--wb-panel-duration) var(--wb-ease); }
+/* File change cards: the frame height glides; rows keep identity (ChatFileChangePreview). */
+.workbench-diff-preview-viewport { transition: height var(--motion-dur-glide) var(--motion-ease-glide); }
+.workbench-diff-row { transform-origin: 50% 0; transition: background-color 280ms var(--motion-ease-out), opacity 260ms var(--motion-ease-out); }
+.workbench-diff-row[data-ahead] { opacity: .5; }
+.workbench-diff-row[data-flash]::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: color-mix(in srgb, var(--foreground) 10%, transparent); animation: workbench-diff-flash 900ms var(--motion-ease-out) forwards; }
+@keyframes workbench-diff-flash { to { opacity: 0; } }
+/* A thin block cursor that takes no advance, so it never wraps a row. */
+.workbench-diff-caret { display: inline-block; width: 7px; height: 14px; margin: 0 -8px 0 1px; vertical-align: -2px; border-radius: 1.5px; background: currentColor; opacity: .45; animation: workbench-diff-caret 1000ms steps(1) infinite; }
+@keyframes workbench-diff-caret { 50% { opacity: 0; } }
+.workbench-diff-rest { opacity: .38; }
+.workbench-diff-icon-settle { animation: workbench-diff-icon-settle var(--motion-dur-settle) var(--motion-ease-settle) both; }
+@keyframes workbench-diff-icon-settle { from { opacity: 0; transform: scale(.6); } }
 .workbench-status-arrival { animation: wb-action-arrive var(--wb-state-duration) var(--wb-ease) both; }
 .dialogue-activity { min-width: 0; color: var(--muted-foreground); }
 .dialogue-activity-heading { display: flex; align-items: center; gap: 6px; min-width: 0; min-height: 30px; padding: 4px 0; cursor: pointer; list-style: none; font-size: var(--text-meta); }
