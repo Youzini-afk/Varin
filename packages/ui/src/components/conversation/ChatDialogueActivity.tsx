@@ -3,6 +3,7 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
 import { ThinkingPreview } from './ThinkingPreview';
+import { SwapText } from '@/components/motion/SwapText';
 import { ToolDisclosure } from './ToolDisclosure';
 import { invocationData, invocationStatus, operationInvocation, toolRecord, toolText } from './toolInvocation';
 import { fileChangePhase, fileChangeTargets, isFileChangeTool } from './fileChangePreview';
@@ -120,13 +121,13 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   return <ToolDisclosure id={`dialogue:${process.id}`} className="dialogue-activity" open={expanded} onOpenChange={onExpandedChange}>
     <summary className="dialogue-activity-heading">
       <Icon name="arrow-right-s" className="dialogue-activity-chevron size-3.5 shrink-0" />
-      <span key={current?.item.id ?? thinking?.id ?? 'summary'} className="dialogue-activity-label" title={title}>
-        {busy && <Icon name="loader-4" className="size-3 shrink-0 animate-spin motion-reduce:animate-none" />}
-        {thinking ? <>
-          <span className="shrink-0">{label}</span>
-          {thinking.content.redacted ? <span className="min-w-0 truncate">{t('chat.reasoningTrace.unavailable')}</span>
-            : <ThinkingPreview text={thinking.content.thinking} streaming={Boolean(liveThinking)} active />}
-        </> : <span className="min-w-0 truncate">{label}{subject && <> · {subject.replace(/\s+/g, ' ').trim()}</>}</span>}
+      {/* One label for the whole segment: actions, thinking and the closing
+          receipt change in place, and a running label carries the shimmer. */}
+      <span className="dialogue-activity-label" title={title} data-thinking={thinking ? true : undefined}>
+        <SwapText className="dialogue-activity-text" live={Boolean(busy)}
+          text={thinking ? label : [label, subject.replace(/\s+/g, ' ').trim()].filter(Boolean).join(' · ')} />
+        {thinking ? thinking.content.redacted ? <span className="min-w-0 truncate">{t('chat.reasoningTrace.unavailable')}</span>
+          : <ThinkingPreview text={thinking.content.thinking} streaming={Boolean(liveThinking)} active /> : null}
       </span>
       {failures > 0 && <span className="shrink-0 typography-micro text-destructive">{t('chat.dialogue.failures', { count: failures })}</span>}
       {uncertain > 0 && <span className="shrink-0 typography-micro text-status-warning">{t('chat.dialogue.uncertain', { count: uncertain })}</span>}

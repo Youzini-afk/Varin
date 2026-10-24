@@ -367,6 +367,8 @@
 .dialogue-activity-chevron { transition: transform var(--wb-state-duration) var(--wb-ease); }
 .dialogue-activity[open] > summary .dialogue-activity-chevron { transform: rotate(90deg); }
 .dialogue-activity-label { display: flex; flex: 1; align-items: center; gap: 6px; min-width: 0; animation: dialogue-activity-arrive var(--wb-state-duration) var(--wb-ease) both; }
+.dialogue-activity-text { flex: 0 1 auto; }
+.dialogue-activity-label[data-thinking] > .dialogue-activity-text { flex-shrink: 0; max-width: 60%; }
 .dialogue-activity-body { min-width: 0; margin: 5px 0 8px 6px; padding-left: 14px; border-left: 1px solid var(--border); color: var(--foreground); }
 .dialogue-activity-body > * + * { margin-top: 10px; }
 @keyframes dialogue-activity-arrive { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }

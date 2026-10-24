@@ -22,6 +22,7 @@ beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   height = 60; scroll.mockClear();
+  vi.useFakeTimers();
   useUIStore.setState({ showReasoningTraces: true, collapsibleThinkingBlocks: true });
   Object.defineProperties(window.HTMLElement.prototype, { clientHeight: { configurable: true, get: () => 20 }, scrollHeight: { configurable: true, get: () => height } });
   window.HTMLElement.prototype.scrollTo = scroll;
@@ -30,7 +31,9 @@ beforeEach(() => {
     content: [{ id: 'thought', type: 'thinking', thinking: 'Inspect the layout first.' }] };
   executions = {};
 });
-afterEach(async () => { await act(async () => root.unmount()); vi.unstubAllGlobals(); });
+afterEach(async () => { await act(async () => root.unmount()); vi.useRealTimers(); vi.unstubAllGlobals(); });
+// Labels change in place and hold at least 260ms; springs settle within a second.
+const settle = () => act(async () => { vi.advanceTimersByTime(1000); });
 const render = async (history = false, showThinking = true) => {
   const items = history ? projectChatDialogue([{ type: 'message', id: 'history', runId: 'run', parentId: null, timestamp: '', message }], undefined, { showThinking })
     : projectChatDialogue([], message, { showThinking });
@@ -54,7 +57,12 @@ test('single thinking keeps its own preview and expansion without a surrounding 
   await render();
   expect(heading().querySelector('.thinking-preview')).toBe(preview);
   expect(heading().textContent).toContain('Now check the plan editor.');
-  expect(scroll).toHaveBeenLastCalledWith({ top: 60, behavior: 'smooth' });
+  // The new line glides up rather than jumping.
+  await act(async () => { vi.advanceTimersByTime(48); });
+  expect(preview.scrollTop).toBeGreaterThan(40);
+  expect(preview.scrollTop).toBeLessThan(60);
+  await settle();
+  expect(preview.scrollTop).toBe(60);
   message = { ...message, stopReason: 'stop' };
   await render(true);
   expect(heading().querySelector('.thinking-preview')).toBe(preview);
@@ -81,11 +89,46 @@ test('tool activity replaces the thinking preview and a completed mixed segment 
   executions.read = { toolCallId: 'read', name: 'file_read', args: { path: 'ThreadPlan.tsx' }, status: 'success' };
   await render();
   expect(heading().querySelector('.thinking-preview')).toBeNull();
+  await settle();
   expect(heading().textContent).toContain('ThreadPlan.tsx');
+  const label = heading().querySelector('.swap-text');
   message = { ...message, stopReason: 'stop' };
   await render(true);
+  await settle();
   expect(heading().textContent).toContain('chat.activity.reads{"count":1}');
   expect(heading().querySelector('.thinking-preview')).toBeNull();
+  // The receipt replaces the action in the same label instead of remounting it.
+  expect(heading().querySelector('.swap-text')).toBe(label);
+});
+
+test('a quick action stays readable before the next one replaces it', async () => {
+  message = { ...message, content: [
+    { type: 'toolCall', id: 'read', name: 'file_read', arguments: { path: 'First.ts' } },
+    { type: 'toolCall', id: 'search', name: 'file_search', arguments: { pattern: 'plan' } },
+  ] };
+  executions.read = { toolCallId: 'read', name: 'file_read', args: { path: 'First.ts' }, status: 'running' };
+  executions.search = { toolCallId: 'search', name: 'file_search', args: { pattern: 'plan' }, status: 'success' };
+  await render();
+  await settle();
+  const text = () => heading().querySelector('.swap-text-current')!.textContent;
+  expect(text()).toContain('First.ts');
+  expect(heading().querySelector('[data-live]')).not.toBeNull();
+  // A new action replaces a label that has been readable long enough at once…
+  executions.read = { ...executions.read, status: 'success' };
+  executions.write = { toolCallId: 'write', name: 'file_write', args: { path: 'Second.ts' }, status: 'running' };
+  message = { ...message, content: [...message.content, { type: 'toolCall', id: 'write', name: 'file_write', arguments: { path: 'Second.ts', content: '' } }] };
+  await render();
+  expect(text()).toContain('Second.ts');
+  // …but one that follows within 260ms waits its turn.
+  await act(async () => { vi.advanceTimersByTime(50); });
+  executions.write = { ...executions.write, status: 'success' };
+  executions.list = { toolCallId: 'list', name: 'file_list', args: { path: 'src' }, status: 'running' };
+  message = { ...message, content: [...message.content, { type: 'toolCall', id: 'list', name: 'file_list', arguments: { path: 'src' } }] };
+  await render();
+  await act(async () => { vi.advanceTimersByTime(100); });
+  expect(text()).toContain('Second.ts');
+  await settle();
+  expect(text()).toContain('chat.dialogue.list');
 });
 
 test('redacted and disabled thinking never exposes text through the collapsed header', async () => {

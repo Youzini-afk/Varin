@@ -108,3 +108,42 @@
 @keyframes markdown-caret-leave {
   to { opacity: 0; transform: scale(.5); }
 }
+
+/*
+ * In-place label (components/motion/SwapText.tsx): the leaving and the
+ * current text share one grid cell. A running label carries a faint light
+ * sweeping across its text instead of a spinner or an underline.
+ */
+.swap-text {
+  display: inline-grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+.swap-text > * {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* `color` is transparent here, so the base tone cannot be currentColor. */
+.swap-text[data-live] > .swap-text-current {
+  background: linear-gradient(90deg, var(--swap-text-base, var(--muted-foreground)) 0 38%, var(--foreground) 50%, var(--swap-text-base, var(--muted-foreground)) 62% 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: swap-text-shimmer 2200ms linear infinite;
+}
+@keyframes swap-text-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -160% 0; }
+}
+:root[data-motion="reduced"] .swap-text[data-live] > .swap-text-current,
+:root[data-motion="off"] .swap-text[data-live] > .swap-text-current {
+  background: none;
+  color: inherit;
+  animation: none;
+}

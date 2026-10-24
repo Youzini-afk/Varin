@@ -15,6 +15,7 @@ import type {
   ChatAssistantMessage,
   ChatSessionEntry,
   ChatSessionMessageEntry,
+  ChatToolExecutionState,
   ChatUserMessage,
 } from '@/components/conversation/types';
 
@@ -61,6 +62,8 @@ const history = (turns: number): ChatSessionEntry[] => {
 
 interface FrameSample {
   t: number;
+  /** The last process row's label: identity, text, running state, leaving layers. */
+  activity: { id: number; text: string; title: string; live: boolean; leaving: number; spinner: boolean } | null;
   /** Lines of a code fence still streaming, and how many of them have colour. */
   openFenceLines: number;
   openFenceColoured: number;
@@ -85,22 +88,27 @@ interface LabState {
   liveAssistant?: ChatAssistantMessage;
   liveUser?: ChatUserMessage;
   activeRunId?: string;
+  executions: Record<string, ChatToolExecutionState>;
 }
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+let labelIds = 0;
+const labelIdentity = new WeakMap<Element, number>();
 
 const scroller = () => document.querySelector<HTMLElement>('[data-conversation-timeline="true"]');
 
 // Every Thread API call resolves to nothing: the lab owns no Host.
 const inertApi = new Proxy({}, { get: () => new Proxy(() => Promise.resolve(undefined), { get: () => () => Promise.resolve(undefined) }) });
-const presentation: ConversationPresentation = {
+const presentationFor = (toolExecutions: Record<string, ChatToolExecutionState>): ConversationPresentation => ({
   readOnly: true,
   api: inertApi as ConversationPresentation['api'],
   identity: { threadId: SESSION, branchId: 'main' } as ConversationPresentation['identity'],
   head: null,
-  toolExecutions: {},
+  toolExecutions,
   quote: () => undefined,
   openFile: () => Promise.resolve(),
   fileTarget: () => Promise.reject(new Error('The motion lab has no files.')),
-};
+});
 
 // The lab is an entry point, not a module other code imports.
 // eslint-disable-next-line react-refresh/only-export-components
@@ -109,10 +117,11 @@ function Lab() {
     const entries = history(8);
     // As ConversationTimeline does when a Thread opens.
     useTimelineViewStore.getState().enter(SESSION, entries.at(-1)?.id ?? null, false);
-    return { entries };
+    return { entries, executions: {} };
   });
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  const presentation = React.useMemo(() => presentationFor(state.executions), [state.executions]);
 
   React.useEffect(() => {
     let recording: FrameSample[] | null = null;
@@ -126,7 +135,19 @@ function Lab() {
         const markdown = [...node.querySelectorAll<HTMLElement>('[data-markdown-content]')].at(-1);
         const caret = markdown?.querySelector<HTMLElement>('.markdown-caret');
         const openFence = markdown?.querySelector<HTMLElement>('pre:not([data-md-lang]) > code[class*="language-"]');
+        const activity = [...node.querySelectorAll<HTMLElement>('.dialogue-activity-label')].at(-1);
+        if (activity && !labelIdentity.has(activity)) labelIdentity.set(activity, ++labelIds);
+        const swap = activity?.querySelector('.swap-text');
+        if (swap && !labelIdentity.has(swap)) labelIdentity.set(swap, ++labelIds);
         recording.push({
+          activity: activity ? {
+            id: labelIdentity.get(activity)!,
+            text: activity.querySelector('.swap-text-current')?.textContent ?? '',
+            live: Boolean(activity.querySelector('.swap-text[data-live]')),
+            leaving: activity.querySelectorAll('[data-swap-leaving]').length,
+            title: `${activity.getAttribute('title') ?? ''} #${swap ? labelIdentity.get(swap) : '-'}`,
+            spinner: Boolean(activity.querySelector('.animate-spin')),
+          } : null,
           openFenceLines: openFence?.querySelectorAll(':scope > .line').length ?? 0,
           openFenceColoured: openFence ? [...openFence.querySelectorAll(':scope > .line')].filter(line => line.querySelector('[style*="color"]')).length : 0,
           shown: markdown?.textContent?.length ?? 0,
@@ -165,6 +186,62 @@ function Lab() {
       metrics() {
         const node = scroller();
         return node ? { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight } : null;
+      },
+      /**
+       * A reply with a conversation-first process row: thinking, three quick
+       * tools, then the spoken answer. `pace` stretches every step.
+       */
+      async process({ pace = 1 } = {}) {
+        const runId = `run-process-${Date.now()}`;
+        let step = 0;
+        // Each model step streams live, then persists; tools run between steps
+        // and report through their own result entries, as the Host delivers them.
+        const live = (id: string, content: ChatAssistantContent[]) => setState(current => ({
+          ...current, activeRunId: runId, liveAssistant: assistant(id, content.map(part => ({ ...part })), 'pending'),
+        }));
+        const persist = (id: string, content: ChatAssistantContent[], stopReason: ChatAssistantMessage['stopReason']) => setState(current => ({
+          ...current, liveAssistant: undefined, entries: [...current.entries, messageEntry(assistant(id, content, stopReason), runId)],
+        }));
+        const execute = (callId: string, name: string, args: Record<string, string>, status: ChatToolExecutionState['status']) => setState(current => ({
+          ...current, executions: { ...current.executions, [callId]: { toolCallId: callId, name, args, status } },
+        }));
+        const report = (callId: string, name: string) => setState(current => ({
+          ...current, entries: [...current.entries, messageEntry({ role: 'toolResult', toolCallId: callId, toolName: name, content: [{ type: 'text', text: 'ok' }], isError: false, timestamp: sequence }, runId)],
+        }));
+        const thought = '先确认刷新令牌在哪里被丢弃，再看会话恢复是否复用了旧的绑定。';
+        const tools: Array<[string, string, Record<string, string>, number]> = [
+          ['read-1', 'file_read', { path: 'src/auth/login.ts' }, 420],
+          ['search-1', 'file_search', { pattern: 'refreshToken' }, 160],
+          ['read-2', 'file_read', { path: 'src/auth/session.ts' }, 120],
+        ];
+        for (const [index, [callId, name, args, duration]] of tools.entries()) {
+          const id = `a-process-${runId}-${step += 1}`;
+          const content: ChatAssistantContent[] = [];
+          if (index === 0) {
+            for (let length = 2; length <= thought.length; length += 2) {
+              content[0] = { type: 'thinking', id: `${id}:thinking`, thinking: thought.slice(0, length) };
+              live(id, content);
+              await sleep(40 * pace);
+            }
+          }
+          content.push({ type: 'toolCall', id: callId, name, arguments: args });
+          live(id, content);
+          await sleep(60 * pace);
+          persist(id, content, 'toolUse');
+          execute(callId, name, args, 'running');
+          await sleep(duration * pace);
+          execute(callId, name, args, 'success');
+          report(callId, name);
+          await sleep(40 * pace);
+        }
+        const id = `a-process-${runId}-${step + 1}`;
+        const answer = '根因在会话恢复：它复用了旧的绑定，刷新令牌因此被丢弃。';
+        for (let length = 2; length <= answer.length; length += 2) {
+          live(id, [{ type: 'text', id: `${id}:text`, text: answer.slice(0, length) }]);
+          await sleep(60 * pace);
+        }
+        persist(id, [{ type: 'text', id: `${id}:text`, text: answer }], 'stop');
+        setState(current => ({ ...current, activeRunId: undefined }));
       },
       /** Submit a user turn and anchor it, as ThreadConversation does once the Host accepts it. */
       send(text = '新的问题：请继续展开。', { track = false } = {}) {
@@ -210,7 +287,7 @@ function Lab() {
             }
             clearInterval(timer);
             timer = undefined;
-            setState(current => ({ entries: [...current.entries, messageEntry(live, runId)] }));
+            setState(current => ({ entries: [...current.entries, messageEntry(live, runId)], executions: current.executions }));
             resolve();
           }, interval);
         });
@@ -232,7 +309,7 @@ function Lab() {
           liveUser={state.liveUser}
           activeRunId={state.activeRunId}
           leafId={state.entries.at(-1)?.id ?? null}
-          toolExecutions={{}}
+          toolExecutions={state.executions}
         />
         </ConversationContext.Provider>
       </div>
