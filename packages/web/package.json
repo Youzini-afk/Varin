@@ -89,7 +89,7 @@
     "cron-parser": "^5.10.2",
     "diff": "9.0.0",
     "docx": "^9.14.0",
-    "eventsource-parser": "^3.0.6",
+    "eventsource-parser": "^4.1.2",
     "exceljs": "^4.4.0",
     "express": "^5.3.0",
     "google-auth-library": "^11.3.1",
