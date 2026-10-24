@@ -48,6 +48,8 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
 }) {
   const { t } = useI18n();
   const targets = useToolTargets();
+  // A single activity keeps its own disclosure without a second summary around it.
+  if (process.activities.length === 1) return <>{renderActivity(process.activities[0]!)}</>;
   const describe = (item: Extract<DialogueActivity, { kind: 'tool' }>, execution?: ChatToolExecutionState, result?: ChatToolResultMessage) => {
     const phase = isFileChangeTool(item.call.name) ? fileChangePhase(execution, result, item.streaming) : undefined;
     const status = phase === 'failed' || phase === 'partial' ? 'error' : invocationStatus(result, execution, item.streaming);

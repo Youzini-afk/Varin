@@ -3,6 +3,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { ChatDialogueActivity } from './ChatDialogueActivity';
+import { ChatThinkingBlock } from './ChatThinkingBlock';
+import { useUIStore } from '@/stores/useUIStore';
 import { projectChatDialogue } from './chatDialogueProjection';
 import type { ChatAssistantMessage, ChatToolExecutionState } from './types';
 
@@ -11,6 +13,7 @@ vi.mock('@/lib/i18n', async original => ({
   useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => key + (values ? JSON.stringify(values) : '') }),
 }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/chat/MarkdownRenderer', () => ({ MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div> }));
 vi.mock('@/hooks/usePrefersReducedMotion', () => ({ usePrefersReducedMotion: () => false }));
 let root: Root, container: HTMLElement, height: number, message: ChatAssistantMessage;
 let executions: Record<string, ChatToolExecutionState>;
@@ -19,6 +22,7 @@ beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   height = 60; scroll.mockClear();
+  useUIStore.setState({ showReasoningTraces: true, collapsibleThinkingBlocks: true });
   Object.defineProperties(window.HTMLElement.prototype, { clientHeight: { configurable: true, get: () => 20 }, scrollHeight: { configurable: true, get: () => height } });
   window.HTMLElement.prototype.scrollTo = scroll;
   container = document.createElement('div'); document.body.append(container); root = createRoot(container);
@@ -32,12 +36,15 @@ const render = async (history = false, showThinking = true) => {
     : projectChatDialogue([], message, { showThinking });
   const item = items[0];
   await act(async () => root.render(item?.kind === 'process' ? <ChatDialogueActivity process={item} executions={executions} results={new Map()}
-    active={!history} renderActivity={() => <div data-expanded-content>Details</div>} /> : null));
+    active={!history} renderActivity={activity => activity.kind === 'thinking'
+      ? <ChatThinkingBlock content={activity.content} messageId={activity.id} streaming={!history && activity.streaming} label="chat.reasoningTrace.thinking" />
+      : <div data-expanded-content>Details</div>} /> : null));
 };
-const heading = () => container.querySelector('summary')!;
+const heading = () => container.querySelector('summary, button[aria-expanded]')!;
 
-test('collapsed dialogue thinking follows the latest visual line and survives streaming-to-history replacement', async () => {
+test('single thinking keeps its own preview and expansion without a surrounding disclosure', async () => {
   await render();
+  expect(container.querySelector('details')).toBeNull();
   const preview = heading().querySelector<HTMLElement>('.thinking-preview')!;
   expect(heading().textContent).toContain('Inspect the layout first.');
   expect(preview.scrollTop).toBe(40);
@@ -51,8 +58,21 @@ test('collapsed dialogue thinking follows the latest visual line and survives st
   message = { ...message, stopReason: 'stop' };
   await render(true);
   expect(heading().querySelector('.thinking-preview')).toBe(preview);
-  expect(heading().textContent).toContain('chat.dialogue.thinking');
-  expect(heading().textContent).not.toContain('chat.dialogue.thinkingNow');
+  expect(heading().textContent).toContain('chat.reasoningTrace.thinking');
+  await act(async () => (heading() as HTMLButtonElement).click());
+  expect(heading().getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('[role="region"]')?.textContent).toContain('Now check the plan editor.');
+});
+
+test('a single tool renders directly and additional activity restores group disclosure', async () => {
+  message = { ...message, content: [{ type: 'toolCall', id: 'read', name: 'file_read', arguments: { path: 'ThreadPlan.tsx' } }] };
+  await render();
+  expect(container.querySelector('details')).toBeNull();
+  expect(container.querySelector('[data-expanded-content]')).not.toBeNull();
+  message = { ...message, content: [...message.content, { type: 'toolCall', id: 'search', name: 'file_search', arguments: { pattern: 'plan' } }] };
+  await render();
+  expect(container.querySelector('details')).not.toBeNull();
+  expect(container.querySelector('[data-expanded-content]')).toBeNull();
 });
 
 test('tool activity replaces the thinking preview and a completed mixed segment retains its receipt summary', async () => {

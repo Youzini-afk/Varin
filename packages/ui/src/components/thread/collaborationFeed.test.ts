@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { ThreadsAPI, ThreadIdentity } from '@varin/application-client';
-import type { FamilyMember, MessageFeedEntry, RuntimeEvent } from '@varin/protocol';
+import type { FamilyMember, MessageFeedDispatch, MessageFeedEntry, RuntimeEvent } from '@varin/protocol';
 import { CollaborationFeed } from './collaborationFeed';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'root', branchId: 'root-branch' };
@@ -24,6 +24,7 @@ const message = (id: number): MessageFeedEntry => ({
 });
 function fixture() {
   const records = [message(1), message(2), message(3)];
+  const dispatches: MessageFeedDispatch[] = [];
   let listener: (event: RuntimeEvent) => void = () => {};
   const member = (id: string, current = true): FamilyMember => ({
     threadId: id,
@@ -38,7 +39,7 @@ function fixture() {
   const api = {
     messages: {
       feed: vi.fn<NonNullable<ThreadsAPI['messages']>['feed']>(async (_identity, request) => {
-        const matching = records.filter((item) =>
+        const matching = [...records, ...dispatches].sort((a, b) => a.acceptedCursor - b.acceptedCursor).filter((item) =>
           request.before !== undefined
             ? item.acceptedCursor < request.before
             : request.after !== undefined
@@ -48,7 +49,8 @@ function fixture() {
         const selected = request.after !== undefined ? matching.slice(0, 2) : matching.slice(-2);
         return {
           rootThreadId: 'root',
-          messages: structuredClone(selected),
+          messages: structuredClone(selected.filter((item): item is MessageFeedEntry => 'messageId' in item)),
+          dispatches: structuredClone(selected.filter((item): item is MessageFeedDispatch => 'task' in item)),
           participants: ['worker', 'reviewer'].map((threadId) => ({
             threadId,
             name: threadId,
@@ -57,7 +59,7 @@ function fixture() {
           })),
           before: request.after === undefined && matching.length > 2 ? selected[0]!.acceptedCursor : null,
           after: request.after !== undefined && matching.length > 2 ? selected.at(-1)!.acceptedCursor : null,
-          eventCursor: records.at(-1)!.acceptedCursor,
+          eventCursor: Math.max(...records.map(item => item.acceptedCursor), ...dispatches.map(item => item.acceptedCursor)),
         };
       }),
       get: vi.fn(async (_identity: ThreadIdentity, id: string) =>
@@ -76,7 +78,7 @@ function fixture() {
       await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
     }),
   };
-  return { api: api as unknown as ThreadsAPI, records, readers: api, emit: (event: RuntimeEvent) => listener(event) };
+  return { api: api as unknown as ThreadsAPI, records, dispatches, readers: api, emit: (event: RuntimeEvent) => listener(event) };
 }
 it('keeps peer messages, prepended history and new pages in one ordered feed, while refreshing original delivery state', async () => {
   const f = fixture();
@@ -126,6 +128,27 @@ it('does not publish an old page after its panel closes', async () => {
   await pending;
   expect(feed.getSnapshot()).toBe(before);
   expect(f.readers.observe.mock.calls[0]![2].signal.aborted).toBe(true);
+});
+
+it('merges original dispatches with messages, including dispatch-only delta pages without replaying old entries', async () => {
+  const f = fixture();
+  const dispatch = (id: number): MessageFeedDispatch => ({ operationId: `dispatch-${id}`, executionId: `execution-${id}`,
+    senderThreadId: 'root', senderBranchId: 'original-root-branch', targetThreadId: 'worker', targetBranchId: 'original-worker-branch',
+    acceptedCursor: id, acceptedAtMs: id + 1, task: `Original task ${id}`, preset: 'worker' });
+  f.dispatches.push(dispatch(0));
+  const feed = new CollaborationFeed(f.api, identity);
+  await feed.start();
+  await feed.earlier();
+  expect(feed.getSnapshot().items[0]).toMatchObject({ kind: 'dispatch', dispatch: { task: 'Original task 0', targetBranchId: 'original-worker-branch' } });
+  f.dispatches.push(dispatch(4));
+  f.emit({ cursor: 4, subject: 'dispatch-4', revision: 1, kind: 'child.accepted', data: {} });
+  await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('dispatch:dispatch-4'));
+  f.records.push(message(5));
+  f.emit({ cursor: 5, subject: 'message-5', revision: 1, kind: 'message.accepted', data: {} });
+  await vi.waitFor(() => expect(feed.getSnapshot().items.at(-1)?.id).toBe('message:message-5'));
+  expect(f.readers.messages.feed).toHaveBeenCalledWith(identity, { after: 4 }, expect.any(AbortSignal));
+  expect(feed.getSnapshot().items.map(item => item.acceptedCursor)).toEqual([0, 1, 2, 3, 4, 5]);
+  feed.close();
 });
 
 it('keeps the actual terminal state when a member leaves the current directory', async () => {

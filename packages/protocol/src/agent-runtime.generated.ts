@@ -820,6 +820,19 @@ export interface MessageFeedEntry extends MessageView {
   codeExchangeOperationId?: string;
 }
 
+export interface MessageFeedDispatch {
+  operationId: string;
+  executionId: string;
+  senderThreadId: string;
+  senderBranchId: string;
+  targetThreadId: string;
+  targetBranchId: string;
+  acceptedCursor: number;
+  acceptedAtMs: number;
+  preset?: string;
+  task: string;
+}
+
 export interface MessageParticipant {
   threadId: string;
   name: string;
@@ -830,6 +843,7 @@ export interface MessageParticipant {
 export interface MessageFeedPage {
   rootThreadId: string;
   messages: MessageFeedEntry[];
+  dispatches?: MessageFeedDispatch[];
   participants: MessageParticipant[];
   before: number | null;
   after: number | null;
@@ -1515,7 +1529,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 63; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 64; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 

@@ -10,7 +10,6 @@ import type { MessageFeedEntry } from "@varin/protocol";
 import { Icon } from "@/components/icon/Icon";
 import { AgentAvatar } from "@/components/ui/AgentAvatar";
 import { Button } from "@/components/ui/button";
-import { MarkdownRenderer } from "@/components/chat/MarkdownRenderer";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -19,12 +18,6 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-} from "@/components/ui/context-menu";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { useThreadDraftStore } from "@/stores/useThreadDraftStore";
@@ -34,12 +27,13 @@ import { ChildState } from "../conversation/childPresentation";
 import {
   CollaborationFeed,
   type CollaborationMember,
+  type CollaborationFeedItem,
 } from "./collaborationFeed";
 import { CollaborationComposer } from "./CollaborationComposer";
-import { memberBranch, exchangeSummary } from "./collaborationPresentation";
+import { memberBranch } from "./collaborationPresentation";
+import { CollaborationMessage } from "./CollaborationMessage";
 import {
   CollaborationExchange,
-  CollaborationExchangeCard,
 } from "./CollaborationExchange";
 const CollaborationConversation = React.lazy(() =>
   import("./CollaborationConversation").then((module) => ({
@@ -271,213 +265,40 @@ function CollaborationRoomContent({
       {member.detail && <ChildState state={member.detail.state} />}
     </DropdownMenuItem>
   );
-  const viewMember = (id: string, branch: string, className = "") => (
-    <button
-      type="button"
-      className={cn("min-w-0 truncate hover:text-primary", className)}
-      onClick={() => openMember(id, branch)}
-    >
-      {name(id)}
-    </button>
-  );
-  const renderMessage = ({
-    item: message,
-    index,
-  }: {
-    item: MessageFeedEntry;
-    index: number;
-  }) => {
-    const sender = find(message.senderThreadId);
-    const exchange = exchangeSummary(message);
-    const original = message.replyTo
-      ? state.messages.find((item) => item.messageId === message.replyTo)
-      : undefined;
-    const day = new Date(message.acceptedAtMs).toLocaleDateString();
-    const previous = state.messages[index - 1];
-    const showDay =
-      !previous || day !== new Date(previous.acceptedAtMs).toLocaleDateString();
-    const sourceId =
-      exchange && typeof exchange.source?.threadId === "string"
-        ? exchange.source.threadId
-        : message.senderThreadId;
-    const targetId =
-      exchange && typeof exchange.target?.threadId === "string"
-        ? exchange.target.threadId
-        : message.targetThreadId;
-    return (
-      <div className="px-4 pb-6">
-        {showDay && (
-          <div className="mb-5 mt-1 flex items-center gap-3 typography-micro text-muted-foreground">
-            <span className="h-px flex-1 bg-border/40" />
-            {day}
-            <span className="h-px flex-1 bg-border/40" />
-          </div>
-        )}
-        <ContextMenu>
-          <ContextMenuTrigger asChild>
-            <article
-              className="group/collaboration-message relative flex gap-2.5"
-              data-message-id={message.messageId}
-            >
-              {message.actor.kind === "user" ? (
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 typography-micro text-primary">
-                  {t("collaboration.you")}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  className="mt-0.5 self-start"
-                  onClick={() =>
-                    openMember(message.senderThreadId, message.senderBranchId)
-                  }
-                  aria-label={t("collaboration.viewMember", {
-                    name: name(message.senderThreadId),
-                  })}
-                >
-                  <AgentAvatar
-                    identity={message.senderThreadId}
-                    avatar={sender?.avatar}
-                    size={28}
-                  />
-                </button>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 typography-micro text-muted-foreground">
-                  {message.actor.kind === "user" ? (
-                    <span className="font-medium text-foreground">
-                      {t("collaboration.you")}
-                    </span>
-                  ) : (
-                    viewMember(
-                      sourceId,
-                      sourceId === message.senderThreadId
-                        ? message.senderBranchId
-                        : message.targetBranchId,
-                      "font-medium text-foreground",
-                    )
-                  )}
-                  <Icon name="arrow-right" className="size-3 shrink-0" />
-                  {viewMember(
-                    targetId,
-                    targetId === message.targetThreadId
-                      ? message.targetBranchId
-                      : message.senderBranchId,
-                  )}
-                  <time
-                    className="ml-auto pl-1"
-                    dateTime={new Date(message.acceptedAtMs).toISOString()}
-                  >
-                    {new Date(message.acceptedAtMs).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </time>
-                </div>
-                {message.replyTo && (
-                  <div className="mb-1 mt-2 truncate border-l-2 border-border pl-2 typography-micro text-muted-foreground">
-                    {t("chat.messages.reply")} ·{" "}
-                    {original
-                      ? original.codeExchangeOperationId
-                        ? t("collaboration.fileExchange")
-                        : original.text
-                      : t("collaboration.earlierMessage")}
-                  </div>
-                )}
-                {exchange ? (
-                  <CollaborationExchangeCard
-                    message={message}
-                    onOpen={() => select({ kind: "exchange", message })}
-                  />
-                ) : (
-                  <div
-                    className={cn(
-                      "mt-1 break-words typography-meta leading-relaxed",
-                      message.actor.kind === "user" &&
-                        "rounded-r-lg rounded-bl-lg bg-primary/10 px-3 py-2",
-                    )}
-                  >
-                    <MarkdownRenderer
-                      messageId={`collaboration:${message.messageId}`}
-                      content={message.text}
-                      enableFileReferences={false}
-                    />
-                  </div>
-                )}
-                {message.activation.state === "failed" ? (
-                  <p
-                    role="status"
-                    title={message.activation.code}
-                    className="mt-1 typography-micro text-destructive"
-                  >
-                    {t("chat.messages.failed")}
-                  </p>
-                ) : message.state === "cancelled" ? (
-                  <p className="mt-1 typography-micro text-muted-foreground">
-                    {t("chat.messages.cancelled")}
-                  </p>
-                ) : message.actor.kind === "user" &&
-                  message.state === "queued" ? (
-                  <p className="mt-1 typography-micro text-muted-foreground">
-                    {t("chat.messages.queued")}
-                  </p>
-                ) : null}
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className="absolute -right-1 -top-5 rounded bg-[var(--surface-elevated)] p-1 text-muted-foreground opacity-100 sm:opacity-0 sm:group-hover/collaboration-message:opacity-100 sm:group-focus-within/collaboration-message:opacity-100"
-                    aria-label={t("collaboration.messageActions")}
-                  >
-                    <Icon name="more" className="size-4" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => reply(message)}>
-                    <Icon name="reply" className="size-4" />
-                    {t("chat.messages.reply")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() =>
-                      void runAction(() =>
-                        navigator.clipboard.writeText(message.text),
-                      )
-                    }
-                  >
-                    <Icon name="file-copy" className="size-4" />
-                    {t("collaboration.copyMessage")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </article>
-          </ContextMenuTrigger>
-          <ContextMenuContent>
-            <ContextMenuItem onClick={() => reply(message)}>
-              <Icon name="reply" className="size-4" />
-              {t("chat.messages.reply")}
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() =>
-                openMember(message.senderThreadId, message.senderBranchId)
-              }
-            >
-              <Icon name="chat-1" className="size-4" />
-              {t("harness.threads.openConversation")}
-            </ContextMenuItem>
-            <ContextMenuItem
-              onClick={() =>
-                void runAction(() =>
-                  navigator.clipboard.writeText(message.text),
-                )
-              }
-            >
-              <Icon name="file-copy" className="size-4" />
-              {t("collaboration.copyMessage")}
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
-      </div>
-    );
+  const [expandedMessages, setExpandedMessages] = React.useState(() => new Set<string>());
+  const renderMessage = ({ item, index }: { item: CollaborationFeedItem; index: number }) => {
+    const day = new Date(item.acceptedAtMs).toLocaleDateString();
+    const previous = state.items[index - 1];
+    const showDay = !previous || day !== new Date(previous.acceptedAtMs).toLocaleDateString();
+    const original = item.kind === 'message' && item.message.replyTo
+      ? state.messages.find(message => message.messageId === item.message.replyTo) : undefined;
+    return <div className="px-3 pb-4 sm:px-4">
+      {showDay && <div className="mb-5 mt-1 flex items-center gap-3 typography-micro text-muted-foreground">
+        <span className="h-px flex-1 bg-border/40" />{day}<span className="h-px flex-1 bg-border/40" />
+      </div>}
+      <CollaborationMessage item={item} members={state.members} original={original}
+        expanded={expandedMessages.has(item.id)}
+        onExpandedChange={open => {
+          if (open) setAtEnd(false);
+          setExpandedMessages(previous => {
+            const next = new Set(previous);
+            if (open) next.add(item.id); else next.delete(item.id);
+            return next;
+          });
+        }}
+        onMember={openMember}
+        onReply={entry => {
+          if (entry.kind === 'message') { reply(entry.message); return; }
+          useThreadDraftStore.getState().patch(roomKey, draft => ({
+            collaboration: draft.collaboration?.attempts ? draft.collaboration : { targets: [{
+              runtime: 'agent', threadId: entry.dispatch.targetThreadId, branchId: entry.dispatch.targetBranchId,
+            }] },
+          }));
+          select();
+        }}
+        onCopy={text => void runAction(() => navigator.clipboard.writeText(text))}
+        onExchange={message => select({ kind: 'exchange', message })} />
+    </div>;
   };
   const error = actionError ?? state.error;
   const defaultBranch = memberBranch(
@@ -679,21 +500,21 @@ function CollaborationRoomContent({
           )}
           aria-hidden={Boolean(selection)}
         >
-          {state.ready && state.messages.length ? (
+          {state.ready && state.items.length ? (
             <LegendList
               ref={list}
               className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
               contentContainerClassName="pt-4"
-              data={state.messages}
+              data={state.items}
               dataKey={roomKey}
-              keyExtractor={(item) => item.messageId}
+              keyExtractor={(item) => item.id}
               renderItem={renderMessage}
               recycleItems={false}
               initialScrollIndex={{
-                index: state.messages.length - 1,
+                index: state.items.length - 1,
                 viewPosition: 1,
               }}
-              maintainScrollAtEnd
+              maintainScrollAtEnd={atEnd}
               maintainVisibleContentPosition={{ data: true, size: true }}
               onStartReached={() => {
                 if (!selection && !state.error) void feed.earlier();
@@ -734,7 +555,7 @@ function CollaborationRoomContent({
               variant="outline"
               size="sm"
               className="absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full bg-background shadow-sm"
-              onClick={() => list.current?.scrollToEnd({ animated: false })}
+              onClick={() => { setAtEnd(true); list.current?.scrollToEnd({ animated: false }); }}
             >
               <Icon name="arrow-down" className="size-3.5" />
               {t("chat.scrollToBottom.aria")}

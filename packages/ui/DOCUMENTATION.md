@@ -80,8 +80,9 @@ Narrow viewports wrap subjects instead of hiding them; original arguments remain
 
 Chat layout offers chronological, grouped-answer, and conversation-first (`dialogue`) modes.
 Conversation-first is the default for unset preferences and resets; saved choices retain their mode.
-Conversation-first preserves every spoken message in arrival order. Ordinary tools and public
-thinking between messages share one initially collapsed activity row: the active segment shows
+Conversation-first preserves every spoken message in arrival order. A single activity renders its
+original thinking or tool row, retaining that row's own disclosure. Multiple ordinary tools and public
+thinking items between messages share one initially collapsed activity row: the active segment shows
 the current action. While public thinking streams, its header reuses the single-line scrolling
 preview; thinking-only history retains that preview. A later spoken message or the end of a mixed
 segment leaves a receipt-based tool summary. Redacted thinking never contributes preview text. Dispatches, questions and usable UI/image outputs (including observed script descendants)
@@ -159,8 +160,14 @@ the list. Renaming uses the Thread catalog owner, and an uncertain instruction r
 Showing a resource or history view does not launch work. A follow-up registration observes its original
 Job/source and cursor; it never stops the observed Job or uses a renderer timer as a scheduler.
 
-The right-hand Collaboration surface reads the native family message feed, including exchanges between
-peers. Its virtual list prefetches older messages and merges new arrivals by original message identity.
+The right-hand Collaboration surface reads original family dispatches and peer messages in one native
+admission-cursor feed. Dispatches retain their original task and exact parent/child branches; later
+continuations never substitute their input. Internal code retrieval stays outside the room. Its virtual
+list prefetches older entries and merges by original message/dispatch identity, including dispatch-only pages.
+`CollaborationMessage` shows explicit sender/recipient routes and message bubbles. User messages align
+right; Agents retain their avatars. Rendered body height determines long-message folding, including later
+font/image/reflow changes. Expansion remains keyed to the entry in its room, animates in place and pauses
+automatic following; copy and reply still use original full text and native message identities.
 Member selection mounts one original Thread history/progress reader with a separate viewport key; main
 conversation scroll state stays independent. Completed members are paged through the native history
 directory. User replies and per-recipient send attempts use the original message admission API, with

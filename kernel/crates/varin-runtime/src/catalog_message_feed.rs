@@ -1,4 +1,4 @@
-//! A read projection of the existing family message queue; no separate chat ledger.
+//! A read projection of original family messages and dispatches; no separate chat ledger.
 use super::*;
 use std::collections::BTreeSet;
 
@@ -20,9 +20,25 @@ pub struct Entry {
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct Dispatch {
+    pub operation_id: String,
+    pub execution_id: String,
+    pub sender_thread_id: String,
+    pub sender_branch_id: String,
+    pub target_thread_id: String,
+    pub target_branch_id: String,
+    pub accepted_cursor: u64,
+    pub accepted_at_ms: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<String>,
+    pub task: String,
+}
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Page {
     pub root_thread_id: String,
     pub messages: Vec<Entry>,
+    pub dispatches: Vec<Dispatch>,
     pub participants: Vec<Participant>,
     pub before: Option<u64>,
     pub after: Option<u64>,
@@ -92,8 +108,8 @@ impl Read {
         let event_cursor = db.query_row("SELECT coalesce(max(cursor),0) FROM events", [], |r| {
             read_number(r, 0)
         })?;
-        // Cursor ranges refer to immutable acceptance order. Membership and body reads share
-        // this transaction; a newly admitted message cannot move an older page boundary.
+        // Both domains use the original immutable admission event cursor. A new message,
+        // child continuation or renamed member cannot move an older page boundary.
         let (range, order, bound) = if let Some(after) = self.after {
             (">", "ASC", sql_number(after)?)
         } else {
@@ -103,10 +119,20 @@ impl Read {
                 self.before.map(sql_number).transpose()?.unwrap_or(i64::MAX),
             )
         };
-        let sql = format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id)
-            SELECT q.body,c.id,c.intent FROM input_queue q JOIN commands c ON c.id=json_extract(q.body,'$.origin.command_key')
-            WHERE q.origin='message' AND q.sender_thread_id IN (SELECT id FROM family)
-            AND q.cursor {range} ?2 ORDER BY q.cursor {order} LIMIT ?3");
+        let sql = format!("WITH RECURSIVE family(id) AS (SELECT ?1 UNION SELECT c.child_thread_id FROM child_tasks c JOIN family f ON json_extract(c.body,'$.parent_thread_id')=f.id),
+            feed(kind,body,content,extra,cursor,accepted_at_ms) AS (
+                SELECT 'message',q.body,c.intent,c.id,q.cursor,0
+                FROM input_queue q JOIN commands c ON c.id=json_extract(q.body,'$.origin.command_key')
+                WHERE q.origin='message' AND q.sender_thread_id IN (SELECT id FROM family)
+                UNION ALL
+                SELECT 'dispatch',c.body,d.body,c.id,e.cursor,coalesce(json_extract(e.data,'$.acceptedAtMs'),t.created_at_ms)
+                FROM child_tasks c JOIN delegated_executions d ON d.child_operation_id=c.id AND json_extract(d.body,'$.trigger.kind')='dispatch'
+                JOIN events e ON e.subject=c.id AND e.kind='child.accepted'
+                JOIN threads t ON t.id=c.child_thread_id JOIN operations o ON o.id=c.id
+                WHERE json_extract(c.body,'$.parent_thread_id') IN (SELECT id FROM family)
+                  AND coalesce(json_extract(o.body,'$.executor'),'')!='code_retrieval'
+            ) SELECT kind,body,content,extra,cursor,accepted_at_ms FROM feed
+            WHERE cursor {range} ?2 ORDER BY cursor {order} LIMIT ?3");
         let mut statement = db.prepare(&sql)?;
         let records = statement
             .query_map(params![root, bound, (self.limit + 1) as i64], |r| {
@@ -114,20 +140,46 @@ impl Read {
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    read_number(r, 4)?,
+                    read_number(r, 5)?,
                 ))
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let more = records.len() > self.limit;
         let mut messages = Vec::new();
+        let mut dispatches = Vec::new();
+        let mut cursors = Vec::new();
         let mut participants = BTreeSet::new();
-        for (body, command, intent) in records.into_iter().take(self.limit) {
+        for (kind, body, content, command, cursor, accepted_at_ms) in records.into_iter().take(self.limit) {
             check()?;
+            cursors.push(cursor);
+            if kind == "dispatch" {
+                let child: super::super::delegated::ChildRelation = serde_json::from_str(&body)?;
+                let execution: super::super::delegated::DelegatedExecution = serde_json::from_str(&content)?;
+                let input: super::super::dispatch::DispatchInput = serde_json::from_value(self.content.load_cancellable(&execution.input_ref, cancel)?)?;
+                participants.insert(child.parent_thread_id.clone());
+                participants.insert(child.child_thread_id.clone());
+                dispatches.push(Dispatch {
+                    operation_id: child.operation_id,
+                    execution_id: execution.execution_id,
+                    sender_thread_id: child.parent_thread_id,
+                    sender_branch_id: child.parent_branch_id,
+                    target_thread_id: child.child_thread_id,
+                    target_branch_id: child.child_branch_id,
+                    accepted_cursor: cursor,
+                    accepted_at_ms,
+                    preset: input.preset,
+                    task: input.task,
+                });
+                continue;
+            }
             let row: QueuedInputMetadata = serde_json::from_str(&body)?;
             let message_summary = summary(&db, row)?;
             let identity = &message_summary.receipt.identity;
             participants.insert(identity.sender_thread_id.clone());
             participants.insert(identity.target_thread_id.clone());
-            let reference: Value = serde_json::from_str(&intent)?;
+            let reference: Value = serde_json::from_str(&content)?;
             let original: MessageIntent =
                 serde_json::from_value(self.content.load_cancellable(&reference, cancel)?)?;
             let exchange = match &identity.actor {
@@ -148,21 +200,11 @@ impl Read {
         }
         if self.after.is_none() {
             messages.reverse();
+            dispatches.reverse();
+            cursors.reverse();
         }
-        let before = (more && self.after.is_none())
-            .then(|| {
-                messages
-                    .first()
-                    .map(|m| m.message.summary.receipt.accepted_cursor)
-            })
-            .flatten();
-        let after = (more && self.after.is_some())
-            .then(|| {
-                messages
-                    .last()
-                    .map(|m| m.message.summary.receipt.accepted_cursor)
-            })
-            .flatten();
+        let before = (more && self.after.is_none()).then(|| cursors.first().copied()).flatten();
+        let after = (more && self.after.is_some()).then(|| cursors.last().copied()).flatten();
         let participants = participants.into_iter().map(|thread| {
             check()?;
             Ok(db.query_row("SELECT t.title,t.agent_code,json_extract(c.body,'$.avatar') FROM threads t LEFT JOIN child_tasks c ON c.child_thread_id=t.id WHERE t.id=?1", [&thread], |r| {
@@ -174,6 +216,7 @@ impl Read {
         Ok(Page {
             root_thread_id: root,
             messages,
+            dispatches,
             participants,
             before,
             after,

@@ -72,7 +72,17 @@ fn family_feed_reads_peer_and_user_messages_once_and_pages_across_new_acceptance
     let third = send(&mut f, "feed-self", "thread:parent", "branch:parent", input("thread:parent", "branch:parent", "user to main agent"));
     let older = f.db.capture_message_feed(child.child_thread_id.clone(), child.child_branch_id.clone(), page.before, None, Some(1)).unwrap().load(&|| false).unwrap();
     assert_eq!(older.messages[0].message.summary.receipt, first);
-    assert!(older.before.is_none());
+    let dispatched = f.db.capture_message_feed(child.child_thread_id.clone(), child.child_branch_id.clone(), older.before, None, Some(1)).unwrap().load(&|| false).unwrap();
+    assert!(dispatched.messages.is_empty());
+    assert!(dispatched.before.is_none());
+    assert_eq!(dispatched.dispatches.len(), 1);
+    let dispatch = &dispatched.dispatches[0];
+    assert_eq!(dispatch.operation_id, child.operation_id);
+    assert_eq!(dispatch.accepted_cursor, child.cursor);
+    assert_eq!(dispatch.sender_thread_id, "thread:parent");
+    assert_eq!(dispatch.target_thread_id, child.child_thread_id);
+    assert_eq!(dispatch.task, f.input.task);
+    assert!(dispatch.accepted_at_ms > 0);
     let tail = f.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, Some(second.accepted_cursor), Some(1)).unwrap().load(&|| false).unwrap();
     assert_eq!(tail.messages[0].message.summary.receipt, third);
     assert!(tail.after.is_none());
@@ -84,6 +94,9 @@ fn family_feed_reads_peer_and_user_messages_once_and_pages_across_new_acceptance
     let replied = send(&mut f, "feed-reply", "thread:parent", "branch:parent", reply);
     assert_eq!(replied.identity.target_thread_id, child.child_thread_id);
     assert_eq!(replied.identity.actor, MessageActor::User);
+    let mut internal = Fixture::new_internal_retrieval();
+    internal.accept();
+    assert!(internal.db.capture_message_feed("thread:parent".into(), "branch:parent".into(), None, None, None).unwrap().load(&|| false).unwrap().dispatches.is_empty());
 }
 #[test]
 fn idle_receipt_reply_routing_pagination_and_user_queue_are_one_immutable_fact() {

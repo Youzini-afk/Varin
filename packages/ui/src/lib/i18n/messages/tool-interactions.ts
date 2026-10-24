@@ -1,4 +1,9 @@
 const rows = [
+  ['collaboration.dispatch', 'Delegated task', '派发任务', '派發任務'],
+  ['collaboration.openAgent', 'View Agent conversation', '查看 Agent 对话', '查看 Agent 對話'],
+  ['collaboration.agentState', 'Current Agent state', 'Agent 当前状态', 'Agent 目前狀態'],
+  ['collaboration.expandMessage', 'Read full message', '展开全文', '展開全文'],
+  ['collaboration.collapseMessage', 'Collapse message', '收起全文', '收起全文'],
   ['chat.tools.effect.nextRequest', 'From the next model request', '从下一次模型请求生效', '從下一次模型請求生效'],
   ['chat.tools.inputSent', 'Input sent', '输入已发送', '輸入已傳送'],
   ['chat.tools.inputReceiptHint', 'Confirms writing to the input channel. Read process output to observe the application response.', '此回执确认输入已写入终端或管道；程序的响应请查看进程输出。', '此回執確認輸入已寫入終端或管道；程式的回應請查看程序輸出。'],
