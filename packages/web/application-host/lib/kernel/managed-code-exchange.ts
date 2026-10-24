@@ -8,6 +8,7 @@ import { acknowledgedCode, captureCodeSelection, codeIntegration, openCodeTarget
   type CodeExchangeOwners, type CodeParticipant, type CodeSelection } from './code-exchange.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
 import { toolOperationId, validToolOrigin } from './protocol.generated.js';
+import { sourcePathMap } from './source-path-map.js';
 
 export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:ToolInvocationAuthority,branchId:string,
   source:CodeParticipant,target:CodeParticipant,files:CodeSelection[]|undefined,signal:AbortSignal,onApply:()=>void) {
@@ -39,8 +40,10 @@ export async function exchangeManagedCode(owners:CodeExchangeOwners,invocation:T
     };
     const sender=await open(source),receiver=await open(target);
     const baseline=source.source.mode==='live_root'?target.source:source.launch.selection.source!;
-    if(!baseline.branch_id || baseline.revision===null)throw new Error('The exchange has no shared baseline');
+    if(!baseline.branch_id || baseline.revision===null)throw Object.assign(new Error('No common file baseline links these Agents: neither side records the fixed revision both started from, so their changes cannot be merged'),{code:'baseline_unavailable'});
     const result=await sender.service.service({...sender.address,requestId:randomUUID(),operation:{kind:'code_capture',invocation,
+      mapping: await sourcePathMap(owners.runtime, source, target, signal),
+      baselineMapping: await sourcePathMap(owners.runtime, source.source.mode==='live_root'?target:source, source, signal),
       sourceThreadId:source.member.threadId,targetThreadId:target.member.threadId,
       baselineBranchId:baseline.branch_id,baselineRevision:baseline.revision,...(files?{files}:{})}},signal) as WorkingResult;
     onApply();
@@ -66,6 +69,7 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
       try {return await captureCodeSelection({store:fixed.store,workspaceId:scope.source.workspace_id,operationId:invocation.operationId,
         fixedSource:{branchId:scope.source.branch_id!,revision:scope.source.revision!},baselineBranchId:operation.baselineBranchId,
         baselineRevision:operation.baselineRevision,...(operation.files?{files:operation.files}:{}),signal,
+        mapping: operation.mapping, baselineMapping: operation.baselineMapping,
         acknowledged:await acknowledgedCode(fixed.store,operation.sourceThreadId,operation.targetThreadId,
           await owners.metadataReader.listOperations(scope.source.workspace_id,'integration'))});}
       finally{await fixed.release();}
@@ -77,6 +81,7 @@ export function createManagedCodeExchangeService(owners:Pick<CodeExchangeOwners,
       if(operation.kind==='code_capture')return captureCodeSelection({store:target.store,workspaceId:scope.source.workspace_id,
         operationId:invocation.operationId,directory:target.directory,baselineBranchId:operation.baselineBranchId,
         baselineRevision:operation.baselineRevision,...(operation.files?{files:operation.files}:{}),
+        mapping: operation.mapping, baselineMapping: operation.baselineMapping,
         acknowledged:await acknowledgedCode(target.store,operation.sourceThreadId,operation.targetThreadId),signal});
       if(!isDeepStrictEqual(operation.target.source,scope.source))throw new Error('The exchange target source changed');
       const input=codeIntegration(invocation,operation.branchId,operation.source,operation.target,operation.result,target,signal);

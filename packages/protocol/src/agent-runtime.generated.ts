@@ -1544,7 +1544,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 65; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 66; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2614,6 +2614,8 @@ export interface AgentSourceSelection {
 }
 
 export interface ChildSourceHandoff {
+  retention_pin?: ChildSourcePin;
+  source_path?: string;
   refresh?: AgentSourceSelection;
   source_run_id?: string;
   operation_id: string;
@@ -2676,7 +2678,7 @@ export interface ChildPrepareParams {
   inputPreparation?: InputResourcePreparation;
 }
 
-export interface ChildPreparationProgress { phase: 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission'; completed?: number; total?: number; }
+export interface ChildPreparationProgress { phase: 'source' | 'source_wait' | 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission'; completed?: number; total?: number; }
 
 export interface ChildProgressParams {
   executionId: string;
@@ -2720,7 +2722,6 @@ export interface ChildPreset {
   name: string;
   instructions: string;
   tools: string[];
-  work_mode: ChildWorkMode;
   model: ChildModelBinding | null;
   unavailable: ChildCapabilityFailure | null;
   model_source: 'inherit' | 'selected';
@@ -2760,6 +2761,7 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  sourcePath?: string;
   inheritContext?: boolean;
   sourceAgent?: string;
   name?: string;

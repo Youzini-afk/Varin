@@ -32,6 +32,7 @@ export interface StableDirectoryCaptureInput {
   directoryInventory?: { read(): Promise<readonly string[]>; verify(): Promise<void>; assertCurrent?(): void };
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
+  onDiscovered?: (completed: number) => void;
   onPhase?: (phase: 'inventory' | 'capture' | 'verify' | 'publish') => void;
   changed?: (detail: string) => Error;
 }
@@ -61,7 +62,7 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
   let baselinePaths: readonly string[];
   try {
     baselinePaths = inventory.kind === 'git' ? inventory.paths
-      : input.directoryInventory ? await input.directoryInventory.read() : await store.listWorkspaceBaselinePaths(directory, signal);
+      : input.directoryInventory ? await input.directoryInventory.read() : await store.listWorkspaceBaselinePaths(directory, signal, input.onDiscovered);
   } catch (error) {
     if (error instanceof CaptureInventoryChangedError) throw changed(error.message);
     throw error;
@@ -148,6 +149,7 @@ export interface StableSourceCaptureInput {
   editorDrafts?: readonly { path: string; content: Buffer }[];
   signal?: AbortSignal;
   onProgress?: (completed: number, total: number) => void;
+  onDiscovered?: (completed: number) => void;
   onPhase?: NonNullable<StableDirectoryCaptureInput['onPhase']>;
 }
 
@@ -212,7 +214,7 @@ export async function captureStableSourceBaseline(
       ...(resources ? { capturePaths: resources.observedPaths } : {}), inspectInventory: owners.inspectInventory,
       directoryInventory: documents.captureInventory(token, scopes => scopes
         ? store.listCaptureScopePaths(input.directory, scopes, signal)
-        : store.listWorkspaceBaselinePaths(input.directory, signal), signal) });
+        : store.listWorkspaceBaselinePaths(input.directory, signal, input.onDiscovered), signal) });
     const effective = editorDrafts.length ? await overlayDraftsOnBaseline({ baseState: captured.states, drafts: editorDrafts,
       putObject: async bytes => { signal?.throwIfAborted(); const object = await store.putObject(bytes);
         if (object.release) draftOwners.push(object.release); return object; } }) : { effectiveState: captured.states, changedPaths: [] };

@@ -8,9 +8,11 @@ import type { ManagedSourceServiceHandler } from '../harness/managed-remote-type
 import type { HostJobPending } from './protocol.generated.js';
 import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
 import { openScopedIntegrationTarget, type IntegrationTargetScope, type IntegrationTargetOwners } from './integration-tool-owner.js';
+import { sourcePathMap, type SourcePathMap } from './source-path-map.js';
 
 export type UserIntegrationBinding = Extract<IntegrationOperationBinding, { kind: 'user_operation' }>;
 export interface UserIntegrationRequest {
+  pathMapping?: SourcePathMap;
   binding: UserIntegrationBinding;
   command: ThreadIntegrationCommand;
   /** A previous accepted request is inspected, never silently replayed. */
@@ -33,6 +35,7 @@ const project = (rows: IntegrationOperationReceipt[]): ThreadIntegrationState['o
 async function execute(coordinator: IntegrationCoordinator, target: IntegrationTargetScope, request: UserIntegrationRequest): Promise<UserIntegrationResult> {
   const { binding, command } = request;
   const input: IntegrationPlanInput = { operationId: `integration:${binding.operationId}`,
+    ...(request.pathMapping ? { pathMapping: request.pathMapping } : {}),
     workspaceId: binding.result.workspaceId, threadId: binding.childThreadId,
     branchId: binding.result.branchId, resultRevision: binding.result.resultRevision,
     operationBinding: binding, scopedWorkingStates: target.workingStates,
@@ -147,7 +150,9 @@ export function createThreadIntegrations(options: Owners & {
       if (!op.accepted && command.action !== 'preview') await options.kernel.agentRuntimeRequest('runtime.host_job.accept', {
         binding: op.binding, content: { data: { action: command.action, executionId: child.execution_id }, parts: [] },
       });
-      const request: UserIntegrationRequest = { binding, command, inspectOnly: op.accepted };
+      const request: UserIntegrationRequest = { binding, command, inspectOnly: op.accepted,
+        ...(child.receipt ? { pathMapping: await sourcePathMap(options.runtime,
+          { runId: child.receipt.run_id, source: child.source.selection }, { runId: sourceRunId, source }, signal) } : {}) };
       if (admission.kind === 'managed') {
         dispatched = true;
         result = await admission.service.service({ coordinatorHostId: options.runtime.coordinatorHostId,

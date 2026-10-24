@@ -82,7 +82,7 @@ describe('Runtime tool selections', () => {
     assert.deepEqual(resolveAgentTools([], 'agent'), { source: 'explicit', names: [] });
     assert.throws(() => parseAgentToolSelection({ future: ['read'] }), /array/);
     const settings = mergeHarnessSettings({ agents: { reader: { name: 'Reader', description: '', instructions: '', enabled: true,
-      tools: ['file_read'], worktree: 'none', workFocus: [] } } }, {});
+      tools: ['file_read'], workFocus: [] } } }, {});
     const model = { providerId: 'provider', modelId: 'model' };
     const native = observePresets({}, model, settings.agents, undefined, 'agent', { ...builtinTools, worker: ['file_write'] });
     assert.deepEqual(native.find(p => p.id === 'worker')?.definition.tools, ['file_write']);
@@ -93,5 +93,19 @@ describe('Runtime tool selections', () => {
     assert.equal(retrieval?.modelSource, 'inherit');
     assert.equal(observePresets({ retrievalAgent: { inherit: false } }, model, {}, undefined, 'agent', builtinTools)
       .find(p => p.id === 'retrieval')?.availability, 'unconfigured');
+  });
+
+  it("drops a stored retired placement preference while keeping the rest of the Agent", () => {
+    const stored = { name: "Writer", description: "Edits", instructions: "Keep it short", enabled: true,
+      model: { providerId: "p", modelId: "m" }, tools: ["file_write"], worktree: "isolated", workFocus: ["code"] };
+    const parsed = parseHarnessAgent(stored);
+    assert.equal("worktree" in parsed, false);
+    assert.deepEqual(parsed, { name: "Writer", description: "Edits", instructions: "Keep it short", enabled: true,
+      model: { providerId: "p", modelId: "m" }, tools: ["file_write"], workFocus: ["code"] });
+    assert.throws(() => parseHarnessAgent({ ...stored, worktree: "copy" }), /Invalid agent definition/);
+    // Raw stored settings may still contain the retired key, outside the current input type.
+    const stored = { models: { worker: { agent: { worktree: "shared", instructions: "Own" } } } } as unknown as Parameters<typeof mergeHarnessSettings>[0];
+    const settings = mergeHarnessSettings(stored, {});
+    assert.deepEqual(settings.models.worker?.agent, { instructions: "Own" });
   });
 });

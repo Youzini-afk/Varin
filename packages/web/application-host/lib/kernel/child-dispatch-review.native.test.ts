@@ -75,6 +75,7 @@ function gate() {
 }
 type RecordedRequest = { body: Record<string, unknown>; response: ServerResponse };
 const model = { providerId: 'child-review-provider', modelId: 'child-review-model' };
+const retrievalModel = { providerId: model.providerId, modelId: 'child-review-retrieval-model' };
 function originalSourcePin(child: import('./protocol.generated.js').ChildTask) {
   if (child.source.kind === 'absent' || !child.source.handoff || child.source.handoff.root.kind !== 'fixed') throw new Error('Fixture expects its original fixed source');
   return child.source.handoff.root.pin;
@@ -84,7 +85,7 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
-  const versions: Record<string, string> = { dispatch: '3', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  const versions: Record<string, string> = { dispatch: '4', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
@@ -135,8 +136,10 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
   const endpoint = `${provider.url}/${providerFamily === 'anthropic-messages' ? 'messages' : 'responses'}`;
   const configuration = { providerId: model.providerId, providerFamily, model: model.modelId, endpoint,
     credentialEnvironment: null, allowAnonymous: false, configurationGeneration: 1, maxOutputTokens: 128 };
+  // A separately selected child model is a distinct execution binding on the same account.
+  const retrievalConfiguration = { ...configuration, model: retrievalModel.modelId, configurationGeneration: 2 };
   let projectId = 'child-review-project'; let trusted = true;
-  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean; structure?:boolean } = {}) {
+  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean; structure?:boolean; freshModelOwners?: boolean } = {}) {
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
@@ -173,14 +176,20 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       return result;
     });
     const credentials = { available: true };
-    const credentialOwner = new ExistingHostCredentialOwner({ providerId: model.providerId,
-      providerFamily: configuration.providerFamily, endpoint, bindingIdentity: modelCredentialBindingIdentity(configuration),
+    const createCredentialOwner = (selected: typeof configuration = configuration) => new ExistingHostCredentialOwner({ providerId: model.providerId,
+      providerFamily: configuration.providerFamily, endpoint, bindingIdentity: modelCredentialBindingIdentity(selected),
       currentScope: async () => {
         if (!credentials.available) throw new Error('fixture credential owner was explicitly disabled');
         return { reference: 'child-review-reference', authority: 'child-review-authority',
           account: 'child-review-account', generation: 1 };
       },
-      runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-child-review-key-not-a-real-secret' } }) } });
+      runtime: { getAuth: async () => ({ auth: { apiKey: 'fake-child-review-key-not-a-real-secret' } }) },
+      // Product owners release their captured implementation; this makes reference counting real.
+      ...(options.freshModelOwners ? { release: () => {} } : {}) });
+    const credentialOwner = createCredentialOwner();
+    // The product model authority returns a separately releasable owner for every resolution.
+    const resolvedOwner = (selected: typeof configuration = configuration) => options.freshModelOwners || selected !== configuration
+      ? createCredentialOwner(selected) : credentialOwner;
     const extensions = options.policyExample ? await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
       brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') }) : undefined;
     if (extensions) {
@@ -221,9 +230,13 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
     const errors: unknown[] = [];
     const models = { resolveModel: async (selection: typeof model) => {
-      if (selection.providerId !== model.providerId || selection.modelId !== model.modelId) throw new Error('Unknown fixture model');
-      return { configuration, credentialOwner };
-    }, rebindModel: async () => credentialOwner };
+      if (selection.providerId !== model.providerId || ![model.modelId, retrievalModel.modelId].includes(selection.modelId)) throw new Error('Unknown fixture model');
+      const selected = selection.modelId === retrievalModel.modelId ? retrievalConfiguration : configuration;
+      return { configuration: selected, credentialOwner: resolvedOwner(selected) };
+    }, rebindModel: async (selected: { model: string }) => {
+      if (![configuration.model, retrievalConfiguration.model].includes(selected.model)) throw new Error('Unknown fixture model');
+      return resolvedOwner(selected.model === retrievalConfiguration.model ? retrievalConfiguration : configuration);
+    } };
     const settings = new AgentSettingsService(agentDir, () => false);
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
@@ -573,18 +586,18 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
   } finally { release.release(); }
 });
 
-it.each(['quick','formal'] as const)('%s retrieval uses native search, structural reading and a fixed-source terminal without IDE services',async(mode)=>{
+it.each(['quick','formal','isolated'] as const)('%s retrieval uses native search, structural reading and a fixed-source terminal without IDE services',async(mode)=>{
   let parentSteps=0,childSteps=0;
   let retrievalId='';
   const entered=gate(), release=gate();
   const invoke=(name:string,args:unknown,id:string)=>tool('tool_invoke',{reference:{name,version:'1'},arguments:args},id);
-  const f=await fixture(({body,response})=>{
+  const f=await fixture(async ({body,response})=>{
     assertPairing(body);
     if(isParent(body)) {
       if(++parentSteps===1) complete(response,[mode==='quick'
         ? invoke('code_retrieval',{question:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'quick')
-        : tool('dispatch',{preset:'retrieval',task:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'formal')]);
-      else if(mode==='formal' && parentSteps===2) complete(response,[tool('wait_child',{operationId:job(body)},'wait')]);
+        : tool('dispatch',{preset:'retrieval',task:'Find marker, inspect its complete function, then verify the source environment with the terminal.', ...(mode==='isolated'?{workMode:'isolated_write'}:{})},'formal')]);
+      else if(mode!=='quick' && parentSteps===2) complete(response,[tool('wait_child',{operationId:job(body)},'wait')]);
       else if(mode==='quick' && parentSteps===2) {
         const accepted=result(body,'code_retrieval');
         expect(accepted?.kind).toBe('job_accepted');
@@ -617,6 +630,11 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
           const read=result(body,'file_read')?.content as {unit?:{name:string;signature:{text:string}};content?:{text:string}};
           expect(read.unit?.name).toBe('marker');expect(read.unit?.signature.text).toContain('function marker');
           expect(read.content?.text).toBe("function marker() { return 'old'; }");
+          if (mode === 'isolated') {
+            const child = (await h.runtime.children()).find(child => child.receipt)!;
+            const location = await originalMaterializationLocation(f.root, prepared.source.workspaceId, child.receipt!.run_id);
+            await expect(fs.stat(location.targetPath)).rejects.toMatchObject({ code: 'ENOENT' });
+          }
           complete(response,[invoke('process_spawn',{command:process.execPath,args:['-e',"require('node:fs').writeFileSync('source.txt','changed in original fixed view'); console.log('verified')"],waitMs:1000,maxOutputBytes:4096},'command')]);break;
         }
         case 4:
@@ -640,7 +658,7 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
   expect(capabilities.some(tool => tool.name.startsWith('language_'))).toBe(false);
   expect(sourceTools.some(name => name.startsWith('language_'))).toBe(false);
   expect(sourceTools).toContain('file_read');
-  if(mode==='formal') {
+  if(mode!=='quick') {
     const catalog=await h.profiles.read({runtime:'agent'});
     const profile=catalog.profiles.find(item=>item.id==='varin:builtin:retrievalAgent')!;
     if(profile.config.kind!=='builtin') throw new Error('Expected builtin retrieval');
@@ -664,7 +682,7 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
     expect((await h.api.family!.list(identity,{scope:'history'})).members).toEqual([]);
   } else {
     const child=(await h.runtime.children())[0]!;
-    expect(child.selected_profile.work_mode).toBe('shared');
+    expect(child.selected_profile.work_mode).toBe(mode==='isolated'?'isolated_write':'shared');
     expect(child.code_result.kind).toBe('published');
     await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
   }
@@ -756,6 +774,161 @@ it('observes the real assistant message and read action, then stops the same bac
   expect(parentSteps).toBe(5); expect(childSteps).toBe(2); expect(h.errors).toEqual([]);
 });
 
+it.each([
+  ['inherited', 'direct', false], ['main', 'direct', false], ['distinct', 'direct', false],
+  ['distinct', 'tool_invoke', false], ['distinct', 'direct', true],
+] as const)('quick retrieval on a live root with a %s model (%s call, wait first=%s) runs the investigation and delivers its answer', async (binding, invocation, waitFirst) => {
+  let parentSteps = 0, childSteps = 0, operationId = '';
+  const question = { question: 'Where is the source marker?' };
+  // A completed Wait makes the parent Run rebind its launch before the retrieval call.
+  const offset = waitFirst ? 2 : 0;
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      const step = ++parentSteps - offset;
+      if (waitFirst && parentSteps === 1) { complete(response, [tool('process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'setTimeout(() => {}, 200)'], mode: 'pipe' }, 'spawn')]); return; }
+      if (waitFirst && parentSteps === 2) {
+        const processId = String((result(body, 'process_spawn') as { operation_id?: string } | undefined)?.operation_id);
+        complete(response, [tool('wait_process', { processId }, 'wait-process')]); return;
+      }
+      switch (step) {
+        case 1: complete(response, [invocation === 'direct' ? tool('code_retrieval', question, 'quick')
+          : tool('tool_invoke', { reference: { name: 'code_retrieval', version: '1' }, arguments: question }, 'quick')]); break;
+        case 2: {
+          const accepted = result(body, 'code_retrieval');
+          expect(accepted?.kind, JSON.stringify(accepted)).toBe('job_accepted');
+          operationId = String(accepted?.operation_id ?? (accepted?.content as Record<string, unknown> | undefined)?.operationId);
+          complete(response, [tool('retrieval_control', { operationId, action: 'wait' }, 'wait')]); break;
+        }
+        default:
+          expect(JSON.stringify(body.input)).toContain('LIVE_ROOT_ANSWER');
+          complete(response, [answer('Parent received the live-root answer', 'parent-done')]);
+      }
+    } else if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'read')]);
+    else {
+      expect(JSON.stringify(result(body, 'file_read'))).toContain('fixed child source before parent changes');
+      complete(response, [answer('LIVE_ROOT_ANSWER: source.txt holds the marker', 'child-done')]);
+    }
+  });
+  if (binding !== 'inherited') {
+    await fs.writeFile(path.join(f.root, 'agent', 'agent-settings.json'),
+      JSON.stringify({ harness: { models: { explore: binding === 'main' ? model : retrievalModel } } }));
+  }
+  const h = await f.openHost({ freshModelOwners: true });
+  const identity = await h.api.create(`quick-live-root-${binding}-${invocation}-${waitFirst}`);
+  const prepared = await h.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' },
+    workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Investigate quickly.', model, source: prepared.source });
+  try {
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 20_000 }).toBe('completed');
+  } catch (error) {
+    const operations = (await h.api.snapshot(identity)).operations.map(operation => ({ executor: operation.executor, outcome: operation.outcome, effect: operation.effect }));
+    console.error('Live-root retrieval stalled', { parentSteps, childSteps, operations, errors: h.errors.map(String),
+      parentInput: JSON.stringify(f.requests.filter(request => isParent(request.body)).at(-1)?.body.input).slice(-4000) });
+    throw error;
+  }
+  expect(parentSteps).toBe(3 + offset); expect(childSteps).toBe(2);
+  const child = await h.runtime.child(operationId);
+  expect(child.report?.outcome).toBe('succeeded');
+  expect(child.selected_profile.work_mode).toBe('shared');
+  expect(child.launch.model).toBe(binding === 'distinct' ? retrievalModel.modelId : model.modelId);
+  await expect.poll(async () => (await h.runtime.child(operationId)).resources_released).toBe(true);
+  expect(h.errors).toEqual([]);
+}, 45_000);
+
+it.each([
+  ['worker preset', { preset: 'worker' }, undefined], ['free dispatch', { tools: ['file_read', 'file_write'] }, 'selected'],
+] as const)('%s without workMode writes directly into the shared live root without capturing a baseline', async (_label, selection, sourcePath) => {
+  let parentSteps = 0, childSteps = 0, operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Update source.txt in place', ...selection, ...(sourcePath ? { sourcePath } : {}) }, 'dispatch')]);
+      else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'wait')]); }
+      else complete(response, [answer('Parent saw the shared change', 'parent-done')]);
+      return;
+    }
+    const receipt = result(body) as { content?: { readVersion?: string } } | undefined;
+    if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'read')]);
+    else if (childSteps === 2) complete(response, [tool('file_write', { path: 'source.txt', readVersion: receipt!.content!.readVersion!, content: 'SHARED_CHILD_WRITE' }, 'write')]);
+    else { expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' }); complete(response, [answer('Wrote the shared file', 'child-done')]); }
+  });
+  // The fixture's capture owner fails if any directory inventory is attempted.
+  const h = await f.openHost();
+  const selectedDirectory = sourcePath ? path.join(f.workspace, sourcePath) : f.workspace;
+  if (sourcePath) { await fs.mkdir(selectedDirectory); await fs.copyFile(path.join(f.workspace, 'source.txt'), path.join(selectedDirectory, 'source.txt')); }
+  const identity = await h.api.create('shared-default');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' },
+    workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate the edit.', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 20_000 }).toBe('completed');
+  const child = await h.runtime.child(operationId);
+  expect(child.selected_profile.work_mode).toBe('shared');
+  expect(child.report, JSON.stringify({ report: child.report, errors: h.errors.map(error => error instanceof Error ? `${error}: ${error.cause}` : String(error)), source: child.source })).toMatchObject({ outcome: 'succeeded' });
+  expect(child.source.kind).toBe('shared');
+  expect(child.code_result.kind).toBe('shared_source');
+  expect(await fs.readFile(path.join(selectedDirectory, 'source.txt'), 'utf8')).toBe('SHARED_CHILD_WRITE');
+  const launch = (await h.runtime.launch(child.receipt!.run_id))!.selection.source;
+  if (sourcePath) {
+    expect(await fs.realpath(launch!.live_root!.canonicalRoot)).toBe(await fs.realpath(selectedDirectory));
+    expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('fixed child source before parent changes');
+  } else expect(launch).toEqual((await h.runtime.launch(receipt.run_id))!.selection.source);
+  expect(h.errors).toEqual([]);
+}, 45_000);
+
+it('a rebound parent keeps its own frozen retrieval model while another Run shares its main model', async () => {
+  // Thread A starts first without a separate retrieval model and keeps the same main model live.
+  const held = gate(); let heldResponse: ServerResponse | undefined;
+  let parentSteps = 0, childSteps = 0, operationId = '';
+  const f = await fixture(({ body, response }) => {
+    if (JSON.stringify(body.input).includes('THREAD_A_HOLD')) { heldResponse = response; held.release(); return; }
+    assertPairing(body);
+    if (isParent(body)) {
+      switch (++parentSteps) {
+        case 1: complete(response, [tool('process_spawn', { cwd: '', command: process.execPath, args: ['-e', 'setTimeout(() => {}, 200)'], mode: 'pipe' }, 'spawn')]); break;
+        case 2: complete(response, [tool('wait_process', { processId: String((result(body, 'process_spawn') as { operation_id?: string }).operation_id) }, 'wait-process')]); break;
+        case 3: complete(response, [tool('code_retrieval', { question: 'Where is the source marker?' }, 'quick')]); break;
+        case 4: {
+          const accepted = result(body, 'code_retrieval');
+          expect(accepted?.kind, JSON.stringify(accepted)).toBe('job_accepted');
+          operationId = String(accepted?.operation_id);
+          complete(response, [tool('retrieval_control', { operationId, action: 'wait' }, 'wait')]); break;
+        }
+        default: complete(response, [answer('Parent received the answer', 'parent-done')]);
+      }
+    } else if (++childSteps === 1) complete(response, [tool('file_read', { path: 'source.txt' }, 'read')]);
+    else complete(response, [answer('REBOUND_ANSWER', 'child-done')]);
+  });
+  const h = await f.openHost({ freshModelOwners: true });
+  const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
+  const start = async (name: string, text: string) => {
+    const identity = await h.api.create(name);
+    const prepared = await h.api.prepareSource({ ...identity, key: 'live', resourceOwner: { kind: 'local' }, workspaceId,
+      content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+    // The Host entry directly exposes a pre-admission failure that the route reports only by code.
+    return { identity, receipt: await h.adapter.submit({ ...identity, key: `input-${name}`, expectedHead: null, text, model, source: prepared.source }) };
+  };
+  await start('rebound-other', 'THREAD_A_HOLD');
+  await held.promise;
+  await fs.writeFile(path.join(f.root, 'agent', 'agent-settings.json'), JSON.stringify({ harness: { models: { explore: retrievalModel } } }));
+  const { identity, receipt } = await start('rebound-parent', 'Investigate after a wait.').catch(error => {
+    const reason = (error as { reason?: unknown }).reason ?? error;
+    throw new Error(`Second submission failed: ${String(reason)}`, { cause: error });
+  });
+  try {
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 20_000 }).toBe('completed');
+  } catch (error) {
+    console.error('Rebound retrieval stalled', { parentSteps, childSteps, errors: h.errors.map(String),
+      parentInput: JSON.stringify(f.requests.filter(request => isParent(request.body)).at(-1)?.body.input).slice(-3000) });
+    throw error;
+  } finally { if (heldResponse) complete(heldResponse, [answer('Released', 'held-done')]); }
+  const child = await h.runtime.child(operationId);
+  expect(child.report?.outcome).toBe('succeeded');
+  expect(child.launch.model).toBe(retrievalModel.modelId);
+  expect((await h.api.snapshot(identity)).history.some(item => JSON.stringify(item).includes('REBOUND_ANSWER'))).toBe(true);
+  expect(h.errors).toEqual([]);
+}, 45_000);
+
 it('the configured retrieval preset returns before preparation and delivers one fixed-source scoped report', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0; let operationId = '';
@@ -832,13 +1005,13 @@ it('the configured retrieval preset returns before preparation and delivers one 
   expect(parentSteps).toBe(3); expect(childSteps).toBe(2);
 }, 30_000);
 
-it('the shipped worker preset writes a private child from a fixed read-only parent and reopens without replay', async () => {
+it.each([undefined, 'selected'] as const)('the shipped worker preset writes a private child from a fixed read-only parent (%s) and reopens without replay', async sourcePath => {
   let parentSteps = 0; let childSteps = 0; let operationId = '';
   const finalText = 'alpha\ngamma\n';
-  const f = await fixture(({ body, response }) => {
+  const f = await fixture(async ({ body, response }) => {
     assertPairing(body);
     if (isParent(body)) {
-      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', preset: 'worker' }, 'dispatch-write')]);
+      if (++parentSteps === 1) complete(response, [tool('dispatch', { task: 'Read source.txt, write alpha/beta, edit beta to gamma, and report', preset: 'worker', workMode: 'isolated_write', ...(sourcePath ? { sourcePath } : {}) }, 'dispatch-write')]);
       else if (parentSteps === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'wait-written-child')]); }
       else {
         expect(JSON.stringify(body.input)).toContain('child-result:');
@@ -850,6 +1023,14 @@ it('the shipped worker preset writes a private child from a fixed read-only pare
     const receipt = result(body) as { outcome?: string; effect?: string; content?: { readVersion?: string; content?: { text?: string } } } | undefined;
     childSteps++;
     if (childSteps === 1) {
+      if (sourcePath) {
+        expect(JSON.stringify(body.input)).toContain('ORIGINAL_PARENT_SCOPE_INSTRUCTION');
+        expect(JSON.stringify(body.input)).toContain('SELECTED_SCOPE_INSTRUCTION');
+      }
+      const current = (await h.runtime.children()).find(child => child.receipt);
+      expect(current?.receipt).toBeTruthy();
+      const location = await originalMaterializationLocation(f.root, current!.source.kind === 'ready' ? current!.source.selection.workspace_id : '', current!.receipt!.run_id);
+      await expect(fs.stat(location.targetPath)).rejects.toMatchObject({ code: 'ENOENT' });
       expect((body.tools as Array<{ name: string }>).map(item => item.name)).toEqual(expect.arrayContaining(['file_read', 'file_write', 'file_edit']));
       complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-original')]);
     } else if (childSteps === 2) {
@@ -867,6 +1048,12 @@ it('the shipped worker preset writes a private child from a fixed read-only pare
     }
   });
   const h = await f.openHost();
+  if (sourcePath) {
+    await fs.mkdir(path.join(f.workspace, sourcePath));
+    await fs.copyFile(path.join(f.workspace, 'source.txt'), path.join(f.workspace, sourcePath, 'source.txt'));
+    await fs.writeFile(path.join(f.workspace, 'AGENTS.md'), 'ORIGINAL_PARENT_SCOPE_INSTRUCTION');
+    await fs.writeFile(path.join(f.workspace, sourcePath, 'AGENTS.md'), 'SELECTED_SCOPE_INSTRUCTION');
+  }
   const profiles = await h.profiles.read({ runtime: 'agent' });
   const worker = profiles.profiles.find(profile => profile.id === 'varin:builtin:worker')!;
   expect(worker.tools.source).toBe('default');
@@ -893,6 +1080,13 @@ it('the shipped worker preset writes a private child from a fixed read-only pare
   expect(history.filter(item => item.source === 'agent')).toHaveLength(1);
   expect(JSON.stringify(history)).toContain(resultRef.publication_id);
   expect(parentSteps).toBe(3); expect(childSteps).toBe(5); expect(h.errors.map(String)).toEqual([]);
+  await expect.poll(async () => (await h.runtime.child(operationId)).resources_released).toBe(true);
+  const location = await originalMaterializationLocation(f.root, resultRef.workspace_id, child.receipt!.run_id);
+  const maintenance = await h.kernel.issueGrant({ grantId: 'settled-child-maintenance', owningWorkspace: resultRef.workspace_id,
+    executionWorkspace: resultRef.workspace_id, capabilities: ['storage.read', 'storage.write', 'storage.gc'], pathScopes: [''] });
+  try { await h.kernel.scoped(maintenance).gc('settled-child-gc'); }
+  finally { await h.kernel.revokeGrant(maintenance.grantId); }
+  await expect.poll(async () => fs.stat(location.targetPath).then(() => 'present', error => (error as NodeJS.ErrnoException).code)).toBe('ENOENT');
   await h.close();
   const reopened = await f.openHost();
   await reopened.collaboration!.recover(); await reopened.adapter.recover();
@@ -958,7 +1152,7 @@ it('a saved runtime-specific preset stays frozen across a later edit and Host/ke
   const empty = await h.profiles.read({ runtime: 'agent' });
   const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: empty.revision,
     config: { kind: 'custom', key: '', agent: { name: 'Frozen review profile', description: 'Reads its original source',
-      instructions: 'ORIGINAL_PROFILE_INSTRUCTIONS', enabled: true, worktree: 'none', workFocus: [] } }, tools: ['file_read'] });
+      instructions: 'ORIGINAL_PROFILE_INSTRUCTIONS', enabled: true, workFocus: [] } }, tools: ['file_read'] });
   const original = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
   if (original.config.kind !== 'custom') throw new Error('Expected the newly saved custom profile');
   preset = `custom:${original.config.key}`;

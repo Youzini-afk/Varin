@@ -424,8 +424,8 @@ pub(super) fn hydrate_source(
 }
 impl Catalog {
     pub fn child_preparation_progress(&mut self, id: &str, progress: ChildPreparationProgress) -> Result<bool> {
-        if !matches!(progress.phase.as_str(), "inventory" | "capture" | "verify" | "publish" | "context" | "admission")
-            || progress.completed.is_some() != progress.total.is_some()
+        if !matches!(progress.phase.as_str(), "source" | "source_wait" | "inventory" | "capture" | "verify" | "publish" | "context" | "admission")
+            || progress.total.is_some() && progress.completed.is_none()
             || progress.completed.zip(progress.total).is_some_and(|(done,total)| done > total) {
             return Err(RuntimeError::Invalid("invalid child preparation progress".into()));
         }

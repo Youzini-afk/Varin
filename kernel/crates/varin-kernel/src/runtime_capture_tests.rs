@@ -137,6 +137,33 @@ fn object_path(f: &Fixture, body: &[u8]) -> PathBuf {
 }
 
 #[test]
+fn capture_reuses_unchanged_bytes_but_detects_changes_with_restored_mtime_and_releases_hints_on_gc() {
+    let mut f=Fixture::new();
+    let file=f.work().join("reuse.txt");
+    fs::write(&file,b"original").unwrap();
+    let before=fs::metadata(&file).unwrap().modified().unwrap();
+    let original=f.capture("reuse.txt",true,"reuse-first");
+    f.begin("file.capture",f.capture_params("reuse.txt",true,"reuse-second"),"writer");
+    let (request,task,result)=f.receive_capture().unwrap();
+    assert_eq!(task.counts(),[0,0,0,0,0],"unchanged source and immutable object must not be reread");
+    let second=f.kernel.complete_file_capture(&request,&task,result,&f.revoked).unwrap();
+    assert_eq!(second["stateJson"],original["stateJson"]);
+    fs::write(&file,b"replaced").unwrap();
+    fs::OpenOptions::new().write(true).open(&file).unwrap().set_times(fs::FileTimes::new().set_modified(before)).unwrap();
+    f.begin("file.capture",f.capture_params("reuse.txt",true,"reuse-changed"),"writer");
+    let (request,task,result)=f.receive_capture().unwrap();
+    assert!(task.counts()[0]>0,"restoring mtime and keeping length must not reuse stale content");
+    let changed=f.kernel.complete_file_capture(&request,&task,result,&f.revoked).unwrap();
+    assert_ne!(changed["stateJson"],original["stateJson"]);
+    f.gc();
+    f.begin("file.capture",f.capture_params("reuse.txt",true,"reuse-after-gc"),"writer");
+    let (request,task,result)=f.receive_capture().unwrap();
+    assert!(task.counts()[0]>0);
+    f.kernel.complete_file_capture(&request,&task,result,&f.revoked).unwrap();
+    for captured in [original,second,changed] { f.release_owner(&captured["ownerId"]); }
+}
+
+#[test]
 fn single_capture_real_body_retains_original_or_implicit_exclusion_while_control_and_cancel_run() {
     for supplied in [false, true] {
         for store in [false, true] {
@@ -303,6 +330,7 @@ fn stored_capture_reuses_verified_bytes_with_two_complete_source_passes_and_no_s
     fs::write(f.work().join("body"), &body).unwrap();
     let mut owners = Vec::new();
     for (operation, stages) in [("install", 1), ("reuse", 0)] {
+        f.gc(); // exercise the cold body-verification path, not the identity cache
         f.begin(
             "file.capture",
             f.capture_params("body", true, operation),
@@ -344,6 +372,7 @@ fn verification_reads_once_against_original_capture_and_rejects_content_drift() 
     let state: Value = serde_json::from_str(original["stateJson"].as_str().unwrap()).unwrap();
     f.short("file.lease.acquire", f.lease("body", "verify-lease"), Some("writer"));
     for changed in [false, true] {
+        f.gc();
         if changed { fs::write(f.work().join("body"), vec![20; body.len()]).unwrap(); }
         f.begin("file.captureBatch", json!({"workspaceId":"workspace","rootId":f.root_id,
             "operationId":format!("verify-{changed}"),"paths":["body"],"store":false,"leaseId":"verify-lease",
@@ -367,6 +396,7 @@ fn capture_continuation_keeps_original_lease_and_rechecks_cancel_and_missing_obj
         let body = b"exact first-pass identity";
         fs::write(f.work().join("body"), body).unwrap();
         let seed = f.capture("body", true, "seed");
+          f.gc();
         let (request, token) = f.begin(
             "file.capture",
             f.capture_params("body", true, "continued"),
@@ -433,6 +463,7 @@ fn retained_object_hit_still_rejects_a_changed_second_source_pass() {
     let body = b"original capture body";
     fs::write(f.work().join("body"), body).unwrap();
     let seed = f.capture("body", true, "seed");
+    f.gc();
     let mut hold = f.capture_hold(CapturePhase::VerifySource);
     f.begin(
         "file.capture",
@@ -483,6 +514,9 @@ fn existing_object_verification_is_off_actor_and_gc_cannot_delete_later_publicat
         let mut f = Fixture::new();
         fs::write(f.work().join("body"), b"object verification body").unwrap();
         let seed = f.capture("body", true, "seed");
+        // This test targets cold CAS verification; an unchanged-file reuse is
+        // verified separately and deliberately performs no body I/O.
+        f.gc();
         let mut hold = f.capture_hold(CapturePhase::VerifyObject);
         let (_, token) = f.begin(
             "file.capture",

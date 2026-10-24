@@ -315,7 +315,7 @@ impl Storage {
         }
         for row in self
             .conn
-            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.sourceRoot') FROM domain_records WHERE record_type='file.materialized-view'")?
+            .prepare("SELECT root_hash FROM revisions UNION SELECT root_hash FROM pins UNION SELECT json_extract(payload_json,'$.root') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.baseRoot') FROM domain_records WHERE record_type='working.result' UNION SELECT json_extract(payload_json,'$.sourceRoot') FROM domain_records WHERE record_type='file.materialized-view' UNION SELECT json_extract(payload_json,'$.cleanupRoot') FROM domain_records WHERE record_type='file.materialized-view' AND json_type(payload_json,'$.cleanupRoot')='text'")?
             .query_map([], |row| row.get::<_, String>(0))?
         {
             roots.insert(row?);

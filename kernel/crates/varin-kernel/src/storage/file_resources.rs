@@ -329,35 +329,24 @@ fn clone_file(_source: &Path, _destination: &Path) -> Result<bool, KernelError> 
     Ok(false)
 }
 
-pub(super) fn copy_object_to(
-    source: &Path,
-    destination: &Path,
-    cancellation: &AtomicBool,
-) -> Result<&'static str, KernelError> {
-    if cancellation.load(Ordering::Acquire) {
-        return Err(KernelError::Cancelled);
-    }
-    if clone_file(source, destination)? {
-        return Ok("reflink");
-    }
-    let mut reader = File::open(source)?;
-    let mut target = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(destination)?;
-    let mut buffer = [0u8; 128 * 1024];
+/// Materialization verifies the bytes while copying them. Cloned targets are
+/// read once; writable files never share a hard link with the immutable object.
+pub(super) fn copy_verified_object_to(source: &Path, destination: &Path, cancellation: &AtomicBool,
+    expected_hash: &str, expected_length: u64) -> Result<&'static str, KernelError> {
+    let cloned = clone_file(source, destination)?;
+    let mut reader = File::open(if cloned { destination } else { source })?;
+    let mut target = if cloned { None } else { Some(OpenOptions::new().create_new(true).write(true).open(destination)?) };
+    let mut digest = Sha256::new(); let mut length = 0u64; let mut bytes = [0u8; 128 * 1024];
     loop {
-        if cancellation.load(Ordering::Acquire) {
-            return Err(KernelError::Cancelled);
-        }
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        target.write_all(&buffer[..count])?;
+        if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        let count = reader.read(&mut bytes)?; if count == 0 { break; }
+        if let Some(target) = &mut target { target.write_all(&bytes[..count])?; }
+        digest.update(&bytes[..count]); length += count as u64;
     }
-    target.sync_all()?;
-    Ok("copy")
+    let actual = format!("sha256-{}",hex::encode(digest.finalize()));
+    if actual != expected_hash || length != expected_length { return Err(KernelError::Storage(format!("materialize object is corrupt: {expected_hash}"))); }
+    if let Some(target) = target { target.sync_all()?; }
+    Ok(if cloned { "reflink" } else { "copy" })
 }
 
 pub(super) fn durable_directory_rename(source: &Path, target: &Path) -> Result<(), KernelError> {

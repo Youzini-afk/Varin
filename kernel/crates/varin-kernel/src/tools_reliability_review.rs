@@ -174,7 +174,7 @@ fn fixed_source_commands_prepare_once_and_reads_searches_use_the_owned_view() {
         let mut storage=f._storage.lock().unwrap();
         let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
         let context=ToolExecutionContext{run_id:"run".into(),operation_id:"request:tool:handoff".into(),origin:ToolOrigin::ModelStep{request_id:"request".into()}};
-        let handoff=storage.child_source_handoff(&f.executor.binding,&context,&varin_runtime::catalog::dispatch::ChildSourceDelegation{
+        let handoff=storage.child_source_handoff(&f.executor.binding,&context,&varin_runtime::catalog::dispatch::ChildSourceDelegation{ source_path: None,
             agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,process:true,configured_preset:true,selection_ref:json!({"content_object":"fixture"})},&grant,HOST,false).unwrap();
         assert_eq!(handoff["root"]["kind"],"derived");assert_eq!(handoff["root"]["view_id"],"run-execution:run");
         assert_eq!(fs::canonicalize(handoff["root"]["root"]["canonicalRoot"].as_str().unwrap()).unwrap(),fs::canonicalize(&root).unwrap());
@@ -191,6 +191,62 @@ fn fixed_source_commands_prepare_once_and_reads_searches_use_the_owned_view() {
     // A separately admitted fixed reader still observes the immutable baseline.
     f.next_run("baseline-reader",&[""]);
     assert_eq!(f.read(json!({"path":"body.txt"}))["content"]["text"],String::from_utf8_lossy(body).as_ref());
+}
+
+#[test]
+fn scoped_deferred_child_reads_without_copy_and_first_write_uses_the_observed_version() {
+    let mut f=Fixture::new();
+    {
+        let mut storage=f._storage.lock().unwrap();
+        let mut invoke=|method:&str,params:Value| {
+            let (grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();
+            storage.dispatch(method,&params,Some("actor"),&grant).unwrap()
+        };
+        invoke("storage.putBlob.begin",json!({"operationId":"scoped-body","streamId":"scoped-body","workspaceId":"workspace","byteLength":8}));
+        invoke("storage.putBlob.chunk",json!({"streamId":"scoped-body","sequence":0,"bytesBase64":BASE64.encode(b"original")}));
+        let blob=invoke("storage.putBlob.finish",json!({"operationId":"scoped-body","streamId":"scoped-body","workspaceId":"workspace"}));
+        invoke("branch.create.begin",json!({"operationId":"scoped-create","builderId":"scoped-create","workspaceId":"workspace","branchId":"parent","draftBasePaths":[],"captureScopes":[]}));
+        invoke("branch.create.append",json!({"builderId":"scoped-create","sequence":0,"entries":[
+            {"path":"sub/body.txt","state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":8,"mode":420},"ownerId":blob["ownerId"]},
+            {"path":"sibling","state":{"kind":"directory","mode":493}}]}));
+        invoke("branch.create.finish",json!({"operationId":"scoped-create","builderId":"scoped-create"}));
+    }
+    f.executor.binding.source_mode=SourceMode::FixedBranch;
+    f.executor.binding.root_id=None;f.executor.binding.live_root=None;
+    f.executor.binding.file_source=Some(FixedFileSource{branch_id:"parent".into(),revision:0});
+    let handoff={
+        let mut storage=f._storage.lock().unwrap();
+        let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
+        let context=ToolExecutionContext{run_id:"run".into(),operation_id:"scoped-dispatch".into(),origin:ToolOrigin::ModelStep{request_id:"request".into()}};
+        let handoff=storage.child_source_handoff(&f.executor.binding,&context,&varin_runtime::catalog::dispatch::ChildSourceDelegation{
+            source_path:Some("sub".into()),agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
+            process:true,configured_preset:true,selection_ref:json!({})},&grant,HOST,false).unwrap();
+        assert_eq!(handoff["source_path"],"sub");
+        for (method,params) in [
+            ("branch.create.begin",json!({"operationId":"branch-create:child-source:scoped-dispatch","builderId":"child-create","branchId":"child-source:scoped-dispatch","workspaceId":"workspace","baseRef":handoff["root"]["pin"]["root"],"draftBasePaths":[],"captureScopes":[]})),
+            ("branch.create.finish",json!({"operationId":"branch-create:child-source:scoped-dispatch","builderId":"child-create"}))] {
+            storage.dispatch(method,&params,Some("actor"),&grant).unwrap();
+        }
+        let tree=storage.dispatch("branch.read",&json!({"branchId":"child-source:scoped-dispatch","revision":0,"includeEntries":true}),Some("actor"),&grant).unwrap();
+        assert_eq!(tree["entries"].as_array().unwrap().len(),1);
+        assert_eq!(tree["entries"][0]["path"],"body.txt");
+        handoff
+    };
+    assert!(!handoff["root"]["pin"]["root"].is_null());
+    f.executor.binding.source_mode=SourceMode::Materialized;
+    f.executor.binding.materialized_source=Some(FixedFileSource{branch_id:"child-source:scoped-dispatch".into(),revision:0});
+    f.executor.binding.file_source=None;
+    let before=f.read(json!({"path":"body.txt"}));
+    assert_eq!(before["content"]["text"],"original");
+    assert!(before["readVersion"].is_string());
+    assert!(!f.root.join("store/managed/runs").exists());
+    let changed=f.call("file_write",json!({"path":"body.txt","readVersion":before["readVersion"],"content":"private change"}));
+    assert!(matches!(changed,ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::Confirmed,..}),"{changed:?}");
+    assert_eq!(f.read(json!({"path":"body.txt"}))["content"]["text"],"private change");
+    assert!(f.root.join("store/managed/runs").is_dir());
+    assert!(!f.root.join("work/body.txt").exists());
+    let stale=f.call("file_write",json!({"path":"body.txt","readVersion":before["readVersion"],"content":"stale"}));
+    assert!(matches!(stale,ToolCompletion::NotDispatched{..}),"{stale:?}");
 }
 
 #[test]
@@ -473,6 +529,28 @@ fn healthcheck_file_contracts_keep_line_endings_and_distinguish_invalid_targets(
     let invalid = f.try_call("file_list", json!({"maxResults":0})).unwrap_err();
     assert!(invalid.to_string().contains("maxResults"));
     assert!(!invalid.to_string().contains("query"));
+}
+
+#[test]
+fn filtered_zero_results_explain_their_scope_and_an_explicit_widening_finds_the_match() {
+    let mut f = Fixture::new();
+    fs::create_dir_all(f.root.join("work/node_modules/pkg")).unwrap();
+    fs::write(f.root.join("work/node_modules/pkg/vendored.txt"), "unique_vendored_marker").unwrap();
+    fs::write(f.root.join("work/own.txt"), "project text").unwrap();
+    let filtered = f.call("file_search", json!({"query":"unique_vendored_marker"}));
+    let ToolCompletion::Result { content, .. } = filtered else { panic!("{filtered:?}") };
+    assert_eq!(content.data["records"].as_array().unwrap().len(), 0);
+    assert_eq!(content.data["scanComplete"], true);
+    let explanation = &content.data["emptyResult"];
+    assert!(explanation["meaning"].as_str().unwrap().contains("does not show they lack a match"));
+    assert_eq!(content.data["message"], explanation["meaning"]);
+    let widen = explanation["widen"].as_array().unwrap();
+    assert!(widen.iter().any(|item| item["argument"] == "excludeDirectories" && item["excluded"].as_array().unwrap().contains(&json!("node_modules"))));
+    // The caller chooses the wider scope; the tool never rescans on its own.
+    let widened = f.call("file_search", json!({"query":"unique_vendored_marker","excludeDirectories":[]}));
+    let ToolCompletion::Result { content, .. } = widened else { panic!("{widened:?}") };
+    assert_eq!(content.data["records"][0]["path"], "node_modules/pkg/vendored.txt");
+    assert!(content.data.get("emptyResult").is_none());
 }
 
 #[test]

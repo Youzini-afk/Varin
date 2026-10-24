@@ -29,9 +29,6 @@ export const settingsDict = {
   "settings.page.harness.section.embedding.description": "為記憶與 Bot 知識選擇本機模型元件或遠端模型服務；關閉嵌入時使用文字檢索。",
 
   'settings.harness.retrieval.selectOrdinaryModel': '请选择支持工具调用的普通模型，或明确选择沿用当前会话模型。旧快速决策和重排配置不会自动改用其他服务。',
-  'settings.agents.sourceMode': '文件环境',
-  'settings.agents.sourceShared': '使用当前来源（支持终端）',
-  'settings.agents.sourceReadOnly': '只读来源',
 
   "settings.agents.avatar.library": "頭像庫",
   "settings.agents.avatar.fixed": "指定頭像",
@@ -216,7 +213,6 @@ export const settingsDict = {
   "settings.agents.toolsHint": "填寫已註冊的工具名稱；每個任務仍遵循現有權限規則。",
   "settings.agents.focus": "適用工作側重",
   "settings.agents.focusHint": "兩項都不勾選時，通用和科研均可使用。",
-  "settings.agents.isolated": "使用隔離工作區",
   "settings.agents.applies": "修改用於後續新建任務，已受理的任務保留原有設定。",
   "settings.agents.back": "返回 Agent 清單",
   "settings.agents.currentFocus": "目前工作側重：{focus}",

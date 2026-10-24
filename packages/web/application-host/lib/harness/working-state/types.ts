@@ -189,7 +189,7 @@ export interface WorkingStateRootStore {
   /** Release only transient capture owners; retained branch/result objects remain owned. */
   releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void>;
   listCaptureScopePaths(directory: string, scopes: readonly string[], signal?: AbortSignal): Promise<string[]>;
-  listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]>;
+  listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal, onDiscovered?: (completed: number) => void): Promise<string[]>;
   commitVirtualWrites(
     branchId: string,
     expectedWriteRevision: number,

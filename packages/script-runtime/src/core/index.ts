@@ -87,6 +87,34 @@ function closedError(): Error {
 }
 
 /**
+ * A cell is a complete program unit, not an interactive line. Node's REPL reads a leading `{`
+ * as an object literal and then cannot parse a block that contains `await`. An empty statement
+ * before that brace keeps it a block; `({ ... })` remains an explicit object expression. The
+ * statement takes a preceding space when possible so reported line and column positions hold.
+ */
+export function statementUnit(script: string): string {
+  let index = 0;
+  while (index < script.length) {
+    const char = script[index]!;
+    if (/\s/u.test(char)) { index += 1; continue; }
+    if (script.startsWith("//", index)) {
+      const end = script.indexOf("\n", index);
+      if (end === -1) return script;
+      index = end + 1; continue;
+    }
+    if (script.startsWith("/*", index)) {
+      const end = script.indexOf("*/", index + 2);
+      if (end === -1) return script;
+      index = end + 2; continue;
+    }
+    break;
+  }
+  if (script[index] !== "{") return script;
+  if (index > 0 && (script[index - 1] === " " || script[index - 1] === "\t")) return `${script.slice(0, index - 1)};${script.slice(index)}`;
+  return `${script.slice(0, index)};${script.slice(index)}`;
+}
+
+/**
  * Node's own evaluator owns parsing, top-level await and persistent lexical state.
  * This is an execution context, not an OS sandbox or a process supervisor.
  */
@@ -206,7 +234,7 @@ export function createNodeReplSession<Input = NestedToolInput, Receipt = NestedT
         active = scope;
         scopes.run(scope, () => {
           try {
-            server.eval(`${cell.script}\n`, server.context, "script-cell", (error, value: unknown) => {
+            server.eval(`${statementUnit(cell.script)}\n`, server.context, "script-cell", (error, value: unknown) => {
               if (error !== null) { scope.finish({ ok: false, error }); return; }
               // A plain result ends the cell synchronously. Deferring even this
               // branch would admit already-queued detached microtasks after eval.

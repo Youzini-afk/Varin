@@ -36,9 +36,16 @@ export interface HarnessAgentOverrides {
   description?: string;
   instructions?: string;
   tools?: AgentToolSelection;
-  worktree?: "none" | "shared" | "isolated";
   modelSettings?: HarnessAgentModelSettings;
 }
+
+/**
+ * Agents no longer choose their file placement; each dispatch selects `workMode`. A stored
+ * value of the retired `worktree` key is validated and dropped here, at the one settings
+ * entry, so it never reaches a dispatch decision and is not written back when saved.
+ */
+const RETIRED_WORKTREE = "worktree";
+const retiredWorktreeValid = (value: unknown) => value === undefined || value === "none" || value === "shared" || value === "isolated";
 
 export function parseHarnessAgentModelSettings(value: unknown): HarnessAgentModelSettings {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new HarnessSettingsValidationError("Agent model settings must be an object");
@@ -55,12 +62,12 @@ export function parseHarnessAgentModelSettings(value: unknown): HarnessAgentMode
 export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverrides {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new HarnessSettingsValidationError("Agent overrides must be an object");
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).some(key => !["name", "description", "instructions", "tools", "worktree", "modelSettings", "avatar"].includes(key))
+  if (Object.keys(v).some(key => !["name", "description", "instructions", "tools", RETIRED_WORKTREE, "modelSettings", "avatar"].includes(key))
     || (v.avatar !== undefined && !isAgentAvatarId(v.avatar))
     || (v.name !== undefined && (typeof v.name !== "string" || !v.name.trim()))
     || (v.description !== undefined && typeof v.description !== "string")
     || (v.instructions !== undefined && typeof v.instructions !== "string")
-    || (v.worktree !== undefined && v.worktree !== "none" && v.worktree !== "shared" && v.worktree !== "isolated")) {
+    || !retiredWorktreeValid(v[RETIRED_WORKTREE])) {
     throw new HarnessSettingsValidationError("Invalid built-in agent overrides");
   }
   return {
@@ -69,12 +76,11 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     ...(v.description === undefined ? {} : { description: v.description as string }),
     ...(v.instructions === undefined ? {} : { instructions: v.instructions as string }),
     ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }),
-    ...(v.worktree === undefined ? {} : { worktree: v.worktree as "none" | "shared" | "isolated" }),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }),
   };
 }
 
-export function customizeHarnessAgent<T extends { tools: string[]; worktree: "none" | "shared" | "isolated"; systemPromptFragment: string }>(
+export function customizeHarnessAgent<T extends { tools: string[]; systemPromptFragment: string }>(
   definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "agent",
 ): T & { name?: string; description?: string; avatar?: AgentAvatarId; modelSettings?: HarnessAgentModelSettings } {
   return { ...definition,
@@ -83,7 +89,6 @@ export function customizeHarnessAgent<T extends { tools: string[]; worktree: "no
     ...(overrides?.description === undefined ? {} : { description: overrides.description }),
     ...(overrides?.instructions === undefined ? {} : { systemPromptFragment: overrides.instructions }),
     tools: resolveAgentTools(overrides?.tools, runtime, definition.tools).names,
-    ...(overrides?.worktree === undefined ? {} : { worktree: overrides.worktree }),
     ...(overrides?.modelSettings === undefined ? {} : { modelSettings: { ...overrides.modelSettings } }),
   };
 }
@@ -98,21 +103,20 @@ export interface HarnessCustomAgent {
   model?: ModelSelection;
   modelSettings?: HarnessAgentModelSettings;
   tools?: AgentToolSelection;
-  worktree: "none" | "shared" | "isolated";
   /** Empty means available in either work focus. */
   workFocus: WorkFocusId[];
 }
 
 export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
-  const fail = (): never => { throw new HarnessSettingsValidationError("Invalid agent definition: name, description, instructions, enabled, worktree and workFocus are required; model and tools are optional"); };
+  const fail = (): never => { throw new HarnessSettingsValidationError("Invalid agent definition: name, description, instructions, enabled and workFocus are required; model and tools are optional"); };
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).some(key => !["name", "description", "instructions", "enabled", "model", "modelSettings", "tools", "worktree", "workFocus", "avatar"].includes(key))
+  if (Object.keys(v).some(key => !["name", "description", "instructions", "enabled", "model", "modelSettings", "tools", RETIRED_WORKTREE, "workFocus", "avatar"].includes(key))
     || (v.avatar !== undefined && !isAgentAvatarId(v.avatar))
     || typeof v.name !== "string" || !v.name.trim()
     || typeof v.description !== "string" || typeof v.instructions !== "string"
     || typeof v.enabled !== "boolean"
-    || (v.worktree !== "none" && v.worktree !== "shared" && v.worktree !== "isolated") || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
+    || !retiredWorktreeValid(v[RETIRED_WORKTREE]) || !Array.isArray(v.workFocus) || !v.workFocus.every(isWorkFocusId)) return fail();
   let model: ModelSelection | undefined;
   if (v.model !== undefined) {
     if (!v.model || typeof v.model !== "object" || Array.isArray(v.model)) return fail();
@@ -124,7 +128,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
   }
   return { name: v.name.trim(), description: v.description, instructions: v.instructions,
     ...(isAgentAvatarId(v.avatar) ? { avatar: v.avatar } : {}),
-    enabled: v.enabled, ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }), worktree: v.worktree,
+    enabled: v.enabled, ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }),
     workFocus: [...new Set(v.workFocus as WorkFocusId[])], ...(model ? { model } : {}),
     ...(v.modelSettings === undefined ? {} : { modelSettings: parseHarnessAgentModelSettings(v.modelSettings) }) };
 }

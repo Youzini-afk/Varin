@@ -1845,8 +1845,8 @@ export class AgentRuntimeClient {
     });
   }
   /** Borrow a fresh base lease from the exact live model binding, including its child dependencies. */
-  retainedModelOwner(configuration: ModelSessionConfiguration, scope: import('./protocol.generated.js').CredentialScope): ExistingHostCredentialOwner | undefined {
-    return this.kernel.findModelCredentialOwner(configuration, scope);
+  retainedModelOwner(configuration: ModelSessionConfiguration, scope: import('./protocol.generated.js').CredentialScope, runId?: string): ExistingHostCredentialOwner | undefined {
+    return this.kernel.findModelCredentialOwner(configuration, scope, runId);
   }
   retainQueuedModel(runId: string, owner: ExistingHostCredentialOwner): Promise<void> { return this.kernel.retainQueuedModelCredentialOwner(runId, owner); }
   releaseQueuedModel(runId: string, owner: ExistingHostCredentialOwner): void { this.kernel.releaseQueuedModelCredentialOwner(runId, owner); }

@@ -65,7 +65,9 @@ fn retrieval_with_terminal_effects_is_not_a_policy_read_and_keeps_original_sourc
     assert!(!bound.supports_policy_read(&contract));
     assert!(!contract.read_only);
     assert_eq!(contract.completion,CompletionKind::Job);
-    bound.authorize(&f.context, &contract, &cancel).unwrap();
+    // The original source is admitted first; the dispatch-equivalent selection check then needs the
+    // native retrieval owner, so this executor-only fixture stops before dispatch with that reason.
+    assert_eq!(bound.authorize(&f.context, &contract, &cancel).unwrap_err().code, "retrieval_owner_unavailable");
     for changed in ["revision", "branch", "workspace", "execution", "physical"] {
         let mut frozen = f.frozen.clone();
         let source = frozen.source.as_mut().unwrap();
@@ -76,7 +78,8 @@ fn retrieval_with_terminal_effects_is_not_a_policy_read_and_keeps_original_sourc
             "execution" => source.execution_workspace_id = "other".into(),
             _ => source.mode = SourceMode::Materialized,
         }
-        assert!(directory.clone().bind_call(&f.call, &frozen, &cancel).unwrap().authorize(&f.context,&contract,&cancel).is_err(), "{changed}");
+        let error = directory.clone().bind_call(&f.call, &frozen, &cancel).unwrap().authorize(&f.context,&contract,&cancel).unwrap_err();
+        assert_ne!(error.code, "retrieval_owner_unavailable", "{changed} must fail source admission first");
     }
     f.storage.lock().unwrap().revoke_grant(&json!({"grantId":"reader"}), HOST).unwrap();
     assert!(bound.authorize(&f.context, &contract, &cancel).is_err());

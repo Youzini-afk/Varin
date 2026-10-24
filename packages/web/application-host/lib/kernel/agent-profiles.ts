@@ -47,11 +47,11 @@ function definitions(capabilities: ChildCapabilityDescriptor[], context: Context
   const native = agentPresetTools(capabilities);
   return [...Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.name ?? definition.id,
     description: definition.teamDescription, instructions: definition.systemPromptFragment,
-    worktree: definition.worktree, workFocus: definition.workFocus ?? [],
+    workFocus: definition.workFocus ?? [],
     tools: native[definition.id], automation: undefined as ContextAgentDefinition | undefined })),
     { slot: 'contextCompaction' as const, name: 'Context organization',
       description: 'Update conversation summaries and retain original material for subsequent work.',
-      instructions: context.instructions, worktree: 'none' as const, workFocus: [],
+      instructions: context.instructions, workFocus: [],
       tools: context.tools.map(tool => tool.name), automation: context }];
 }
 function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities: ChildCapabilityDescriptor[], context: ContextAgentDefinition): AgentProfilesSnapshot {
@@ -68,11 +68,11 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
         instructions: overrides?.instructions ?? definition.instructions, enabled: binding.enabled !== false,
         model, modelSource: model ? 'selected' : harnessModelSlotInheritsMain(definition.slot, binding) ? 'inherit' : 'unconfigured',
         ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
-        worktree: overrides?.worktree ?? definition.worktree, workFocus: [...definition.workFocus] },
+        workFocus: [...definition.workFocus] },
       tools: resolveAgentTools(definition.automation ? undefined : overrides?.tools, target, definition.tools),
       ...(definition.automation ? { automation: definition.automation } : {}),
       defaults: { name: definition.name, description: definition.description, instructions: definition.instructions,
-        tools: [...definition.tools], worktree: definition.worktree },
+        tools: [...definition.tools] },
     };
   });
   for (const [key, agent] of Object.entries(selected.agents)) {
@@ -80,7 +80,7 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
       effective: { name: agent.name, description: agent.description, instructions: agent.instructions, enabled: agent.enabled,
         ...(agent.avatar ? { avatar: agent.avatar } : {}),
         model: agent.model ?? null, modelSource: agent.model ? 'selected' : 'inherit',
-        ...(agent.modelSettings ? { modelSettings: agent.modelSettings } : {}), worktree: agent.worktree, workFocus: [...agent.workFocus] },
+        ...(agent.modelSettings ? { modelSettings: agent.modelSettings } : {}), workFocus: [...agent.workFocus] },
       tools: resolveAgentTools(agent.tools, target), defaults: null });
   }
   return { runtime: target, revision: snapshot.revision, profiles, capabilities };
@@ -135,7 +135,7 @@ export function createAgentProfilesAPI(owners: {
       }
       const builtin = definitions(tools, context).find(definition => config.kind === 'builtin' && definition.slot === config.slot);
       if (config.kind === 'builtin' && (!builtin || profileId !== `varin:builtin:${config.slot}`)) invalid('Select a built-in profile available in this runtime.');
-      if (builtin?.automation && (input.tools !== undefined || (config.kind === 'builtin' && config.binding.agent?.worktree !== undefined))) {
+      if (builtin?.automation && input.tools !== undefined) {
         invalid('Context organization uses its runtime-owned read tools and conversation source.');
       }
       if (config.kind === 'custom' && profileId !== undefined && profileId !== `varin:custom:${config.key}`) invalid('The selected agent identity changed. Reload agent settings.');

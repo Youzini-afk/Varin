@@ -5,6 +5,7 @@ import type { ManagedSourceServiceHandler } from '../harness/managed-remote-type
 import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
 import { integrationCompletion, openScopedIntegrationTarget, type IntegrationTargetOwners, type IntegrationToolOwnerOptions } from './integration-tool-owner.js';
 import { toolOperationId, validToolOrigin } from './protocol.generated.js';
+import { sourcePathMap } from './source-path-map.js';
 
 /** Only the target executes the original merge. A transport failure preserves unknown
  * until its original journal can answer; the coordinator never repeats a local merge. */
@@ -24,7 +25,10 @@ export function createManagedIntegrationOwner(options: Pick<IntegrationTargetOwn
       signal.throwIfAborted();
       try {
         const result = await authority.service.service({ ...address, requestId: randomUUID(),
-          operation: { kind: 'integration', invocation, child, journal } }, signal) as IntegrationOperationReceipt;
+          operation: { kind: 'integration', invocation, child, journal,
+            ...(child.receipt && child.source?.kind === 'ready' ? { pathMapping: await sourcePathMap(options.runtime,
+              { runId: child.receipt.run_id, source: child.source.selection },
+              { runId: invocation.runId, source: launch.selection.source }, signal) } : {}) } }, signal) as IntegrationOperationReceipt;
         return integrationCompletion(result, true);
       } catch (error) {
         // The original Host-tool reconciler reads the target's Storage journal. Do not
@@ -68,6 +72,7 @@ export function createManagedIntegrationService(options: Pick<IntegrationTargetO
     const result = child.code_result.result;
     const input: IntegrationPlanInput & { operationId: string } = {
       operationId: `integration:${invocation.operationId}`, workspaceId: result.workspace_id,
+      ...(operation.pathMapping ? { pathMapping: operation.pathMapping } : {}),
       threadId: child.child_thread_id, branchId: result.branch_id, resultRevision: result.result_revision,
       operationBinding: { kind: 'runtime_operation', operationId: invocation.operationId,
         journal,

@@ -13,7 +13,6 @@ export interface AgentProfileDraft {
   thinkingLevel: ThinkingLevel | 'inherit';
   tools: string;
   toolsChange: 'unchanged' | 'explicit' | 'reset';
-  worktree: 'none' | 'shared' | 'isolated';
   workFocus: WorkFocusId[];
 }
 export interface RetainedAgentProfileDraft { values: AgentProfileDraft; revision: string }
@@ -29,7 +28,7 @@ export function makeAgentProfileDraft(profile?: AgentProfileView, newTools: read
     temperature: effective?.modelSettings?.temperature === undefined ? '' : String(effective.modelSettings.temperature),
     thinkingLevel: effective?.modelSettings?.thinkingLevel ?? 'inherit',
     tools: (profile?.tools.names ?? newTools).join(', '), toolsChange: profile ? 'unchanged' : 'explicit',
-    worktree: effective?.worktree ?? 'none', workFocus: effective?.workFocus ?? [],
+    workFocus: effective?.workFocus ?? [],
   };
 }
 
@@ -48,7 +47,6 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
       ...(draft.name.trim() === defaults?.name ? {} : { name: draft.name.trim() }),
       ...(draft.description === defaults?.description ? {} : { description: draft.description }),
       ...(draft.instructions === defaults?.instructions ? {} : { instructions: draft.instructions }),
-      ...(profile.automation || draft.worktree === defaults?.worktree ? {} : { worktree: draft.worktree }),
       ...(Object.keys(modelSettings).length ? { modelSettings } : {}),
     };
     config = { kind: 'builtin', slot: profile.config.slot, binding: {
@@ -59,7 +57,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
       name: draft.name.trim(), description: draft.description, instructions: draft.instructions, enabled: draft.enabled,
       ...(draft.avatar ? { avatar: draft.avatar } : {}),
       ...(model ? { model } : {}), ...(Object.keys(modelSettings).length ? { modelSettings } : {}),
-      worktree: draft.worktree, workFocus: draft.workFocus,
+      workFocus: draft.workFocus,
     } };
   }
   return { runtime, expectedRevision: revision, ...(profile ? { id: profile.id } : {}), config,

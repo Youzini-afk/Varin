@@ -68,7 +68,29 @@ fn plain(text: &str) -> String {
     result
 }
 
+/// Explains the existing exit and output facts of one observation together. Exit and output
+/// completion are independent: only `outputComplete` proves no further bytes will be appended.
+pub(crate) fn output_state(value: &Value) -> Option<Value> {
+    let process = &value["process"];
+    let field = |name: &str| if value.get(name).is_some_and(|v| !v.is_null()) { &value[name] } else { &process[name] };
+    let status = process["status"].as_str()?;
+    let more = matches!((value["nextCursor"].as_u64(), value["endCursor"].as_u64()), (Some(next), Some(end)) if next < end);
+    let (kind, note) = if field("outputError").as_str().is_some_and(|error| !error.is_empty()) {
+        ("output_error", "The retained output is incomplete or unreadable; the process status above is reported independently.")
+    } else if field("outputComplete") == true {
+        ("complete", if more { "Output is complete; more retained bytes follow nextCursor." } else { "Output is complete; no further bytes will be appended." })
+    } else if matches!(status, "exited" | "failed") {
+        ("finishing", "The process has exited and its output is still being drained. Read again from nextCursor, or wait until outputComplete is true.")
+    } else if process["writerActive"] == true || matches!(status, "starting" | "running") {
+        ("running", "The process is running; more output may follow.")
+    } else {
+        ("unknown", "Whether more output will follow is not yet known; read again from nextCursor.")
+    };
+    Some(json!({"kind":kind,"note":note}))
+}
+
 pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
+    if let Some(state) = output_state(value) { value["outputState"] = state; }
     let process = &value["process"];
     let page = process["outputCodePage"].as_u64().and_then(|v| u32::try_from(v).ok());
     let pty = process["mode"] == "pty";
@@ -108,6 +130,17 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exit_and_output_completion_stay_distinct_facts() {
+        let state = |value: Value| output_state(&value).unwrap()["kind"].as_str().unwrap().to_owned();
+        assert_eq!(state(json!({"process":{"status":"running","writerActive":true},"outputComplete":false,"nextCursor":4,"endCursor":4})), "running");
+        // Reading to the current end of the spool is not proof that no bytes remain.
+        assert_eq!(state(json!({"process":{"status":"exited","writerActive":false},"outputComplete":false,"nextCursor":4,"endCursor":4})), "finishing");
+        assert_eq!(state(json!({"process":{"status":"exited","writerActive":false},"outputComplete":true,"nextCursor":4,"endCursor":4})), "complete");
+        assert_eq!(state(json!({"process":{"status":"exited","outputComplete":true}})), "complete");
+        assert_eq!(state(json!({"process":{"status":"exited"},"outputComplete":false,"outputError":"spool unreadable"})), "output_error");
+        assert!(output_state(&json!({"chunks":[]})).is_none());
+    }
     fn output(bytes: &[u8]) -> Value { json!({"process":{"mode":"pipe","outputCodePage":936},"nextCursor":bytes.len(),"chunks":[{"offset":0,"bytesBase64":BASE64.encode(bytes),"encoding":"base64"}]}) }
     #[test]
     fn text_projection_preserves_cursor_and_raw_mode_preserves_bytes() {

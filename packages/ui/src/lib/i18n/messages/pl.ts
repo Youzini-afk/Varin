@@ -3960,6 +3960,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.script.loadFailed": "Nie udało się wczytać wywołań.",
   "chat.script.retry": "Ponów",
   "chat.script.attention": "Do sprawdzenia: {count}",
+  "chat.children.preparation.source": "Sprawdzanie źródła",
+  "chat.children.preparation.sourceWait": "Oczekiwanie na wspólne przechwycenie",
   "chat.children.preparation.inventory": "Odczytywanie listy plików",
   "chat.children.preparation.capture": "Tworzenie migawki plików",
   "chat.children.preparation.verify": "Weryfikowanie plików",
@@ -3982,8 +3984,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.messages": "Task messages",
   "chat.children.profiles": "Task profiles",
   "chat.children.configureProfiles": "Configure profiles",
-  "chat.children.readOnly": "Read only",
-  "chat.children.workingCopy": "Independent working copy",
   "chat.children.inheritModel": "Uses the request model",
   "chat.children.noModel": "Model unavailable",
 } as const;

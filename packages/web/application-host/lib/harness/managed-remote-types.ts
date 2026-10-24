@@ -31,6 +31,7 @@ export interface ManagedSourceResolveRequest { coordinatorHostId: string; path: 
 export interface ManagedSourceResolveReceipt { workspaceId: string; canonicalRoot: string; hostId: string }
 export interface ManagedSourcePrepareRequest { coordinatorHostId: string; input: ThreadPrepareSource }
 export interface ManagedSourceBindRequest {
+  deferMaterialization?: boolean;
   coordinatorHostId: string;
   scope: SourceAuthorityScope;
   source: ThreadSource;
@@ -94,7 +95,7 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 export type SourceServiceOperation =
   | { kind: 'binary_write'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; journal: RecoveryAnchor;
       path: string; expectedRevision: string | null; bytesBase64: string; byteLength: number }
-  | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string}
+  | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string;mapping?:import('../kernel/source-path-map.js').SourcePathMap;baselineMapping?:import('../kernel/source-path-map.js').SourcePathMap}
   | {kind:'code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;branchId:string;source:import('../kernel/code-exchange.js').CodeParticipant;target:import('../kernel/code-exchange.js').CodeParticipant;result:import('./working-state/types.js').WorkingResult}
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
   | { kind: 'schedule'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority }
@@ -132,7 +133,7 @@ export type SourceServiceOperation =
   | { kind: 'child_result_read'; execution: DelegatedExecution }
   | { kind: 'child_release'; execution: DelegatedExecution }
   | { kind: 'child_unaccepted_release'; source: import('../kernel/protocol.generated.js').UnacceptedChildSourcePin & {operation_id:string;parent_run_id:string;parent_thread_id:string} }
-  | { kind: 'integration'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; child: DelegatedExecution; journal: RecoveryAnchor };
+  | { kind: 'integration'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; child: DelegatedExecution; journal: RecoveryAnchor; pathMapping?: import('./working-state/source-paths.js').SourcePathMap };
 export interface ManagedSourceServiceCancelRequest extends ManagedSourceAddress { requestId: string }
 export interface ManagedSourceServiceCancelReceipt { requestId: string; resourceEpoch: string; status: 'drained' | 'not_started' | 'unknown' }
 export interface ManagedSourceServiceRequest extends ManagedSourceAddress {

@@ -10,10 +10,10 @@ import { UiContentError } from '../interactive-ui/store.js';
 export interface ResourceQuery extends Omit<ResourceSnapshotParams, 'activationId'> { request: AgentResourceRequest }
 export type ResourceToolResult = (AgentResourceRead | ({ status: 'ready' } & Record<string, unknown>)) & { snapshotId?: string; resourceCheckpointId?: string };
 export type ResourceOwner = (query: ResourceQuery, signal: AbortSignal) => Promise<ResourceToolResult>;
-export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string): ResourceToolResult {
+export function resourceQueryFailure(status: ResourceFailureStatus, reason: string, query?: ResourceQuery, snapshotId?: string, code?: string): ResourceToolResult {
   const target = query?.request.kind === 'ui' ? query.request.ref : query?.request.kind === 'instruction-scope' ? query.request.targetPath
     : query?.request.kind === 'skill-resource' ? query.request.relativePath : query?.request.resourceId ?? '';
-  return { status, reason, domainId: 'agent-resources', viewId: snapshotId ?? query?.resourceCheckpointId ?? 'unbound', path: target,
+  return { status, reason, ...(code ? { code } : {}), domainId: 'agent-resources', viewId: snapshotId ?? query?.resourceCheckpointId ?? 'unbound', path: target,
     ...(snapshotId ? { snapshotId } : {}), ...(query ? { resourceCheckpointId: query.resourceCheckpointId } : {}) };
 }
 /** No Host snapshot cache: each call resolves the immutable checkpoint selected by its actual origin. */
@@ -57,7 +57,7 @@ export function createResourceOwner(options: {
       if (current.cancel_requested || ['completed', 'failed', 'cancelled'].includes(current.state)) return resourceQueryFailure('cancelled', 'Resource Run is closed', query, snapshotId);
       return { ...result, snapshotId, resourceCheckpointId: query.resourceCheckpointId };
     } catch (error) {
-      if (error instanceof UiContentError) return resourceQueryFailure(error.status === 404 ? 'missing' : error.status === 409 ? 'stale' : error.status === 400 ? 'invalid' : 'unavailable', error.message, query, snapshotId);
+      if (error instanceof UiContentError) return resourceQueryFailure(error.status === 404 ? 'missing' : error.status === 409 ? 'stale' : error.status === 400 ? 'invalid' : 'unavailable', error.message, query, snapshotId, error.code);
       if (signal.aborted) return resourceQueryFailure('cancelled', 'Resource query was cancelled', query, snapshotId);
       const failure = error instanceof ResourceScopeError ? error.failure : undefined;
       if (failure) return { ...failure, ...(snapshotId ? { snapshotId } : {}), resourceCheckpointId: query.resourceCheckpointId };

@@ -5,6 +5,8 @@ import type { WorkingStateRootStore, WorkingStatePin } from '../harness/working-
 import { captureStableSourceBaseline, type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { buildThreeWayMergePlan } from '../harness/working-state/three-way-merge.js';
+import type { ChildPhysicalCapture } from './child-source-capture.js';
+import { scopeFixedSourceResources } from './scoped-source-resources.js';
 
 export interface ChildSourcePreparation {
   source: LaunchSource;
@@ -16,6 +18,7 @@ export interface ChildSourceStoreOwners {
   store: WorkingStateRootStore;
   capture: StableSourcePreparationOwners;
   onProgress?(progress: ChildPreparationProgress): void;
+  capturePhysical?: ChildPhysicalCapture;
   /** The original physical handoff, checked by the source owner before opening it. */
   physical(root: { rootId: string; canonicalRoot: string }): Promise<WorkingStateRootStore>;
 }
@@ -40,7 +43,9 @@ export async function prepareChildSourceStore(
     const pin = await store.openBranchHandoffPin(fixed.source.branch_id, fixed.pin_id,
       { root: fixed.root, revision: fixed.source.revision, writeRevision: fixed.source.revision }, signal);
     const original = await store.readOriginalSource(fixed.source.branch_id, { signal });
-    provenance = { consistency: 'fixed-root', root: fixed.root, ...(original?.provenance.resources ? { resources: original.provenance.resources } : {}) };
+    const resources=original?.provenance.resources;
+    provenance = { consistency: 'fixed-root', root: fixed.root, ...(resources ? { resources: handoff.source_path
+      ? await scopeFixedSourceResources(store,{branchId:fixed.source.branch_id,revision:fixed.source.revision},resources,handoff.source_path,signal) : resources } : {}) };
     const branch = await store.createBranchFromPin(workspace, sourceBranch, pin,
       `${fixed.source.branch_id}@${fixed.source.revision}`, undefined, [], { sourceProvenance: provenance });
     if (branch.baseRoot !== fixed.root) throw new Error('Child source root changed');
@@ -55,6 +60,10 @@ export async function prepareChildSourceStore(
         throw new Error('Child source Documents authority changed');
       }
       store = await owners.physical(physical);
+      if (owners.capturePhysical) {
+        provenance = await owners.capturePhysical({ child, directory, rootId: physical.rootId,
+          captureWorkspaceId: resolved.workspaceId, signal, onProgress: owners.onProgress });
+      } else {
       let phase: ChildPreparationProgress['phase'] = 'inventory';
       const captured = await captureStableSourceBaseline({ store, workspaceId: workspace,
         captureWorkspaceId: resolved.workspaceId, branchId: sourceBranch, directory,
@@ -62,6 +71,7 @@ export async function prepareChildSourceStore(
         onPhase: value => { phase = value; owners.onProgress?.({ phase }); },
         onProgress: (completed, total) => owners.onProgress?.({ phase, completed, total }) }, owners.capture);
       provenance = captured.provenance;
+      }
     }
   }
   if (!store.pinBranchHandoff) throw new Error('Durable source pin is unavailable');
@@ -106,7 +116,7 @@ export async function captureContinuationStage(child: DelegatedExecution, owners
   source: LaunchSource, physical: { rootId: string; canonicalRoot: string } | undefined, signal: AbortSignal): Promise<void> {
   const branchId = `child-incoming:${child.execution_id}`;
   if (await owners.store.readSourcePreparation(branchId, { signal })) return;
-  if (source.mode === 'fixed_branch') {
+  if (source.mode === 'fixed_branch' || source.mode === 'materialized' && !physical) {
     if (!source.branch_id || source.revision === null) throw new Error('Incoming source is incomplete');
     const pin = await owners.store.pinBranch(source.branch_id, { revision: source.revision, signal });
     try {

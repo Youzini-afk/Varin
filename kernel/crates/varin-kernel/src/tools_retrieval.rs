@@ -62,6 +62,31 @@ impl KernelToolExecutor {
                 ExecutionError::from(failure.error)
             })
     }
+    /// Selection, model profile and source checks run before dispatch, as for `dispatch`.
+    pub(super) fn authorize_retrieval(
+        &self,
+        context: &ToolExecutionContext,
+        call: &ToolCall,
+        args: &RetrievalQueryArgs,
+        cancel: &CancellationToken,
+    ) -> Result<(), ExecutionError> {
+        self.admit_retrieval(context, args, cancel)?;
+        let owner = self.retrieval_owner.as_ref().ok_or_else(|| {
+            ExecutionError::new(
+                "retrieval_owner_unavailable",
+                "Native retrieval execution owner is unavailable",
+            )
+        })?;
+        crate::collaboration::authorize_internal_retrieval(
+            owner.runtime.catalog(),
+            self.binding.clone(),
+            self.resources.clone(),
+            owner.tools.bridge(),
+            context,
+            call,
+            cancel,
+        )
+    }
     pub(super) fn execute_retrieval(
         &self,
         context: &ToolExecutionContext,
@@ -70,14 +95,50 @@ impl KernelToolExecutor {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         self.run_retrieval(context, call, args, cancel).unwrap_or_else(|failure| {
-            // Once admitted, a lost observation cannot prove that subordinate work stopped.
-            let admitted=self.retrieval_owner.as_ref().is_some_and(|owner|owner.runtime.catalog().lock()
-                .map(|db|db.child_task(&context.operation_id).is_ok()).unwrap_or(true));
-            ToolCompletion::Result {
-                outcome:if admitted {Outcome::Indeterminate}else{Outcome::Failed}, effect:if admitted {Effect::Unknown}else{Effect::None},
-                content:json!({"status":if admitted {"unknown"}else{"failed"},"error":failure}).into(),
+            match self.retrieval_admission(context) {
+                // No Catalog child exists and this call's own preparation references were
+                // released: the original executor stopped without model, process or file work.
+                Some(false) if failure.details.as_ref().is_none_or(|details| details.get("cleanup").is_none()) => {
+                    let content: varin_runtime::output::OutputBody = json!({"status":"failed","error":failure}).into();
+                    if let Some(owner) = &self.retrieval_owner {
+                        let receipt = varin_runtime::ExternalReceipt {
+                            executor: call.name.clone(),
+                            identity: context.operation_id.clone(),
+                            epoch: "collaboration-v1".into(),
+                            outcome: Outcome::Failed,
+                            effect: Effect::None,
+                            result: content.clone(),
+                        };
+                        // Without this receipt the generic completion keeps its Unknown guard.
+                        let _ = varin_runtime::catalog::result_content::record_external_receipt(
+                            &owner.runtime.catalog(), &context.operation_id, receipt, true);
+                    }
+                    ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content }
+                }
+                Some(false) => ToolCompletion::Result {
+                    outcome: Outcome::Failed,
+                    effect: Effect::None,
+                    content: json!({"status":"failed","error":failure}).into(),
+                },
+                // Once admitted, a lost observation cannot prove that subordinate work stopped.
+                _ => ToolCompletion::Result {
+                    outcome: Outcome::Indeterminate,
+                    effect: Effect::Unknown,
+                    content: json!({"status":"unknown","operationId":context.operation_id,"error":failure}).into(),
+                },
             }
         })
+    }
+    /// `Some(true)` when Catalog has the child, `Some(false)` when it proves there is none.
+    fn retrieval_admission(&self, context: &ToolExecutionContext) -> Option<bool> {
+        let owner = self.retrieval_owner.as_ref()?;
+        let catalog = owner.runtime.catalog();
+        let db = catalog.lock().ok()?;
+        match db.child_task(&context.operation_id) {
+            Ok(_) => Some(true),
+            Err(varin_runtime::RuntimeError::NotFound(_)) => Some(false),
+            Err(_) => None,
+        }
     }
     fn run_retrieval(
         &self,

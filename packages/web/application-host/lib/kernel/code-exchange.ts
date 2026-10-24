@@ -16,6 +16,9 @@ import type { RecoveryState, WorkingResult, WorkingStateRootStore } from '../har
 import { normalizeResourceId } from '../recovery/journal-files.js';
 import { projectIntegrationOperation, UnconfirmedIntegrationCommitError } from '../recovery/durable-file-operation.js';
 import { exchangeManagedCode } from './managed-code-exchange.js';
+import { mapSourcePath, sourcePathMap, type SourcePathMap } from './source-path-map.js';
+import path from 'node:path';
+import { normalizePathIdentity } from '../workspace/path-safety.js';
 
 export { CODE_EXCHANGE_CAPABILITY };
 export type CodeSelection = string | { path: string; before: string; after: string };
@@ -28,6 +31,55 @@ export interface CodeExchangeOwners extends IntegrationTargetOwners {
 }
 const validators = new Map(CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => [d.id.slice('varin.code.'.length),
   { tool: d.tool!, validate: compileToolJsonSchema(d.tool!.inputSchema) }]));
+
+/** Same Host, workspace and actual writable directory: a live root by its registered root, or
+ * a materialized execution directory by the Run that owns it. Fixed revisions are never shared. */
+export function sameWritableSource(left: Pick<Participant, 'runId' | 'source'>, right: Pick<Participant, 'runId' | 'source'>): boolean {
+  const [a, b] = [left.source, right.source];
+  if (a.mode !== b.mode || a.mode === 'fixed_branch' || !isDeepStrictEqual(a.resource_owner, b.resource_owner)
+    || a.workspace_id !== b.workspace_id || a.execution_workspace_id !== b.execution_workspace_id) return false;
+  if (a.mode === 'live_root') {
+    if (!a.live_root || !b.live_root || a.live_root.hostId !== b.live_root.hostId) return false;
+    const [leftRoot, rightRoot] = [a.live_root.canonicalRoot, b.live_root.canonicalRoot].map(root => normalizePathIdentity(root));
+    return leftRoot === rightRoot ? a.live_root.rootId === b.live_root.rootId
+      : [path.relative(leftRoot!, rightRoot!), path.relative(rightRoot!, leftRoot!)]
+        .some(relative => relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+  }
+  return (a.environment_run_id ?? left.runId) === (b.environment_run_id ?? right.runId)
+    && a.branch_id === b.branch_id && a.revision === b.revision;
+}
+/** Scoped shared descendants can name a live subroot of a materialized source.
+ * Follow only actual sharing edges; independent copies retain distinct owners. */
+export async function sameSharedWritableSource(runtime: Pick<AgentRuntimeClient, 'childExecutionForRun' | 'launch'>,
+  left: Pick<Participant, 'runId' | 'source'>, right: Pick<Participant, 'runId' | 'source'>, signal: AbortSignal): Promise<boolean> {
+  if (sameWritableSource(left, right)) return true;
+  if (left.source.mode === 'fixed_branch' || right.source.mode === 'fixed_branch') return false;
+  const environment = async (selected: typeof left) => {
+    let current = selected;
+    const seen = new Set<string>();
+    while (!seen.has(current.runId)) {
+      signal.throwIfAborted(); seen.add(current.runId);
+      const child = await runtime.childExecutionForRun(current.runId, signal);
+      if (child?.source?.kind !== 'shared') return current;
+      if (child.source.handoff) {
+        current = { source: child.source.handoff.source, runId: child.source.handoff.source_run_id ?? child.parent_run_id };
+      } else if (child.trigger.kind !== 'dispatch') {
+        const previous = await runtime.launch(child.trigger.previous_run_id, signal);
+        if (!previous?.selection.source) throw new Error('Original shared source is unavailable');
+        current = { source: previous.selection.source, runId: child.trigger.previous_run_id };
+      } else return current;
+    }
+    throw new Error('Shared source handoff contains a cycle');
+  };
+  const [a, b] = await Promise.all([environment(left), environment(right)]);
+  return sameWritableSource(a, b);
+}
+function baselineUnavailable(source: Participant, target: Participant): Error {
+  const describe = (value: Participant) => `${value.member.name ?? value.member.agentId ?? value.member.threadId} (${value.source.mode})`;
+  return Object.assign(new Error(`No common file baseline links ${describe(source)} and ${describe(target)}: `
+    + 'neither side records the fixed revision both started from, so their changes cannot be merged. '
+    + 'Dispatch with an independent copy or a fixed stage source to obtain one, or apply the changes directly.'), { code: 'baseline_unavailable' });
+}
 
 async function participant(runtime: AgentRuntimeClient, caller: string, identity: string, signal: AbortSignal,
   own?: { runId: string; branchId: string }): Promise<Participant> {
@@ -118,6 +170,7 @@ export async function captureCodeSelection(input: {
   fixedSource?: {branchId:string;revision:number};
   baselineBranchId: string; baselineRevision: number; files?: CodeSelection[];
   acknowledged?: Record<string, RecoveryState>; signal: AbortSignal;
+  mapping?: SourcePathMap | undefined; baselineMapping?: SourcePathMap | undefined;
 }): Promise<WorkingResult> {
   const { store, signal } = input;
   const branchId = `code-exchange:${input.operationId}`;
@@ -129,12 +182,18 @@ export async function captureCodeSelection(input: {
   if (existing && existing.writeRevision > 0) return store.publishHeadResult(branchId, { publicationId, signal });
   const baseView = { revision: input.baselineRevision, signal };
   const selections = input.files?.map(file => typeof file === 'string' ? normalizeResourceId(file) : { ...file, path: normalizeResourceId(file.path) });
+  const mapping = input.mapping ?? { from: '', to: '' };
+  const baselineMapping = input.baselineMapping ?? { from: '', to: '' };
   const paths = selections?.map(file => typeof file === 'string' ? file : file.path) ?? [...new Set([
-    ...(await store.listPaths(input.baselineBranchId, [''], baseView))?.entries.map(e => e.path) ?? [],
+    ...(await store.listPaths(input.baselineBranchId, [''], baseView))?.entries.flatMap(e => {
+      const mapped = mapSourcePath(e.path, baselineMapping); return mapped ? [mapped] : [];
+    }) ?? [],
     ...(input.fixedSource ? (await store.listPaths(input.fixedSource.branchId,[''],{revision:input.fixedSource.revision,signal}))?.entries.map(e=>e.path)??[]
       : await store.listWorkspaceBaselinePaths(input.directory!, signal)),
-  ])];
-  const base = await store.readStateSlice(input.baselineBranchId, paths, baseView);
+  ])].filter(file => Boolean(mapSourcePath(file, mapping)));
+  const basePaths = paths.map(file => mapSourcePath(file, { from: baselineMapping.to, to: baselineMapping.from }));
+  if (basePaths.some(file => !file) || paths.some(file => !mapSourcePath(file, mapping))) throw new Error('A selected file is outside the receiving source directory');
+  const base = await store.readStateSlice(input.baselineBranchId, basePaths as string[], baseView);
   if (!base) throw new Error('The source baseline is unavailable');
   const captured = input.fixedSource ? await store.readStateSlice(input.fixedSource.branchId,paths,{revision:input.fixedSource.revision,signal})
     : await store.captureDirectory(input.directory!, paths, { store: true, signal });
@@ -145,17 +204,19 @@ export async function captureCodeSelection(input: {
     const selected: Record<string, RecoveryState> = {};
     for (const file of selections ?? paths) {
       const path = typeof file === 'string' ? file : file.path;
-      baseline[path] ??= input.acknowledged?.[path] ?? base[path] ?? missing();
-      if (typeof file === 'string') selected[path] = captured[path] ?? missing();
+      const targetPath = mapSourcePath(path, mapping)!;
+      const basePath = mapSourcePath(path, { from: baselineMapping.to, to: baselineMapping.from })!;
+      baseline[targetPath] ??= input.acknowledged?.[targetPath] ?? base[basePath] ?? missing();
+      if (typeof file === 'string') selected[targetPath] = captured[path] ?? missing();
       else {
-        const before = await stateText(store, selected[path] ?? baseline[path]!);
+        const before = await stateText(store, selected[targetPath] ?? baseline[targetPath]!);
         const after = replaceOnce(before, file.before, file.after);
         const actual = await stateText(store, captured[path] ?? missing());
         if (file.after && !actual.includes(file.after)) throw new Error(`The after fragment is absent from ${path}`);
         const object = await store.putObject(Buffer.from(after, 'utf8'));
         if(object.release)uploads.push(object.release);
-        selected[path] = { kind: 'regular-file', objectHash: object.hash, byteLength: object.byteLength,
-          ...(baseline[path]!.kind === 'regular-file' ? { mode: baseline[path]!.mode } : {}) };
+        selected[targetPath] = { kind: 'regular-file', objectHash: object.hash, byteLength: object.byteLength,
+          ...(baseline[targetPath]!.kind === 'regular-file' ? { mode: baseline[targetPath]!.mode } : {}) };
       }
     }
     if (!existing) await store.createBranch(input.workspaceId, branchId, baseline);
@@ -206,6 +267,16 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         if (source.member.threadId === target.member.threadId) throw new Error('Select another Agent');
         if (source.source.workspace_id !== target.source.workspace_id
           || !isDeepStrictEqual(source.source.resource_owner, target.source.resource_owner)) throw new Error('These file sources belong to different resource owners');
+        if (await sameSharedWritableSource(owners.runtime, source, target, context.signal)) {
+          const mapping = await sourcePathMap(owners.runtime, source, target, context.signal);
+          if (input.files?.some(file => !mapSourcePath(typeof file === 'string' ? normalizeResourceId(file) : normalizeResourceId(file.path), mapping))) throw new Error('A selected file is outside the receiving source directory');
+          // A shared child already changed this exact directory; there is nothing to merge.
+          return { executor_stopped: true, completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: parseVarinToolJson({
+            status: 'shared_source', source: { name: source.member.name, agentId: source.member.agentId },
+            target: { name: target.member.name, agentId: target.member.agentId },
+            message: 'Both Agents work in the same shared source; their file changes already apply there and need no exchange.',
+          }), parts: [] } } };
+        }
         let result:WorkingResult;
         let merged:Awaited<ReturnType<IntegrationCoordinator['mergeResult']>>;
         if(source.source.resource_owner.kind==='managed_host') {
@@ -215,10 +286,12 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         const sourceScope = source.source.mode==='fixed_branch'?await openFixedCodeSource(owners,authority,source.source,context.signal)
           :await openExchangeScope(owners, authority, source, context.signal); opened.push(sourceScope);
         const baseline = source.source.mode === 'live_root' ? target.source : source.launch.selection.source!;
-        if (!baseline.branch_id || baseline.revision === null) throw new Error('The exchange has no shared file baseline');
+        if (!baseline.branch_id || baseline.revision === null) throw baselineUnavailable(source, target);
         const acknowledged = await acknowledgedCode(sourceScope.store, source.member.threadId, target.member.threadId,
           source.source.mode==='fixed_branch'?await owners.metadataReader.listOperations(source.source.workspace_id,'integration'):undefined);
         result = await captureCodeSelection({ store: sourceScope.store, operationId: authority.operationId,
+          mapping: await sourcePathMap(owners.runtime, source, target, context.signal),
+          baselineMapping: await sourcePathMap(owners.runtime, source.source.mode === 'live_root' ? target : source, source, context.signal),
           workspaceId: source.source.workspace_id,
           ...('directory' in sourceScope?{directory:sourceScope.directory}:{}),
           ...(source.source.mode==='fixed_branch'?{fixedSource:{branchId:source.source.branch_id!,revision:source.source.revision!}}:{}),

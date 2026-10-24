@@ -32,7 +32,7 @@ it('requires an explicit ordinary model for old decision-only retrieval while pr
   let settings:unknown={};
   const prepare=createChildProfilePreparer({models:f.models,capabilities:async()=>f.capabilities,settings:async()=>settings});
   const quick=async()=>(await prepare({parent:f.parent})).presets.find(profile=>profile.id==='code_retrieval')!;
-  expect(await quick()).toMatchObject({model_source:'inherit',unavailable:null,work_mode:'shared'});
+  expect(await quick()).toMatchObject({model_source:'inherit',unavailable:null});
   const old={codeRetrieval:{decision:'auto'},fastDecision:{default:{protocol:'typed-classifier',providerId:'provider',modelId:'decision'}}};
   settings={harness:old};expect((await quick()).unavailable?.code).toBe('retrieval-model-selection-required');
   settings={harness:{...old,models:{explore:{inherit:true}}}};expect((await quick()).unavailable).toBeNull();
@@ -51,7 +51,7 @@ it('compiles original configured profiles without losing unavailable choices, sc
   const frozen = await prepare({ parent: f.parent, workFocus: 'code' });
   const profile = (id: string) => frozen.presets.find(value => value.id === `custom:${id}`)!;
   expect(frozen.normal_unavailable).toBeNull();
-  expect(frozen.presets.find(preset=>preset.id==='verifier')).toMatchObject({unavailable:null,model_source:'inherit',work_mode:'isolated_write',tools:['file_read','file_write','process_spawn','ask_user']});
+  expect(frozen.presets.find(preset=>preset.id==='verifier')).toMatchObject({unavailable:null,model_source:'inherit',tools:['file_read','file_write','process_spawn','ask_user']});
   expect(profile('reader')).toMatchObject({ model_source: 'inherit', model: null, unavailable: null, tools: ['file_read'], avatar: 'dome-ivory' });
   expect(profile('selected')).toMatchObject({ model_source: 'selected', model: { configuration: { model: 'model' } }, unavailable: null });
   expect(profile('off').unavailable?.code).toBe('child-profile-disabled');
@@ -59,7 +59,9 @@ it('compiles original configured profiles without losing unavailable choices, sc
   expect(profile('unsupported')).toMatchObject({ tools: ['file_read', 'computer'], unavailable: null });
   expect(frozen.native_capabilities).toEqual(f.capabilities); // Actual request directory resolves non-native names, never a latest registry.
   expect(profile('physical').unavailable).toBeNull(); // Actual directory decides whether a same-named tool is native or a Host service.
-  expect(profile('process')).toMatchObject({ work_mode: 'isolated_write', unavailable: null });
+  // A stored retired placement is dropped by the settings parser and never frozen into a dispatch choice.
+  expect(profile('process')).toMatchObject({ unavailable: null });
+  expect(profile('process')).not.toHaveProperty('work_mode');
   settings.harness.agents.reader.instructions = 'Changed later.';
   expect(profile('reader').instructions).toBe('Keep the original result.');
   expect((await prepare({ parent: f.parent, workFocus: 'code' })).identity).not.toBe(frozen.identity);
@@ -180,7 +182,7 @@ it('retains shipped-default provenance and explicit preset/custom arrays for exa
   let settings: unknown = {};
   const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities, settings: async () => settings });
   const absent = await prepare({ parent: f.parent });
-  expect(absent.presets.find(preset => preset.id === 'worker')).toMatchObject({ tools: ['file_read', 'file_write', 'process_spawn', 'ask_user'], tools_source: 'default', work_mode: 'isolated_write', unavailable: null });
+  expect(absent.presets.find(preset => preset.id === 'worker')).toMatchObject({ tools: ['file_read', 'file_write', 'process_spawn', 'ask_user'], tools_source: 'default', unavailable: null });
   expect(absent.presets.find(preset => preset.id === 'retrieval')).toMatchObject({ tools: ['file_read'], tools_source: 'default' });
   expect(absent.native_capabilities).toEqual(f.capabilities);
   settings = { harness: { models: { worker: { agent: { tools: ['file_read', 'process_spawn'] } } },

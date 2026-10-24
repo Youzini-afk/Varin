@@ -16,6 +16,11 @@ import type {
   ChildModelBinding,
 } from './protocol.generated.js';
 export type HostToolSchema = LaunchTool;
+/** Names which original owner a child retention could not borrow. Messages carry tool names only. */
+class ChildRetentionFailure extends Error {
+  constructor(readonly code: string, message: string) { super(message); this.name = 'ChildRetentionFailure'; }
+}
+const childModelUnavailable = "The parent Run's credential owner does not retain this child's frozen model selection";
 export interface HostToolBinding {
   reference: string;
   generation: number;
@@ -564,12 +569,14 @@ export class ToolBridge {
           )
         );
       });
-      if (!owner) return false;
+      if (!owner) throw new ChildRetentionFailure('child_mcp_original_owner_unavailable',
+        'The parent Run no longer holds the exact MCP binding selected for this child');
       mcpOwner = owner.entry;
       const managed = Object.values(mcp.provenance.servers).some(
         server => server.owner.resource_owner.kind === 'managed_host',
       );
-      if (managed && !mcpOwner.lease.retainChild) return false;
+      if (managed && !mcpOwner.lease.retainChild) throw new ChildRetentionFailure('child_mcp_original_owner_unavailable',
+        'The parent MCP binding cannot retain managed servers for a child');
       selected.push(owner);
     }
     for (const extension of extensions) {
@@ -578,7 +585,8 @@ export class ToolBridge {
           isDeepStrictEqual(entry.lease.extensionBinding, extension) &&
           entry.lease.available(extension.tool),
       );
-      if (!owner) return false;
+      if (!owner) throw new ChildRetentionFailure('child_extension_original_owner_unavailable',
+        `The parent Run no longer holds the exact ${extension.tool.name} tool binding selected for this child`);
       if (!selected.some(value => value.entry === owner.entry)) selected.push(owner);
     }
     const previous = selected.map(({ entry }) => entry.childHolders.get(binding.operationId));
@@ -597,7 +605,10 @@ export class ToolBridge {
     }
     // A model-only child has no tool holder. Its operation-lifetime registration lives
     // in the existing credential bridge and uses the same release/reconcile controls.
-    if (!selected.length) return model ? await this.childModels?.retain(binding, model, { mcp, extensions }) ?? false : true;
+    if (!selected.length) {
+      if (!model || await this.childModels?.retain(binding, model, { mcp, extensions })) return true;
+      throw new ChildRetentionFailure('child_model_original_owner_unavailable', childModelUnavailable);
+    }
     const holder: ChildHolder = {
       epoch, binding: structuredClone(binding), mcp: structuredClone(mcp),
       extensions: structuredClone(extensions), model: structuredClone(model), modelRetained: false,
@@ -613,7 +624,7 @@ export class ToolBridge {
     const lease = mcpOwner?.lease;
     holder.acquiring = Promise.resolve().then(async () => {
       if (model) {
-        if (!(await this.childModels?.retain(binding, model, { mcp, extensions }))) throw new Error('child_model_original_owner_unavailable');
+        if (!(await this.childModels?.retain(binding, model, { mcp, extensions }))) throw new ChildRetentionFailure('child_model_original_owner_unavailable', childModelUnavailable);
         holder.modelRetained = true;
       }
       if (lease?.retainChild && mcp) {
@@ -725,8 +736,10 @@ export class ToolBridge {
           ? { ok }
           : { ok, error: { code: 'child_tool_original_owner_unavailable' } }),
         error => this.#reply(request, { ok: false,
-          error: { code: error instanceof AggregateError && error.message === 'host_tool_child_release_failed'
-            ? 'host_tool_child_release_failed' : 'child_tool_original_owner_unavailable' } }),
+          error: error instanceof AggregateError && error.message === 'host_tool_child_release_failed'
+            ? { code: 'host_tool_child_release_failed' }
+            : error instanceof ChildRetentionFailure ? { code: error.code, message: error.message }
+              : { code: 'child_tool_original_owner_unavailable' } }),
       );
       return true;
     }

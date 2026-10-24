@@ -52,12 +52,12 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
   const closeView = (ref: string, current: LiveView) => {
     if (views.get(ref) !== current) return;
     views.delete(ref); current.wake?.();
-    for (const pending of current.pending.values()) pending.reject(new UiContentError('View is no longer connected', 503));
+    for (const pending of current.pending.values()) pending.reject(new UiContentError('View is no longer connected', 503, 'ui_view_disconnected'));
     current.pending.clear();
   };
   const live = (root: string, ref: string, token?: string) => {
     const view = views.get(ref);
-    if (!view || view.root !== root || token !== undefined && token !== view.token) throw new UiContentError('View is no longer connected', 503);
+    if (!view || view.root !== root || token !== undefined && token !== view.token) throw new UiContentError('View is no longer connected', 503, 'ui_view_disconnected');
     return view;
   };
   const observe = async (root: string, ref: string, view: UiReadInput['view'], signal: AbortSignal) => {
@@ -107,6 +107,16 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
       signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
     });
   };
+  /** A disconnected view is never answered with older data as if it were live. The saved view
+   * record has no capture time, so none is reported; the source summary lists connected views. */
+  const disconnectedView = async (root: string, input: UiReadInput, view: UiReadInput['view']) => {
+    const saved = await store.view(root, input.ref).catch(() => null);
+    const source = saved?.source.ref ?? null;
+    return { status: 'unavailable', code: 'ui_view_disconnected', ref: input.ref, view: view ?? 'summary', source,
+      savedStateAvailable: Boolean(saved?.state),
+      message: 'This view is not connected now, so its live state cannot be read. Read the source summary for currently connected views, or read the source with view: source.',
+      next: source ? [{ kind: 'ui', ref: source, view: 'summary' }, { kind: 'ui', ref: source, view: 'source' }] : [] };
+  };
   const read = async (root: string, input: UiReadInput, signal: AbortSignal): Promise<Record<string, unknown>> => {
     const view = input.view ?? 'summary';
     if (input.ref.startsWith('ui:')) {
@@ -116,7 +126,8 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
         views: [...views].filter(([, v]) => v.root === root && v.source.ref === version.ref).map(([ref]) => ref) };
       if (view !== 'source') {
         const candidates = [...views].filter(([, v]) => v.root === root && v.source.ref === version.ref).map(([ref]) => ref);
-        return { status: 'view_required', code: 'ui_view_required', ...summary, views: candidates,
+        // A stable failure status keeps this guidance intact through the generic resource tool.
+        return { status: 'unavailable', code: 'ui_view_required', ...summary, views: candidates,
           message: candidates.length ? 'Select one of views and repeat this read with its ui-view: reference. Each view has its own live state.'
             : 'No live view is connected for this revision. Open this content in the chat, then read summary to discover its ui-view: reference. Source is available with view: source.',
           next: candidates.map(ref => ({ kind: 'ui', ref, view })) };
@@ -134,7 +145,14 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
         source: selection.source.ref ?? (selection.source.preview ? { callId: selection.source.preview.callId, sequence: selection.source.preview.sequence, baseRef: selection.source.preview.baseRef } : null),
         image: selection.image ? { available: true } : undefined };
     } else if (input.ref.startsWith('ui-snapshot:')) { snapshotRef = input.ref; observed = await store.readSnapshot(root, snapshotRef); }
-    else { observed = await observe(root, input.ref, view, signal); snapshotRef = await store.snapshot(root, observed); }
+    else {
+      try { observed = await observe(root, input.ref, view, signal); }
+      catch (error) {
+        if (!(error instanceof UiContentError) || error.code !== 'ui_view_disconnected') throw error;
+        return disconnectedView(root, input, view);
+      }
+      snapshotRef = await store.snapshot(root, observed);
+    }
     if (view === 'source') {
       if (observed.ref) return read(root, { ...input, ref: observed.ref }, signal);
       const contents = observed.preview!.contents;
@@ -156,7 +174,7 @@ export function createInteractiveUiRuntime(options: { kernel: KernelClient; runt
         : { structure: nodes }) };
     }
     if (view === 'screen') {
-      if (!observed.image) throw new UiContentError('This client cannot capture the current view', 503);
+      if (!observed.image) throw new UiContentError('This client cannot capture the current view; its state and structure remain readable', 503, 'ui_screen_capture_unsupported');
       return { ...summary, captureMethod: observed.image.method, capturedBounds: observed.image.bounds, imageCapturedAt: observed.image.capturedAt,
         stateCapturedAt: observed.stateCapturedAt ?? observed.capturedAt,
         outputParts: [{ kind: 'media', media: { media_type: observed.image.mimeType, data_base64: observed.image.data } }] };

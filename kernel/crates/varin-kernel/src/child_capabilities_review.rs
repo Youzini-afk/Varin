@@ -53,6 +53,7 @@ fn available_metadata_is_the_actual_native_directory_and_classifies_real_source_
             varin_runtime::catalog::dispatch::ChildPresetDefault::Worker,
             varin_runtime::catalog::dispatch::ChildPresetDefault::Retrieval,
             varin_runtime::catalog::dispatch::ChildPresetDefault::Verifier,
+            varin_runtime::catalog::dispatch::ChildPresetDefault::ResearchPeer,
         ]
     );
     for name in ["language_definition", "language_references", "language_diagnostics", "language_hover", "language_symbols", "language_document_symbols", "language_call_hierarchy"] {
@@ -281,7 +282,8 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
             name: id.into(),
             instructions: String::new(),
             tools: tools.clone(),
-            work_mode: mode,
+            // A retained catalog may still carry the retired placement; it is never consulted.
+            retired_work_mode: Some(mode),
             model_source: ChildModelSource::Inherit,
             inherit_base: None,
             model: None,
@@ -293,7 +295,7 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
         input.work_mode = None;
         let (resolved, executable) =
             crate::collaboration::resolve_selection(&selected, &input).unwrap();
-        assert_eq!(resolved.profile.work_mode, mode);
+        assert_eq!(resolved.profile.work_mode, ChildWorkMode::Shared);
         assert_eq!(executable.len(), tools.len());
         assert!(executable.iter().all(|tool| directory.contains(tool)));
         assert!(executable.contains(&get("code_retrieval")));
@@ -310,16 +312,25 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
             assert!(executable.contains(&get("file_write")));
             assert!(executable.contains(&get("file_edit")));
             assert!(resolved.source_delegation().process);
-            input.work_mode = Some(ChildWorkMode::ReadOnly);
-            assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
         } else {
             assert!(resolved.source_delegation().process);
             assert!(!executable.contains(&get("file_write")));
-            input.work_mode = Some(ChildWorkMode::ReadOnly);
-            assert!(crate::collaboration::resolve_selection(&selected, &input).is_err());
-            input.tools = Some(vec!["file_read".into()]);
-            assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
         }
+        // An explicit read-only dispatch narrows the role's default tools to non-physical ones;
+        // an explicit physical tool remains exact and is rejected for read-only work.
+        input.work_mode = Some(ChildWorkMode::ReadOnly);
+        let (read_only, _) = crate::collaboration::resolve_selection(&selected, &input).unwrap();
+        assert_eq!(read_only.profile.work_mode, ChildWorkMode::ReadOnly);
+        assert!(!read_only.profile.tools.iter().any(|name| ["process_spawn", "file_write", "file_edit"].contains(&name.as_str())));
+        assert!(!read_only.source_delegation().process);
+        input.tools = Some(vec!["process_spawn".into()]);
+        assert!(crate::collaboration::resolve_selection(&selected, &input).unwrap_err().message.contains("cannot run read-only"));
+        input.tools = Some(vec!["file_read".into()]);
+        assert!(crate::collaboration::resolve_selection(&selected, &input).is_ok());
+        input.tools = None;
+        input.work_mode = Some(ChildWorkMode::IsolatedWrite);
+        assert_eq!(crate::collaboration::resolve_selection(&selected, &input).unwrap().0.profile.work_mode, ChildWorkMode::IsolatedWrite);
+        input.work_mode = None;
     }
     selected.catalog.presets[0].tools = vec!["read".into(), "bash".into()];
     let mut input = f.input.clone();
@@ -396,7 +407,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
             instructions: String::new(),
             tools: all.clone(),
             tools_source: ChildPresetToolsSource::Default,
-            work_mode: mode,
+            retired_work_mode: Some(mode),
             model_source: ChildModelSource::Inherit,
             inherit_base: None,
             model: None,
@@ -415,7 +426,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
             selected.catalog.presets[index].tools, all,
             "a source projection does not mutate the configured snapshot"
         );
-        assert_eq!(resolved.profile.work_mode, mode);
+        assert_eq!(resolved.profile.work_mode, ChildWorkMode::Shared);
         input.tools = Some(vec!["code_retrieval".into()]);
         let error = crate::collaboration::resolve_selection(&selected, &input).unwrap_err();
         assert!(error.message.contains("exceed the frozen delegation"), "{error}");

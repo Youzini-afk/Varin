@@ -8,7 +8,8 @@ export interface LiveSourceSelection {
 }
 export type LiveSourceResolver = (source: LiveSourceSelection, signal?: AbortSignal) => Promise<void>;
 interface Owners {
-  documents: { getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<{ root: string; hostId: string }> };
+  documents: { getWorkspace(workspaceId: string, signal?: AbortSignal): Promise<{ root: string; hostId: string }>;
+    resolveWorkspace?(input: { path: string }): Promise<{ workspaceId: string; hostId: string }> };
   kernel: KernelClient;
 }
 
@@ -20,6 +21,22 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     const [workspace, execution] = await Promise.all([original, source.executionWorkspaceId === source.workspaceId
       ? original : documents.getWorkspace(source.executionWorkspaceId, signal)]);
     const handshake = kernel.handshake ?? await kernel.start();
+    // Dispatch may select a subdirectory, or share an already admitted private
+    // execution view. Re-admit that exact directory through Documents as well as
+    // the owning workspace; never substitute the navigation project's root.
+    if (normalizePathIdentity(workspace.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)
+      || normalizePathIdentity(execution.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+      if (!documents.resolveWorkspace) throw new Error('Scoped live source admission is unavailable');
+      const selected = await documents.resolveWorkspace({ path: source.liveRoot.canonicalRoot });
+      const actual = await documents.getWorkspace(selected.workspaceId, signal);
+      if (actual.hostId !== source.liveRoot.hostId || normalizePathIdentity(actual.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)
+        || normalizePathIdentity(await canonicalizePathIdentity(source.liveRoot.canonicalRoot)) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+        throw new Error('Scoped live workspace identity changed');
+      }
+      if (source.liveRoot.hostId !== handshake.hostId || workspace.hostId !== handshake.hostId || execution.hostId !== handshake.hostId) throw new Error('Live source changed Host');
+      signal?.throwIfAborted();
+      return;
+    }
     if (source.liveRoot.hostId !== handshake.hostId || workspace.hostId !== source.liveRoot.hostId
       || execution.hostId !== source.liveRoot.hostId
       || normalizePathIdentity(workspace.root) !== normalizePathIdentity(source.liveRoot.canonicalRoot)
@@ -45,11 +62,18 @@ export function createLiveSourceOwner({ documents, kernel }: Owners) {
     } finally { await kernel.revokeGrant(grant.grantId); }
   };
   const admit = async (source: LiveSourceSelection, threadId: string, signal?: AbortSignal): Promise<void> => {
-    const actual = await prepare(source.workspaceId, source.executionWorkspaceId, threadId, signal);
-    if (actual.rootId !== source.liveRoot.rootId || actual.hostId !== source.liveRoot.hostId
-      || normalizePathIdentity(actual.canonicalRoot) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
-      throw new Error('Live root registration does not match the selected source');
-    }
+    await validate(source, signal);
+    const grant = await kernel.issueGrant({ grantId: `live-admission:${randomUUID()}`, threadId,
+      owningWorkspace: source.workspaceId, executionWorkspace: source.executionWorkspaceId,
+      capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }, signal);
+    try {
+      const actual = await kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspaceId,
+        executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: source.liveRoot.canonicalRoot }, signal);
+      if (actual.rootId !== source.liveRoot.rootId
+        || normalizePathIdentity(actual.canonicalRoot) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+        throw new Error('Live root registration does not match the selected source');
+      }
+    } finally { await kernel.revokeGrant(grant.grantId); }
   };
   return { prepare, validate, admit };
 }

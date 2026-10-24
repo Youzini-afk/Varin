@@ -628,7 +628,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
             name: "Writer".into(),
             instructions: "Use only the admitted private view.".into(),
             tools: schemas.iter().map(|s| s.name.clone()).collect(),
-            work_mode: ChildWorkMode::IsolatedWrite,
+            retired_work_mode: None,
             model_source: ChildModelSource::Inherit,
             inherit_base: None,
             model: None,

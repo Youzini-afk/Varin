@@ -5,6 +5,36 @@ use crate::tools::{FixedFileSource, ToolBinding};
 use varin_runtime::SourceMode;
 
 impl Storage {
+    pub(crate) fn deferred_source_binding(&mut self, binding: &ToolBinding, grant: &Grant) -> Result<Option<ToolBinding>, KernelError> {
+        if binding.source_mode != SourceMode::Materialized || binding.root_id.is_some() { return Ok(None); }
+        let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([binding.workspace_id,
+            binding.environment_run_id.as_deref().unwrap_or(&binding.run_id)]))?));
+        let receipt = self.operation_get(&json!({"operationId":format!("source-materialize:{key}")}))?;
+        if receipt.is_null() || receipt["state"] != "committed" { return Ok(None); }
+        if receipt["kind"] != "file.materialize" || receipt["result"]["status"] != "materialized" {
+            return Err(KernelError::Storage("Original child materialization needs reconciliation".into()));
+        }
+        let target = self.root.join("managed").join("runs").join(key);
+        // file_root_register resolves and checks the original directory; it must
+        // not recreate a lost, previously published execution environment.
+        let root = self.file_root_register(&json!({"workspaceId":binding.workspace_id,
+            "executionWorkspaceId":binding.execution_workspace_id,"canonicalRoot":target}), grant)?;
+        let mut effective = binding.clone();
+        effective.root_id = Some(root["rootId"].as_str().unwrap().into());
+        Ok(Some(effective))
+    }
+    pub(crate) fn prepare_deferred_source(&mut self, binding: &ToolBinding, grant: &Grant, cancellation: Arc<AtomicBool>)
+        -> Result<super::materialization::Admission, KernelError> {
+        let fixed = binding.materialized_source.as_ref().ok_or_else(|| KernelError::Authorization("Deferred source has no fixed baseline".into()))?;
+        let source = self.branch_read(&json!({"branchId":fixed.branch_id,"revision":fixed.revision,"includeEntries":false}))?;
+        if source["workspaceId"] != binding.workspace_id { return Err(KernelError::Authorization("Deferred source belongs to another workspace".into())); }
+        let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([binding.workspace_id,
+            binding.environment_run_id.as_deref().unwrap_or(&binding.run_id)]))?));
+        let root = self.file_root_register(&json!({"workspaceId":binding.workspace_id,
+            "executionWorkspaceId":binding.execution_workspace_id,"canonicalRoot":self.root}), grant)?;
+        self.prepare_materialization(&json!({"operationId":format!("source-materialize:{key}"),"workspaceId":binding.workspace_id,
+            "rootId":root["rootId"],"path":format!("managed/runs/{key}"),"sourceRoot":source["root"]}), grant, cancellation)
+    }
     pub(super) fn validate_execution_view_grant(
         &self,
         record: &Value,

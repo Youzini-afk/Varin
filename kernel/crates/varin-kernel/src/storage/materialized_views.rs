@@ -27,9 +27,48 @@ pub(crate) struct CleanupTask {
     operation_id: String,
     lease_id: String,
     paths: Vec<(PathBuf, DirectoryIdentity)>,
+    expected: Option<(PathBuf, Vec<(String, PathState)>)>,
 }
 impl CleanupTask {
     pub(crate) fn run(&self) -> Result<(), KernelError> {
+        for (path, identity) in &self.paths {
+            if directory_identity(path)?.as_ref().is_some_and(|current| current != identity) {
+                return Err(unavailable("Derived view cleanup directory changed; the directory was preserved"));
+            }
+        }
+        if let Some((root, entries)) = &self.expected {
+          if root.try_exists()? {
+            // Published child output is the deletion boundary. Preserve any file
+            // added or edited afterwards, including files excluded from capture.
+            let mut actual = BTreeSet::new();
+            let mut pending = vec![root.clone()];
+            while let Some(directory) = pending.pop() {
+                for entry in fs::read_dir(&directory)? {
+                    let entry = entry?; let file = entry.path();
+                    let relative = file.strip_prefix(root).map_err(|_| unavailable("Child cleanup escaped its root"))?.to_string_lossy().replace('\\', "/");
+                    actual.insert(relative);
+                    let metadata = fs::symlink_metadata(&file)?;
+                    if metadata.is_dir() && !metadata.file_type().is_symlink() { pending.push(file); }
+                }
+            }
+            let expected: BTreeSet<_> = entries.iter().filter(|(_, state)| !matches!(state, PathState::Missing)).map(|(path, _)| path.clone()).collect();
+            if actual != expected { return Err(unavailable("Child directory contains unpublished files; cleanup preserved it")); }
+            for (relative, state) in entries {
+                let file = root.join(relative);
+                if matches!(state, PathState::Missing) { continue; }
+                let metadata = fs::symlink_metadata(&file)?;
+                let same = match state {
+                    PathState::RegularFile { object_hash, byte_length, mode } => metadata.is_file() && !metadata.file_type().is_symlink()
+                        && super::file_resources::file_mode(&metadata) == *mode && hash_file(&file)? == (object_hash.clone(), *byte_length),
+                    PathState::Directory { mode } => metadata.is_dir() && !metadata.file_type().is_symlink()
+                        && mode.is_none_or(|mode| super::file_resources::file_mode(&metadata) == mode),
+                    PathState::Symlink { symlink_target, .. } => metadata.file_type().is_symlink() && fs::read_link(&file)?.to_string_lossy() == *symlink_target,
+                    PathState::Missing => !file.exists(), _ => false,
+                };
+                if !same { return Err(unavailable("Child directory changed after result publication; cleanup preserved it")); }
+            }
+          }
+        }
         for (path, identity) in &self.paths {
             match directory_identity(path)? {
                 None => continue,
@@ -51,6 +90,38 @@ impl CleanupTask {
     }
 }
 impl Storage {
+    /// A published result and the stopped original Run authorize reclaiming only
+    /// this Run's private directory through the existing physical-view GC owner.
+    pub(crate) fn settle_child_environment(&mut self, value: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let params: crate::protocol_generated::KernelChildEnvironmentSettleParams = parse_file_params(value)?;
+        let run = grant.run_id.as_deref().ok_or_else(|| unavailable("Child environment requires its original Run"))?;
+        let branch = self.branch(&params.branch_id)?;
+        if grant.owning_workspace.as_deref() != Some(&branch.workspace_id) || params.workspace_id != branch.workspace_id {
+            return Err(unavailable("Child environment belongs to another workspace"));
+        }
+        let published = self.operation_get(&json!({"operationId":params.publication_id}))?;
+        if published["kind"] != "working.result.publish" || published["state"] != "committed"
+            || published["result"]["branchId"] != params.branch_id || published["result"]["workspaceId"] != params.workspace_id {
+            return Err(unavailable("Child environment has no published file result"));
+        }
+        let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([params.workspace_id, run]))?));
+        let operation = format!("source-materialize:{key}");
+        let receipt = self.operation_get(&json!({"operationId":operation}))?;
+        if receipt.is_null() { return Ok(json!({"physical":false})); }
+        if receipt["kind"] != "file.materialize" || receipt["state"] != "committed" || receipt["result"]["status"] != "materialized"
+            || receipt["result"]["root"] != branch.base_root { return Err(unavailable("Child environment materialization has not settled")); }
+        let id = format!("child-environment:{run}");
+        if let Some(record) = self.materialized_view_record(&params.workspace_id, &id)? {
+            if record["cleanupRoot"] != published["result"]["root"] { return Err(unavailable("Child result changed during environment cleanup")); }
+            return Ok(json!({"physical":true,"viewId":id}));
+        }
+        self.save_materialized_view_record(&json!({"viewId":id,"workspaceId":params.workspace_id,
+            "executionWorkspaceId":grant.execution_workspace.as_deref().unwrap_or(&params.workspace_id),
+            "branchId":params.branch_id,"revision":0,"sourceRoot":branch.base_root,"cleanupRoot":published["result"]["root"],
+            "directoryIdentity":receipt["result"]["directoryIdentity"],"kernelEpoch":grant.kernel_epoch,
+            "ownerGrantId":grant.grant_id,"operationId":operation,"path":format!("managed/runs/{key}"),"state":"ready"}))?;
+        Ok(json!({"physical":true,"viewId":id}))
+    }
     pub(super) fn materialized_view_record(
         &self,
         workspace: &str,
@@ -376,6 +447,9 @@ impl Storage {
         record["cleanupPaths"] = serde_json::to_value(&paths)?;
         self.save_materialized_view_record(&record)?;
         Ok(Some(CleanupTask {
+            expected: record.get("cleanupRoot").and_then(Value::as_str).map(|root| {
+                self.root_entries(root).map(|entries| (self.root.join(&path), entries))
+            }).transpose()?,
             workspace_id: params.workspace_id,
             view_id: params.view_id,
             operation_id,
@@ -438,7 +512,7 @@ impl Storage {
             let record: Value = serde_json::from_str(&raw)?;
             if self.execution_view_handoff_retained(&record)? {continue;}
             let grant = self.load_grant(field(&record, "ownerGrantId")?)?;
-            let execution_view=record["viewId"].as_str().is_some_and(|id|id.starts_with("run-execution:"));
+            let execution_view=record["viewId"].as_str().is_some_and(|id|id.starts_with("run-execution:") || id.starts_with("child-environment:"));
             let run_retained=execution_view && grant.run_id.is_some()
                 && self.conn.query_row("SELECT EXISTS(SELECT 1 FROM grants WHERE state='active' AND json_extract(grant_json,'$.run_id')=?1 AND json_extract(grant_json,'$.thread_id')=?2)",
                     params![grant.run_id,grant.thread_id],|row|row.get::<_,bool>(0))?;
@@ -455,6 +529,16 @@ impl Storage {
         Ok(result)
     }
     fn execution_view_handoff_retained(&self,record:&Value)->Result<bool,KernelError> {
+        if record["viewId"].as_str().is_some_and(|id|id.starts_with("child-environment:")) {
+            let directory=self.root.join(field(record,"path")?);
+            let mut query=self.conn.prepare("SELECT o.result_json FROM operations o JOIN pins p ON p.pin_id=json_extract(o.result_json,'$.retention_pin.pin_id') WHERE o.kind='source.handoff' AND o.state='committed'")?;
+            for raw in query.query_map([],|row|row.get::<_,String>(0))? {
+                let handoff:Value=serde_json::from_str(&raw?)?;
+                let selected=PathBuf::from(handoff["root"]["root"]["canonicalRoot"].as_str().unwrap_or(""));
+                if selected.starts_with(&directory) || record["viewId"] == format!("child-environment:{}",handoff["retention_pin"]["source"]["environment_run_id"].as_str().unwrap_or("")) {return Ok(true);}
+            }
+            return Ok(false);
+        }
         if !record["viewId"].as_str().is_some_and(|id|id.starts_with("run-execution:")) {return Ok(false)}
         Ok(self.conn.query_row("SELECT EXISTS(SELECT 1 FROM operations o JOIN pins p ON p.pin_id=json_extract(o.result_json,'$.root.pin.pin_id') WHERE o.kind='source.handoff' AND o.state='committed' AND json_extract(o.result_json,'$.root.kind')='derived' AND json_extract(o.result_json,'$.root.view_id')=?1)",
             [field(record,"viewId")?],|row|row.get(0))?)
@@ -697,6 +781,39 @@ mod tests {
         assert!(!object_path(&root, &hash).unwrap().exists());
         drop(storage);
         fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn published_child_cleanup_preserves_later_edits_and_tolerates_an_already_removed_directory() {
+        for removed in [false, true] {
+            let (mut storage, grant, root, params, _) = fixture();
+            let view = prepare(&mut storage, &grant, &params);
+            let directory = PathBuf::from(view["canonicalRoot"].as_str().unwrap());
+            let mut record = storage.materialized_view_record("workspace", "view-one").unwrap().unwrap();
+            let source = record["sourceRoot"].as_str().unwrap().to_string();
+            let mut expected = storage.root_get(&source, "main.ts").unwrap().unwrap();
+            if let PathState::RegularFile { mode, .. } = &mut expected {
+                *mode = super::super::file_resources::file_mode(&fs::metadata(directory.join("main.ts")).unwrap());
+            }
+            let result = storage.root_set(&source, &["main.ts"], expected).unwrap();
+            storage.record_root_blobs(&result).unwrap();
+            record["cleanupRoot"] = json!(result);
+            storage.save_materialized_view_record(&record).unwrap();
+            if removed { fs::remove_dir_all(&directory).unwrap(); }
+            else { fs::write(directory.join("main.ts"), "later user edit").unwrap(); }
+            let task = storage.prepare_materialized_view_release(&address(), &grant).unwrap().unwrap();
+            let result = task.run();
+            if removed {
+                storage.finish_materialized_view_release(&task, result).unwrap();
+                assert!(storage.materialized_view_record("workspace", "view-one").unwrap().is_none());
+            } else {
+                assert!(storage.finish_materialized_view_release(&task, result).is_err());
+                assert_eq!(fs::read_to_string(directory.join("main.ts")).unwrap(), "later user edit");
+                fs::write(directory.join("main.ts"), "export const fixed = 1;\n").unwrap();
+                release(&mut storage, &grant);
+                assert!(!directory.exists());
+            }
+            drop(storage); fs::remove_dir_all(root).unwrap();
+        }
     }
     // On Unix a missing exit receipt keeps the prior tree unknown. On Windows,
     // absence of the original native Job already supplies actual stop evidence.

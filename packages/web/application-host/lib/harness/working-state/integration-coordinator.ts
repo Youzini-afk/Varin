@@ -45,6 +45,7 @@ import {
 import { sameState } from "../../recovery/journal-files.js";
 import { normalizePathIdentity } from "../../workspace/path-safety.js";
 import { inspectDocumentBytes } from "../../documents/inspect.js";
+import { mapSourcePath, mapSourceResult, type SourcePathMap } from './source-paths.js';
 
 export class DirectoryApplyUnresolvedError extends Error {
   readonly directory: string;
@@ -95,6 +96,7 @@ export interface IntegrationCoordinatorOptions {
 }
 
 export interface IntegrationPlanInput {
+  pathMapping?: SourcePathMap;
   /** Stable selected-code receipt identity; retries must not replay against later recipient edits. */
   operationId?: string;
   baseStatesOverride?: Record<string, RecoveryState>;
@@ -476,7 +478,8 @@ export class IntegrationCoordinator {
     // Resolve and acquire the physical path lease before entering the short
     // workspace metadata section. A busy alias must not block disjoint work.
     return this.withWorkingStore(input.workspaceId, "integration-reservation-target", async (store, context) => {
-      const result = await store.getResult(input.branchId, input.resultRevision);
+      const original = await store.getResult(input.branchId, input.resultRevision);
+      const result = original && mapSourceResult(original, input.pathMapping);
       if (!result || (input.operationBinding && result.root !== input.operationBinding.result.root)) {
         throw new Error("Integration fixed result is unavailable or changed");
       }
@@ -1574,20 +1577,26 @@ export class IntegrationCoordinator {
     surfaceEdits: PlannedSurfaceTextEdit[];
     texts: Record<string, { parent?: string; child?: string; baseline?: string }>;
   }> {
-    const storedResult = await store.getResult(input.branchId, input.resultRevision);
+    const original = await store.getResult(input.branchId, input.resultRevision);
+    const storedResult = original && mapSourceResult(original, input.pathMapping);
     const overrides = input.baseStatesOverride ?? await input.resolveBaseStates?.(store);
     const result = storedResult && { ...storedResult, baseStates: { ...storedResult.baseStates, ...overrides },
       pathStates: { ...storedResult.pathStates }, changedPaths: [...storedResult.changedPaths] };
     if (!result || (input.operationBinding && result.root !== input.operationBinding.result.root)) throw new Error(`Working result not found or changed: ${input.branchId}@${input.resultRevision}`);
     if (overrides && Object.keys(overrides).length) {
       const paths = [...new Set([...result.changedPaths, ...Object.keys(overrides)])];
-      const fixed = await store.readStateSlice(input.branchId, paths, { revision: input.resultRevision });
+      const sourcePaths = paths.map(file => input.pathMapping ? mapSourcePath(file, { from: input.pathMapping.to, to: input.pathMapping.from }) : file);
+      if (sourcePaths.some(file => !file)) throw new Error('An acknowledged path is outside the fixed child source');
+      const fixed = await store.readStateSlice(input.branchId, sourcePaths as string[], { revision: input.resultRevision });
       if (!fixed) throw new Error("The fixed source for acknowledged paths is unavailable");
-      result.pathStates = Object.fromEntries(paths.map(path => [path, fixed[path] ?? { kind: "missing" as const }]));
+      result.pathStates = Object.fromEntries(paths.map((path, index) => [path, fixed[sourcePaths[index]!] ?? { kind: "missing" as const }]));
       result.changedPaths = paths.filter(path => !sameState(result.baseStates[path] ?? { kind: "missing" }, result.pathStates[path]!));
     }
     const branch = await store.getBranchRoot(input.branchId);
     if (!branch) throw new Error(`Working branch not found: ${input.branchId}`);
+    const draftBasePaths = new Set(branch.draftBasePaths.flatMap(file => {
+      const mapped = input.pathMapping ? mapSourcePath(file, input.pathMapping) : file; return mapped ? [mapped] : [];
+    }));
     const parentAuthority = input.parentAuthority ?? { kind: "workspace" as const };
     const documentWorkspaceId = await this.documentWorkspace(input);
     const barrier = parentAuthority.kind !== "branch" && this.beginDirtyStateBarrier
@@ -1630,14 +1639,14 @@ export class IntegrationCoordinator {
         }
         const selected = selectDirtyResource(dirty.get(file), input.sourceOwner);
         if (selected.status === "ambiguous"
-          || (input.sourceOwner && !sourceOwnerConnected && branch.draftBasePaths.includes(file))) {
+          || (input.sourceOwner && !sourceOwnerConnected && draftBasePaths.has(file))) {
           targets[file] = "unavailable";
           parentState[file] = disk;
           bindings[file] = { target: "unavailable", revision: `ambiguous:${parentRevisionOf(disk)}` };
         } else {
           const live = selected.status === "selected" ? selected.resource : undefined;
           const target = classifyIntegrationTarget({
-            draftBasePath: branch.draftBasePaths.includes(file),
+            draftBasePath: draftBasePaths.has(file),
             ...(live ? { dirty: live } : {}),
             inspectDirtyBuffers: Boolean(this.inspectDirtyBuffers),
             parentState: disk,

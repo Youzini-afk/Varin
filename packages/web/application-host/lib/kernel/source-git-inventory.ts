@@ -1,11 +1,8 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { waitForManagedExit, type ManagedSpawn } from '../process/types.js';
-import { isNotGitRepositoryError, isUnbornHeadError, parseGitNullList, parseGitStageList, workdirContentIdentities, type BaselineInventory } from '../harness/working-state/workspace-baseline.js';
+import { isNotGitRepositoryError, isUnbornHeadError, parseGitNullList, parseGitStageList, type BaselineInventory } from '../harness/working-state/workspace-baseline.js';
 /** Read-only Git inventory for native source capture; all processes remain Kernel-owned. */
 export function createSourceGitInventory(options: { spawn: ManagedSpawn; gitBinary: string; env: NodeJS.ProcessEnv }) {
-  const fsPromises = fs.promises, pathModule = path;
   const abortError = () => new DOMException('Source inventory cancelled', 'AbortError');
   const runGit = async (cwd: string, args: string[], input?: Buffer | string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
@@ -71,32 +68,10 @@ export function createSourceGitInventory(options: { spawn: ManagedSpawn; gitBina
     for (const entry of parseGitStageList(stagedMeta)) {
       if (entry.mode === "100644" || entry.mode === "100755") indexModes[entry.path] = entry.mode;
     }
-    const dirtyPaths = [...new Set([
-      ...parseGitNullList(deleted),
-      ...parseGitNullList(untracked),
-      ...parseGitNullList(unstaged),
-      ...parseGitNullList(staged),
-      ...versusHead,
-    ])].filter((relative) => !gitlinks.includes(relative));
-    const contentIdentities = await workdirContentIdentities(directory, dirtyPaths, {
-      readFile: fsPromises.readFile,
-      lstat: fsPromises.lstat,
-      readlink: fsPromises.readlink,
-      join: pathModule.join,
-    }, signal);
-    const rawPaths = [...new Set([...parseGitNullList(tracked), ...parseGitNullList(untracked)])].filter(file => {
-      const identity = contentIdentities[file];
-      return identity ? identity.startsWith("file:") : indexModes[file] === "100644" || indexModes[file] === "100755";
-    }).sort();
-    // One native Git process hashes raw bytes for the reusable baseline identity.
-    // C-quoted UTF-8 input handles spaces, quotes and control characters without a shell.
-    const quoted = (file: string) => '"' + [...Buffer.from(file)].map(byte => byte >= 32 && byte < 127 && byte !== 34 && byte !== 92
-      ? String.fromCharCode(byte) : `\\${byte.toString(8).padStart(3, "0")}`).join("") + '"';
-    // Git resolves --stdin-paths from its repository root, whereas ls-files and our
-    // inventory are relative to the selected directory, which may be a subtree.
-    const rawHashes = rawPaths.length ? (await runGit(directory, ["hash-object", "--no-filters", "--stdin-paths"], rawPaths.map(file => quoted(pathModule.resolve(directory, file))).join("\n") + "\n", signal)).stdout.trim().split(/\r?\n/u) : [];
-    if (rawHashes.length !== rawPaths.length || rawHashes.some(hash => !/^[0-9a-f]+$/u.test(hash))) throw new Error("Git returned an incomplete raw baseline identity");
-    const rawFileHashes = Object.fromEntries(rawPaths.map((file, index) => [file, rawHashes[index]!]));
+    // Content is captured and verified by the native file owner. Computing a
+    // second full raw hash inventory here would reread every body before each
+    // capture, defeating native unchanged-file reuse (and Git clean files can
+    // still be changed without updating HEAD or the index).
     return {
       kind: "git",
       baseRef,
@@ -112,8 +87,6 @@ export function createSourceGitInventory(options: { spawn: ManagedSpawn; gitBina
       gitlinks,
       indexFingerprint: createHash("sha256").update(stagedMeta).digest("hex"),
       indexModes,
-      contentIdentities,
-      rawFileHashes,
     };
   };
 

@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { SourceDirectory } from './thread-sources.js';
 import { preparationFailure } from './preparation-failure.js';
 import type { McpInteractionListParams, McpInteractionReadParams, McpInteractionRespondParams, McpSamplingOutputReviewParams } from '@varin/protocol';
-import type { MediaReadParams, MediaReadChunk } from './protocol.generated.js';
+import type { MediaReadParams, MediaReadChunk, ChildDispatchCatalog } from './protocol.generated.js';
 import type { MessageSendParams, MessageListParams, MessageFeedParams } from '@varin/protocol';
 import type { FamilyListParams, FamilyRunsParams, FamilyReadParams, FamilyItemParams } from '@varin/protocol';
 import type { ChildProfilePreparer } from './child-profiles.js';
@@ -1157,6 +1157,26 @@ export class ThreadAdapter {
     await this.continueLaunch(runId);
   }
 
+  /** A borrowed or rebound launch owner lacks this Run's frozen child model selections. Retain
+   * each exact configuration/scope again; one that cannot be rebound fails only its own dispatch. */
+  private async retainFrozenChildModels(owner: ExistingHostCredentialOwner, catalog: ChildDispatchCatalog | null | undefined, signal: AbortSignal): Promise<void> {
+    for (const preset of catalog?.presets ?? []) {
+      const model = preset.unavailable ? null : preset.model;
+      if (!model?.credential_scope) continue;
+      const configuration = model.configuration as ModelSessionConfiguration;
+      if (owner.bindingIdentity === modelCredentialBindingIdentity(configuration)) continue;
+      const retained = owner.findRetained(modelCredentialBindingIdentity(configuration), model.credential_scope);
+      if (retained) { retained.release(); continue; }
+      let child: ExistingHostCredentialOwner | undefined;
+      try {
+        child = this.runtime.retainedModelOwner(configuration, model.credential_scope)
+          ?? await waitForModelBinding(this.models.rebindModel(configuration, model.credential_scope), value => value.release(), signal);
+        owner.retainDependency(child);
+      } catch { signal.throwIfAborted(); }
+      finally { child?.release(); }
+    }
+  }
+
   /** The single Host launch entry for submission, recovered input and domain continuations.
    * The kernel projection includes worker/quiescence ownership, including asynchronous cold
    * assembly after start acknowledgement. A stale notification never releases that owner. */
@@ -1197,8 +1217,12 @@ export class ThreadAdapter {
           const supplied = options.credentialOwner;
           const suppliedOwner = supplied && (supplied.bindingIdentity === undefined
             || supplied.bindingIdentity === modelCredentialBindingIdentity(run.configuration as ModelSessionConfiguration)) ? supplied : undefined;
-          owner = suppliedOwner ?? (scope ? this.runtime.retainedModelOwner(run.configuration as ModelSessionConfiguration, scope)
+          // This Run's own registration carries its original child-model graph. Another Run with
+          // the same main model has a different frozen child catalog and is only a fallback.
+          owner = suppliedOwner ?? (scope ? this.runtime.retainedModelOwner(run.configuration as ModelSessionConfiguration, scope, runId)
+            ?? this.runtime.retainedModelOwner(run.configuration as ModelSessionConfiguration, scope)
             ?? await waitForModelBinding(this.models.rebindModel(run.configuration as ModelSessionConfiguration, scope), owner => owner.release(), signal) : undefined);
+          if (owner) await this.retainFrozenChildModels(owner, launch.selection.child_dispatch, signal);
           const selected = await this.runtime.modelSelections(runId, signal);
           const desired = selected.desired;
           desiredOwner = desired?.credential_scope && desired.id !== selected.active?.id && desired.status !== 'failed'

@@ -36,12 +36,10 @@ export function ThreadChildProfiles({ launch }: { launch: LaunchSelection }) {
     {catalog.normal_unavailable && <p>{reasons[catalog.normal_unavailable.code] ?? catalog.normal_unavailable.code}</p>}
     {catalog.presets.map(preset => {
       const unsupported = preset.tools.filter(name => !names.has(name));
-      const physical = preset.work_mode === 'read_only' ? preset.tools.filter(name => !hostNames.has(name)
-        && catalog.native_capabilities.some(tool => tool.name === name && tool.source_requirement === 'physical')) : [];
-      const unavailable = preset.unavailable ?? (unsupported.length ? { code: 'child-capability-unsupported', capabilities: unsupported }
-        : physical.length ? { code: 'child-physical-source-required', capabilities: physical } : null);
+      // Placement is chosen by each dispatch; a preset only lists role, model and tools.
+      const unavailable = preset.unavailable ?? (unsupported.length ? { code: 'child-capability-unsupported', capabilities: unsupported } : null);
       return <div key={preset.id} className="mt-2">
-      <div>{preset.name} · {t(preset.work_mode === 'read_only' ? 'chat.children.readOnly' : 'chat.children.workingCopy')}</div>
+      <div>{preset.name}</div>
       <div className="text-xs text-muted-foreground">{preset.model_source === 'inherit' ? t('chat.children.inheritModel') : preset.model?.configuration.model ?? t('chat.children.noModel')}</div>
       <div className="text-xs text-muted-foreground">{preset.tools.join(', ') || 'No tools'}</div>
       {unavailable && <p>{reasons[unavailable.code] ?? unavailable.code}{unavailable.capabilities.length ? `: ${unavailable.capabilities.join(', ')}` : ''}</p>}

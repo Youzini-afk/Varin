@@ -103,6 +103,7 @@ impl Storage {
             "storage.getBlob" => storage.read_blob_fixture(authorized_params, authorized_grant),
             "file.materializedView.check" => storage.check_materialized_view(authorized_params, authorized_grant),
             "file.executionView.inspect" => storage.inspect_execution_view(authorized_params, authorized_grant),
+            "file.childEnvironment.settle" => storage.settle_child_environment(authorized_params, authorized_grant),
             "file.read.check" => storage.file_read_check(authorized_params, authorized_grant),
             "file.root.register" => storage.file_root_register(authorized_params, authorized_grant),
             "file.operation.list" => {

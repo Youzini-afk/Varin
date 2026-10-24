@@ -66,6 +66,9 @@ impl ChildAdmissionPreparation {
         super::dispatch::validate_agent_source(&database,&parent,self.input.source_agent.as_deref(),self.handoff.as_ref())?;
         if let Some(handoff) = &self.handoff {
             handoff.source.validate()?;
+            if handoff.source_path.as_deref() != self.input.source_path.as_deref().filter(|path| *path != ".") {
+                return Err(RuntimeError::Conflict("child sourcePath differs from its original invocation".into()));
+            }
             if handoff.operation_id != format!("child-source-handoff:{}", self.context.operation_id)
             {
                 return Err(RuntimeError::Invalid(
@@ -74,7 +77,7 @@ impl ChildAdmissionPreparation {
             }
             match &handoff.root {
                 ChildSourceRoot::Fixed { pin }
-                    if handoff.source.mode == SourceMode::FixedBranch
+                    if handoff.source.mode != SourceMode::LiveRoot
                         && pin.source == handoff.source
                         && !pin.pin_id.is_empty()
                         && !pin.root.is_empty() =>

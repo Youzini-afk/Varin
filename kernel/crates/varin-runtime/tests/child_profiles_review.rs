@@ -71,7 +71,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
         name: format!("Configured {id}"),
         instructions: "Original selected instructions".into(),
         tools: vec!["file_read".into()],
-        work_mode: ChildWorkMode::ReadOnly,
+        retired_work_mode: None,
         model_source: if model.is_some() {
             ChildModelSource::Selected
         } else {
@@ -83,7 +83,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     }
 }
 fn input() -> DispatchInput {
-    DispatchInput {
+    DispatchInput { source_path: None,
         inherit_context: false,
         source_agent: None,
         name: None,
@@ -311,11 +311,12 @@ fn normal_modes_preserve_private_text_path_and_missing_configuration_never_falls
     let writable = selected.resolve(&request).unwrap();
     assert!(writable.profile.tools.contains(&"file_write".into()));
     assert!(!writable.source_delegation().process);
+    // Omitting workMode shares the selected source; the tool shape never selects isolation.
     request.work_mode = None;
     request.tools = Some(vec!["file_read".into()]);
     assert_eq!(
         selected.resolve(&request).unwrap().profile.work_mode,
-        ChildWorkMode::ReadOnly
+        ChildWorkMode::Shared
     );
     request.tools = Some(vec!["process_spawn".into()]);
     assert!(selected.resolve(&request).is_err());

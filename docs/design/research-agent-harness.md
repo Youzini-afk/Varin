@@ -371,7 +371,7 @@ Thread、历史、执行和受理仍由 Rust Catalog 负责，文件与执行来
 | 协作与复用 | [Agent 协作](../collaboration.md)、[catalog_delegated.rs](../../kernel/crates/varin-runtime/src/catalog_delegated.rs) |
 | 工具披露 | [tool_disclosure.rs](../../kernel/crates/varin-runtime/src/tool_disclosure.rs)、[extension-tool-owner.ts](../../packages/web/application-host/lib/kernel/extension-tool-owner.ts) |
 | 搜索与文档声明 | [research-discovery-tools.ts](../../packages/extension-builtins/src/research-discovery-tools.ts)、[web-tools.ts](../../packages/extension-builtins/src/web-tools.ts) |
-| 科研决策清理 | [research-decision-tools.ts](../../packages/extension-builtins/src/research-decision-tools.ts)、[research-decision.ts](../../packages/web/application-host/lib/kernel/research-decision.ts) |
+| 科研决策清理 | 原 `research-decision-tools.ts`、`research-decision.ts`，已按本设计删除 |
 | 实验运行 | [research-runtime.ts](../../packages/web/application-host/lib/kernel/research-runtime.ts) |
 | 设置入口 | [settings-catalog.ts](../../packages/application-client/src/settings-catalog.ts) |
 | 所有权与工程边界 | [架构](../architecture.md)、[运行时](../runtime.md)、[检索与上下文](../retrieval.md)、[开发指南](../development.md) |

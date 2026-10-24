@@ -386,7 +386,8 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           if (!environmentRun) throw new SourceAdmissionError('source_environment_unavailable');
           const handshake = kernel.handshake ?? await kernel.start();
           const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, environmentRun);
-          if (opened.phase === 'preparing' && opened.firstPreparation && !source.environment_run_id) {
+          const previous = await actor.getOperation(opened.materializationOperationId, signal);
+          if (!input.deferMaterialization && (!previous || previous.state !== 'committed')) {
             const container = await actor.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id,
               canonicalRoot: location.storageRoot }, signal);
             if (typeof container.rootId !== 'string') throw new SourceAdmissionError('source_environment_unavailable');
@@ -394,11 +395,14 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
               rootId: container.rootId, path: location.relativeTarget, sourceRoot: branch!.root }, signal);
             if (receipt.status !== 'materialized') throw new SourceAdmissionError('source_environment_unavailable');
           }
+          const materialized = await actor.getOperation(opened.materializationOperationId, signal);
+          if (materialized?.state === 'committed' && (materialized.result as { status?: unknown })?.status === 'materialized') {
           const canonicalRoot = await admitMaterializedRoot(location.targetPath, signal);
           const registered = await actor.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, canonicalRoot }, signal);
           if (typeof registered.rootId !== 'string') throw new SourceAdmissionError('source_environment_unavailable');
           physicalRoot = { hostId: options.hostId, rootId: registered.rootId, canonicalRoot };
           if (opened.physicalRoot && !isDeepStrictEqual(opened.physicalRoot, physicalRoot)) throw new SourceAdmissionError('source_changed');
+          } else if (!input.deferMaterialization) throw new SourceAdmissionError('source_environment_unavailable');
         }
         const fixed = { branchId: source.branch_id!, revision: source.revision! };
         const toolBinding: SourceToolBinding | null = input.scope.kind === 'source_read' ? null : {
@@ -527,6 +531,29 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
             // The original domain owns promotion and drain. No post-effect
             // cancellation/trust check may discard its committed receipt.
             const scope = localScope(principal, input.coordinatorHostId, authority);
+            if (scope.source.mode === 'materialized' && !scope.physicalRoot && scope.scope.kind === 'run' && authority.purpose !== 'result') {
+              const actor = kernel.scoped(scope.grant);
+              const location = await originalMaterializationLocation(kernel.handshake!.storageRoot, scope.source.workspace_id,
+                scope.source.environment_run_id ?? scope.scope.runId);
+              const operationId = `source-materialize:${location.key}`;
+              let materialized = await actor.getOperation(operationId, controller.signal);
+              const needsPhysical = ['binary_write', 'code_capture', 'code_apply', 'integration', 'user_integration',
+                'package_capture', 'experiment_admit', 'experiment_capture'].includes(operation.kind)
+                || operation.kind === 'language' && operation.query.method !== 'structure';
+              if (needsPhysical && (!materialized || materialized.state !== 'committed')) {
+                const branch = await actor.readBranch({ branchId: scope.source.branch_id!, revision: scope.source.revision!, includeEntries: false }, controller.signal);
+                const container = await actor.fileRootRegister({workspaceId:scope.source.workspace_id,executionWorkspaceId:scope.source.execution_workspace_id,canonicalRoot:location.storageRoot},controller.signal);
+                await actor.fileMaterialize({workspaceId:scope.source.workspace_id,rootId:String(container.rootId),operationId,path:location.relativeTarget,sourceRoot:branch.root},controller.signal);
+                materialized=await actor.getOperation(operationId,controller.signal);
+              }
+              if (materialized?.state === 'committed' && (materialized.result as {status?:unknown})?.status === 'materialized') {
+                const canonicalRoot=await admitMaterializedRoot(location.targetPath,controller.signal);
+                const registered=await actor.fileRootRegister({workspaceId:scope.source.workspace_id,executionWorkspaceId:scope.source.execution_workspace_id,canonicalRoot},controller.signal);
+                scope.physicalRoot={hostId:options.hostId,rootId:String(registered.rootId),canonicalRoot};
+                if(authority.toolBinding) await kernel.sourceRequest('source.authority.bind',{
+                  ...address(principal,input), toolBinding:{...authority.toolBinding,rootId:scope.physicalRoot.rootId},physicalRoot:scope.physicalRoot},controller.signal);
+              }
+            }
             dispatched = true;
             return options.serviceOperation(scope, operation, controller.signal);
           }

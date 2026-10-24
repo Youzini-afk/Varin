@@ -1226,6 +1226,7 @@ mod tests {
                     varin_runtime::SourceMode::LiveRoot,
                     true,
                     &mut false,
+                    None,
                 )
                 .unwrap();
             assert_eq!(result["status"], "applied");

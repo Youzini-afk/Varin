@@ -96,7 +96,10 @@ export async function startRunFromSource(
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
     enabledTools: tools, ...(credentialScope ? { credentialScope } : {}),
   }, signal);
-  const authority = await admitRunSourceAuthority(kernel, runtime, selection, { ...options, allowMaterialization: true });
+  const child = selection.branchId?.startsWith('child-source:') ? await runtime.childExecutionForRun(run.id, signal) : null;
+  const needsMcpWorkspace = Object.values(child?.launch.mcp_binding?.provenance.servers ?? {}).some(server => server.owner.execution_scope === 'workspace');
+  const authority = await admitRunSourceAuthority(kernel, runtime, selection, { ...options,
+    allowMaterialization: needsMcpWorkspace || !child && !selection.environmentRunId });
   try {
     await runtime.reconcileRun(run.id, authority.toolBinding, signal);
     await runtime.prepareMcp(run.id, selection, authority.kind === 'local' ? authority.canonicalRoot : undefined, signal);
@@ -167,6 +170,7 @@ export async function admitRunSourceAuthority(
     const binding = await service.bind({ coordinatorHostId: runtime.coordinatorHostId,
       scope: { kind: 'run', threadId: run.thread_id, runId: run.id, epoch: run.epoch },
       source: { ...selection, tools: [...selection.tools] }, purpose: options.purpose ?? 'source', retention: options.retention ?? 'run',
+      ...(options.allowMaterialization === false ? { deferMaterialization: true } : {}),
       ...(options.operationId ? { operationId: options.operationId } : {}),
     }, signal);
     if (!isDeepStrictEqual(binding.source, sourceSelection)) throw new SourceAdmissionError('source_changed');
@@ -223,7 +227,8 @@ export async function admitRunSourceAuthority(
     if (!resultOnly && selection.mode === 'materialized') {
       const handshake = kernel.handshake ?? await kernel.start();
       const { storageRoot, key, relativeTarget, targetPath } = await originalMaterializationLocation(handshake.storageRoot, selection.workspaceId, selection.environmentRunId ?? run.id);
-      if (options.allowMaterialization && !selection.environmentRunId) {
+      const previous = await actor.getOperation(`source-materialize:${key}`, signal);
+      if (options.allowMaterialization !== false && (!selection.environmentRunId || !previous || previous.state !== 'committed')) {
       const container = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot: storageRoot }, signal);
       if (typeof container.rootId !== 'string') throw new Error('Materialization root registration failed');
       const result = await actor.fileMaterialize({
@@ -235,11 +240,14 @@ export async function admitRunSourceAuthority(
       }, signal);
       if (result.status !== 'materialized') throw new Error('Source materialization requires reconciliation');
       }
+      const receipt = await actor.getOperation(`source-materialize:${key}`, signal);
+      if (receipt?.state === 'committed' && (receipt.result as { status?: unknown })?.status === 'materialized') {
       const canonicalRoot = await admitMaterializedRoot(targetPath, signal);
       const registered = await actor.fileRootRegister({ workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId, canonicalRoot }, signal);
       if (typeof registered.rootId !== 'string') throw new Error('Execution root registration failed');
       rootId = registered.rootId;
       executionCwd = canonicalRoot;
+      } else if (options.allowMaterialization !== false) throw new SourceAdmissionError('source_environment_unavailable');
     }
     if (!resultOnly && selection.mode === 'fixed_branch') {
       const view = await actor.executionViewInspect({workspaceId:selection.workspaceId,branchId:selection.branchId!,revision:selection.revision!},signal);

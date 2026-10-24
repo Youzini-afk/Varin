@@ -52,7 +52,7 @@ impl TextMutation {
         }
     }
 }
-pub(super) fn read_version(
+pub(crate) fn read_version(
     root_id: &str,
     path: &str,
     state: &FileState,
@@ -63,6 +63,9 @@ pub(super) fn read_version(
         path,
         state
     ]))
+}
+pub(crate) fn fixed_read_namespace(workspace: &str, source: &crate::tools::FixedFileSource) -> String {
+    format!("fixed:{workspace}:{}@{}",source.branch_id,source.revision)
 }
 fn edit_original(text: &str, edits: &[TextEdit]) -> Result<String, KernelError> {
     if edits.is_empty() {
@@ -151,6 +154,7 @@ impl Storage {
         source_mode: varin_runtime::SourceMode,
         execute: bool,
         dispatched: &mut bool,
+        baseline: Option<&crate::tools::FixedFileSource>,
     ) -> Result<Value, KernelError> {
         let resource = self.resolve_file_resource(root_id, mutation.path(), grant, false)?;
         self.assert_file_lease(
@@ -247,7 +251,21 @@ impl Storage {
             let version_matches = if mutation.read_version().is_empty() {
                 matches!(expected, FileState::Missing)
             } else {
-                current_version == mutation.read_version()
+                let mut matches = current_version == mutation.read_version();
+                if !matches {
+                    if let Some(baseline) = baseline {
+                        let original = self.branch_read(&json!({"branchId":baseline.branch_id,"revision":baseline.revision,"paths":[resource.path]}))?;
+                        let state = original["entries"].as_array().and_then(|entries|entries.first()).and_then(|entry|entry.get("state"))
+                            .cloned().unwrap_or_else(||json!({"kind":"missing"}));
+                        let mut state: FileState = serde_json::from_value(state)?;
+                        if read_version(&fixed_read_namespace(workspace_id,baseline),&resource.path,&state)? == mutation.read_version() {
+                            #[cfg(windows)]
+                            if let FileState::RegularFile { mode: Some(mode), .. } = &mut state { *mode = if *mode & 0o222 == 0 { 0o444 } else { 0o666 }; }
+                            matches = Self::file_state_matches(&expected,&state);
+                        }
+                    }
+                }
+                matches
             };
             if !version_matches {
                 return Ok(

@@ -295,6 +295,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     directory: string,
     scopes?: readonly string[],
     signal?: AbortSignal,
+    onDiscovered?: (completed: number) => void,
   ): Promise<string[]> {
     const root = await this.kernelFileRoot(directory);
     const output: string[] = [];
@@ -313,6 +314,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         if (prefix && !record.path.startsWith(prefix)) throw new Error("Kernel inventory escaped its admitted directory");
         output.push(normalize(record.path.slice(prefix.length)));
       }
+      onDiscovered?.(output.length);
     } });
     if (result.status !== "ready" && result.status !== "empty") throw new Error(result.message ?? "Workspace inventory did not complete");
     return [...new Set(output)].sort();
@@ -1409,8 +1411,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     return this.kernelScanPaths(directory, scopes, signal);
   }
 
-  async listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal): Promise<string[]> {
-    return this.kernelScanPaths(directory, undefined, signal);
+  async listWorkspaceBaselinePaths(directory: string, signal?: AbortSignal, onDiscovered?: (completed: number) => void): Promise<string[]> {
+    return this.kernelScanPaths(directory, undefined, signal, onDiscovered);
   }
 
   private resultCandidate(value: unknown, branchId: string, publicationId: string): WorkingResultCandidate {

@@ -199,6 +199,7 @@ impl Storage {
             branch_builders: HashMap::new(),
             branch_write_builders: HashMap::new(),
             verified_objects: BTreeSet::new(),
+            source_capture_cache: HashMap::new(),
             blob_read_roots: Default::default(),
             file_roots: HashMap::new(),
             observation_reads: HashMap::new(),

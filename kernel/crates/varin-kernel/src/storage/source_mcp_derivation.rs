@@ -600,7 +600,7 @@ mod tests {
         let handoff: ChildSourceHandoff = serde_json::from_value(storage.child_source_handoff(&binding,
             &varin_runtime::execution::ToolExecutionContext { run_id:"parent-run".into(),operation_id:"dispatch".into(),
                 origin:varin_runtime::execution::ToolOrigin::ModelStep { request_id:"request".into() } },
-            &varin_runtime::catalog::dispatch::ChildSourceDelegation {
+            &varin_runtime::catalog::dispatch::ChildSourceDelegation { source_path: None,
         agent_source: Some(varin_runtime::catalog::dispatch::AgentSourceSelection{run_id:"selected-run".into(),source:stage}),
                 work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,process:false,configured_preset:false,selection_ref:Value::Null },
             &grant,HOST,false).unwrap()).unwrap();

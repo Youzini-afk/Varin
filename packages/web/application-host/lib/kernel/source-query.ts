@@ -48,7 +48,7 @@ export interface SourceQueryOwner {
 }
 export function createSourceQueryOwner(options: {
   kernel: KernelClient;
-  documents: Pick<DocumentAuthority, 'readSnapshot' | 'admitWorkspaceRegistration'>;
+  documents: Pick<DocumentAuthority, 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'resolveWorkspace'>>;
   validateLiveSource: LiveSourceResolver;
   remote?: ManagedSourceQueryTransport;
   /** Target-only, already admitted native handle; never decoded from a query payload. */
@@ -60,6 +60,8 @@ export function createSourceQueryOwner(options: {
   const languageRoot = (root: string) => process.platform === 'win32' ? stripWindowsNamespacePrefix(root) : root;
   const targetQueries = options.targetAuthority !== undefined;
   const managed = (query: SourceQueryAccess) => query.source.resource_owner.kind === 'managed_host' && !options.targetAuthority;
+  const immutable = (query: SourceQueryAccess) => query.source.mode === 'fixed_branch'
+    || query.source.mode === 'materialized' && !query.physicalRoot;
   const service = async <Operation extends SourceServiceOperation>(query: SourceQueryAccess, operation: Operation, signal?: AbortSignal): Promise<SourceServiceResponse<Operation>> => {
     if (!options.remote) throw new Error('The original managed source service is unavailable');
     return await options.remote.service(query, operation, signal);
@@ -105,10 +107,14 @@ export function createSourceQueryOwner(options: {
         if (root || source.environment_run_id) throw new Error('Fixed source cannot use a physical root');
       } else {
         const handshake = kernel.handshake;
-        if (source.mode !== 'materialized' || !root || !handshake || root.hostId !== handshake.hostId) throw new Error('The original materialized source root is unavailable');
+        if (source.mode !== 'materialized' || !handshake || root && root.hostId !== handshake.hostId) throw new Error('The original materialized source root is unavailable');
         const location = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? query.runId ?? '');
-        const canonical = await admitMaterializedRoot(location.targetPath, signal);
-        if (normalizePathIdentity(canonical) !== normalizePathIdentity(root.canonicalRoot)) throw new Error('The original materialized source location changed');
+        if (root) {
+          const canonical = await admitMaterializedRoot(location.targetPath, signal);
+          if (normalizePathIdentity(canonical) !== normalizePathIdentity(root.canonicalRoot)) throw new Error('The original materialized source location changed');
+        } else if ((await client.getOperation(`source-materialize:${location.key}`, signal))?.state === 'committed') {
+          throw new Error('The source gained its physical execution view; obtain a current source descriptor');
+        }
       }
     }
     signal.throwIfAborted();
@@ -135,7 +141,7 @@ export function createSourceQueryOwner(options: {
     let drained = false;
     try {
       return await runKernelCompute(client, { ...input, workspaceId: source.workspace_id,
-        ...(source.mode === 'fixed_branch' ? { branchId: source.branch_id!, revision: source.revision! }
+        ...(immutable(query) ? { branchId: source.branch_id!, revision: source.revision! }
           : { rootId: query.physicalRoot!.rootId }) }, { ...options, onDrained: () => {
             drained = true; options.onDrained?.();
           } });
@@ -202,7 +208,7 @@ export function createSourceQueryOwner(options: {
       signal.throwIfAborted();
       if (managed(query)) { await service(query, { kind: 'check_path', path }, signal); return; }
       const client = kernel.scoped(sourceGrant(query));
-      if (query.source.mode === 'fixed_branch') {
+      if (immutable(query)) {
         await client.readBranch({ branchId: query.source.branch_id!, revision: query.source.revision!, paths: [path], includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
       } else {
         await client.fileReadCheck({ workspaceId: query.source.workspace_id, rootId: query.physicalRoot!.rootId, path }, signal);
@@ -227,7 +233,15 @@ export function createSourceQueryOwner(options: {
       const before = address ? await client.fileReadCheck(address, signal) : null;
       let result: ExploreFileSnapshot;
       if (source.mode === 'live_root') {
-        const snapshot = await documents.readSnapshot({ workspaceId: source.workspace_id, resourceId: path }, { signal });
+        let workspaceId = source.workspace_id;
+        const owning = await documents.admitWorkspaceRegistration(workspaceId, signal);
+        if (normalizePathIdentity(owning.canonicalPath) !== normalizePathIdentity(source.live_root!.canonicalRoot)) {
+          if (!documents.resolveWorkspace) throw new Error('Scoped source document admission is unavailable');
+          workspaceId = (await documents.resolveWorkspace({ path: source.live_root!.canonicalRoot })).workspaceId;
+          const selected = await documents.admitWorkspaceRegistration(workspaceId, signal);
+          if (normalizePathIdentity(selected.canonicalPath) !== normalizePathIdentity(source.live_root!.canonicalRoot)) throw new Error('Scoped source document root changed');
+        }
+        const snapshot = await documents.readSnapshot({ workspaceId, resourceId: path }, { signal });
         result = snapshot.status === 'ready' ? { status: 'ready', content: snapshot.content, revision: snapshot.revision, source: 'disk' }
           : { status: 'unavailable', message: `Source text is unavailable (${snapshot.status})` };
       } else {
@@ -256,7 +270,7 @@ export function createSourceQueryOwner(options: {
         const bytes = Buffer.concat(parts), inspected = inspectDocumentBytes(bytes);
         if (revisionFromBytes(bytes) !== revision) throw new Error('The original source reader revision differs from its bytes');
         result = inspected.kind === 'text' ? { status: 'ready', content: inspected.content, revision,
-          source: source.mode === 'fixed_branch' ? 'working-branch' : 'disk' }
+          source: immutable(query) ? 'working-branch' : 'disk' }
           : { status: 'unavailable', message: `The selected source is ${inspected.kind}` };
       }
       const after = address ? await client.fileReadCheck(address, signal) : null;

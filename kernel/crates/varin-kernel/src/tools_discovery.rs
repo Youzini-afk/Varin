@@ -159,6 +159,7 @@ impl FileQueryArgs {
         }
         Ok(())
     }
+    fn recursive_scope(&self) -> bool { self.recursive.unwrap_or(self.search) }
     pub fn params(&self, binding: &ToolBinding, context: &ToolExecutionContext) -> Value {
         let mut params = self.query_params(binding);
         params["jobId"] = json!(context.operation_id);
@@ -509,6 +510,11 @@ impl KernelResourceClient {
                     "message":if next.is_some() {json!("Continue the original query with nextCursor and the same filters; page size may change. Counts describe observed results, not a whole-source total.")}
                         else {page["message"].clone()}
                 });
+                let mut output = output;
+                if next.is_none() && output["records"].as_array().is_some_and(Vec::is_empty) && output["queryErrors"].as_array().is_some_and(Vec::is_empty) {
+                    output["emptyResult"] = empty_result_explanation(&args, &output["scope"]);
+                    output["message"] = output["emptyResult"]["meaning"].clone();
+                }
                 if next.is_none() {
                     self.finish_query(binding, context, job_id, false, &watch)?;
                 }
@@ -531,6 +537,30 @@ impl KernelResourceClient {
         }
         result
     }
+}
+
+/// Zero results are a fact about this exact scope and these filters, never about the whole
+/// source. Each widening is an ordinary argument of the same tool; nothing is rescanned here.
+fn empty_result_explanation(args: &FileQueryArgs, scope: &Value) -> Value {
+    let mut widen = Vec::new();
+    if scope["respectGitignore"] == true {
+        widen.push(json!({"argument":"respectGitignore","value":false,"effect":"also search files excluded by ignore rules"}));
+    }
+    if scope["excludeDirectories"].as_array().is_some_and(|names| !names.is_empty()) {
+        widen.push(json!({"argument":"excludeDirectories","value":[],"effect":"also enter the default excluded directories","excluded":scope["excludeDirectories"]}));
+    }
+    if scope["includeHidden"] == false {
+        widen.push(json!({"argument":"includeHidden","value":true,"effect":"also include hidden entries"}));
+    }
+    if !args.recursive_scope() {
+        widen.push(json!({"argument":"recursive","value":true,"effect":"also include descendants of the selected directories"}));
+    }
+    if args.globs.as_ref().is_some_and(|globs| !globs.is_empty()) {
+        widen.push(json!({"argument":"globs","value":null,"effect":"remove the path pattern filter"}));
+    }
+    widen.push(json!({"argument":"paths","effect":"name a specific file or directory; explicit paths are read even when ignored"}));
+    json!({"meaning":"No match in the searched scope with these filters. Paths outside the scope or removed by a filter were not searched, so this does not show they lack a match.",
+        "filtersApplied":widen.len() > 1,"widen":widen})
 }
 
 pub(super) fn schema(search: bool) -> Value {

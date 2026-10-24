@@ -3,7 +3,8 @@ import type { RenderUiInput, UiReceipt, UiSource, UiObservation, UiSelection, Ui
 import type { KernelClient, KernelScopedClient } from '../kernel/kernel-client.js';
 import type { KernelRecordResult } from '../kernel/protocol.generated.js';
 
-export class UiContentError extends Error { constructor(message: string, readonly status = 400) { super(message); } }
+/** code names a public, stable reason that survives the generic resource wrapper. */
+export class UiContentError extends Error { constructor(message: string, readonly status = 400, readonly code?: string) { super(message); } }
 export class UiMutationUnknownError extends UiContentError { constructor() { super('Save outcome is not confirmed; the original call was not repeated', 503); } }
 type FileObject = { hash: string; slot: string; mediaRefs?: string[] };
 type Revision = Omit<UiReceipt, 'kind' | 'files'> & { files: Record<string, FileObject>; assets: Record<string, FileObject & { mimeType: string }> };

@@ -57,6 +57,9 @@ pub struct DispatchInput {
     pub inherit_context: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_agent: Option<String>,
+    /// Directory within the selected Agent's source; no change to its owning workspace.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -91,7 +94,7 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { task, inherit_context: false, source_agent: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { task, inherit_context: false, source_agent: None, source_path: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -105,6 +108,11 @@ impl DispatchInput {
         }
         if let Some(tools) = &self.tools {
             validate_names(tools)?;
+        }
+        if self.source_path.as_deref().is_some_and(|path| path != "." && (path.is_empty()
+            || path.contains(['\\', ':', '\0']) || path.starts_with('/')
+            || path.split('/').any(|part| part.is_empty() || matches!(part, "." | "..")))) {
+            return Err(RuntimeError::Invalid("sourcePath must be a directory relative to the selected source (or . for its root)".into()));
         }
         Ok(())
     }
@@ -173,7 +181,10 @@ pub struct ChildPreset {
     pub instructions: String,
     pub tools: Vec<String>,
     pub tools_source: ChildPresetToolsSource,
-    pub work_mode: ChildWorkMode,
+    /// Retired preset-level placement. Each dispatch selects its own work mode; this value is
+    /// kept only so retained frozen catalogs keep their exact bytes, and is never consulted.
+    #[serde(default, rename = "work_mode", skip_serializing_if = "Option::is_none")]
+    pub retired_work_mode: Option<ChildWorkMode>,
     pub model_source: ChildModelSource,
     pub inherit_base: Option<ChildModelBinding>,
     /// Absence means the configuration owner explicitly selected parent inheritance.
@@ -342,6 +353,8 @@ pub struct ResolvedChildSelection {
 #[serde(deny_unknown_fields)]
 pub struct ChildSourceDelegation {
     #[serde(default, skip_serializing_if="Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
     pub agent_source: Option<AgentSourceSelection>,
     pub work_mode: ChildWorkMode,
     pub process: bool,
@@ -351,6 +364,7 @@ pub struct ChildSourceDelegation {
 impl ResolvedChildSelection {
     pub fn source_delegation(&self) -> ChildSourceDelegation {
         ChildSourceDelegation {
+            source_path: None,
         agent_source: None,
             work_mode: self.profile.work_mode,
             process: self.process,
@@ -413,7 +427,7 @@ impl Catalog {
         let run_id:String=self.db.query_row("SELECT id FROM runs WHERE branch_id=?1 ORDER BY rowid DESC LIMIT 1",[branch],|r|r.get(0))?;
         let source=agent_file_source(&self.db,&self.run(&run_id)?)?;
         let selected=AgentSourceSelection{run_id,source};
-        let handoff=super::collaboration::ChildSourceHandoff{refresh:None,source_run_id:Some(selected.run_id.clone()),source:selected.source.clone(),operation_id:String::new(),resource_authority:None,
+        let handoff=super::collaboration::ChildSourceHandoff{ retention_pin: None, source_path: None,refresh:None,source_run_id:Some(selected.run_id.clone()),source:selected.source.clone(),operation_id:String::new(),resource_authority:None,
             root:super::collaboration::ChildSourceRoot::Physical{root:launches::LiveRoot{host_id:String::new(),root_id:String::new(),canonical_root:String::new()}}};
         validate_agent_source(&self.db,&parent,Some(identity),Some(&handoff))?;
         Ok(selected)
@@ -457,7 +471,6 @@ impl ChildDispatchSelection {
             for tool in &self.frozen.allowed_delegation {
                 if self.host_tool(&tool.name).is_some()
                     && self.source_requirement(&tool.name) != Some(ChildSourceRequirement::Live)
-                    && !(preset.work_mode == ChildWorkMode::ReadOnly && self.physical_tool(&tool.name))
                     && !tools.contains(&tool.name) { tools.push(tool.name.clone()); }
             }
         }
@@ -538,7 +551,8 @@ impl ChildDispatchSelection {
             }
             (
                 self.preset_tools(preset),
-                input.work_mode.unwrap_or(preset.work_mode),
+                // Placement is chosen by this dispatch, independently of the role.
+                input.work_mode.unwrap_or(ChildWorkMode::Shared),
                 preset.instructions.clone(),
                 preset
                     .model
@@ -559,9 +573,6 @@ impl ChildDispatchSelection {
                 .iter()
                 .map(|tool| tool.name.clone())
                 .collect();
-            if input.work_mode == Some(ChildWorkMode::ReadOnly) && input.tools.is_none() {
-                tools.retain(|name| !self.physical_tool(name));
-            }
             if input.work_mode == Some(ChildWorkMode::IsolatedWrite) && self.frozen.source.is_some()
             {
                 for name in ["file_write", "file_edit"] {
@@ -570,15 +581,13 @@ impl ChildDispatchSelection {
                     }
                 }
             }
-            let mode = input.work_mode.unwrap_or_else(|| {
-                if tools.iter().any(|name| self.physical_tool(name)) {
-                    ChildWorkMode::IsolatedWrite
-                } else {
-                    ChildWorkMode::ReadOnly
-                }
-            });
-            (tools, mode, String::new(), self.frozen.parent_model.clone(), None)
+            (tools, input.work_mode.unwrap_or(ChildWorkMode::Shared), String::new(), self.frozen.parent_model.clone(), None)
         };
+        // An explicit read-only dispatch narrows a default capability set; an explicit tool list
+        // remains exact and is checked below.
+        if mode == ChildWorkMode::ReadOnly && input.tools.is_none() {
+            tools.retain(|name| !self.physical_tool(name));
+        }
         if input.preset.as_deref() == Some("code_retrieval") {
             tools.retain(|name| !matches!(name.as_str(), "code_retrieval" | "retrieval_control" | "dispatch")
                 && self.frozen.allowed_delegation.iter().any(|tool| &tool.name == name));
@@ -600,15 +609,6 @@ impl ChildDispatchSelection {
                 tools.push(gateway.name);
             }
         }
-        let mode = if input.preset.is_none() && input.work_mode.is_none() {
-            if tools.iter().any(|name| self.physical_tool(name)) {
-                ChildWorkMode::IsolatedWrite
-            } else {
-                ChildWorkMode::ReadOnly
-            }
-        } else {
-            mode
-        };
         if self.frozen.source.is_none() {
             let unavailable = self.unavailable_source_tools(&tools);
             if !unavailable.is_empty() {
@@ -629,7 +629,7 @@ impl ChildDispatchSelection {
         if mode == ChildWorkMode::ReadOnly && tools.iter().any(|name| self.physical_tool(name)) {
             let physical = tools.iter().filter(|name| self.physical_tool(name)).cloned().collect::<Vec<_>>();
             return Err(RuntimeError::Invalid(format!(
-                "selected child tools require a private physical source: {}. Use workMode=isolated_write, or exclude these tools for read_only.", physical.join(", ")
+                "selected child tools can change files and cannot run read-only: {}. Omit workMode to share the source, use workMode=isolated_write for an independent copy, or exclude these tools.", physical.join(", ")
             )));
         }
         tools.sort();

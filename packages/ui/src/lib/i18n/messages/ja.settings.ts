@@ -93,7 +93,6 @@ export const settingsDict = {
   "settings.agents.toolsHint": "Use registered tool names. Existing permission checks still apply to every task.",
   "settings.agents.focus": "Work focus",
   "settings.agents.focusHint": "Leave both unchecked to make this agent available in either focus.",
-  "settings.agents.isolated": "Use an isolated workspace",
   "settings.agents.applies": "Changes apply to new task dispatches. Accepted tasks retain their configuration.",
   "settings.agents.back": "Back to agents",
   "settings.agents.currentFocus": "Current work focus: {focus}",

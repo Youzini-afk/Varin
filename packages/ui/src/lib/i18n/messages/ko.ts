@@ -3943,6 +3943,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.script.loadFailed": "호출 기록을 불러올 수 없습니다.",
   "chat.script.retry": "다시 시도",
   "chat.script.attention": "확인 필요: {count}건",
+  "chat.children.preparation.source": "작업 소스 확인 중",
+  "chat.children.preparation.sourceWait": "공유 소스 캡처 대기 중",
   "chat.children.preparation.inventory": "파일 목록 읽는 중",
   "chat.children.preparation.capture": "파일 스냅샷 생성 중",
   "chat.children.preparation.verify": "파일 확인 중",
@@ -3965,8 +3967,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.messages": "Task messages",
   "chat.children.profiles": "Task profiles",
   "chat.children.configureProfiles": "Configure profiles",
-  "chat.children.readOnly": "Read only",
-  "chat.children.workingCopy": "Independent working copy",
   "chat.children.inheritModel": "Uses the request model",
   "chat.children.noModel": "Model unavailable",
 };

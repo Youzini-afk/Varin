@@ -585,7 +585,7 @@ fn continued_child_proves_the_actual_predecessor_basis_and_new_materialized_sour
     proof.origin = McpChildDerivationOrigin::Continuation {
         previous_run_id: first_run,
     };
-    proof.handoff = ChildSourceHandoff {
+    proof.handoff = ChildSourceHandoff { retention_pin: None, source_path: None,
         refresh:None,
         source_run_id: None,
         operation_id: format!("child-source-handoff:{}", next.execution_id),

@@ -401,7 +401,8 @@ impl Storage {
         } else if record.purpose != "result"
             && p.tool_binding
                 .as_ref()
-                .is_some_and(|b| b.source_mode != varin_runtime::SourceMode::FixedBranch)
+                .is_some_and(|b| b.source_mode != varin_runtime::SourceMode::FixedBranch
+                    && !(b.source_mode == varin_runtime::SourceMode::Materialized && b.materialized_source.is_some()))
         {
             return Err(denied("Physical source requires its original root"));
         }
@@ -410,7 +411,15 @@ impl Storage {
                 != serde_json::to_value(&p.tool_binding)?
                 || record.result.physical_root != p.physical_root)
         {
-            return Err(denied("Ready source authority is immutable"));
+            // Promotion fills only the original deferred directory. Frozen source,
+            // capabilities and executor identities have already been checked above.
+            let original=record.result.tool_binding.as_ref().ok_or_else(||denied("Ready source authority is immutable"))?;
+            let grant=self.load_grant(&record.result.grant_id)?;
+            if record.result.physical_root.is_some() || original.root_id.is_some()
+                || self.deferred_source_binding(original,&grant)?.as_ref().map(serde_json::to_value).transpose()?
+                    != p.tool_binding.as_ref().map(serde_json::to_value).transpose()? {
+                return Err(denied("Ready source authority is immutable"));
+            }
         }
         record.result.tool_binding = p.tool_binding;
         record.result.physical_root = p.physical_root;
@@ -1348,7 +1357,7 @@ impl Storage {
         )?;
         if authority.result.scope.run_id() != Some(p.parent_run_id.as_str())
             || authority.result.scope.thread_id() != p.parent_thread_id
-            || handoff.source != p.source
+            || (handoff.source != p.source && authority.result.source != p.source)
             || authority.result.source.workspace_id != p.source.workspace_id
             || authority.result.source.resource_owner != p.source.resource_owner
         {
@@ -1470,7 +1479,7 @@ impl Storage {
                     authority_id: previous.authority_id,
                     resource_epoch: previous.resource_epoch,
                 };
-                let expected = ChildSourceHandoff {
+                let expected = ChildSourceHandoff { retention_pin: None, source_path: None,
                     refresh: continuation.refresh,
         source_run_id: None,
                     operation_id: op.clone(),

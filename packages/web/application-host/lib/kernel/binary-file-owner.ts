@@ -42,24 +42,26 @@ export async function writeSourceBinary(input: BinaryFileWrite & {
 }): Promise<BinaryFileWriteResult> {
   const { client, rootId, source, operationId, path, signal } = input;
   if (source.mode === 'fixed_branch') throw new Error('This file source is an immutable revision; prepare its writable execution view before saving');
-  const base = { workspaceId: source.workspace_id, rootId, operationId };
+  // Each native method has its own exact parameters: the root address, the lease identity and
+  // the write identity are distinct. Native Storage rejects fields that belong to another method.
+  const root = { workspaceId: source.workspace_id, rootId };
   const unknown = (): BinaryFileWriteResult => ({ status: 'unknown', path, operationId, executorStopped: false, fileJournal: true });
   const inspect = async () => {
-    const saved = await client.fileOperationReconcile(base);
+    const saved = await client.fileOperationReconcile({ ...root, operationId });
     return saved.status === 'missing' ? null : saved.status === 'reconciled' ? resultFrom(saved.result, path, operationId) ?? unknown() : unknown();
   };
   signal?.throwIfAborted();
   const saved = await inspect();
   if (saved) return saved;
   const leaseId = `binary-write:${randomUUID()}`;
-  const lease = await client.fileLeaseAcquire({ ...base, leaseId, resources: [{ path, scope: 'exact' }] }, signal);
+  const lease = await client.fileLeaseAcquire({ ...root, leaseId, resources: [{ path, scope: 'exact' }] }, signal);
   if (lease.status !== 'acquired') throw new Error('The file is being changed by another operation; read it again when that operation finishes');
   let beforeOwner: string | undefined;
   let targetOwner: string | undefined;
   let pending = false;
   let receipt: BinaryFileWriteResult | undefined;
   try {
-    const captured = await client.fileCapture({ ...base, operationId: `${operationId}:before`, path, store: true, leaseId }, signal);
+    const captured = await client.fileCapture({ ...root, operationId: `${operationId}:before`, path, store: true, leaseId }, signal);
     if (typeof captured.stateJson !== 'string' || typeof captured.path !== 'string') throw new Error('The file owner returned an incomplete capture');
     const state = JSON.parse(captured.stateJson) as KernelBranchState;
     beforeOwner = typeof captured.ownerId === 'string' ? captured.ownerId : undefined;
@@ -73,7 +75,7 @@ export async function writeSourceBinary(input: BinaryFileWrite & {
     signal?.throwIfAborted();
     pending = true;
     // Keep the original writer until its actual receipt settles, even if the observer cancels.
-    const applied = await client.fileApply({ ...base, path: captured.path, leaseId,
+    const applied = await client.fileApply({ ...root, operationId, path: captured.path, leaseId,
       ownerId: stored.ownerId, expectedJson: JSON.stringify(state),
       targetJson: JSON.stringify({ kind: 'regular-file', objectHash: stored.hash, byteLength: stored.byteLength,
         ...(state.kind === 'regular-file' && state.mode !== undefined ? { mode: state.mode } : {}) }),
@@ -95,7 +97,7 @@ export async function writeSourceBinary(input: BinaryFileWrite & {
     if (!pending) {
       const cleaned = await Promise.allSettled([
         ...[beforeOwner, targetOwner].filter((owner): owner is string => Boolean(owner)).map(owner => client.releaseBlob(owner)),
-        client.fileLeaseRelease({ workspaceId: source.workspace_id, rootId, leaseId }),
+        client.fileLeaseRelease({ ...root, leaseId }),
       ]);
       if (receipt && cleaned.some(result => result.status === 'rejected')) receipt.cleanupPending = true;
     }

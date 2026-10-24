@@ -6,6 +6,7 @@ import { sourceToolSchemas, savedSourceLaunch } from './source-launch.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import { captureContinuationStage, prepareChildSourceStore, prepareContinuationSourceStore, prepareRefreshedContinuationSourceStore, releaseRefreshScratch, type ChildSourcePreparation } from './child-source-store.js';
 import type { StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
+import { createChildPhysicalCapture } from './child-source-capture.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 
@@ -22,8 +23,10 @@ function childPreparationSource(child: DelegatedExecution): LaunchSource {
 }
 
 function validateUnacceptedHandoff(source: ChildSourcePinCleanup, handoff: ChildSourceHandoff): void {
-  if (handoff.operation_id !== `child-source-handoff:${source.operation_id}` || !isDeepStrictEqual(handoff.source, source.source)
-    || handoff.root.kind !== 'fixed' || handoff.root.pin.pin_id !== source.pin_id
+  const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='derived'?handoff.root.pin:null);
+  if (handoff.operation_id !== `child-source-handoff:${source.operation_id}`
+    || handoff.source.workspace_id !== source.source.workspace_id || !isDeepStrictEqual(handoff.source.resource_owner,source.source.resource_owner)
+    || (pin && (pin.pin_id !== source.pin_id || !pin.source.branch_id))
     || source.pin_id !== `child-pin:${source.operation_id}`) {
     throw new Error('Unaccepted child source differs from its original handoff');
   }
@@ -88,6 +91,10 @@ export async function releaseManagedUnacceptedSource(runtime: AgentRuntimeClient
     parentThreadId: source.parent_thread_id, source: source.source }, signal);
   if (!handoff) return;
   validateUnacceptedHandoff(source, handoff);
+  if (!handoff.retention_pin && handoff.root.kind !== 'fixed' && handoff.root.kind !== 'derived') return;
+  // The original parent authority authenticates the receipt; sourceAgent may
+  // have selected a different fixed branch within that same resource owner.
+  source={...source,source:handoff.source};
   const {runId: _run, ...prepared} = savedSourceLaunch(source.parent_run_id, source.source, []);
   const binding = await service.bind({ coordinatorHostId: runtime.coordinatorHostId,
     scope: { kind: 'source_read', threadId: `thread:child:${source.operation_id}`,
@@ -105,6 +112,7 @@ export function createManagedChildSourceService(options: {
   storage: KernelStorageAdapter;
   capture: StableSourcePreparationOwners;
 }): ManagedSourceServiceHandler {
+  const capturePhysical = createChildPhysicalCapture(options.storage.client, options.storage, options.capture);
   const context = (scope: ManagedSourceLocalScope) => options.storage.contextFromBranchGrant({
     grant: scope.grant, owningWorkspaceId: scope.source.workspace_id,
     executionWorkspaceId: scope.source.execution_workspace_id,
@@ -147,7 +155,8 @@ export function createManagedChildSourceService(options: {
       if (!handoff) throw new Error('Original unaccepted child handoff is unavailable');
       validateUnacceptedHandoff(source, handoff);
       const store = new KernelWorkingStateRootStore(await context(scope));
-      await store.releaseBranchHandoffPin(source.source.branch_id, source.pin_id);
+      const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='derived'?handoff.root.pin:null);
+      if (pin) await store.releaseBranchHandoffPin(pin.source.branch_id!, pin.pin_id);
       return { released: true };
     }
     if (operation.kind === 'child_prepare') {
@@ -164,7 +173,7 @@ export function createManagedChildSourceService(options: {
           {root:basis.root,revision:basis.source.revision,writeRevision:basis.source.revision},signal);
         return prepareContinuationSourceStore(child, store, signal, pin);
       }
-      return prepareChildSourceStore(operation.execution, { store, capture: options.capture,
+      return prepareChildSourceStore(operation.execution, { store, capture: options.capture, capturePhysical,
         physical: async root => {
           if (!scope.physicalRoot || !isDeepStrictEqual(scope.physicalRoot, { ...root, hostId: scope.physicalRoot.hostId })) {
             throw new Error('Child physical handoff differs from its admitted target');
@@ -189,15 +198,19 @@ export function createManagedChildSourceService(options: {
       if (operation.kind === 'child_result_read') return store.readResultCandidate(branchId, publicationId, { signal });
       if (operation.kind === 'child_result_publish') {
         if (child.code_result.kind !== 'candidate') throw new Error('Child has no accepted result candidate');
-        return store.publishPreparedResult(publicationId, child.code_result.candidate, { signal });
+        const result=await store.publishPreparedResult(publicationId, child.code_result.candidate, { signal });
+        if (scope.source.mode==='materialized' && !scope.source.environment_run_id) await options.storage.client.scoped(scope.grant)
+          .settleChildEnvironment({workspaceId:scope.source.workspace_id,branchId,publicationId},signal);
+        return result;
       }
       let executionRoot=scope.physicalRoot;
       if (scope.source.mode==='fixed_branch') {
         const view=await options.storage.client.scoped(scope.grant).executionViewInspect({workspaceId:scope.source.workspace_id,branchId,revision:scope.source.revision!},signal);
-        if (view?.status!=='ready') throw new Error('The original child execution view is unavailable');
-        executionRoot={hostId:scope.physicalRoot?.hostId ?? '',rootId:view.rootId,canonicalRoot:view.canonicalRoot};
+        if (view?.status==='ready') executionRoot={hostId:scope.physicalRoot?.hostId ?? '',rootId:view.rootId,canonicalRoot:view.canonicalRoot};
+        else if (view) throw new Error('The original child execution view is unavailable');
       }
-      if (child.code_result.kind !== 'settling' || !executionRoot) throw new Error('Child result capture has no settled physical source');
+      if (child.code_result.kind !== 'settling') throw new Error('Child result capture has no settled source');
+      if (!executionRoot) return store.prepareResultCandidate({publicationId,branchId,source:{kind:'head'},signal});
       const physical = new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({
         grant: scope.grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
         rootId: executionRoot.rootId, canonicalRoot: executionRoot.canonicalRoot,
@@ -210,7 +223,8 @@ export function createManagedChildSourceService(options: {
       if (!isDeepStrictEqual(scope.source, childPreparationSource(child))) throw new Error('Child release differs from its original source');
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
-      const handoff = child.source?.kind === 'pending' || child.source?.kind === 'ready' ? child.source.handoff : null;
+      const handoff = child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
+      if (handoff?.retention_pin) await store.releaseBranchHandoffPin(handoff.retention_pin.source.branch_id!,handoff.retention_pin.pin_id);
       if (child.trigger.kind === 'dispatch' && (handoff?.root.kind === 'fixed' || handoff?.root.kind === 'derived')) {
         await store.releaseBranchHandoffPin(handoff.root.pin.source.branch_id!, handoff.root.pin.pin_id);
       }

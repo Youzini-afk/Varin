@@ -16,13 +16,13 @@ import { contentVersion, createAdmittedDirectoryReader, createCapsuleResourceRea
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { StableSourcePreparationOwners, SourceResourceCapturePlan } from '../harness/working-state/source-preparation.js';
 import type { WorkspaceWorkingStateRootAccess, WorkingStateRootStore, WorkingStatePinnedRoot, WorkingOriginalSource } from '../harness/working-state/types.js';
-import { canonicalizePathIdentity, isPathWithinRoot } from '../workspace/path-safety.js';
+import { canonicalizePathIdentity, isPathWithinRoot, normalizePathIdentity } from '../workspace/path-safety.js';
 import type { LiveSourceResolver } from './live-source.js';
 import type { AgentResourceRequest, SourceResourceCapture, SourceResourceCapsule, SourceResourceTarget } from './protocol.generated.js';
 
 export class ResourceScopeError extends Error {
   readonly code: string;
-  constructor(readonly failure: ResourceFailure) { super(failure.reason); this.name = 'ResourceScopeError'; this.code = `resource-${failure.status}`; }
+  constructor(readonly failure: ResourceFailure, options?: ErrorOptions) { super(failure.reason, options); this.name = 'ResourceScopeError'; this.code = `resource-${failure.status}`; }
 }
 
 export interface ResourceContextScope { mode: 'agent' | 'bot'; threadRole: string; projectId: string | null }
@@ -64,7 +64,7 @@ export interface ThreadResourceScopeOwners {
   };
   dataDirectory: string;
   homeDir?: string;
-  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots'>>;
+  documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots' | 'resolveWorkspace'>>;
   workingStates: WorkspaceWorkingStateRootAccess;
   validateLiveSource: LiveSourceResolver;
   projectTrusted(root: string): boolean | Promise<boolean>;
@@ -329,7 +329,8 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
   };
 
   const prepareSourceCapture = async (input: Parameters<ThreadResourceScope['prepareSourceCapture']>[0], documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents): Promise<SourceResourceCapturePlan> => {
-    const { store, directory: root, workspaceId, signal } = input;
+    const { store, workspaceId, signal } = input;
+    const root = await canonicalizePathIdentity(input.directory);
     const trusted = await owners.projectTrusted(root);
     const captures = new Map<string, ReturnType<typeof recordReader>>();
     const scopes = new Set<string>();
@@ -633,6 +634,14 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
     if (source.mode === 'live_root') {
       await owners.validateLiveSource(source, signal);
       scope.projectTrusted = await owners.projectTrusted(source.liveRoot.canonicalRoot);
+      let resourceWorkspaceId = source.workspaceId;
+      const owning = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
+      if (normalizePathIdentity(owning.canonicalPath) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+        if (!owners.documents.resolveWorkspace) throw new Error('Scoped resource registration is unavailable');
+        resourceWorkspaceId = (await owners.documents.resolveWorkspace({ path: source.liveRoot.canonicalRoot })).workspaceId;
+        const selected = await owners.documents.admitWorkspaceRegistration(resourceWorkspaceId, signal);
+        if (normalizePathIdentity(selected.canonicalPath) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) throw new Error('Scoped resource directory changed');
+      }
       const consume = async (store: WorkingStateRootStore) => {
         const root = source.liveRoot.canonicalRoot;
         const id = `workspace:${source.workspaceId}`;
@@ -650,23 +659,23 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
             // Alias/error handling remains with the original resource reader if selected.
             catch { return null; }
           }))).filter((value): value is string => value !== null);
-          const results = await owners.documents.readSnapshots(local.map(resourceId => ({ workspaceId: source.workspaceId, resourceId })), signal ? { signal } : {});
+          const results = await owners.documents.readSnapshots(local.map(resourceId => ({ workspaceId: resourceWorkspaceId, resourceId })), signal ? { signal } : {});
           const captured = new Map(local.map((relative, index) => [relative, results[index]!]));
           documents = { readSnapshot: async (resource, readOptions) => {
             readOptions?.signal?.throwIfAborted();
-            const result = resource.workspaceId === source.workspaceId ? captured.get(resource.resourceId) : undefined;
+            const result = resource.workspaceId === resourceWorkspaceId ? captured.get(resource.resourceId) : undefined;
             if (!result) return owners.documents.readSnapshot(resource, readOptions);
             if (result.status === 'rejected') throw result.reason;
             return result.value;
           } };
         }
-        const reader = createDocumentResourceReader({ domainId: id, viewId, workspaceId: source.workspaceId, documents,
+        const reader = createDocumentResourceReader({ domainId: id, viewId, workspaceId: resourceWorkspaceId, documents,
           list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
         scope.sourceIdentity = `workspace:${source.workspaceId}:live:${source.liveRoot.rootId}`;
         scope.project = { reader, cwd: '', skillAncestorBoundary: '', displayRoot: root };
         if (!options.snapshot) {
           // Capturing this candidate's external dependencies does not mutate the live source or a prior snapshot.
-          const captured = await prepareSourceCapture({ store, directory: root, workspaceId: source.workspaceId, captureWorkspaceId: source.workspaceId,
+          const captured = await prepareSourceCapture({ store, directory: root, workspaceId: source.workspaceId, captureWorkspaceId: resourceWorkspaceId,
             branchId: identity.branchId, ...(signal ? { signal } : {}) }, documents);
           scope.project.reader = withSourceLinks(reader, captured.resources);
           applyCapture(scope, scope.project.reader, captured.resources);
@@ -674,7 +683,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         return finish();
       };
       return owners.targetAuthority ? owners.targetAuthority.withLiveSourceRead(source, consume, signal)
-        : owners.workingStates.withBranchStore(source.workspaceId, 'resource-live-scope', consume, 'shared', { threadId: identity.threadId });
+        : owners.workingStates.withBranchStore(source.workspaceId, 'resource-live-scope', consume, 'shared', { threadId: identity.threadId, executionWorkspace: resourceWorkspaceId });
     }
     const registration = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
     if (source.executionWorkspaceId !== source.workspaceId) await owners.documents.admitWorkspaceRegistration(source.executionWorkspaceId, signal);
@@ -707,7 +716,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       const status = options.signal?.aborted || (error as Error)?.name === 'AbortError' ? 'cancelled'
         : ['EACCES', 'EPERM'].includes((error as NodeJS.ErrnoException)?.code ?? '') ? 'denied' : 'unavailable';
       throw new ResourceScopeError(resourceFailure({ domainId: 'agent-resources', viewId: options.snapshot?.id ?? 'admission' }, '', status,
-        status === 'cancelled' ? 'Resource admission was cancelled' : status === 'denied' ? 'Resource owner denied admission' : 'The admitted resource view is unavailable'));
+        status === 'cancelled' ? 'Resource admission was cancelled' : status === 'denied' ? 'Resource owner denied admission' : 'The admitted resource view is unavailable'), { cause: error });
     }
   };
   const prepare: ThreadResourceScope['prepare'] = async (identity, source, admitted, options = {}) => {

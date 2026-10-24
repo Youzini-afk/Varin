@@ -58,6 +58,10 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     const prior = services.get(key);
     if (prior) {
       if (!isDeepStrictEqual(prior.scope.source, scope.source) || !isDeepStrictEqual(prior.scope.scope, scope.scope)) throw new Error('Managed source authority changed');
+      if (prior.scope.physicalRoot && !isDeepStrictEqual(prior.scope.physicalRoot, scope.physicalRoot)) throw new Error('Managed source execution view changed');
+      // Native admission only promotes the original deferred environment. Keep
+      // every retained query/resource reader on that same newly available view.
+      if (!prior.scope.physicalRoot && scope.physicalRoot) prior.scope.physicalRoot = scope.physicalRoot;
       if (prior.controller.signal.aborted) throw new Error('The original source service is retiring');
       return prior;
     }

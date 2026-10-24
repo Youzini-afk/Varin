@@ -11,6 +11,40 @@ import { IntegrationCoordinator } from '../harness/working-state/integration-coo
 
 const exec = promisify(execFile);
 
+it('maps a scoped child publication into its parent subtree and undoes through the original file journal', async () => {
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'varin-integration-subtree-')));
+  const workspace = path.join(root, 'parent'), child = path.join(root, 'child'), dataDir = path.join(root, 'data');
+  await fs.mkdir(path.join(workspace, 'project'), { recursive: true }); await fs.mkdir(child);
+  const before = 'original content\n';
+  await fs.writeFile(path.join(workspace, 'project/body.txt'), before);
+  await fs.writeFile(path.join(workspace, 'body.txt'), 'unrelated sibling');
+  await fs.writeFile(path.join(child, 'body.txt'), before);
+  const documents = createDocumentAuthority({ hostId: 'integration-scope', dataDir, isAllowedRoot: async () => true, isTrusted: async () => true });
+  const parent = await documents.resolveWorkspace({ path: workspace }), execution = await documents.resolveWorkspace({ path: child });
+  const native = await createAuthorityTestRuntime({ documents, hostId: 'integration-scope', dataDir });
+  try {
+    await native.workingStates.withBranchStore(parent.workspaceId, 'scope-baseline', async store => {
+      const states = await store.captureDirectory(child, ['body.txt']);
+      try { await store.createBranch(parent.workspaceId, 'scope-child', states); }
+      finally { await store.releaseCapturedStates(states); }
+    }, 'exclusive', { executionWorkspace: execution.workspaceId });
+    await fs.writeFile(path.join(child, 'body.txt'), 'scoped child result\n');
+    const result = await native.workingStates.withBranchStore(parent.workspaceId, 'scope-result',
+      store => store.publishDirectoryResult('scope-child', child, ['body.txt']), 'exclusive', { executionWorkspace: execution.workspaceId });
+    const coordinator = new IntegrationCoordinator({ workingStates: native.workingStates });
+    const input = { workspaceId: parent.workspaceId, threadId: 'scope-child-thread', branchId: 'scope-child',
+      resultRevision: result.resultRevision, operationId: 'scope-integration', pathMapping: { from: '', to: 'project' } };
+    const preview = await coordinator.previewResult(input);
+    expect(preview.mergeReady).toBe(true);
+    const applied = await coordinator.mergeResult({ ...input, expectedBindingFingerprint: preview.bindingFingerprint });
+    expect(applied.appliedPaths).toEqual(['project/body.txt']);
+    expect(await fs.readFile(path.join(workspace, 'project/body.txt'), 'utf8')).toBe('scoped child result\n');
+    expect(await fs.readFile(path.join(workspace, 'body.txt'), 'utf8')).toBe('unrelated sibling');
+    expect((await coordinator.undoIntegration({ workspaceId: parent.workspaceId, threadId: input.threadId, operationId: applied.operationId })).status).toBe('compensated');
+    expect(await fs.readFile(path.join(workspace, 'project/body.txt'), 'utf8')).toBe(before);
+  } finally { await native.dispose(); await documents.dispose(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
 /** Real Git linked worktree and native Storage IPC; all data belongs to this
  * temporary fixture. No renderer, installed-package or provider claim. */
 it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result and undoes file-directory, deletion, binary, mode and symlink changes', async () => {

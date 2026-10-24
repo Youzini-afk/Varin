@@ -41,7 +41,7 @@ pub(crate) struct ImmutableReadTask {
     verify: bool,
     cancellation: Arc<AtomicBool>,
     retention: BlobReadRetention,
-    file_output: Option<(String, Value)>,
+    file_output: Option<(String, Value, String)>,
     #[cfg(test)]
     hold: std::sync::Mutex<Option<(BlobReadPhase, Box<dyn FnOnce() + Send>)>>,
 }
@@ -70,8 +70,8 @@ impl BlobReadTask {
     pub(crate) fn retain_worker(&self) -> Option<BlobReadRetention> {
         match self { Self::Immutable(task) => Some(task.retention.clone()), Self::File(_) => None }
     }
-    pub(crate) fn with_file_output(mut self, path: String, source: Value) -> Self {
-        if let Self::Immutable(task) = &mut self { task.file_output = Some((path, source)); }
+    pub(crate) fn with_file_output(mut self, path: String, source: Value, read_version: String) -> Self {
+        if let Self::Immutable(task) = &mut self { task.file_output = Some((path, source, read_version)); }
         self
     }
     #[cfg(test)]
@@ -158,8 +158,8 @@ impl ImmutableReadTask {
             }
             let mut value = lines.content(self.byte_length);
             value["hash"] = json!(self.hash);
-            if let Some((path, source)) = &self.file_output {
-                value = json!({"path":path,"source":source,"missing":false,"content":value});
+            if let Some((path, source, version)) = &self.file_output {
+                value = json!({"path":path,"source":source,"missing":false,"readVersion":version,"content":value});
             }
             self.checkpoint(BlobReadPhase::Encoded)?;
             return Ok(PreparedImmutableRead { value, verified: self.verify });
@@ -178,7 +178,7 @@ impl ImmutableReadTask {
         }
         self.check_cancelled()?;
         let mut value = json!({"hash":self.hash,"byteLength":self.byte_length,"offset":self.offset,"nextOffset":next,"eof":next >= self.byte_length});
-        if let Some((path, source)) = &self.file_output {
+        if let Some((path, source, version)) = &self.file_output {
             let left=(self.offset-from) as usize;let right=(next-from) as usize;
             let(mut start,mut end)=(left,right);
             if padded {
@@ -193,7 +193,7 @@ impl ImmutableReadTask {
                 _ => {value["bytesBase64"]=json!(BASE64.encode(&bytes[left..right]));value["encoding"]=json!("base64");}
             }
             value["returnedBytes"] = json!(value["nextOffset"].as_u64().unwrap() - value["offset"].as_u64().unwrap());
-            value = json!({"path":path,"source":source,"missing":false,"content":value});
+            value = json!({"path":path,"source":source,"missing":false,"readVersion":version,"content":value});
         } else {
             value["bytesBase64"] = Value::String(BASE64.encode(bytes));
         }

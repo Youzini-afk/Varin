@@ -3964,6 +3964,8 @@ export const dict = {
   "chat.script.loadFailed": "Impossible de charger les appels.",
   "chat.script.retry": "Réessayer",
   "chat.script.attention": "{count} à vérifier",
+  "chat.children.preparation.source": "Vérification de la source",
+  "chat.children.preparation.sourceWait": "En attente de la capture partagée",
   "chat.children.preparation.inventory": "Lecture de la liste des fichiers",
   "chat.children.preparation.capture": "Capture des fichiers",
   "chat.children.preparation.verify": "Vérification des fichiers",
@@ -3986,8 +3988,6 @@ export const dict = {
   "chat.children.messages": "Task messages",
   "chat.children.profiles": "Task profiles",
   "chat.children.configureProfiles": "Configure profiles",
-  "chat.children.readOnly": "Read only",
-  "chat.children.workingCopy": "Independent working copy",
   "chat.children.inheritModel": "Uses the request model",
   "chat.children.noModel": "Model unavailable",
 } as const;

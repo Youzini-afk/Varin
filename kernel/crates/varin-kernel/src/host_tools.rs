@@ -283,13 +283,13 @@ impl ToolBridge {
                         return Ok(());
                     }
                     Ok(reply) => {
-                        return Err(failed(
-                            reply
-                                .error
-                                .as_ref()
-                                .map(|error| error.code.as_str())
-                                .unwrap_or("child_retention_rejected"),
-                        ));
+                        // The Host names the exact original owner that was unavailable.
+                        let error = reply.error.as_ref();
+                        let code = error.map(|error| error.code.as_str()).unwrap_or("child_retention_rejected");
+                        return Err(match error.and_then(|error| error.message.as_deref()) {
+                            Some(message) => ExecutionError::new(code, message),
+                            None => failed(code),
+                        });
                     }
                     Err(mpsc::TryRecvError::Disconnected) => {
                         return Err(failed("host_tool_channel_closed"));

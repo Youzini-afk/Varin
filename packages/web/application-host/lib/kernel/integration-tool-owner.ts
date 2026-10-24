@@ -1,5 +1,6 @@
 /** Ordinary tool entry into the existing Integration authority. No Pi session or second journal. */
 import type { JsonValue } from '@varin/extension-contract';
+import { sourcePathMap } from './source-path-map.js';
 import type { HostCapabilityHandler } from '@varin/extension-host';
 import { isDeepStrictEqual } from 'node:util';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -22,7 +23,7 @@ export interface IntegrationTargetScope {
   release(): Promise<void>;
 }
 export interface IntegrationToolOwnerOptions {
-  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'childExecution' | 'journalAnchor'>;
+  runtime: Pick<AgentRuntimeClient, 'run' | 'launch' | 'childExecution' | 'journalAnchor' | 'childExecutionForRun'>;
   coordinator: Pick<IntegrationCoordinator, 'mergeResult' | 'inspectIntegration'>;
   onCleanupError(operationId: string, error: unknown): void;
   /** Re-admit the original physical source and bind actual file/journal ports to its fresh grant. */
@@ -85,6 +86,9 @@ export function createIntegrationToolOwner(options: IntegrationToolOwnerOptions)
           result: { workspaceId: result.workspace_id, branchId: result.branch_id, resultRevision: result.result_revision,
             root: result.root, publicationId: result.publication_id }, target: authority.source as LaunchSource };
         admitted = { operationId: `integration:${authority.operationId}`, workspaceId: result.workspace_id,
+          ...(child.receipt ? {
+            pathMapping: await sourcePathMap(options.runtime, { runId: child.receipt!.run_id, source: child.source.selection },
+              { runId: authority.runId, source: authority.source as LaunchSource }, context.signal) } : {}),
           threadId: child.child_thread_id, branchId: result.branch_id, resultRevision: result.result_revision,
           operationBinding, scopedWorkingStates: target.workingStates, signal: context.signal,
           parentAuthority: { kind: 'directory', directory: target.directory, workspaceId: target.documentWorkspaceId } };

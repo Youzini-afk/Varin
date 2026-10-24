@@ -13,7 +13,7 @@ impl Storage {
         grant: &Grant,
         host_id: &str,
     ) -> Result<Option<varin_runtime::catalog::launches::LiveRoot>, KernelError> {
-        if binding.source_mode == varin_runtime::SourceMode::FixedBranch {
+        if binding.source_mode == varin_runtime::SourceMode::FixedBranch || binding.root_id.is_none() {
             return Ok(None);
         }
         let root = self.registered_file_root(
@@ -51,11 +51,31 @@ impl Storage {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
         let source = delegation.agent_source.as_ref().map(|s|s.source.clone()).unwrap_or(binding.source_selection()?);
-        let physical = if let Some(stage)=&delegation.agent_source {
+        let mut physical = if let Some(stage)=&delegation.agent_source {
             if source.workspace_id!=binding.workspace_id || source.resource_owner!=binding.resource_owner {
                 return Err(KernelError::Authorization("stage source belongs to another resource owner".into()));
             }
             match source.mode {
+                varin_runtime::SourceMode::Materialized => {
+                    let mut selected = binding.clone();
+                    selected.source_mode = source.mode;
+                    selected.workspace_id = source.workspace_id.clone();
+                    selected.execution_workspace_id = source.execution_workspace_id.clone();
+                    selected.run_id = stage.run_id.clone();
+                    selected.environment_run_id = source.environment_run_id.clone();
+                    selected.root_id = None;
+                    selected.live_root = None;
+                    selected.file_source = None;
+                    selected.materialized_source = Some(crate::tools::FixedFileSource {
+                        branch_id: source.branch_id.clone().ok_or_else(|| KernelError::Storage("stage source branch missing".into()))?,
+                        revision: i64::try_from(source.revision.ok_or_else(|| KernelError::Storage("stage source revision missing".into()))?)
+                            .map_err(|_| KernelError::Storage("stage source revision is invalid".into()))?,
+                    });
+                    match self.deferred_source_binding(&selected, grant)? {
+                        Some(effective) => self.source_physical_root(&effective, grant, host_id)?,
+                        None => None,
+                    }
+                },
                 varin_runtime::SourceMode::FixedBranch=>{
                     let view_id=format!("run-execution:{}",stage.run_id);
                     match self.materialized_view_record(&source.workspace_id,&view_id)? {
@@ -93,10 +113,34 @@ impl Storage {
                     Some(varin_runtime::catalog::launches::LiveRoot{host_id:host_id.into(),root_id:root["rootId"].as_str().ok_or_else(||KernelError::Storage("stage root missing".into()))?.into(),canonical_root:root["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("stage directory missing".into()))?.into()})
                 }
             }
+        } else if let Some(effective)=self.deferred_source_binding(binding,grant)? {
+            self.source_physical_root(&effective,grant,host_id)?
         } else if let Some(effective)=self.execution_tool_binding(binding,grant)? {
             self.source_physical_root(&effective,grant,host_id)?
         } else { self.source_physical_root(binding, grant, host_id)? };
+        if let (Some(relative), Some(root)) = (&delegation.source_path, &physical) {
+            // Resolve at the original authority, before publishing the handoff. A
+            // symlink to a sibling or an absent directory must never widen capture.
+            let segments = Self::validate_path(relative)?;
+            let original = fs::canonicalize(&root.canonical_root)?;
+            let selected = fs::canonicalize(segments.iter().fold(original.clone(), |path, part| path.join(part)))?;
+            if !selected.starts_with(&original) || !selected.is_dir() {
+                return Err(KernelError::Operation("sourcePath must select a directory inside the admitted source".into()));
+            }
+            let registered = self.file_root_register(&json!({"workspaceId":source.workspace_id,
+                "executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":selected}), grant)?;
+            physical = Some(varin_runtime::catalog::launches::LiveRoot { host_id: host_id.into(),
+                root_id: registered["rootId"].as_str().unwrap().into(),
+                canonical_root: registered["canonicalRoot"].as_str().unwrap().into() });
+        }
         if authorize_only {
+            if physical.is_none() {
+                if let Some(relative) = &delegation.source_path {
+                    let branch = source.branch_id.as_deref().ok_or_else(|| KernelError::Operation("sourcePath requires a file source".into()))?;
+                    let root = self.resolve_base_ref(&format!("{branch}@{}", source.revision.unwrap_or(0)), &source.workspace_id)?;
+                    self.source_subtree_root(&root, relative)?;
+                }
+            }
             return Ok(Value::Null);
         }
         let operation_id = format!("child-source-handoff:{}", context.operation_id);
@@ -108,7 +152,8 @@ impl Storage {
             } else {
                 let pin_id = format!("child-pin:{}", context.operation_id);
                 let pinned = storage.branch_pin(
-                    &json!({"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id}),
+                    &json!({"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id,
+                        "subtree":if physical.is_none(){delegation.source_path.as_deref()}else{None}}),
                     true,
                     &grant.grant_id,
                 )?;
@@ -119,7 +164,17 @@ impl Storage {
             };
             Ok(
                 { let mut handoff=json!({"operation_id":operation_id,"source":source,"root":root,"resource_authority":binding.target_authority.as_ref().map(|authority|json!({"authority_id":authority.authority_id,"resource_epoch":authority.resource_epoch}))});
-                  if let Some(stage)=&delegation.agent_source {handoff["source_run_id"]=json!(stage.run_id);} handoff },
+                  if source.mode == varin_runtime::SourceMode::Materialized {
+                    let pin_id=format!("child-pin:{}",context.operation_id);
+                    let pin_root=if root["kind"]=="fixed" {root["pin"]["root"].clone()} else {
+                        storage.branch_pin(&json!({"branchId":source.branch_id,"revision":source.revision,"pinId":pin_id}),true,&grant.grant_id)?["root"].clone()
+                    };
+                    let mut retained_source=source.clone();
+                    retained_source.environment_run_id.get_or_insert_with(|| delegation.agent_source.as_ref().map(|stage|stage.run_id.clone()).unwrap_or_else(||binding.run_id.clone()));
+                    handoff["retention_pin"]=json!({"pin_id":pin_id,"root":pin_root,"source":retained_source});
+                  }
+                  if let Some(stage)=&delegation.agent_source {handoff["source_run_id"]=json!(stage.run_id);}
+                  if let Some(path)=&delegation.source_path {handoff["source_path"]=json!(path);} handoff },
             )
         })
     }
@@ -183,7 +238,10 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         let effective;
-        let binding=if binding.source_mode==varin_runtime::SourceMode::FixedBranch {
+        let binding=if binding.source_mode==varin_runtime::SourceMode::Materialized && binding.root_id.is_none() {
+            if let Some(prepared) = self.deferred_source_binding(binding,grant)? { effective=prepared; &effective }
+            else { return Ok(json!({"physical":false,"writerStopped":true})); }
+        } else if binding.source_mode==varin_runtime::SourceMode::FixedBranch {
             let params=Storage::execution_view_params(binding)?;
             let view=self.inspect_execution_view(&json!({"workspaceId":binding.workspace_id,"branchId":params["branchId"],"revision":params["revision"]}),grant)?;
             if view.is_null() {return Ok(json!({"physical":false,"writerStopped":true}));}
@@ -324,14 +382,14 @@ impl Storage {
                 let parent = match &handoff.root {
                     varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
                         | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => pin,
-                    _ => return Err(deny()),
+                    _ => handoff.retention_pin.as_ref().ok_or_else(deny)?,
                 };
                 if actual != parent.source.branch_id.as_deref().unwrap_or("")
-                    || !matches!(method, "branch.read" | "branch.unpin")
+                    || !matches!(method, "branch.read" | "branch.unpin" | "storage.getBlob")
                 {
                     return Err(deny());
                 }
-                if method == "branch.read"
+                if matches!(method, "branch.read" | "storage.getBlob")
                     && params.get("includeEntries").and_then(Value::as_bool) != Some(false)
                     && params.get("revision").and_then(Value::as_u64) != parent.source.revision
                 {
@@ -361,7 +419,7 @@ impl Storage {
                     | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => {
                     Some(pin.pin_id.as_str())
                 }
-                _ => None,
+                _ => handoff.retention_pin.as_ref().map(|pin| pin.pin_id.as_str()),
             };
             if Some(pin) != parent && pin != format!("child-source-pin:{dispatch}") {
                 return Err(deny());
@@ -819,7 +877,7 @@ mod handoff_tests {
             .child_source_handoff(
                 &binding,
                 &context,
-                &varin_runtime::catalog::dispatch::ChildSourceDelegation {
+                &varin_runtime::catalog::dispatch::ChildSourceDelegation { source_path: None,
         agent_source: None,
                     work_mode: varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
                     process: false,

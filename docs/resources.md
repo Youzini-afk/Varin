@@ -82,6 +82,7 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 文件工具入口按词法统一相对路径：Windows 反斜杠转换为资源分隔符，`.`、`./` 与省略查询路径都表示来源根，
 `src/./file.ts` 与 `src/file.ts` 使用相同资源身份。绝对路径、上级跳转和 symlink 仍进入原准入检查。
 `readVersion` 是条件写入的文件状态令牌，应原样传回；`objectHash` 是内容对象身份。缺失文件的版本记录“目标不存在”这一条件；
+隔离任务尚未物化时从固定基线读取，版本绑定原分支、修订和文件状态；首次写入物化后，只在实际文件仍与该固定状态一致时接纳原令牌。子目录来源的恢复 journal 使用映射后的实际父路径。
 目录读取返回 `not_a_file`，目录内容通过 `file_list` 获取。
 `file_write` 创建新文件时可省略 `readVersion`；替换已有文件与文本编辑使用读取所得版本。
 `mode: create` 明确要求目标不存在，`mode: replace` 要求目标存在且提供版本；省略 mode 时按观察到的状态写入。
@@ -97,6 +98,7 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 普通目录列表显示包括依赖、Git、worktree 和被忽略文件在内的入口。递归发现默认略过 `.git`、`node_modules`、`.worktrees`
 及 ignore 规则排除的内容；明确指定的路径作为搜索起点，直接进入该范围，内部的嵌套目录继续应用过滤。
 Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excludeDirectories`、`respectGitignore` 调整范围。
+过滤后零命中返回 `emptyResult`：只说明当前 `scope` 与过滤条件下没有匹配，并列出同一工具可放宽的参数；`scanComplete` 只针对这个范围。工具不会自动关闭过滤或追加全树扫描，也不报告未遍历子树里的文件数。
 文本搜索在分配整文件缓冲之前检查二进制前缀。
 
 ## 进程与 Operation 寿命
@@ -119,7 +121,8 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 `process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
 应用的响应继续读原进程输出。退出与输出收尾分别观察：`outputComplete:false` 保留游标，输出错误显示原错误，
-`outputComplete:true` 也仍可能有当前页尚未读到的后续内容。
+`outputComplete:true` 也仍可能有当前页尚未读到的后续内容。读取到 `nextCursor == endCursor` 只说明已读到当前保留的末尾。
+进程观察附带 `outputState`（`running`、`finishing`、`complete`、`output_error` 或 `unknown`），由同一次观察的退出、输出完成与输出错误事实推出；`process_spawn` 顶层状态与其嵌套观察来自同一次读取。
 Windows 启动时将规范化路径转换为子进程可用的目录表示，内部资源身份仍保留规范化路径。
 进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 

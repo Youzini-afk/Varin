@@ -1309,6 +1309,9 @@ impl Storage {
                 })?;
             (branch.head_revision, -1, root, "revision")
         };
+        let root = if let Some(path) = params.get("subtree").and_then(Value::as_str) {
+            self.source_subtree_root(&root, path)?
+        } else { root };
         let persistent = params
             .get("persistent")
             .and_then(Value::as_bool)

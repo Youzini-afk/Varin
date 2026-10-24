@@ -36,6 +36,31 @@ test("Node cells preserve lexical bindings, top-level await, closures and object
   assert.deepEqual(outputs, [{ cellId: "one", text: "created 2" }]);
 });
 
+test("a cell that starts with a block runs as statements, including top-level await and nested calls", async (t) => {
+  const { session, calls, outputs } = fixture();
+  t.after(() => session.closeAdmission());
+  await session.evaluate({ cellId: "declare", script: "let kept = 1" });
+  // The natural documented form: block-local temporaries around an awaited nested call.
+  const block = await session.evaluate({ cellId: "block", script: `{
+  const temporary = await tools.invoke({ callId: "inspect-files", name: "file_list", arguments: {} });
+  kept = temporary.name.length;
+  print(temporary.name);
+}` });
+  assert.equal(block.error, undefined);
+  // The input object belongs to the evaluator realm; compare its JSON shape.
+  assert.equal(JSON.stringify(calls), JSON.stringify([{ cellId: "block", input: { callId: "inspect-files", name: "file_list", arguments: {} } }]));
+  assert.deepEqual(outputs, [{ cellId: "block", text: "file_list" }]);
+  assert.equal((await session.evaluate({ cellId: "after", script: "kept" })).valueText, "9");
+  // Block bindings stay block-local, so the same name can be used again in a later block.
+  assert.equal((await session.evaluate({ cellId: "again", script: "  /* note */ { const temporary = await Promise.resolve(2); kept += temporary; }" })).error, undefined);
+  assert.equal((await session.evaluate({ cellId: "read", script: "typeof temporary + ':' + kept" })).valueText, "undefined:11");
+  // An explicit object expression still returns its value.
+  assert.equal((await session.evaluate({ cellId: "object", script: "({ answer: await Promise.resolve(42) })" })).valueText, "{ answer: 42 }");
+  // A syntax error in a block reports its own line, and the environment remains usable.
+  assert.match((await session.evaluate({ cellId: "bad", script: "{\n  const x = ;\n}" })).error?.message ?? "", /Unexpected token/);
+  assert.equal((await session.evaluate({ cellId: "usable", script: "kept + 1" })).valueText, "12");
+});
+
 test("contexts are isolated and syntax/runtime errors preserve subsequent usable cells", async (t) => {
   const { session } = fixture("first");
   const other = fixture("second").session;

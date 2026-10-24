@@ -229,18 +229,29 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
   assert.deepEqual(preparedChild.source.resource_owner, owner);
   const childRun = 'run:managed-private-child';
   const { runId: _run, ...selection } = savedSourceLaunch(childRun, preparedChild.source, childTools);
-  const privateBinding = await service.bind({ coordinatorHostId: HOST_A, source: { ...selection, tools: [...selection.tools] },
-    scope: { kind: 'run', threadId: child.child_thread_id, runId: childRun, epoch: 1 }, purpose: 'source', retention: 'run' });
-  const privateAddress = addressOf(privateBinding), privateRoot = privateBinding.physicalRoot;
-  assert(privateRoot); assert.notEqual(privateRoot.canonicalRoot, bRoot);
-  assert.equal(await readFile(join(privateRoot.canonicalRoot, 'source.txt'), 'utf8'), 'B_CHANGED_SOURCE\n');
+  let privateBinding = await service.bind({ coordinatorHostId: HOST_A, source: { ...selection, tools: [...selection.tools] },
+    scope: { kind: 'run', threadId: child.child_thread_id, runId: childRun, epoch: 1 }, purpose: 'source', retention: 'run', deferMaterialization: true });
+  const privateAddress = addressOf(privateBinding);
+  assert.equal(privateBinding.physicalRoot, null);
   const invocation = (name: string, args: unknown): HostToolCall => {
     const callId = randomUUID(); return { runId: childRun, operationId: toolOperationId(origin, callId), origin,
       callId, name, schemaVersion: '1', arguments: args };
   };
   const original = data(await service.execute({ ...privateAddress, call: invocation('file_read', { path: 'source.txt' }) }));
+  assert.equal((original.content as { text: string }).text, 'B_CHANGED_SOURCE\n');
+  const beforeCopy = await service.service({ ...privateAddress, requestId: randomUUID(), operation: { kind: 'read', path: 'source.txt' } });
+  assert(beforeCopy.status === 'ready'); assert.equal(beforeCopy.content, 'B_CHANGED_SOURCE\n');
+  assert.equal((await service.bind({ coordinatorHostId: HOST_A, source: { ...selection, tools: [...selection.tools] },
+    scope: { kind: 'run', threadId: child.child_thread_id, runId: childRun, epoch: 1 }, purpose: 'source', retention: 'run', deferMaterialization: true })).physicalRoot, null);
   assert.equal(data(await service.execute({ ...privateAddress, call: invocation('file_write', { path: 'source.txt',
     readVersion: original.readVersion, content: 'CHILD_PRIVATE_RESULT\n' }) })).status, 'applied');
+  privateBinding = await service.bind({ coordinatorHostId: HOST_A, source: { ...selection, tools: [...selection.tools] },
+    scope: { kind: 'run', threadId: child.child_thread_id, runId: childRun, epoch: 1 }, purpose: 'source', retention: 'run', deferMaterialization: true });
+  const privateRoot = privateBinding.physicalRoot;
+  assert(privateRoot); assert.notEqual(privateRoot.canonicalRoot, bRoot);
+  assert.equal(await readFile(join(privateRoot.canonicalRoot, 'source.txt'), 'utf8'), 'CHILD_PRIVATE_RESULT\n');
+  const afterCopy = await service.service({ ...privateAddress, requestId: randomUUID(), operation: { kind: 'read', path: 'source.txt' } });
+  assert(afterCopy.status === 'ready'); assert.equal(afterCopy.content, 'CHILD_PRIVATE_RESULT\n');
   assert.equal(await readFile(join(bRoot, 'source.txt'), 'utf8'), 'B_CHANGED_SOURCE\n');
   const childProcess = invocation('process_spawn', { cwd: '', command: process.execPath, mode: 'pipe',
     args: ['-e', 'process.stdout.write("CHILD_LINEAGE_OUTPUT")'] });
@@ -353,19 +364,19 @@ async function run(frame: Record<string, unknown>) {
     workingStates: createKernelWorkspaceWorkingStateAccess(storage), inspectInventory: capture.inspectInventory,
     sourceTools: async mode => (await b.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode })).tools.map(tool => tool.name),
   });
-  const packageQueries = frame.scenario === 'extension-package' ? createSourceQueryService({ kernel: b, documents: bDocuments,
+  const packageQueries = createSourceQueryService({ kernel: b, documents: bDocuments,
     validateLiveSource: bLive.validate, storage, resourceOwners: {
       dataDirectory: join(root, 'target-agent'), homeDir: root, documents: bDocuments,
       workingStates: createKernelWorkspaceWorkingStateAccess(storage), validateLiveSource: bLive.validate,
       projectTrusted: path => path === bRoot, configuration: async () => ({ packages: [] }),
       withSourceRead: async () => { throw new Error('Managed resources require their original target authority'); },
-    } }) : undefined;
+    } });
   const childService = createManagedChildSourceService({ storage, capture });
   const sourceOwner = createManagedSourceService({ kernel: b, hostId: HOST_B, documents: bDocuments,
     validateLiveSource: bLive.validate, prepareSource: localPreparer,
-    serviceOperation: (scope, operation, signal) => packageQueries && ['package_capture', 'package_read', 'language_release'].includes(operation.kind)
+    serviceOperation: (scope, operation, signal) => ['package_capture', 'package_read', 'language_release', 'read'].includes(operation.kind)
       ? packageQueries(scope, operation, signal) : childService(scope, operation, signal),
-    ...(packageQueries ? { releaseSource: packageQueries.release } : {}) });
+    releaseSource: packageQueries.release });
   const remote = createManagedRemoteExecutionService({ hostId: HOST_B, client: b, sourceOwner,
     resources: { getMachine: async () => ({ machineId: 'local', kind: 'local', state: 'available' }) } as never });
   const permissions = ['filesystem:read', 'filesystem:write', 'terminal:use', 'process:control'];
@@ -568,6 +579,7 @@ async function run(frame: Record<string, unknown>) {
   assert.deepEqual((release as { pendingAuthorities: unknown[] }).pendingAuthorities, []);
   permissions.push('filesystem:read', 'filesystem:write', 'terminal:use', 'process:control');
   const child = await childSources(runtime, service, owner, bRoot, other);
+  await packageQueries.dispose();
   await storage.dispose();
   await Promise.all(documents.map(value => value.dispose()));
   write({ kind: 'fixture-result', ok: true, checks: ['same-workspace-target-isolation', 'target-file-read-write-search',

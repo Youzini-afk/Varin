@@ -3716,6 +3716,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.script.loadFailed": "呼び出し履歴を読み込めませんでした。",
   "chat.script.retry": "再試行",
   "chat.script.attention": "要確認：{count} 件",
+  "chat.children.preparation.source": "作業元を確認中",
+  "chat.children.preparation.sourceWait": "共有のソース取得を待機中",
   "chat.children.preparation.inventory": "ファイル一覧を読み込み中",
   "chat.children.preparation.capture": "ファイルのスナップショットを作成中",
   "chat.children.preparation.verify": "ファイルを検証中",
@@ -3738,8 +3740,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.children.messages": "Task messages",
   "chat.children.profiles": "Task profiles",
   "chat.children.configureProfiles": "Configure profiles",
-  "chat.children.readOnly": "Read only",
-  "chat.children.workingCopy": "Independent working copy",
   "chat.children.inheritModel": "Uses the request model",
   "chat.children.noModel": "Model unavailable",
 };

@@ -210,11 +210,11 @@ tool/result 对。持久脚本、PTY、研究 Job 和 MCP Task 各有实际寿�
 
 本地物理 Source 派发只读或 Shared 子 agent 时，直接共享父 Run 的实际执行目录。各 worktree 保留各自的目录身份；
 materialized 来源保留原 environment Run，续跑沿用同一个目录，并能读取期间发生的文件变化。
-这条路径省去整目录捕获和复制。写代码子 agent 继续准备隔离副本；fixed branch 和 managed Host 保留现有来源交接。
+这条路径省去整目录捕获和复制。省略 `workMode` 的派发复用选定来源；只有显式 `isolated_write` 才建立独立工作状态。固定 branch 直接复用原树，managed Host 由目标资源 owner 执行同一准备合同。
 
 固定捕获的 saved-files/surface-drafts、Git 语义、来源闭包和文件一致性由
-[资源合同](resources.md)解释。Linux 的连续目录观察只允许复用名称清单，仍读取并哈希全部
-当前文件正文；Windows 和未知覆盖继续全量核对目录。运行时不能据此声称已完成内容增量捕获。
+[资源合同](resources.md)解释。连续目录观察只用于名称清单；正文复用另由原生文件身份、change time 与已验证对象身份决定，不能只看 mtime/大小或 Git HEAD。
+同一有效观察代的并发准备共用捕获，原生缓存只存可丢弃的元数据，不持有正文引用；GC 清除这些提示。隔离任务的读取和搜索不要求物化，首次写入或真实路径需求沿原 journal 准备执行目录。
 
 managed Host 场景仍由协调端 Catalog 拥有执行事实；目标端原 Storage、工具和 guardian
 拥有资源准入、效果和回执，不另开影子 Agent Run。同名路径或 workspace 不等于同一资源，

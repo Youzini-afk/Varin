@@ -35,18 +35,11 @@ export function agentPresetTools(capabilities: readonly { name: string; default_
   };
 }
 
-/**
- * Source placement is independent from the investigation role. Shared work uses
- * the admitted live root; an immutable source needs an owned execution view.
- */
-export type PresetWorktree = "isolated" | "none" | "shared";
-
 export interface ExecutionPreset {
   avatar?: import('./agent-runtime.generated.js').AgentAvatarId;
   id: string;
   slot?: HarnessModelRole;
   tools: string[];
-  worktree: PresetWorktree;
   /** Included in the thread's initial task input. */
   systemPromptFragment: string;
   /** One clause describing the preset, used to build the team prompt. */
@@ -62,7 +55,6 @@ export interface ExecutionPreset {
 export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, "tools"> & { id: PresetId; slot: HarnessModelRole }>> = {
   worker: {
     id: "worker", slot: "worker",
-    worktree: "isolated",
     name: "Worker",
     systemPromptFragment: "Understand how the assigned work fits the overall goal. Use your judgment to carry it through to a usable result, working through issues as they arise and coordinating with related work. Adjust your approach based on findings, and make the outcome clear enough for subsequent work to build on.",
     teamDescription: "Independently carry delegated work forward in the context of the overall goal",
@@ -70,7 +62,6 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
   verifier: {
     id: "verifier", slot: "verifier", name: "验证 Agent",
     workFocus: ["code"],
-    worktree: "isolated",
     systemPromptFragment: "Starting from the user's goal and the system as a whole, independently assess correctness, completeness, and design quality, including behavior across related modules. Choose verification methods as needed, base conclusions on evidence, and explain significant findings and their impact. Verify enough to support judgment, balancing new tests and proposed improvements against practical value, design simplicity, and maintenance cost.",
     teamDescription: "Independently assess correctness, completeness, and design quality",
   },
@@ -78,14 +69,13 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
     id: "retrieval",
     slot: "retrievalAgent",
     name: "调研 Agent",
-    worktree: "shared",
     systemPromptFragment:
       "Find, verify, and synthesize facts relevant to the assigned question. Understand the surrounding context and follow useful leads across sources and their relationships. Let the evidence guide further retrieval, filling gaps that matter to the answer and examining differences between sources that could change the conclusion.\n\nLet the question and evidence determine the depth of investigation. Deliver when the material answers the question or further retrieval offers little practical value.\n\nProvide a concise, usable synthesis with precise source locations and enough context to understand the conclusions, clearly distinguishing confirmed facts, inferences, and unresolved questions.",
     teamDescription: "Investigate questions across relevant sources and synthesize findings",
   },
   research_peer: {
     id: "research_peer", slot: "researchPeer", name: "科研搭档",
-    worktree: "shared", workFocus: ["research"],
+    workFocus: ["research"],
     systemPromptFragment: "You are a research collaborator. Take on the assigned work with your own judgment and contribute useful findings, ideas, or results to the collaboration.",
     teamDescription: "Contribute an independent perspective and pursue the assigned research work",
   },
@@ -147,7 +137,7 @@ export function observePresets(
       availability: !agent.enabled ? "disabled" : tools.source === "unconfigured" ? "runtime_unconfigured"
         : focus && agent.workFocus.length && !agent.workFocus.includes(focus) ? "scope_unavailable"
           : model ? "available" : "unconfigured",
-      definition: { id, tools: tools.names, worktree: agent.worktree,
+      definition: { id, tools: tools.names,
         ...(agent.avatar ? { avatar: agent.avatar } : {}),
         systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
         name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });

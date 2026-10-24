@@ -312,6 +312,9 @@ export class KernelScopedClient {
   executionViewInspect(params: KernelMethodParams['file.executionView.inspect'], signal?: AbortSignal) {
     return this.owner.executionViewInspect(params, this.grant, signal);
   }
+  settleChildEnvironment(params: KernelMethodParams['file.childEnvironment.settle'], signal?: AbortSignal) {
+    return this.owner.settleChildEnvironment(params, this.grant, signal);
+  }
   materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], signal?: AbortSignal): Promise<{ released: boolean }> {
     return this.owner.materializedViewRelease(params, this.grant, signal);
   }
@@ -665,8 +668,9 @@ export class KernelClient {
     signal?.throwIfAborted();
     return this.credentialBridge.register(runId, owner, signal, bindingId, lifetime);
   }
-  findModelCredentialOwner(configuration: import('./protocol.generated.js').ModelSessionConfiguration, scope: CredentialScope): ExistingHostCredentialOwner | undefined {
-    return this.credentialBridge.findOwner(modelCredentialBindingIdentity(configuration), scope);
+  /** `runId` restricts the search to that Run's own registrations and their retained graph. */
+  findModelCredentialOwner(configuration: import('./protocol.generated.js').ModelSessionConfiguration, scope: CredentialScope, runId?: string): ExistingHostCredentialOwner | undefined {
+    return this.credentialBridge.findOwner(modelCredentialBindingIdentity(configuration), scope, runId);
   }
   async retainQueuedModelCredentialOwner(runId: string, owner: ExistingHostCredentialOwner): Promise<void> {
     if (!this.handshakeResult) await this.start();
@@ -1480,6 +1484,9 @@ export class KernelClient {
   }
   async executionViewInspect(params: KernelMethodParams['file.executionView.inspect'], grant: KernelGrantHandle, signal?: AbortSignal) {
     return this.requestRaw<(KernelMaterializedView & {status:'ready';rootId:string}) | {status:'preparing';viewId:string} | null>('file.executionView.inspect',params,{signal,grant});
+  }
+  async settleChildEnvironment(params: KernelMethodParams['file.childEnvironment.settle'], grant: KernelGrantHandle, signal?: AbortSignal) {
+    return this.requestRaw<Record<string, unknown>>('file.childEnvironment.settle', params, { signal, grant });
   }
   async materializedViewRelease(params: KernelMethodParams["file.materializedView.release"], grant: KernelGrantHandle, signal?: AbortSignal): Promise<{ released: boolean }> {
     return this.requestRaw<{ released: boolean }>("file.materializedView.release", params, { signal, grant, settleCancellation: true });

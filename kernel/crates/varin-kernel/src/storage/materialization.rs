@@ -2,7 +2,7 @@
 //! The worker reads an immutable tree retained by its started journal. Storage alone
 //! admits physical leases, authorizes effects, moves directories and commits facts.
 use super::file_resources::{
-    apply_mode, copy_object_to, create_symlink, durable_directory_rename, file_mode,
+    apply_mode, copy_verified_object_to, create_symlink, durable_directory_rename, file_mode,
     materialize_side_path, materialized_expected_state, normalized_relative_path,
     parse_file_params, resolve_admitted_resource, FileState, ResolvedFileResource,
 };
@@ -431,14 +431,8 @@ impl Task {
                     mode,
                 } => {
                     let source = object_path(&self.storage_root, object_hash)?;
-                    let (actual_hash, actual_length) = digest(&source, Some(&self.cancellation))?;
-                    if actual_hash != *object_hash || actual_length != *byte_length {
-                        return Err(KernelError::Storage(format!(
-                            "materialize object is corrupt: {object_hash}"
-                        )));
-                    }
                     check(&self.cancellation)?;
-                    match copy_object_to(&source, &target, &self.cancellation)? {
+                    match copy_verified_object_to(&source, &target, &self.cancellation, object_hash, *byte_length)? {
                         "reflink" => reflink += 1,
                         _ => copy += 1,
                     }

@@ -37,7 +37,7 @@ let root: Root, container: HTMLDivElement, directory: string, owner: AgentProfil
 let hold: { action: 'read' | 'save'; runtime: AgentRuntime; release?: () => void } | undefined;
 const originalFetch = globalThis.fetch;
 const custom = { name: 'Saved helper', description: 'Existing explicit tools', instructions: 'Read carefully.', enabled: true,
-  model: { providerId: 'local', modelId: 'fixture' }, worktree: 'none', workFocus: [] };
+  model: { providerId: 'local', modelId: 'fixture' }, workFocus: [] };
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'varin-agent-settings-ui-'));
   await writeFile(join(directory, 'agent-settings.json'), JSON.stringify({ harness: {
@@ -134,7 +134,7 @@ test('creates a custom Agent through the Host API with explicit runtime tools an
   await click(container.querySelector('[aria-label="Avatar 64"]')!);
   await save();
   const input = fixture.writes.at(-1)!;
-  expect(input.id).toBeUndefined(); expect(input.config).toMatchObject({ kind: 'custom', key: '', agent: { name: 'New helper', description: 'Created here', instructions: 'Inspect the source.', enabled: true, worktree: 'none', workFocus: [] } });
+  expect(input.id).toBeUndefined(); expect(input.config).toMatchObject({ kind: 'custom', key: '', agent: { name: 'New helper', description: 'Created here', instructions: 'Inspect the source.', enabled: true, workFocus: [] } });
   expect(input.tools).toEqual(['file_read']);
   const added = Object.values((await persisted()).harness.agents).find((value: unknown) => (value as { name: string }).name === 'New helper');
   expect(added).toMatchObject({ tools: ['file_read'], avatar: 'float-butter' });

@@ -2,6 +2,19 @@
 use super::*;
 
 impl Storage {
+    /// Select a directory without copying its bodies or sibling tree nodes. The
+    /// selected directory becomes a root, so its own mode is not an empty path entry.
+    pub(super) fn source_subtree_root(&mut self, root: &str, relative: &str) -> Result<String, KernelError> {
+        let segments = Self::validate_path(relative)?;
+        let node = self.find_path_node(root, &segments)?.ok_or_else(|| KernelError::Operation("sourcePath directory does not exist".into()))?;
+        let TrieNode::Path { state, children } = self.load_node(&node)? else { unreachable!() };
+        if state.as_ref().is_some_and(|state| !matches!(state, PathState::Directory { .. })) {
+            return Err(KernelError::Operation("sourcePath must select a directory".into()));
+        }
+        let scoped = self.store_node(&TrieNode::Path { state: None, children })?;
+        self.record_root_blobs(&scoped)?;
+        Ok(scoped)
+    }
     pub(super) fn load_node(&self, hash: &str) -> Result<TrieNode, KernelError> {
         let encoded: Option<String> = self
             .conn

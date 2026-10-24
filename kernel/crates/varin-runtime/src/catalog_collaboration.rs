@@ -126,6 +126,10 @@ pub struct ChildSourceAuthority {pub authority_id:String,pub resource_epoch:Stri
 #[serde(deny_unknown_fields)]
 pub struct ChildSourceHandoff {
     #[serde(default,skip_serializing_if="Option::is_none")]
+    pub retention_pin: Option<ChildSourcePin>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
     pub refresh: Option<super::dispatch::AgentSourceSelection>,
     #[serde(default,skip_serializing_if="Option::is_none")]
     pub source_run_id: Option<String>,
@@ -137,6 +141,8 @@ pub struct ChildSourceHandoff {
 impl ChildSourceHandoff {
     pub fn fixed(operation_id: &str, pin: ChildSourcePin) -> Self {
         Self {
+            retention_pin:None,
+            source_path:None,
             refresh:None,
             source_run_id:None,
             resource_authority:None,
@@ -482,8 +488,8 @@ impl Catalog {
             "INSERT INTO branches(id,thread_id,head) VALUES(?1,?2,NULL)",
             params![child_branch_id, child_thread_id],
         )?;
-        let shared_physical=prepared.handoff.as_ref().is_some_and(|handoff|handoff.source_run_id.is_none()
-            && matches!(handoff.root,ChildSourceRoot::Physical{..}));
+        let shared_physical=prepared.handoff.as_ref().is_some_and(|handoff| handoff.source.mode == SourceMode::Materialized
+            || matches!(handoff.root,ChildSourceRoot::Physical{..} | ChildSourceRoot::Derived{..}));
         let mut child =
             ChildTask {
                 inherited_context: prepared.inherited_context,
@@ -510,12 +516,19 @@ impl Catalog {
                 launch: prepared.launch,
                 source: prepared.handoff.map_or(ChildSource::Absent, |handoff| {
                     if prepared.work_mode != super::dispatch::ChildWorkMode::IsolatedWrite
-                        && handoff.source_run_id.is_none()
-                        && matches!(handoff.root, ChildSourceRoot::Physical { .. })
+                        && (handoff.source.mode == SourceMode::Materialized
+                            || matches!(handoff.root, ChildSourceRoot::Physical { .. } | ChildSourceRoot::Derived { .. }))
                     {
                         let mut selection = handoff.source.clone();
                         if selection.mode == crate::SourceMode::Materialized {
-                            selection.environment_run_id.get_or_insert_with(|| run.id.clone());
+                            selection.environment_run_id.get_or_insert_with(|| handoff.source_run_id.clone().unwrap_or_else(|| run.id.clone()));
+                        }
+                        if (handoff.source_path.is_some() || matches!(handoff.root, ChildSourceRoot::Derived { .. }))
+                            && !matches!(handoff.root,ChildSourceRoot::Fixed{..}) {
+                            let root = match &handoff.root { ChildSourceRoot::Physical { root } | ChildSourceRoot::Derived { root, .. } => root.clone(), _ => unreachable!() };
+                            selection.mode = crate::SourceMode::LiveRoot;
+                            selection.live_root = Some(root);
+                            selection.branch_id = None; selection.revision = None; selection.environment_run_id = None;
                         }
                         ChildSource::Shared { handoff: Some(handoff), selection }
                     } else {
@@ -1394,7 +1407,6 @@ impl UnacceptedChildDependenciesRead {
             dependencies.source_pin = selected
                 .frozen
                 .source
-                .filter(|source| source.mode == SourceMode::FixedBranch)
                 .map(|source| UnacceptedChildSourcePin {
                     source,
                     pin_id: format!("child-pin:{}", dependencies.operation_id),

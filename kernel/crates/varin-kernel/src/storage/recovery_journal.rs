@@ -271,6 +271,7 @@ mod tests {
                     varin_runtime::SourceMode::LiveRoot,
                     true,
                     &mut false,
+                    None,
                 )
                 .unwrap();
             assert_eq!(receipt["status"], "applied");
@@ -288,6 +289,7 @@ mod tests {
                 varin_runtime::SourceMode::LiveRoot,
                 true,
                 &mut false,
+                    None,
             )
             .unwrap();
         assert_eq!(again["status"], "applied");

@@ -38,6 +38,7 @@ mod compute_resources;
 mod core;
 mod dispatch;
 pub(crate) mod file_inventory;
+mod file_identity;
 pub(crate) mod file_reads;
 pub(crate) mod line_reads;
 pub(crate) mod file_mutations;
@@ -212,6 +213,7 @@ pub(crate) struct Storage {
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
     verified_objects: BTreeSet<String>,
+    source_capture_cache: HashMap<(String, String), capture_resources::CaptureReuse>,
     blob_read_roots: blob_reads::BlobReadRoots,
     file_roots: HashMap<String, FileRoot>,
     observation_reads: HashMap<String, file_observations::ActiveRead>,

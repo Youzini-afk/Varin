@@ -575,7 +575,8 @@ it('continuation reacquires the retained fixed model before considering current 
     currentScope: async () => f.launch.selection.credential_scope!, runtime: { getAuth: async () => undefined }, release: released });
   f.runtime.retainedModelOwner.mockReturnValueOnce(owner);
   await f.adapter.continueLaunch(f.run.id);
-  expect(f.runtime.retainedModelOwner).toHaveBeenCalledWith(f.run.configuration, f.launch.selection.credential_scope);
+  // The Run's own registration is consulted before any same-model owner of another Run.
+  expect(f.runtime.retainedModelOwner).toHaveBeenCalledWith(f.run.configuration, f.launch.selection.credential_scope, f.run.id);
   expect(f.models.rebindModel).not.toHaveBeenCalled();
   expect(f.runtime.rebindLaunch.mock.calls[0]![1]?.credentialOwner).toBe(owner);
   expect(released).toHaveBeenCalledOnce();

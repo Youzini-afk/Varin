@@ -342,7 +342,7 @@ impl Fixture {
             db.publish_bot_gate(varin_runtime::catalog::bot::BotGate { bot_id:bot.into(), profile_revision:1, activity_operation_id:Some("sleep".into()), permitted:true }).unwrap();
             db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
         } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
-        let mut input = DispatchInput {
+        let mut input = DispatchInput { source_path: None,
             inherit_context: false,
         source_agent: None,
             name: None,
@@ -398,7 +398,7 @@ impl Fixture {
                 id:"code_retrieval".into(),name:"Quick retrieval".into(),avatar:None,
                 tools_source:varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
                 tools:vec!["file_read".into()],instructions:"Investigate using ordinary tools".into(),
-                work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,
+                retired_work_mode:None,
                 model_source:varin_runtime::catalog::dispatch::ChildModelSource::Inherit,
                 model:None,inherit_base:None,unavailable:None,
             }] } else {Vec::new()},

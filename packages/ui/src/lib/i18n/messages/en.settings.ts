@@ -95,9 +95,6 @@ export const settingsDict = {
   "settings.page.harness.section.embedding.description": "Choose an installed local component or a remote model service for memory and Bot knowledge. Disabled embeddings use text search.",
 
   'settings.harness.retrieval.selectOrdinaryModel': 'Select an ordinary model with tool support, or explicitly inherit the current conversation model. The previous decision or rerank selection will not silently switch services.',
-  'settings.agents.sourceMode': 'File environment',
-  'settings.agents.sourceShared': 'Use current source, with terminal access',
-  'settings.agents.sourceReadOnly': 'Read-only source',
 
   "settings.retry.running": "Retrying request · attempt {attempt}",
   "settings.retry.title": "Automatic retry",
@@ -536,7 +533,6 @@ export const settingsDict = {
   "settings.agents.toolsHint": "Use registered tool names. Existing permission checks still apply to every task.",
   "settings.agents.focus": "Work focus",
   "settings.agents.focusHint": "Leave both unchecked to make this agent available in either focus.",
-  "settings.agents.isolated": "Use an isolated workspace",
   "settings.agents.applies": "Changes apply to new task dispatches. Accepted tasks retain their configuration.",
   "settings.agents.back": "Back to agents",
   "settings.agents.currentFocus": "Current work focus: {focus}",

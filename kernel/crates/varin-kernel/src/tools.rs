@@ -626,6 +626,7 @@ impl ResourceOperation {
                 let source = binding
                     .file_source
                     .as_ref()
+                    .or(binding.materialized_source.as_ref())
                     .expect("fixed collaboration binding");
                 if *release {
                     (
@@ -819,6 +820,11 @@ pub(crate) fn finish_resource_execution_view(storage:&mut Storage,epoch:&str,hos
     if let Some(authority)=&request.binding.target_authority { storage.validate_source_resource(authority,&request.binding,epoch,true)?; }
     let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host,generation,"storage.health",&json!({"workspaceId":request.binding.workspace_id}))?;
     validate_binding(&grant,&request.binding,&request.context)?;
+    if request.binding.source_mode == SourceMode::Materialized && request.binding.root_id.is_none() {
+        if result["status"] != "materialized" { return Err(KernelError::Operation("Deferred source materialization did not commit".into())); }
+        storage.deferred_source_binding(&request.binding, &grant)?.ok_or_else(||KernelError::Storage("Deferred source lost its committed receipt".into()))?;
+        return Ok(());
+    }
     Storage::require_execution_view_owner(&request.binding,&grant)?;
     let params=Storage::execution_view_params(&request.binding)?;
     storage.finish_materialized_view(&params,&grant,result)?;
@@ -1693,7 +1699,8 @@ impl KernelToolExecutor {
         }
         if binding.source_mode != SourceMode::FixedBranch
             && (binding.file_source.is_some()
-                || binding.root_id.as_deref().is_none_or(str::is_empty))
+                || (binding.root_id.as_deref().is_none_or(str::is_empty)
+                    && !(binding.source_mode == SourceMode::Materialized && binding.materialized_source.is_some())))
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
@@ -1724,7 +1731,7 @@ impl KernelToolExecutor {
             ));
         }
         if binding.enabled_tools.contains(&ToolKind::ProcessSpawn)
-            && binding.source_mode != SourceMode::FixedBranch
+            && binding.source_mode == SourceMode::LiveRoot
             && binding.root_id.as_deref().is_none_or(str::is_empty)
         {
             return Err(ExecutionError::new(
@@ -2381,7 +2388,7 @@ impl KernelToolExecutor {
                     "retrieval contract changed",
                 ));
             }
-            return self.admit_retrieval(context, args, cancel).map(|_| ());
+            return self.authorize_retrieval(context, call, args, cancel);
         }
         if &self.planned_contract(context, call, &operation, cancel)? != contract {
             return Err(ExecutionError::new(
@@ -2476,6 +2483,8 @@ impl KernelToolExecutor {
                                 if let Some(current) = output["process"].as_object() {
                                     result.as_object_mut().expect("process record").extend(current.clone());
                                 }
+                                // Top-level status and this explanation come from the same observation.
+                                if let Some(state) = output.get("outputState") { result["outputState"] = state.clone(); }
                                 result["observation"] = output;
                             },
                             Err(error) => { result["observationError"] = json!({"code":error.code,"message":error.message}); },
@@ -2825,6 +2834,37 @@ pub(crate) fn prepare_resource(
             dispatched: false,
         });
     }
+    let scoped_handoff = matches!(&request.operation, ResourceOperation::ChildSourceHandoff { delegation }
+        if delegation.work_mode != varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite && delegation.source_path.is_some());
+    let deferred;
+    let request = if request.binding.source_mode == SourceMode::Materialized && request.binding.root_id.is_none()
+        && (scoped_handoff || matches!(request.operation, ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)
+            | ResourceOperation::FileMutation(_) | ResourceOperation::ReconcileMutation { .. }
+            | ResourceOperation::RetrievalQuery(_) | ResourceOperation::LanguageSource(_) | ResourceOperation::ReconcileFileRestore(_)
+            | ResourceOperation::FileRestore(_) | ResourceOperation::RecoveryPoints(_)
+            | ResourceOperation::ProcessSpawn(_) | ResourceOperation::ProcessInspect(_) | ResourceOperation::ProcessRead(_) | ResourceOperation::ProcessObservation { .. })) {
+        let (grant, _) = storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,"storage.health",
+            &json!({"workspaceId":request.binding.workspace_id})).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        validate_binding(&grant,&request.binding,&request.context).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        let mut binding = storage.deferred_source_binding(&request.binding,&grant).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        if binding.is_none() && (scoped_handoff || matches!(request.operation, ResourceOperation::FileMutation(_) | ResourceOperation::ReconcileMutation { .. } | ResourceOperation::LanguageSource(_)
+            | ResourceOperation::FileRestore(_) | ResourceOperation::RecoveryPoints(_) | ResourceOperation::ProcessSpawn(_))) {
+            match storage.prepare_deferred_source(&request.binding,&grant,request.cancellation.shared_flag()).map_err(|error|ResourceFailure{error,dispatched:false})? {
+                crate::storage::materialization::Admission::Work(task) => return Ok(ResourceWork::ExecutionView(task)),
+                crate::storage::materialization::Admission::Complete(_) => {},
+            }
+            binding = storage.deferred_source_binding(&request.binding,&grant).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        }
+        let binding = binding.unwrap_or_else(|| {
+            let mut fixed = request.binding.clone();
+            if matches!(request.operation, ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_)) {
+                fixed.source_mode = SourceMode::FixedBranch;
+                fixed.file_source = fixed.materialized_source.take();
+            }
+            fixed
+        });
+        deferred = request.with_execution_binding(binding); &deferred
+    } else { request };
     let effective;
     let request = if request.binding.source_mode == SourceMode::FixedBranch && matches!(request.operation,
         ResourceOperation::FileRead(_) | ResourceOperation::FileQuery(_) | ResourceOperation::ProcessSpawn(_)
@@ -2907,7 +2947,8 @@ pub(crate) fn prepare_resource(
             .ok_or_else(|| KernelError::Storage("branch read omitted entries".into()))?;
         let Some(state) = entries.first().and_then(|entry| entry.get("state")) else {
             return Ok(ResourceWork::Ready(
-                json!({"path":args.path,"source":source,"missing":true}),
+                json!({"path":args.path,"source":source,"missing":true,"readVersion":crate::storage::file_mutations::read_version(
+                    &crate::storage::file_mutations::fixed_read_namespace(&request.binding.workspace_id,source),&args.path,&varin_runtime::catalog::followups::FileState::Missing)?}),
             ));
         };
         if state.get("kind").and_then(Value::as_str) != Some("regular-file") {
@@ -2939,6 +2980,8 @@ pub(crate) fn prepare_resource(
         Ok(ResourceWork::BlobRead(task.with_file_output(
             args.path.clone(),
             serde_json::to_value(source)?,
+            crate::storage::file_mutations::read_version(&crate::storage::file_mutations::fixed_read_namespace(&request.binding.workspace_id,source),
+                &args.path,&serde_json::from_value(state.clone())?)?,
         )))
     })();
     result.map_err(|error| ResourceFailure { error, dispatched })
@@ -2962,7 +3005,8 @@ pub(crate) fn finish_resource_blob_read(
             task.params(),
         )?;
         validate_binding(&grant, &request.binding, &request.context)?;
-        let effective = storage.execution_tool_binding(&request.binding, &grant)?;
+        let effective = storage.deferred_source_binding(&request.binding, &grant)?
+            .or(storage.execution_tool_binding(&request.binding, &grant)?);
         let binding = effective.as_ref().unwrap_or(&request.binding);
         if task.method() == "file.read" {
             if let Some(root) = &binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
@@ -3201,6 +3245,7 @@ fn serve_resource_immediate(
                 request.binding.source_mode,
                 !request.authorize_only,
                 &mut dispatched,
+                request.binding.materialized_source.as_ref(),
             );
             storage.clear_cancellation();
             return result;

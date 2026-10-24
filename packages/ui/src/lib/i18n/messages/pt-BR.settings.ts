@@ -1,9 +1,6 @@
 export const settingsDict = {
 
   'settings.harness.retrieval.selectOrdinaryModel': 'Select an ordinary model with tool support, or explicitly inherit the current conversation model. The previous decision or rerank selection will not silently switch services.',
-  'settings.agents.sourceMode': 'File environment',
-  'settings.agents.sourceShared': 'Use current source, with terminal access',
-  'settings.agents.sourceReadOnly': 'Read-only source',
 
   "settings.models.discoveryHint": "Salve as alterações de conexão antes de descobrir modelos. Os resultados só são adicionados ao selecionar e salvar.",
   "settings.varin.mcp.structured.transport.unconfigured": "Escolha um transporte",
@@ -230,7 +227,6 @@ export const settingsDict = {
   "settings.agents.toolsHint": "Use registered tool names. Existing permission checks still apply to every task.",
   "settings.agents.focus": "Work focus",
   "settings.agents.focusHint": "Leave both unchecked to make this agent available in either focus.",
-  "settings.agents.isolated": "Use an isolated workspace",
   "settings.agents.applies": "Changes apply to new task dispatches. Accepted tasks retain their configuration.",
   "settings.agents.back": "Back to agents",
   "settings.agents.currentFocus": "Current work focus: {focus}",

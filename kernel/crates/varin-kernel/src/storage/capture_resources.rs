@@ -8,11 +8,19 @@ use super::file_resources::{
 use super::*;
 use crate::model::CanonicalFileLeaseResource;
 use crate::protocol_generated::{KernelFileCaptureBatchParams, KernelFileCaptureParams};
+use super::file_identity::capture_identity;
+
+#[derive(Clone)]
+pub(super) struct CaptureReuse { identity: String, object_identity: Option<String>, state: FileState }
 
 enum CaptureRequest {
     Single(KernelFileCaptureParams),
     Batch(KernelFileCaptureBatchParams),
     Observation { path: String },
+}
+fn paths_from_request(request: &CaptureRequest) -> &[String] {
+    match request { CaptureRequest::Single(params) => std::slice::from_ref(&params.path),
+        CaptureRequest::Batch(params) => &params.paths, CaptureRequest::Observation { path } => std::slice::from_ref(path) }
 }
 pub(crate) struct CaptureTask {
     request: CaptureRequest,
@@ -23,6 +31,7 @@ pub(crate) struct CaptureTask {
     cancellation: Arc<AtomicBool>,
     retained_objects: BTreeMap<String, blob_reads::BlobReadRetention>,
     expected: Option<BTreeMap<String, FileState>>,
+    reusable: BTreeMap<String, CaptureReuse>,
     hooks: CaptureHooks,
 }
 pub(crate) struct HashedCapture {
@@ -32,6 +41,8 @@ struct HashedEntry {
     path: String,
     absolute: PathBuf,
     state: FileState,
+    identity: Option<String>,
+    reused: bool,
 }
 pub(crate) struct CapturedBatch {
     entries: Vec<CapturedEntry>,
@@ -45,6 +56,7 @@ struct CapturedEntry {
     path: String,
     state: FileState,
     object: Option<CapturedObject>,
+    identity: Option<String>,
 }
 enum CapturedObject {
     Staged(StagedFile),
@@ -167,6 +179,17 @@ fn digest_reader(
     Ok((format!("sha256-{}", hex::encode(digest.finalize())), length))
 }
 impl CaptureTask {
+    fn read_source(&self, path: &str) -> Result<HashedEntry, KernelError> {
+        let resource = self.resolve(path)?;
+        if let Some(prior) = self.reusable.get(path) {
+            if capture_identity(&resource.absolute).as_deref() == Some(&prior.identity) {
+                check(&self.cancellation)?;
+                return Ok(HashedEntry { path: path.into(), absolute: resource.absolute,
+                    state: prior.state.clone(), identity: Some(prior.identity.clone()), reused: true });
+            }
+        }
+        read_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
+    }
     pub(crate) fn lease_id(&self) -> &str {
         &self.lease.lease_id
     }
@@ -222,7 +245,7 @@ impl CaptureTask {
             .paths()
             .iter()
             .map(|path| {
-                read_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
+                self.read_source(path)
                     .map_err(|error| self.capture_error(error))
             })
             .collect::<Result<_, _>>()?;
@@ -240,7 +263,7 @@ impl CaptureTask {
         let mut entries = Vec::with_capacity(self.paths().len());
         for path in self.paths() {
             let entry = if let Some(expected) = &self.expected {
-                let observed = read_entry(|| self.resolve(path), &self.cancellation, &self.hooks)?;
+                let observed = self.read_source(path)?;
                 if expected.get(path) != Some(&observed.state) {
                     return Err(KernelError::SnapshotChanged(format!(
                         "captured content or metadata changed: {path}"
@@ -250,6 +273,7 @@ impl CaptureTask {
                     path: observed.path,
                     state: observed.state,
                     object: None,
+                    identity: observed.identity,
                 }
             } else {
                 capture_entry(|| self.resolve(path), &self.cancellation, &self.hooks)
@@ -264,7 +288,7 @@ impl CaptureTask {
         hashed: HashedCapture,
     ) -> Result<CapturedBatch, KernelError> {
         let mut entries = Vec::with_capacity(hashed.entries.len());
-        for entry in hashed.entries {
+        for mut entry in hashed.entries {
             let captured = (|| {
                 let object = if let FileState::RegularFile {
                     object_hash,
@@ -285,6 +309,7 @@ impl CaptureTask {
                                     "content object is corrupt: {object_hash}"
                                 )));
                             }
+                            if !entry.reused {
                             let mut file = open_regular(&path)?;
                             let (hash, length) = digest_reader(
                                 &mut file,
@@ -298,9 +323,11 @@ impl CaptureTask {
                                     "content object is corrupt: {object_hash}"
                                 )));
                             }
+                            }
                             Some(CapturedObject::Retained)
                         }
                         Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                            entry.reused = false;
                             let directory = self.storage_root.join("staging");
                             fs::create_dir_all(&directory)?;
                             Some(CapturedObject::Staged(StagedFile(
@@ -405,6 +432,7 @@ fn read_entry(
 ) -> Result<HashedEntry, KernelError> {
     check(cancel)?;
     let resource = resolve()?;
+    let identity = capture_identity(&resource.absolute);
     let metadata = match fs::symlink_metadata(&resource.absolute) {
         Ok(value) => Some(value),
         // Descendants of a non-directory are absent observations. This does not
@@ -447,10 +475,15 @@ fn read_entry(
             resource.path
         )));
     }
+    if identity.is_some() && identity != capture_identity(&resource.absolute) {
+        return Err(KernelError::SnapshotChanged(format!("file identity changed while being captured: {}", resource.path)));
+    }
     Ok(HashedEntry {
         path: resource.path,
         absolute: resource.absolute,
         state,
+        identity,
+        reused: false,
     })
 }
 fn verify_entry(
@@ -481,6 +514,11 @@ fn verify_entry(
                 entry.path
             )));
         }
+        if entry.reused {
+            if entry.identity.is_none() || capture_identity(&after_resource.absolute) != entry.identity {
+                return Err(KernelError::SnapshotChanged(format!("reused file changed during capture: {}", entry.path)));
+            }
+        } else {
         let mut source = open_regular(&after_resource.absolute)?;
         let mut target = if let Some(CapturedObject::Staged(staged)) = &object {
             let file = OpenOptions::new()
@@ -510,6 +548,7 @@ fn verify_entry(
             drop(file);
             hooks.checkpoint(CapturePhase::Staged);
         }
+        }
     }
     check(cancel)?;
     // Metadata-only states still describe the admitted physical path.
@@ -519,10 +558,14 @@ fn verify_entry(
             entry.path
         )));
     }
+    if entry.identity.is_some() && capture_identity(&entry.absolute) != entry.identity {
+        return Err(KernelError::SnapshotChanged(format!("file identity changed during verification: {}", entry.path)));
+    }
     Ok(CapturedEntry {
         path: entry.path,
         state: entry.state,
         object,
+        identity: entry.identity,
     })
 }
 /// Original mutation/recovery observations share exactly the same source passes.
@@ -631,6 +674,16 @@ impl Storage {
             },
         );
         Ok(CaptureTask {
+            reusable: paths_from_request(&request).iter().filter_map(|path| {
+                let prior = self.source_capture_cache.get(&(root.root_id.clone(), path.clone()))?;
+                // Reuse carries no blob reference. GC may already have reclaimed
+                // its bytes; only a still-installed, previously verified object is usable.
+                if let FileState::RegularFile { object_hash, .. } = &prior.state {
+                    if !self.verified_objects.contains(object_hash) || prior.object_identity.is_none()
+                        || capture_identity(&object_path(&self.root, object_hash).ok()?) != prior.object_identity { return None; }
+                }
+                Some((path.clone(), prior.clone()))
+            }).collect(),
             request,
             root,
             grant: grant.clone(),
@@ -789,6 +842,15 @@ impl Storage {
         for (_, hash, _, _) in rows {
             self.verified_objects.insert(hash);
         }
+        for entry in &batch.entries {
+            let key = (task.root.root_id.clone(), entry.path.clone());
+            if let Some(identity) = &entry.identity {
+                let object_identity = if let FileState::RegularFile { object_hash, .. } = &entry.state {
+                    object_path(&self.root, object_hash).ok().and_then(|path| capture_identity(&path))
+                } else { None };
+                self.source_capture_cache.insert(key, CaptureReuse { identity: identity.clone(), object_identity, state: entry.state.clone() });
+            } else { self.source_capture_cache.remove(&key); }
+        }
         Ok(response)
     }
 }
@@ -811,6 +873,7 @@ impl CaptureTask {
             cancellation,
             retained_objects: BTreeMap::new(),
             expected: None,
+            reusable: BTreeMap::new(),
             hooks: CaptureHooks::default(),
         }
     }

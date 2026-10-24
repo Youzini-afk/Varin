@@ -38,6 +38,10 @@
 自动进入等待。主 Agent 可以继续其他工作，后台调查继续使用原执行与资源 owner。
 父工具不会在整个调查期间持有阻挡内部进程的宽范围文件租约。
 
+选择、预设模型与来源交接检查在 `code_retrieval` 派发前执行，与 `dispatch` 相同；拒绝时调用未派发。派发后受理前失败（例如 Host 保留子模型或扩展绑定）返回 `retrieval_preparation_failed`，`details.stage` 指出步骤，`details.cause` 保留原 code 与 message；Catalog 没有子任务且本次准备引用已释放时，以原执行者的无副作用回执结算为 failed/none，pin 释放未确认时保留清理说明。已受理的任务失败沿原句柄查询和交付。
+
+父 Run 在 Wait 后重新绑定模型时，先使用本 Run 自己的凭据注册，并按冻结的子任务目录重新保留各预设的确切模型配置与账号范围；某个模型无法重新绑定时，只让对应派发失败。
+
 `retrieval_control` 接受同一会话分支的 `operationId` 与一个动作：
 
 | 动作 | 行为 |

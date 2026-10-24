@@ -104,7 +104,7 @@ async function openHarness(options: { callback?: 'mask' | 'early' | 'tamper'; re
       return domainReceipt(request.operationId!);
     });
     const inspectIntegration = vi.fn(async (_request: IntegrationPlanInput): Promise<IntegrationOperationReceipt | null> => null);
-    const runtimePort = { journalAnchor: vi.fn(async () => journalAnchor), run: vi.fn(async () => run), launch: vi.fn(async () => launch), childExecution: vi.fn(async (id: string) => {
+    const runtimePort = { childExecutionForRun: vi.fn(async () => null), journalAnchor: vi.fn(async () => journalAnchor), run: vi.fn(async () => run), launch: vi.fn(async () => launch), childExecution: vi.fn(async (id: string) => {
       if (id !== child.execution_id) throw new Error('Child does not exist');
       return child;
     }) };

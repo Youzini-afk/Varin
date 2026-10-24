@@ -307,10 +307,10 @@ pub(crate) fn discovery(
             else if !selected.unavailable_source_tools(&tools).is_empty() { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "source_required".into(), capabilities: selected.unavailable_source_tools(&tools) }) }
             else if preset.inherit_base.as_ref().is_some_and(|base| base != &selected.frozen.parent_model) { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "inheritance_basis_changed".into(), capabilities: Vec::new() }) } else { None }
         });
-        json!({"id":preset.id,"name":preset.name,"description":preset.description,"work_mode":preset.work_mode,"tools":tools,"tools_source":preset.tools_source,"unavailable":failure})
+        json!({"id":preset.id,"name":preset.name,"description":preset.description,"tools":tools,"tools_source":preset.tools_source,"unavailable":failure})
     }).collect::<Vec<_>>();
     json!({"kind":"child_dispatch_configuration","catalog_identity":selected.catalog.identity,"normal":{"allowed_delegation":normal,"unavailable":selected.catalog.normal_unavailable,"default_unavailable":normal_failure,"selection":"Without tools, the full delegation is selected. Explicit tools may narrow it; unsupported selected tools are rejected."},"presets":presets,
-        "work_modes":{"read_only":"fixes an existing file source; ordinary external effects retain their own permissions","isolated_write":"isolates an existing file source; without files, creates no working copy or file result"},
+        "work_modes":{"shared":"default: works in the selected source's actual files; permitted changes apply there immediately","isolated_write":"works on an independent copy of the selected source; changes return through the code exchange","read_only":"reads the selected source without file-changing tools"},
         "source_notice":"Source-dependent tools require an actual selected file source. Select a source or narrow tools to source-independent capabilities. A process cwd is not an OS sandbox. Model final reports and process lifetime are independent."})
 }
 
