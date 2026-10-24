@@ -26,6 +26,13 @@ import type {
 
 const SESSION = 'motion-lab';
 const PARAGRAPH = '对话优先的阅读节奏：新的内容在原位生长，视线不被推走。跟随是一根临界阻尼的弹簧，目标只增不减；用户一旦向上滚动，跟随立即让出所有权。';
+/** Formatted Markdown: emphasis, inline code, a link, a list and a code fence. */
+const RICH = [
+  '修复放在 **`thread-adapter.ts`** 的 `retainFrozenChildModels`：重新绑定时保留子 Run 冻结的模型集合，详见 [设计文档](https://example.com/design)。',
+  '- 第一步：读取冻结的模型集合\n- 第二步：按 *原始所有者* 重新绑定\n- 第三步：写回检索上下文',
+  '```ts\nexport function retainFrozenChildModels(run: Run): ModelSet {\n  const frozen = run.child?.models ?? [];\n  return new ModelSet(frozen.filter((model) => model.owner === run.id));\n}\n```',
+  PARAGRAPH,
+].join('\n\n');
 
 let sequence = 0;
 let previousId: string | null = null;
@@ -54,6 +61,13 @@ const history = (turns: number): ChatSessionEntry[] => {
 
 interface FrameSample {
   t: number;
+  /** Rendered text length of the last Markdown block in the timeline. */
+  shown: number;
+  /** Ink spans developing in it, and the end dot's state. */
+  ink: number;
+  caret: string | null;
+  caretLast: boolean;
+  caretWhere: string | null;
   scrollTop: number;
   /** Top of the tracked message relative to the viewport top. */
   turnTop: number | null;
@@ -106,7 +120,22 @@ function Lab() {
       const end = document.querySelector<HTMLElement>('[data-conversation-timeline-end-space]');
       if (node && end && recording) {
         const turn = trackedTurn ? document.querySelector<HTMLElement>(`[data-conversation-entry-id="${CSS.escape(trackedTurn)}"]`) : null;
+        const markdown = [...node.querySelectorAll<HTMLElement>('[data-markdown-content]')].at(-1);
+        const caret = markdown?.querySelector<HTMLElement>('.markdown-caret');
         recording.push({
+          shown: markdown?.textContent?.length ?? 0,
+          ink: markdown?.querySelectorAll('.markdown-ink').length ?? 0,
+          caret: caret?.dataset.state ?? null,
+          caretLast: Boolean(caret && markdown && (() => {
+            // Nothing but whitespace or controls may follow the dot.
+            const range = document.createRange();
+            range.setStartAfter(caret);
+            range.setEnd(markdown, markdown.childNodes.length);
+            const after = range.cloneContents();
+            after.querySelectorAll('button, svg, [aria-hidden="true"]').forEach(node => node.remove());
+            return !after.textContent?.trim();
+          })()),
+          caretWhere: caret ? `${caret.parentElement?.tagName}.${caret.parentElement?.className}|next=${caret.nextSibling?.nodeName}:${(caret.nextSibling?.textContent ?? '').slice(0, 12)}|prev=${(caret.previousSibling?.textContent ?? '').slice(-8)}` : null,
           t: performance.now(),
           scrollTop: node.scrollTop,
           turnTop: turn ? turn.getBoundingClientRect().top - node.getBoundingClientRect().top : null,
@@ -132,8 +161,9 @@ function Lab() {
         return node ? { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight } : null;
       },
       /** Submit a user turn and anchor it, as ThreadConversation does once the Host accepts it. */
-      send(text = '新的问题：请继续展开。') {
+      send(text = '新的问题：请继续展开。', { track = false } = {}) {
         const user = messageEntry({ role: 'user', content: text, timestamp: sequence }, `run-send-${sequence}`);
+        if (track) { recording = []; trackedTurn = user.id; }
         setState(current => ({ ...current, entries: [...current.entries, user] }));
         useTimelineViewStore.getState().anchor(SESSION, user.id);
         return user.id;
@@ -148,15 +178,22 @@ function Lab() {
        * Stream an assistant reply: `cps` characters per second delivered in
        * network-sized chunks every `interval` ms, with an occasional burst.
        */
-      stream({ chars = 1600, cps = 120, interval = 48, burstEvery = 0, burst = 360 } = {}) {
+      stream({ chars = 1600, cps = 120, interval = 48, burstEvery = 0, burst = 360, rich = false, pauseAt = -1, pauseMs = 0 } = {}) {
         if (timer) clearInterval(timer);
         const runId = `run-live-${Date.now()}`;
         const messageId = `a-live-${runId}`;
-        const text = Array.from({ length: Math.ceil(chars / PARAGRAPH.length) + 1 }, () => PARAGRAPH).join('\n\n').slice(0, chars);
+        const source = rich ? RICH : PARAGRAPH;
+        const text = Array.from({ length: Math.ceil(chars / source.length) + 1 }, () => source).join('\n\n').slice(0, chars);
         let written = 0;
         let ticks = 0;
+        let pausedUntil = 0;
         return new Promise<void>((resolve) => {
           timer = setInterval(() => {
+            if (performance.now() < pausedUntil) return;
+            if (pauseAt >= 0 && written >= pauseAt && pausedUntil === 0) {
+              pausedUntil = performance.now() + pauseMs;
+              return;
+            }
             ticks += 1;
             const extra = burstEvery && ticks % burstEvery === 0 ? burst : 0;
             written = Math.min(text.length, written + Math.max(1, Math.round(cps * interval / 1000)) + extra);

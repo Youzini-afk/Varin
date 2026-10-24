@@ -1,5 +1,6 @@
 import React from 'react';
 import { usePacedText } from './usePacedText';
+import { MarkdownInk } from './markdownInk';
 import { usePdfMaterialLinkInteractions } from '@/components/materials/usePdfMaterialLinkInteractions';
 import morphdom from 'morphdom';
 import { renderMermaidASCII, renderMermaidSVG } from 'beautiful-mermaid';
@@ -781,6 +782,7 @@ const useMorphdomMarkdown = ({
   syntaxVars,
   ctx,
   onContentChange,
+  ink,
 }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   text: string;
@@ -789,6 +791,8 @@ const useMorphdomMarkdown = ({
   syntaxVars: Record<string, string>;
   ctx: DecorateContext;
   onContentChange?: (reason?: ContentChangeReason) => void;
+  /** Ink front for streamed text; rewrapped after each morph. */
+  ink?: MarkdownInk;
 }) => {
   const onContentChangeRef = React.useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
@@ -853,6 +857,10 @@ const useMorphdomMarkdown = ({
       if (!active) return;
       const existing = Array.from(target.children) as HTMLElement[];
       let changed = false;
+      const inking = Boolean(ink && (streaming || ink.engaged));
+      if (inking && (existing.length !== blocks.length || blocks.some((block, index) => existing[index]?.getAttribute('data-md-id') !== block.id))) {
+        ink!.prepare();
+      }
 
       // Reconcile per block: only re-morph blocks whose content changed, leaving
       // stable leading blocks untouched. Keeps per-stream-step DOM work bounded
@@ -901,6 +909,7 @@ const useMorphdomMarkdown = ({
         refreshMermaidViewers();
       }
 
+      if (changed && inking) ink!.update(target, streaming);
       if (changed) {
         onContentChangeRef.current?.('structural');
       }
@@ -909,7 +918,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers]);
+  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers, ink]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -964,8 +973,13 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   const currentTheme = useCurrentMermaidTheme();
   const containerRef = React.useRef<HTMLDivElement>(null);
   const effectiveDirectory = useEffectiveDirectory() ?? '';
-  const live = isStreaming && !disableStreamAnimation;
-  const pacedText = usePacedText(content, live);
+  const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
+  const paced = usePacedText(content, isStreaming && !disableStreamAnimation, cacheKey);
+  // Still "live" while the backlog drains after the stream: the open block
+  // keeps its streaming render until the last character is shown.
+  const live = paced.revealing;
+  const [ink] = React.useState(() => new MarkdownInk());
+  React.useEffect(() => () => ink.dispose(), [ink]);
 
   useMermaidInlineInteractions({
     containerRef,
@@ -983,16 +997,16 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
 
   const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
   const ctx = useDecorateContext(currentTheme, live, DEFAULT_MERMAID_CONTROLS);
-  const cacheKey = `markdown-${part?.id ? `part-${part.id}` : `message-${messageId}`}`;
 
   useMorphdomMarkdown({
     containerRef,
-    text: pacedText,
+    text: paced.text,
     streaming: live,
     cacheKey,
     syntaxVars,
     ctx,
     onContentChange,
+    ink,
   });
 
   const markdownContent = (

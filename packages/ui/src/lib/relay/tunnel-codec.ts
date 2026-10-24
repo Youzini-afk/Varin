@@ -252,10 +252,11 @@ const BUFFERED_FRAME_TYPES = new Set<number>([
   TunnelFrameType.WsBinary,
 ]);
 
-// 150ms: the chat render pipeline already gates visible streaming updates well below this — a
-// 100ms input throttle (useStreamingTextThrottle) feeding a ~64ms paced-reveal (usePacedText) that
-// buffers-and-smooths arrival bursts, and the app already tolerates 200ms under backpressure. So a
-// 150ms batch window is invisible to users while cutting DO messages ~33% more than 100ms.
+// 150ms: the chat render pipeline already decouples visible streaming from arrival — a 100ms
+// input throttle (useStreamingTextThrottle) feeding a frame-paced reveal (usePacedText) that
+// catches up with bursts on a 0.24s time constant, and the app already tolerates 200ms under
+// backpressure. So a 150ms batch window is invisible to users while cutting DO messages ~33% more
+// than 100ms.
 // Leading-edge flush keeps time-to-first-token and terminal echo instant regardless of this value.
 export const DEFAULT_BATCH_WINDOW_MS = 150;
 export const DEFAULT_BATCH_MAX_BYTES = 24 * 1024;

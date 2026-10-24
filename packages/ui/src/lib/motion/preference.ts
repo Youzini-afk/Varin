@@ -19,6 +19,15 @@ export const isMotionPreference = (value: unknown): value is MotionPreference =>
 export const resolveMotionLevel = (preference: MotionPreference, systemReduced: boolean): MotionLevel =>
   preference === 'full' && systemReduced ? 'reduced' : preference;
 
+/**
+ * The level the document currently renders with, as written by `MotionProvider`.
+ * For DOM-level code outside React; `full` when no provider has written it.
+ */
+export function documentMotionLevel(root: HTMLElement | undefined = typeof document === 'undefined' ? undefined : document.documentElement): MotionLevel {
+  const level = root?.dataset.motion;
+  return isMotionPreference(level) ? level : 'full';
+}
+
 /** The attribute CSS reads: `:root[data-motion="reduced"]` and `:root[data-motion="off"]`. */
 export function applyMotionLevel(level: MotionLevel, root: HTMLElement | undefined = typeof document === 'undefined' ? undefined : document.documentElement): void {
   if (!root) return;

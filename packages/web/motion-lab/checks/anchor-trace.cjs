@@ -5,7 +5,8 @@ const { openLab } = require('./lab.cjs');
 (async () => {
   const { browser, page, errors } = await openLab();
   if (process.env.LAB_MOTION) await page.evaluate((level) => window.__lab.setMotion(level), process.env.LAB_MOTION);
-  await page.evaluate(() => window.__lab.record(`turn:lab-${17}`));
+  // LAB_PRESTREAM: send right as a previous reply finishes, as people do.
+  if (process.env.LAB_PRESTREAM) await page.evaluate(() => window.__lab.stream({ chars: 600, cps: 160, interval: 48 }));
   const turnId = await page.evaluate(() => window.__lab.send());
   await page.evaluate((id) => window.__lab.record(id), turnId);
   await page.waitForTimeout(500);

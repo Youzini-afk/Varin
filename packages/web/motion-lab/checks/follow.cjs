@@ -17,6 +17,15 @@ const deltas = (frames) => frames.slice(1).map((frame, index) => frame.scrollTop
   let moves = deltas(frames);
   const moving = moves.filter((delta) => Math.abs(delta) > 0.25);
   const maxStep = Math.max(...moves);
+  // Headless frames are ~34ms; judge speed rather than a per-frame step.
+  // Over two frames: the sampler and the spring run in separate frame
+  // callbacks, so one sample interval can be a few milliseconds.
+  const speeds = frames.slice(2).map((frame, index) => (frame.scrollTop - frames[index].scrollTop) / Math.max(1, frame.t - frames[index].t) * 1000);
+  const maxSpeed = Math.max(...speeds);
+  if (process.env.LAB_VERBOSE) {
+    const at = speeds.indexOf(maxSpeed);
+    console.log(frames.slice(Math.max(0, at - 4), at + 5).map((frame) => `${frame.t.toFixed(1)} top=${frame.scrollTop} gap=${frame.endGap.toFixed(0)} shown=${frame.shown}`).join('\n'));
+  }
   // A burst lands below the fold and glides into view; it must not stay there.
   let hiddenSince = null;
   let longestHidden = 0;
@@ -43,7 +52,8 @@ const deltas = (frames) => frames.slice(1).map((frame, index) => frame.scrollTop
   console.log(JSON.stringify({ frames: frames.length, movingFrames: moving.length, maxStep, backwards, longestHidden, finalGap }));
   if (backwards <= -1) console.log('around backwards step', JSON.stringify(frames.slice(Math.max(0, backIndex - 3), backIndex + 4)));
   assert(frames.every((frame) => frame.mode === 'following-end'), 'stays in following-end while streaming', failures);
-  assert(maxStep < 40, `largest per-frame scroll step is small (${maxStep.toFixed(1)}px < 40px)`, failures);
+  // A placed jump of a block or two in one frame reads as >3000px/s.
+  assert(maxSpeed < 2500, `following never jumps (peak ${maxSpeed.toFixed(0)}px/s, largest frame ${maxStep.toFixed(0)}px)`, failures);
   assert(backwards > -1, `never scrolls backwards while following (${backwards.toFixed(2)}px)`, failures);
   assert(moving.length > 20, `scroll moves across many frames, not in single jumps (${moving.length})`, failures);
   // The spring trails a fast reveal by about 2v/ω; it must stay bounded and
@@ -85,16 +95,19 @@ const deltas = (frames) => frames.slice(1).map((frame, index) => frame.scrollTop
 
   // 4. Anchoring: a sent turn sits at the top while its reply grows beneath
   // it; once the reply passes the comfortable line, the turn is followed.
-  await page.evaluate(() => window.__lab.record());
-  const entryId = await page.evaluate(() => window.__lab.send());
+  const entryId = await page.evaluate(() => window.__lab.send(undefined, { track: true }));
   await page.waitForTimeout(900);
   const anchoredTop = await page.evaluate((id) => window.__lab.entryTop(id), entryId);
   frames = await page.evaluate(() => window.__lab.stopRecording());
   moves = deltas(frames);
   const travel = moves.filter((delta) => Math.abs(delta) > 0.25);
-  console.log(JSON.stringify({ anchoredTop, travelFrames: travel.length, maxTravelStep: Math.max(...moves) }));
+  // Judge what the reader sees: the turn itself only moves up. (The list may
+  // compensate the scroll for rows above settling; that is not movement.)
+  const tops = frames.map((frame) => frame.turnTop).filter((top) => top !== null);
+  const turnBack = Math.max(0, ...tops.slice(1).map((top, index) => top - tops[index]));
+  console.log(JSON.stringify({ anchoredTop, travelFrames: travel.length, maxTravelStep: Math.max(...moves), turnBack }));
   assert(anchoredTop !== null && anchoredTop >= 0 && anchoredTop < 64, `sent turn anchors near the top (${anchoredTop})`, failures);
-  assert(travel.length >= 8 && Math.min(...moves) > -1, `sent turn travels to the top over ${travel.length} frames`, failures);
+  assert(travel.length >= 8 && turnBack <= 2, `sent turn travels to the top over ${travel.length} frames without moving back (${turnBack}px)`, failures);
   await page.evaluate(() => window.__lab.record());
   await page.evaluate(() => window.__lab.stream({ chars: 1800, cps: 160, interval: 48, burstEvery: 30, burst: 300 }));
   await page.waitForTimeout(800);
@@ -117,9 +130,16 @@ const deltas = (frames) => frames.slice(1).map((frame, index) => frame.scrollTop
   await page.evaluate(() => window.__lab.stream({ chars: 900, cps: 140, interval: 48, burstEvery: 6, burst: 420 }));
   await page.waitForTimeout(300);
   frames = await page.evaluate(() => window.__lab.stopRecording());
-  const reducedHidden = frames.filter((frame) => frame.endGap > 24).length;
+  let reducedRun = 0;
+  let reducedLongest = 0;
+  for (const frame of frames) {
+    reducedRun = frame.endGap > 24 ? reducedRun + 1 : 0;
+    reducedLongest = Math.max(reducedLongest, reducedRun);
+  }
   assert(frames.every((frame) => frame.mode === 'following-end'), 'reduced: stays following', failures);
-  assert(reducedHidden <= 3, `reduced: end placed directly (${reducedHidden} frames below the edge)`, failures);
+  // Growth is placed in the next frame; the sampler may run before that frame's
+  // follow callback, so it can see one extra frame.
+  assert(reducedLongest <= 2, `reduced: growth is placed by the next frame (longest ${reducedLongest} sampled frames below the edge)`, failures);
 
   assert(errors.filter((error) => !error.includes('404')).length === 0, `no page errors ${JSON.stringify(errors.filter((error) => !error.includes('404')))}`, failures);
   await browser.close();

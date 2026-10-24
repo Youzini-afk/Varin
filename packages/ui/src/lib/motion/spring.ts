@@ -1,3 +1,4 @@
+import { requestFrame, type FrameHandle } from './frame';
 import { SPRINGS, springCoefficients, type SpringCoefficients, type SpringToken } from './tokens';
 
 /**
@@ -48,16 +49,7 @@ export const springAtRest = (
   restSpeed: number,
 ): boolean => Math.abs(state.position - target) < restDelta && Math.abs(state.velocity) < restSpeed;
 
-type Frame = { cancel: () => void };
-
-const requestFrame = (callback: (time: number) => void): Frame => {
-  if (typeof globalThis.requestAnimationFrame === 'function') {
-    const handle = globalThis.requestAnimationFrame(callback);
-    return { cancel: () => globalThis.cancelAnimationFrame(handle) };
-  }
-  const handle = setTimeout(() => callback(performance.now()), 16);
-  return { cancel: () => clearTimeout(handle) };
-};
+type Frame = FrameHandle;
 
 export interface SpringDriverOptions {
   value?: number;

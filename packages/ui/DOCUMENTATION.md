@@ -103,9 +103,18 @@ The conversation timeline has one scroll spring, owned by one motion at a time:
 - Wheel, touch and key intent stop the spring at once. A motion whose owner went stale (mode, generation or return token) stops on its next frame.
 - Entering a Thread, a resized viewport, and `reduced` or `off` place the end directly.
 
+Streamed Markdown is revealed by `usePacedText` one frame at a time (`lib/motion/pace.ts`):
+
+- The reveal rate is `max(26/s, backlog / 0.24s)`. Arriving text only moves the target, so a burst speeds the front up and a pause slows it down smoothly.
+- When the stream ends, what is left drains evenly in 0.16s. `revealing` stays true until then, so the open block keeps its streaming render until the last character.
+- History and windowless environments show text in full immediately. Joining a stream already in progress reveals only its last 160 characters. A reply remounted within 1.5s continues where it was.
+- The pace runs under every motion level; it is reading rhythm, not animation.
+
+`MarkdownInk` (`components/chat/markdownInk.ts`) paints the ink front after each morph. Text revealed in a frame develops from faint secondary grey to its own colour in 300ms, and a zero-width dot after the last text stays lit while writing and breathes after 280ms without new text. The renderer calls `prepare()` before morphing, so morphdom never sees or reuses the ink spans or the dot. Spans are rewrapped after the morph with a negative animation delay matching their age, and merged back into text after 420ms. `reduced` keeps a still dot and `off` shows neither.
+
 Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it. `MessageHandoff` keeps a sent message's flight on its destination while the timeline scrolls, and ends the flight only when the destination leaves the view.
 
-The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`. Headless checks are in `motion-lab/checks`; for example, `node follow.cjs` measures following, release, return, anchoring and reduced motion frame by frame. They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
+The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`. Headless checks are in `motion-lab/checks`. `node follow.cjs` measures following, release, return, anchoring and reduced motion frame by frame; `node stream.cjs` measures pacing, ink, the dot, the drain and cleanup. They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 
 ## Conversation and resource projections
 

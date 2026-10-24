@@ -64,3 +64,47 @@
   transition-delay: 0s !important;
   scroll-behavior: auto !important;
 }
+
+/*
+ * Streamed Markdown (components/chat/markdownInk.ts). Each frame's new text
+ * develops from a faint secondary grey to its own colour; the dot at the end
+ * stays lit while text arrives and breathes once it has waited a beat.
+ */
+.markdown-ink {
+  animation: markdown-ink 300ms var(--motion-ease-out) both;
+}
+@keyframes markdown-ink {
+  from { opacity: .12; color: var(--muted-foreground); }
+  40% { opacity: 1; }
+}
+/* The dot takes no space, so it never wraps a line or changes a block's height. */
+.markdown-caret {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  user-select: none;
+}
+.markdown-caret::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  bottom: .12em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, currentColor 55%, transparent);
+}
+.markdown-caret[data-state="waiting"]::after {
+  animation: markdown-caret-breathe 1100ms ease-in-out infinite;
+}
+.markdown-caret[data-state="leaving"]::after {
+  animation: markdown-caret-leave var(--motion-dur-fade) var(--motion-ease-exit) forwards;
+}
+@keyframes markdown-caret-breathe {
+  50% { opacity: .2; transform: scale(.7); }
+}
+@keyframes markdown-caret-leave {
+  to { opacity: 0; transform: scale(.5); }
+}
