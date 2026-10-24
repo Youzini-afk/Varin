@@ -1,4 +1,5 @@
 import { commitPreparedMcpBinding } from './mcp-preparation-commit.js';
+import { defaultExecutionEnvironment } from '../platform/execution-environment.js';
 import { SourceAdmissionError } from './source-admission-error.js';
 import type { SourceFailureCode } from './protocol.generated.js';
 import type { OperationCallCompletion, IncomingMedia, OutputPart } from './protocol.generated.js';
@@ -128,6 +129,14 @@ interface ToolCompositionState {
 }
 /** Explicit authority client. Existing Pi thread routes are not silently redirected. */
 export class AgentRuntimeClient {
+  executionEnvironment = () => defaultExecutionEnvironment.snapshot();
+  async executionEnvironmentForSource(source: CalendarProtocol.LaunchSource | null | undefined, signal?: AbortSignal) {
+    if (source?.resource_owner.kind !== 'managed_host') return this.executionEnvironment();
+    const client = await this.managedSource(source.resource_owner, signal);
+    const capabilities = await client.capabilities({ coordinatorHostId: this.coordinatorHostId, mode: source.mode, enabledTools: ['process_spawn'] }, signal);
+    if (!capabilities.executionEnvironment) throw new Error('Execution Host shell discovery is unavailable');
+    return capabilities.executionEnvironment;
+  }
   private managedSources?: Pick<ManagedRemoteTargetRegistry, 'source'>;
   private readonly managedSourceBindings = new Map<string, { client: ManagedSourceClient; binding: ManagedSourceBinding }>();
   bindManagedSources(registry: Pick<ManagedRemoteTargetRegistry, 'source'>): void {
@@ -1958,9 +1967,6 @@ export class AgentRuntimeClient {
       { operationId },
       signal,
     );
-  }
-  finishRetrieval(operationId: string): Promise<{ accepted: boolean }> {
-    return this.kernel.agentRuntimeRequest('runtime.retrieval.finish', { operationId });
   }
   modelPresentations(requestIds: string[], signal?: AbortSignal): Promise<import('./protocol.generated.js').ModelPresentation[]> {
     return this.kernel.agentRuntimeRequest('runtime.model.presentations', { requestIds }, signal);

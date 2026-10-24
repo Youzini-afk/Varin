@@ -1515,7 +1515,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 61; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 63; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -1576,6 +1576,7 @@ export interface NestedToolInput {
 export interface NestedToolReceipt {
   operationId: string;
   completion: OperationCallCompletion<ResolvedMedia>;
+  error?: ExecutionError;
 }
 
 export interface HostToolCall {
@@ -2499,7 +2500,7 @@ export interface Run {
 }
 
 export type OperationCallCompletion<M = StoredMedia> =
-  | { kind: 'not_dispatched'; reason: string }
+  | { kind: 'not_dispatched'; reason: string; error?: ExecutionError }
   | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
@@ -3183,6 +3184,8 @@ export interface McpChildDerivationReceipt {
 export interface SourceMcpChildBinding { operationId:string;parentRunId:string;executionOwner:ExecutorOwner;executionEpoch:number; }
 
 export interface SourceMcpCreationError { code:string;dispatched:boolean;settlement:'unknown'|'session_expired'|'rpc_response';taskKind?:'protocol'|'transport'|'unsupported'|'owner';rpcCode?:number;protocolError?:Record<string,unknown>;interactionProblem?:string; }
+
+export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}
 
 export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};
 

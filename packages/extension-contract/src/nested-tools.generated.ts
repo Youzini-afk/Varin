@@ -1,5 +1,7 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
 
+export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}
+
 export type Outcome = "succeeded" | "failed" | "cancelled" | "indeterminate";
 
 export type Effect = "none" | "dispatched" | "partial" | "confirmed" | "unknown";
@@ -7,7 +9,7 @@ export type Effect = "none" | "dispatched" | "partial" | "confirmed" | "unknown"
 export type Lifetime = "call" | "run" | "thread" | "environment";
 
 export type OperationCallCompletion<M = StoredMedia> =
-  | { kind: 'not_dispatched'; reason: string }
+  | { kind: 'not_dispatched'; reason: string; error?: ExecutionError }
   | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
@@ -20,6 +22,7 @@ export interface NestedToolInput {
 export interface NestedToolReceipt {
   operationId: string;
   completion: OperationCallCompletion<ResolvedMedia>;
+  error?: ExecutionError;
 }
 
 export interface NestedToolSummary {

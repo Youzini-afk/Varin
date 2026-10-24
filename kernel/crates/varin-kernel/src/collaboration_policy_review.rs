@@ -304,8 +304,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
     let owner = db.lock().unwrap();
     let launch = owner.launch_intent(run).unwrap().unwrap().selection;
     let run_record = owner.run(run).unwrap();
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -428,6 +427,7 @@ fn run_sequence(cancel_before_park: bool, pause_before_observation: bool) {
         crate::process::ProcessControlRegistry::default(),
     );
     let binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "parent".into(),
         run_id: run.clone(),

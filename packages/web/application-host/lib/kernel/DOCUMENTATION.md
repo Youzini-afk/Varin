@@ -31,6 +31,17 @@ Encoding/decoding and body work run outside the short control owner. `close()` d
 waits for native exit. Protocol mismatch, revoked grants, malformed replies and executable loss are explicit
 failures, with no old-backend fallback. Cancelling observation does not reverse a committed domain effect.
 
+`context-service.ts` answers native execution-environment preparation from the actual Source Host.
+`source-launch.ts` carries the initial trusted program inventory; request preparation refreshes the
+selection and persists it in the frozen tool context. Managed tool dispatch forwards that same snapshot
+to its target owner. A changed default takes effect at the next model request, while accepted commands
+retain their interpreter and process identity. No coordinator program path is used as a remote fallback.
+
+Typed `ExecutionError` code/message/details survive kernel, managed-source and script transport.
+Original completion state decides whether a model-facing error is projected; opaque successful tool
+data is not reclassified. The Catalog stores error details with its existing completion and GC roots,
+so subsequent reads retain them without a second receipt store.
+
 `getBlob` keeps its caller pending through the original native read receipt, so a transfer's `finally`
 cannot interpret AbortSignal as drained hashing/reading. Native transient references and leases survive
 until worker exit independently of a rejected transport Promise.

@@ -165,6 +165,7 @@ impl ToolExecutor for Capabilities {
     ) -> ToolCompletion {
         ToolCompletion::NotDispatched {
             reason: "bound disclosure invocation required".into(),
+            error: None,
         }
     }
 }
@@ -218,8 +219,9 @@ impl Call {
         }
         Ok(
             json!({"groups":disclosure::GROUPS.iter().filter_map(|(id, description)| {
-            let count = tools.iter().filter(|tool| !disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()) && disclosure::namespace(&tool.name) == Some(*id)).count();
-            (count > 0).then(|| json!({"namespace":id,"description":description,"tools":count}))
+            let members = tools.iter().filter(|tool| disclosure::namespace(&tool.name) == Some(*id)).collect::<Vec<_>>();
+            let direct = members.iter().filter(|tool| disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref())).count();
+            (!members.is_empty()).then(|| json!({"namespace":id,"description":description,"toolCount":members.len(),"directToolCount":direct}))
         }).collect::<Vec<_>>()}),
         )
     }
@@ -263,6 +265,7 @@ impl Call {
                         arguments: args.arguments.clone(),
                     },
                 )?;
+                let failure = receipt.completion.error();
                 let (outcome, completion, output) = match receipt.completion {
                     ToolCompletion::Result {
                         outcome,
@@ -284,17 +287,19 @@ impl Call {
                         json!({"kind":"job_accepted","operationId":operation_id,"phase":phase,"effect":effect,"lifetime":lifetime}),
                         content.unwrap_or_else(|| Value::Null.into()),
                     ),
-                    ToolCompletion::NotDispatched { reason } => (
-                        Outcome::Failed,
+                    ToolCompletion::NotDispatched { reason, .. } => (
+                        if reason == "cancelled" { Outcome::Cancelled } else { Outcome::Failed },
                         json!({"kind":"not_dispatched","reason":reason}),
                         Value::Null.into(),
                     ),
                 };
+                let mut data = json!({"reference":args.reference,"operationId":receipt.operation_id,"completion":completion,"result":output.data});
+                if let Some(error) = failure { data["error"] = json!(error); }
                 Ok(ToolCompletion::Result {
                     outcome,
                     effect: Effect::None,
                     content: varin_runtime::output::OutputBody {
-                        data: json!({"reference":args.reference,"operationId":receipt.operation_id,"completion":completion,"result":output.data}),
+                        data,
                         parts: output.parts,
                     },
                 })
@@ -358,7 +363,7 @@ impl PreparedToolCall for Call {
             result.unwrap_or_else(|err| ToolCompletion::Result {
                 outcome: Outcome::Failed,
                 effect: Effect::None,
-                content: json!({"code":err.code,"message":err.message}).into(),
+                content: json!({"error":err}).into(),
             }),
             actual,
         )

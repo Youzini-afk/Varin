@@ -85,9 +85,11 @@ export function mergePathValues(primary: string, fallback: string, delim: string
   const addSegments = (value: string): void => {
     if (typeof value !== 'string' || !value) return;
     for (const segment of value.split(delim)) {
-      if (segment && !seen.has(segment)) {
-        seen.add(segment);
-        result.push(segment);
+      const cleaned = segment.replace(/^"(.*)"$/, '$1');
+      const identity = delim === ';' ? cleaned.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase() : cleaned;
+      if (cleaned && !seen.has(identity)) {
+        seen.add(identity);
+        result.push(cleaned);
       }
     }
   };

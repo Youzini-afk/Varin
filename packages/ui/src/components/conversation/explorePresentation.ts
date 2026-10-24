@@ -36,9 +36,15 @@ export function parseExploreProgress(value: unknown): ExploreToolProgress | unde
 
 export type ExploreDisplayPhase = ExploreProgressPhase | 'preparing' | 'unknown' | 'invalid';
 export function explorePresentation(execution?: ChatToolExecutionState, result?: ChatToolResultMessage, generating = false) {
-  const final = Boolean(result || execution && execution.status !== 'running');
+  const operation = execution?.operation ?? result?.operation;
   const output = exploreRecord(execution?.result ?? execution?.partialResult);
-  const details = exploreRecord(result?.details) ?? output;
+  const delivered = output?.kind === 'retrieval' && ['ready', 'failed', 'cancelled', 'unknown'].includes(String(output.status));
+  const background = result?.status === 'background' || execution?.status === 'background' || operation?.call_completion?.kind === 'job_accepted';
+  const stopping = !delivered && background && operation?.cancel_requested === true && operation.external_receipt?.executor_stopped !== true;
+  const active = !delivered && (stopping || execution?.status === 'running' || execution?.status === 'waiting'
+    || background && (!operation || operation.phase !== 'terminal'));
+  const final = !active && Boolean(result || execution);
+  const details = exploreRecord(operation?.external_receipt?.result.data) ?? (background ? output ?? exploreRecord(result?.details) : exploreRecord(result?.details) ?? output);
   const ownProgress = parseExploreProgress(details?.progress);
   const progress = ownProgress
     ?? parseExploreProgress(exploreRecord(exploreRecord(execution?.partialResult)?.details)?.progress);
@@ -54,15 +60,16 @@ export function explorePresentation(execution?: ChatToolExecutionState, result?:
   }) : undefined;
   const invalid = (rawSnippets !== undefined && !validSnippets) || (details?.progress !== undefined && !ownProgress);
   let phase: ExploreDisplayPhase;
-  if (progress?.phase === 'cancelled' || result?.status === 'cancelled' || execution?.status === 'cancelled') phase = 'cancelled';
+  if (stopping) phase = 'finishing';
+  else if (progress?.phase === 'cancelled' || result?.status === 'cancelled' || execution?.status === 'cancelled') phase = 'cancelled';
   else if (details?.status === 'unavailable') phase = 'unavailable';
   else if (result?.isError || execution?.status === 'error' || typeof details?.error === 'string') phase = 'failed';
   else if (result?.status === 'unknown' || execution?.status === 'unknown') phase = 'unknown';
   else if (invalid) phase = 'invalid';
   else if (final) phase = details?.status === 'partial' ? 'partial' : details?.kind === 'retrieval' && details.status === 'ready' ? 'complete' : snippets ? snippets.length ? 'complete' : 'empty' : 'unknown';
-  else if (execution?.status === 'running') phase = progress && ['complete', 'partial', 'empty'].includes(progress.phase) ? 'finishing' : progress?.phase ?? 'starting';
+  else if (active) phase = progress && ['complete', 'partial', 'empty'].includes(progress.phase) ? 'finishing' : progress?.phase ?? 'starting';
   else phase = generating ? 'preparing' : 'unknown';
-  const running = execution?.status === 'running' && !['complete', 'partial', 'empty', 'failed', 'unavailable', 'cancelled'].includes(phase);
-  return { phase, running, final, details, progress, snippets,
+  const running = active && !['complete', 'partial', 'empty', 'failed', 'unavailable', 'cancelled'].includes(phase);
+  return { phase, running, stopping, final, details, progress, snippets,
     returnedFiles: snippets ? new Set(snippets.map(snippet => snippet.path)).size : undefined };
 }

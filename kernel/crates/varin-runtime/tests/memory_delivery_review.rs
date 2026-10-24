@@ -169,8 +169,7 @@ fn snapshot(run: &str, head: &str, id: &str, projection: ContextProjection) -> R
             compaction: None, step: 1,
             history_range: range.clone(),
         },
-        binding: RequestBinding {
-            direct_tools: None,
+        binding: RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

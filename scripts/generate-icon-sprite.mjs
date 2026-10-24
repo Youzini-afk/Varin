@@ -38,6 +38,23 @@ const customIconData = new Map([
     "workspace-research",
     `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.2 15.2 5.3 5.3M8 9h5m-5 3h3"/></g>`,
   ],
+  // Session work focuses have independent silhouettes, readable at 14–16px.
+  [
+    "focus-general",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M14.5 3.5H9A5.5 5.5 0 0 0 3.5 9v5.5M9.5 20.5H15a5.5 5.5 0 0 0 5.5-5.5V9.5"/></g>`,
+  ],
+  [
+    "focus-code",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.3"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.3"/><path d="M10.5 7h6.5v6.5m-3.5 3.5H7v-6.5"/></g>`,
+  ],
+  [
+    "focus-research",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M16.5 4.2a8.7 8.7 0 1 0 3.3 10.6"/><path d="M8.1 16.6a6.1 6.1 0 0 0 8.5-8.5"/><path d="m11.5 12.5 5-5"/></g><circle cx="19.3" cy="4.7" r="2" fill="currentColor"/>`,
+  ],
+  [
+    "focus-office",
+    `<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h11a2 2 0 0 1 2 2v10.5c0 2.5-1.5 4-4 4h-8a3 3 0 0 1 0-6h8v3"/><path d="M5.5 4v10.5M9.5 8h5M9.5 11.5h3"/></g>`,
+  ],
   [
     "varin",
     `<polygon points="12 2.5 3.5 7.4 3.5 17.2 12 22.1 20.5 17.2 20.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><polyline points="3.5 7.4 12 12.3 20.5 7.4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><line x1="12" y1="12.3" x2="12" y2="22.1" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="m12 5.5 3.7 2.1L12 9.7 8.3 7.6 12 5.5Zm0 1.5-1 .6 1 .6 1-.6-1-.6Z" fill="currentColor" fill-rule="evenodd"/>`,

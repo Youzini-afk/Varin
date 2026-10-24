@@ -84,7 +84,7 @@ function complete(response: ServerResponse, output: unknown[]) {
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output } })}\n\n`);
 }
 function tool(name: string, args: unknown, id: string) {
-  const versions: Record<string, string> = { dispatch: '2', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  const versions: Record<string, string> = { dispatch: '3', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
@@ -575,6 +575,8 @@ it('selected read-only child owns its ordinary notes and plan through real Host 
 
 it.each(['quick','formal'] as const)('%s retrieval uses native search, structural reading and a fixed-source terminal without IDE services',async(mode)=>{
   let parentSteps=0,childSteps=0;
+  let retrievalId='';
+  const entered=gate(), release=gate();
   const invoke=(name:string,args:unknown,id:string)=>tool('tool_invoke',{reference:{name,version:'1'},arguments:args},id);
   const f=await fixture(({body,response})=>{
     assertPairing(body);
@@ -583,10 +585,25 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
         ? invoke('code_retrieval',{question:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'quick')
         : tool('dispatch',{preset:'retrieval',task:'Find marker, inspect its complete function, then verify the source environment with the terminal.'},'formal')]);
       else if(mode==='formal' && parentSteps===2) complete(response,[tool('wait_child',{operationId:job(body)},'wait')]);
+      else if(mode==='quick' && parentSteps===2) {
+        const accepted=result(body,'code_retrieval');
+        expect(accepted?.kind).toBe('job_accepted');
+        retrievalId=String((accepted?.content as Record<string,unknown>).operationId);
+        expect(retrievalId).not.toBe('undefined');
+        complete(response,[tool('file_read',{path:'source.txt'},'independent-read')]);
+      } else if(mode==='quick' && parentSteps===3) {
+        expect(JSON.stringify(result(body,'file_read'))).toContain('fixed child source before parent changes');
+        expect(childSteps).toBe(0);
+        complete(response,[tool('retrieval_control',{operationId:retrievalId,action:'status'},'status')]);
+      } else if(mode==='quick' && parentSteps===4) {
+        expect(result(body,'retrieval_control')?.content).toMatchObject({state:'preparing',latestAssistantMessage:null,latestAction:null});
+        release.release();
+        complete(response,[tool('retrieval_control',{operationId:retrievalId,action:'wait'},'wait')]);
+      }
       else {
         if(mode==='quick') {
-          const retrieved=result(body,'code_retrieval')?.content as Record<string,unknown>;
-          expect(retrieved).toMatchObject({kind:'retrieval',status:'ready',answer:'Verified marker and the original execution view.'});
+          expect(JSON.stringify(body.input)).toContain('Verified marker and the original execution view.');
+          expect((body.input as unknown[]).filter(item=>JSON.stringify(item).includes('Verified marker and the original execution view.'))).toHaveLength(1);
         }
         complete(response,[answer('Parent received the investigation','parent-complete')]);
       }
@@ -613,7 +630,9 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
     }
   });
   await fs.writeFile(path.join(f.workspace,'sample.ts'),"export function outer() {\r\n  function marker() { return 'old'; }\r\n  return marker();\r\n}\r\n");
-  const h=await f.openHost({structure:true});const identity=await h.api.create('quick-investigation');
+  const h=await f.openHost({structure:true,...(mode==='quick'?{context:(original:ContextPreparer)=>blockChild(original,entered,release)}:{})});
+  cleanup.push(async()=>release.release());
+  const identity=await h.api.create('quick-investigation');
   const [directory, capabilities, sourceTools] = await Promise.all([
     h.runtime.toolCatalog(), h.runtime.childCapabilities(), h.runtime.sourceTools('live_root'),
   ]);
@@ -629,7 +648,7 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
   }
   const prepared=await h.api.prepareSource({...identity,key:'quick-source',resourceOwner:{kind:'local'},workspaceId:(await h.documents.resolveWorkspace({path:f.workspace})).workspaceId,
     content:{mode:'saved-files'},captureScopes:[],mode:'fixed_branch'});
-  prepared.source.tools=['code_retrieval','file_search','file_read','process_spawn','process_read','process_inspect'];
+  prepared.source.tools=prepared.source.tools.filter(name => ['code_retrieval','file_search','file_read','process_spawn','process_read','process_inspect'].includes(name));
   const receipt=await h.api.submit({...identity,key:'quick-input',expectedHead:null,text:'Run the focused investigation.',model,source:prepared.source});
   try {
     await expect.poll(async()=>(await h.runtime.run(receipt.run_id)).state,{timeout:20000}).toBe('completed');
@@ -638,7 +657,7 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
       children:(await h.runtime.children()).map(child=>({state:child.state,report:child.report,codeResult:child.code_result}))});
     throw error;
   }
-  expect(parentSteps).toBe(mode==='quick'?2:3);expect(childSteps).toBe(5);
+  expect(parentSteps).toBe(mode==='quick'?5:3);expect(childSteps).toBe(5);
   expect(await fs.readFile(path.join(f.workspace,'source.txt'),'utf8')).toBe('fixed child source before parent changes');
   if(mode==='quick') {
     expect(await h.api.collaboration!.children(identity)).toEqual([]);
@@ -650,6 +669,91 @@ it.each(['quick','formal'] as const)('%s retrieval uses native search, structura
     await expect.poll(async()=>(await h.runtime.child(child.operation_id)).resources_released).toBe(true);
   }
   expect(h.errors).toEqual([]);
+});
+
+it.each([false, true])('delivers a background retrieval once after its original parent Run has completed (cancelWait=%s)', async cancelWait => {
+  const requested = gate(); let childResponse: ServerResponse | undefined;
+  let parentSteps = 0, childSteps = 0, operationId = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      if (++parentSteps === 1) complete(response, [tool('code_retrieval', { question: 'Inspect the original source.' }, 'quick')]);
+      else if (parentSteps === 2) {
+        expect(result(body, 'code_retrieval')?.kind).toBe('job_accepted');
+        operationId = String(result(body, 'code_retrieval')!.operation_id);
+        complete(response, cancelWait ? [tool('retrieval_control', { operationId, action: 'wait' }, 'wait')]
+          : [answer('Continuing independently while the investigation runs.', 'parent-first')]);
+      } else if (cancelWait && parentSteps === 3) {
+        expect(JSON.stringify(body.input)).toContain('The observation wait was cancelled');
+        complete(response, [answer('Continuing independently while the investigation runs.', 'parent-after-wait')]);
+      } else {
+        expect((body.input as unknown[]).filter(item => JSON.stringify(item).includes('LATE_BACKGROUND_ANSWER'))).toHaveLength(1);
+        complete(response, [answer('Received the background answer.', 'parent-late')]);
+      }
+    } else { childSteps++; childResponse = response; requested.release(); }
+  });
+  const h = await f.openHost();
+  const identity = await h.api.create('quick-background-late');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' },
+    workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Investigate in the background.', model, source: prepared.source });
+  await requested.promise;
+  if (cancelWait) {
+    await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on).toMatch(/^child-wait:/);
+    const wait = (await h.api.snapshot(identity)).operations.find(operation => operation.executor === 'retrieval_control' && operation.waiting_on?.startsWith('child-wait:'))!;
+    await h.api.cancelOperation(wait.id);
+    expect((await h.runtime.operation(operationId)).cancel_requested).toBe(false);
+  }
+  await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state).toBe('completed');
+  expect(parentSteps).toBe(cancelWait ? 3 : 2);
+  complete(childResponse!, [answer('LATE_BACKGROUND_ANSWER', 'child-late')]);
+  await expect.poll(() => parentSteps).toBe(cancelWait ? 4 : 3);
+  await expect.poll(async () => (await h.api.snapshot(identity)).activeRun).toBeNull();
+  const snapshot = await h.api.snapshot(identity);
+  expect(snapshot.history.filter(item => item.source === 'agent')).toHaveLength(1);
+  await h.collaboration!.recover(); await h.adapter.recover();
+  expect(parentSteps).toBe(cancelWait ? 4 : 3); expect(childSteps).toBe(1); expect(h.errors).toEqual([]);
+});
+
+it('observes the real assistant message and read action, then stops the same background retrieval', async () => {
+  const investigating = gate();
+  let parentSteps = 0, childSteps = 0, operationId = '';
+  const f = await fixture(async ({ body, response }) => {
+    assertPairing(body);
+    if (isParent(body)) {
+      switch (++parentSteps) {
+        case 1: complete(response, [tool('code_retrieval', { question: 'Inspect source.txt.' }, 'quick')]); break;
+        case 2: {
+          operationId = String(result(body, 'code_retrieval')!.operation_id);
+          await investigating.promise;
+          complete(response, [tool('retrieval_control', { operationId, action: 'status' }, 'status')]); break;
+        }
+        case 3: {
+          expect(result(body, 'retrieval_control')?.content).toMatchObject({ state: 'running',
+            latestAssistantMessage: { text: 'Inspecting the admitted source.' },
+            latestAction: { tool: 'file_read', arguments: { path: 'source.txt' } } });
+          complete(response, [tool('retrieval_control', { operationId, action: 'stop' }, 'stop')]); break;
+        }
+        case 4:
+          expect(result(body, 'retrieval_control')?.content).toMatchObject({ stopRequested: true });
+          complete(response, [tool('retrieval_control', { operationId, action: 'wait' }, 'wait')]); break;
+        case 5:
+          expect(JSON.stringify(body.input)).toContain('Inspecting the admitted source.');
+          complete(response, [answer('Investigation stopped; its existing findings are retained.', 'parent-stopped')]); break;
+        default: throw new Error('Unexpected duplicate retrieval delivery');
+      }
+    } else if (++childSteps === 1) complete(response, [answer('Inspecting the admitted source.', 'child-progress'), tool('file_read', { path: 'source.txt' }, 'read')]);
+    else { investigating.release(); /* Keep the real second model request in flight until stop. */ }
+  });
+  const h = await f.openHost();
+  const identity = await h.api.create('quick-background-stop');
+  const prepared = await h.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' },
+    workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
+  const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Inspect and stop.', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
+  const child = await h.runtime.child(operationId);
+  expect(child.report?.outcome).toBe('cancelled'); expect(child.resources_released).toBe(true);
+  expect(parentSteps).toBe(5); expect(childSteps).toBe(2); expect(h.errors).toEqual([]);
 });
 
 it('the configured retrieval preset returns before preparation and delivers one fixed-source scoped report', async () => {
@@ -677,7 +781,7 @@ it('the configured retrieval preset returns before preparation and delivers one 
   const h = await f.openHost({ context: original => blockChild(original, entered, release) });
   const catalog = await h.profiles.read({ runtime: 'agent' });
   const retrieval = catalog.profiles.find(profile => profile.id === 'varin:builtin:retrievalAgent')!;
-  expect(retrieval.effective.modelSource).toBe('unconfigured');
+  expect(retrieval.effective.modelSource).toBe('inherit');
   expect(retrieval.tools.source).toBe('default');
   if (retrieval.config.kind !== 'builtin') throw new Error('Expected the shipped retrieval preset');
   await h.profiles.save({ runtime: 'agent', expectedRevision: catalog.revision, id: retrieval.id,

@@ -32,6 +32,19 @@ HTTP remains the authenticated command plane for create, resize, appearance upda
 - Restarts are serialized per terminal. Each restart spawns and wires the replacement before terminating the old process, retaining the terminal ID.
 - Close uses SIGTERM with bounded SIGKILL escalation. Harness kill/close and explicit force-kill wait for a real PTY exit and process-writer release before evicting the session; failure leaves the same identity observable and retryable. Idle cleanup and shutdown request native tree termination; unconfirmed exits retain the same process/session and report failure. Attached terminals are not considered idle.
 
+## Shared execution environment
+
+`shells.ts` also serves Agent discovery with `purpose:agent`. Agent auto prefers Git Bash on Windows,
+then pwsh, Windows PowerShell and CMD; interactive auto keeps the order above. Both use the same
+Host PATH construction and real executable discovery. System32/Sysnative WSL bash launchers are not
+native Windows shell candidates. Git's discovered installation root supplies its own Unix tool directories.
+
+`../platform/execution-environment.ts` publishes Agent program facts before command generation and
+freezes each request's selection. `/api/execution-environment` shows the selected Host's programs and
+supports explicit refresh, without exposing PATH. Agent `harness.shell` belongs to that Host's global
+configuration, independently of the renderer's terminal preference. Product ripgrep is a native binary
+on the shared PATH, appended after existing user tools; script subprocesses inherit this same base environment.
+
 ## Encoding
 
 User shells and external programs retain their encoding settings. Terminal transport and Varin-owned

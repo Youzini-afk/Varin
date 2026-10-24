@@ -298,8 +298,7 @@ fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
     let executor=Arc::new(KernelToolExecutor::new(binding,f.executor.resources.clone().with_source_bridge(source.clone())).unwrap().with_language(language.clone()));
     let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
     let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
-    let request=FrozenToolContext{
-        direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
+    let request=FrozenToolContext { execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
     let cancel=CancellationToken::default();let bound=executor.bind_call(&call,&request,&cancel).unwrap();
     assert_eq!(bound.executor_owner(),varin_runtime::ExecutorOwner::Kernel);
     let plan=bound.prepare(&cancel).unwrap();bound.authorize(&context,&plan,&cancel).unwrap();
@@ -361,7 +360,7 @@ fn unavailable_unit_reads_return_context_and_plain_continuation_without_reinterp
     assert!(matches!(failed,ToolCompletion::Result { outcome:Outcome::Failed,.. }));
     let batch=f.read(json!({"files":[{"path":"source.unknown","unit":{"line":50,"revision":"old"}},{"path":"source.unknown","unit":{"line":50}}]}));
     assert_eq!(batch["status"],"partial");
-    assert_eq!(batch["files"][0]["result"]["error"],"structure_continuation_unavailable");
+    assert_eq!(batch["files"][0]["result"]["error"]["code"],"structure_continuation_unavailable");
 }
 
 #[test]
@@ -457,7 +456,7 @@ fn healthcheck_file_contracts_keep_line_endings_and_distinguish_invalid_targets(
     assert!(matches!(edited, ToolCompletion::Result { outcome: Outcome::Succeeded, .. }));
     assert_eq!(fs::read_to_string(f.root.join("work/tree/crlf.txt")).unwrap(), "one\r\ntwo\r\nccc\r\n");
     assert!(matches!(f.call("file_read",json!({"path":"tree"})),
-        ToolCompletion::Result { outcome: Outcome::Failed, content, .. } if content.data["error"] == "not_a_file"));
+        ToolCompletion::Result { outcome: Outcome::Failed, content, .. } if content.data["error"]["code"] == "not_a_file"));
     let missing = f.call("file_list", json!({"paths":["tree/missing"]}));
     assert!(serde_json::to_string(&missing).unwrap().contains("Discovery path does not exist: tree/missing"));
     fs::write(f.root.join("work/tree/second.txt"), "second entry").unwrap();
@@ -552,15 +551,16 @@ fn process_dot_cwd_resolves_before_launch_and_globs_filter_records_without_pruni
         let ResourceOperation::ProcessSpawn(args) = operation else { unreachable!() };
         assert_eq!(args.cwd, "");
     }
-    let ToolCompletion::NotDispatched { reason } = f.call("process_spawn",
+    let ToolCompletion::NotDispatched { reason, .. } = f.call("process_spawn",
         json!({"command":"unused-command","args":[],"env":[],"mode":"pipe","cwd":"./missing"})) else { panic!("missing directory was dispatched"); };
     assert!(reason.contains("working directory") && !reason.contains("normalized"), "{reason}");
     fs::create_dir_all(f.root.join("work/docs/sub")).unwrap();
+    assert_eq!(f.try_call("file_read",json!({"path":"."})).unwrap_err().code,"not_a_file");
     for path in ["README.md", "docs/notes.md", "docs/sub/last.md", "docs/other.txt"] {
         fs::write(f.root.join("work").join(path), "body").unwrap();
     }
     for (recursive, expected) in [(false, vec!["README.md"]), (true, vec!["README.md", "docs/notes.md", "docs/sub/last.md"])] {
-        let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = f.call("file_list", json!({"globs":["*.md"],"recursive":recursive})) else { panic!("listing failed"); };
+        let ToolCompletion::Result { outcome: Outcome::Succeeded, content, .. } = f.call("file_list", json!({"paths":["./"],"globs":["*.md"],"recursive":recursive})) else { panic!("listing failed"); };
         let paths = content.data["records"].as_array().unwrap().iter().map(|r|r["path"].as_str().unwrap()).collect::<Vec<_>>();
         assert_eq!(paths, expected);
     }

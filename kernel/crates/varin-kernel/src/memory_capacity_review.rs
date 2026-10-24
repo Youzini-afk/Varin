@@ -119,8 +119,7 @@ fn combined(ending: Ending) {
         ExecutionInput {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
-            binding: RequestBinding {
-                direct_tools: None,
+            binding: RequestBinding { execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -227,6 +226,7 @@ fn combined(ending: Ending) {
         }
     });
     let binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "search".into(),
         run_id: input.run_id.clone(),
@@ -337,8 +337,7 @@ grant_id: "search".into(),
         schema_version: "1".into(),
         arguments: json!({"action":"read"}),
     };
-    let frozen = FrozenToolContext {
-        direct_tools: None,
+    let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         child_dispatch: None,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,
@@ -366,8 +365,7 @@ grant_id: "search".into(),
         schema_version: "1".into(),
         arguments: json!({"action":"read"}),
     };
-    let plan_frozen = FrozenToolContext {
-        direct_tools: None,
+    let plan_frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         child_dispatch: None,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,

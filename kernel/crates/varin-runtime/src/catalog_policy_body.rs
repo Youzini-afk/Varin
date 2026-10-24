@@ -115,8 +115,7 @@ impl PolicyActionMetadata {
                 .nodes
                 .into_iter()
                 .map(|node| PolicyAdmittedNode {
-                    context: FrozenToolContext {
-                        direct_tools: body.direct_tools.clone(),
+                    context: FrozenToolContext { execution_environment: body.execution_environment.clone(), direct_tools: body.direct_tools.clone(),
                         child_dispatch: node.child_dispatch,
                         resource_activations: node.resource_activations,
                         resource_checkpoint_id: node.resource_checkpoint_id,
@@ -153,6 +152,8 @@ impl PolicyActionMetadata {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PolicyGraphBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_environment: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dispatch_history: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,6 +195,7 @@ impl PolicyGraphBody {
         let first = &nodes[0].context;
         for node in nodes {
             if node.context.child_dispatch != first.child_dispatch
+                || node.context.execution_environment != first.execution_environment
                 || node.context.resource_checkpoint_id != boundary.resource_checkpoint_id
                 || node.context.resource_activations != first.resource_activations
                 || node.context.run_id != first.run_id
@@ -216,6 +218,7 @@ impl PolicyGraphBody {
         }
         Ok((
             Self {
+                execution_environment: first.execution_environment.clone(),
                 dispatch_history: None,
                 direct_tools: first.direct_tools.clone(),
                 action_id: action_id.clone(),

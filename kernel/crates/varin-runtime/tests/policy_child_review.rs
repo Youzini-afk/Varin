@@ -141,8 +141,7 @@ fn binding(f: &Fixture) -> RequestBinding {
             .unwrap()
             .unwrap()
             .selection;
-    RequestBinding {
-        direct_tools: None,
+    RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

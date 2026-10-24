@@ -180,6 +180,7 @@ pub(crate) fn builtin_definitions(
     tools = crate::questions::builtin_schemas(tools);
     tools.extend(crate::collaboration::builtin_schemas());
     tools.push(crate::child_cancel::builtin());
+    tools.push(crate::retrieval_control::builtin());
     tools.extend(crate::capability_tools::definitions());
     tools.extend(crate::family_tools::builtin_schemas());
     tools.extend([
@@ -583,6 +584,7 @@ impl ToolExecutor for ScopedTools {
     ) -> ToolCompletion {
         ToolCompletion::NotDispatched {
             reason: "prepared directory invocation required".into(),
+            error: None,
         }
     }
 }

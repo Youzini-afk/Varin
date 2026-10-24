@@ -295,8 +295,7 @@ impl<
                     "policy tool is absent from the frozen schema",
                 ));
             }
-            let context = FrozenToolContext {
-                direct_tools: input.binding.direct_tools.clone(),
+            let context = FrozenToolContext { execution_environment: input.binding.execution_environment.clone(), direct_tools: input.binding.direct_tools.clone(),
                 child_dispatch: input.binding.child_dispatch.clone(),
                 resource_activations: resource_activations.clone(),
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -426,6 +425,7 @@ impl<
                                                 "dependency_failed"
                                             }
                                             .into(),
+                                            error: None,
                                         },
                                     )),
                                     existing,
@@ -482,9 +482,7 @@ impl<
                                 Ok((
                                     None,
                                     Some(PreparedPolicyCompletion::Immediate(
-                                        ToolCompletion::NotDispatched {
-                                            reason: format!("{}: {}", error.code, error.message),
-                                        },
+                                        ToolCompletion::not_dispatched(error),
                                     )),
                                     existing,
                                 ))
@@ -548,6 +546,7 @@ impl<
                                                 } else {
                                                     format!("{}: {}", error.code, error.message)
                                                 },
+                                                error: None,
                                             };
                                             if existing {
                                                 completion = self

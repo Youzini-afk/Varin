@@ -3,12 +3,14 @@ import type { KernelError } from './protocol.generated.js';
 export class KernelClientError extends Error {
   readonly code: string;
   readonly retryable: boolean;
+  readonly details?: unknown;
 
-  constructor(error: KernelError | { code: string; message: string; retryable?: boolean }) {
+  constructor(error: KernelError | { code: string; message: string; retryable?: boolean; details?: unknown }) {
     super(error.message);
     this.name = 'KernelClientError';
     this.code = error.code;
     this.retryable = error.retryable ?? false;
+    this.details = error.details;
   }
 }
 

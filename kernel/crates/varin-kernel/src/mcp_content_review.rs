@@ -292,7 +292,7 @@ impl ModelProvider for Model {
                     ("unsupported", "mcp-service-unsupported"),
                 ] {
                     let result = results.iter().find(|result| result.call_id == id).unwrap();
-                    let ToolCompletion::NotDispatched { reason } = &result.completion else {
+                    let ToolCompletion::NotDispatched { reason, .. } = &result.completion else {
                         panic!("bad admission must not dispatch: {result:?}")
                     };
                     assert!(

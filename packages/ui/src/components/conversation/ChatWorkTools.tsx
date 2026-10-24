@@ -23,7 +23,8 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
   const plan = call.name === 'todo', memory = call.name === 'memory', settings = call.name.startsWith('settings_');
   const body = toolRecord(data.plan ?? toolRecord(data.mutation).plan);
   const planItems = typeof body.content === 'string' ? parseTodoPlan(body.content) : [];
-  const label = t(plan && args.action === 'update' ? 'chat.tools.updatePlan' : memory && args.action === 'save' ? 'chat.tools.saveMemory'
+  const label = t(call.name === 'retrieval_control' ? args.action === 'stop' ? 'chat.explore.stop' : args.action === 'wait' ? 'chat.explore.wait' : 'chat.explore.status'
+    : plan && args.action === 'update' ? 'chat.tools.updatePlan' : memory && args.action === 'save' ? 'chat.tools.saveMemory'
     : memory && args.action === 'delete' ? 'chat.tools.deleteMemory' : workToolLabels[call.name] ?? 'chat.tools.resource');
   const subject = toolSubject(call, data, t, targets);
   const content = toolText(data.content) || toolText(toolRecord(data.note).content);
@@ -31,7 +32,7 @@ export function ChatWorkTool({ call, execution, result, status, generating, cwd,
   const purposeContent = workToolContent(call, data, t, cwd, conversation);
   return <ToolDisclosure id={'tool:' + call.id} initiallyExpanded={memory && Boolean(purposeContent || content)} className={'tool-work-record group ' + (plan ? 'tool-plan-record' : memory ? 'tool-memory-record' : '')}>
     <summary className="tool-work-heading"><Icon name={plan ? 'list-check-2' : memory ? 'brain' : settings ? 'settings-3'
-      : call.name.includes('child') ? 'group' : call.name === 'ask_user' || call.name === 'question_status' ? 'question' : 'file-list-2'} className="size-3.5 shrink-0" />
+      : call.name === 'retrieval_control' ? 'binoculars' : call.name.includes('child') ? 'group' : call.name === 'ask_user' || call.name === 'question_status' ? 'question' : 'file-list-2'} className="size-3.5 shrink-0" />
       <ToolHeadingText label={label} subject={subject} />
       {planItems.length > 0 && <span className="typography-micro text-muted-foreground tabular-nums">{planItems.filter(item => item.status === 'completed').length} / {planItems.length}</span>}
       {typeof data.status === 'string' && !['ready', 'ok', 'available'].includes(data.status) && <span className="typography-micro text-muted-foreground">{toolValueLabel(data.status, t)}</span>}

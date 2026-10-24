@@ -80,9 +80,9 @@ impl DispatchInput {
         if name != "code_retrieval" { return Err(RuntimeError::Invalid("Not a delegated Agent invocation".into())); }
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        struct Query { question: String, paths: Option<Vec<String>>, limit: Option<u64> }
+        struct Query { question: String, paths: Option<Vec<String>> }
         let query: Query = serde_json::from_value(arguments.clone())?;
-        if query.question.trim().is_empty() || query.question.contains('\0') || query.limit.is_some_and(|value|value==0 || value>9_007_199_254_740_991)
+        if query.question.trim().is_empty() || query.question.contains('\0')
             || query.paths.as_ref().is_some_and(|paths| paths.is_empty() || paths.iter().any(|path|path.is_empty() || path.starts_with('/') || path.contains('\0') || path.contains('\\') || path.contains(':') || path.split('/').any(|p|matches!(p,".."|".") || p.is_empty()))) {
             return Err(RuntimeError::Invalid("Retrieval requires a question and optional normalized relative paths".into()));
         }
@@ -580,7 +580,7 @@ impl ChildDispatchSelection {
             (tools, mode, String::new(), self.frozen.parent_model.clone(), None)
         };
         if input.preset.as_deref() == Some("code_retrieval") {
-            tools.retain(|name| !matches!(name.as_str(), "code_retrieval" | "dispatch")
+            tools.retain(|name| !matches!(name.as_str(), "code_retrieval" | "retrieval_control" | "dispatch")
                 && self.frozen.allowed_delegation.iter().any(|tool| &tool.name == name));
         }
         if let Some(selected) = &input.tools {
@@ -1129,9 +1129,7 @@ impl Catalog {
             }
         }
         for child in &children {
-            let delivery = matches!(&target,TreeCancelTarget::Child{operation_id} if operation_id==&child.operation_id)
-                && tx.query_row("SELECT EXISTS(SELECT 1 FROM events WHERE subject=?1 AND kind='retrieval.delivery_requested')",[&child.operation_id],|row|row.get::<_,bool>(0))?;
-            if !delivery {super::request_cancel_operation_in(&tx, &child.operation_id)?;}
+            super::request_cancel_operation_in(&tx, &child.operation_id)?;
             let executions: Vec<super::delegated::DelegatedExecution> = {
                 let mut s = tx
                     .prepare("SELECT body FROM delegated_executions WHERE child_operation_id=?1")?;

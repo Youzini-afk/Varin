@@ -98,12 +98,12 @@ pub(crate) fn admit_internal_retrieval(
     catalog: Arc<Mutex<Catalog>>, binding: ToolBinding, resources: KernelResourceClient,
     host: crate::host_tools::ToolBridge, context: &ToolExecutionContext, call: &ToolCall,
     contract: &ToolContract, cancel: &CancellationToken,
-) -> Result<(), ExecutionError> {
+) -> Result<ToolCompletion, ExecutionError> {
     let tools = CollaborationTools { catalog, binding: Some(binding), resources, host };
     match tools.execute(context, call, contract, cancel) {
-        ToolCompletion::JobAccepted { .. } => Ok(()),
+        accepted @ ToolCompletion::JobAccepted { .. } => Ok(accepted),
         ToolCompletion::Result {content,..} => Err(ExecutionError::new("retrieval_preparation_failed", content.data["message"].as_str().unwrap_or("Internal retrieval preparation failed"))),
-        ToolCompletion::NotDispatched {reason} => Err(ExecutionError::new("retrieval_preparation_failed",reason)),
+        ToolCompletion::NotDispatched { reason, .. } => Err(ExecutionError::new("retrieval_preparation_failed",reason)),
     }
 }
 impl CollaborationTools {
@@ -523,7 +523,7 @@ impl ToolExecutor for CollaborationTools {
         result.unwrap_or_else(|e| ToolCompletion::Result {
             outcome: Outcome::Failed,
             effect: Effect::None,
-            content: json!({"error":e.code,"message":e.message}).into(),
+            content: json!({"error":e}).into(),
         })
     }
 }

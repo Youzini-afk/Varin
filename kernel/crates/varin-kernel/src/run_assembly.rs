@@ -83,6 +83,7 @@ impl RunAssembly {
         check_cancelled()?;
         let p = preparation.params;
         let tool_binding = preparation.tools;
+        let execution_environment = tool_binding.as_ref().and_then(|binding|binding.execution_environment.clone());
         let runtime = &self.runtime;
         let resources = &self.resources;
         let credential_bridge = &self.credentials;
@@ -407,6 +408,9 @@ impl RunAssembly {
             declarations.push(crate::child_cancel::declaration(crate::agent_runtime::control_commands::ControlCommands {
                 runtime: runtime.clone(), resources: resources.clone(), models: self.models.clone(), tools: self.tools.clone(),
             }));
+            declarations.push(crate::retrieval_control::declaration(crate::agent_runtime::control_commands::ControlCommands {
+                runtime: runtime.clone(), resources: resources.clone(), models: self.models.clone(), tools: self.tools.clone(),
+            }));
             if let Some(source) = collaboration_source {
                 declarations.extend(crate::process_wait::declarations(
                     runtime.catalog(),
@@ -583,6 +587,9 @@ impl RunAssembly {
             start.context_preparation = Arc::new(crate::child_capabilities::BindingPreparation {
                 inner: start.context_preparation,
                 catalog: runtime.catalog(),
+            });
+            start.context_preparation = Arc::new(crate::shell_environment::ExecutionPreparation {
+                inner: start.context_preparation, environment: execution_environment, bridge: self.context.clone(),
             });
             start.context_preparation = Arc::new(crate::context::CapacityPreparation::new(
                 start.context_preparation,

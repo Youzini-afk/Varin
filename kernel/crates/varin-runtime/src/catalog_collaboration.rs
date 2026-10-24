@@ -540,10 +540,14 @@ impl Catalog {
             };
         // The original invocation completes at acceptance. A fast child may independently
         // finish before the model exchange or policy graph consumes this immutable fact.
-        if !prepared.internal_retrieval {
+        let accepted_at_ms = observations::wall_time_ms()?;
         let acceptance=super::result_content::ToolCompletionMetadata::write(&self.content,&crate::execution::ToolCompletion::JobAccepted{
             operation_id:op.id.clone(),phase:"preparing_child".into(),effect:Effect::None,lifetime:Lifetime::Thread,
-            content:Some(json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}).into()),
+            content:Some(if prepared.internal_retrieval {
+                json!({"kind":"retrieval","operationId":child.operation_id,"status":"preparing", "acceptedAtMs":accepted_at_ms,
+                    "control":{"tool":"retrieval_control","actions":["status","wait","stop"]},
+                    "delivery":"The final answer is delivered automatically. Continue other work, inspect status, wait, or stop this investigation."})
+            } else { json!({"agentId":child.agent_id,"name":child.name,"threadId":child.child_thread_id,"branchId":child.child_branch_id,"operationId":child.operation_id}) }.into()),
         })?;
         let content_ref=match acceptance {super::result_content::ToolCompletionMetadata::JobAccepted{content_ref,..}=>content_ref,_=>unreachable!()};
         super::result_content::publish_job_acceptance_content(&tx, &mut op, &admitted, "preparing_child",content_ref)?;
@@ -552,26 +556,14 @@ impl Catalog {
         op.effect = Effect::None;
         op.revision += 1;
         put(&tx, "operations", &op.id, &op)?;
-        }
         child.cursor = event(
             &tx,
             &op.id,
             child.revision,
             "child.accepted",
-            json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id}),
+            json!({"child_thread_id":child.child_thread_id,"parent_run_id":run.id,"acceptedAtMs":accepted_at_ms}),
         )?;
         delegated::insert_initial(&tx, &child)?;
-        if prepared.internal_retrieval {
-            let wait_id = format!("retrieval-wait:{}", op.id);
-            let wait = Wait { id: wait_id.clone(), run_id: run.id.clone(), subject: op.id.clone(),
-                kind: "operation.settled".into(), after_cursor: child.cursor, deadline_at_ms: None,
-                trigger_cursor: None, cancelled: false };
-            tx.execute("INSERT INTO waits(id,run_id,body) VALUES(?1,?2,?3)", params![wait.id,wait.run_id,encode(&wait)?])?;
-            op.waiting_on = Some(wait_id);
-            op.handed_off = true;
-            op.revision += 1;
-            put(&tx, "operations", &op.id, &op)?;
-        }
         super::goals::bind_child(&tx, &op.id, &run.id)?;
         tx.commit()?;
         Ok(child)
@@ -599,7 +591,7 @@ pub(super) fn pending_cancelled_observation(
     };
     if op.run_id != run.id
         || op.epoch != run.epoch
-        || op.executor.as_deref() != Some(WAIT_TOOL)
+        || !matches!(op.executor.as_deref(), Some(WAIT_TOOL | super::retrieval::CONTROL_TOOL))
         || op.phase != OperationPhase::Waiting
         || !op.handed_off
         || op.waiting_on.as_deref() != Some(wait.id.as_str())
@@ -609,7 +601,7 @@ pub(super) fn pending_cancelled_observation(
         return Ok(false);
     }
     let admitted = super::tool_content::ToolIntent::from_operation(&op)?;
-    if admitted.call().name != WAIT_TOOL {
+    if !matches!(admitted.call().name.as_str(), WAIT_TOOL | super::retrieval::CONTROL_TOOL) {
         return Ok(false);
     }
     let Some(child) =
@@ -1126,7 +1118,7 @@ impl Catalog {
             &child.execution_id,
             child.revision,
             "child.report_ready",
-            json!({"sender_thread_id":child.child_thread_id,"outcome":child.report.as_ref().map(|r|r.outcome)}),
+            json!({"sender_thread_id":child.child_thread_id,"outcome":child.report.as_ref().map(|r|r.outcome),"atMs":observations::wall_time_ms()?}),
         )?;
         tx.commit()?;
         Ok(child)
@@ -1199,7 +1191,9 @@ impl Catalog {
     ) -> Result<Wait> {
         let context = &prepared.context;
         let operation_id = prepared.child_operation_id.as_str();
-        let child = self.require_child_parent(&context.run_id, operation_id)?;
+        let child = if prepared.tool_name == super::retrieval::CONTROL_TOOL {
+            self.require_retrieval_parent(&context.run_id, operation_id)?
+        } else { self.require_child_parent(&context.run_id, operation_id)? };
         let wait_id = format!("child-wait:{}", context.operation_id);
         let tx = self.db.transaction()?;
         let run: Run = record(&tx, "runs", &context.run_id)?;
@@ -1222,7 +1216,7 @@ impl Catalog {
             return Ok(wait);
         }
         fence(&run, self.epoch)?;
-        super::tool_content::require_job_invocation(&tx, &run, &op, context, WAIT_TOOL)?;
+        super::tool_content::require_job_invocation(&tx, &run, &op, context, &prepared.tool_name)?;
         if run.state.terminal()
             || run.cancel_requested
             || op.cancel_requested
@@ -1278,8 +1272,8 @@ impl Catalog {
         Ok(wait)
     }
     pub fn pending_child_wait(&self, run_id: &str) -> Result<Option<String>> {
-        self.db.query_row("SELECT json_extract(body,'$.waiting_on') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor')=?2 AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid LIMIT 1",
-            params![run_id,WAIT_TOOL],|row|row.get(0)).optional().map_err(Into::into)
+        self.db.query_row("SELECT json_extract(body,'$.waiting_on') FROM operations WHERE run_id=?1 AND json_extract(body,'$.executor') IN (?2,?3) AND json_extract(body,'$.phase')!='terminal' AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid LIMIT 1",
+            params![run_id,WAIT_TOOL,super::retrieval::CONTROL_TOOL],|row|row.get(0)).optional().map_err(Into::into)
     }
 
     pub fn inspect_child_wait(&self, wait_id: &str) -> Result<Wait> {
@@ -1304,9 +1298,9 @@ impl Catalog {
     pub(super) fn close_finished_parent_waits(&mut self) -> Result<()> {
         let tx = self.db.transaction()?;
         let operations: Vec<Operation> = {
-            let mut statement=tx.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(o.body,'$.executor')=?1 AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
+            let mut statement=tx.prepare("SELECT o.body FROM operations o JOIN runs r ON r.id=o.run_id WHERE json_extract(o.body,'$.executor') IN (?1,?2) AND json_extract(o.body,'$.phase')!='terminal' AND json_extract(o.body,'$.waiting_on') LIKE 'child-wait:%' AND json_extract(r.body,'$.state') IN ('completed','failed','cancelled')")?;
             let rows = statement
-                .query_map([WAIT_TOOL], |row| row.get::<_, String>(0))?
+                .query_map([WAIT_TOOL,super::retrieval::CONTROL_TOOL], |row| row.get::<_, String>(0))?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             rows.into_iter()
                 .map(|row| serde_json::from_str(&row).map_err(Into::into))
@@ -1314,7 +1308,7 @@ impl Catalog {
         };
         let mut released = Vec::new();
         for mut op in operations {
-            if op.executor.as_deref() != Some(WAIT_TOOL) || op.phase == OperationPhase::Terminal {
+            if !matches!(op.executor.as_deref(),Some(WAIT_TOOL | super::retrieval::CONTROL_TOOL)) || op.phase == OperationPhase::Terminal {
                 continue;
             }
             let run: Run = record(&tx, "runs", &op.run_id)?;

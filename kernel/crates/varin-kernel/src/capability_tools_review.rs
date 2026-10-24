@@ -59,9 +59,13 @@ impl ModelProvider for Provider {
                         ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
                     }, _ => None,
                 }).unwrap();
-                assert_eq!(index["groups"].as_array().unwrap().len(), 1);
-                assert_eq!(index["groups"][0]["namespace"], "extensions");
-                assert_eq!(index["groups"][0]["tools"], 1, "common tools stay out of the deferred index");
+                let groups = index["groups"].as_array().unwrap();
+                let extensions = groups.iter().find(|group| group["namespace"] == "extensions").unwrap();
+                assert_eq!(extensions["toolCount"], 1);
+                assert_eq!(extensions["directToolCount"], 0);
+                let collaboration = groups.iter().find(|group| group["namespace"] == "collaboration").unwrap();
+                assert!(collaboration["toolCount"].as_u64().unwrap() > 0);
+                assert_eq!(collaboration["directToolCount"], collaboration["toolCount"], "all-direct groups remain discoverable");
                 let group = request.view.history.iter().find_map(|item| match &item.content {
                     Content::ToolResult { result } if result.call_id == "describe" => match &result.completion {
                         ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
@@ -221,6 +225,10 @@ impl ToolExecutor for Target {
         _: &CancellationToken,
     ) -> ToolCompletion {
         self.calls.fetch_add(1, Ordering::SeqCst);
+        if call.arguments["mode"] == "not_dispatched" {
+            return ToolCompletion::not_dispatched(ExecutionError::new("fixture_unavailable", "Original target was not dispatched")
+                .with_details(json!({"available":["other"]})));
+        }
         ToolCompletion::Result {
             outcome: Outcome::Succeeded,
             effect: if call.arguments["mode"] == "unknown" {
@@ -229,7 +237,7 @@ impl ToolExecutor for Target {
                 Effect::Confirmed
             },
             content: varin_runtime::output::OutputBody {
-                data: json!({"actual":"fixture_effect"}),
+                data: json!({"actual":"fixture_effect","error":{"code":"opaque_payload_field","message":"Successful content can contain error"}}),
                 parts: vec![varin_runtime::output::OutputPart::Text {
                     text: "target output".into(),
                 }, varin_runtime::output::OutputPart::Media { media: varin_runtime::output::IncomingMedia {
@@ -243,7 +251,7 @@ impl ToolExecutor for Target {
 #[test]
 fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output() {
     for mode in [
-        "success", "denied", "stale", "missing", "unknown", "question", "invalid",
+        "success", "denied", "stale", "missing", "unknown", "question", "invalid", "not_dispatched",
         "direct_success", "direct_denied", "direct_invalid",
     ] {
         let root = std::env::temp_dir().join(format!("varin-disclosure-{}", uuid::Uuid::new_v4()));
@@ -309,7 +317,7 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
         let report = engine.run(input, CancellationToken::default()).unwrap();
         assert_eq!(
             target.calls.load(Ordering::SeqCst),
-            usize::from(matches!(mode, "success" | "unknown")),
+            usize::from(matches!(mode, "success" | "unknown" | "not_dispatched")),
             "{mode}: {:?}",
             report.history
         );
@@ -384,6 +392,21 @@ fn disclosure_invocation_uses_original_permissions_versions_receipts_and_output(
         }
         if mode == "invalid" {
             assert!(serde_json::to_string(&result.completion).unwrap().contains("mode required"));
+        }
+        if mode == "success" {
+            let ToolCompletion::Result {content,..}=&result.completion else {unreachable!()};
+            assert!(content.data.get("error").is_none(), "successful opaque data does not change the completion");
+        }
+        if mode == "not_dispatched" {
+            let ToolCompletion::Result {content,..}=&result.completion else {unreachable!()};
+            assert_eq!(content.data["error"]["code"],"fixture_unavailable");
+            assert_eq!(content.data["error"]["details"]["available"],json!(["other"]));
+            let operation_id=content.data["operationId"].as_str().unwrap();
+            let collection=db.lock().unwrap().prepare_content_collection(Arc::new(std::sync::atomic::AtomicBool::new(false)));
+            let varin_runtime::content::ContentCollectionAdmission::Ready(collection)=collection else {panic!("collector unavailable")};
+            assert_eq!(collection.run().status,varin_runtime::ContentCollectionStatus::Completed);
+            let saved=db.lock().unwrap().capture_call_completion(operation_id).unwrap().load().unwrap();
+            assert_eq!(saved.error().unwrap().details,Some(json!({"available":["other"]})));
         }
         assert_eq!(
             report.state,

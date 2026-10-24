@@ -139,8 +139,7 @@ impl Harness {
             .unwrap()
             .bind_child_dispatch(&run.id, prepared)
             .unwrap();
-        let binding = RequestBinding {
-            direct_tools: None,
+        let binding = RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -209,8 +208,7 @@ impl Harness {
                 ),
                 origin: origin.clone(),
             },
-            FrozenToolContext {
-                direct_tools: None,
+            FrozenToolContext { execution_environment: None, direct_tools: None,
                 child_dispatch: dispatch_ref,
                 resource_activations: vec![],
                 resource_checkpoint_id: None,
@@ -442,6 +440,7 @@ impl Harness {
             operation: Some(child.operation_id),
             cwd,
             binding: ToolBinding {
+                execution_environment: None,
                 resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: name.into(),
                 run_id: run,
@@ -637,6 +636,7 @@ fn actual_child_guardians_outlive_reports_and_tree_stop_precedes_fixed_results()
         }],
     };
     let mut binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "parent".into(),
         run_id: String::new(),

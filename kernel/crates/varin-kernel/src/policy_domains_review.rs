@@ -738,6 +738,7 @@ fn policy_todo_question_reopen_process_wait_and_explicit_resume_use_real_domains
         ToolKind::ProcessWrite,
     ]);
     let mut binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "process".into(),
         run_id: String::new(),
@@ -925,8 +926,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             schema_version: crate::questions::schema().version,
             arguments: json!({"questions":[{"id":"question","question":"Original question"}]}),
         };
-        let frozen = FrozenToolContext {
-            direct_tools: None,
+        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -1058,8 +1058,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             action_id: action_id.clone(),
             node_id: "plan".into(),
         };
-        let frozen = FrozenToolContext {
-            direct_tools: None,
+        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

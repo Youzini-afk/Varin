@@ -53,7 +53,7 @@ impl ReadPreparation {
                 completion: varin_runtime::execution::ToolCompletion::Result {
                     outcome: varin_runtime::Outcome::Failed,
                     effect: varin_runtime::Effect::None,
-                    content: json!({"error":error.to_string()}).into(),
+                    content: json!({"error":varin_runtime::execution::ExecutionError::from(error)}).into(),
                 },
             };
             json!({"operationId":self.operation_id,"resourceEpoch":self.record.result.resource_epoch,"executionOwner":self.record.result.execution_owner,"accepted":true,"executorStopped":true,"result":receipt})

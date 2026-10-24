@@ -71,6 +71,7 @@
       "!node_modules/@varin/*/{src,test,tests}/**/*",
       "!node_modules/@varin/web/{application-host,cli,scripts,kernel,dist,.application-host-types}/**/*",
       "!node_modules/**/*.{js,cjs,mjs,ts,cts,mts}.map",
+      "!node_modules/@vscode/ripgrep-*/bin/**/*",
       "!node_modules/**/*.d.{mts,cts}",
       "!node_modules/**/{openai,@anthropic-ai/sdk,typebox}/**/*.d.ts",
       "!node_modules/**/{openai,@anthropic-ai/sdk}/src/**/*"
@@ -91,6 +92,11 @@
       "zh-TW"
     ],
     "extraResources": [
+      {
+        "from": "resources/tools",
+        "to": "tools",
+        "filter": ["rg", "rg.exe", "ripgrep-LICENSE", "ripgrep-MIT-LICENSE.txt", "pcre2-LICENSE.txt"]
+      },
       {
         "from": "resources/web-dist",
         "to": "web-dist"

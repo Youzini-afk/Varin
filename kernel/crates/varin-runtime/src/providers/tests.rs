@@ -137,8 +137,7 @@ fn view(family: &str) -> RequestView {
                 leaf_id: None,
             },
         },
-        binding: RequestBinding {
-            direct_tools: None,
+        binding: RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -2294,8 +2293,10 @@ fn accepted_job_and_not_dispatched_receipts_keep_their_data_and_media_in_each_pr
             };
             result.completion = ToolCompletion::NotDispatched {
                 reason: "用户取消 🧭\noriginal request was never sent".into(),
+                error: None,
             };
-            let rejected = json!({"kind":"not_dispatched","reason":"用户取消 🧭\noriginal request was never sent"});
+            let rejected = json!({"kind":"not_dispatched","reason":"用户取消 🧭\noriginal request was never sent",
+                "error":{"code":"tool_not_dispatched","message":"用户取消 🧭\noriginal request was never sent"}});
             crate::execution::validate_history_pairs(&request.history).unwrap();
             let wire = media_provider(family, true).serialize(&request, None).unwrap().to_value();
             let mut receipts = Vec::new();

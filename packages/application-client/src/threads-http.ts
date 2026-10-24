@@ -147,7 +147,6 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     cancelRun: runId => post('run/cancel', { runId }), operation: operationId => post('operation', { operationId }),
     toolCalls: (operationId, signal) => post('operation/calls', { operationId }, signal),
     cancelOperation: operationId => post('operation/cancel', { operationId }),
-    finishRetrieval: operationId => post('operation/finish-retrieval', { operationId }),
     retrievalTrace: (operationId, cursor, signal) => post('operation/retrieval-trace', { operationId, ...cursor }, signal),
     retrievalFileTarget: (operationId, itemId, path, signal) => post('operation/retrieval-file', { operationId, itemId, path }, signal),
     decidePermission: input => post('permission/decide', input),

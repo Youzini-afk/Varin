@@ -79,12 +79,15 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 此默认只在工具参数入口应用，底层文件修改、结构分析等完整读取不受影响。
 `file_read` 也接受从 1 开始、包含末行的 `startLine` / `endLine`，可直接承接搜索命中的行号；省略末行读取至文件末尾。
 行范围与字节范围互斥，保留原换行与完整文件版本，返回实际字节位置和下一行。物理文件与固定来源使用相同的行选择语义。
-文件工具入口将 Windows 反斜杠转换为资源路径分隔符。缺失文件的版本记录“目标不存在”这一条件；
+文件工具入口按词法统一相对路径：Windows 反斜杠转换为资源分隔符，`.`、`./` 与省略查询路径都表示来源根，
+`src/./file.ts` 与 `src/file.ts` 使用相同资源身份。绝对路径、上级跳转和 symlink 仍进入原准入检查。
+`readVersion` 是条件写入的文件状态令牌，应原样传回；`objectHash` 是内容对象身份。缺失文件的版本记录“目标不存在”这一条件；
 目录读取返回 `not_a_file`，目录内容通过 `file_list` 获取。
 `file_write` 创建新文件时可省略 `readVersion`；替换已有文件与文本编辑使用读取所得版本。
 `mode: create` 明确要求目标不存在，`mode: replace` 要求目标存在且提供版本；省略 mode 时按观察到的状态写入。
 缺失版本仍校验“目标不存在”，其他写入者先创建文件后，旧缺失版本发生冲突。文本修改准备在一次读取中
 取得正文和版本状态，提交时沿原 `file.apply` 校验当前文件，工具回执直接提供结构化 `state`；响应帧大小只约束发往调用方的正文。
+正常模型回执省略内部 `reconciled` 字段；是否应用由实际写入状态表达，原恢复 journal 继续保存协调事实。
 `file_list` 默认列当前目录的内容，不把被查询目录自身混入条目；`scannedFiles` 统计实际遇到的普通文件。
 `recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；游标绑定来源及生效过滤条件，拒绝格式错误或换查询续读，页面大小可调整。实时目录变化后仍按路径继续，非固定快照。
@@ -113,6 +116,10 @@ Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 
 自动解码先看 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；`encodingSource` 标明依据，不把代码页默认值伪称为检测结果。
 已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页保留字节并提示处理方式。
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
+`process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
+空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
+应用的响应继续读原进程输出。退出与输出收尾分别观察：`outputComplete:false` 保留游标，输出错误显示原错误，
+`outputComplete:true` 也仍可能有当前页尚未读到的后续内容。
 Windows 启动时将规范化路径转换为子进程可用的目录表示，内部资源身份仍保留规范化路径。
 进程已退出时，输入和 resize 明确返回 `process_exited`；正在停止时返回 `process_stopping`。
 
@@ -120,6 +127,22 @@ Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epo
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。
 目录解析或进程受理失败时，Storage 用原进程意图记录确认是否尚未启动；确认未启动的失败返回 `not_dispatched`，
 供模型修正参数后继续。`cwd` 使用选中 Source 下的相对目录，空字符串和 `.` 表示根目录；入口统一处理 `./` 和路径分隔符。
+
+### Shell 与基础环境
+
+实际执行 Host 的 `platform/execution-environment.ts` 复用终端 Shell 发现与环境解析。模型请求准备时冻结默认 Shell、
+可选程序和基础 PATH；模型只收到平台、Shell ID 与可执行路径。当前请求的启动使用同一快照，设置变化在下一请求生效。
+受管来源查询目标 Host，命令、PATH 与目标程序身份不会从协调端拼接到远端。
+
+`process_spawn.shellCommand` 使用公布的默认解释器；可选 `shell` 按实际候选选择。Windows Agent auto 优先有效显式环境选择，
+然后 Git Bash、pwsh、Windows PowerShell、CMD；WSL 的 bash 启动入口不属于本机 Shell 候选。
+终端面板保留自己的默认偏好和 auto 顺序。`command + args` 继续直接启动程序，不能与 shellCommand/shell 混用。
+非交互命令按 Shell 家族传递正文且不加载个人 Profile；启动回执记录实际解释器。程序失效时返回 `shell_unavailable`，
+不更换语言重新执行正文。Windows PowerShell 5.1 的 curl 别名需要使用 `curl.exe` 才能接收 curl 参数。
+
+Host 将用户及系统 PATH 与产品工具目录统一供给 Agent、终端和 Node 脚本；用户已有工具保持优先。
+`env` 显式提供时仍表示完整环境，空数组保持空环境。原生 ripgrep 来自锁定的目标平台 `@vscode/ripgrep-*` 包，
+桌面打包到 asar 外的 `resources/tools`，通过普通 PATH 可直接启动，不依赖 Node shim 或其他产品安装目录。
 
 grant retirement 与 revocation 分开：前者在真实 drain 后关闭旧 caller，后者继续拒绝。Operation-owned grant 可以长于 Run，
 直到自己的 reader、process 和回执归档完成。原来源仅支持精确限定的 successor 读取，不继承全部旧控制权限。

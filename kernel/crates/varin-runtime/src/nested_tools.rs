@@ -17,6 +17,8 @@ pub struct NestedToolInput {
 pub struct NestedToolReceipt {
     pub operation_id: String,
     pub completion: ToolCompletion,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<ExecutionError>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct NestedToolSummary {
@@ -382,6 +384,7 @@ impl NestedTools {
         drop(result);
         Ok(NestedToolReceipt {
             operation_id: entry.context.operation_id.clone(),
+            error: receipt.completion.error(),
             completion: receipt.completion.clone(),
         })
     }
@@ -459,8 +462,7 @@ mod tests {
                     origin: origin.clone(),
                 },
                 ExecutorOwner::Kernel,
-                Arc::new(FrozenToolContext {
-                    direct_tools: None,
+                Arc::new(FrozenToolContext { execution_environment: None, direct_tools: None,
                     run_id: "run".into(),
                     origin,
                     child_dispatch: None,

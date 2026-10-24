@@ -153,6 +153,72 @@ async function originalProcessRoot(f: Awaited<ReturnType<typeof fixture>>, runId
 }
 
 const model = { providerId: 'fixture-provider', modelId: 'fixture-model' };
+it('freezes the published Shell for a request and applies changed Host defaults at the following request', async () => {
+  let serial = 0;
+  let selected = '';
+  let initial = '';
+  let alternate = '';
+  let hasCmd = false;
+  const script = (id: string) => ['pwsh', 'powershell'].includes(id) ? "[Console]::Out.WriteLine('shell-evidence quoted text')"
+    : id === 'cmd' ? 'echo shell-evidence quoted text' : id === 'nu' ? "print 'shell-evidence quoted text'" : "printf '%s\\n' 'shell-evidence quoted text'";
+  const f = await fixture(async (body, response) => {
+    serial++;
+    const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
+    const previous = outputs.at(-1);
+    if (serial === 1) {
+      expect(JSON.stringify(body.input)).toContain('Default command shell:');
+      tool(response, 'process_spawn', { shellCommand: script(initial), cwd: '目录 with spaces', waitMs: 10_000 }, serial);
+    } else if (serial === 2) {
+      expect(JSON.parse(responsesMetadataText(previous?.output))).toMatchObject({ kind: 'job_accepted', content: { shell: { id: initial }, status: 'exited', exitCode: 0 } });
+      // This request was already prepared with `initial`. Changing settings now
+      // must not send its already-written command to a different interpreter.
+      selected = alternate;
+      tool(response, 'process_spawn', { shellCommand: script(initial), waitMs: 10_000 }, serial);
+    } else if (serial === 3) {
+      expect(JSON.parse(responsesMetadataText(previous?.output))).toMatchObject({ kind: 'job_accepted', content: { shell: { id: initial }, exitCode: 0 } });
+      const facts = JSON.stringify(body.input);
+      expect(facts).toContain('Default command shell:');
+      const env = await f.runtime.executionEnvironment();
+      expect(facts).toContain(env.shells.find(shell => shell.id === alternate)!.executable.replaceAll('\\', '\\\\'));
+      tool(response, 'process_spawn', { shellCommand: script(alternate), waitMs: 10_000 }, serial);
+    } else if (serial === 4) {
+      expect(JSON.parse(responsesMetadataText(previous?.output))).toMatchObject({ kind: 'job_accepted', content: { shell: { id: alternate }, exitCode: 0 } });
+      if (hasCmd) batch(response, ['pipe', 'pty'].map(mode => ({ id: `cmd-${mode}`, name: 'process_spawn', args: {
+        shell: 'cmd', shellCommand: 'if "quoted text"=="quoted text" (echo shell-evidence) else (exit /b 23)', mode, waitMs: 10_000,
+      } })));
+      else tool(response, 'process_spawn', { shell: 'unavailable-fixture-shell', shellCommand: 'never-executed' }, serial);
+    } else if (hasCmd && serial === 5) {
+      for (const mode of ['pipe', 'pty']) {
+        expect(JSON.parse(responsesMetadataText(outputs.find(output => output.call_id === `cmd-${mode}`)?.output))).toMatchObject({
+          kind: 'job_accepted', content: { shell: { id: 'cmd' }, exitCode: 0 },
+        });
+      }
+      tool(response, 'process_spawn', { shell: 'unavailable-fixture-shell', shellCommand: 'never-executed' }, serial);
+    } else {
+      expect(JSON.parse(responsesMetadataText(previous?.output))).toMatchObject({ error: { code: 'shell_unavailable', details: { requestedShell: 'unavailable-fixture-shell' } } });
+      done(response);
+    }
+  });
+  const environment = await f.runtime.executionEnvironment();
+  hasCmd = environment.shells.some(shell => shell.id === 'cmd');
+  initial = environment.defaultShell!;
+  alternate = environment.shells.find(shell => shell.id !== initial && ['pwsh', 'powershell', 'bash', 'sh', 'cmd'].includes(shell.id))?.id ?? initial;
+  selected = initial;
+  f.runtime.executionEnvironment = async () => ({ ...environment, defaultShell: selected });
+  f.kernel.setContextOwner({ close() {}, query: async (query, signal) => ({ status: 'ready' as const,
+    ...(query.action === 'execution_environment' ? { environment: await f.runtime.executionEnvironmentForSource((await f.runtime.launch(query.runId, signal))?.selection.source, signal) } : {}) }) });
+  await fs.mkdir(path.join(f.workspace, '目录 with spaces'));
+  await fs.writeFile(path.join(f.workspace, '目录 with spaces', 'anchor.txt'), 'source directory');
+  const identity = await f.api.create('shell-selection');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' },
+    workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId,
+    content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const receipt = await f.api.submit({ ...identity, key: 'shell-contract', expectedHead: null, text: 'Run commands with the published Shell', model, source: prepared.source });
+  await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 30_000 }).toMatch(/^(completed|failed|cancelled)$/);
+  expect(f.launchErrors).toEqual([]);
+  expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });
+  expect(serial).toBe(hasCmd ? 6 : 5);
+}, 45_000);
 function batch(response: ServerResponse, calls: Array<{ name: string; args: Record<string, unknown>; id: string }>) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: calls.map(call => ({
@@ -213,10 +279,16 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       readResult = responsesMetadataText(output?.output);
       // New observation registration must obey the same explicit revoke as reads.
       if (revoked !== 'none') tool(response, 'wait_process', { processId }, 4);
-      else tool(response, 'process_resize', { processId, cols: 100, rows: 30 }, 4);
+      else tool(response, 'tool_describe', { name: 'process_resize' }, 4);
+    } else if (serial === 5 && revoked === 'none') {
+      const described = JSON.parse(responsesMetadataText(output?.output));
+      tool(response, 'tool_invoke', { reference: described.content.reference, arguments: { processId, cols: 100, rows: 30 } }, 5);
     } else {
-      if (revoked === 'none') expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched', reason: expect.stringContaining('The process has exited') });
+      if (revoked === 'none') expect(JSON.parse(responsesMetadataText(output?.output))).toMatchObject({ kind: 'result', outcome: 'failed',
+        error: { code: 'process_exited', message: expect.stringContaining('The process has exited') },
+        content: { completion: { kind: 'not_dispatched', reason: expect.stringContaining('The process has exited') } } });
       else expect(JSON.parse(responsesMetadataText(output?.output))).toEqual({ kind: 'not_dispatched',
+        error: { code: revoked === 'original' ? 'unauthorized' : 'process', message: expect.any(String) },
         reason: revoked === 'original'
           ? expect.stringContaining('original process authority was revoked')
           : expect.stringContaining('process observation cancelled') });
@@ -242,7 +314,8 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
     // Provider callback failures are rethrown by the shared fixture hook. Stop
     // polling on terminal failure so it cannot be hidden behind a 15-second wait.
     expect(f.launchErrors).toEqual([]);
-    expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });
+    const completed = await f.runtime.run(receipt.run_id);
+    expect(completed, JSON.stringify({ completed, serial, failure: completed.state === 'failed' ? await f.runtime.runFailure(receipt.run_id) : null })).toMatchObject({ state: 'completed' });
     if (revoked === 'none') {
       expect(JSON.parse(readResult)).toMatchObject({ kind: 'result', outcome: 'succeeded', effect: 'none' });
       const observed = JSON.parse(readResult) as { content: { chunks: Array<{ text: string; bytesBase64?: string }> } };
@@ -255,13 +328,15 @@ it.each(['none', 'original', 'current'] as const)('durable wait resumes with exa
       const foreignRun = await f.api.submit({ ...other, key: 'foreign', expectedHead: null, text: 'observe foreign process', model, source: prepared.source });
       await expect.poll(async () => (await f.runtime.run(foreignRun.run_id)).state, { timeout: 10_000 }).toBe('completed');
       expect(JSON.parse(foreignResult)).toEqual({ kind: 'not_dispatched',
+        error: { code: 'process', message: expect.stringContaining('not an accepted native Job of this Thread and branch') },
         reason: expect.stringContaining('not an accepted native Job of this Thread and branch') });
       expect((await f.runtime.operation(processId)).outcome).toBe('succeeded');
     } else {
       expect(JSON.parse(readResult)).toEqual({ kind: 'not_dispatched',
+        ...(revoked === 'original' ? { error: { code: 'unauthorized', message: expect.stringContaining('original process authority was revoked') } } : {}),
         reason: revoked === 'original'
           ? expect.stringContaining('original process authority was revoked')
-          : expect.stringContaining('operation cancelled') });
+          : 'cancelled' });
       expect(readResult).not.toContain(Buffer.from('process-wait-real-output').toString('base64'));
     }
   } finally {

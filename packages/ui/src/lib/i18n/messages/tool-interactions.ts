@@ -1,4 +1,8 @@
 const rows = [
+  ['chat.tools.effect.nextRequest', 'From the next model request', '从下一次模型请求生效', '從下一次模型請求生效'],
+  ['chat.tools.inputSent', 'Input sent', '输入已发送', '輸入已傳送'],
+  ['chat.tools.inputReceiptHint', 'Confirms writing to the input channel. Read process output to observe the application response.', '此回执确认输入已写入终端或管道；程序的响应请查看进程输出。', '此回執確認輸入已寫入終端或管道；程式的回應請查看程序輸出。'],
+  ['chat.tools.exitedOutputPending', 'Process exited; output is still being collected', '进程已退出，输出仍在收集', '程序已結束，輸出仍在收集'],
   ['chat.tools.clearChoice', 'Clear choice', '取消所选项', '取消所選項'],
   ['chat.tools.documentTarget', 'Document output', '文档输出位置', '文件輸出位置'],
   ['chat.tools.refresh', 'Refresh', '刷新', '重新整理'],

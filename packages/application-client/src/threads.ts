@@ -456,7 +456,6 @@ export interface ThreadsAPI {
   operation(operationId: string): Promise<Operation>;
   toolCalls(operationId: string, signal?: AbortSignal): Promise<import('@varin/protocol').OperationCallSummary[]>;
   cancelOperation(operationId: string): Promise<OperationCancellationReceipt>;
-  finishRetrieval(operationId: string): Promise<{ accepted: boolean }>;
   retrievalTrace(operationId: string, cursor?: { headId: string; beforeId: string }, signal?: AbortSignal): Promise<ThreadRetrievalTrace>;
   retrievalFileTarget(operationId: string, itemId: string, path: string, signal?: AbortSignal): Promise<ThreadFileTarget>;
   decidePermission(input: ThreadIdentity & { operationId: string; permissionId: string; decision: 'allow_once' | 'allow_always' | 'deny' }): Promise<Operation>;

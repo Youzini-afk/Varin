@@ -50,15 +50,15 @@ export const ChatExploreCard: React.FC<{
 }> = ({ call, cwd, execution, result, generating, rawDetails, renderTool }) => {
   const { t } = useI18n();
   const presentation = React.useMemo(() => explorePresentation(execution, result, generating), [execution, result, generating]);
-  const { phase, progress, snippets, details, running, returnedFiles } = presentation;
+  const { phase, progress, snippets, details, running, stopping: stopRequested, returnedFiles } = presentation;
   const contentId = React.useId();
   const views = React.useContext(ExploreViews);
   const activities = progress?.activities ?? EMPTY_ACTIVITIES;
   const [view] = React.useState(() => views?.get(call.id) ?? { expanded: false, sequence: activities.at(-1)?.sequence ?? -1 });
   const [expanded, setExpanded] = React.useState(view.expanded);
   const [selectedKey, setSelectedKey] = React.useState<string>();
-  const [finishing, setFinishing] = React.useState(false);
-  const [finishError, setFinishError] = React.useState<string>();
+  const [stopping, setStopping] = React.useState(false);
+  const [stopError, setStopError] = React.useState<string>();
   const selected = snippets?.find(snippet => snippetKey(snippet) === selectedKey);
   const reducedMotion = usePrefersReducedMotion();
   const conversation = useConversationPresentation();
@@ -77,13 +77,12 @@ export const ChatExploreCard: React.FC<{
   const toggle = () => { view.expanded = !expanded; setExpanded(view.expanded); };
   const open = (path: string, line: number) => conversation.openFile(call.id, path, line);
   const seconds = (ms: number) => t('chat.explore.seconds', { count: (ms / 1000).toFixed(1) });
-  const finish = async () => {
-    if (!execution?.operationId || finishing) return;
-    setFinishing(true); setFinishError(undefined);
+  const stop = async () => {
+    if (!execution?.operationId || stopping || stopRequested) return;
+    setStopping(true); setStopError(undefined);
     try {
-      const result = await conversation.api.finishRetrieval(execution.operationId);
-      if (!result.accepted) { setFinishing(false); setFinishError(t('chat.explore.finishUnavailable')); }
-    } catch { setFinishing(false); setFinishError(t('chat.explore.finishUnavailable')); }
+      await conversation.api.cancelOperation(execution.operationId);
+    } catch { setStopping(false); setStopError(t('chat.explore.stopUnavailable')); }
   };
   const diagnostics = Array.isArray(details?.diagnostics) ? details.diagnostics.flatMap(item => {
     const value = exploreRecord(item);
@@ -170,18 +169,16 @@ export const ChatExploreCard: React.FC<{
     </div>
     <footer className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/40 px-3 py-1.5 typography-micro text-muted-foreground">
       <span role="status" className={cn('min-w-0 flex-1', warning && (phase === 'failed' || phase === 'invalid' ? 'text-[var(--status-error)]' : 'text-[var(--status-warning)]'))}>
-        {warning || running ? <>{t(running && !progress ? 'chat.explore.investigating' : `chat.explore.phase.${phase}`)}{showResults || running && progress?.receivedSnippets ? ' · ' : ''}</> : null}
+        {warning || running ? <>{t(running && (stopRequested || stopping) ? 'chat.explore.stopping' : running && !progress ? 'chat.explore.investigating' : `chat.explore.phase.${phase}`)}{showResults || running && progress?.receivedSnippets ? ' · ' : ''}</> : null}
         {showResults ? t('chat.explore.returned', { snippets: snippets.length, files: returnedFiles ?? 0 })
           : running && progress?.receivedSnippets ? t('chat.explore.received', { snippets: progress.receivedSnippets, files: progress.receivedFiles })
             : !warning && !running ? t(`chat.explore.phase.${phase}`) : null}
       </span>
-      {finishError ? <span role="alert">{finishError}</span> : null}
-      {running && execution?.operationId && !conversation.readOnly ? <button type="button" disabled={finishing}
-        className="shrink-0 hover:text-foreground disabled:opacity-50" onClick={() => void finish()}>
-        {t(finishing ? 'chat.explore.finishing' : 'chat.explore.finish')}
+      {stopError ? <span role="alert">{stopError}</span> : null}
+      {running && execution?.operationId && !conversation.readOnly ? <button type="button" disabled={stopping || stopRequested}
+        className="shrink-0 hover:text-foreground disabled:opacity-50" onClick={() => void stop()}>
+        {t(stopping || stopRequested ? 'chat.explore.stopping' : 'chat.explore.stop')}
       </button> : null}
-      {running && execution?.operationId && !conversation.readOnly ? <button type="button" className="shrink-0 hover:text-foreground"
-        onClick={() => void conversation.api.cancelOperation(execution.operationId!).catch(() => setFinishError(t('chat.explore.finishUnavailable')))}>{t('chat.explore.cancel')}</button> : null}
       <button type="button" className="ml-auto inline-flex shrink-0 items-center gap-0.5 hover:text-foreground" onClick={toggle}
         aria-expanded={expanded} aria-controls={contentId}>
         {t(expanded ? 'chat.explore.collapse' : 'chat.explore.expand')}

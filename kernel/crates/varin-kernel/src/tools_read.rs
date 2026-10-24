@@ -204,7 +204,7 @@ impl KernelToolExecutor {
                     cancel,
                 )
                 .map_err(|failure| {
-                    ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                    ExecutionError::from(failure.error)
                 })?;
             let bridge = self.language.as_ref().ok_or_else(|| {
                 ExecutionError::new("structure_unavailable", "Structure service is unavailable")
@@ -214,7 +214,7 @@ impl KernelToolExecutor {
         })();
         let outline = match outline {
             Ok(value) => value,
-            Err(error) => json!({"status":"unavailable","error":error.code,"message":error.message}),
+            Err(error) => json!({"status":"unavailable","error":error}),
         };
         if cancel.is_cancelled() || outline["status"] == "cancelled" {
             return ToolCompletion::Result {
@@ -227,7 +227,7 @@ impl KernelToolExecutor {
         read.unit = None;
         if outline["status"] == "stale" {
             return ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None,
-                content: json!({"status":"stale","error":"structure_revision_changed","message":outline["message"]}).into() };
+                content: json!({"status":"stale","error":ExecutionError::new("structure_revision_changed", outline["message"].as_str().unwrap_or("The source changed; repeat the unit selection before continuing"))}).into() };
         }
         if outline["status"] != "ready" {
             return self.unit_plain_read(context, call, args, contract, cancel, outline);
@@ -238,7 +238,7 @@ impl KernelToolExecutor {
             .is_some_and(|revision| outline["revision"] != revision)
         {
             return ToolCompletion::Result {outcome:Outcome::Failed,effect:Effect::None,
-                content:json!({"status":"stale","error":"structure_revision_changed","message":"The source changed; repeat the unit selection before continuing"}).into()};
+                content:json!({"status":"stale","error":ExecutionError::new("structure_revision_changed", "The source changed; repeat the unit selection before continuing")}).into()};
         }
         let mut candidates = outline["items"]
             .as_array()
@@ -298,11 +298,13 @@ impl KernelToolExecutor {
         ) else {
             return ToolCompletion::NotDispatched {
                 reason: "Structure result omitted exact source bytes".into(),
+                error: None,
             };
         };
         if end < start || args.offset > end - start {
             return ToolCompletion::NotDispatched {
                 reason: "Unit offset is outside the selected source range".into(),
+                error: None,
             };
         }
         read.offset = start + args.offset;
@@ -326,7 +328,7 @@ impl KernelToolExecutor {
                     outline["contentHash"].as_str().unwrap_or_default()
                 )
             {
-                return ToolCompletion::Result{outcome:Outcome::Failed,effect:Effect::None,content:json!({"status":"stale","error":"structure_source_changed","message":"The file changed between structure analysis and reading; select the unit again"}).into()};
+                return ToolCompletion::Result{outcome:Outcome::Failed,effect:Effect::None,content:json!({"status":"stale","error":ExecutionError::new("structure_source_changed", "The file changed between structure analysis and reading; select the unit again")}).into()};
             }
             let next = content.data["content"]["nextOffset"]
                 .as_u64()
@@ -351,8 +353,8 @@ impl KernelToolExecutor {
         // A unit-relative continuation must never silently become a file-relative page.
         if unit.revision.is_some() || args.offset != 0 {
             return ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None,
-                content: json!({"status":"unavailable","error":"structure_continuation_unavailable",
-                    "message":"The selected unit cannot be continued; repeat selection or use a plain file range", "structure":reason}).into() };
+                content: json!({"status":"unavailable","error":ExecutionError::new("structure_continuation_unavailable",
+                    "The selected unit cannot be continued; repeat selection or use a plain file range"), "structure":reason}).into() };
         }
         let mut read = args.clone();
         read.unit = None;
@@ -425,10 +427,10 @@ impl KernelToolExecutor {
                         if outcome == Outcome::Succeeded && merged { observations.insert(key,value.clone()); }
                         Ok(if selected.is_some() && merged {project_range(value,&original)}else{value})
                     },
-                    ToolCompletion::NotDispatched {reason} => Err(ExecutionError::new("read_not_dispatched",reason)),
+                    ToolCompletion::NotDispatched { reason, error } => Err(error.unwrap_or_else(||ExecutionError::new("read_not_dispatched",reason))),
                     _ => Err(ExecutionError::new("invalid_read_result","File read returned a job instead of its content")),
                 }
-            })().unwrap_or_else(|error|json!({"status":if error.code=="cancelled" {"cancelled"} else {"failed"},"error":error.code,"message":error.message}));
+            })().unwrap_or_else(|error|json!({"status":if error.code=="cancelled" {"cancelled"} else {"failed"},"error":error}));
             results.push(json!({"index":index,"request":request,"result":result}));
         }
         let good = results

@@ -64,6 +64,7 @@ fn fork_rejects_an_open_tool_exchange_but_accepts_its_completed_boundary() {
                 call_id: "call-1".into(),
                 completion: ToolCompletion::NotDispatched {
                     reason: "fixture".into(),
+                    error: None,
                 },
             },
         },

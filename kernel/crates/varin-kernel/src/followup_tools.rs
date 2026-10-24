@@ -383,6 +383,6 @@ impl ToolExecutor for FollowupTools {
                 }
             }
         })();
-        result.unwrap_or_else(|e| ToolCompletion::NotDispatched { reason: e.message })
+        result.unwrap_or_else(|e| ToolCompletion::not_dispatched(e))
     }
 }

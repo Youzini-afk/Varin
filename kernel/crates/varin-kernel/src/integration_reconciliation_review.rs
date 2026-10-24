@@ -191,8 +191,7 @@ fn replay_scenario(tail_phase: Option<&str>,exchange:bool) {
         ancestor_id: None,
         leaf_id: Some(run.input_id.clone()),
     };
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

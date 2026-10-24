@@ -201,7 +201,7 @@ impl<M> crate::execution::ToolCompletion<M> {
     ) -> Result<crate::execution::ToolCompletion<N>, E> {
         use crate::execution::ToolCompletion as C;
         Ok(match self {
-            C::NotDispatched { reason } => C::NotDispatched { reason },
+            C::NotDispatched { reason, error } => C::NotDispatched { reason, error },
             C::Result {
                 outcome,
                 effect,

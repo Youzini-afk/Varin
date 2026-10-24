@@ -132,8 +132,6 @@ impl ToolExecutor for MessageTools {
                 .completion
                 .ok_or_else(|| error("send completion missing"))
         })();
-        result.unwrap_or_else(|failure| ToolCompletion::NotDispatched {
-            reason: failure.message,
-        })
+        result.unwrap_or_else(|failure| ToolCompletion::not_dispatched(failure))
     }
 }

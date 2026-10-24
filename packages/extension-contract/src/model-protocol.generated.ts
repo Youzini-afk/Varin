@@ -1,5 +1,5 @@
 // Generated from kernel/protocol/schema.json. Do not hand-edit.
-import type { Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from './nested-tools.generated.js';
+import type { ExecutionError, Outcome, Effect, Lifetime, OutputBody, ResolvedMedia, ContentProvenance, LaunchTool } from './nested-tools.generated.js';
 
 export interface HistoryRange { branch_id:string; ancestor_id:string|null; leaf_id:string|null }
 
@@ -7,13 +7,13 @@ export interface ModelOpaqueItem { connection_identity:string; family:string; ad
 
 export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }
 
-export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
+export type ModelToolCompletion = {kind:'not_dispatched';reason:string;error?:ExecutionError} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
 
 export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};
 
 export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
 
-export interface RequestBinding {direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+export interface RequestBinding {execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
 export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 

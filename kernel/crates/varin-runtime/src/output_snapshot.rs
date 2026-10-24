@@ -265,6 +265,7 @@ mod tests {
         for completion in [
             ToolCompletion::NotDispatched {
                 reason: "cancelled_before_dispatch".into(),
+                error: None,
             },
             ToolCompletion::Result {
                 outcome: crate::Outcome::Succeeded,
@@ -311,8 +312,7 @@ mod tests {
                     step: 1,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding {
-                    direct_tools: None,
+                binding: RequestBinding { execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,

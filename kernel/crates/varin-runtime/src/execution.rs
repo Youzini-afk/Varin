@@ -22,6 +22,8 @@ pub struct ExecutionError {
     pub message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 impl ExecutionError {
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
@@ -29,8 +31,10 @@ impl ExecutionError {
             code: code.into(),
             message: message.into(),
             tool_name: None,
+            details: None,
         }
     }
+    pub fn with_details(mut self, details: Value) -> Self { self.details = Some(details); self }
 }
 
 /// Cancellation is a control fact, not a synthetic tool-effect receipt.
@@ -374,6 +378,8 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_environment: Option<Value>,
     /// Direct model functions selected for this request; None retains earlier frozen requests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direct_tools: Option<Vec<String>>,
@@ -637,7 +643,7 @@ impl From<ExecutionError> for ModelFailure {
 }
 impl From<ModelFailure> for ExecutionError {
     fn from(error: ModelFailure) -> Self {
-        Self { code: error.code, message: error.message, tool_name: error.tool_name }
+        Self { code: error.code, message: error.message, tool_name: error.tool_name, details: None }
     }
 }
 
@@ -881,7 +887,11 @@ pub struct ToolContract {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ToolCompletion<M = ResolvedMedia> {
     /// Executor evidence that no external request or side effect was sent.
-    NotDispatched { reason: String },
+    NotDispatched {
+        reason: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<ExecutionError>,
+    },
     Result {
         outcome: Outcome,
         effect: Effect,
@@ -898,6 +908,10 @@ pub enum ToolCompletion<M = ResolvedMedia> {
     },
 }
 impl ToolCompletion {
+    pub fn not_dispatched(error: ExecutionError) -> Self {
+        if error.code == "cancelled" { return Self::NotDispatched { reason: "cancelled".into(), error: None }; }
+        Self::NotDispatched { reason: error.to_string(), error: Some(error) }
+    }
     pub(crate) fn cancelled() -> Self {
         Self::Result {
             outcome: Outcome::Cancelled,
@@ -906,6 +920,9 @@ impl ToolCompletion {
         }
     }
     fn failure(code: &str, message: &str, effect: Effect) -> Self {
+        Self::failed(&ExecutionError::new(code,message),effect)
+    }
+    pub fn failed(error: &ExecutionError, effect: Effect) -> Self {
         Self::Result {
             outcome: if effect == Effect::Unknown {
                 Outcome::Indeterminate
@@ -913,7 +930,7 @@ impl ToolCompletion {
                 Outcome::Failed
             },
             effect,
-            content: serde_json::json!({"error":code, "message":message}).into(),
+            content: serde_json::json!({"error":error}).into(),
         }
     }
 }
@@ -946,8 +963,30 @@ impl ToolExecutionReceipt {
         Self {
             completion: ToolCompletion::NotDispatched {
                 reason: reason.into(),
+                error: None,
             },
             executor_stopped: true,
+        }
+    }
+}
+
+impl<M> ToolCompletion<M> {
+    /// Project only an original failure state. Successful opaque tool data is never
+    /// reclassified because it happens to contain a property named `error`.
+    pub fn error(&self) -> Option<ExecutionError> {
+        match self {
+            Self::NotDispatched { reason, error } if reason != "cancelled" => Some(error.clone()
+                .unwrap_or_else(||ExecutionError::new("tool_not_dispatched", reason))),
+            Self::Result { outcome: Outcome::Failed | Outcome::Indeterminate, content, .. } => {
+                let data=&content.data;
+                let structured=data.get("error").filter(|value|value.is_object());
+                let code=structured.and_then(|value|value.get("code")).or_else(||data.get("code")).and_then(Value::as_str).unwrap_or("tool_failed");
+                let message=structured.and_then(|value|value.get("message")).or_else(||data.get("message")).or_else(||data.get("reason")).and_then(Value::as_str)
+                    .or_else(||data.get("error").and_then(Value::as_str)).unwrap_or("The tool failed. Original completion data and output are retained.");
+                Some(ExecutionError { code:code.into(), message:message.into(), tool_name:None,
+                    details:structured.and_then(|value|value.get("details")).cloned() })
+            },
+            _=>None,
         }
     }
 }
@@ -994,6 +1033,8 @@ impl ToolOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_environment: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direct_tools: Option<Vec<String>>,
     pub child_dispatch: Option<Value>,
@@ -2185,7 +2226,7 @@ impl<
                             calls,
                             &mut history,
                             &recovered_results,
-                            ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                            ToolCompletion::failed(&error, Effect::None),
                         )?;
                         history_cursor = history.last().map(|item| item.id.clone());
                     }
@@ -3041,6 +3082,7 @@ impl<
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
+            execution_environment: snapshot.view.binding.execution_environment.clone(),
             direct_tools: snapshot.view.binding.direct_tools.clone(),
             child_dispatch: snapshot.view.binding.child_dispatch.clone(),
             resource_activations: snapshot.view.binding.resource_activations.clone(),
@@ -3084,7 +3126,7 @@ impl<
                         input,
                         snapshot,
                         call,
-                        ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                        ToolCompletion::failed(&error, Effect::None),
                     ));
                     continue;
                 }
@@ -3102,7 +3144,7 @@ impl<
                             if operation_cancel.is_cancelled() {
                                 ToolCompletion::cancelled()
                             } else {
-                                ToolCompletion::failure(&error.code, &error.message, Effect::None)
+                                ToolCompletion::failed(&error, Effect::None)
                             },
                         ));
                         continue;
@@ -3143,9 +3185,7 @@ impl<
                                     input,
                                     snapshot,
                                     call,
-                                    ToolCompletion::failure(
-                                        &error.code,
-                                        &error.message,
+                                    ToolCompletion::failed(&error,
                                         Effect::None,
                                     ),
                                 ));
@@ -3251,9 +3291,7 @@ impl<
                                     if operation_cancel.is_cancelled() {
                                         ToolCompletion::cancelled()
                                     } else {
-                                        ToolCompletion::failure(
-                                            &error.code,
-                                            &error.message,
+                                        ToolCompletion::failed(&error,
                                             Effect::None,
                                         )
                                     },
@@ -3277,7 +3315,7 @@ impl<
                                 input,
                                 snapshot,
                                 call,
-                                ToolCompletion::failure(&error.code, &error.message, Effect::None),
+                                ToolCompletion::failed(&error, Effect::None),
                             ));
                         }
                         let tool = AdmittedTool {

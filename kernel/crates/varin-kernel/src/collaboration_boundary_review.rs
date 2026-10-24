@@ -105,6 +105,7 @@ fn boundary(revoke_before: bool, policy: bool) {
         crate::process::ProcessControlRegistry::default(),
     );
     let binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "parent".into(),
         run_id: f.context.run_id.clone(),
@@ -140,8 +141,7 @@ grant_id: "parent".into(),
         schema_version: "2".into(),
         arguments: serde_json::to_value(f.input).unwrap(),
     };
-    let frozen = FrozenToolContext {
-        direct_tools: None,
+    let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         child_dispatch: db.lock().unwrap().launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,

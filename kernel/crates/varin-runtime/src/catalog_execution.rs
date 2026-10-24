@@ -39,7 +39,7 @@ fn safe_run_failure(failure: &ExecutionError) -> ExecutionError {
     };
     let tool_name = matches!(code, "tool_not_declared" | "unknown_tool_schema" | "stale_tool_schema" | "invalid_tool_call" | "invalid_tool_arguments")
         .then(|| failure.tool_name.as_deref().and_then(crate::tool_disclosure::diagnostic_tool_name)).flatten();
-    ExecutionError { code: code.into(), message: tool_name.as_ref().map(|name| format!("Tool `{name}`: {message}")).unwrap_or_else(|| message.into()), tool_name }
+    ExecutionError { code: code.into(), message: tool_name.as_ref().map(|name| format!("Tool `{name}`: {message}")).unwrap_or_else(|| message.into()), tool_name, details: None }
 }
 
 /// Shared by the live query and terminal child-report snapshot. Both read the same
@@ -1043,7 +1043,7 @@ impl ExecutionBodyPreparation {
                     }
                     _ => unreachable!(),
                 },
-                ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content {
+                ToolCompletion::NotDispatched { reason, .. } => OperationResultMetadata::Content {
                     reference: self
                         .content
                         .save_output(&json!({"not_dispatched":reason}).into())?,
@@ -1078,7 +1078,7 @@ impl ExecutionBodyPreparation {
                     }
                     _ => unreachable!(),
                 },
-                ToolCompletion::NotDispatched { reason } => OperationResultMetadata::Content {
+                ToolCompletion::NotDispatched { reason, .. } => OperationResultMetadata::Content {
                     reference: self
                         .content
                         .save_output(&json!({"not_dispatched":reason}).into())?,
@@ -1821,7 +1821,7 @@ impl Catalog {
                     op.waiting_on = None;
                 }
                 match completion {
-                    ToolCompletion::NotDispatched { reason } => {
+                    ToolCompletion::NotDispatched { reason, .. } => {
                         op.phase = OperationPhase::Terminal;
                         op.outcome = Some(if reason == "cancelled" {
                             Outcome::Cancelled
@@ -2729,18 +2729,6 @@ pub(super) fn record_external_receipt_in(
             "DELETE FROM resource_occupancy WHERE operation_id=?1",
             [operation_id],
         )?;
-    }
-    if op.executor.as_deref() == Some("code_retrieval") && settle {
-        if let Some(id) = op.waiting_on.as_deref().filter(|id| id.starts_with("retrieval-wait:")) {
-            let mut wait: Wait = record(tx, "waits", id)?;
-            let cursor = tx.query_row("SELECT max(cursor) FROM events WHERE subject=?1", [operation_id], |row| read_number(row,0))?;
-            wait.trigger_cursor = Some(cursor);
-            put(tx,"waits",id,&wait)?;
-            // Its live tool worker consumes the original receipt. Following restart the
-            // ordinary exchange recovery consumes it; never start a second model writer.
-            tx.execute("INSERT INTO resumptions(wait_id,run_id,trigger_cursor,claimed,acknowledged) VALUES(?1,?2,?3,?4,1) ON CONFLICT(wait_id) DO UPDATE SET acknowledged=1",
-                params![id,op.run_id,sql_number(cursor)?,sql_number(op.epoch)?])?;
-        }
     }
     Ok(op)
 }

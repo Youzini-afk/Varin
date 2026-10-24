@@ -127,6 +127,19 @@ is distributed in `packages/web/public/licenses/puppeteer-LICENSE.txt`.
 Puppeteer connects to Electron's existing Chromium; no additional browser
 distribution is bundled by this integration.
 
+## Native ripgrep
+
+Varin distributes native ripgrep through the locked `@vscode/ripgrep` 1.18.0 target packages from
+[Microsoft's ripgrep-prebuilt](https://github.com/microsoft/ripgrep-prebuilt), under MIT. The original
+package license is staged alongside the executable as `ripgrep-LICENSE`.
+
+The bundled ripgrep 15.0.0 is Copyright (c) 2015 Andrew Gallant, distributed under its
+[MIT option](https://github.com/BurntSushi/ripgrep/blob/15.0.0/LICENSE-MIT). PCRE2 10.45 includes
+copyrights of the University of Cambridge, Philip Hazel, Zoltan Herczeg and other contributors,
+under [BSD-3-Clause WITH PCRE2-exception](https://github.com/PCRE2Project/pcre2/blob/pcre2-10.45/LICENCE.md).
+The unchanged texts are included in `packages/web/public/licenses/ripgrep-MIT-LICENSE.txt` and
+`pcre2-LICENSE.txt`, and copied beside the desktop executable payload in `resources/tools`.
+
 ## models.dev metadata and model brand icons
 
 The bundled `deepseek.svg` in `packages/ui/src/assets/provider-logos` comes from

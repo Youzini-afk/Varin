@@ -27,8 +27,7 @@ fn request_snapshot(receipt: &Receipt) -> varin_runtime::execution::RequestSnaps
                     leaf_id: Some(receipt.input_id.clone()),
                 },
             },
-            binding: RequestBinding {
-                direct_tools: None,
+            binding: RequestBinding { execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -276,8 +275,7 @@ mod actual_engines {
         ExecutionInput {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
-            binding: RequestBinding {
-                direct_tools: None,
+            binding: RequestBinding { execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

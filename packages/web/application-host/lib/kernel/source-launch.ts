@@ -175,6 +175,7 @@ export async function admitRunSourceAuthority(
       resourceOwner: selection.resourceOwner, grantId: binding.authorityId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
       enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,
+      ...(binding.executionEnvironment ? { executionEnvironment: binding.executionEnvironment } : {}),
       remoteAuthority: { authorityId: binding.authorityId, resourceEpoch: binding.resourceEpoch, executionOwner: binding.executionOwner },
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : selection.mode === 'materialized'
@@ -250,6 +251,7 @@ export async function admitRunSourceAuthority(
       resourceOwner: selection.resourceOwner, grantId: grant.grantId, runId: run.id, threadId: run.thread_id,
       workspaceId: selection.workspaceId, executionWorkspaceId: selection.executionWorkspaceId,
       enabledTools: resultOnly ? [] : tools, sourceMode: selection.mode,
+      executionEnvironment: await runtime.executionEnvironment(),
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed }
         : selection.mode === 'materialized' ? { ...(rootId ? { rootId } : {}), materializedSource: fixed } : { ...(rootId ? { rootId } : {}), liveRoot: selection.liveRoot! }),

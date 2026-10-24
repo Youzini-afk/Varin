@@ -110,7 +110,7 @@ export function observeQuickRetrieval(
   const model = resolveHarnessModelSlot('explore', slots, mainModel);
   const definition = customizeHarnessAgent({ ...EXECUTION_PRESETS.retrieval,
     id: 'code_retrieval', slot: 'explore' as const, name: '快速检索',
-    tools: tools.filter(name => !['code_retrieval', 'dispatch'].includes(name)),
+    tools: tools.filter(name => !['code_retrieval', 'retrieval_control', 'dispatch'].includes(name)),
     systemPromptFragment: "Locate the information needed to answer this question. Follow relevant context and use the available tools as useful. Return a focused answer with precise source locations and enough supporting context to continue the work. This investigation belongs to the calling task.",
   }, binding?.agent, 'agent');
   return { id: 'code_retrieval', definition, model,

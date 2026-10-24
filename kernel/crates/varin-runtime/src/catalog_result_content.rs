@@ -44,6 +44,8 @@ pub(crate) struct ToolReceiptMetadata {
 pub enum ToolCompletionMetadata {
     NotDispatched {
         reason_ref: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error_ref: Option<Value>,
     },
     Result {
         outcome: Outcome,
@@ -84,8 +86,9 @@ impl ToolCompletionMetadata {
         completion: &ToolCompletion,
     ) -> Result<Self> {
         Ok(match completion {
-            ToolCompletion::NotDispatched { reason } => ToolCompletionMetadata::NotDispatched {
+            ToolCompletion::NotDispatched { reason, error } => ToolCompletionMetadata::NotDispatched {
                 reason_ref: content.save(&json!(reason))?,
+                error_ref: error.as_ref().map(|error|content.save(&json!(error))).transpose()?,
             },
             ToolCompletion::Result {
                 outcome,
@@ -113,8 +116,9 @@ impl ToolCompletionMetadata {
     }
     pub(crate) fn load(self, content: &crate::content::ContentStore) -> Result<ToolCompletion> {
         Ok(match self {
-            ToolCompletionMetadata::NotDispatched { reason_ref } => ToolCompletion::NotDispatched {
+            ToolCompletionMetadata::NotDispatched { reason_ref, error_ref } => ToolCompletion::NotDispatched {
                 reason: serde_json::from_value(content.load(&reason_ref)?)?,
+                error: error_ref.map(|reference|content.load(&reference).and_then(|value|Ok(serde_json::from_value(value)?))).transpose()?,
             },
             ToolCompletionMetadata::Result {
                 outcome,
@@ -145,8 +149,9 @@ impl ToolCompletionMetadata {
         content: &crate::content::ContentStore,
     ) -> Result<ToolCompletion<crate::output::StoredMedia>> {
         Ok(match self {
-            ToolCompletionMetadata::NotDispatched { reason_ref } => ToolCompletion::NotDispatched {
+            ToolCompletionMetadata::NotDispatched { reason_ref, error_ref } => ToolCompletion::NotDispatched {
                 reason: serde_json::from_value(content.load(&reason_ref)?)?,
+                error: error_ref.map(|reference|content.load(&reference).and_then(|value|Ok(serde_json::from_value(value)?))).transpose()?,
             },
             ToolCompletionMetadata::Result {
                 outcome,

@@ -37,7 +37,7 @@ impl PolicyNodeReceiptMetadata {
         content: &crate::content::ContentStore,
     ) -> Result<PolicyNodeReceipt> {
         let completion = match &self.completion {
-            ToolCompletionMetadata::NotDispatched { reason_ref } => {
+            ToolCompletionMetadata::NotDispatched { reason_ref, .. } => {
                 PolicyNodeCompletion::NotDispatched {
                     reason: serde_json::from_value(content.load(reason_ref)?)?,
                 }
@@ -628,7 +628,7 @@ impl Catalog {
             completion: completion_metadata,
         };
         let projected = match completion {
-            ToolCompletion::NotDispatched { reason } => PolicyNodeCompletion::NotDispatched {
+            ToolCompletion::NotDispatched { reason, .. } => PolicyNodeCompletion::NotDispatched {
                 reason: reason.clone(),
             },
             ToolCompletion::Result {

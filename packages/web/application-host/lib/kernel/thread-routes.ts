@@ -164,7 +164,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
     'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode', 'clientTime'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
-    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], 'operation/finish-retrieval': ['operationId'], events: ['cursor'],
+    run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
   fields['operation/calls'] = ['operationId'];
   fields['operation/retrieval-trace'] = ['operationId', 'headId', 'beforeId'];
@@ -544,7 +544,6 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.runtime.toolCalls(operationId, signal);
   });
   post('operation/cancel', body => adapter.cancelOperation(text(body.operationId)));
-  post('operation/finish-retrieval', body => adapter.finishRetrieval(text(body.operationId)));
   post('operation/retrieval-file', (body, signal) => adapter.retrievalFileTarget(text(body.operationId), text(body.itemId), text(body.path), signal));
   post('operation/retrieval-trace', (body, signal) => adapter.retrievalTrace(text(body.operationId),
     body.beforeId === undefined ? undefined : { headId: text(body.headId), beforeId: text(body.beforeId) }, signal));

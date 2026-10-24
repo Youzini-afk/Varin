@@ -15,6 +15,7 @@ import { ManagedSourceDrainedError } from './managed-source-drain.js';
 import { resolveScriptNodeBinding, scriptNodeSpawnInput } from '../kernel/script-node-binding.js';
 import { isManagedMcpDerivationContinuation, isManagedMcpChildContinuation, isManagedMcpTaskContinuation, isManagedMcpResourceContinuation, isManagedMcpInteractionContinuation } from './managed-mcp-contract.js';
 import { createManagedSourceProcesses } from './managed-source-processes.js';
+import { defaultExecutionEnvironment } from '../platform/execution-environment.js';
 import type { ManagedSourceAddress, ManagedSourceBindRequest, ManagedSourceBinding, ManagedSourceCapabilities,
   ManagedSourcePrincipal, ManagedSourceService, ManagedSourceServiceHandler, ManagedSourceLocalScope,
   ManagedSourceServiceRequest, ManagedSourceServiceCancelReceipt } from './managed-remote-types.js';
@@ -22,6 +23,7 @@ import type { ManagedSourceCleanupScope } from './managed-remote-types.js';
 import type { ManagedRecoveryReply, ManagedRecoveryRequest } from './managed-recovery-contract.js';
 
 export interface ManagedSourceServiceOptions {
+  executionEnvironment?: () => Promise<import('../kernel/protocol.generated.js').ExecutionEnvironment>;
   kernel: KernelClient;
   hostId: string;
   documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration' | 'resolveWorkspace' | 'inspectWorkspace'>;
@@ -89,9 +91,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   const capabilities: ManagedSourceService['capabilities'] = async (principal, input, signal) => {
     requireReadPrincipal(principal, input.coordinatorHostId);
     await kernel.start();
-    return kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
+    const selected = await kernel.sourceRequest<ManagedSourceCapabilities>('source.capabilities', { mode: input.mode,
       ...(input.enabledTools ? { enabledTools: input.enabledTools } : {}),
       clientCapabilities: [...principal.capabilities] }, signal);
+    return { ...selected, ...(selected.tools.some(tool => tool.name === 'process_spawn')
+      ? { executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()) } : {}) };
   };
   const registration = async (source: LaunchSource, signal?: AbortSignal): Promise<void> => {
     if (source.resource_owner.kind !== 'managed_host' || source.resource_owner.hostId !== options.hostId) {
@@ -113,6 +117,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
   const project = (authority: SourceAuthorityResult, selected: ManagedSourceCapabilities): ManagedSourceBinding => ({
     authorityId: authority.authorityId, resourceEpoch: authority.resourceEpoch, executionOwner: authority.executionOwner,
     source: authority.source, physicalRoot: authority.physicalRoot, capabilities: selected,
+    ...(authority.toolBinding?.executionEnvironment ? { executionEnvironment: authority.toolBinding.executionEnvironment } : {}),
   });
   type NativeRelease = { authorityId: string; phase: string; receipt?: { pendingProcesses?: unknown; processStopFailures?: unknown } };
   const projectRelease = (result: NativeRelease) => ({ authorityId: result.authorityId, phase: result.phase,
@@ -397,6 +402,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         }
         const fixed = { branchId: source.branch_id!, revision: source.revision! };
         const toolBinding: SourceToolBinding | null = input.scope.kind === 'source_read' ? null : {
+          executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()),
           resourceOwner: source.resource_owner, grantId: opened.grantId, runId: input.scope.runId, threadId: input.scope.threadId,
           workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, sourceMode: source.mode,
           enabledTools: selected.tools.map(tool => tool.name), ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}),

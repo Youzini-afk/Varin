@@ -67,11 +67,14 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
     : call.name === 'process_read' ? 'chat.tools.processOutput' : call.name === 'process_write' ? 'chat.tools.processInput'
       : call.name === 'process_resize' ? 'chat.tools.resizeTerminal' : 'chat.tools.inspectProcess');
   const subject = toolSubject(call, { ...data, process: snapshot }, t, targets);
-  const receipt = subjectJoin(typeof data.confirmedBytes === 'number' ? t('chat.toolSummary.inputBytes', { count: data.confirmedBytes }) : '',
+  const draining = snapshot.status === 'exited' && snapshot.outputComplete === false && !snapshot.outputError;
+  const receipt = subjectJoin(call.name === 'process_write' && data.state === 'applied' ? t('chat.tools.inputSent') : '',
+    typeof data.confirmedBytes === 'number' ? t('chat.toolSummary.inputBytes', { count: data.confirmedBytes }) : '',
     typeof snapshot.exitCode === 'number' ? t('chat.tools.exitCode', { code: snapshot.exitCode }) : toolValueLabel(snapshot.status, t),
     call.name === 'process_read' && Array.isArray(data.chunks) && (text || data.chunks.length === 0)
       ? t('chat.toolSummary.outputLines', { count: text ? text.replace(/\r?\n$/, '').split(/\r?\n/).length : 0 }) : '',
-    data.stopConfirmed === false ? t('chat.tools.cancelAwaitingStop') : '');
+    data.stopConfirmed === false ? t('chat.tools.cancelAwaitingStop') : '',
+    draining ? t('chat.tools.exitedOutputPending') : '');
   return <ToolDisclosure id={'tool:' + call.id} className="tool-process group" initiallyExpanded={expanded || status === 'error'}>
     <summary className="tool-command-heading"><Icon name="terminal" className="size-3.5 shrink-0" />
       <ToolHeadingText label={label} subject={subject} receipt={receipt} />
@@ -88,7 +91,9 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
         {processId && <span title={processId} className="max-w-64 truncate">{processId}</span>}
         {typeof snapshot.status === 'string' && <span>{toolValueLabel(snapshot.status, t)}</span>}
         {typeof snapshot.exitCode === 'number' && <span>{t('chat.tools.exitCode', { code: snapshot.exitCode })}</span>}
-        {snapshot.outputComplete === false && <span>{t('chat.tools.partialOutput')}</span>}
+        {snapshot.outputComplete === false && !snapshot.outputError && <span>{t(draining ? 'chat.tools.exitedOutputPending' : 'chat.tools.partialOutput')}</span>}
+        {Boolean(snapshot.outputError) && <span className="text-destructive">{toolText(snapshot.outputError) || toolText(toolRecord(snapshot.outputError).message)}</span>}
+        {spawning && typeof toolRecord(data.shell).executable === 'string' && <span className="break-all font-mono">{toolText(toolRecord(data.shell).executable)}</span>}
       </div>
       {output}
       {chunks.some(chunk => chunk.encoding === 'base64') && <p className="px-3 py-2 typography-meta text-muted-foreground">{t('chat.tools.rawOutput')}</p>}
@@ -98,6 +103,7 @@ export function ChatProcessTool({ call, execution, result, status, generating, o
         {live && !conversation?.readOnly && <button type="button" disabled={stopping || operation?.cancel_requested} onClick={() => void stop()}>{t(waiting ? 'chat.tools.stopWaiting' : 'chat.tools.stopProcess')}</button>}
       </div>
       {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
+      {call.name === 'process_write' && <p className="px-3 typography-meta text-muted-foreground">{t('chat.tools.inputReceiptHint')}</p>}
       <ToolResultNotice data={data} status={status} />{details}
     </div>
   </ToolDisclosure>;

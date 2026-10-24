@@ -38,7 +38,7 @@ fn waiting_runs(db: &Connection) -> Result<Vec<Run>> {
     rows.map(|row| Ok(serde_json::from_str(&row?)?)).collect()
 }
 pub(super) fn operations(db: &Connection, run: Option<&str>) -> Result<Vec<Operation>> {
-    let mut q = db.prepare("SELECT body FROM operations WHERE (?1 IS NULL OR run_id=?1) AND json_extract(body,'$.phase')!='terminal' AND ((json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','wait_process','send','follow_up')) OR json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid")?;
+    let mut q = db.prepare("SELECT body FROM operations WHERE (?1 IS NULL OR run_id=?1) AND json_extract(body,'$.phase')!='terminal' AND ((json_extract(body,'$.execution_owner.kind')='kernel' AND json_extract(body,'$.executor') IN ('wait_child','retrieval_control','wait_process','send','follow_up')) OR json_extract(body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(body,'$.waiting_on') IS NOT NULL ORDER BY rowid")?;
     let rows = q.query_map([run], |r| r.get::<_, String>(0))?;
     let mut out = Vec::new();
     for raw in rows {
@@ -71,6 +71,10 @@ pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool
         Some(collaboration::WAIT_TOOL) => {
             let child = delegated::execution_task(db, &wait.subject)?;
             Ok(child.report.is_some() && child.code_result.settled())
+        }
+        Some(super::retrieval::CONTROL_TOOL) => {
+            let retrieval: Operation = record(db,"operations",&wait.subject)?;
+            Ok(retrieval.external_receipt.as_ref().is_some_and(|receipt|receipt.executor_stopped))
         }
         Some(process_wait::WAIT_TOOL) => {
             let process: Operation = record(db, "operations", &wait.subject)?;

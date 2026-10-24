@@ -140,8 +140,7 @@ fn child_assembly_rebinds_only_admitted_extension_and_activates_its_own_static_o
         schema_version: launch.tools[0].version.clone(),
         arguments: json!({}),
     };
-    let mut frozen = FrozenToolContext {
-        direct_tools: None,
+    let mut frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         run_id: run.id.clone(),
         origin: ToolOrigin::ModelStep {
             request_id: "not-dispatched-request".into(),

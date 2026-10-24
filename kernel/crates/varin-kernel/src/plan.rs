@@ -311,9 +311,7 @@ impl ToolExecutor for PlanTools {
         })() {
             Ok(query) => query,
             Err(failure) => {
-                return ToolCompletion::NotDispatched {
-                    reason: failure.message,
-                };
+                return ToolCompletion::not_dispatched(failure);
             }
         };
         let value = match self.bridge.query(query.clone(), cancel) {
@@ -323,6 +321,7 @@ impl ToolExecutor for PlanTools {
         if value["status"] == "rejected" {
             return ToolCompletion::NotDispatched {
                 reason: value["message"].as_str().unwrap_or("plan rejected").into(),
+                error: None,
             };
         }
         let (outcome, effect) = if contract.read_only {

@@ -6,9 +6,11 @@ import type { SourceToolBinding, SourceResourceAction, ToolOrigin, LaunchSource 
 import { controlManagedScript } from './managed-script-source.js';
 import { releaseManagedPackageSource, type ManagedPackageCleanup } from './managed-package-source.js';
 import { recallManagedScheduleReceipt, type ManagedScheduleReceiptQuery } from './managed-schedule-receipt.js';
+import { ManagedResponseError } from '../harness/managed-remote-client.js';
+import { KernelClientError } from './kernel-error.js';
 
 export type ManagedSourceOwner = (owner: ManagedHostSourceOwner) => Promise<ManagedSourceClient>;
-export type PrivateManagedSourceFrame = { v: 1; kind: 'source-resource-response'; id: string; kernelEpoch: string; result: { ok: boolean; value?: unknown; message?: string } }
+export type PrivateManagedSourceFrame = { v: 1; kind: 'source-resource-response'; id: string; kernelEpoch: string; result: { ok: boolean; value?: unknown; message?: string; error?: {code:string;message:string;details?:unknown} } }
   | { v: 1; kind: 'source-process-terminal'; kernelEpoch: string; source: LaunchSource; executionOwner: unknown; process: Record<string, unknown> };
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
@@ -72,7 +74,7 @@ export class ManagedSourceBridge {
     if (this.active.has(id)) return true;
     const pending: { epoch: string; cancel?: () => Promise<unknown>; cancelled: boolean } = { epoch, cancelled: false }; this.active.set(id, pending);
     void (async () => {
-      let result: { ok: boolean; value?: unknown; message?: string };
+      let result: Extract<PrivateManagedSourceFrame, { kind: 'source-resource-response' }>['result'];
       try {
         if (record(value.query) && value.query.kind === 'script_control') {
           const query = value.query;
@@ -136,7 +138,7 @@ export class ManagedSourceBridge {
         let reply: unknown;
         if (query.kind === 'tool') {
           if (!query.call || query.context.run_id !== query.binding.runId) throw new Error('Managed invocation scope changed');
-          const input: ManagedSourceToolRequest = { ...address, call: { runId: query.context.run_id, operationId: query.context.operation_id,
+          const input: ManagedSourceToolRequest = { ...address, ...(query.binding.executionEnvironment ? { executionEnvironment: query.binding.executionEnvironment } : {}), call: { runId: query.context.run_id, operationId: query.context.operation_id,
             origin: query.context.origin, callId: query.call.call_id, name: query.call.name, schemaVersion: query.call.schema_version, arguments: query.call.arguments }, ...(query.journal ? { journal: query.journal } : {}) };
           if (query.phase === 'authorize') reply = await client.authorize(input);
           else {
@@ -164,7 +166,11 @@ export class ManagedSourceBridge {
         } else throw new Error('Unknown closed source request');
         result = { ok: true, value: reply };
         }
-      } catch (error) { result = { ok: false, message: error instanceof Error ? error.message : String(error) }; }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        result = { ok: false, message, ...((error instanceof ManagedResponseError || error instanceof KernelClientError) && typeof error.code === 'string'
+          ? { error: { code: error.code, message, ...(error.details === undefined ? {} : { details: error.details }) } } : {}) };
+      }
       if (this.active.get(id) !== pending) return;
       this.active.delete(id); if (this.epoch() !== epoch) return;
       await this.send({ v: 1, kind: 'source-resource-response', id, kernelEpoch: epoch, result });

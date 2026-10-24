@@ -167,12 +167,12 @@ export const unknownToolReceipt = (): ToolExecutionReceipt => ({
     kind: 'result',
     outcome: 'indeterminate',
     effect: 'unknown',
-    content: { data: { error: 'host_tool_effect_unknown' }, parts: [] },
+    content: { data: { error: { code: 'host_tool_effect_unknown', message: 'The original tool executor has not confirmed its effect. Its original receipt remains authoritative.' } }, parts: [] },
   },
   executor_stopped: false,
 });
 export const failedReadToolReceipt = (code: string): ToolExecutionReceipt => ({
-  completion: { kind: 'result', outcome: 'failed', effect: 'none', content: { data: { error: code }, parts: [] } },
+  completion: { kind: 'result', outcome: 'failed', effect: 'none', content: { data: { error: { code, message: 'The original tool read failed; no write effect was dispatched.' } }, parts: [] } },
   executor_stopped: true,
 });
 export const undispatchedToolReceipt = (

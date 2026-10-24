@@ -440,13 +440,13 @@ describe("settings update", () => {
     const result = await service.update(caller, {
       id: "harness.shell",
       scope: "global",
-      set: { "harness.shell": "wsl" },
+      set: { "harness.shell": "bash" },
     });
     assert.equal(result.status, "applied");
     assert.equal(pi.updates.length, 1);
     assert.equal(pi.updates[0]?.scope, "global");
     assert.ok(pi.updates[0]?.expectedRevision);
-    assert.equal((pi.global.harness as Record<string, unknown>).shell, "wsl");
+    assert.equal((pi.global.harness as Record<string, unknown>).shell, "bash");
   });
 
   it("keeps client and action entries honest when their channel is missing", async () => {
@@ -642,7 +642,7 @@ describe("compound settings.update (D-309)", () => {
       id: "appearance.time-format",
       items: [
         { id: "appearance.time-format", set: { timeFormatPreference: "12h" } },
-        { id: "harness.shell", scope: "global", set: { "harness.shell": "wsl" } },
+        { id: "harness.shell", scope: "global", set: { "harness.shell": "bash" } },
         { id: "chat.persist-drafts", set: { enabled: true } },
         { id: "appearance.time-format", set: { timeFormatPreference: "stardate" } },
       ],
@@ -651,7 +651,7 @@ describe("compound settings.update (D-309)", () => {
     const byId = result.items ?? [];
     assert.equal(byId.filter((item) => item.status === "applied").length, 2);
     assert.equal(byId.filter((item) => item.status === "failed").length, 2);
-    assert.equal((pi.global.harness as Record<string, unknown>).shell, "wsl");
+    assert.equal((pi.global.harness as Record<string, unknown>).shell, "bash");
     assert.equal(pi.updates.length, 1);
   });
 });

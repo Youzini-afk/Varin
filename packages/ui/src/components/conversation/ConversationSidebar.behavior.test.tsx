@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   translate: (key: string) => key,
 }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: mocks.translate }) }));
-vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
+vi.mock('@/components/icon/Icon', () => ({ Icon: ({ name }: { name: string }) => <span data-icon={name} /> }));
 vi.mock('@/components/ui/AgentAvatar', () => ({ AgentAvatar: () => null }));
 vi.mock('@/components/ui', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ files: {} }) }));
@@ -159,6 +159,19 @@ beforeEach(async () => {
   await act(async () => { root.render(<ConversationSidebar />); });
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+
+it.each(['completed', 'failed'] as const)('keeps unread %s child tasks quiet while retaining the parent reminder', async state => {
+  await act(async () => {
+    useThreadStore.setState(store => ({ threads: store.threads.map(thread => ({ ...thread, unread: true,
+      branches: thread.branches.map(branch => ({ ...branch, latest_run: { state } as NonNullable<typeof branch.latest_run> })),
+    })) }));
+  });
+  const parent = titleButton('Parent conversation').parentElement!;
+  const child = titleButton('Child task').parentElement!;
+  expect(parent.querySelector(`[data-icon="${state === 'failed' ? 'error-warning' : 'notification-3'}"]`)).not.toBeNull();
+  expect(child.querySelector('[data-icon="notification-3"], [data-icon="error-warning"]')).toBeNull();
+  expect(useThreadStore.getState().threads.find(thread => thread.thread_id === 'child')?.unread).toBe(true);
+});
 
 it.each(['context', 'dropdown'] as const)('keeps the %s rename editor focused, saves the child, and can rename again', async menu => {
   let input = await openRename('Child task', menu);

@@ -33,7 +33,7 @@ impl ModelProvider for Script {
                 if let Some((_, _, _, outcome, effect)) =
                     self.calls.iter().find(|(id, ..)| *id == result.call_id)
                 {
-                    if let ToolCompletion::NotDispatched { reason } = &result.completion {
+                    if let ToolCompletion::NotDispatched { reason, .. } = &result.completion {
                         assert_eq!(result.call_id, "denied");
                         results.insert(result.call_id.clone(), json!({"not_dispatched":reason}));
                         continue;

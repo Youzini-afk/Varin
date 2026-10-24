@@ -1204,6 +1204,10 @@ export const ChatTimelineEntryList: React.FC<Omit<
           }
 
           if (entry.type === 'custom_message') {
+            if (entry.customType === 'retrieval-result') return <ToolDisclosure key={entry.id} id={'retrieval-result:' + entry.id}>
+              <summary><Icon name="binoculars" className="size-3.5" />{t('chat.explore.title')}<Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
+              <div><ChatUserContentView content={entry.content} messageId={entry.id} /></div>
+            </ToolDisclosure>;
             if (entry.customType === 'question-answer') return <ToolDisclosure key={entry.id} id={'answer:' + entry.id} className="conversation-question-answer">
               <summary><Icon name={toolRecord(entry.details).cancelled ? 'close' : 'check'} className="size-3.5" />{t(toolRecord(entry.details).cancelled ? 'chat.timeline.tools.cancelled' : 'chat.question.answered')}<Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
               <div><ChatUserContentView content={entry.content} messageId={entry.id} /></div>

@@ -282,6 +282,7 @@ impl ToolExecutor for ResourceTools {
     ) -> ToolCompletion {
         ToolCompletion::NotDispatched {
             reason: "resource read requires its selected invocation".into(),
+            error: None,
         }
     }
 }

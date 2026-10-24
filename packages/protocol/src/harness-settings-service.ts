@@ -43,7 +43,7 @@ export interface SettingsSearchItem {
   /** Machine-usable paths this row controls, if any. */
   paths: string[];
   writable: boolean;
-  apply?: "immediate" | "next-run" | "restart" | "manual";
+  apply?: "immediate" | "next-request" | "next-run" | "restart" | "manual";
   /** Settings-page slug; the UI focuses this row by id. */
   page: string;
   keywords?: string[];
@@ -200,7 +200,7 @@ export interface SettingsUpdateResult {
   /** New owner revision after a successful write (for follow-up CAS). */
   revision?: string;
   /** When the change actually reaches the running product. */
-  appliedAt: "immediate" | "next-run" | "restart" | "manual";
+  appliedAt: "immediate" | "next-request" | "next-run" | "restart" | "manual";
   /** Post-write effective state for the affected fields. */
   effective?: Record<string, unknown>;
   /** Domain-action result for `action` entries. */

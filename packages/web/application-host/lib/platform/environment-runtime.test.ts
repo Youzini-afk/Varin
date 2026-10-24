@@ -12,3 +12,10 @@ it.skipIf(process.platform !== 'win32')('reads Unicode environment values throug
   expect(runtime.getLoginShellEnvSnapshot()?.[key]).toBe('中文路径🙂');
   expect(process.env[key]).toBe(original);
 });
+
+it('preserves an explicit Windows process PATH ahead of registry additions', () => {
+  const runtime = createPlatformEnvironmentRuntime({ pathModule: path.win32 as typeof path,
+    processLike: { platform: 'win32', env: { Path: 'D:\\CustomTools;C:\\Windows' } },
+    spawnSyncFn: (() => ({ status: 0, stdout: 'Path=C:\\Windows;C:\\AddedTools\0', stderr: '', signal: null, pid: 1, output: [] })) as unknown as typeof spawnSync });
+  expect(runtime.buildAugmentedPath()).toMatch(/^D:\\CustomTools;C:\\Windows;C:\\AddedTools(?:;|$)/);
+});

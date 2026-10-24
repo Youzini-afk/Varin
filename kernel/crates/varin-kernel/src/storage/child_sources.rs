@@ -788,6 +788,7 @@ mod handoff_tests {
                 .unwrap();
         }
         let binding = ToolBinding {
+            execution_environment: None,
             resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local,
             remote_authority: None,
             target_authority: None,

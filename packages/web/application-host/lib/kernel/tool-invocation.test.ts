@@ -66,7 +66,7 @@ test('lost domain transport remains unknown and occupied after the broker callba
     return { pretendSuccess: true };
   });
   assert.equal(observed?.executor_stopped, false);
-  assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: { error: 'host_tool_effect_unknown' }, parts: [] } });
+  assert.deepEqual(observed?.completion, { kind: 'result', outcome: 'indeterminate', effect: 'unknown', content: { data: { error: { code: 'host_tool_effect_unknown', message: 'The original tool executor has not confirmed its effect. Its original receipt remains authoritative.' } }, parts: [] } });
 });
 
 test('a failed read domain settles without claiming an unknown write', async () => {
@@ -77,7 +77,7 @@ test('a failed read domain settles without claiming an unknown write', async () 
   });
   assert.equal(observed?.executor_stopped,true);
   assert.equal(observed?.completion.kind,'result');
-  assert.deepEqual(observed?.completion,{kind:'result',outcome:'failed',effect:'none',content:{data:{error:'host_tool_read_failed'},parts:[]}});
+  assert.deepEqual(observed?.completion,{kind:'result',outcome:'failed',effect:'none',content:{data:{error:{code:'host_tool_read_failed',message:'The original tool read failed; no write effect was dispatched.'}},parts:[]}});
 });
 
 test('domain result and accepted job preserve JSON null; only a bodyless job projects its handle', async () => {

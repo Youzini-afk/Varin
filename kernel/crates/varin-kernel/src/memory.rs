@@ -329,6 +329,7 @@ impl ToolExecutor for MemoryTools {
                     .as_str()
                     .unwrap_or("memory action rejected")
                     .into(),
+                error: None,
             },
             Ok(value) => ToolCompletion::Result {
                 outcome: if contract.read_only {
@@ -354,7 +355,7 @@ impl ToolExecutor for MemoryTools {
                 } else {
                     Effect::Unknown
                 },
-                content: json!({"error":failure.code,"message":failure.message}).into(),
+                content: json!({"error":failure}).into(),
             },
         }
     }

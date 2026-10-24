@@ -110,7 +110,7 @@ export interface ManagedRemoteTargetRegistryOptions {
 }
 
 export class ManagedResponseError extends Error {
-  constructor(message: string, readonly code: unknown, readonly status?: number) { super(message); }
+  constructor(message: string, readonly code: unknown, readonly status?: number, readonly details?: unknown) { super(message); }
 }
 
 class ManagedTargetClient {
@@ -143,10 +143,10 @@ class ManagedTargetClient {
       throw new Error(`Managed target identity changed for ${this.target.machineId}`);
     }
     if (!response.ok) {
-      const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown } | null;
+      const responseBody = await response.json().catch(() => null) as { error?: unknown; code?: unknown; details?: unknown } | null;
       const message = responseBody && typeof responseBody === "object" && "error" in responseBody && typeof responseBody.error === "string"
         ? responseBody.error : `Managed target request failed (${response.status})`;
-      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined, response.status);
+      throw new ManagedResponseError(message, responseBody && typeof responseBody === 'object' && 'code' in responseBody ? responseBody.code : undefined, response.status, responseBody?.details);
     }
     return response;
   }

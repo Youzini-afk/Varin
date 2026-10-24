@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 61;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 63;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -4195,9 +4195,6 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
-        "runtime.retrieval.finish" => serde_json::from_value::<OperationParams>(params.clone())
-            .map(|_| ())
-            .map_err(|error| error.to_string()),
         "runtime.retry.evaluate" => {
             serde_json::from_value::<ModelRetryEvaluateParams>(params.clone())
                 .map(|_| ())

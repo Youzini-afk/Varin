@@ -59,14 +59,36 @@ export function createOfficeReader(options: { materials: Pick<WebMaterialStore, 
           { byteRange: { offset: 0, length: 0 }, ...(context.signal ? { signal: context.signal } : {}) });
         if (!isOfficeFormat(metadata?.ref.document?.kind)) return undefined;
       } else if (!captured || captured.source[0] !== 0x50 || captured.source[1] !== 0x4b) return undefined;
-      if (input.view === 'page-image') return render({ ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}), page: input.page ?? 1,
-        ...(input.scale === undefined ? {} : { scale: input.scale }) }, context, {}, captured);
+      const officeView = input.office?.view;
+      if (officeView && input.view && (input.view === 'page-image'
+        || (input.view === 'overview') !== (officeView === 'overview'))) {
+        return { status: 'failed', url: '', reason: 'Conflicting document view and office.view. Use view:overview for an index, view:text for readable content, or office.view:find for keyword matches.' };
+      }
+      if (input.view === 'page-image') {
+        if (Object.keys(input.office ?? {}).length || input.find || (input.position && input.position.kind !== 'page')) {
+          return { status: 'failed', url: '', reason: 'A page image cannot apply Office content selectors. Read selected content with view:text, or request an image with page or position.kind:page.' };
+        }
+        const positionPage = input.position?.kind === 'page' ? input.position.page : undefined;
+        if (input.page !== undefined && positionPage !== undefined && input.page !== positionPage) {
+          return { status: 'failed', url: '', reason: 'Conflicting page and position.page values. Choose one page for the image.' };
+        }
+        return render({ ...(input.snapshotId ? { snapshotId: input.snapshotId } : {}), page: input.page ?? positionPage ?? 1,
+          ...(input.scale === undefined ? {} : { scale: input.scale }) }, context, {}, captured);
+      }
       const original = await load(input, context, {}, captured);
-      const read = original.package.read({ view: input.find ? 'find' : input.view === 'overview' || !input.view ? 'overview' : 'content',
+      const read = original.package.read({ view: input.find ? 'find' : input.view === 'overview' ? 'overview' : 'content',
         ...(input.find ? { query: input.find } : {}), ...(input.position?.kind === 'section' ? { section: input.position.title } : {}), ...input.office });
       const content = read.objects ? bodyText(read) : read.sections.map(section => `${section.name}\t${section.id}`).join('\n');
+      const overview = read.objects === undefined;
+      const nextRead: DocumentReadRequest | undefined = overview ? { snapshotId: original.snapshot.snapshotId, view: 'text' }
+        : read.nextOffset === undefined ? undefined : { snapshotId: original.snapshot.snapshotId, view: 'text',
+          office: { ...input.office, ...(input.find ? { view: 'find', query: input.find } : {}),
+            ...(input.position?.kind === 'section' ? { section: input.position.title } : {}), offset: read.nextOffset } };
       return { status: 'ok', url: original.snapshot.sourceUrl, finalUrl: original.snapshot.finalUrl, snapshot: original.snapshot, markdown: content,
         bytes: Buffer.byteLength(content), fromCache: !!input.snapshotId, rendered: false, contentType: OFFICE_MIME[original.package.format],
+        view: overview ? 'overview' : input.view === 'structure' ? 'structure' : 'text',
+        textStatus: overview ? 'not-requested' : content.trim() ? 'available' : 'no-text',
+        ...(nextRead ? { nextRead } : {}),
         office: read, ...(original.snapshot.title ? { title: original.snapshot.title } : {}) };
     },
   };

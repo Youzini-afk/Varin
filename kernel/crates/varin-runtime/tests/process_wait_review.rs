@@ -162,8 +162,7 @@ impl Fixture {
             ancestor_id: None,
             leaf_id: self.db.head("branch").unwrap(),
         };
-        let binding = RequestBinding {
-            direct_tools: None,
+        let binding = RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -528,8 +527,7 @@ impl Fixture {
             arguments: json!({"processId":PROCESS}),
         };
         let launch = self.db.launch_intent(&self.run).unwrap().unwrap().selection;
-        let context = FrozenToolContext {
-            direct_tools: None,
+        let context = FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

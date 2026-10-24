@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 61 as const;
+export const KERNEL_PROTOCOL_VERSION = 63 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.sources","runtime.thread.usage","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.so
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v61" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v63" as const;
 
 export type KernelMethod =
   | "runtime.context.observations.sources"
@@ -197,7 +197,6 @@ export type KernelMethod =
   | "runtime.material.retention"
   | "runtime.content.collect"
   | "runtime.tokenizers.open"
-  | "runtime.retrieval.finish"
   | "runtime.retry.evaluate"
   | "runtime.tokenizers.count"
   | "runtime.tokenizers.close"
@@ -510,13 +509,13 @@ export interface ModelOpaqueItem { connection_identity:string; family:string; ad
 
 export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }
 
-export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
+export type ModelToolCompletion = {kind:'not_dispatched';reason:string;error?:ExecutionError} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};
 
 export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};
 
 export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
 
-export interface RequestBinding {direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+export interface RequestBinding {execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
 export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 
@@ -2507,7 +2506,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 61; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 63; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2578,6 +2577,7 @@ export interface NestedToolInput {
 export interface NestedToolReceipt {
   operationId: string;
   completion: OperationCallCompletion<ResolvedMedia>;
+  error?: ExecutionError;
 }
 
 export interface NestedToolInvokeParams {
@@ -3551,7 +3551,7 @@ export interface Run {
 }
 
 export type OperationCallCompletion<M = StoredMedia> =
-  | { kind: 'not_dispatched'; reason: string }
+  | { kind: 'not_dispatched'; reason: string; error?: ExecutionError }
   | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }
   | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };
 
@@ -4647,6 +4647,7 @@ export interface KernelError {
   code: string;
   message: string;
   retryable: boolean;
+  details?: unknown;
 }
 
 export interface KernelRequestCreditReleased {
@@ -5585,13 +5586,19 @@ export interface SourceAuthorityAddress { principalId:string;coordinatorHostId:s
 
 export interface SourceAuthorityReleaseParams extends SourceAuthorityAddress { mode:'retire'|'revoke'; }
 
-export interface SourceResourceCallParams extends SourceAuthorityAddress { call:HostToolCall;journal?:RecoveryAnchor; }
+export interface SourceResourceCallParams extends SourceAuthorityAddress { executionEnvironment?:ExecutionEnvironment; call:HostToolCall;journal?:RecoveryAnchor; }
 
 export interface SourceResourceControlParams extends SourceAuthorityAddress { operationId:string; }
 
 export interface SourceServiceCallParams extends SourceAuthorityAddress { requestId:string;clientCapabilities:string[];operation: {kind:'native_resource';context:{run_id:string;origin:ToolOrigin;operation_id:string};action:SourceResourceAction;authorizeOnly:boolean} | {kind:'validate'}; }
 
-export interface SourceToolBinding { resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
+export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}
+
+export interface ExecutionShell {id:string;name:string;executable:string;path?:string[];}
+
+export interface ExecutionEnvironment {searchPath?:string;platform:string;defaultShell:string|null;shells:ExecutionShell[];}
+
+export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
 export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
 
@@ -6205,7 +6212,6 @@ export type KernelMethodParams = {
   "runtime.material.retention": MaterialRetentionParams;
   "runtime.content.collect": KernelEmptyParams;
   "runtime.tokenizers.open": KernelTokenizerOpenParams;
-  "runtime.retrieval.finish": OperationParams;
   "runtime.retry.evaluate": ModelRetryEvaluateParams;
   "runtime.tokenizers.count": KernelTokenizerCountParams;
   "runtime.tokenizers.close": KernelTokenizerLeaseParams;
@@ -8034,15 +8040,6 @@ export type KernelRequest =
       id: string;
       method: "runtime.tokenizers.open";
       params: KernelTokenizerOpenParams;
-      epoch?: string;
-      grantId?: string;
-    }
-  | {
-      v: typeof KERNEL_PROTOCOL_VERSION;
-      kind: "request";
-      id: string;
-      method: "runtime.retrieval.finish";
-      params: OperationParams;
       epoch?: string;
       grantId?: string;
     }

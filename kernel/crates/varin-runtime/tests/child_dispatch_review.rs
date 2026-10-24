@@ -1598,6 +1598,7 @@ fn original_no_send_receipt_does_not_wait_for_a_nonexistent_native_process() {
         &context,
         ToolCompletion::NotDispatched {
             reason: "cancelled-before-spawn".into(),
+            error: None,
         },
         true,
     );

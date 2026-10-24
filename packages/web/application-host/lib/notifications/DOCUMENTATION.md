@@ -6,8 +6,9 @@ and OS delivery is separate from Catalog read cursors and unread state.
 ## Runtime flow
 
 1. `thread-runtime.ts` observes native durable events. Completed/failed root Runs and open
-   permission/question Operations produce notifications; child completion, deleted/archived Threads
-   and terminal permission/question Operations are excluded.
+   permission/question Operations produce notifications; completion/failure in child Threads (including
+   later Runs), deleted/archived Threads and terminal permission/question Operations are excluded.
+   Child questions and permission requests still notify because they require a user decision.
 2. Startup and kernel reconnection begin at the current durable cursor. The live observer reads later
    facts rather than replaying all historical notifications.
 3. `application-host/index.ts` applies notification settings and fans the payload out to desktop,

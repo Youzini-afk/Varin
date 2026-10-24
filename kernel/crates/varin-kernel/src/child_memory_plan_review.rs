@@ -544,8 +544,7 @@ fn available_but_unselected_child_helpers_do_not_enter_assembly() {
     let f = fixture(vec!["helper".into()]);
     f.prepare_policy(0, "http://127.0.0.1:1/unused");
     let start = f.start(0);
-    let frozen = FrozenToolContext {
-        direct_tools: None,
+    let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         run_id: f.run.id.clone(),
         origin: ToolOrigin::ModelStep {
             request_id: "unselected".into(),

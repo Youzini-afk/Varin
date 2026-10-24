@@ -1,144 +1,55 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { mergePathValues } from './path-utils.js';
 
 const require = createRequire(import.meta.url);
-
-const resolveRipgrepPackageJsonCandidates = (): string[] => {
-  const packageNames = ['@vscode/ripgrep', 'ripgrep'];
-  const candidates: string[] = [];
-  for (const packageName of packageNames) {
-    try {
-      candidates.push(require.resolve(`${packageName}/package.json`));
-    } catch {
-      // Try the next bundled package candidate.
-    }
-  }
-
-  return candidates;
-};
-
-const getBinaryNames = (platform: NodeJS.Platform = process.platform): string[] => (
-  platform === 'win32'
-    ? ['rg.exe', 'rg.cmd', 'rg.bat', 'rg.ps1', 'rg']
-    : ['rg']
-);
-
-const resolveNodeModulesBinDir = (packageRoot: string): string | null => {
-  let current = packageRoot;
-  while (current && current !== path.dirname(current)) {
-    if (path.basename(current) === 'node_modules') {
-      return path.join(current, '.bin');
-    }
-    current = path.dirname(current);
-  }
-
-  return null;
-};
-
-interface RipgrepPackageJson {
-  bin?: string | Record<string, string> | undefined;
-}
-
-const readPackageJson = (packageJsonPath: string): RipgrepPackageJson | null => {
+const executable = (file: string, platform: NodeJS.Platform): boolean => {
   try {
-    const value = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as unknown;
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-    const bin = (value as { bin?: unknown }).bin;
-    if (bin !== undefined && typeof bin !== 'string'
-      && (!bin || typeof bin !== 'object' || Array.isArray(bin)
-        || Object.values(bin).some((entry) => typeof entry !== 'string'))) return null;
-    return { ...(bin === undefined ? {} : { bin: bin as string | Record<string, string> }) };
-  } catch {
-    return null;
-  }
-};
-
-const isExecutableFile = (filePath: string, platform: NodeJS.Platform = process.platform): boolean => {
-  try {
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) return false;
-    if (platform === 'win32') return true;
-    fs.accessSync(filePath, fs.constants.X_OK);
+    if (!fs.statSync(file).isFile()) return false;
+    if (platform !== 'win32') fs.accessSync(file, fs.constants.X_OK);
     return true;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 };
 
-export interface ResolveBundledRipgrepOptions {
-  packageJsonPath?: string | undefined;
-  platform?: NodeJS.Platform | undefined;
+/** Resolves only a native CLI. Package-manager JS/WASI shims are not product tools. */
+export function resolveBundledRipgrepBinDir(options: {
+  platform?: NodeJS.Platform;
+  arch?: string;
+  resourcesPath?: string;
+  packageJsonPath?: string;
+} = {}): string | null {
+  const platform = options.platform ?? process.platform;
+  const binary = platform === 'win32' ? 'rg.exe' : 'rg';
+  const resources = options.resourcesPath ?? (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const candidates = resources ? [path.join(resources, 'tools', binary)] : [];
+  if (options.packageJsonPath) candidates.push(path.join(path.dirname(options.packageJsonPath), 'bin', binary));
+  else {
+    try {
+      const fromPackage = createRequire(require.resolve('@vscode/ripgrep'));
+      const resolved = fromPackage.resolve(`@vscode/ripgrep-${platform}-${options.arch ?? process.arch}/bin/${binary}`);
+      candidates.push(resolved.replace(/\.asar([\\/])/, '.asar.unpacked$1'));
+    } catch { /* Missing optional target package is reported by packaging verification. */ }
+  }
+  const found = candidates.find(file => executable(file, platform));
+  return found ? path.dirname(found) : null;
 }
 
-export const resolveBundledRipgrepBinDir = ({
-  packageJsonPath = resolveRipgrepPackageJsonCandidates()[0],
-  platform = process.platform,
-}: ResolveBundledRipgrepOptions = {}): string | null => {
-  if (typeof packageJsonPath !== 'string' || packageJsonPath.trim().length === 0) {
-    return null;
-  }
-
-  const packageRoot = path.dirname(packageJsonPath);
-  const packageJson = readPackageJson(packageJsonPath);
-  const binaryNames = getBinaryNames(platform);
-  const nodeModulesBinDir = packageJson?.bin ? resolveNodeModulesBinDir(packageRoot) : null;
-  const packageBinTargets = packageJson?.bin && typeof packageJson.bin === 'object'
-    ? Object.values(packageJson.bin)
-    : typeof packageJson?.bin === 'string'
-      ? [packageJson.bin]
-      : [];
-  const candidateDirs = [
-    nodeModulesBinDir,
-    path.join(packageRoot, 'bin'),
-    packageRoot,
-    ...packageBinTargets
-      .map((target) => path.resolve(packageRoot, String(target)))
-      .filter((target) => binaryNames.includes(path.basename(target)))
-      .map((target) => path.dirname(target)),
-  ].filter((entry): entry is string => Boolean(entry));
-
-  for (const candidateDir of candidateDirs) {
-    for (const binaryName of binaryNames) {
-      const candidate = path.join(candidateDir, binaryName);
-      if (isExecutableFile(candidate, platform)) {
-        return candidateDir;
-      }
-    }
-  }
-
-  return null;
-};
-
-export interface AugmentBundledRipgrepOptions {
-  delimiter?: string | undefined;
-  env?: NodeJS.ProcessEnv | undefined;
-  platform?: NodeJS.Platform | undefined;
-  resolvePackageJson?: (() => string | string[] | null | undefined) | undefined;
+export function augmentPathWithBundledRipgrep(options: {
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+  delimiter?: string;
+  resolveBinDir?: () => string | null;
+} = {}): { added: boolean; binDir: string | null } {
+  const env = options.env ?? process.env, platform = options.platform ?? process.platform;
+  const delimiter = options.delimiter ?? path.delimiter;
+  const binDir = options.resolveBinDir ? options.resolveBinDir() : resolveBundledRipgrepBinDir({ platform });
+  if (!binDir) return { added: false, binDir: null };
+  const key = Object.keys(env).find(key => platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH');
+  const current = key ? env[key] ?? '' : '';
+  // Explicit user programs retain precedence; the product fills missing tools.
+  const next = mergePathValues(current, binDir, delimiter);
+  if (platform === 'win32') for (const key of Object.keys(env)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete env[key];
+  env.PATH = next;
+  return { added: current !== next, binDir };
 }
-
-export const augmentPathWithBundledRipgrep = ({
-  env = process.env,
-  resolvePackageJson = resolveRipgrepPackageJsonCandidates,
-  platform = process.platform,
-  delimiter = path.delimiter,
-}: AugmentBundledRipgrepOptions = {}): { added: boolean; binDir: string | null } => {
-  const packageJsonPaths = [resolvePackageJson()].flat()
-    .filter((entry): entry is string => typeof entry === 'string' && entry.length > 0);
-  const binDir = packageJsonPaths
-    .map((packageJsonPath) => resolveBundledRipgrepBinDir({ packageJsonPath, platform }))
-    .find(Boolean) || null;
-
-  if (!binDir) {
-    return { added: false, binDir: null };
-  }
-
-  const currentPath = typeof env.PATH === 'string' ? env.PATH : '';
-  const parts = currentPath.split(delimiter).filter(Boolean);
-  const nextParts = [binDir, ...parts.filter((part) => part !== binDir)];
-  const nextPath = nextParts.join(delimiter);
-  const added = nextPath !== currentPath;
-  env.PATH = nextPath;
-
-  return { added, binDir };
-};

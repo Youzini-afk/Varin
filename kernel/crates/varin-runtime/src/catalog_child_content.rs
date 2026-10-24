@@ -464,6 +464,7 @@ pub struct ChildWaitRegistrationPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildWaitRegistration {
+    pub(super) tool_name: String,
     pub(super) context: ToolExecutionContext,
     pub(super) child_operation_id: String,
     pub(super) operation_revision: u64,
@@ -476,14 +477,17 @@ impl ChildWaitRegistrationPreparation {
         let admitted = intent.clone().load(&self.content)?;
         if self.operation.run_id != self.context.run_id
             || admitted.origin != self.context.origin
-            || admitted.call.name != collaboration::WAIT_TOOL
-            || admitted.call.arguments != json!({"operationId": self.child_operation_id})
+            || !((admitted.call.name == collaboration::WAIT_TOOL
+                && admitted.call.arguments == json!({"operationId": self.child_operation_id}))
+                || (admitted.call.name == super::retrieval::CONTROL_TOOL
+                && admitted.call.arguments == json!({"operationId":self.child_operation_id,"action":"wait"})))
         {
             return Err(RuntimeError::Conflict(
                 "child wait differs from its admitted call".into(),
             ));
         }
         Ok(PreparedChildWaitRegistration {
+            tool_name: admitted.call.name,
             context: self.context,
             child_operation_id: self.child_operation_id,
             operation_revision: self.operation.revision,

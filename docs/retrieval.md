@@ -7,7 +7,7 @@
 
 | 入口 | 执行与交付 | 模型配置 |
 | --- | --- | --- |
-| `code_retrieval` | 原工具 Operation 内部的普通 Agent 调查；结果直接返回父工具 | `models.explore`，界面为“快速检索模型” |
+| `code_retrieval` | 启动原工具 Operation 所属的后台 Agent 调查，立即返回任务身份；回答自动进入父会话输入队列 | `models.explore`，界面为“快速检索模型” |
 | 正式检索 Agent | 原协作派发、消息、报告及续接 | `models.retrievalAgent` |
 
 `question` 是快速入口唯一必需的任务信息。已有线索自然附在问题里即可；不要求主 Agent
@@ -34,11 +34,28 @@
 未声明的能力沿 `tool_describe` / `tool_invoke`，不能凭工具名绕过目录与权限。
 内部检索不递归派发新的快速检索或协作成员。
 
-原 Operation 等待采用原生持久 Wait 和事件唤醒；不在 Catalog 锁、Host 控制通道中等待模型。
+原工具以 Thread 生命周期的 Job 受理；受理回执闭合本次工具交换，不等待调查完成，也不让父 Run
+自动进入等待。主 Agent 可以继续其他工作，后台调查继续使用原执行与资源 owner。
 父工具不会在整个调查期间持有阻挡内部进程的宽范围文件租约。
-“使用已有材料”请求结束内部工作并交付已有回答；取消保留取消语义。两者都保留已经取得的
-工具证据、用量和中断时的可见回答，等待真实执行停止后释放资源。未确认效果仍标为未知。
-失败或压缩中断不会把已有证据改成成功完成。
+
+`retrieval_control` 接受同一会话分支的 `operationId` 与一个动作：
+
+| 动作 | 行为 |
+| --- | --- |
+| `status` | 立即返回实际状态、经过时间、最近一条助手消息和最近实际工具动作；助手未说话时该项为空 |
+| `wait` | 用原生持久 Wait 挂起本轮主 Run，等待该调查停止；取消这次等待保留后台调查 |
+| `stop` | 向原调查取消域发出停止请求，返回请求与确认状态；已有回答、工具证据和用量继续保留 |
+
+最近消息直接来自自然产生的公开助手正文，最近动作来自实际工具历史和在途 Operation。
+动作只投影工具名、状态、路径、查询或命令等识别信息，不复制文件正文、完整工具结果或思考内容。
+不增加进度总结请求，也不要求检索 Agent 为观察接口另写进展。
+
+调查结束并确认资源释放后，原生 Catalog 按原任务身份将回答送入父分支输入队列一次。
+主 Run 正在工作时，在下一次闭合工具交换的模型请求边界接收；本轮已经结束时沿原消息接续机制
+创建后续 Run。暂停、取消与已有执行门控继续生效。显式 `wait` 和自动交付共用同一份回答，
+不会再附加一份子任务报告。已排队的结果和投递身份可重启恢复。
+停止保留中断时已有的公开回答，等待真实执行停止后释放资源；请求停止与已确认停止分别显示。
+未确认效果仍标为未知，失败或压缩中断保留真实结束状态。
 
 内部实际模型回执计入所属父会话一次，正式子任务继续使用各自归属。
 父会话删除同时纳入内部历史、内容引用和派生资源的原回收流程；存活进程或 handoff pin
@@ -134,13 +151,16 @@ Bot knowledge-vector 仍有独立用途，使用 `vectors/embedding-owner.ts`、
 线程内沿用快速检索专用呈现，显示问题、实际最近动作、回答和可展开的工具过程。
 详情复用共用搜索/文件/终端视图，限定滚动区域；在底部时跟随输出，用户上翻后保留阅读位置。
 展开/收起使用现有动效并遵循 reduced-motion。正式检索保留协作成员与报告呈现。
-提前交付与取消分别受理；关闭详情不停止执行。
+运行卡片在父 Run 结束后继续显示调查状态；停止按钮控制原后台任务，关闭详情保留执行。
+完成后的回答归入原检索卡片；原调用尚未加载的历史分页位置保留独立结果入口。
 
 原生及真实 Host 接线测试覆盖普通工具循环、固定来源命令后读取、分页、部分失败、
 输出游标和回收；测试提供商为本地协议 fixture。真实服务的回答质量、延迟和成本需要在
 具体模型、来源和问题上观察；当前实现不把接线测试耗时当作模型性能。
 
 入口：[原生检索](../kernel/crates/varin-kernel/src/tools_retrieval.rs)、
+[后台控制](../kernel/crates/varin-kernel/src/retrieval_control.rs)、
+[原生结果交付](../kernel/crates/varin-runtime/src/catalog_retrieval.rs)、
 [共用发现](../kernel/crates/varin-kernel/src/tools_discovery.rs)、
 [共用读取](../kernel/crates/varin-kernel/src/tools_read.rs)、
 [执行视图](../kernel/crates/varin-kernel/src/storage/execution_views.rs)、
@@ -154,6 +174,12 @@ DNS/proxy/TLS 和取消，外部 URL 仍是不可信输入。
 
 Web snapshot 和本地文档捕获保留原件、来源、reader scope 与 revision。提取文本、outline/table/figure 与 page image 是同一材料
 的不同视图。PDF 文本不能证明视觉忠实，页面读取交付真正 typed image。刷新 URL 产生新观察，不改写已引用来源。
+
+模型 `document_read` 只给 path、snapshotId 或 artifact 时，PDF 与 Office 都默认读取正文；内部上传/材料登记仍可只取元数据。
+显式 `view:overview` 保持概览，返回有效 view、`textStatus:not-requested` 和携原 snapshotId 的 `nextRead`。
+Office 保留 section/object/range/query 选择和原对象身份，分页携实际 nextOffset 与选择条件续读；通用 view 与 Office view
+冲突时说明参数问题。工具输出预算截断继续使用原 `read_thread` 结果引用及精确偏移，不重新捕获原件。
+空正文按尚未请求、没有文字、解析失败或组件不可用表达实际状态；没有文本层时不自动启用 OCR。
 
 原生输入的 PDF upload 经过 ThreadMaterials 作用域校验，用 documentReader 与 MaterialStore 保留原始字节。
 submit、三种 enqueue 与 child continuation 冻结已授权 snapshot 的来源信息，`document_read` 继续读取同一原件；

@@ -292,6 +292,7 @@ import { createServerBootstrapRuntime } from './lib/platform/bootstrap-runtime.j
 import { parseServeCliOptions } from './lib/platform/cli-options.js';
 import { registerAuthAndAccessRoutes, registerCommonRequestMiddleware, registerServerStatusRoutes } from './lib/platform/core-routes.js';
 import { createPlatformEnvironmentRuntime } from './lib/platform/environment-runtime.js';
+import { createExecutionEnvironmentRuntime } from './lib/platform/execution-environment.js';
 import { resolveVarinDataDir } from './lib/platform/data-paths.js';
 import { clearAppImageArgv0FromProcessEnv } from './lib/platform/inherited-env.js';
 import { pathLooksUserConfigured, mergePathValues } from './lib/platform/path-utils.js';
@@ -1600,6 +1601,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const projectTrust = new ProjectTrustService(VARIN_DATA_DIR, (id, signal) => documentsAuthority.admitWorkspaceRegistration(id, signal));
   registerProjectTrustRoutes(app, projectTrust, uiAuthController.requireAuth);
   const modelsService = new ModelsService(VARIN_DATA_DIR, { projectTrusted: cwd => projectTrust.trusted(cwd), fetch: egressRuntime.fetch as typeof globalThis.fetch });
+  const executionEnvironment = createExecutionEnvironmentRuntime({ platform: platformEnvironmentRuntime,
+    preference: async () => (await modelsService.settings.harness()).shell });
+  app.get('/api/execution-environment', uiAuthController.requireAuth, async (req, res) => {
+    try { const { searchPath: _searchPath, ...visible } = await executionEnvironment.snapshot(req.query.refresh === 'true'); res.json(visible); }
+    catch (error) { res.status(503).json({ error: error instanceof Error ? error.message : String(error) }); }
+  });
   const stopModelDirectory = modelsService.startDirectory(egressRuntime.fetch as typeof globalThis.fetch);
   const resourceManagement = createResourceManagement({ dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, settings: modelsService.settings,
     promptTools: (context, signal) => promptToolCatalog(context, signal),
@@ -1860,6 +1867,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     return agentMcpPolicy(cwd,Boolean(workspace) && await projectTrust.trusted(cwd));
   }}), documentsAuthority.admitWorkspaceRegistration);
   agentRuntime.bindManagedSources(managedRemoteTargets);
+  agentRuntime.executionEnvironment = () => executionEnvironment.snapshot();
   let stopTokenizerCollection: (() => Promise<void>) | undefined;
   const startTokenizerCollection = () => {
     stopTokenizerCollection ??= modelsService.tokenizers.startCollection({
@@ -2112,6 +2120,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   kernelClient.subscribeExit(() => { void targetMcpService.close(); });
   managedRemoteExecution.setSourceOwner(createManagedSourceService({ kernel: kernelClient, hostId,
+    executionEnvironment: () => executionEnvironment.snapshot(),
     documents: documentsAuthority, validateLiveSource: liveSources.validate, prepareSource: prepareThreadSource,
     recovery: targetRecovery.handle,
     readCodeExchange: targetExchangeReader,

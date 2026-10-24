@@ -1729,6 +1729,8 @@ pub mod delegated;
 pub mod child_content;
 #[path = "catalog_child_delivery.rs"]
 pub mod child_delivery;
+#[path = "catalog_retrieval.rs"]
+pub mod retrieval;
 #[path = "catalog_permission_content.rs"]
 pub mod permission_content;
 #[path = "catalog_policy_body.rs"]

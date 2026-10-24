@@ -43,6 +43,11 @@ The presentation switcher uses `workbench-agent` (conversation with materials), 
 glyphs share a 1.8px rounded stroke and render at 16px in both the titlebar and menu; mode and workspace
 keep distinct silhouettes. These glyphs describe the workspace presentation, not session work focus.
 
+Session work focus uses its own four glyphs: `focus-general` (open rounded frame), `focus-code`
+(interlocking modules), `focus-research` (offset observation), and `focus-office` (curled manuscript).
+They use the same 24px grid and 1.8px rounded stroke, with silhouettes tuned for the composer's
+14px trigger and 16px menu. The selected trigger and menu use the same exhaustive focus mapping.
+
 ## Sizing
 
 The `Icon` component does not have a `size` prop. Use Tailwind classes instead:

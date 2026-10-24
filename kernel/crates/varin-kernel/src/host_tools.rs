@@ -425,7 +425,7 @@ fn unknown() -> ToolCompletion {
     ToolCompletion::Result {
         outcome: Outcome::Indeterminate,
         effect: Effect::Unknown,
-        content: json!({"error":"host_tool_effect_unknown"}).into(),
+        content: json!({"error":ExecutionError::new("host_tool_effect_unknown", "The original tool executor has not confirmed its effect. Its original receipt remains authoritative.")}).into(),
     }
 }
 /// Validate producer media independently of the receipt's already established effect facts.
@@ -847,7 +847,7 @@ impl ToolExecutor for HostTools {
                         | "host_tool_not_dispatched"
                 ) =>
             {
-                ToolExecutionReceipt::not_dispatched(error.code)
+                ToolExecutionReceipt { completion: ToolCompletion::not_dispatched(error), executor_stopped: true }
             }
             _ => ToolExecutionReceipt {
                 completion: unknown(),
@@ -923,7 +923,7 @@ impl LateReceipt {
                 effect,
                 content,
             } => (outcome, effect, content),
-            ToolCompletion::NotDispatched { reason } => (
+            ToolCompletion::NotDispatched { reason, .. } => (
                 if reason == "cancelled" {
                     Outcome::Cancelled
                 } else {

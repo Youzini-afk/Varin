@@ -34,20 +34,17 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
         let completion = if cancel.is_cancelled() || !self.persistence.goal_tool_allowed(context)? {
             ToolCompletion::NotDispatched {
                 reason: "cancelled".into(),
+                error: None,
             }
         } else if let Err(error) = guarded("tool_admission_watch_panicked", || {
             _admission_control = bound.watch_admission(context, &tool.contract, cancel)?;
             Ok(())
         }) {
-            ToolCompletion::NotDispatched {
-                reason: format!("{}: {}", error.code, error.message),
-            }
+            ToolCompletion::not_dispatched(error)
         } else if let Err(error) = guarded("tool_authorize_panicked", || {
             bound.authorize(context, &tool.contract, cancel)
         }) {
-            ToolCompletion::NotDispatched {
-                reason: format!("{}: {}", error.code, error.message),
-            }
+            ToolCompletion::not_dispatched(error)
         } else {
             let ready = prepare_dispatch(cancel, || {
                 lease = reservation
@@ -59,6 +56,7 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
             if !ready {
                 ToolCompletion::NotDispatched {
                     reason: "cancelled".into(),
+                    error: None,
                 }
             } else if let Err(error) = self
                 .persistence
@@ -69,12 +67,11 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
                     })
                 })
             {
-                ToolCompletion::NotDispatched {
-                    reason: format!("{}: {}", error.code, error.message),
-                }
+                ToolCompletion::not_dispatched(error)
             } else if cancel.is_cancelled() || !self.persistence.goal_tool_allowed(context)? {
                 ToolCompletion::NotDispatched {
                     reason: "cancelled".into(),
+                    error: None,
                 }
             } else {
                 let dispatch_cancelled = if durable {
@@ -159,9 +156,7 @@ impl<P: Persistence + ?Sized + 'static> InvocationRunner<P> {
                             .unwrap_or(false);
                         normalize_completion(completion, &tool.contract, confirmed_no_effect)
                     }
-                    Ok(Err(error)) => ToolCompletion::NotDispatched {
-                        reason: format!("{}: {}", error.code, error.message),
-                    },
+                    Ok(Err(error)) => ToolCompletion::not_dispatched(error),
                     Err(_) => {
                         executor_stopped = matches!(bound.executor_owner(), ExecutorOwner::Kernel)
                             && tool.contract.completion != CompletionKind::Job;

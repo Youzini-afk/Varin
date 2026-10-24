@@ -4,6 +4,7 @@ import type { ManagedRemoteExecutionService } from "./managed-remote-service.js"
 import { requestBodyChunks } from "./managed-remote-service.js";
 import type { ManagedSourcePrincipal, ManagedSourceService } from './managed-remote-types.js';
 import { sourceFailureCode } from '../kernel/source-admission-error.js';
+import { KernelClientError } from '../kernel/kernel-error.js';
 
 export interface ManagedRemoteRoutesOptions {
   service: ManagedRemoteExecutionService;
@@ -34,6 +35,10 @@ const asNonNegativeInteger = (input: unknown, label: string): number => {
 const sendError = (response: Response, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error);
   const code = sourceFailureCode(error);
+  if (!code && error instanceof KernelClientError) {
+    response.status(400).json({ error: message, code: error.code, ...(error.details === undefined ? {} : { details: error.details }) });
+    return;
+  }
   if (code) {
     response.status(code === 'source_authority_denied' ? 403 : code === 'source_changed' ? 409 : 503).json({ error: message, code });
     return;

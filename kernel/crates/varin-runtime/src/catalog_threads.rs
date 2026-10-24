@@ -109,7 +109,7 @@ pub(super) fn require_available(db: &Connection, thread_id: &str) -> Result<()> 
 pub(super) fn require_public(db:&Connection,thread:&str)->Result<()> {
     let internal:bool=db.query_row("SELECT EXISTS(SELECT 1 FROM child_tasks c JOIN operations o ON o.id=c.id WHERE c.child_thread_id=?1 AND json_extract(o.body,'$.executor')='code_retrieval')",
         [thread],|row|row.get(0))?;
-    if internal {return Err(RuntimeError::Conflict("Internal retrieval belongs to its original code_retrieval Operation; use that Operation to inspect, finish or cancel it".into()));}
+    if internal {return Err(RuntimeError::Conflict("Internal retrieval belongs to its original code_retrieval Operation; use retrieval_control to inspect, wait or stop it".into()));}
     Ok(())
 }
 

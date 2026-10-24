@@ -204,7 +204,7 @@ impl ToolExecutor for Questions {
                     effect: Effect::None,
                     content: content.into(),
                 },
-                Err(e) => ToolCompletion::NotDispatched { reason: e.message },
+                Err(e) => ToolCompletion::not_dispatched(e),
             };
         }
         let result = self
@@ -223,7 +223,7 @@ impl ToolExecutor for Questions {
             Err(e) => ToolCompletion::Result {
                 outcome: Outcome::Failed,
                 effect: Effect::None,
-                content: json!({"error":e.code}).into(),
+                content: json!({"error":e}).into(),
             },
         }
     }

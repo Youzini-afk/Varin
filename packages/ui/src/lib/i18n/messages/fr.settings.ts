@@ -263,8 +263,6 @@ export const settingsDict = {
 'settings.page.harness.output.visibleBytes.description': 'Long results show complete records or text previews with access to the original output. Explicit range reads return the full requested page.',
 'settings.page.harness.section.bash': 'Bash',
 'settings.page.harness.section.bash.description': 'Configure bash command execution behavior.',
-'settings.page.harness.bash.waitMs.label': 'Command wait timeout',
-'settings.page.harness.bash.waitMs.description': 'How long to wait for a command before backgrounding it.',
 'settings.page.harness.section.permissions': 'Autorisations',
 'settings.page.harness.section.permissions.description': 'Configurez la stratégie de confirmation native et les règles utilisateur.',
 'settings.page.harness.permissions.mode.label': 'Mode de confirmation',

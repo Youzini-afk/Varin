@@ -13,6 +13,7 @@ import { toolValueLabel } from './toolLabels';
 import { ChildState } from './childPresentation';
 import { ThreadChildReport } from '../thread/ThreadChildReport';
 import { ToolDisclosure } from './ToolDisclosure';
+import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
 
 const records = (value: unknown) => Array.isArray(value) ? value.map(toolRecord) : [];
 const valueText = (value: unknown) => typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value, null, 2);
@@ -21,6 +22,20 @@ const valueText = (value: unknown) => typeof value === 'string' ? value : value 
 export function workToolContent(call: ChatToolCall, data: Record<string, unknown>, t: ReturnType<typeof useI18n>['t'],
   cwd: string, conversation: ConversationPresentation | null): React.ReactNode {
   const args = toolRecord(call.arguments);
+  if (call.name === 'retrieval_control' && typeof data.state === 'string') {
+    const message = toolRecord(data.latestAssistantMessage), action = toolRecord(data.latestAction);
+    const summary = typeof action.tool === 'string' ? getToolSummary({ toolName: action.tool, arguments: action.arguments }).text : '';
+    return <div className="min-w-0 space-y-2">
+      <p className="typography-micro text-muted-foreground">{toolValueLabel(data.state, t)}
+        {typeof data.elapsedMs === 'number' && <> · {t('chat.explore.seconds', { count: (data.elapsedMs / 1000).toFixed(1) })}</>}</p>
+      {typeof message.text === 'string' && message.text && <div className="max-h-64 overflow-auto overscroll-contain break-words">
+        <MarkdownRenderer content={message.text} messageId={call.id + ':latest-message'} enableFileReferences={false} />
+      </div>}
+      {typeof action.tool === 'string' && <p className="break-words typography-meta text-muted-foreground">
+        {action.tool}{summary && summary !== action.tool ? ' · ' + summary : ''} · {toolValueLabel(action.outcome ?? action.state, t)}
+      </p>}
+    </div>;
+  }
   if (call.name === 'child_status') {
     const executions = Array.isArray(data.executions) ? records(data.executions) : data.execution_id ? [data] : [];
     return executions.length ? <div className="tool-execution-history">{executions.map((entry, index) => {

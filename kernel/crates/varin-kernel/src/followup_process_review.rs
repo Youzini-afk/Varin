@@ -58,8 +58,7 @@ fn model_call(
             waiting_on: None,
         },
     );
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -132,8 +131,7 @@ fn model_call(
             operation_id: format!("{request}:tool:{}", call.call_id),
             origin: origin.clone(),
         },
-        FrozenToolContext {
-            direct_tools: None,
+        FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
@@ -241,6 +239,7 @@ fn process_followup_reads_real_original_output_and_rechecks_both_grants() {
     let mut tools = crate::process_wait::schemas(KernelToolExecutor::selected_schemas(&kinds));
     tools.push(crate::followup_tools::schema());
     let mut binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "source".into(),
         run_id: String::new(),
@@ -856,6 +855,7 @@ fn native_input_uses_original_model_intent_and_guardian_receipt_then_reads_same_
     ]);
     let tools = KernelToolExecutor::selected_schemas(&kinds);
     let mut binding = ToolBinding {
+        execution_environment: None,
         resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local, remote_authority:None, target_authority:None,
 grant_id: "source".into(),
         run_id: String::new(),

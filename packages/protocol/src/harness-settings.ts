@@ -272,9 +272,8 @@ export type HarnessSettingsInput = Omit<Partial<HarnessSettings>, "context" | "n
 export interface HarnessSettings {
   images?: HarnessImageSettings;
   tools: Partial<Record<string, boolean>>;
-  shell: "auto" | "git-bash" | "powershell" | "wsl";
+  shell: "auto" | "bash" | "zsh" | "sh" | "fish" | "pwsh" | "powershell" | "cmd" | "dash" | "ksh" | "nu";
   output: { visibleBytes: number };
-  bash: { waitMs: number };
   models: Partial<Record<HarnessModelRole, HarnessModelBinding>>;
   /** User-owned profiles dispatched through the ordinary native Thread runtime. */
   agents: Record<string, HarnessCustomAgent>;
@@ -344,7 +343,6 @@ export const DEFAULT_HARNESS_SETTINGS: HarnessSettings = {
   tools: {},
   shell: "auto",
   output: { visibleBytes: 32768 },
-  bash: { waitMs: 10000 },
   models: {},
   agents: {},
   codeRetrieval: { decision: "auto" },
@@ -474,10 +472,10 @@ export function mergeHarnessSettings(
     ...DEFAULT_HARNESS_SETTINGS,
     ...userRest,
     ...workspaceRest,
+    shell: user.shell ?? DEFAULT_HARNESS_SETTINGS.shell,
     // Deep merge (depth 1) for nested objects
     tools: { ...DEFAULT_HARNESS_SETTINGS.tools, ...user.tools, ...workspace.tools },
     output: { ...DEFAULT_HARNESS_SETTINGS.output, ...user.output, ...workspace.output },
-    bash: { ...DEFAULT_HARNESS_SETTINGS.bash, ...user.bash, ...workspace.bash },
     // Model/provider selection is user-owned. A repository cannot redirect
     // auxiliary requests to another provider.
     models: parseHarnessModelSlots(user.models),

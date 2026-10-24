@@ -29,6 +29,10 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
   const child = (id: unknown) => targets?.children.get(toolText(id)) || toolText(id);
   const thread = (id: unknown) => targets?.threads.get(toolText(id)) || toolText(id);
   switch (call.name) {
+    case 'retrieval_control': {
+      const latest = toolRecord(data.latestAction), target = toolRecord(latest.arguments);
+      return subjectJoin(target.path ?? target.query ?? latest.tool, toolValueLabel(data.state, t));
+    }
     case 'browser_tabs': case 'browser_open': case 'browser_read': case 'browser_act': case 'browser_files': {
       const page = toolRecord(data.page);
       return subjectJoin(page.title || args.url || page.url, args.query, args.ref, args.key,
@@ -43,7 +47,7 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
       const id = toolText(args.processId) || toolText(snapshot.processId);
       const target = processCommand(args) || targets?.processes.get(id) || (typeof snapshot.pid === 'number' ? 'PID ' + snapshot.pid : id);
       const input = toolText(args.text).replace(/\r\n|\r|\n/g, ' ↵ ').replace(/\t/g, ' ⇥ ').trim();
-      return subjectJoin(target, call.name === 'process_write' ? subjectJoin(input, args.eof === true ? 'EOF' : '')
+      return subjectJoin(target, call.name === 'process_write' ? subjectJoin(input, args.submit === true ? '↵' : '', args.eof === true ? 'EOF' : '')
         : call.name === 'process_resize' && typeof args.cols === 'number' && typeof args.rows === 'number' ? `${args.cols} × ${args.rows}` : '');
     }
     case 'todo': {

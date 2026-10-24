@@ -10,6 +10,7 @@ const createResolver = ({
   executables = [],
   links = {},
   directories = {},
+  purpose = 'terminal',
 }: {
   augmentedPath?: string | undefined;
   env?: NodeJS.ProcessEnv | undefined;
@@ -17,6 +18,7 @@ const createResolver = ({
   platform?: NodeJS.Platform | undefined;
   links?: Record<string, string>;
   directories?: Record<string, string[]>;
+  purpose?: 'terminal' | 'agent';
 } = {}) => {
   const available = new Set<string>(executables);
   const path = {
@@ -34,6 +36,7 @@ const createResolver = ({
       path,
       platform,
       env,
+      purpose,
       buildAugmentedPath: () => augmentedPath,
       searchPathFor: (name, searchPath) => {
         searches.push([name, searchPath]);
@@ -51,6 +54,18 @@ const createResolver = ({
 };
 
 describe('terminal shell resolver', () => {
+  it('prefers Git Bash for Agent auto, preserves terminal auto, and excludes the WSL bash launcher', async () => {
+    const bash = 'C:\\Program Files\\Git\\bin\\bash.exe', pwsh = 'C:\\Tools\\pwsh.exe';
+    const input = { platform: 'win32' as const, env: { ProgramFiles: 'C:\\Program Files' },
+      augmentedPath: 'C:\\Windows\\System32;C:\\Tools', executables: [bash, pwsh, 'C:\\Windows\\System32\\bash.exe'] };
+    const agent = createResolver({ ...input, purpose: 'agent' }).resolver;
+    expect((await agent.resolve('auto')).executables[0]).toBe(bash);
+    expect((await agent.list()).find(shell => shell.id === 'bash')).toMatchObject({ name: 'Git Bash', executable: bash });
+    expect((await createResolver(input).resolver.resolve('auto')).executables[0]).toBe(pwsh);
+    const noGit = createResolver({ ...input, purpose: 'agent', env: { ...input.env, SHELL: 'C:\\Windows\\System32\\bash.exe' }, executables: [pwsh, 'C:\\Windows\\System32\\bash.exe'] }).resolver;
+    expect((await noGit.list()).some(shell => shell.id === 'bash')).toBe(false);
+    expect((await noGit.resolve('auto')).executables[0]).toBe(pwsh);
+  });
   it('discovers shells from the augmented PTY PATH', async () => {
     const { resolver, searches } = createResolver({ executables: ['/augmented/bin/fish'] });
 

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { WebSnapshotRef } from "@varin/protocol";
 import { webOutput } from '../kernel/web-runtime.js';
 import { createDocumentReader } from "./document-reading.js";
+import { readDocumentMaterial } from './document-material.js';
 import type { ThreadMaterialAuthority, WebSnapshotDraft, WebMaterialStore } from "./web-materials.js";
 import type { createPdfEngine } from "./pdf-engine.js";
 
@@ -87,6 +88,19 @@ const fixture = (failText = false) => {
 };
 
 describe("independent document reading", () => {
+  it('uses body text for both a model path read and its fixed snapshot while internal ingest stays metadata-only', async () => {
+    const f = fixture();
+    const first = await readDocumentMaterial(f.reader, { path: 'paper.pdf' }, f.ctx(), {
+      readPath: async () => ({ source: f.source, sourceUrl: 'file:///paper.pdf' }),
+    });
+    expect(first.status).toBe('ok'); if (first.status !== 'ok') throw new Error('Missing text');
+    expect(first).toMatchObject({ view: 'text', textStatus: 'available' });
+    expect(first.markdown).toContain('native page 1');
+    const pinned = await readDocumentMaterial(f.reader, { snapshotId: first.snapshot!.snapshotId }, f.ctx());
+    expect(pinned).toMatchObject({ status: 'ok', markdown: first.markdown, view: 'text' });
+    const overview = await readDocumentMaterial(f.reader, { snapshotId: first.snapshot!.snapshotId, view: 'overview' }, f.ctx());
+    expect(overview).toMatchObject({ status: 'ok', markdown: '', textStatus: 'not-requested', nextRead: { snapshotId: first.snapshot!.snapshotId, view: 'text' } });
+  });
   it("pins original bytes before parsing; text failure still leaves page rendering available", async () => {
     const f = fixture(true);
     const opened = await f.reader.ingest({ source: f.source, sourceUrl: "https://example.com/paper.pdf" }, f.ctx());

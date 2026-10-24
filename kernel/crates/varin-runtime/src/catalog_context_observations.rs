@@ -377,8 +377,7 @@ mod tests {
     fn source(root: &str) -> SourceSelection {
         serde_json::from_value(json!({"resource_owner":{"kind":"local"},"mode":"live_root","workspace_id":root,"execution_workspace_id":root,"branch_id":null,"revision":null,"live_root":{"hostId":"host","rootId":root,"canonicalRoot":format!("/{root}")}})).unwrap()
     }
-    fn binding(branch: &str, head: Option<String>) -> RequestBinding {
-        serde_json::from_value(json!({"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":[],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":branch,"ancestor_id":null,"leaf_id":head}})).unwrap()
+    fn binding(branch: &str, head: Option<String>) -> RequestBinding { serde_json::from_value(json!({"resource_activations":[],"resource_checkpoint_id":null,"connection_identity":"fixture","provider_family":"fixture","model":"fixture","credential_ref":null,"configuration_generation":1,"tool_schema_generation":1,"tools":[],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":{"branch_id":branch,"ancestor_id":null,"leaf_id":head}})).unwrap()
     }
     fn submit(
         db: &mut Catalog,

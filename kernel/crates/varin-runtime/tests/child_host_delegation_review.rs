@@ -641,6 +641,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                         context: context.clone(),
                         completion: ToolCompletion::NotDispatched {
                             reason: "cancelled".into(),
+                            error: None,
                         },
                         executor_stopped: true,
                     },
@@ -687,6 +688,7 @@ fn child_result_waits_for_original_workspace_and_service_callbacks_but_not_globa
                         completion: if call.call_id == "cancelled-before-dispatch" {
                             ToolCompletion::NotDispatched {
                                 reason: "cancelled".into(),
+                                error: None,
                             }
                         } else {
                             unknown.clone()

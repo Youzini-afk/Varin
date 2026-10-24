@@ -1,6 +1,6 @@
 //! Selected tools reuse the existing Storage owner through typed in-process messages.
 //! No second catalog, file writer, process manager, or management-authority fallback exists here.
-use crate::error::{error_code, KernelError};
+use crate::error::KernelError;
 use crate::model::Grant;
 use crate::storage::file_mutations::{FileEditArgs, FileWriteArgs, TextMutation};
 use crate::storage::Storage;
@@ -92,7 +92,7 @@ impl ToolKind {
     fn description(self) -> &'static str {
         match self {
             Self::FileRead => {
-                "Read a bounded UTF-8 range from the admitted source and return its read version."
+                "Read a bounded UTF-8 range from the admitted source. Return readVersion unchanged for conditional file_write/file_edit; it identifies file state, including absence. objectHash identifies content and is not a write version."
             }
             Self::FileList => "List paths in the admitted source with bounded pagination.",
             Self::FileSearch => "Search text in the admitted source and return bounded matches.",
@@ -114,13 +114,13 @@ impl ToolKind {
                 "Start a process in the admitted execution environment and return its durable operation handle."
             }
             Self::ProcessWrite => {
-                "Write UTF-8 input to the original process and report actual written-byte evidence. Pipe EOF is explicit; a PTY accepts control characters rather than a universal EOF operation."
+                "Send exact UTF-8 text to the original process input channel. submit appends its advertised input.lineEnding (Enter); text may be empty. confirmedBytes/state:applied confirms channel writes, not application execution. Read process output for its response. Pipe EOF is explicit; PTY control characters remain exact."
             }
             Self::ProcessResize => {
                 "Resize the original PTY and wait for its actual size-change receipt."
             }
             Self::CodeRetrieval => {
-                "Retrieve source excerpts relevant to the question, following useful code relationships to provide the context needed for further work. Results include source locations and any gaps that affect their use."
+                "Start an internal background investigation of a focused question about the admitted source files or materials. Returns an operationId after acceptance, allowing other work to continue. The investigation uses ordinary tools and delivers its final answer automatically, with precise source locations and relevant gaps. Use retrieval_control to inspect its latest assistant message and actual action, wait for it, or stop it."
             }
         }
     }
@@ -227,6 +227,8 @@ pub(crate) fn source_capabilities(
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ToolBinding {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_environment: Option<crate::shell_environment::ExecutionEnvironment>,
     pub resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
     pub remote_authority: Option<RemoteResourceAuthority>,
     #[serde(skip)]
@@ -307,7 +309,21 @@ pub(crate) struct ProcessWriteArgs {
     pub process_id: String,
     pub text: String,
     #[serde(default)]
+    pub submit: bool,
+    #[serde(default)]
     pub eof: bool,
+}
+impl ProcessWriteArgs {
+    pub(crate) fn input(&self, binding: &ToolBinding, resources: &KernelResourceClient) -> Result<crate::process::interaction::Input, ExecutionError> {
+        let mut bytes=self.text.as_bytes().to_vec();
+        if self.submit && binding.remote_authority.is_none() {
+            let process=resources.interactions.as_ref().ok_or_else(||ExecutionError::new("process_unavailable","The original process input owner is unavailable"))?
+                .access(binding.clone(),self.process_id.clone()).map_err(|error|ExecutionError::new("process_input",error.to_string()))?;
+            let ending=process["input"]["lineEnding"].as_str().ok_or_else(||ExecutionError::new("process_input","The original process did not publish an input line ending"))?;
+            bytes.extend_from_slice(ending.as_bytes());
+        }
+        Ok(crate::process::interaction::Input::Write {bytes:bytes.into(),eof:self.eof})
+    }
 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -340,6 +356,8 @@ struct EnvironmentEntry {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ProcessSpawnArgs {
+    #[serde(skip)]
+    shell: Option<crate::shell_environment::ExecutionShell>,
     #[serde(default)]
     cwd: String,
     command: String,
@@ -460,21 +478,6 @@ impl ResourceOperation {
             }
             ToolKind::ProcessSpawn => {
                 let mut arguments = args.clone();
-                if let Some(script) = arguments.get("shellCommand").cloned() {
-                    if script.as_str().is_none_or(|text| text.trim().is_empty() || text.contains('\0'))
-                        || ["command","args","windowsRawArguments"].iter().any(|key|arguments.get(key).is_some()) {
-                        return Err(ExecutionError::new("invalid_tool_arguments","Use shellCommand alone, or command with an argument array"));
-                    }
-                    arguments.as_object_mut().expect("object with shellCommand").remove("shellCommand");
-                    #[cfg(windows)] {
-                        arguments["command"] = json!("powershell.exe");
-                        arguments["args"] = json!(["-NoLogo","-NoProfile","-NonInteractive","-Command",script]);
-                    }
-                    #[cfg(not(windows))] {
-                        arguments["command"] = json!("/bin/sh");
-                        arguments["args"] = json!(["-c",script]);
-                    }
-                }
                 if arguments.get("env").is_none() {
                     let environment = std::env::vars_os()
                         .map(|(name, value)| {
@@ -497,9 +500,7 @@ impl ResourceOperation {
                     arguments["env"] = json!(environment);
                 }
                 serde_json::from_value::<ProcessSpawnArgs>(arguments).map(|mut args| {
-                    args.cwd = std::path::Path::new(&args.cwd.replace('\\', "/"))
-                        .components().filter(|part| !matches!(part, std::path::Component::CurDir))
-                        .collect::<std::path::PathBuf>().to_string_lossy().replace('\\', "/");
+                    normalize_separators(&mut args.cwd);
                     Self::ProcessSpawn(args)
                 })
             }
@@ -513,7 +514,8 @@ impl ResourceOperation {
                     if args.start_line.is_some() || args.end_line.is_some() { return Err(ExecutionError::new("invalid_tool_arguments","Use unit selection without startLine/endLine; offset is relative to the selected unit")); }
                 }
                 normalize_separators(&mut args.path);
-                normalized_path(&args.path, false)?;
+                normalized_path(&args.path, true)?;
+                if args.path.is_empty() { return Err(ExecutionError::new("not_a_file", "The source root is a directory; use file_list to read its entries.")); }
                 // Agent-facing default page only. Internal source/mutation reads retain
                 // their explicit full-read semantics; callers can request a larger range.
                 if args.length.is_none() && args.start_line.is_none() && args.end_line.is_none() {
@@ -740,7 +742,11 @@ impl ResourceOperation {
     }
 }
 fn normalize_separators(path: &mut String) {
-    if path.contains('\\') { *path = path.replace('\\', "/"); }
+    // Lexical only: leave absolute paths and parent components for the original
+    // resource admission to reject. Virtual Sources do not use local realpath.
+    let value = path.replace('\\', "/");
+    *path = value.split('/').filter(|part| !part.is_empty() && *part != ".").collect::<Vec<_>>().join("/");
+    if value.starts_with('/') && !path.starts_with('/') { path.insert(0, '/'); }
 }
 fn normalized_path(path: &str, root: bool) -> Result<(), ExecutionError> {
     if (path.is_empty() && !root)
@@ -934,6 +940,9 @@ impl KernelResourceClient {
             })?
             .query_draining(query, cancel)?;
         if result["ok"] != true {
+            if let Some(error)=result.get("error") {
+                return Err(serde_json::from_value(error.clone()).map_err(|failure|ExecutionError::new("source_receipt",failure.to_string()))?);
+            }
             return Err(ExecutionError::new(
                 "source_unavailable",
                 result["message"]
@@ -1003,7 +1012,7 @@ impl KernelResourceClient {
             cancel,
         )
         .map_err(|failure| {
-            ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+            ExecutionError::from(failure.error)
         })
     }
     pub(crate) fn with_integration_receipts(
@@ -1220,6 +1229,7 @@ impl KernelResourceClient {
                 revision: revision as i64,
             });
         let binding = ToolBinding {
+            execution_environment: None,
             resource_owner: read.1.resource_owner.clone(),
             remote_authority: Some(RemoteResourceAuthority {
                 authority_id: authority_id.into(),
@@ -1604,6 +1614,7 @@ impl KernelResourceClient {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct KernelToolExecutor {
     binding: ToolBinding,
     schemas: Vec<ToolSchema>,
@@ -1841,7 +1852,42 @@ impl KernelToolExecutor {
             .ok_or_else(|| {
                 ExecutionError::new("tool_not_bound", "tool is not selected in this Run")
             })?;
-        let mut operation = ResourceOperation::parse(kind, &call.arguments)?;
+        let mut arguments = call.arguments.clone();
+        let mut selected_shell = None;
+        if kind == ToolKind::ProcessSpawn {
+            let inherit=arguments.get("env").is_none();
+            if let Some(script) = arguments.get("shellCommand").cloned() {
+                if script.as_str().is_none_or(|text| text.trim().is_empty() || text.contains('\0'))
+                    || ["command", "args", "windowsRawArguments"].iter().any(|key| arguments.get(key).is_some()) {
+                    return Err(ExecutionError::new("invalid_tool_arguments", "Use shellCommand with optional shell, or command with an argument array"));
+                }
+                let requested = arguments.get("shell").map(|value|value.as_str().ok_or_else(||ExecutionError::new("invalid_tool_arguments","shell must be a Shell ID"))).transpose()?;
+                let environment = self.binding.execution_environment.as_ref().ok_or_else(||ExecutionError::new("shell_unavailable","Execution Host shell discovery is unavailable. Use command and args to start a known executable directly."))?;
+                let shell = environment.select(requested, self.binding.remote_authority.is_none())?.clone();
+                let object = arguments.as_object_mut().expect("shellCommand object");
+                object.remove("shellCommand"); object.remove("shell");
+                object.insert("command".into(),json!(shell.executable));
+                object.insert("args".into(),shell.arguments(&script)?);
+                selected_shell=Some(shell);
+            } else if arguments.get("shell").is_some() {
+                return Err(ExecutionError::new("invalid_tool_arguments", "shell requires shellCommand; command and args starts a program directly"));
+            }
+            if inherit && self.binding.remote_authority.is_none() {
+                if let Some(environment)=&self.binding.execution_environment {
+                    let mut env=std::env::vars().filter(|(key,_)|if cfg!(windows) {!key.eq_ignore_ascii_case("path")} else {key!="PATH"})
+                        .map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>();
+                    let inherited=std::env::var("PATH").unwrap_or_default();
+                    let current=environment.search_path.as_deref().unwrap_or(&inherited);
+                    let extra=selected_shell.as_ref().map(|shell|shell.path.as_slice()).unwrap_or(&[]);
+                    let path=std::env::join_paths(std::env::split_paths(current).chain(extra.iter().map(std::path::PathBuf::from)))
+                        .map_err(|error|ExecutionError::new("environment_encoding",error.to_string()))?;
+                    env.push(json!({"name":"PATH","value":path.to_string_lossy()}));
+                    arguments["env"]=json!(env);
+                }
+            }
+        }
+        let mut operation = ResourceOperation::parse(kind, &arguments)?;
+        if let ResourceOperation::ProcessSpawn(args) = &mut operation { args.shell=selected_shell; }
         if let ResourceOperation::FileQuery(args) = &mut operation {
             if let Some(scope)=&self.search_scope {args.restrict_paths(scope)?;}
             args.validate_source(&self.binding)?;
@@ -2055,7 +2101,7 @@ impl KernelToolExecutor {
                 .resources
                 .call(&self.binding, context, operation.clone(), true, cancel)
                 .map_err(|failure| {
-                    ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                    ExecutionError::from(failure.error)
                 })?;
             contract.resources[0].key = plan
                 .get("resourceKey")
@@ -2110,9 +2156,14 @@ impl ToolExecutor for KernelToolExecutor {
         request: &FrozenToolContext,
         _: &CancellationToken,
     ) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
-        let operation = self.frozen_operation(call, request)?;
+        let self_ = if let Some(environment) = &request.execution_environment {
+            let mut executor=(*self).clone();
+            executor.binding.execution_environment=Some(serde_json::from_value(environment.clone()).map_err(|error|ExecutionError::new("execution_environment",error.to_string()))?);
+            Arc::new(executor)
+        } else {self};
+        let operation = self_.frozen_operation(call, request)?;
         Ok(Box::new(KernelCall {
-            executor: self,
+            executor: self_,
             call: call.clone(),
             request: request.clone(),
             operation,
@@ -2195,9 +2246,7 @@ impl ToolExecutor for KernelToolExecutor {
     ) -> ToolCompletion {
         match self.operation(Some(context), call) {
             Ok(operation) => self.execute_operation(context, call, operation, contract, cancel),
-            Err(error) => ToolCompletion::NotDispatched {
-                reason: error.to_string(),
-            },
+            Err(error) => ToolCompletion::not_dispatched(error),
         }
     }
 }
@@ -2347,7 +2396,7 @@ impl KernelToolExecutor {
             .call(&self.binding, context, operation.clone(), true, cancel)
             .map(|_| ())
             .map_err(|failure| {
-                ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                ExecutionError::from(failure.error)
             })
     }
     fn execute_operation(
@@ -2368,6 +2417,7 @@ impl KernelToolExecutor {
         if &expected != contract {
             return ToolCompletion::NotDispatched {
                 reason: "tool contract changed".into(),
+                error: None,
             };
         }
         if let ResourceOperation::RetrievalQuery(args) = &operation {
@@ -2382,6 +2432,7 @@ impl KernelToolExecutor {
         ) {
             return ToolCompletion::NotDispatched {
                 reason: "process interaction requires Catalog ownership validation".into(),
+                error: None,
             };
         }
         let spawn_args = if let ResourceOperation::ProcessSpawn(args) = &operation { Some(args.clone()) } else { None };
@@ -2431,6 +2482,7 @@ impl KernelToolExecutor {
                         }
                         result["command"] = json!(args.command);
                         result["args"] = json!(args.args);
+                        if let Some(shell) = &args.shell { result["shell"] = json!({"id":shell.id,"executable":shell.executable}); }
                     }
                 }
                 let phase = result.get("status").and_then(Value::as_str);
@@ -2455,19 +2507,17 @@ impl KernelToolExecutor {
                 }
             }
             Ok(mut result) if read && result["state"]["kind"] == "directory" => {
-                result["error"] = json!("not_a_file");
-                result["message"] = json!("The path is a directory; use file_list to read its entries.");
+                result["error"] = json!(ExecutionError::new("not_a_file", "The path is a directory; use file_list to read its entries."));
                 ToolCompletion::Result { outcome: Outcome::Failed, effect: Effect::None, content: result.into() }
             }
             // The conditional resource owner proved the target was untouched.
             // Use the explicit no-dispatch receipt; generic mutating Result(None)
             // is deliberately normalized to unknown by the runtime.
             Ok(result) if mutation && result["status"] == "conflict" => {
-                ToolCompletion::NotDispatched {
-                    reason: "File version conflict; read the current file to obtain its readVersion before retrying.".into(),
-                }
+                ToolCompletion::not_dispatched(ExecutionError::new("file_version_conflict", "File version conflict; read the current file to obtain its readVersion before retrying.")
+                    .with_details(json!({"path":result["path"],"read":{"tool":"file_read","arguments":{"path":result["path"]}}})))
             }
-            Ok(result) if restore && result["status"] == "failed" => ToolCompletion::NotDispatched { reason: result.to_string() },
+            Ok(result) if restore && result["status"] == "failed" => ToolCompletion::NotDispatched { reason: result.to_string(), error: None, },
             Ok(result) if restore => ToolCompletion::Result {
                 outcome: if result["status"] == "pending" { Outcome::Indeterminate } else if result["status"] == "applied" { Outcome::Succeeded } else { Outcome::Failed },
                 effect: if result["status"] == "pending" { Effect::Unknown } else if result["appliedPaths"].as_array().is_some_and(|v| !v.is_empty()) {
@@ -2475,7 +2525,11 @@ impl KernelToolExecutor {
                 } else { Effect::Confirmed },
                 content: result.into(),
             },
-            Ok(result) if mutation => ToolCompletion::Result {
+            Ok(mut result) if mutation => {
+                // Recovery provenance belongs to Storage's original journal, not
+                // the model-facing save status (normal writes are not reconciliations).
+                if let Some(fields)=result.as_object_mut() { fields.remove("reconciled"); }
+                ToolCompletion::Result {
                 outcome: if result["status"] == "applied" {
                     Outcome::Succeeded
                 } else {
@@ -2487,15 +2541,13 @@ impl KernelToolExecutor {
                     Effect::None
                 },
                 content: result.into(),
-            },
+            } },
             Ok(mut result) => { if let Some((mode,encoding)) = output_options { crate::process::text::project(&mut result, &mode, encoding.as_deref()); } ToolCompletion::Result {
                 outcome: Outcome::Succeeded,
                 effect: Effect::None,
                 content: result.into(),
             } },
-            Err(failure) if !failure.dispatched => ToolCompletion::NotDispatched {
-                reason: failure.error.to_string(),
-            },
+            Err(failure) if !failure.dispatched => ToolCompletion::not_dispatched(ExecutionError::from(failure.error)),
             Err(failure) => ToolCompletion::Result {
                 outcome: if spawn || mutation || restore {
                     Outcome::Indeterminate
@@ -2510,7 +2562,7 @@ impl KernelToolExecutor {
                     Effect::None
                 },
                 content:
-                    json!({"error":error_code(&failure.error),"message":failure.error.to_string()})
+                    json!({"error":ExecutionError::from(failure.error)})
                         .into(),
             },
         }
@@ -2628,7 +2680,7 @@ impl PreparedToolCall for KernelCall {
                         } else {
                             Effect::Unknown
                         },
-                        content: json!({"error":"source_unavailable","message":error.to_string()})
+                        content: json!({"error":ExecutionError::new("source_unavailable",error.to_string())})
                             .into(),
                     },
                     executor_stopped: false,
@@ -2687,7 +2739,7 @@ fn tool_schema(kind: ToolKind) -> Value {
             vec!["processId", "cursor"],
         ),
         ToolKind::ProcessWrite => (
-            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string"},"eof":{"type":"boolean"}}),
+            json!({"processId":{"type":"string","minLength":1},"text":{"type":"string","description":"Exact JSON-decoded UTF-8 input; escapes are decoded once. Writing confirms delivery to the input channel, not application execution."},"submit":{"type":"boolean","default":false,"description":"Append this process input.lineEnding once after text. Empty text with submit sends Enter. Existing newlines are kept."},"eof":{"type":"boolean"}}),
             vec!["processId", "text"],
         ),
         ToolKind::ProcessResize => (
@@ -2696,7 +2748,8 @@ fn tool_schema(kind: ToolKind) -> Value {
         ),
         ToolKind::ProcessSpawn => (
             json!({"cwd":{"type":"string","default":"","description":"Directory relative to the selected source root. Empty string or . selects the root."},"command":{"type":"string","minLength":1},"args":{"type":"array","items":{"type":"string"}},
-            "shellCommand":{"type":"string","minLength":1,"description":"Shell text for pipelines, redirection or multiline commands. Runs in the actual execution Host's shell: PowerShell on Windows, /bin/sh on Unix. Mutually exclusive with command/args."},
+            "shellCommand":{"type":"string","minLength":1,"description":"Command text for the execution Host's published default Shell, or the selected shell. Mutually exclusive with command/args/windowsRawArguments. The body is passed unchanged."},
+            "shell":{"type":"string","minLength":1,"description":"Shell ID from the execution Host's available shells (for example bash, pwsh, powershell, cmd). Omit or use auto for the published default. Only with shellCommand. Unavailable choices fail without replaying in another interpreter."},
             "waitMs":{"type":"integer","minimum":0,"maximum":9007199254740991u64,"default":0,"description":"Observe the original process until exit or this interval. Zero returns immediately. Never a kill timeout."},
             "maxOutputBytes":{"type":"integer","minimum":1,"maximum":crate::process::CHUNK_BYTES,"description":"Initial output page. Continue with process_read at observation.nextCursor."},
             "outputEncoding":{"type":"string","description":"Encoding override for the initial text output, for example gbk or utf-16le; omitted uses automatic decoding."},
@@ -2707,7 +2760,7 @@ fn tool_schema(kind: ToolKind) -> Value {
     };
     let mut schema = json!({"type":"object","additionalProperties":false,"properties":properties,"required":required});
     if kind == ToolKind::ProcessSpawn {
-        schema["oneOf"] = json!([{"required":["command"],"not":{"required":["shellCommand"]}},
+        schema["oneOf"] = json!([{"required":["command"],"not":{"anyOf":[{"required":["shellCommand"]},{"required":["shell"]}]}},
             {"required":["shellCommand"],"not":{"anyOf":[{"required":["command"]},{"required":["args"]},{"required":["windowsRawArguments"]}]}}]);
     }
     schema
@@ -3316,6 +3369,7 @@ pub(crate) fn execute_source_tool(
         .ok_or_else(|| KernelError::Authorization("Tool source has no Run binding".into()))?;
     let address = crate::source_resources::address(&input);
     binding.target_authority = Some(address);
+    if let Some(environment) = input.execution_environment { binding.execution_environment = Some(environment); }
     let call = ToolCall {
         call_id: input.call.call_id,
         name: input.call.name,
@@ -3348,10 +3402,10 @@ pub(crate) fn execute_source_tool(
         .map_err(|e| KernelError::Authorization(e.to_string()))?;
     let operation = executor
         .operation(Some(&context), &call)
-        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+        .map_err(KernelError::Execution)?;
     let contract = executor
         .planned_contract(&context, &call, &operation, &cancel)
-        .map_err(|e| KernelError::Authorization(e.to_string()))?;
+        .map_err(KernelError::Execution)?;
     let _grant_watch = executor
         .watch_admission(&context, &call, &contract, &cancel)
         .map_err(|e| KernelError::Authorization(e.to_string()))?;
@@ -3382,13 +3436,10 @@ pub(crate) fn execute_source_tool(
         ResourceOperation::ProcessWrite(_) | ResourceOperation::ProcessResize(_)
     ) {
         let (id, action) = match operation {
-            ResourceOperation::ProcessWrite(args) => (
-                args.process_id,
-                crate::process::interaction::Input::Write {
-                    bytes: args.text.into_bytes().into(),
-                    eof: args.eof,
-                },
-            ),
+            ResourceOperation::ProcessWrite(args) => {
+                let input=args.input(&binding,&resources).map_err(|error|KernelError::Operation(error.to_string()))?;
+                (args.process_id,input)
+            },
             ResourceOperation::ProcessResize(args) => (
                 args.process_id,
                 crate::process::interaction::Input::Resize {

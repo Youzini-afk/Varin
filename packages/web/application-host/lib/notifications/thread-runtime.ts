@@ -42,6 +42,7 @@ export function createThreadNotificationRuntime(options: {
     } else return;
     const thread = await options.runtime.thread(run.thread_id, lifetime.signal);
     if (thread.deleted_at_ms !== null || thread.archived) return;
+    if (event.kind === 'run.changed' && thread.parent_thread_id) return;
     lifetime.signal.throwIfAborted();
     await options.send({ threadId: run.thread_id, branchId: run.branch_id, runId: run.id,
       kind, title: thread.title || 'Varin', body, tag: `thread:${run.id}:${event.kind}` });

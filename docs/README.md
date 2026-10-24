@@ -32,8 +32,11 @@
 
 具体 API、参数和命令以代码、schema 与 package scripts 为准。文档说明当前机制及取舍，历史设计保留在 Git 中。
 
-## 正在评审的设计
+## 本轮实现依据
 
+- [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
+
+## 正在评审的设计
 - [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。
 - [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
 - [办公模式与浏览器、电脑协作](design/office-agent-harness.md)：文档与数据处理、浏览器和电脑操作、文件流转及连续修改；复用现有工作台与协作能力，设计稿尚未实施。

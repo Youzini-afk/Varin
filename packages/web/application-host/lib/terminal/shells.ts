@@ -13,7 +13,7 @@ export const normalizeTerminalShell = (value: unknown): TerminalShellPreference 
     : null;
 };
 
-const shellIdFromPath = (value: unknown): TerminalShellId | null => {
+export const shellIdFromPath = (value: unknown): TerminalShellId | null => {
   const filename = String(value || '').replace(/\\/g, '/').split('/').pop()?.toLowerCase() || '';
   const id = filename.endsWith('.exe') ? filename.slice(0, -4) : filename;
   return TERMINAL_SHELL_ID_SET.has(id) ? id as TerminalShellId : null;
@@ -31,6 +31,7 @@ export const getTerminalShellLoginArgs = (executable: unknown, platform: NodeJS.
 };
 
 export interface TerminalShellResolverDependencies {
+  purpose?: 'terminal' | 'agent';
   buildAugmentedPath?: (() => string) | undefined;
   env?: NodeJS.ProcessEnv | undefined;
   fs: { promises: {
@@ -51,23 +52,25 @@ export interface TerminalShellDescriptor {
   supportsLogin: boolean;
 }
 
-export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env }: TerminalShellResolverDependencies) => {
+export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecutable, buildAugmentedPath = () => env.PATH || '', platform = process.platform, env = process.env, purpose = 'terminal' }: TerminalShellResolverDependencies) => {
   // One shallow inventory per request. No shell is started to discover installed programs.
   const prepare = async () => {
     const searchPath = buildAugmentedPath();
     const reads = new Map<string, Promise<string | null>>();
+    const isWslLauncher = (candidate: string) => platform === 'win32' && /[\\/](System32|Sysnative)[\\/]bash\.exe$/i.test(candidate);
     const executableAt = (candidate: string): Promise<string | null> => {
       const key = platform === 'win32' ? candidate.toLowerCase() : candidate;
       let read = reads.get(key);
       if (!read) {
         read = (async () => {
+          if (isWslLauncher(candidate)) return null;
           if (isExecutable(candidate)) return candidate;
           if (platform === 'win32' && fs.promises.readlink) {
             try {
               // App Execution Aliases can fail stat with EACCES while readlink exposes
               // the installed executable. Pass that real path to the native PTY owner.
               const target = nodePath.win32.resolve(nodePath.win32.dirname(candidate), await fs.promises.readlink(candidate));
-              if (isExecutable(target)) return target;
+              if (!isWslLauncher(target) && isExecutable(target)) return target;
             } catch { /* Absent or broken candidate. */ }
           }
           return null;
@@ -103,12 +106,14 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
       });
     };
     const installed: string[] = [];
+    const gitBash: string[] = [];
     if (platform === 'win32') {
       const roots = [...new Set([
         env.ProgramW6432, env.ProgramFiles || 'C:\\Program Files', env['ProgramFiles(x86)'],
         ...(env.LOCALAPPDATA ? [path.join(env.LOCALAPPDATA, 'Programs')] : []),
       ].filter((root): root is string => Boolean(root)))];
       for (const root of roots) {
+        gitBash.push(path.join(root, 'Git', 'bin', 'bash.exe'));
         const directory = path.join(root, 'PowerShell');
         installed.push(path.join(directory, 'pwsh.exe'));
         try {
@@ -118,16 +123,25 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
         } catch { /* This installation location is absent or not readable. */ }
       }
       if (env.LOCALAPPDATA) installed.push(path.join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'pwsh.exe'));
+      // Git may be installed outside Program Files (including portable installs).
+      // Follow Git's layout rather than mistaking System32/bash.exe (WSL) for Git Bash.
+      const git = searchPathFor('git.exe', searchPath);
+      if (git) {
+        const parent = nodePath.win32.dirname(git);
+        const root = nodePath.win32.basename(parent).toLowerCase() === 'cmd' || nodePath.win32.basename(parent).toLowerCase() === 'bin'
+          ? nodePath.win32.dirname(parent) : nodePath.win32.resolve(parent, '..', '..');
+        gitBash.unshift(path.join(root, 'bin', 'bash.exe'), path.join(root, 'usr', 'bin', 'bash.exe'));
+      }
     }
     const defaults = platform === 'win32'
-      ? [env.VARIN_TERMINAL_SHELL, env.SHELL, 'pwsh.exe', ...installed, 'powershell.exe',
+      ? [env.VARIN_TERMINAL_SHELL, env.SHELL, ...(purpose === 'agent' ? gitBash : []), 'pwsh.exe', ...installed, 'powershell.exe',
         path.join(env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'), env.ComSpec, 'cmd.exe']
       : [env.VARIN_TERMINAL_SHELL, env.SHELL, '/bin/zsh', '/bin/bash', '/bin/sh', 'zsh', 'bash', 'sh'];
-    return { defaults, resolveCandidates };
+    return { defaults, gitBash, resolveCandidates };
   };
 
   const list = async (): Promise<TerminalShellDescriptor[]> => {
-    const { defaults, resolveCandidates } = await prepare();
+    const { defaults, gitBash, resolveCandidates } = await prepare();
     let configuredShells: string[] = [];
     if (platform !== 'win32') {
       try {
@@ -142,7 +156,7 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
     }
 
     const candidates = platform === 'win32'
-      ? [...defaults, ...TERMINAL_SHELL_IDS]
+      ? [...defaults, ...gitBash, ...TERMINAL_SHELL_IDS]
       : [env.VARIN_TERMINAL_SHELL, env.SHELL, ...configuredShells, ...TERMINAL_SHELL_IDS, '/bin/zsh', '/bin/bash', '/bin/sh'];
     const autoExecutable = (await resolveCandidates(defaults))[0] ?? null;
     const byId = new Map<TerminalShellPreference, TerminalShellDescriptor>([
@@ -156,7 +170,8 @@ export const createTerminalShellResolver = ({ fs, path, searchPathFor, isExecuta
     for (const executable of await resolveCandidates(candidates)) {
       const id = shellIdFromPath(executable);
       if (id && !byId.has(id)) {
-        byId.set(id, { id, name: shellLabel(id), executable, supportsLogin: Boolean(getTerminalShellLoginArgs(executable, platform)) });
+        const git = platform === 'win32' && id === 'bash' && gitBash.some(candidate => candidate.toLowerCase() === executable.toLowerCase());
+        byId.set(id, { id, name: git ? 'Git Bash' : shellLabel(id), executable, supportsLogin: Boolean(getTerminalShellLoginArgs(executable, platform)) });
       }
     }
     return [...byId.values()];

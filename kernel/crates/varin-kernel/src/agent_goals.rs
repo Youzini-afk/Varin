@@ -178,9 +178,7 @@ impl ToolExecutor for GoalReports {
                 .admit_goal_report(prepared)
                 .map_err(error)
         })();
-        result.unwrap_or_else(|e| ToolCompletion::NotDispatched {
-            reason: format!("{}: {}", e.code, e.message),
-        })
+        result.unwrap_or_else(|e| ToolCompletion::not_dispatched(e))
     }
 }
 pub(crate) fn declaration(

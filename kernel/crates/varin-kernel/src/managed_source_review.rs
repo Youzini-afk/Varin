@@ -715,7 +715,7 @@ fn managed_source_interaction_recalls_original_receipt_after_reopen_without_repl
     );
     let (address, _) = owner.bind_live(&work, "input-first", 1);
     let node = std::env::var("VARIN_NODE").unwrap_or_else(|_| "node".into());
-    let accepted=owner.tool(&address,"process_spawn","process",json!({"cwd":"","command":node,"mode":"pipe","args":["-e","const fs=require('node:fs');process.stdin.on('data',b=>fs.appendFileSync('received',b));setInterval(()=>{},1000)"]})).unwrap();
+    let accepted=owner.tool(&address,"process_spawn","process",json!({"cwd":"","command":node,"mode":"pty","args":["-e","const fs=require('node:fs');process.stdin.on('data',b=>fs.appendFileSync('received',b));setInterval(()=>{},1000)"]})).unwrap();
     assert_eq!(
         accepted["result"]["completion"]["kind"], "job_accepted",
         "{accepted}"
@@ -725,15 +725,17 @@ fn managed_source_interaction_recalls_original_receipt_after_reopen_without_repl
             &address,
             "process_write",
             "input",
-            json!({"processId":"request:tool:process","text":"ONCE","eof":false}),
+            json!({"processId":"request:tool:process","text":"ONCE","submit":true,"eof":false}),
         )
         .unwrap();
     assert_eq!(
         sent["result"]["completion"]["content"]["data"]["state"], "applied",
         "{sent}"
     );
+    assert_eq!(sent["result"]["completion"]["content"]["data"]["requestedBytes"],5);
+    assert_eq!(sent["result"]["completion"]["content"]["data"]["confirmedBytes"],5);
     let deadline = Instant::now() + Duration::from_secs(10);
-    while std::fs::read_to_string(work.join("received")).unwrap_or_default() != "ONCE" {
+    while std::fs::read_to_string(work.join("received")).unwrap_or_default().trim_end_matches(['\r','\n']) != "ONCE" {
         assert!(Instant::now() < deadline);
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -770,7 +772,7 @@ fn managed_source_interaction_recalls_original_receipt_after_reopen_without_repl
         assert!(owner.rpc("source.service.call", observation, None).is_err());
     }
     assert_eq!(
-        std::fs::read_to_string(work.join("received")).unwrap(),
+        std::fs::read_to_string(work.join("received")).unwrap().trim_end_matches(['\r','\n']),
         "ONCE"
     );
     owner.bind_live(&work, "input-next", 2);
@@ -808,7 +810,7 @@ fn managed_source_interaction_recalls_original_receipt_after_reopen_without_repl
         .unwrap();
     assert_eq!(recovered["result"], sent["result"]);
     assert_eq!(
-        std::fs::read_to_string(work.join("received")).unwrap(),
+        std::fs::read_to_string(work.join("received")).unwrap().trim_end_matches(['\r','\n']),
         "ONCE"
     );
     drop(reopened);
@@ -989,8 +991,7 @@ fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelEr
         output_schema: None,
         metadata: None,
     };
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -1154,8 +1155,7 @@ fn coordinator_read(
         )?;
         let schemas = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
         let read_schema = schemas[0].clone();
-        let mut request = RequestBinding {
-            direct_tools: None,
+        let mut request = RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -1261,8 +1261,7 @@ fn coordinator_read(
             operation_id: origin.operation_id(&call.call_id),
             origin: origin.clone(),
         };
-        let frozen = FrozenToolContext {
-            direct_tools: None,
+        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: None,
@@ -2053,8 +2052,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
     let submitted = db.admit_submission(submitted).unwrap();
     let run = submitted.run_id;
     let schema:ToolSchema=serde_json::from_value(json!({"name":"environment_forward","version":"1","description":"Forward a selected service","schema":{"type":"object"},"metadata":{"service_id":"environment.forward","service_version":1,"completion":"job","operation":"effect","lifetime":"thread"}})).unwrap();
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -2301,8 +2299,7 @@ fn native_file_followup(
         json!({"resourceOwner":source.resource_owner,"grantId":remote["authorityId"],"runId":run,"threadId":"thread:managed-review","workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"rootId":remote["physicalRoot"]["rootId"],"sourceMode":"live_root","liveRoot":source.live_root,"enabledTools":["file_read","file_write","file_search","process_spawn","process_read","process_inspect"],"remoteAuthority":{"authorityId":remote["authorityId"],"resourceEpoch":remote["resourceEpoch"],"executionOwner":remote["executionOwner"]}}),
     )?;
     let schema = crate::followup_tools::schema();
-    let request = RequestBinding {
-        direct_tools: None,
+    let request = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -2405,8 +2402,7 @@ fn native_file_followup(
         operation_id: origin.operation_id(&call.call_id),
         origin: origin.clone(),
     };
-    let frozen = FrozenToolContext {
-        direct_tools: None,
+    let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
         child_dispatch: None,
         resource_activations: vec![],
         resource_checkpoint_id: None,

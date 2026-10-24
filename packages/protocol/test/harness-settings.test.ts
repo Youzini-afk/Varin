@@ -14,12 +14,13 @@ import {
 } from "../src/index.js";
 
 describe("harness settings", () => {
-  it("workspace overrides user for top-level keys", () => {
+  it("keeps execution Shell owned by the actual Host's user settings", () => {
     const merged = mergeHarnessSettings(
       { shell: "powershell" },
-      { shell: "wsl" },
+      { shell: "bash" },
     );
-    assert.equal(merged.shell, "wsl");
+    assert.equal(merged.shell, "powershell");
+    assert.equal(mergeHarnessSettings({}, { shell: "bash" }).shell, "auto");
   });
 
   it("keeps the code retrieval judgment choice user-owned", () => {
@@ -31,17 +32,6 @@ describe("harness settings", () => {
     assert.equal(mergeHarnessSettings({ codeRetrieval: { decision: "unknown" as never } }, {}).codeRetrieval.decision,
       "source");
     assert.throws(() => resolveHarnessCodeRetrievalSettings({ decision: "unknown" }), HarnessSettingsValidationError);
-  });
-
-  it("deep-merges nested objects (depth 1)", () => {
-    const merged = mergeHarnessSettings(
-      { output: { visibleBytes: 16384 } },
-      { bash: { waitMs: 120000 } },
-    );
-    assert.equal(merged.output.visibleBytes, 16384);
-    assert.equal(merged.bash.waitMs, 120000);
-    // Non-overridden defaults preserved
-    assert.equal(merged.dispatch.concurrency, 12);
   });
 
   it("lets a workspace add dispatch prompts but not remove a user prompt", () => {

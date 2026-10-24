@@ -171,8 +171,7 @@ fn send_rejects_unselected_and_model_supplied_sender_before_any_message_is_accep
     );
     f.prepare_policy(0, "http://127.0.0.1:1/unused");
     let start = f.start(0);
-    let context = FrozenToolContext {
-        direct_tools: None,
+    let context = FrozenToolContext { execution_environment: None, direct_tools: None,
         run_id: f.run.id.clone(),
         origin: ToolOrigin::ModelStep {
             request_id: "not-admitted".into(),

@@ -185,7 +185,7 @@ export function createScriptRuntime(options: {
       if (environment.accepting) await send(environment, { type: 'receipt', cellId: cell.id, requestId: frame.requestId, receipt } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
     }).catch(async error => {
       if (environment.accepting) await send(environment, { type: 'rejected', cellId: cell.id, requestId: frame.requestId,
-        error: { message: errorText(error), ...(error instanceof KernelClientError ? { code: error.code } : {}) } } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
+        error: { message: errorText(error), ...(error instanceof KernelClientError ? { code: error.code, ...(error.details === undefined ? {} : { details: error.details }) } : {}) } } as Omit<ScriptHostFrame, 'v' | 'environmentId'>);
     });
     cell.callbacks.add(work);
     void work.finally(() => cell.callbacks.delete(work)).catch(options.onError);

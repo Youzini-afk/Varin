@@ -2250,8 +2250,6 @@ export const settingsDict = {
   'settings.page.harness.output.visibleBytes.description': 'Resultados longos mostram registros completos ou prévias de texto com acesso à saída original. Leituras com intervalo explícito retornam a página solicitada completa.',
   'settings.page.harness.section.bash': 'Bash',
   'settings.page.harness.section.bash.description': 'Configure o comportamento de execução de comandos bash.',
-  'settings.page.harness.bash.waitMs.label': 'Tempo de espera do comando',
-  'settings.page.harness.bash.waitMs.description': 'Quanto tempo esperar por um comando antes de colocá-lo em segundo plano.',
   'settings.page.harness.section.permissions': 'Permissões',
   'settings.page.harness.section.permissions.description': 'Configure a política nativa de confirmação e as regras do usuário.',
   'settings.page.harness.permissions.mode.label': 'Modo de confirmação',

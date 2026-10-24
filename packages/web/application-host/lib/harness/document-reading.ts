@@ -290,6 +290,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const invalid = validateRequest(request);
     if (invalid) return { status: "failed", url: "", reason: invalid };
     if (request.path || request.artifact) return { status: "failed", url: "", reason: "Host must authorize the source and pass its bytes to ingest" };
+    if (request.office) return { status: 'failed', url: '', reason: 'office selectors apply to DOCX/XLSX/PPTX; use PDF page, position or find selectors for this document.' };
     const snapshotId = request.snapshotId?.trim();
     if (!snapshotId) return { status: "failed", url: "", reason: "snapshotId is required" };
     checkAbort(ctx.signal);
@@ -306,6 +307,7 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     const engine = engineFactory(options);
     const source = found.source.bytes;
     const base = (snapshot: WebSnapshotRef = found.ref, markdown = found.body.toString("utf8")): Ok => ({
+      view: request.view ?? 'text',
       status: "ok", url: snapshot.sourceUrl, finalUrl: snapshot.finalUrl,
       contentType: snapshot.contentType ?? "application/pdf", ...(snapshot.title ? { title: snapshot.title } : {}),
       markdown, bytes: Buffer.byteLength(markdown), fromCache: false, rendered: false, snapshot,
@@ -346,7 +348,11 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
           ? { status: storedOcr.status, ...(storedOcr.engine ? { engine: storedOcr.engine } : {}),
             ...(storedOcr.pages ? { pages: storedOcr.pages } : {}) }
           : undefined;
-      return { ...base(material.ref, markdown), overview: overview(probed,
+      const textStatus = markdown.trim() ? 'available' : material.ref.document?.analysis?.failedPages?.length ? 'failed' : 'no-text';
+      return { ...base(material.ref, markdown), textStatus,
+        ...(textStatus === 'no-text' ? { detail: request.ocr ? 'No extractable text was found in the selected scope.' : 'No text layer was found in the selected scope. Page images are available; OCR can be requested explicitly.' }
+          : textStatus === 'failed' ? { detail: 'The selected pages could not be parsed; inspect analysis.failedPages and original page images.' } : {}),
+        overview: overview(probed,
         material.body.toString("utf8").trim() ? "available" : "unavailable"),
         ...(material.ref.document?.analysis ? { analysis: material.ref.document.analysis } : {}),
         ...(range ? { range } : {}),
@@ -364,14 +370,18 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
     };
     const view = request.view ?? "text";
     let probed: Awaited<ReturnType<typeof engine.probe>> | undefined;
+    let probeFailure: string | undefined;
     if (view !== "page-image" || request.pages === "all") {
       try { probed = await probe(); } catch (error) {
         if (ctx.signal?.aborted) throw cancelled(ctx.signal);
-        if (view !== "overview" && view !== "text") return { status: "failed", url: found.ref.finalUrl, reason: error instanceof Error ? error.message : "PDF probe failed" };
+        probeFailure = error instanceof Error ? error.message : 'PDF probe failed';
+        if (view !== 'overview') return { status: 'failed', url: found.ref.finalUrl, reason: probeFailure };
       }
     }
     if (!(await recheck())) return { status: "snapshot-missing", snapshotId };
-    if (view === "overview") return { ...base(found.ref, ""), overview: overview(probed,
+    if (view === "overview") return { ...base(found.ref, ""), textStatus: 'not-requested',
+      ...(probeFailure ? { detail: `Source retained; page metadata could not be read: ${probeFailure}` } : {}),
+      nextRead: { snapshotId: found.ref.snapshotId, view: 'text' }, overview: overview(probed,
       found.ref.document.analysis ? found.body.toString("utf8").trim() ? "available" : "unavailable" : "not-requested") };
     const pinnedCoversAll = request.pages === "all" && !!probed
       && found.ref.document.analysis?.pages.length === probed.pageCount
@@ -419,10 +429,10 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
         if (lineRange) return bodyLines.slice(lineRange.startLine - 1, lineRange.endLine).join("\n");
         return found.ref.structure?.blocks?.filter((block) => block.page === page).map((block) => block.text).join("\n") ?? "";
       }).join("\n\n") : "";
-      return { ...base(found.ref, pageText), overview: overview(probed), pageImage: images[0]!, pageImages: images };
+      return { ...base(found.ref, pageText), textStatus: pageText.trim() ? 'available' : 'not-requested', overview: overview(probed), pageImage: images[0]!, pageImages: images };
     }
 
-    if (!probed) return { ...base(), overview: overview(undefined, "unavailable") };
+    if (!probed) return { status: 'failed', url: found.ref.finalUrl, reason: 'PDF page metadata could not be read.' };
     const parser = request.parser ?? (view === "structure" ? "docling" : "native");
     const toolVersions: NonNullable<DocumentAnalysis["toolVersions"]> = typeof engine.versions === "function"
       ? await engine.versions({ parser, ocr: request.ocr === true,
@@ -595,7 +605,9 @@ export const createDocumentReader = (deps: { materials: Materials; engineFactory
       });
       if (!(await recheck())) return { status: "snapshot-missing", snapshotId };
       if (!analyzed || "unavailableReason" in analyzed) {
-        return { ...base(found.ref, ""), overview: overview(probed, "unavailable"),
+        return { ...base(found.ref, ""), textStatus: 'unavailable',
+          detail: analyzed && 'unavailableReason' in analyzed ? analyzed.unavailableReason : 'Document analysis failed',
+          overview: overview(probed, "unavailable"),
           analysis: { id: analysisId, parser, version: versionKey, configHash, toolVersions,
             sourceHash, pages, ocr: request.ocr === true, status: "unavailable" },
           structure: { unparsed: [analyzed && "unavailableReason" in analyzed ? analyzed.unavailableReason : "document analysis failed"] } };

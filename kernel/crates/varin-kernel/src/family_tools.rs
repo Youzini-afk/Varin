@@ -422,7 +422,7 @@ impl ToolExecutor for FamilyTools {
                     Outcome::Failed
                 },
                 effect: Effect::None,
-                content: json!({"error":error.code,"message":error.message}).into(),
+                content: json!({"error":error}).into(),
             },
         }
     }

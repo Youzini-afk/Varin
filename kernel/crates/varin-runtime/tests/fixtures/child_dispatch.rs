@@ -500,8 +500,7 @@ impl Fixture {
                     compaction: None, step: 1,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding {
-                    direct_tools: None,
+                binding: RequestBinding { execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -695,8 +694,7 @@ impl Fixture {
                     compaction: None, step: 2,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding {
-                    direct_tools: None,
+                binding: RequestBinding { execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -899,8 +897,7 @@ impl Fixture {
             identity: launch.policy,
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
-                context: FrozenToolContext {
-                    direct_tools: None,
+                context: FrozenToolContext { execution_environment: None, direct_tools: None,
                     child_dispatch: self
                         .db
                         .launch_metadata(&run_id)

@@ -10,6 +10,8 @@ import type { NestedToolInput, NestedToolReceipt, IncomingMedia, OutputPart } fr
 export interface ScriptError {
   message: string;
   code?: string;
+  hint?: string;
+  details?: unknown;
 }
 
 export interface CellEvaluation {
@@ -67,9 +69,14 @@ const inspectOptions = {
 export function scriptError(error: unknown): ScriptError {
   // Errors from the REPL have a different realm and need not pass instanceof Error.
   if (error && typeof error === "object") {
-    const details = error as { message?: unknown; code?: unknown };
+    const details = error as { message?: unknown; code?: unknown; details?: unknown };
     if (typeof details.message === "string") {
-      return { message: details.message, ...(typeof details.code === "string" ? { code: details.code } : {}) };
+      return { message: details.message, ...(typeof details.code === "string" ? { code: details.code } : {}),
+        ...(details.details === undefined ? {} : { details: details.details }),
+        ...(/^Identifier .+ has already been declared/.test(details.message) ? {
+          code: typeof details.code === 'string' ? details.code : 'SCRIPT_BINDING_REDECLARED',
+          hint: "Bindings persist in this environmentId. Reuse the existing variable by assignment, use a block { const temporary = ...; } for local values, or var for redeclarable bindings. The environment and prior output are retained.",
+        } : {}) };
     }
   }
   return { message: String(error) };

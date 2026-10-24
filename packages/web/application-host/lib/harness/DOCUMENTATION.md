@@ -13,7 +13,7 @@ cross-cutting contracts.
 | Responsibility | Implementation |
 | --- | --- |
 | Fixed source preparation, materialization and integration | `working-state/` |
-| Progressive retrieval and candidate ranking | `explore.ts`, `explore-query.ts`, `retrieval-pipeline.ts` |
+| Quick investigation admission and profile configuration | `../kernel/thread-collaboration.ts`, `../kernel/child-profiles.ts` |
 | URL discovery/fetch, scholarly records and original material | `web-search.ts`, `web-fetch.ts`, `research-search.ts`, `web-materials.ts` |
 | PDF/document views and material collections | `document-reading.ts`, `document-material.ts`, `material-collections.ts` |
 | Editable Office packages and actual rendering | `../office/`, `../kernel/office-runtime.ts`, `../kernel/binary-file-owner.ts` |
@@ -57,6 +57,11 @@ Search and retrieval use admitted native sources and actual revisions. Quick ret
 internal native Agent Run owned by the original code_retrieval Operation; formal retrieval uses
 the same execution/tools through collaboration. Rust owns traversal, reads, structure and process
 effects. Host supplies configuration and domain adapters, without a second planning/selection loop.
+The original tool returns Job acceptance immediately. `retrieval_control` observes its latest actual
+assistant message/action, parks the main Run when requested, or cancels that investigation. The native
+Catalog queues one final answer through ordinary message ingress after executor/resource release,
+including when the original parent Run has already completed. UI trace reads remain a presentation
+API; the model does not need to retrieve tool evidence or ask another model to summarize progress.
 
 Web search has a Host-owned keyless default and disclosed failure-only fallback. An explicitly selected
 provider never silently becomes another provider. Domain filtering applies before disclosure; valid

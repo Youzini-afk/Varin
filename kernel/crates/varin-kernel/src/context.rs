@@ -460,8 +460,7 @@ mod tests {
                 compaction: None, step: 0,
                 history_range: range.clone(),
             },
-            binding: RequestBinding {
-                direct_tools: None,
+            binding: RequestBinding { execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

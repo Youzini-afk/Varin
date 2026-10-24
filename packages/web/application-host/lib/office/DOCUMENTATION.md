@@ -23,6 +23,12 @@ Workbench readers use the selected physical file or its matching admitted source
 use fixed material snapshots and expose actual section/object references. A converted PDF retains its
 Office source association. Office JSON structure and rendered pages are separate views.
 
+The model-facing `document_read` defaults to readable content for both original paths and retained
+snapshots. Explicit overview remains an index with human section names, `textStatus:not-requested`
+and a `nextRead` for the original snapshot. Content pages retain selectors and return exact nextOffset
+continuations. Conflicting general/Office views fail explicitly. PDF ingestion used only to register
+uploaded material can still request metadata without extracting the entire body.
+
 Focused format tests cover cross-run Word text edits, retained table/custom XML parts, formula cache
 invalidation, and editable presentation charts with retained embedded workbooks. Real rendering needs
 a Host with LibreOffice; component detection is not evidence of a completed render.

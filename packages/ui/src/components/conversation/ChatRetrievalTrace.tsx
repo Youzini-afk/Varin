@@ -11,6 +11,7 @@ import { revealResourceInEditor } from '@/lib/agent-editor/navigation';
 import { useI18n } from '@/lib/i18n';
 import { ToolTargetScope } from './ToolTargetScope';
 import { ToolTargetContext } from './toolTargetContext';
+import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 
 export type RetrievalToolRenderer = (call: ChatToolCall, execution: ChatToolExecutionState | undefined,
   result: ChatToolResultMessage | undefined, executions: Record<string, ChatToolExecutionState>) => React.ReactNode;
@@ -105,12 +106,26 @@ export function ChatRetrievalTrace({ operationId, running, expanded, renderTool 
     finally { if (alive.current) setLoadingEarlier(false); }
   };
   const last = calls.at(-1)?.call;
+  const active = Object.values(view.toolExecutions).find(execution => execution.status === 'running' || execution.status === 'waiting');
+  const lastAssistantText = view.entries.flatMap(entry => {
+    if (entry.type !== 'message') return [];
+    const message = entry.message;
+    if (message.role !== 'assistant' && !(message.role === 'custom' && message.customType === 'assistant')) return [];
+    const text = typeof message.content === 'string' ? message.content
+      : message.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n');
+    return text.trim() ? [{ id: entry.id, text }] : [];
+  }).at(-1);
+  const modelWorking = running && trace?.run?.state === 'generating' && !active;
+  const action = active ? { id: active.operationId ?? active.toolCallId, name: active.name, arguments: active.args } : last;
   return <ConversationContext.Provider value={context}><ToolTargetContext.Provider value={null}>
     <ToolTargetScope entries={view.entries} executions={view.toolExecutions}>
-      {!expanded && last && <div className="overflow-hidden"><AnimatePresence initial={false} mode="popLayout"><motion.p key={last.id}
+      {running && lastAssistantText && <div className="line-clamp-3 break-words px-3 py-1 typography-meta text-muted-foreground">
+        <MarkdownRenderer content={lastAssistantText.text} messageId={lastAssistantText.id} />
+      </div>}
+      {!expanded && (action || modelWorking) && <div className="overflow-hidden"><AnimatePresence initial={false} mode="popLayout"><motion.p key={modelWorking ? 'model' : action!.id}
         initial={reducedMotion?false:{opacity:0,y:8}} animate={{opacity:1,y:0}} exit={{opacity:0,y:reducedMotion?0:-8}}
-        transition={{duration:reducedMotion?0:0.18}} className="truncate px-3 py-1 typography-meta text-muted-foreground" title={last.name}>
-        {getToolSummary({toolName:last.name,arguments:last.arguments,details:results.get(last.id)?.details}).text || last.name}
+        transition={{duration:reducedMotion?0:0.18}} className="truncate px-3 py-1 typography-meta text-muted-foreground" title={modelWorking ? undefined : action?.name}>
+        {modelWorking ? t('chat.explore.modelWorking') : getToolSummary({toolName:action!.name,arguments:action!.arguments,details:results.get(action!.id)?.details}).text || action!.name}
       </motion.p></AnimatePresence></div>}
       <AnimatePresence initial={false}>{expanded && <motion.div key="trace" initial={{height:0,opacity:0}} animate={{height:'auto',opacity:1}}
         exit={{height:0,opacity:0}} transition={{duration:reducedMotion?0:0.22,ease:[0.22,1,0.36,1]}} className="overflow-hidden">

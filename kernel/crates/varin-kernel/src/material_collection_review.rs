@@ -209,8 +209,7 @@ pub(super) fn binding(runtime: &Arc<RunSupervisor>, run: &str) -> RequestBinding
     let db = owner.lock().unwrap();
     let launch = db.launch_intent(run).unwrap().unwrap().selection;
     let record = db.run(run).unwrap();
-    RequestBinding {
-        direct_tools: None,
+    RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

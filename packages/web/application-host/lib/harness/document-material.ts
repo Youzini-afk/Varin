@@ -31,6 +31,7 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
     return { status: "failed", url: "", reason: "A valid experiment attempt and artifact are required" };
   }
   context.signal?.throwIfAborted();
+  request = { ...request, view: request.view ?? (request.office?.view === 'overview' ? 'overview' : 'text') };
   if (snapshotId) return await alternate?.(request, context) ?? reader.read(request, context);
   let input: DocumentIngestInput;
   if (artifact) {
@@ -53,5 +54,5 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
       ?? { status: "failed", url: input.sourceUrl, reason: "This document format is unsupported by the available readers" };
   }
   const { path: _path, artifact: _artifact, ...readRequest } = request;
-  return reader.ingest(input, context, { ...readRequest, view: request.view ?? "overview" });
+  return reader.ingest(input, context, readRequest);
 }

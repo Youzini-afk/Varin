@@ -112,11 +112,12 @@ export interface SettingsCatalogEntry {
   actionRef?: SettingsActionRef;
   /**
    * How a saved change reaches the running product. `immediate` = live once
-   * saved; `next-run` = applied when the owning run/session starts;
+   * saved; `next-request` = at the following model request;
+   * `next-run` = applied when the owning run/session starts;
    * `restart` = needs a host/surface restart; `manual` = requires a user or
    * domain action the catalog cannot perform.
    */
-  apply?: 'immediate' | 'next-run' | 'restart' | 'manual';
+  apply?: 'immediate' | 'next-request' | 'next-run' | 'restart' | 'manual';
   /** Pointer for `settings_read(detail)` — doc anchor or resource hint. */
   helpRef?: string;
   ui: {
@@ -177,18 +178,15 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.shell', category: 'harness', owner: 'agent-settings',
     fields: [
-      { path: 'harness.shell', kind: 'enum', scope: 'user-or-project',
+      { path: 'harness.shell', kind: 'enum', scope: 'user',
         options: [
-          { value: 'auto' }, { value: 'git-bash' }, { value: 'powershell' }, { value: 'wsl' },
+          ...['auto', 'bash', 'zsh', 'sh', 'fish', 'pwsh', 'powershell', 'cmd', 'dash', 'ksh', 'nu'].map(value => ({ value })),
         ], default: 'auto' },
-      { path: 'harness.bash.waitMs', kind: 'number', scope: 'user-or-project',
-        min: 0, integer: true, unit: 'ms', default: 10000,
-        note: 'foreground wait before the shell tool returns a background handle' },
     ],
-    apply: 'next-run',
+    apply: 'next-request',
     ui: { page: 'harness-tools', titleKey: 'settings.page.harness.shell.label',
-      descriptionKey: 'settings.page.harness.bash.waitMs.description',
-      keywords: ['shell', 'powershell', 'wsl', 'background'] },
+      descriptionKey: 'settings.page.harness.shell.description',
+      keywords: ['shell', 'bash', 'git bash', 'pwsh', 'powershell', 'cmd', 'environment'] },
   },
   {
     id: 'harness.output', category: 'harness', owner: 'agent-settings',

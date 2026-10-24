@@ -74,8 +74,7 @@ fn proposal(text: &str) -> ContextProposal {
     }
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
-    RequestBinding {
-        direct_tools: None,
+    RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -346,8 +345,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
                     arguments: json!({"kind":"skill","resourceId":"skill"}),
                 },
             },
-            context: FrozenToolContext {
-                direct_tools: None,
+            context: FrozenToolContext { execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: Some(old.id.clone()),
@@ -1189,8 +1187,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
                     arguments: json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}),
                 },
             },
-            context: FrozenToolContext {
-                direct_tools: None,
+            context: FrozenToolContext { execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![activation.clone()],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -1626,8 +1623,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
                     arguments: json!({"kind":"skill-resource","resourceId":"skill","relativePath":"support.txt","activationId":activation.activation_id}),
                 },
             },
-            context: FrozenToolContext {
-                direct_tools: None,
+            context: FrozenToolContext { execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![activation.clone()],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

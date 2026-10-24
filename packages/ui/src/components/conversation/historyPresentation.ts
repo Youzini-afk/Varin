@@ -164,6 +164,10 @@ export class HistoryPresentation {
             status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' || gateway?.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
             ...(output?.data == null ? {} : { details: json(invocationData(output.data, calls.get(id))), originalDetails: json(output.data) }) } };
+        } else if (content.kind === 'output' && item.source === 'agent' && object(object(content.output).data).kind === 'retrieval_result') {
+          const output = content.output as OutputBody;
+          entry = { ...base, type: 'custom_message', customType: 'retrieval-result', display: true,
+            content: outputParts(output).slice(1), details: json(output.data) };
         } else if (content.kind === 'output') {
           entry = { ...base, type: 'message', message: { role: 'custom', customType: item.source, display: true, timestamp: 0,
             content: outputParts(content.output as OutputBody) } };
@@ -220,9 +224,23 @@ export class HistoryPresentation {
       execution.questionResponse = json({ ...(response.cancelled ? { cancelled: true } : { answer: entry.content, answers: response.answers }) });
       joinedAnswers.add(entry.id);
     }
+    // A paginated/cold view may retain the original call but not its terminal Operation.
+    // The native delivery is also a durable completion fact; keep that answer on its card.
+    for (const entry of result) {
+      if (entry.type !== 'custom_message' || entry.customType !== 'retrieval-result') continue;
+      const delivery = object(entry.details), operationId = String(delivery.operationId);
+      const callId = operationCalls.get(operationId), call = callId ? calls.get(callId) : undefined;
+      if (!callId || call?.name !== 'code_retrieval') continue;
+      const execution = toolExecutions[callId] ??= { toolCallId: callId, operationId, name: call.name, args: {}, status: 'unknown' };
+      execution.result = json({ ...delivery, kind: 'retrieval', answer: typeof entry.content === 'string' ? entry.content
+        : entry.content.flatMap(part => part.type === 'text' ? [part.text] : []).join('\n') });
+      execution.status = outcomeStatus(delivery.status === 'ready' ? 'succeeded' : delivery.status);
+    }
     // Keep an answer visible on its own at a paginated boundary. Once its
     // original question is loaded, that row owns the answer disclosure.
-    const presented = result.filter(entry => !joinedAnswers.has(entry.id));
+    const presented = result.filter(entry => !joinedAnswers.has(entry.id)
+      && !(entry.type === 'custom_message' && entry.customType === 'retrieval-result'
+        && operationCalls.has(String(object(entry.details).operationId))));
     const visible = new Set(presented.map(entry => entry.id));
     const lastByRun = new Map<string, string>();
     const cutByRun = new Map(history.map(item => [item.run_id, item.id]));

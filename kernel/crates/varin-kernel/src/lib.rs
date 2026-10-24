@@ -32,6 +32,8 @@ mod plan_bridge;
 mod policy;
 mod process;
 mod process_wait;
+mod shell_environment;
+mod retrieval_control;
 mod protocol;
 mod protocol_generated;
 mod questions;

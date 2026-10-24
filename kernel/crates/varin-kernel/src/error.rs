@@ -83,6 +83,15 @@ impl From<serde_json::Error> for KernelError {
     }
 }
 
+impl From<KernelError> for varin_runtime::execution::ExecutionError {
+    fn from(error: KernelError) -> Self {
+        match error {
+            KernelError::Execution(error) => error,
+            error => Self::new(error_code(&error), error.to_string()),
+        }
+    }
+}
+
 pub(crate) fn error_code(error: &KernelError) -> &str {
     match error {
         KernelError::Execution(error) => &error.code,
@@ -103,7 +112,9 @@ pub(crate) fn error_code(error: &KernelError) -> &str {
 
 pub(crate) fn response_error(id: &str, error: &KernelError) -> Value {
     let message = match error { KernelError::Execution(error) => error.message.clone(), _ => error.to_string() };
-    serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": message, "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}})
+    let mut value=serde_json::json!({"v": crate::protocol::PROTOCOL_VERSION, "kind": "response", "id": id, "ok": false, "error": {"code": error_code(error), "message": message, "retryable": matches!(error, KernelError::Cancelled | KernelError::ActivationHeld(_))}});
+    if let KernelError::Execution(error)=error {if let Some(details)=&error.details {value["error"]["details"]=details.clone();}}
+    value
 }
 
 #[cfg(test)]

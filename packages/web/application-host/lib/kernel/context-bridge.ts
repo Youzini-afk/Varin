@@ -5,10 +5,11 @@ import type { ContextRequestObservation, ContextTiming } from './context-timing.
 import { parseVarinContextBudgetInput, type VarinContextBudgetInput, type VarinContextBudgetDecision } from '@varin/extension-contract';
 
 export type ContextQuery = {action:'prepare';runId:string;requestId:string;expectedRevision:number;observation?:ContextRequestObservation}
+  | {action:'execution_environment';runId:string}
   | {action:'decide';runId:string;input:VarinContextBudgetInput}
   | {action:'compact';runId:string;requestId:string;throughId:string;expectedRevision:number;block:boolean;summaryRecipe:ContextSummaryRecipe};
 export interface AcceptedContextJob { throughId:string; summaryRecipe:ContextSummaryRecipe; block:boolean }
-export type ContextResult = {accepted?:AcceptedContextJob;status:'ready';policy?:ContextPolicySnapshot;timing?:ContextTiming;external?:boolean;decision?:VarinContextBudgetDecision;summaryRecipe?:ContextSummaryRecipe;published?:boolean;jobRunId?:string} | {status:'failed';code:string;accepted?:AcceptedContextJob};
+export type ContextResult = {environment?:import('./protocol.generated.js').ExecutionEnvironment;accepted?:AcceptedContextJob;status:'ready';policy?:ContextPolicySnapshot;timing?:ContextTiming;external?:boolean;decision?:VarinContextBudgetDecision;summaryRecipe?:ContextSummaryRecipe;published?:boolean;jobRunId?:string} | {status:'failed';code:string;accepted?:AcceptedContextJob};
 export interface ContextOwner {
   query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult>;
   close():void;
@@ -18,6 +19,7 @@ const record = (value:unknown):value is Record<string,unknown> => value !== null
 const text = (value:unknown):value is string=>typeof value==='string' && value.length>0;
 const valid = (value:unknown):value is ContextQuery => {
   if (!record(value) || !text(value.runId)) return false;
+  if (value.action === 'execution_environment') return true;
   if (value.action === 'decide') { try { parseVarinContextBudgetInput(value.input); return true; } catch { return false; } }
   return text(value.requestId) && Number.isSafeInteger(value.expectedRevision) && Number(value.expectedRevision)>=0
     && (value.action==='prepare'

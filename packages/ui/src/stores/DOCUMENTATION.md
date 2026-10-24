@@ -62,6 +62,8 @@ monotonically so an original command receipt cannot overwrite a newer event proj
 sorts visible conversations by pin, update time and identity. Archive and delete are different commands.
 Deletion hides navigation through a retained tombstone; accepted execution and resource cleanup remain
 with their original owners. `markRead` acknowledges only the cursor actually presented.
+The shared sidebar catalog shows passive completion/failure reminders only for root conversations.
+Child unread cursors remain intact; their work stays visible without a completion bell in navigation.
 
 The store's creation key survives an uncertain response. Creating a Thread does not itself start a Run.
 A selected workspace path is staged on the new Thread draft; actual source resolution/preparation uses

@@ -149,8 +149,7 @@ pub fn build_provider(
     connection.accepts_images = configuration.accepts_images;
     connection.tool_output_visible_bytes = configuration.tool_output_visible_bytes.map(|bytes| bytes as usize);
     let provider = selected.bind(&configuration, connection)?;
-    let binding = RequestBinding {
-        direct_tools: None,
+    let binding = RequestBinding { execution_environment: None, direct_tools: None,
         provider_id: configuration.provider_id,
         tokenizer: configuration.tokenizer,
         request_context: None,
@@ -220,6 +219,7 @@ impl ToolExecutor for NoTools {
     ) -> ToolCompletion {
         ToolCompletion::NotDispatched {
             reason: "no tool binding exists".into(),
+            error: None,
         }
     }
 }

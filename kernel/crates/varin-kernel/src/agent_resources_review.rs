@@ -256,8 +256,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             ancestor_id: None,
             leaf_id: Some(receipt.input_id.clone()),
         };
-        let binding = RequestBinding {
-            direct_tools: None,
+        let binding = RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -339,8 +338,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         depends_on: vec![],
                         call: call.clone(),
                     },
-                    context: FrozenToolContext {
-                        direct_tools: None,
+                    context: FrozenToolContext { execution_environment: None, direct_tools: None,
                         child_dispatch: None,
                         resource_activations: activations.clone(),
                         resource_checkpoint_id: checkpoint_id.clone(),
@@ -368,8 +366,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
         let directory = Arc::new(
             ToolDirectory::assemble(vec![declaration(db.clone(), bridge.clone())]).unwrap(),
         );
-        let frozen = FrozenToolContext {
-            direct_tools: None,
+        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: activations.clone(),
             resource_checkpoint_id: checkpoint_id.clone(),

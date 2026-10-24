@@ -13,6 +13,7 @@ export type ManagedHostSourceOwner = Extract<SourceResourceOwner, { kind: 'manag
 export interface ManagedSourcePrincipal { principalId: string; capabilities: readonly string[] }
 export type SourceAuthorityScope = import('../kernel/protocol.generated.js').SourceAuthorityScope;
 export interface ManagedSourceCapabilities {
+  executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;
   tools: LaunchTool[];
   grantCapabilities: string[];
   clientCapabilities: string[];
@@ -41,6 +42,7 @@ export interface ManagedSourceBindRequest {
 }
 /** References to the target's Storage remain target references. They confer no local access. */
 export interface ManagedSourceBinding {
+  executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;
   authorityId: string;
   resourceEpoch: string;
   executionOwner: ExecutorOwner;
@@ -66,6 +68,7 @@ export type ManagedSourceProcessWrite = ManagedSourceProcessAddress & { operatio
 export type ManagedSourceProcessResize = ManagedSourceProcessAddress & { operationId: string; cols: number; rows: number };
 /** Models use the original accepted invocation; service reads below never invent a ToolCall. */
 export interface ManagedSourceToolRequest extends ManagedSourceAddress {
+  executionEnvironment?: import('../kernel/protocol.generated.js').ExecutionEnvironment;
   call: HostToolCall;
   journal?: RecoveryAnchor;
 }

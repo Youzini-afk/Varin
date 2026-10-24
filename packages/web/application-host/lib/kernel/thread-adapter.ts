@@ -299,20 +299,15 @@ export class ThreadAdapter {
   async cancelOperation(operationId: string) {
     const current = await this.runtime.operationStatus(operationId);
     await this.requireRun(current.run_id);
-    if (current.executor === 'dispatch') {
+    if (current.executor === 'dispatch' || current.executor === 'code_retrieval') {
       await this.runtime.cancelTree({ kind: 'child', operation_id: operationId }); return this.runtime.operationStatus(operationId);
     }
-    if (current.executor === 'wait_child' && current.waiting_on) {
+    if ((current.executor === 'wait_child' || current.executor === 'retrieval_control') && current.waiting_on?.startsWith('child-wait:')) {
       await this.runtime.cancelChildWait(current.waiting_on); return this.runtime.operationStatus(operationId);
     }
     const result = await this.runtime.cancelOperation(operationId);
     if (result.executor === 'ask_user') await this.continueLaunch(result.run_id);
     return result;
-  }
-  async finishRetrieval(operationId: string) {
-    const current = await this.runtime.operationStatus(operationId);
-    await this.requireRun(current.run_id);
-    return this.runtime.finishRetrieval(operationId);
   }
   async retrievalTrace(operationId: string, cursor?: { headId: string; beforeId: string }, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadRetrievalTrace> {
     const operation = await this.requireOperation(operationId);

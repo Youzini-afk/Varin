@@ -578,13 +578,6 @@ pub(crate) fn spawn(
                             catalog.pending_managed_processes().map_err(domain)?
                         };
                         resources.replay_source_delivery_releases()?;
-                        let deliveries=owner.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?
-                            .pending_retrieval_deliveries().map_err(domain)?;
-                        let controls=control_commands::ControlCommands {runtime:owner.clone(),resources:resources.clone(),
-                            models:run_models.as_ref().expect("initialized models").clone(),tools:run_tools.as_ref().expect("initialized tools").clone()};
-                        for operation_id in deliveries {
-                            controls.admit_tree_cancel(varin_runtime::catalog::dispatch::TreeCancelTarget::Child{operation_id},None)?;
-                        }
                         if let Err(error) = resources.replay_process_terminals(pending) {
                             let catalog = owner.catalog();
                             if let Ok(mut catalog) = catalog.lock() {
@@ -722,17 +715,6 @@ pub(crate) fn spawn(
                                 })?;
                             deferred = true;
                             return Ok(Value::Null);
-                        }
-                        if method == "runtime.retrieval.finish" {
-                            let p: OperationParams = serde_json::from_value(params)?;
-                            let accepted=runtime.catalog().lock().map_err(|_|KernelError::Storage("Catalog unavailable".into()))?
-                                .request_retrieval_delivery(&p.operation_id).map_err(domain)?;
-                            if accepted {
-                                let commands=control_commands::ControlCommands {runtime:runtime.clone(),resources:resources.clone(),
-                                    models:run_models.as_ref().expect("initialized models").clone(),tools:run_tools.as_ref().expect("initialized tools").clone()};
-                                commands.admit_tree_cancel(varin_runtime::catalog::dispatch::TreeCancelTarget::Child{operation_id:p.operation_id},None)?;
-                            }
-                            return Ok(json!({"accepted":accepted}));
                         }
                         if method == "runtime.retry.evaluate" {
                             let p: ModelRetryEvaluateParams = serde_json::from_value(params)?;

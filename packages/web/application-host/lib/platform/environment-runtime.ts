@@ -31,7 +31,7 @@ export const createPlatformEnvironmentRuntime = (options: {
   fsModule?: typeof fs;
   osModule?: typeof os;
   pathModule?: typeof path;
-  processLike?: NodeJS.Process;
+  processLike?: Pick<NodeJS.Process, 'platform' | 'env'>;
   spawnSyncFn?: typeof spawnSync;
 } = {}) => {
   const processLike = options.processLike ?? process;
@@ -141,22 +141,21 @@ export const createPlatformEnvironmentRuntime = (options: {
 
   const applyLoginShellEnvSnapshot = (): void => {
     const snapshot = getLoginShellEnvSnapshot();
-    if (!snapshot) return;
-    for (const [key, value] of Object.entries(snapshot)) {
-      if (key === 'PATH' || ['PWD', 'OLDPWD', 'SHLVL', '_'].includes(key)) continue;
+    for (const [key, value] of Object.entries(snapshot ?? {})) {
+      if (key.toLowerCase() === 'path' || ['PWD', 'OLDPWD', 'SHLVL', '_'].includes(key)) continue;
       if (typeof processLike.env[key] !== 'string' || processLike.env[key].length === 0) {
         processLike.env[key] = value;
       }
     }
-    const currentPath = normalizeEnvironmentPath(processLike.env);
-    const shellPath = normalizeEnvironmentPath(snapshot);
-    if (shellPath) processLike.env.PATH = mergePathValues(shellPath, currentPath, pathModule.delimiter);
+    const augmented = buildAugmentedPath();
+    if (processLike.platform === 'win32') for (const key of Object.keys(processLike.env)) if (key.toLowerCase() === 'path' && key !== 'PATH') delete processLike.env[key];
+    processLike.env.PATH = augmented;
   };
 
   const buildAugmentedPath = (): string => {
     const currentPath = normalizeEnvironmentPath(processLike.env);
     const shellPath = normalizeEnvironmentPath(getLoginShellEnvSnapshot() ?? {});
-    const currentIsUserConfigured = pathLooksUserConfigured(currentPath, osModule.homedir(), pathModule.delimiter);
+    const currentIsUserConfigured = processLike.platform === 'win32' || pathLooksUserConfigured(currentPath, osModule.homedir(), pathModule.delimiter);
     const primary = currentIsUserConfigured ? currentPath : shellPath;
     const fallback = currentIsUserConfigured ? shellPath : currentPath;
     const environment = { PATH: mergePathValues(primary, fallback, pathModule.delimiter) };
@@ -202,6 +201,7 @@ export const createPlatformEnvironmentRuntime = (options: {
   };
 
   return {
+    refresh: () => { cachedShellEnvironment = undefined; resolvedGitBinary = null; applyLoginShellEnvSnapshot(); },
     applyLoginShellEnvSnapshot,
     buildAugmentedPath,
     getLoginShellEnvSnapshot,

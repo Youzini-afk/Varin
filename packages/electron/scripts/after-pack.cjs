@@ -41,6 +41,7 @@ module.exports = (context) => {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
   if (context.electronPlatformName === 'darwin') {
+    // macOS signing below also sees the native tools resource.
     const helper = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'computer-driver', 'macos',
       'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');
     if (!fs.existsSync(helper)) throw new Error('Missing native macOS Computer helper: ' + helper);
@@ -54,6 +55,19 @@ module.exports = (context) => {
   const suffix = context.electronPlatformName === 'win32' ? '-msvc' : context.electronPlatformName === 'linux' ? '-gnu' : '';
   const triviumBinary = 'triviumdb.' + context.electronPlatformName + '-' + targetArchitecture + suffix + '.node';
   if (!fs.existsSync(path.join(trivium, triviumBinary))) throw new Error('Missing target TriviumDB binary: ' + triviumBinary);
+  const rg = path.join(resourcesPath, 'tools', context.electronPlatformName === 'win32' ? 'rg.exe' : 'rg');
+  const rgIdentity = detectKernelBinaryIdentity(fs.readFileSync(rg));
+  if (rgIdentity.platform !== context.electronPlatformName || rgIdentity.arch !== targetArchitecture) throw new Error('Packaged ripgrep architecture mismatch');
+  for (const license of ['ripgrep-LICENSE', 'ripgrep-MIT-LICENSE.txt', 'pcre2-LICENSE.txt']) {
+    if (!fs.existsSync(path.join(resourcesPath, 'tools', license))) throw new Error('Packaged ripgrep license is missing: ' + license);
+  }
+  if (context.electronPlatformName === process.platform && targetArchitecture === process.arch) {
+    const cleanEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== 'path'));
+    const options = { encoding: 'utf8', env: { ...cleanEnvironment, PATH: path.dirname(rg) }, windowsHide: true };
+    const output = execFileSync(rg, ['--version'], options);
+    if (!output.startsWith('ripgrep ')) throw new Error('Packaged ripgrep did not execute');
+    execFileSync(rg, ['--no-config', '--fixed-strings', '--quiet', 'Copyright (c) 2015 Andrew Gallant', path.join(resourcesPath, 'tools', 'ripgrep-MIT-LICENSE.txt')], options);
+  }
   for (const name of fs.readdirSync(trivium)) if (name.endsWith('.node') && name !== triviumBinary) fs.rmSync(path.join(trivium, name));
   for (const optional of ['@huggingface/transformers', 'onnxruntime-node', 'onnxruntime-web']) {
     if (fs.existsSync(path.join(unpackedNodeModulesPath, optional))) {

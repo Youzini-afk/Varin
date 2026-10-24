@@ -171,14 +171,8 @@ impl ProcessWaitTools {
         let (id, input, kind) = if call.name == "process_write" {
             let args: crate::tools::ProcessWriteArgs =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            (
-                args.process_id,
-                crate::process::interaction::Input::Write {
-                    bytes: args.text.into_bytes().into(),
-                    eof: args.eof,
-                },
-                ToolKind::ProcessWrite,
-            )
+            let input=args.input(&self.binding,&self.resources)?;
+            (args.process_id,input,ToolKind::ProcessWrite)
         } else {
             let args: crate::tools::ProcessResizeArgs =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
@@ -385,7 +379,7 @@ impl ToolExecutor for ProcessWaitTools {
                 completion: ToolCompletion::Result {
                     outcome: Outcome::Indeterminate,
                     effect: Effect::Unknown,
-                    content: json!({"error":"source_unavailable","message":e.to_string()}).into(),
+                    content: json!({"error":ExecutionError::new("source_unavailable", e.to_string())}).into(),
                 },
                 executor_stopped: false,
             });
@@ -524,20 +518,16 @@ impl ToolExecutor for ProcessWaitTools {
                         ToolCompletion::Result {
                             outcome: Outcome::Indeterminate,
                             effect: Effect::Unknown,
-                            content: json!({"error":error.code,"message":error.message}).into(),
+                            content: json!({"error":error}).into(),
                         }
                     } else {
-                        ToolCompletion::NotDispatched {
-                            reason: error.to_string(),
-                        }
+                        ToolCompletion::not_dispatched(error)
                     }
                 });
         }
         if observes(&call.name) {
             if let Err(e) = self.validate_contract(c, call, contract) {
-                return ToolCompletion::NotDispatched {
-                    reason: e.to_string(),
-                };
+                return ToolCompletion::not_dispatched(e);
             }
             return match self.observe(c, call, false, cancel) {
                 Ok(content) => ToolCompletion::Result {
@@ -548,7 +538,7 @@ impl ToolExecutor for ProcessWaitTools {
                 Err(e) => ToolCompletion::Result {
                     outcome: Outcome::Failed,
                     effect: Effect::None,
-                    content: json!({"error":e.code,"message":e.message}).into(),
+                    content: json!({"error":e}).into(),
                 },
             };
         }
@@ -560,17 +550,19 @@ impl ToolExecutor for ProcessWaitTools {
                     .request_cancel_operation(&id).map_err(error)?;
                 let already_stopped = operation.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
                 let delivery = if already_stopped { Ok(true) } else {
-                    self.resources.cancel_process(&id, &operation.run_id)
+                    self.resources.cancel_process(&id, &operation.run_id).map_err(ExecutionError::from)
                 };
                 let observed = self.catalog.lock().map_err(error)?.operation(&id).map_err(error)?;
                 let stopped = observed.external_receipt.as_ref().is_some_and(|receipt| receipt.executor_stopped);
+                let mut content = json!({"processId":id,"cancelRequested":observed.cancel_requested,
+                    "status":if stopped {"stopped"} else {"stop_requested"},"stopConfirmed":stopped,
+                    "signalDelivered":if already_stopped { Some(false) } else { delivery.as_ref().ok().copied() },
+                    "outcome":observed.outcome});
+                if let Err(failure) = &delivery { content["error"] = json!(failure); }
                 return Ok(ToolCompletion::Result {
                     outcome: if delivery.is_ok() { Outcome::Succeeded } else { Outcome::Failed },
                     effect: Effect::Confirmed,
-                    content: json!({"processId":id,"cancelRequested":observed.cancel_requested,
-                        "status":if stopped {"stopped"} else {"stop_requested"},"stopConfirmed":stopped,
-                        "signalDelivered":if already_stopped { Some(false) } else { delivery.as_ref().ok().copied() },
-                        "outcome":observed.outcome,"message":delivery.err().map(|error|error.to_string())}).into(),
+                    content: content.into(),
                 });
             }
             self.catalog
@@ -589,7 +581,7 @@ impl ToolExecutor for ProcessWaitTools {
         result.unwrap_or_else(|e| ToolCompletion::Result {
             outcome: Outcome::Failed,
             effect: Effect::None,
-            content: json!({"error":e.code,"message":e.message}).into(),
+            content: json!({"error":e}).into(),
         })
     }
 }

@@ -155,6 +155,11 @@ export type FetchResult =
     /** Original material reference, unaffected by a new text/structure analysis. */
     sourceSnapshot?: WebSnapshotRef;
     overview?: DocumentOverview;
+    view?: import('./harness-web.js').DocumentReadRequest['view'];
+    textStatus?: 'not-requested' | 'available' | 'no-text' | 'failed' | 'unavailable';
+    detail?: string;
+    /** Exact continuation on the retained source, including Office object pagination. */
+    nextRead?: import('./harness-web.js').DocumentReadRequest;
     office?: import('./office.js').OfficeReadResult;
     rendering?: { engine: string; version: string };
     pageImages?: DocumentPageImage[];

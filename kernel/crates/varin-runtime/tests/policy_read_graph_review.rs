@@ -150,6 +150,7 @@ fn graph_cancellation_and_node_settlement_do_not_hydrate_the_definition() {
                 node,
                 &ToolCompletion::NotDispatched {
                     reason: "cancelled".into(),
+                    error: None,
                 },
             )
             .unwrap();
@@ -194,8 +195,7 @@ impl Fixture {
                 configuration: json!({}),
             })
             .unwrap();
-        let binding = RequestBinding {
-            direct_tools: None,
+        let binding = RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -736,8 +736,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
         .into_iter()
         .map(|value| {
             let node: PolicyToolNode = serde_json::from_value(value).unwrap();
-            let context = FrozenToolContext {
-                direct_tools: None,
+            let context = FrozenToolContext { execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,

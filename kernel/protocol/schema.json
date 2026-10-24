@@ -351,7 +351,7 @@
     }
   }
 ],
-  "runtimeExports": ["MaterialRetention", "MaterialRetentionParams", "CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
+  "runtimeExports": ["ExecutionError","MaterialRetention", "MaterialRetentionParams", "CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
   "ModelPresentationParams",
   "ModelPresentation","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
  "FileObservationAuthority",
@@ -864,7 +864,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 61,
+  "protocolVersion": 63,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1359,7 +1359,6 @@
     "runtime.material.retention": "MaterialRetentionParams",
     "runtime.content.collect": "KernelEmptyParams",
     "runtime.tokenizers.open": "KernelTokenizerOpenParams",
-    "runtime.retrieval.finish": "OperationParams",
     "runtime.retry.evaluate": "ModelRetryEvaluateParams",
     "runtime.tokenizers.count": "KernelTokenizerCountParams",
     "runtime.tokenizers.close": "KernelTokenizerLeaseParams",
@@ -1594,10 +1593,10 @@
     "HistoryRange": {"raw":"export interface HistoryRange { branch_id:string; ancestor_id:string|null; leaf_id:string|null }"},
     "ModelOpaqueItem": {"raw":"export interface ModelOpaqueItem { connection_identity:string; family:string; adapter_version:string; value:unknown }"},
     "ModelToolCall": {"raw":"export interface ModelToolCall { call_id:string; name:string; schema_version:string; arguments:unknown }"},
-    "ModelToolCompletion": {"raw":"export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};"},
+    "ModelToolCompletion": {"raw":"export type ModelToolCompletion = {kind:'not_dispatched';reason:string;error?:ExecutionError} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};"},
     "ModelContent": {"raw":"export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};"},
     "ModelConversationItem": {"raw":"export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }"},
-    "RequestBinding": {"raw":"export interface RequestBinding {direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }"},
+    "RequestBinding": {"raw":"export interface RequestBinding {execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }"},
     "RequestOrigin": {"raw":"export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};"},
     "RequestView": {"raw":"export interface RequestView { request_id:string; run_id:string; origin:RequestOrigin; binding:RequestBinding; history:ModelConversationItem[] }"},
     "ModelUsageReceipt": {"raw":"export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }"},
@@ -2079,7 +2078,7 @@
     "NestedToolSummary": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"description":{"type":"string"}}},
     "NestedToolInspection": {"raw":"export type NestedToolInspection = {\n  origin: 'accepted_run'; permission: 'checked_on_invocation'; runId: string; generation: number;\n} & ({ action: 'list'; tools: NestedToolSummary[] } | { action: 'describe'; tool: LaunchTool | null });"},
     "NestedToolInput": {"rustType":"varin_runtime::execution::NestedToolInput","fields":{"callId":{"type":"string"},"name":{"type":"string"},"arguments":{"type":"unknown"}}},
-    "NestedToolReceipt": {"fields":{"operationId":{"type":"string"},"completion":{"type":"OperationCallCompletion<ResolvedMedia>"}}},
+    "NestedToolReceipt": {"fields":{"operationId":{"type":"string"},"completion":{"type":"OperationCallCompletion<ResolvedMedia>"},"error":{"type":"ExecutionError","optional":true}}},
     "NestedToolInvokeParams": {"fields":{"parentOperationId":{"type":"string"},"executorOwner":{"type":"ExecutorOwner"},"call":{"type":"NestedToolInput"}}},
     "HostToolCall": {"fields":{"runId":{"type":"string"},"operationId":{"type":"string"},"origin":{"type":"ToolOrigin"},"callId":{"type":"string"},"name":{"type":"string"},"schemaVersion":{"type":"string"},"arguments":{"type":"unknown"}}},
     "HostCompositionProvider": {"fields":{"nodeId":{"type":"string"},"providerKey":{"type":"string"}}},
@@ -2252,7 +2251,7 @@
     "InputSubmitReceipt": {"fields": {"thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "run_id": {"type": "string"}, "input_id": {"type": "string"}, "cursor": {"type": "number"}}},
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}, "rustType": "varin_runtime::RunFailure"},
     "Run": {"fields": {"waiting_on": {"type": "string | null"}, "id": {"type": "string"}, "thread_id": {"type": "string"}, "branch_id": {"type": "string"}, "state": {"type": "RunState"}, "revision": {"type": "number"}, "epoch": {"type": "number"}, "configuration": {"type": "unknown"}, "cancel_requested": {"type": "boolean"}}},
-    "OperationCallCompletion": {"raw": "export type OperationCallCompletion<M = StoredMedia> =\n  | { kind: 'not_dispatched'; reason: string }\n  | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }\n  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };"},
+    "OperationCallCompletion": {"raw": "export type OperationCallCompletion<M = StoredMedia> =\n  | { kind: 'not_dispatched'; reason: string; error?: ExecutionError }\n  | { kind: 'result'; outcome: Outcome; effect: Effect; content: OutputBody<M> }\n  | { kind: 'job_accepted'; operation_id: string; phase: string; effect: Effect; lifetime: Lifetime; content?: OutputBody<M> };"},
     "Operation": {"fields":{"host_job":{"type":"HostJobView","optional":true},"execution_owner":{"type":"ExecutorOwner | null"},"external_receipt":{"type":"ExternalReceiptView | null"},"call_completion":{"type":"OperationCallCompletion | null"},"id":{"type":"string"},"run_id":{"type":"string"},"epoch":{"type":"number"},"revision":{"type":"number"},"phase":{"type":"OperationPhase"},"outcome":{"type":"Outcome | null"},"effect":{"type":"Effect"},"cancel_requested":{"type":"boolean"},"lifetime":{"type":"Lifetime"},"handed_off":{"type":"boolean"},"executor":{"type":"string | null"},"waiting_on":{"type":"string | null"},"intent":{"type":"unknown"},"result":{"type":"OperationResult | null"},"managed_process":{"type":"ManagedProcess","optional":true},"mcp_resource_subscription": {"type": "McpResourceSubscription", "optional": true}}},
     "ProviderOriginal": {"fields": {"connection_identity": {"type": "string"}, "adapter": {"type": "string"}, "version": {"type": "string"}, "item": {"type": "unknown"}}},
     "HistoryItem": {"fields": {"id": {"type": "string"}, "thread_id": {"type": "string"}, "parent": {"type": "string | null"}, "source": {"type": "HistorySource"}, "content": {"type": "unknown"}, "provider": {"type": "ProviderOriginal | null"}, "run_id": {"type": "string"}}},
@@ -2528,7 +2527,8 @@
       "fields": {
         "code": {"type": "string"},
         "message": {"type": "string"},
-        "retryable": {"type": "boolean"}
+        "retryable": {"type": "boolean"},
+        "details": {"type": "unknown", "optional": true}
       }
     },
     "KernelRequestCreditReleased": {
@@ -2973,10 +2973,13 @@
 "SourceProcessAccessParams": {"raw":"export interface SourceProcessAccessParams extends SourceAuthorityAddress {processId:string;}","rustType":"crate::source_resources::SourceProcessAccessParams"},
 "SourceAuthorityAddress": {"raw":"export interface SourceAuthorityAddress { principalId:string;coordinatorHostId:string;authorityId:string;resourceEpoch:string; }","rustType":"crate::source_resources::SourceAuthorityAddress"},
 "SourceAuthorityReleaseParams": {"raw":"export interface SourceAuthorityReleaseParams extends SourceAuthorityAddress { mode:'retire'|'revoke'; }","rustType":"crate::source_resources::SourceAuthorityReleaseParams"},
-"SourceResourceCallParams": {"raw":"export interface SourceResourceCallParams extends SourceAuthorityAddress { call:HostToolCall;journal?:RecoveryAnchor; }","rustType":"crate::source_resources::SourceResourceCallParams"},
+"SourceResourceCallParams": {"raw":"export interface SourceResourceCallParams extends SourceAuthorityAddress { executionEnvironment?:ExecutionEnvironment; call:HostToolCall;journal?:RecoveryAnchor; }","rustType":"crate::source_resources::SourceResourceCallParams"},
 "SourceResourceControlParams": {"raw":"export interface SourceResourceControlParams extends SourceAuthorityAddress { operationId:string; }","rustType":"crate::source_resources::SourceResourceControlParams"},
 "SourceServiceCallParams": {"raw":"export interface SourceServiceCallParams extends SourceAuthorityAddress { requestId:string;clientCapabilities:string[];operation: {kind:'native_resource';context:{run_id:string;origin:ToolOrigin;operation_id:string};action:SourceResourceAction;authorizeOnly:boolean} | {kind:'validate'}; }","rustType":"crate::source_resources::SourceServiceCallParams"},
-"SourceToolBinding": {"raw":"export interface SourceToolBinding { resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }","rustType":"crate::tools::ToolBinding"},
+"ExecutionError": {"raw":"export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}","rustType":"varin_runtime::execution::ExecutionError"},
+"ExecutionShell": {"raw":"export interface ExecutionShell {id:string;name:string;executable:string;path?:string[];}","rustType":"crate::shell_environment::ExecutionShell"},
+"ExecutionEnvironment": {"raw":"export interface ExecutionEnvironment {searchPath?:string;platform:string;defaultShell:string|null;shells:ExecutionShell[];}","rustType":"crate::shell_environment::ExecutionEnvironment"},
+"SourceToolBinding": {"raw":"export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }","rustType":"crate::tools::ToolBinding"},
 "SourceAuthorityResult": {"raw":"export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }","rustType":"crate::source_resources::SourceAuthorityResult"},
 "SourceAuthorityScopeReleaseParams": {"raw":"export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}","rustType":"crate::source_resources::SourceAuthorityScopeReleaseParams"},
 "SourceResourceOwner": {"raw":"export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};","rustType":"varin_runtime::catalog::launches::SourceResourceOwner"},
@@ -3164,7 +3167,6 @@
     "runtime.material.retention": "Read frozen child material references and drained deleted Thread owners",
     "runtime.content.collect": "Collect unreferenced runtime content on an independent maintenance worker",
     "runtime.tokenizers.open": "Lease the native tokenizer for a frozen model configuration",
-    "runtime.retrieval.finish": "Deliver available evidence from the original retrieval operation without cancelling its result",
     "runtime.retry.evaluate": "Evaluate retry settings without issuing a provider request",
     "runtime.tokenizers.count": "Count serialized input using a leased native tokenizer on a worker",
     "runtime.tokenizers.close": "Release a native tokenizer lease",

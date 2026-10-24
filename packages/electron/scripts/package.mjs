@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { resolveTargetArchitecture } from './target-architecture.mjs';
+import { prepareRipgrep } from '../../../scripts/prepare-ripgrep.mjs';
 
 const electronDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const env = { ...process.env };
@@ -25,6 +26,7 @@ const electronVersion = require('electron/package.json').version;
 env.VARIN_TARGET_ARCH = targetArchitecture.node;
 env.VARIN_TARGET_PLATFORM = targetPlatform;
 env.VARIN_PACKAGING_NODE = process.execPath;
+prepareRipgrep({ platform: targetPlatform, arch: targetArchitecture.node, stage: path.join(electronDir, 'resources', 'tools') });
 
 if (!builderArgs.some((argument) => argument.startsWith('--config.electronVersion='))) {
   builderArgs.push(`--config.electronVersion=${electronVersion}`);

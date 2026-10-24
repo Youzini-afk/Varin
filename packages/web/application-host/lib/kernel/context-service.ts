@@ -53,6 +53,7 @@ export class ContextService implements ContextOwner {
     if(query.action==='prepare' && this.publishObservations) { await waitWithSignal(this.publishObservations(run,signal),signal); signal.throwIfAborted(); }
     const launch=await this.runtime.launch(run.id,signal);
     signal.throwIfAborted();
+    if (query.action === 'execution_environment') return { status: 'ready', environment: await this.runtime.executionEnvironmentForSource(launch?.selection.source, signal) };
     if(query.action==='prepare' || query.action==='decide') {
       const {policy,scope}=await this.readPolicy(run,launch,signal);
       signal.throwIfAborted();

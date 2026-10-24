@@ -68,8 +68,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
                 leaf_id: None,
             },
         },
-        binding: RequestBinding {
-            direct_tools: None,
+        binding: RequestBinding { execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

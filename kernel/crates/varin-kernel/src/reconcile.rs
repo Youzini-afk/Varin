@@ -267,7 +267,7 @@ pub(crate) fn reconcile_managed_read(
             effect,
             content,
         } => (outcome, effect, content),
-        varin_runtime::execution::ToolCompletion::NotDispatched { reason } => (
+        varin_runtime::execution::ToolCompletion::NotDispatched { reason, .. } => (
             varin_runtime::Outcome::Failed,
             varin_runtime::Effect::None,
             json!({"reason":reason}).into(),

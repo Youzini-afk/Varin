@@ -32,6 +32,12 @@ closure and object state. There is no `AsyncFunction`/globals-dictionary substit
 Launch the containing Node process with `--experimental-repl-await` so its flags cannot silently
 disable that contract. The package requires Node >=22.19.0.
 
+The `script_run` tool takes JavaScript in its `script` parameter. Within one environment, later cells
+reuse earlier bindings; repeated `let`/`const` declarations fail. Assign to an existing mutable binding,
+use a block for cell-local `const`, or use `var` for redeclarable temporary names. Redeclaration retains
+Node's error plus `SCRIPT_BINDING_REDECLARED` and a targeted hint. It does not reset state or replay
+the cell; output and effects already produced remain associated with the original invocation.
+
 The default context supplies `tools.invoke(input)`, `print(...values)`, `emitImage(image)`
 and a Node `console` whose output is associated with the calling cell. Print/console
 values remain ordinary text previews (`inspect` depth 6 for non-strings). Only explicit
@@ -54,7 +60,7 @@ A trusted embedding can use `createNodeReplSession<Input, Receipt>` and the opti
 `tools` and `emitImage` installation; `print` and `console` remain available. The embedding owns its
 method/argument and error mapping rather than maintaining another lexical engine.
 A third optional `ErrorInfo extends ScriptError` type parameter and `serializeError(error)` allow an
-explicit error projection. Native transport preserves message/code; a failing custom projection falls
+explicit error projection. Native transport preserves message/code/details/hint; a failing custom projection falls
 back to the base error. These hooks are trusted embedding code, not authority for script authors to
 change the original Run or its permissions.
 
@@ -98,7 +104,7 @@ The package root exports the shared frame types, encoder and incremental decoder
 
 - Host → `initialize { bindingIdentity }`, `eval { cellId, script }`,
   `receipt { cellId, requestId, receipt }`,
-  `rejected { cellId, requestId, error: { message, code? } }`
+  `rejected { cellId, requestId, error: { message, code?, details?, hint? } }`
 - Worker → `ready { bindingIdentity }`, `invoke { cellId, requestId, input }`,
   `output { cellId, part }`, `completed { cellId, valueText?, error? }`
 
@@ -120,6 +126,10 @@ list or argument-field whitelist. Trusted Host receipts pass through intact;
 this transport does not duplicate the generated completion union or validate its
 meaning as a second authority. Host `rejected` frames are transport/call errors,
 not replacements for original completion facts.
+
+Failed nested receipts expose `receipt.error` with the shared code/message/details projection while
+retaining original completion, data and media. Rejected transport calls remain rejected Promises;
+they do not manufacture a target-tool completion.
 
 Stdout is reserved for protocol frames. The provided `print` and `console` emit
 `output` frames; Node's own REPL prompts/domain diagnostics go to a discarded

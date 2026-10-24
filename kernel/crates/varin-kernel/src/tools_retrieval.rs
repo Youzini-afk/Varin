@@ -1,6 +1,5 @@
 //! Internal retrieval uses the ordinary native Agent engine and its original Operation.
 use super::*;
-const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 fn valid_path(path: &str) -> bool {
     normalized_path(path, false).is_ok() && !path.split('/').any(str::is_empty)
 }
@@ -9,14 +8,12 @@ fn valid_path(path: &str) -> bool {
 pub(super) struct RetrievalQueryArgs {
     question: String,
     pub paths: Option<Vec<String>>,
-    limit: Option<u64>,
 }
 impl RetrievalQueryArgs {
     pub(super) fn source_descriptor(paths: Option<Vec<String>>) -> Self {
         Self {
             question: String::new(),
             paths,
-            limit: None,
         }
     }
     pub(super) fn parse(value: &Value) -> Result<Self, ExecutionError> {
@@ -26,16 +23,13 @@ impl RetrievalQueryArgs {
         if args.question.trim().is_empty()
             || args.question.contains('\0')
             || args
-                .limit
-                .is_some_and(|limit| limit == 0 || limit > MAX_SAFE_INTEGER)
-            || args
                 .paths
                 .as_ref()
                 .is_some_and(|paths| paths.is_empty() || paths.iter().any(|path| !valid_path(path)))
         {
             return Err(ExecutionError::new(
                 "invalid_tool_arguments",
-                "Code retrieval requires a question, normalized relative paths, and a positive safe-integer limit",
+                "Code retrieval requires a question and optional normalized relative paths",
             ));
         }
         Ok(args)
@@ -45,8 +39,7 @@ impl RetrievalQueryArgs {
 pub(super) fn schema() -> Value {
     json!({"type":"object","additionalProperties":false,"required":["question"],"properties":{
         "question":{"type":"string","minLength":1,"description":"A focused question about the current source files or materials. Existing clues can be included naturally; no plan or keywords are required."},
-        "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."},
-        "limit":{"type":"integer","minimum":1,"maximum":MAX_SAFE_INTEGER,"description":"Optional result preview preference; never limits investigation or retained history."}
+        "paths":{"type":"array","minItems":1,"items":{"type":"string","minLength":1},"description":"Optional normalized relative files or directories within this Run's authorized scope."}
     }})
 }
 
@@ -66,7 +59,7 @@ impl KernelToolExecutor {
                 cancel,
             )
             .map_err(|failure| {
-                ExecutionError::new(error_code(&failure.error), failure.error.to_string())
+                ExecutionError::from(failure.error)
             })
     }
     pub(super) fn execute_retrieval(
@@ -82,7 +75,7 @@ impl KernelToolExecutor {
                 .map(|db|db.child_task(&context.operation_id).is_ok()).unwrap_or(true));
             ToolCompletion::Result {
                 outcome:if admitted {Outcome::Indeterminate}else{Outcome::Failed}, effect:if admitted {Effect::Unknown}else{Effect::None},
-                content:json!({"status":if admitted {"unknown"}else{"failed"},"error":failure.code,"message":failure.message}).into(),
+                content:json!({"status":if admitted {"unknown"}else{"failed"},"error":failure}).into(),
             }
         })
     }
@@ -100,21 +93,8 @@ impl KernelToolExecutor {
                 "Native retrieval execution owner is unavailable",
             )
         })?;
-        let catalog = owner.runtime.catalog();
-        let lock = || {
-            catalog
-                .lock()
-                .map_err(|_| ExecutionError::new("catalog_unavailable", "Catalog unavailable"))
-        };
-        let failure = |cause: varin_runtime::RuntimeError| {
-            ExecutionError::new("retrieval_execution", cause.to_string())
-        };
-        let (send, receive) = std::sync::mpsc::sync_channel(1);
-        // Register before admission/inspection to close the completion-before-wait race.
-        let _events = lock()?.subscribe_events(send.clone());
-        let _cancel = cancel.wake_on_cancel(send);
         crate::collaboration::admit_internal_retrieval(
-            catalog.clone(),
+            owner.runtime.catalog(),
             self.binding.clone(),
             self.resources.clone(),
             owner.tools.bridge(),
@@ -122,52 +102,6 @@ impl KernelToolExecutor {
             call,
             &self.contract(call, &ResourceOperation::RetrievalQuery(args.clone())),
             cancel,
-        )?;
-        let mut cancellation_sent = false;
-        loop {
-            if (cancel.is_cancelled()
-                || lock()?
-                    .retrieval_delivery_requested(&context.operation_id)
-                    .map_err(failure)?)
-                && !cancellation_sent
-            {
-                owner
-                    .admit_tree_cancel(
-                        varin_runtime::catalog::dispatch::TreeCancelTarget::Child {
-                            operation_id: context.operation_id.clone(),
-                        },
-                        Some(&self.binding.thread_id),
-                    )
-                    .map_err(|error| {
-                        ExecutionError::new("retrieval_cancel_failed", error.to_string())
-                    })?;
-                cancellation_sent = true;
-            }
-            let read = {
-                let db = lock()?;
-                let op = db.operation(&context.operation_id).map_err(failure)?;
-                op.external_receipt
-                    .as_ref()
-                    .filter(|receipt| receipt.executor_stopped)
-                    .map(|_| db.capture_operation_read(op.clone()))
-            };
-            if let Some(read) = read {
-                let (_, receipt) = read.load_with_external_receipt().map_err(failure)?;
-                let receipt = receipt.ok_or_else(|| {
-                    ExecutionError::new(
-                        "retrieval_receipt_missing",
-                        "Original retrieval receipt is unavailable",
-                    )
-                })?;
-                return Ok(ToolCompletion::Result {
-                    outcome: receipt.outcome,
-                    effect: receipt.effect,
-                    content: receipt.result,
-                });
-            }
-            receive.recv().map_err(|_| {
-                ExecutionError::new("retrieval_owner_closed", "Retrieval event owner closed")
-            })?;
-        }
+        )
     }
 }

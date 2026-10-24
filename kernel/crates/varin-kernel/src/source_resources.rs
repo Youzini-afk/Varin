@@ -453,6 +453,7 @@ pub(crate) struct SourceCall {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SourceResourceCallParams {
+    pub execution_environment: Option<crate::shell_environment::ExecutionEnvironment>,
     pub principal_id: String,
     pub coordinator_host_id: String,
     pub authority_id: String,

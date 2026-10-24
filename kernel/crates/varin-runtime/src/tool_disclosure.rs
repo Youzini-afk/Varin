@@ -90,6 +90,7 @@ pub fn is_always_declared(name: &str) -> bool {
             | "file_restore"
             | "file_edit"
             | "code_retrieval"
+            | "retrieval_control"
             | "process_spawn"
             | "process_read"
             | "process_write"
@@ -164,7 +165,7 @@ pub fn direct_tools(tools: &[ToolSchema], focus: &str) -> Option<Vec<String>> {
         match focus {
             "research" => matches!(name,
                 "websearch" | "webfetch" | "document_read" | "materials" | "resource_read" | "research_search"
-                | "file_list" | "file_search" | "file_read" | "file_write" | "file_edit" | "code_retrieval"
+                | "file_list" | "file_search" | "file_read" | "file_write" | "file_edit" | "code_retrieval" | "retrieval_control"
                 | "process_spawn" | "process_read" | "process_write" | "process_inspect" | "process_stop" | "wait_process"
                 | "script_open" | "script_run" | "script_close" | "dispatch" | "send" | "threads" | "read_thread"
                 | "child_status" | "child_report" | "wait_child" | "child_cancel" | "ask_user" | "question_status"
@@ -189,6 +190,7 @@ pub fn direct_tools(tools: &[ToolSchema], focus: &str) -> Option<Vec<String>> {
 /// discoverable. These are not an execution order or additional prerequisites.
 pub fn related(name: &str) -> &'static [&'static str] {
     match name {
+        "code_retrieval" | "retrieval_control" => &["code_retrieval", "retrieval_control"],
         "browser_tabs" | "browser_open" | "browser_read" | "browser_act" | "browser_files" =>
             &["browser_tabs", "browser_open", "browser_read", "browser_act", "browser_files", "document_read", "office_read"],
         "office_read" | "office_write" | "office_render" | "office_export" | "office_environment" =>
@@ -258,7 +260,7 @@ pub fn namespace(name: &str) -> Option<&'static str> {
         | "ask_user" | "question_status" | "todo" | "memory" | "goal_report" => "collaboration",
         "websearch" | "webfetch" | "document_read" | "materials" | "resource_read" => "documents",
         "image_generate" | "image_edit" | "render_ui" => "media",
-        "code_retrieval" => "files",
+        "code_retrieval" | "retrieval_control" => "files",
         "research_search" => "research",
         name if name.starts_with("browser_") => "browser",
         name if name.starts_with("office_") => "office",
