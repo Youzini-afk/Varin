@@ -42,3 +42,4 @@
 - [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
 - [办公模式与浏览器、电脑协作](design/office-agent-harness.md)：文档与数据处理、浏览器和电脑操作、文件流转及连续修改；复用现有工作台与协作能力，设计稿尚未实施。
 - [聊天与设置的整体体验](design/chat-settings-experience.md)、[独立 HTML 设计稿](design/chat-settings-preview.html)：基于现有界面、实际工具字段与三种聊天模式的设计提案，尚未实施。
+- [动效与交互：丝滑到底](design/motion-and-interaction.md)、[可交互原型](design/motion-preview/index.html)：以现有外壳和对话优先阅读规则为基础，统一弹簧 token，覆盖发送飞入与输入框停靠、墨迹流式、过程行原位换字、文件修改流式差异与就地预览托盘、派发与任务回复、尾部 FLIP、导轨与面板、设置窗口、晶格波工作台切换与降低动效分级；设计已确认，正在分期实施。

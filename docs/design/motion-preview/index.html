@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Varin · 动效与交互原型</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="frame" id="frame" data-sidebar="open">
+    <header class="titlebar" id="titlebar">
+      <div class="tb-left">
+        <button class="tb-btn" id="sidebarToggle" type="button" data-tip="打开会话（Ctrl B）" aria-label="打开会话"><i data-ic="layout-left"></i></button>
+        <button class="profile-pill" id="profileBtn" type="button" aria-haspopup="menu" aria-label="模式: 工作台">
+          <i data-ic="workbench"></i><span class="swap" id="profileLabel"><span class="swap-cur">工作台</span></span><i data-ic="chev-down" class="dim"></i>
+        </button>
+        <button class="profile-pill sub" id="workspaceBtn" type="button" aria-haspopup="menu" aria-label="工作台: 通用">
+          <i data-ic="general"></i><span class="swap" id="workspaceLabel"><span class="swap-cur">通用</span></span><i data-ic="chev-down" class="dim"></i>
+        </button>
+      </div>
+      <div class="tb-title" id="tbTitle">
+        <div class="tb-title-main swap" id="threadTitle"><span class="swap-cur">新会话</span></div>
+        <div class="tb-sub" id="threadSub"><i data-ic="folder"></i><span>opencr</span><span class="dot">·</span><span>Varin</span><i data-ic="git-branch"></i><span>main</span></div>
+      </div>
+      <div class="tb-right">
+        <button class="ctx-ring" id="ctxRing" type="button" data-tip="上下文 · 0%" aria-label="上下文用量">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle class="track" cx="10" cy="10" r="7"/><circle class="arc" id="ctxArc" cx="10" cy="10" r="7" pathLength="100"/></svg>
+          <span class="ctx-pct" id="ctxPct">0%</span>
+        </button>
+        <button class="local-pill" id="localBtn" type="button" data-tip="服务 · 当前实例 Local" aria-label="服务"><i data-ic="stack"></i><span>Local</span></button>
+        <button class="tb-btn" id="panelToggle" type="button" data-tip="打开面板" aria-label="打开面板" aria-pressed="false"><i data-ic="layout-right"></i></button>
+      </div>
+    </header>
+
+    <div class="row">
+      <aside class="sidebar" id="sidebar" aria-label="会话">
+        <div class="sidebar-inner">
+          <div class="side-actions">
+            <button class="side-new" id="newThread" type="button"><i data-ic="new"></i><span>新建会话</span><kbd>Ctrl N</kbd></button>
+            <button class="side-icon" type="button" data-tip="搜索会话" aria-label="搜索会话"><i data-ic="search"></i></button>
+          </div>
+          <nav class="sessions" id="sessions" aria-label="会话列表">
+            <div class="pill-select" id="selPill" aria-hidden="true"></div>
+            <div class="pill-hover" id="hoverPill" aria-hidden="true"></div>
+          </nav>
+          <section class="lab" id="lab" data-open="true" aria-label="动效实验室">
+            <button class="lab-head" id="labToggle" type="button" aria-expanded="true">
+              <span>动效实验室</span><span class="fps" id="fps">—</span><i data-ic="chev-down" class="lab-chev"></i>
+            </button>
+            <div class="lab-body" id="labBody">
+              <div class="lab-row"><span>版本</span>
+                <div class="seg" id="versionSeg" role="radiogroup" aria-label="版本"><span class="seg-knob"></span>
+                  <button type="button" role="radio" data-value="new" aria-checked="true">新设计</button><button type="button" role="radio" data-value="legacy" aria-checked="false">现状</button></div></div>
+              <div class="lab-row"><span>阅读</span>
+                <div class="seg" id="readingSeg" role="radiogroup" aria-label="阅读模式"><span class="seg-knob"></span>
+                  <button type="button" role="radio" data-value="dialogue" aria-checked="true">对话优先</button><button type="button" role="radio" data-value="chrono" aria-checked="false">按时间</button></div></div>
+              <div class="lab-row"><span>动效</span>
+                <div class="seg" id="levelSeg" role="radiogroup" aria-label="动效级别"><span class="seg-knob"></span>
+                  <button type="button" role="radio" data-value="full" aria-checked="true">完整</button><button type="button" role="radio" data-value="reduced" aria-checked="false">简化</button><button type="button" role="radio" data-value="off" aria-checked="false">关闭</button></div></div>
+              <div class="lab-row"><span>主题</span>
+                <div class="seg" id="themeSeg" role="radiogroup" aria-label="主题"><span class="seg-knob"></span>
+                  <button type="button" role="radio" data-value="light" aria-checked="true">浅色</button><button type="button" role="radio" data-value="dark" aria-checked="false">深色</button></div></div>
+              <label class="lab-row lab-switch"><span>慢放 ×4</span><input type="checkbox" id="slowmo" role="switch"><span class="switch" aria-hidden="true"><i></i></span></label>
+              <button class="lab-replay" id="replay" type="button"><i data-ic="redo"></i>重播演示</button>
+            </div>
+          </section>
+          <div class="side-foot">
+            <button class="side-foot-btn" id="openSettings" type="button"><i data-ic="settings"></i><span>设置</span></button>
+            <button class="side-icon" type="button" data-tip="快捷键" aria-label="快捷键"><i data-ic="keyboard"></i></button>
+          </div>
+        </div>
+      </aside>
+
+      <div class="workspace" id="workspace">
+        <div class="stage" id="stage">
+          <div class="agent-layout" id="agentLayout">
+            <main class="canvas" id="canvas" data-empty="true">
+              <div class="scroller" id="scroller" tabindex="-1"></div>
+              <div class="draft" id="draft">
+                <h1 class="draft-title" id="draftTitle">我们要在 Varin 中做什么？</h1>
+                <div class="draft-slot" id="draftSlot"></div>
+                <div class="starters" id="starters"></div>
+              </div>
+              <button class="jump-pill" id="jumpPill" type="button" hidden><i data-ic="arrow-down"></i>回到最新</button>
+              <div class="dock" id="dock">
+                <div class="dock-col">
+                  <div class="composer" id="composer">
+                    <textarea id="input" rows="1" aria-label="消息" placeholder="描述你想做的事…"></textarea>
+                    <div class="composer-foot">
+                      <div class="cf-left">
+                        <button class="cf-icon" type="button" data-tip="添加附件" aria-label="添加附件"><i data-ic="plus"></i></button>
+                        <button class="cf-icon" type="button" data-tip="权限：按项目规则" aria-label="权限"><i data-ic="shield"></i></button>
+                        <button class="cf-workspace" type="button" data-tip="opencr" aria-label="工作区"><i data-ic="folder"></i><span>opencr</span></button>
+                      </div>
+                      <div class="cf-models">
+                        <button class="cf-chip" id="thinkingBtn" type="button" aria-haspopup="menu" aria-label="思考"><i data-ic="brain"></i><span class="swap" id="thinkingLabel"><span class="swap-cur">中</span></span></button>
+                        <button class="cf-chip" id="modelBtn" type="button" aria-haspopup="menu" aria-label="选择模型"><span class="model-mark" aria-hidden="true"></span><span class="swap" id="modelLabel"><span class="swap-cur">主力模型</span></span><i data-ic="chev-down" class="dim"></i></button>
+                      </div>
+                      <div class="cf-actions">
+                        <button class="send" id="sendBtn" type="button" data-state="idle" aria-label="发送" data-tip="发送">
+                          <i data-ic="arrow-up" class="i-arrow"></i><i data-ic="stop" class="i-stop"></i>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </main>
+            <section class="ctx-panel" id="ctxPanel" hidden aria-label="面板">
+              <div class="panel-head">
+                <div class="panel-tabs" id="panelTabs"><span class="tab-ink" id="tabInk" aria-hidden="true"></span></div>
+                <button class="tb-btn sm" id="panelClose" type="button" data-tip="关闭面板" aria-label="关闭面板"><i data-ic="layout-right"></i></button>
+              </div>
+              <div class="panel-body" id="panelBody"></div>
+            </section>
+          </div>
+          <div class="ide-layout" id="ideLayout" hidden aria-label="IDE"></div>
+          <div class="lattice" id="lattice" hidden aria-hidden="true"></div>
+        </div>
+        <div class="rail-reveal" id="railReveal" data-open="true">
+          <nav class="rail" id="rail" aria-label="面板界面"><span class="rail-ind" id="railInd" aria-hidden="true"></span></nav>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="menu" id="menu" role="menu" hidden><div class="menu-pill" aria-hidden="true"></div></div>
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+  <div class="settings-layer" id="settingsLayer" hidden>
+    <div class="settings-backdrop" id="settingsBackdrop"></div>
+    <div class="settings-window" id="settingsWindow" role="dialog" aria-modal="true" aria-label="设置">
+      <aside class="settings-nav" id="settingsNav"><div class="snav-pill" id="snavPill" aria-hidden="true"></div></aside>
+      <div class="settings-content">
+        <header class="settings-head"><div class="settings-crumb swap" id="settingsCrumb"><span class="swap-cur">使用偏好 / 外观</span></div>
+          <button class="tb-btn" id="settingsClose" type="button" aria-label="关闭设置"><i data-ic="close"></i></button></header>
+        <div class="settings-pages" id="settingsPages"></div>
+      </div>
+    </div>
+  </div>
+  <div class="legacy-splash" id="legacySplash" hidden aria-hidden="true">
+    <svg viewBox="-64 -64 128 128"><path d="M-35 -19 L-11 -43 L44 -43 L57 -30 L2 -30 L-21 -7 L-21 26 L-35 12 Z"/><path d="M35 19 L11 43 L-44 43 L-57 30 L-2 30 L21 7 L21 -26 L35 -12 Z" opacity=".6"/></svg>
+    <span>正在切换工作台</span>
+  </div>
+
+  <script src="motion.js"></script>
+  <script src="demo.js"></script>
+</body>
+</html>
