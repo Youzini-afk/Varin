@@ -34,4 +34,7 @@
 
 ## 正在评审的设计
 
+- [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。
+- [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
+- [办公模式与浏览器、电脑协作](design/office-agent-harness.md)：文档与数据处理、浏览器和电脑操作、文件流转及连续修改；复用现有工作台与协作能力，设计稿尚未实施。
 - [聊天与设置的整体体验](design/chat-settings-experience.md)、[独立 HTML 设计稿](design/chat-settings-preview.html)：基于现有界面、实际工具字段与三种聊天模式的设计提案，尚未实施。
