@@ -1,4 +1,5 @@
 import type { Transition } from 'motion/react';
+import type { MotionLevel } from './preference';
 
 /**
  * Shared motion tokens. Four springs and two tweens cover every UI movement:
@@ -37,6 +38,17 @@ export const TWEENS = {
   fade: { duration: 0.16, ease: EASE_OUT },
   exit: { duration: 0.11, ease: EASE_EXIT },
 } as const satisfies Record<string, Transition>;
+
+export const INSTANT_TRANSITION = { duration: 0 } as const satisfies Transition;
+
+/**
+ * An element-level transition under the effective motion level. Off makes it
+ * instant; under Reduced, `MotionConfig` already drops transform and layout
+ * animation, so the remaining opacity change keeps its timing.
+ */
+export const transitionFor = (level: MotionLevel, transition: Transition): Transition => (
+  level === 'off' ? INSTANT_TRANSITION : transition
+);
 
 /** Stagger between list items, capped so long lists do not trail. */
 export const STAGGER_SECONDS = 0.02;

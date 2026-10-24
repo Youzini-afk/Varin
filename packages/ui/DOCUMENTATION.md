@@ -93,6 +93,20 @@ The same spring drives every motion layer:
 
 `usePrefersReducedMotion()` and `prefersReducedMotion()` return true for either reduced level, so existing callers follow the user's choice. `useMotionLevel()` exposes the three-way level for code that treats `reduced` and `off` differently. Reading pauses, such as a preview that stays briefly before retracting, keep their time under every level because they are reading time rather than animation. The design and phased plan are in [motion and interaction](../../docs/design/motion-and-interaction.md).
 
+Values that a motion component cannot own, such as a scroll position the virtual list also reads, use `SpringDriver` from `lib/motion/spring.ts`. It integrates one spring per frame, keeps its velocity when retargeted, and can be shifted when the underlying content moves.
+
+The conversation timeline has one scroll spring, owned by one motion at a time:
+
+- Following the end uses a critically damped spring (ω = 14). Its target only grows, so a long reply glides instead of stepping once per measurement. While it catches up, the timeline still counts as at the end.
+- A sent turn travels to the top with `travel`. Once its reply passes the comfortable line, the view hands over to following on the same spring.
+- 「滚动到底部」 skips a long history and travels the last 1.25 viewports. Near the live edge it hands over to following, velocity and all.
+- Wheel, touch and key intent stop the spring at once. A motion whose owner went stale (mode, generation or return token) stops on its next frame.
+- Entering a Thread, a resized viewport, and `reduced` or `off` place the end directly.
+
+Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it. `MessageHandoff` keeps a sent message's flight on its destination while the timeline scrolls, and ends the flight only when the destination leaves the view.
+
+The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`. Headless checks are in `motion-lab/checks`; for example, `node follow.cjs` measures following, release, return, anchoring and reduced motion frame by frame. They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
+
 ## Conversation and resource projections
 
 Tool headings summarize the requested action and its subject before disclosure, then add returned

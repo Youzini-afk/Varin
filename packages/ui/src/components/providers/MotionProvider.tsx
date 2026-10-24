@@ -2,9 +2,8 @@ import React from 'react';
 import { MotionConfig } from 'motion/react';
 import { useMotionLevel } from '@/hooks/usePrefersReducedMotion';
 import { applyMotionLevel } from '@/lib/motion/preference';
-import { springTransition } from '@/lib/motion/tokens';
+import { INSTANT_TRANSITION, springTransition } from '@/lib/motion/tokens';
 
-const INSTANT = { duration: 0 } as const;
 const GLIDE = springTransition('glide');
 
 /**
@@ -18,7 +17,7 @@ const GLIDE = springTransition('glide');
 export const MotionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const level = useMotionLevel();
   React.useLayoutEffect(() => applyMotionLevel(level), [level]);
-  return <MotionConfig reducedMotion={level === 'full' ? 'never' : 'always'} transition={level === 'off' ? INSTANT : GLIDE}>
+  return <MotionConfig reducedMotion={level === 'full' ? 'never' : 'always'} transition={level === 'off' ? INSTANT_TRANSITION : GLIDE}>
     {children}
   </MotionConfig>;
 };

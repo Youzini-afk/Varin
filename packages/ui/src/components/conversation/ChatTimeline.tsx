@@ -1,4 +1,5 @@
 import React from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import {
   LegendList,
   type LegendListRef,
@@ -47,10 +48,49 @@ import { ChatTurnNavigator, type ChatTurnNavigatorHandle } from './ChatTurnNavig
 import { readChatRunNavigationText } from './chatMessageNavigation';
 import type { ThreadHistoryRun } from '@varin/application-client';
 import { toast } from '@/components/ui';
-import { prefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { currentMotionLevel, prefersReducedMotion, useMotionLevel } from '@/hooks/usePrefersReducedMotion';
+import { SpringDriver, omegaSpring, tokenSpring } from '@/lib/motion/spring';
+import { springTransition, transitionFor, TWEENS } from '@/lib/motion/tokens';
 import { useWorkbenchMatchRenderers } from '@/lib/extensions/workbench-registry';
 import type { ChatSessionEntry } from './types';
 import { ConversationPreviewContext } from './ConversationContext';
+
+/** Following is a critically damped spring on the scroll position. */
+const FOLLOW_SPRING = omegaSpring(14);
+/** Anchoring a sent turn and returning to the latest cross the timeline. */
+const TRAVEL_SPRING = tokenSpring('travel');
+/** "Back to latest" skips a long history and travels only the last stretch. */
+const RETURN_TRAVEL_VIEWPORTS = 1.25;
+/** Distance from the end at which a return hands the spring to following. */
+const RETURN_HANDOVER_PX = 48;
+const RETURN_PILL_ENTER = springTransition('snap');
+
+/** Who owns the scroll spring; a motion stops as soon as its owner is stale. */
+type TimelineScrollMotion =
+  | { kind: 'follow' }
+  /** A sent turn travelling to the top; `key` identifies the anchored turn. */
+  | { kind: 'anchor'; generation: number; key: string; index: number }
+  | { kind: 'return'; token: number };
+
+const sameScrollMotion = (left: TimelineScrollMotion, right: TimelineScrollMotion): boolean => (
+  left.kind === right.kind
+  && (left.kind !== 'anchor' || right.kind !== 'anchor' || left.generation === right.generation)
+  && (left.kind !== 'return' || right.kind !== 'return' || left.token === right.token)
+);
+
+const isScrollMotionCurrent = (sessionId: string, motion: TimelineScrollMotion): boolean => {
+  const view = useTimelineViewStore.getState().views[sessionId] ?? DEFAULT_CHAT_TIMELINE_VIEW;
+  if (motion.kind === 'follow') return view.scrollMode === 'following-end';
+  if (motion.kind === 'anchor') return view.scrollMode === 'anchoring-new-turn' && view.generation === motion.generation;
+  return view.pendingReturnToken === motion.token;
+};
+
+const timelineScroller = (list: LegendListRef | null): HTMLElement | null => {
+  const node = list?.getScrollableNode() as HTMLElement | null | undefined;
+  return node && typeof node.scrollTop === 'number' ? node : null;
+};
+
+const maxScrollTop = (node: HTMLElement): number => Math.max(0, node.scrollHeight - node.clientHeight);
 
 const isInteractiveKeyTarget = (target: EventTarget | null): boolean => (
   target instanceof HTMLElement
@@ -202,6 +242,84 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   if (timelineView.scrollMode !== 'free-scrolling') {
     manualOwnershipClaimedRef.current = false;
   }
+  const motionLevel = useMotionLevel();
+  const scrollSpringRef = React.useRef<SpringDriver | null>(null);
+  const scrollMotionRef = React.useRef<TimelineScrollMotion | null>(null);
+  // Last value the spring wrote. A different scrollTop on the next frame means
+  // the list (a position adjustment) or the user moved it in between.
+  const scrollWriteRef = React.useRef<number | null>(null);
+  const followViewportRef = React.useRef(0);
+  const followInstantRef = React.useRef(false);
+  /** `generation:turnId` of the sent turn once it has arrived at the top. */
+  const anchorSettledRef = React.useRef<string | null>(null);
+  const settleScrollMotionRef = React.useRef<(motion: TimelineScrollMotion) => void>(() => undefined);
+
+  const haltScrollMotion = React.useCallback(() => {
+    scrollSpringRef.current?.stop();
+    scrollMotionRef.current = null;
+    scrollWriteRef.current = null;
+  }, []);
+
+  const writeScrollMotion = React.useCallback(() => {
+    const spring = scrollSpringRef.current;
+    const motion = scrollMotionRef.current;
+    const node = timelineScroller(listRef.current);
+    if (!spring) return;
+    if (!motion || !node || !isScrollMotionCurrent(projectionSessionRef.current, motion)) {
+      haltScrollMotion();
+      return;
+    }
+    const written = scrollWriteRef.current;
+    if (written !== null) {
+      const drift = node.scrollTop - written;
+      if (Math.abs(drift) > 1) spring.shift(drift);
+    }
+    // Only the written value is clamped: the room a destination needs (the
+    // reservation under a sent turn, a growing end) can arrive a frame later.
+    const next = Math.min(maxScrollTop(node), Math.max(0, spring.value));
+    node.scrollTop = next;
+    scrollWriteRef.current = next;
+    // A growing end never lets a return come to rest. Once it reaches the live
+    // edge, following takes over the same spring, velocity and all.
+    if (motion.kind === 'return' && spring.target - next <= RETURN_HANDOVER_PX) {
+      scrollMotionRef.current = { kind: 'follow' };
+      spring.configure(FOLLOW_SPRING);
+      settleScrollMotionRef.current(motion);
+    }
+  }, [haltScrollMotion]);
+
+  /** Start, or retarget, the single scroll spring for `motion`. */
+  const startScrollMotion = React.useCallback((motion: TimelineScrollMotion, target: number) => {
+    const node = timelineScroller(listRef.current);
+    if (!node) return;
+    const spring = scrollSpringRef.current ??= new SpringDriver({
+      spring: FOLLOW_SPRING,
+      restDelta: 0.5,
+      restSpeed: 4,
+      onUpdate: writeScrollMotion,
+      onRest: () => {
+        const settled = scrollMotionRef.current;
+        scrollMotionRef.current = null;
+        scrollWriteRef.current = null;
+        if (settled) settleScrollMotionRef.current(settled);
+      },
+    });
+    const goal = Math.max(0, target);
+    const current = scrollMotionRef.current;
+    if (spring.active && current && sameScrollMotion(current, motion)) {
+      // Following targets only grow; travel targets track the measured layout.
+      if (motion.kind !== 'follow' || goal > spring.target + 0.5) spring.to(goal);
+      return;
+    }
+    haltScrollMotion();
+    spring.sync(node.scrollTop);
+    if (Math.abs(goal - node.scrollTop) <= CHAT_TIMELINE_EDGE_EPSILON_PX) return;
+    scrollMotionRef.current = motion;
+    spring.configure(motion.kind === 'follow' ? FOLLOW_SPRING : TRAVEL_SPRING);
+    spring.to(goal);
+  }, [haltScrollMotion, writeScrollMotion]);
+
+  const endSpaceHeight = React.useCallback(() => endSpaceRef.current?.getBoundingClientRect().height ?? 0, []);
 
   const captureViewport = React.useCallback(() => {
     const list = listRef.current;
@@ -246,6 +364,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (anchorCorrectionFrameRef.current !== null) cancelAnimationFrame(anchorCorrectionFrameRef.current);
     if (followEndFrameRef.current !== null) cancelAnimationFrame(followEndFrameRef.current);
     if (prefetchFrame.current !== null) cancelAnimationFrame(prefetchFrame.current);
+    haltScrollMotion();
     navigationRequestRef.current = null; navigationAbort.current?.abort();
     captureViewport();
     if (observedLeafIdRef.current !== undefined) {
@@ -256,9 +375,14 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         viewportRef.current,
       );
     }
-  }, [captureViewport, onScrollContainerChange, props.sessionId, saveTimelineCheckpoint]);
+  }, [captureViewport, haltScrollMotion, onScrollContainerChange, props.sessionId, saveTimelineCheckpoint]);
 
-  const followContentEnd = React.useCallback(() => {
+  /**
+   * Keep the live edge in view. Growth is followed by the scroll spring, so a
+   * long reply glides instead of stepping once per measurement. Entering a
+   * Thread, a resized viewport and reduced motion place the end directly.
+   */
+  const followContentEnd = React.useCallback((instant = false) => {
     const list = listRef.current;
     if (!list) return;
     const state = list.getState();
@@ -266,12 +390,24 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       state.contentLength,
       state.scroll,
       state.scrollLength,
-      endSpaceRef.current?.getBoundingClientRect().height ?? 0,
+      endSpaceHeight(),
     );
-    if (offset - state.scroll > CHAT_TIMELINE_EDGE_EPSILON_PX) {
-      void list.scrollToOffset({ animated: false, offset });
+    const viewportChanged = followViewportRef.current !== state.scrollLength;
+    followViewportRef.current = state.scrollLength;
+    if (instant || viewportChanged || currentMotionLevel() !== 'full') {
+      haltScrollMotion();
+      if (offset - state.scroll > CHAT_TIMELINE_EDGE_EPSILON_PX) {
+        void list.scrollToOffset({ animated: false, offset });
+      }
+      return;
     }
-  }, []);
+    startScrollMotion({ kind: 'follow' }, offset);
+  }, [endSpaceHeight, haltScrollMotion, startScrollMotion]);
+
+  const returnTarget = React.useCallback((): number => {
+    const state = listRef.current?.getState();
+    return state ? getChatTimelineFollowOffset(state.contentLength, 0, state.scrollLength, endSpaceHeight()) : 0;
+  }, [endSpaceHeight]);
 
   const scrollToContentEnd = React.useCallback((animated: boolean) => (
     listRef.current?.scrollToEnd({
@@ -283,16 +419,30 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     })
   ), []);
 
-  const scheduleFollowEnd = React.useCallback(() => {
+  const scheduleFollowEnd = React.useCallback((instant = false) => {
+    if (instant) followInstantRef.current = true;
     if (followEndFrameRef.current !== null) return;
     followEndFrameRef.current = requestAnimationFrame(() => {
       followEndFrameRef.current = null;
+      const instantFollow = followInstantRef.current;
+      followInstantRef.current = false;
       if (!listLoadedRef.current) return;
+      const motion = scrollMotionRef.current;
+      // Travel in flight chases its measured destination as rows settle.
+      if (motion?.kind === 'return') {
+        startScrollMotion(motion, returnTarget());
+        return;
+      }
+      if (motion?.kind === 'anchor') {
+        const position = listRef.current?.getState().positionAtIndex(motion.index);
+        if (position !== undefined && Number.isFinite(position)) startScrollMotion(motion, position - CHAT_TIMELINE_ANCHOR_OFFSET_PX);
+        return;
+      }
       const current = useTimelineViewStore.getState().views[props.sessionId];
       if (current?.scrollMode !== 'following-end') return;
-      followContentEnd();
+      followContentEnd(instantFollow);
     });
-  }, [followContentEnd, props.sessionId]);
+  }, [followContentEnd, props.sessionId, returnTarget, startScrollMotion]);
 
   React.useLayoutEffect(() => {
     if (!listLoadedRef.current) return;
@@ -319,7 +469,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (target.kind === 'end') {
       atEndRef.current = true;
       observedLeafIdRef.current = props.leafId;
-      followContentEnd();
+      // Opening a Thread places its end. A return that has just handed over
+      // to following keeps the spring it is already riding.
+      followContentEnd(scrollSpringRef.current?.active !== true);
       return;
     }
     const index = blocks.items.findIndex((item) => item.id === target.itemId);
@@ -354,6 +506,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [applyEntryIntent, timelineView.entry.epoch]);
 
   const takeManualOwnership = React.useCallback(() => {
+    haltScrollMotion();
     navigationAbort.current?.abort(); navigationRequestRef.current = null;
     const current = useTimelineViewStore.getState().views[props.sessionId];
     if (
@@ -366,7 +519,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     modeRef.current = 'free-scrolling';
     generationRef.current += 1;
     cancelTimelineAutomation(props.sessionId);
-  }, [cancelTimelineAutomation, props.sessionId]);
+  }, [cancelTimelineAutomation, haltScrollMotion, props.sessionId]);
 
   const anchoredTurnId = timelineView.newTurn?.turnId;
   const anchorIndex = React.useMemo(() => anchoredTurnId
@@ -383,14 +536,41 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         modeRef.current !== 'anchoring-new-turn'
         || generationRef.current !== expectedGeneration
         || newTurnRef.current?.turnId !== expectedTurnId
+        // The turn is still travelling to the top; it is not anchored yet.
+        || anchorSettledRef.current !== `${expectedGeneration}:${expectedTurnId}`
       ) return;
       const list = listRef.current;
       if (!list || anchorIndex < 0) return;
       const correction = getChatAnchoredTurnCorrection(list.getState(), anchorIndex);
       if (!correction || correction.delta <= 1) return;
-      void list.scrollToOffset({ animated: true, offset: correction.targetScroll });
+      // Past the comfortable line the new turn is simply followed. Hand the
+      // view to following: the reservation below the turn is used up, and the
+      // follow spring (or reduced motion's direct placement) takes over.
+      const token = requestTimelineReturn(props.sessionId);
+      if (token > 0) completeTimelineReturn(props.sessionId, token);
+      modeRef.current = 'following-end';
+      if (currentMotionLevel() !== 'full') {
+        void list.scrollToOffset({ animated: false, offset: correction.targetScroll });
+        return;
+      }
+      startScrollMotion({ kind: 'follow' }, correction.targetScroll);
     });
-  }, [anchorIndex, timelineView.generation, timelineView.newTurn?.turnId]);
+  }, [anchorIndex, completeTimelineReturn, props.sessionId, requestTimelineReturn, startScrollMotion, timelineView.generation, timelineView.newTurn?.turnId]);
+
+  settleScrollMotionRef.current = (motion) => {
+    if (!isScrollMotionCurrent(props.sessionId, motion)) return;
+    if (motion.kind === 'anchor') {
+      anchorSettledRef.current = motion.key;
+      correctAnchoredTurn();
+      return;
+    }
+    if (motion.kind !== 'return') return;
+    atEndRef.current = true;
+    observedLeafIdRef.current = props.leafId;
+    completeTimelineReturn(props.sessionId, motion.token);
+    // Following takes over from here, including any end that grew meanwhile.
+    scheduleFollowEnd();
+  };
 
   const anchoredEndSpace = React.useMemo(() => {
     const anchor = timelineView.newTurn;
@@ -415,18 +595,30 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         positionedAnchorRef.current = positionedKey;
         atEndRef.current = true;
         observedLeafIdRef.current = props.leafId;
-        void listRef.current?.scrollToIndex({
-          animated: false,
-          index: anchorIndex,
-          viewOffset: CHAT_TIMELINE_ANCHOR_OFFSET_PX,
-          viewPosition: 0,
-        });
+        haltScrollMotion();
+        const list = listRef.current;
+        const position = list?.getState().positionAtIndex(anchorIndex);
+        if (list && position !== undefined && Number.isFinite(position) && currentMotionLevel() === 'full') {
+          // Travel the new turn to the top while the sent message lands in it.
+          startScrollMotion({ kind: 'anchor', generation: anchor.generation, key: positionedKey, index: anchorIndex }, position - CHAT_TIMELINE_ANCHOR_OFFSET_PX);
+          if (scrollMotionRef.current?.kind === 'anchor') return;
+        } else {
+          void list?.scrollToIndex({
+            animated: false,
+            index: anchorIndex,
+            viewOffset: CHAT_TIMELINE_ANCHOR_OFFSET_PX,
+            viewPosition: 0,
+          });
+        }
+        anchorSettledRef.current = positionedKey;
       },
       onSizeChanged: correctAnchoredTurn,
     };
   }, [
     anchorIndex,
     correctAnchoredTurn,
+    haltScrollMotion,
+    startScrollMotion,
     props.leafId,
     props.sessionId,
     timelineView.generation,
@@ -455,12 +647,15 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     const now = performance.now();
     const sample = scrollSample.current;
     scrollSample.current = { top: contentOffset.y, time: now, upward: sample.time && now > sample.time ? Math.max(0, (sample.top - contentOffset.y) / (now - sample.time)) : 0 };
-    atEndRef.current = isChatTimelineAtEnd(
-      contentSize.height,
-      contentOffset.y,
-      layoutMeasurement.height,
-      endSpaceRef.current?.getBoundingClientRect().height ?? 0,
-    );
+    // While the follow spring catches up the view trails the end by design;
+    // it still counts as at the end for intent and leaf observation.
+    atEndRef.current = (scrollMotionRef.current?.kind === 'follow' && scrollSpringRef.current?.active === true)
+      || isChatTimelineAtEnd(
+        contentSize.height,
+        contentOffset.y,
+        layoutMeasurement.height,
+        endSpaceHeight(),
+      );
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
     }
@@ -473,15 +668,28 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     }
     scheduleViewportCapture();
     scheduleHistoryPrefetch();
-  }, [completeTimelineReturn, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture, scheduleHistoryPrefetch]);
+  }, [completeTimelineReturn, endSpaceHeight, props.leafId, props.sessionId, requestTimelineReturn, scheduleViewportCapture, scheduleHistoryPrefetch]);
 
   const handleReturnToLatest = React.useCallback(() => {
     navigationAbort.current?.abort(); navigationRequestRef.current = null;
     const token = requestTimelineReturn(props.sessionId);
     if (token <= 0) return;
-    void Promise.resolve(scrollToContentEnd(true))
-      .then(() => completeTimelineReturn(props.sessionId, token));
-  }, [completeTimelineReturn, props.sessionId, requestTimelineReturn, scrollToContentEnd]);
+    const list = listRef.current;
+    const node = timelineScroller(list);
+    haltScrollMotion();
+    if (!list || !node || currentMotionLevel() !== 'full') {
+      void Promise.resolve(scrollToContentEnd(false))
+        .then(() => completeTimelineReturn(props.sessionId, token));
+      return;
+    }
+    const target = Math.min(maxScrollTop(node), returnTarget());
+    const lead = list.getState().scrollLength * RETURN_TRAVEL_VIEWPORTS;
+    if (target - node.scrollTop > lead) node.scrollTop = target - lead;
+    // Travels, then hands over to following when it settles (or chases the
+    // end while rows on the way are measured).
+    startScrollMotion({ kind: 'return', token }, target);
+    if (!scrollMotionRef.current) settleScrollMotionRef.current({ kind: 'return', token });
+  }, [completeTimelineReturn, haltScrollMotion, props.sessionId, requestTimelineReturn, returnTarget, scrollToContentEnd, startScrollMotion]);
 
   const extraData = React.useMemo(() => ({
     projection,
@@ -732,8 +940,10 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
           captureViewport();
         }}
         onItemSizeChanged={({ itemKey }) => {
-          if (itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
-          if (modeRef.current === 'following-end') scheduleFollowEnd();
+          // The reply is rendered as rows after the anchored turn, so any row
+          // growing can carry the turn past the comfortable line.
+          if (modeRef.current === 'anchoring-new-turn' || itemKey === timelineView.newTurn?.turnId) correctAnchoredTurn();
+          if (modeRef.current === 'following-end' || (scrollMotionRef.current && scrollMotionRef.current.kind !== 'follow')) scheduleFollowEnd();
         }}
         onLayout={() => { scheduleFollowEnd(); scheduleHistoryPrefetch(); }}
         onMetricsChange={() => {
@@ -778,18 +988,26 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         data-conversation-timeline="true"
         tabIndex={0}
       />
-      {timelineView.scrollMode === 'free-scrolling' ? (
-        <button
-          type="button"
-          onClick={handleReturnToLatest}
-          className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-background/95 px-3 py-1.5 typography-meta text-foreground shadow-lg backdrop-blur hover:bg-interactive-hover"
-          aria-label={t('chat.scrollToBottom.aria')}
-          title={t('chat.scrollToBottom.aria')}
-        >
-          <Icon name="arrow-down" className="size-3.5" />
-          {t('chat.scrollToBottom.aria')}
-        </button>
-      ) : null}
+      <AnimatePresence initial={false}>
+        {timelineView.scrollMode === 'free-scrolling' ? (
+          <motion.button
+            key="return-to-latest"
+            type="button"
+            data-conversation-return-latest="true"
+            onClick={handleReturnToLatest}
+            className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border/70 bg-background/95 px-3 py-1.5 typography-meta text-foreground shadow-lg backdrop-blur hover:bg-interactive-hover"
+            aria-label={t('chat.scrollToBottom.aria')}
+            title={t('chat.scrollToBottom.aria')}
+            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1, transition: transitionFor(motionLevel, RETURN_PILL_ENTER) }}
+            exit={{ opacity: 0, y: 4, scale: 0.98, transition: transitionFor(motionLevel, TWEENS.exit) }}
+            whileTap={{ scale: 0.97 }}
+          >
+            <Icon name="arrow-down" className="size-3.5" />
+            {t('chat.scrollToBottom.aria')}
+          </motion.button>
+        ) : null}
+      </AnimatePresence>
     </div>
     </ChatContextMenu></ChatToolDisclosureScope></ToolTargetScope>
   );

@@ -5,7 +5,15 @@ type Transfer = {
   sessionId: string;
   source: Source | null;
   turnId?: string;
-  flight?: { target: HTMLElement; opacity: string; overlay: HTMLElement; animation: Animation };
+  flight?: {
+    target: HTMLElement;
+    opacity: string;
+    overlay: HTMLElement;
+    animation: Animation;
+    /** The timeline scroller the destination lives in, and its offset at takeoff. */
+    scroller: HTMLElement | null;
+    scrollTop: number;
+  };
 };
 
 /** View-local paint projections. No prompt, queue, history or scroll ownership. */
@@ -25,11 +33,11 @@ export class MessageHandoff {
     if (root === this.root) return;
     this.observer?.disconnect();
     this.observer = null;
-    this.root?.removeEventListener('scroll', this.interrupt, true);
+    this.root?.removeEventListener('scroll', this.scrolled, true);
     for (const [id, transfer] of this.transfers) if (transfer.flight) this.finish(id);
     this.root = root;
     if (root) {
-      root.addEventListener('scroll', this.interrupt, { capture: true, passive: true });
+      root.addEventListener('scroll', this.scrolled, { capture: true, passive: true });
       this.watch();
     }
   };
@@ -167,6 +175,7 @@ export class MessageHandoff {
       return;
     }
     const source = transfer.source;
+    const scroller = target.closest<HTMLElement>('.overlay-scrollbar-container');
     const overlay = document.createElement('div');
     overlay.className = 'conversation-message-handoff';
     overlay.setAttribute('aria-hidden', 'true');
@@ -193,11 +202,34 @@ export class MessageHandoff {
         width: `${source.width}px`, height: `${source.height}px`, borderRadius: source.radius, opacity: 0.75 },
       { transform: 'none', width: `${destination.width}px`, height: `${destination.height}px`, borderRadius: destination.radius, opacity: 1 },
     ], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
-    transfer.flight = { target, opacity, overlay, animation };
+    transfer.flight = { target, opacity, overlay, animation, scroller, scrollTop: scroller?.scrollTop ?? 0 };
     void animation.finished.then(() => this.finish(id), () => this.finish(id));
   }
 
   private interrupt = (): void => { for (const [id, transfer] of this.transfers) if (transfer.flight) this.finish(id); };
+
+  /**
+   * The timeline keeps scrolling while a message lands: the follow and anchor
+   * springs write the scroll position every frame. The flight rides along with
+   * its destination; only a scroll that carries the destination out of view,
+   * or one of an unrelated ancestor, ends it early.
+   */
+  private scrolled = (event: Event): void => {
+    for (const [id, transfer] of this.transfers) {
+      const flight = transfer.flight;
+      if (!flight) continue;
+      const source = event.target;
+      if (flight.scroller && source === flight.scroller) {
+        const delta = flight.scroller.scrollTop - flight.scrollTop;
+        flight.overlay.style.translate = `0px ${-delta}px`;
+        const viewport = flight.scroller.getBoundingClientRect();
+        const destination = flight.target.getBoundingClientRect();
+        if (destination.top >= viewport.bottom || destination.bottom <= viewport.top) this.finish(id);
+      } else if (typeof Node !== 'undefined' && source instanceof Node && source.contains(flight.target)) {
+        this.finish(id);
+      }
+    }
+  };
 
   private finish(id: string): void {
     const transfer = this.transfers.get(id);
