@@ -1,4 +1,5 @@
 import { DEFAULT_LOCAL_STT_MODEL, isChatContentWidth } from '@varin/application-client';
+import { isWorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { useUIStore } from '@/stores/useUIStore';
@@ -344,7 +345,7 @@ const sanitizeProjects = (value: unknown): DesktopSettings['projects'] | undefin
     if (typeof candidate.defaultModel === 'string' && candidate.defaultModel.trim()) {
       project.defaultModel = candidate.defaultModel.trim();
     }
-    if (candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research') {
+    if (isWorkFocusId(candidate.defaultWorkFocus)) {
       project.defaultWorkFocus = candidate.defaultWorkFocus;
     }
     if (candidate.iconBackground === null) {

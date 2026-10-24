@@ -242,6 +242,7 @@ pub fn admit_call(
             node_id: unique,
         };
         let context = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: child_dispatch.clone(),
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -255,6 +256,7 @@ pub fn admit_call(
             run_id,
             epoch,
             &PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history: None,
                 action_id,
                 boundary,
                 identity: launch.policy.clone(),

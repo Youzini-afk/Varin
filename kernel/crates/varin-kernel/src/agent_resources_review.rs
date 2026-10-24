@@ -257,6 +257,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             leaf_id: Some(receipt.input_id.clone()),
         };
         let binding = RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -324,6 +325,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                 node_id: "read".into(),
             };
             let graph = PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history: None,
                 action_id,
                 boundary,
                 identity: PolicyIdentity {
@@ -338,6 +340,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
                         call: call.clone(),
                     },
                     context: FrozenToolContext {
+                        direct_tools: None,
                         child_dispatch: None,
                         resource_activations: activations.clone(),
                         resource_checkpoint_id: checkpoint_id.clone(),
@@ -366,6 +369,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             ToolDirectory::assemble(vec![declaration(db.clone(), bridge.clone())]).unwrap(),
         );
         let frozen = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: activations.clone(),
             resource_checkpoint_id: checkpoint_id.clone(),

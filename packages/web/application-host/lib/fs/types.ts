@@ -47,6 +47,7 @@ export interface FsRouteDependencies {
   crypto: { randomUUID(): string };
   documents?: DocumentAuthority;
   fileResources?: HostFileResourceBackend;
+  renderOffice?(bytes: Buffer, format: import('@varin/protocol').OfficeFormat, signal: AbortSignal): Promise<{ bytes: Buffer; engine: { name: string; version: string } }>;
   fsPromises: unknown;
   normalizeDirectoryPath<Value>(path: Value): Value | string;
   os: OsModule;

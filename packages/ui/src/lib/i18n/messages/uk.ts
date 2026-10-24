@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "Лише чат",
   "thread.message.summarize": "Підсумувати до цього місця",
   "chat.fileAttachment.actions.attachPdfs": "Додати PDF",
-  "chat.fileAttachment.actions.choosePdfs": "Вибрати PDF для вкладення",
-  "chat.fileAttachment.pdfAttachments": "Вкладення PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Вибрати документи",
+  "chat.fileAttachment.pdfAttachments": "Вкладені документи",
   "chat.fileAttachment.uploading": "Підготовка вкладень…",
-  "chat.fileAttachment.unsupportedType": "Додайте зображення або файл PDF.",
-  "chat.fileAttachment.pdfNotRetained": "PDF не збережено. Вкладення не додано.",
+  "chat.fileAttachment.unsupportedType": "Додайте зображення або файли PDF, DOCX, XLSX чи PPTX.",
+  "chat.fileAttachment.pdfNotRetained": "Документ не збережено. Вкладення не додано.",
   "computer.feedback.title": "Дії Agent на робочому столі",
   "computer.feedback.type": "Введення",
   "computer.feedback.value": "Задання значення",
@@ -334,10 +336,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "Запустити вибране знову",
   'research-facts.actionFailed': "Дія не вдалася",
   'research-facts.unknownTarget': "невідома ціль",
+  "workFocus.general": "Загальний",
+  "workFocus.generalDescription": "Збалансовані інструменти для повсякденної роботи.",
+  "workFocus.office": "Офіс",
+  "workFocus.officeDescription": "Документи, дані, браузер і керування комп’ютером.",
   'workFocus.label': "Спрямування роботи",
-  'workFocus.code': "Загальне",
+  "workFocus.code": "Програмування",
   'workFocus.research': "Дослідження",
-  'workFocus.codeDescription': "Програмування та повсякденні завдання з потрібними інструментами.",
+  "workFocus.codeDescription": "Інструменти для роботи з кодом.",
   'workFocus.researchDescription': "Досліджувати питання, порівнювати пояснення та розробляти експерименти.",
   'workFocus.pending': "Застосовується до наступного запуску",
   'workFocus.nextTurn': "Зміна діє з наступного запуску. Поточне виконання та його запити в черзі зберігають попередній напрям.",

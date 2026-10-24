@@ -9,12 +9,13 @@
   "main": "./bootstrap.mjs",
   "dependencies": {
     "@varin/application-client": "workspace:*",
-    "@varin/web": "workspace:*",
     "@varin/protocol": "workspace:*",
     "@varin/settings-store": "workspace:*",
+    "@varin/web": "workspace:*",
     "electron-context-menu": "^5.1.0",
     "electron-log": "^5.4.4",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "puppeteer-core": "25.16.0"
   },
   "devDependencies": {
     "electron": "^44.9.3",
@@ -44,6 +45,7 @@
     "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
     "test:runtime": "vitest run --config vitest.config.ts",
+    "test:browser-owner": "node ./scripts/test-browser-owner.mjs",
     "test:architecture": "bun run prepare:runtime && bun run test:runtime && bun run test:packaging-tools",
     "test:packaging-tools": "node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/target-architecture.test.mjs ./scripts/desktop-payload.test.mjs ./scripts/nsis-archive.test.mjs ./scripts/patch-trivium-arm64-loader.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
     "test:updater": "vitest run updater-capability.test.ts updater-channel.test.ts updater-check.test.ts updater-feed.test.ts --config vitest.dedicated.config.ts && node --test ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",

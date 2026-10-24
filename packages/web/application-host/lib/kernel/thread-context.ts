@@ -63,6 +63,7 @@ const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(va
 export function createThreadContext(owners: ContextOwners): ContextPreparer {
   const render = async (basis: ContextPersonalization, resources: ContextResources | undefined, updateMemory = false, signal?: AbortSignal): Promise<InitialContext> => {
     signal?.throwIfAborted();
+    basis = { ...basis, originalSections: basis.originalSections.filter(section => section.name !== 'work_focus') };
     const bot = await owners.botForThread?.(basis.threadId) ?? null;
     if ((basis.mode === 'bot') !== (bot !== null)) throw new Error('Context mode differs from the original Thread owner');
     const catalog = bot ? { revision: bot.revision, prompts: {}, memories: [] } : await owners.personalization.catalog();
@@ -75,7 +76,7 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
       return profile ? [{ scope, profile }] : [];
     });
     const configurationDigest = digest({ scopes, profiles, bot, mode: basis.mode, threadRole: basis.threadRole,
-      agent: basis.originalSections.filter(section => section.name === 'agent_profile' || section.name === 'work_focus') });
+      agent: basis.originalSections.filter(section => section.name === 'agent_profile') });
     const memorySnapshot = updateMemory && !bot ? { revision: catalog.revision,
       memories: basis.mode === 'bot' ? [] : catalog.memories.filter(note => keys.has(agentScopeKey(note.scope))) } : basis.memorySnapshot;
     const context: AgentPersonalizationContext = {
@@ -131,21 +132,18 @@ export function createThreadContext(owners: ContextOwners): ContextPreparer {
     }
     const candidate = await render({ ...basis,
       originalSections: [...Object.entries(sections(snapshot)).map(([name, content]) => ({ name, content })),
-        ...basis.originalSections.filter(section => ['child_profile', 'agent_profile', 'work_focus'].includes(section.name))],
+        ...basis.originalSections.filter(section => ['child_profile', 'agent_profile'].includes(section.name))],
       instructionSources: [...sources(snapshot), ...basis.instructionSources.filter(source => source.startsWith('agent.child-profile:'))] }, { source: retainSource ? previous.source : resourceSource(source), snapshot }, false, options?.signal);
     options?.signal?.throwIfAborted();
     // Resource publication does not acknowledge a newer memory note snapshot.
     return { ...candidate, memoryCheckpoint: checkpoint.proposal.memory_checkpoint };
   };
   return Object.assign(initial, {
-    async withAgent(context: InitialContext, agent: AgentSelection, instructions: string): Promise<InitialContext> {
+    async withAgent(context: InitialContext, _agent: AgentSelection, instructions: string): Promise<InitialContext> {
       const basis = context.personalization;
       if (!basis || basis.mode !== 'agent' || basis.threadRole !== 'main') throw new Error('Agent selection requires an ordinary main conversation');
       const originalSections = basis.originalSections.filter(section => !['agent_profile', 'work_focus'].includes(section.name));
       if (instructions.trim()) originalSections.push({ name: 'agent_profile', content: instructions });
-      originalSections.push({ name: 'work_focus', content: agent.workFocus === 'research'
-        ? 'Work focus: research. Investigate questions, compare explanations, and design and carry out experiments as appropriate to the task. Ground claims in evidence and distinguish findings from hypotheses.'
-        : 'Work focus: general. Help with coding and everyday tasks, choosing the tools and level of investigation appropriate to the user’s request.' });
       if (JSON.stringify(originalSections) === JSON.stringify(basis.originalSections)) return context;
       return render({ ...basis, originalSections }, context.resources);
     },

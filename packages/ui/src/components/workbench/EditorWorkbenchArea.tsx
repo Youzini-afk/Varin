@@ -35,6 +35,8 @@ import { useFilesExplorerStore } from '@/stores/useFilesExplorerStore';
 import { registerWorkbenchCommand } from '@/lib/workbench/editors/commands';
 import { setWorkbenchContextKey } from '@/lib/workbench/editors/context-keys';
 import { registerWorkbenchMenuItem } from '@/lib/workbench/editors/menus';
+import { closeEmbeddedBrowserPage } from '@/lib/browser-page';
+import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 
 export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPanel = true }) => {
   const { t } = useI18n();
@@ -57,7 +59,8 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       return;
     }
     closeWorkbenchEditor(workspaceId, tabId);
-  }, [workspaceId]);
+    if (tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser) closeEmbeddedBrowserPage(root, tab.viewState.browserTabId ?? tab.viewId);
+  }, [workspaceId, root]);
   const closePending = React.useCallback((): void => {
     if (!workspaceId || !closingTab) return;
     closeWorkbenchEditor(workspaceId, closingTab.tabId);

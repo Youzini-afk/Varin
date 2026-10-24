@@ -10,7 +10,7 @@ export function useThreadWorkFocus(key: string, workspacePath?: string, original
     const root = normalizePath(project.path), path = normalizePath(workspacePath);
     return root && path && (path === root || path.startsWith(`${root}/`));
   }).sort((a, b) => b.path.length - a.path.length)[0]?.defaultWorkFocus);
-  const workFocus = original ?? projectFocus ?? 'code';
+  const workFocus = original ?? projectFocus ?? 'general';
   React.useEffect(() => {
     if (ready) useThreadDraftStore.getState().patch(key, current => current.workFocus ? {} : { workFocus });
   }, [key, workFocus, ready]);

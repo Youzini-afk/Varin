@@ -339,7 +339,7 @@ export class AgentRuntimeClient {
     const projectId = admittedScope?.projectId;
     const scope = await this.prepareExtensionOwner(
       { runId, threadId: run.thread_id, branchId: run.branch_id, source: launch?.selection.source ?? null,
-        workFocus: launch?.selection.agent?.workFocus ?? 'code', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
+        workFocus: launch?.selection.agent?.workFocus ?? 'general', ...(projectId ? { projectId } : {}), ...(child ? { fixed: true } : {}) },
       required,
       AbortSignal.any([signal, state.controller.signal]),
     );
@@ -866,6 +866,9 @@ export class AgentRuntimeClient {
   /** Explicit Host maintenance, independent of Run/input admission and Storage's own GC. */
   collectContent(signal?: AbortSignal): Promise<ContentCollectionReport> {
     return this.kernel.agentRuntimeRequest('runtime.content.collect', {}, signal);
+  }
+  materialRetention(childThreadId?: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').MaterialRetention> {
+    return this.kernel.agentRuntimeRequest('runtime.material.retention', childThreadId ? { childThreadId } : {}, signal);
   }
   tokenizerReferences(): Promise<import('./protocol.generated.js').TokenizerBinding[]> {
     return this.kernel.agentRuntimeRequest('runtime.tokenizers.references', {});

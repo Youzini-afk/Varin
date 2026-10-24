@@ -504,6 +504,7 @@ mod tests {
             arguments: json!({}),
         };
         let context = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
@@ -532,6 +533,7 @@ mod tests {
         );
         let next_token = CancellationToken::default();
         let next_context = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,

@@ -89,6 +89,8 @@ export interface ManagedSourceInspection { scope: SourceAuthorityScope; phase: '
 /** Closed, non-model source services. A command cannot name an arbitrary kernel method,
  * mint a grant, change a source, or select a different physical root. */
 export type SourceServiceOperation =
+  | { kind: 'binary_write'; invocation: import('../kernel/tool-invocation.js').ToolInvocationAuthority; journal: RecoveryAnchor;
+      path: string; expectedRevision: string | null; bytesBase64: string; byteLength: number }
   | {kind:'code_capture';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;baselineBranchId:string;baselineRevision:number;files?:import('../kernel/code-exchange.js').CodeSelection[];sourceThreadId:string;targetThreadId:string}
   | {kind:'code_apply';invocation:import('../kernel/tool-invocation.js').ToolInvocationAuthority;branchId:string;source:import('../kernel/code-exchange.js').CodeParticipant;target:import('../kernel/code-exchange.js').CodeParticipant;result:import('./working-state/types.js').WorkingResult}
   | { kind: 'user_integration'; request: import('../kernel/thread-integrations.js').UserIntegrationRequest }
@@ -171,6 +173,7 @@ export interface ManagedSourceService {
   fileObservation(principal:ManagedSourcePrincipal,input:ManagedFileObservationRequest,signal?:AbortSignal):Promise<unknown>;
   capabilities(principal: ManagedSourcePrincipal, input: ManagedSourceCapabilityRequest, signal?: AbortSignal): Promise<ManagedSourceCapabilities>;
   integrationReceipt(principal: ManagedSourcePrincipal, input: ManagedSourceIntegrationReceiptRequest, signal?: AbortSignal): Promise<unknown>;
+  fileReceipt(principal: ManagedSourcePrincipal, input: ManagedSourceIntegrationReceiptRequest, signal?: AbortSignal): Promise<unknown>;
   codeExchange(principal: ManagedSourcePrincipal, input: ManagedSourceCodeExchangeRequest, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadCodeExchange>;
   handoff(principal: ManagedSourcePrincipal, input: ManagedSourceHandoffRequest, signal?: AbortSignal): Promise<ChildSourceHandoff | null>;
   resolve(principal: ManagedSourcePrincipal, input: ManagedSourceResolveRequest, signal?: AbortSignal): Promise<ManagedSourceResolveReceipt>;
@@ -197,7 +200,8 @@ export interface SourceServiceResults {
   native_resource: unknown;
   validate: { pathScopes: string[] };
   read: import('./file-snapshot.js').ExploreFileSnapshot;
-  document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: 'application/pdf' };
+  document_read: { bytesBase64: string; byteLength: number; sourceUrl: string; title: string; contentType: string };
+  binary_write: import('../kernel/binary-file-owner.js').BinaryFileWriteResult;
   package_capture: { captureId: string; snapshot: import('../kernel/extension-source.js').ExtensionSourceSnapshot };
   package_read: import('../kernel/protocol.generated.js').KernelObjectSlice;
   experiment_admit: { cwd: string };

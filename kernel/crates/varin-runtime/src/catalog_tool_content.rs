@@ -685,6 +685,7 @@ impl ToolInvocationRead {
                 (
                     binding.history_range,
                     crate::execution::FrozenToolContext {
+                        direct_tools: binding.direct_tools,
                         run_id: self.context.run_id.clone(),
                         origin: self.context.origin.clone(),
                         tools: std::sync::Arc::new(binding.tools),

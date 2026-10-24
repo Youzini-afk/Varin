@@ -16,6 +16,7 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "contextCompaction",
   "explore",
   "retrievalAgent",
+  "researchPeer",
   "worker",
   "verifier",
   "reader",
@@ -28,7 +29,10 @@ export const HARNESS_MODEL_ROLES: readonly HarnessModelRole[] = [
   "memoryOrganizer",
 ];
 
-const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier", "contextCompaction", "explore", "retrievalAgent"]);
+const DEFAULTING_TO_MAIN = new Set<HarnessModelRole>(["worker", "verifier", "contextCompaction", "explore", "retrievalAgent", "researchPeer"]);
+
+export const harnessModelSlotInheritsMain = (slot: HarnessModelRole, binding?: HarnessModelBinding | null): boolean =>
+  binding?.inherit ?? DEFAULTING_TO_MAIN.has(slot);
 
 export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,
@@ -39,7 +43,7 @@ export const resolveHarnessModelSlot = (
   if (binding?.enabled === false) return null;
   return binding?.providerId && binding.modelId
     ? { providerId: binding.providerId, modelId: binding.modelId }
-    : (binding?.inherit ?? DEFAULTING_TO_MAIN.has(slot)) ? mainModel : null;
+    : harnessModelSlotInheritsMain(slot, binding) ? mainModel : null;
 };
 
 export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {

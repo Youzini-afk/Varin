@@ -16,7 +16,7 @@ export function parseThreadMaterials(value: unknown): ThreadMaterialAttachment[]
 }
 
 /** Native user input remains text/media. Only verified fixed references are added to its text;
- * document_read resolves the original PDF later, without pretending PDF bytes are an image. */
+ * document_read resolves the original document later, without treating its bytes as an image. */
 export function materialInputText(text: string, materials: readonly WebSnapshotRef[]): string {
   if (!materials.length) return text;
   const references = materials.map(ref => ({ snapshotId: ref.snapshotId,
@@ -24,5 +24,5 @@ export function materialInputText(text: string, materials: readonly WebSnapshotR
     ...(ref.title ? { filename: ref.title } : {}), sourceUrl: ref.sourceUrl,
     sourceHash: ref.document!.source!.contentHash, byteLength: ref.document!.source!.byteLength,
     mimeType: ref.document!.source!.contentType }));
-  return `${text}${text.length ? '\n\n' : ''}Attached PDF materials (retained original bytes; use document_read with snapshotId):\n${JSON.stringify(references)}`;
+  return `${text}${text.length ? '\n\n' : ''}Attached documents (retained original bytes; document_read or office_read accepts snapshotId):\n${JSON.stringify(references)}`;
 }

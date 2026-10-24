@@ -64,6 +64,7 @@ fn install(
 }
 fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     ChildPreset {
+        description: None,
         avatar: None,
         tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
         id: id.into(),
@@ -83,6 +84,7 @@ fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
 }
 fn input() -> DispatchInput {
     DispatchInput {
+        inherit_context: false,
         source_agent: None,
         name: None,
         task: "Perform the selected task".into(),

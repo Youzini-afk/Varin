@@ -83,6 +83,8 @@ pub struct PolicyAdmittedNode {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum PolicyGraphIntent {
     PolicyToolGraphV1 {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        dispatch_history: Option<ConversationHistory>,
         action_id: String,
         boundary: PolicyBoundary,
         identity: PolicyIdentity,
@@ -278,6 +280,10 @@ impl<
                 .unwrap_or(history),
         );
         let action_id = format!("{}:policy:{}", input.run_id, boundary.id);
+        let dispatch_history = input.binding.tools.iter().any(|tool| tool.name == "dispatch")
+            .then(|| crate::context_retention::conversation_background(
+                projected.as_ref().map(|projection| projection.history.as_slice()).unwrap_or(history),
+            ));
         let mut admitted = Vec::new();
         let schemas = Arc::new(input.binding.tools.clone());
         for node in nodes {
@@ -290,6 +296,7 @@ impl<
                 ));
             }
             let context = FrozenToolContext {
+                direct_tools: input.binding.direct_tools.clone(),
                 child_dispatch: input.binding.child_dispatch.clone(),
                 resource_activations: resource_activations.clone(),
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -314,6 +321,7 @@ impl<
             &input.run_id,
             input.owner_generation,
             &PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history,
                 action_id,
                 boundary,
                 identity: self.policy.identity(),

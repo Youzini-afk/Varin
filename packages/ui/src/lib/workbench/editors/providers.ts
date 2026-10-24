@@ -64,6 +64,13 @@ export const BUILTIN_EDITOR_PROVIDERS: EditorProviderContribution[] = [
     priority: 20,
   },
   {
+    id: BUILTIN_EDITOR_PROVIDER_IDS.office,
+    extensionId: 'varin.builtin.editors',
+    enabled: true,
+    languages: ['docx', 'xlsx', 'pptx'],
+    priority: 20,
+  },
+  {
     id: BUILTIN_EDITOR_PROVIDER_IDS.diff,
     extensionId: 'varin.builtin.editors',
     enabled: true,

@@ -110,6 +110,23 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
+## Office format libraries and embedded browser automation
+
+Office file creation uses `docx` (Copyright 2016 Dolan), `exceljs` (Copyright
+2014–2019 Guyon Roche) and `pptxgenjs` (Copyright 2015–2022 Brent Ely), under
+the MIT License. OOXML structure editing uses `@xmldom/xmldom`, Copyright
+2012–2017 @jindw and 2019–present Christopher J. Brody and contributors,
+also under the MIT License. Their unchanged license texts are distributed
+in `packages/web/public/licenses/{docx,exceljs,pptxgenjs,xmldom}-LICENSE.txt`.
+
+The embedded browser uses `puppeteer-core`, Copyright 2017 Google Inc.,
+under Apache-2.0. `packages/electron/browser-transport.ts` adapts Puppeteer's
+ExtensionTransport (Copyright 2024 Google Inc.) to Electron's debugger
+transport and restricts its connection to the owned page. The full license
+is distributed in `packages/web/public/licenses/puppeteer-LICENSE.txt`.
+Puppeteer connects to Electron's existing Chromium; no additional browser
+distribution is bundled by this integration.
+
 ## models.dev metadata and model brand icons
 
 The bundled `deepseek.svg` in `packages/ui/src/assets/provider-logos` comes from

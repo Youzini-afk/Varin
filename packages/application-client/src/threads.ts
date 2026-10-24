@@ -369,12 +369,12 @@ export type ThreadMaterialReadRequest = Omit<DocumentReadRequest, 'path' | 'arti
 /** Original experiment artifact selected through a retained source Run; never a file-path grant. */
 export type ThreadMaterialArtifactReadRequest = Omit<DocumentReadRequest, 'path' | 'artifact' | 'snapshotId'> & { artifact: NonNullable<DocumentReadRequest['artifact']> };
 export type ThreadMaterialSourceReadRequest = Omit<DocumentReadRequest, 'artifact' | 'snapshotId' | 'path'> & { path: string };
-/** A retained PDF reference. The Host resolves provenance and authority at admission. */
+/** A retained document reference. The Host resolves provenance and authority at admission. */
 export interface ThreadMaterialAttachment { snapshotId: string }
 export interface ThreadMaterialUpload {
   filename: string;
-  mimeType: 'application/pdf';
-  /** Original PDF bytes, encoded as canonical base64. No extracted browser text. */
+  mimeType: import('@varin/protocol').DocumentMimeType;
+  /** Original document bytes, encoded as canonical base64. */
   data: string;
 }
 export interface ThreadMaterialsAPI {

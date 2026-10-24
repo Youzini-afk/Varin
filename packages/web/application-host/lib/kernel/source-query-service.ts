@@ -14,6 +14,7 @@ import { createThreadResourceScope, type ThreadResourceScope, type ThreadResourc
 import { resourceThreadSource, resourceSource } from './thread-context.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import { readSourceDocument } from './document-sources.js';
+import { writeManagedBinary } from './binary-file-owner.js';
 import { captureExtensionSource, type ExtensionSourceCapture } from './extension-source.js';
 import { resourceFailure } from '../agent-resources/source-reader.js';
 import { ManagedSourceDrainedError } from '../harness/managed-source-drain.js';
@@ -197,6 +198,10 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
         await owner.sources.validate(query, active);
         return { bytesBase64: document.source.toString('base64'), byteLength: document.source.byteLength,
           sourceUrl: document.sourceUrl, title: document.title, contentType: document.contentType };
+      }
+      case 'binary_write': {
+        await owner.sources.validate(query, active);
+        return writeManagedBinary(options.kernel, scope, operation, active);
       }
       case 'package_capture': {
         if (scope.scope.kind !== 'run' || scope.grant.operationId !== operation.operationId || !operation.captureId) {

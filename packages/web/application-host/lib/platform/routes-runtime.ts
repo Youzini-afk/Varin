@@ -53,6 +53,7 @@ export interface PlatformRouteDependencies {
   crypto: typeof cryptoModule;
   documents?: DocumentAuthority;
   fileResources?: FsRouteDependencies['fileResources'];
+  renderOffice?: FsRouteDependencies['renderOffice'];
   extensionCatalog: ExtensionRouteDependencies['extensionCatalog'];
   extensionPackages: ExtensionRouteDependencies['extensionPackages'];
   extensionRuntime: ExtensionRouteDependencies['extensionRuntime'];
@@ -257,6 +258,7 @@ export const createPlatformRoutesRuntime = ({
       varinUserConfigRoot,
       ...(documents ? { documents } : {}),
       ...(fileResources ? { fileResources } : {}),
+      ...(dependencies.renderOffice ? { renderOffice: dependencies.renderOffice } : {}),
     });
     if (documents) {
       registerDocumentRoutes(app, { documents, uiAuthController });

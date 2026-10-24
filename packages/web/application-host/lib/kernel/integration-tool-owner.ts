@@ -198,8 +198,8 @@ function physicalSourceLaunch(runId: string, launch: LaunchIntent): SourceLaunch
 
 
 /** Discovery is driven by the existing collaboration event/startup owner. Only original unknown
- * Integrations are inspected; this never compensates a pending journal or starts a Run. */
-export function createIntegrationReceiptReconciler(options: {
+ * file effects are inspected; this never compensates a pending journal or starts a Run. */
+export function createFileEffectReceiptReconciler(options: {
   runtime: Pick<AgentRuntimeClient, 'threads' | 'activeOperations' | 'reconcileHostTool'>;
   onError(operationId: string | undefined, error: unknown): void;
 }): (signal: AbortSignal) => Promise<void> {
@@ -210,7 +210,8 @@ export function createIntegrationReceiptReconciler(options: {
       const operations = await options.runtime.activeOperations(thread.thread_id, undefined, signal);
       await Promise.all(operations.map(async operation => {
         if (operation.effect !== 'unknown' || operation.execution_owner?.kind !== 'external'
-          || !object(operation.intent) || !object(operation.intent.call) || !['integrate_child','submit_code','update'].includes(String(operation.intent.call.name))) return;
+          || !object(operation.intent) || !object(operation.intent.call) || !['integrate_child','submit_code','update','office_write','office_export','browser_files'].includes(String(operation.intent.call.name))) return;
+        if (operation.intent.call.name === 'browser_files' && (!object(operation.intent.call.arguments) || operation.intent.call.arguments.action !== 'save')) return;
         try {
           signal.throwIfAborted();
           // Catalog derives the unique journal and source from this original execution identity.

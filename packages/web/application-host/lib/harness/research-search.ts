@@ -229,15 +229,26 @@ const openAlexWorkId = (value: string): string => {
   return value;
 };
 
-const paperList = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null): ScholarlyPaper[] => {
+const paperList = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null, cursor?: () => string | undefined,
+  unresolved?: (value: unknown) => boolean): Pick<ScholarlySearchResult, 'papers' | 'status' | 'issues' | 'nextCursor'> => {
   if (!Array.isArray(value)) throw new Error("scholarly provider returned a malformed paper list");
-  return value.map((item) => {
+  const issues: NonNullable<ScholarlySearchResult['issues']> = [];
+  const papers = value.flatMap((item, index) => {
+    if (unresolved?.(item)) { issues.push({ index, code: 'unresolved-reference', message: 'The provider returned this relation without a resolved paper record' }); return []; }
     const paper = parse(item);
-    if (!paper) throw new Error("scholarly provider returned a paper without its identity or title");
-    return paper;
+    if (!paper) { issues.push({ index, code: 'invalid-paper', message: 'The provider record has no usable paper identity or title' }); return []; }
+    return [paper];
   });
+  let nextCursor: string | undefined;
+  try { nextCursor = cursor?.(); } catch (error) { issues.push({ code: 'invalid-cursor', message: error instanceof Error ? error.message : String(error) }); }
+  return { papers, status: issues.length ? papers.length || issues.every(issue => issue.code !== 'invalid-paper') ? 'partial' : 'failed' : papers.length ? 'ok' : 'empty',
+    ...(issues.length ? { issues } : {}), ...(nextCursor ? { nextCursor } : {}) };
 };
-const singlePaper = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null): ScholarlyPaper[] => paperList([value], parse);
+const singlePaper = (value: unknown, parse: (value: unknown) => ScholarlyPaper | null): ScholarlyPaper[] => {
+  const paper = parse(value);
+  if (!paper) throw new Error('The provider returned a paper without its identity or title');
+  return [paper];
+};
 const openAlexCursor = (body: Record<string, unknown>): string | undefined => {
   if (body.meta === undefined) return undefined;
   if (!body.meta || typeof body.meta !== "object" || Array.isArray(body.meta)) throw new Error("OpenAlex returned malformed page metadata");
@@ -301,12 +312,9 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
       url.searchParams.set("per-page", String(limit));
       url.searchParams.set("cursor", params.cursor ?? "*");
       const body = await requestJson(fetcher, url, ctx.signal);
-      const papers = paperList(body.results, openAlexPaper);
-      const nextCursor = openAlexCursor(body);
+      const page = paperList(body.results, openAlexPaper, () => openAlexCursor(body));
       return base("openalex", "relations", {
-        status: papers.length ? "ok" : "empty",
-        papers,
-        ...(nextCursor ? { nextCursor } : {}),
+        ...page,
         relation: { kind: relation, source: { provider: "openalex", id: sourceId } },
       });
     }
@@ -339,12 +347,11 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
     url.searchParams.set("filter", `ids.openalex:${pageIds.join("|")}`);
     url.searchParams.set("per-page", String(pageIds.length));
     const body = await requestJson(fetcher, url, ctx.signal);
-    const papers = paperList(body.results, openAlexPaper);
+    const page = paperList(body.results, openAlexPaper);
     const nextOffset = offset + pageIds.length;
     const nextCursor = nextOffset < ids.length ? `oa-list:${relation}:${encodeURIComponent(sourceId)}:${nextOffset}` : undefined;
     return base("openalex", "relations", {
-      status: papers.length ? "ok" : "empty",
-      papers,
+      ...page,
       ...(nextCursor ? { nextCursor } : {}),
       relation: { kind: relation, source },
     });
@@ -374,16 +381,9 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
     const body = await requestJson(fetcher, url, ctx.signal);
     const paperKey = relation === "references" ? "citedPaper" : "citingPaper";
     if (!Array.isArray(body.data)) throw new Error("Semantic Scholar returned a malformed relation list");
-    // An unresolved edge is explicitly null in the graph API, not a malformed paper.
-    const papers = body.data.flatMap((item) => {
-      const value = record(item)[paperKey];
-      return value === null ? [] : singlePaper(value, semanticScholarPaper);
-    });
-    const nextOffset = semanticScholarCursor(body);
+    const page = paperList(body.data, item => semanticScholarPaper(record(item)[paperKey]), () => semanticScholarCursor(body), item => record(item)[paperKey] === null);
     return base("semantic-scholar", "relations", {
-      status: papers.length ? "ok" : "empty",
-      papers,
-      ...(nextOffset ? { nextCursor: nextOffset } : {}),
+      ...page,
       relation: { kind: relation, source: { provider: "semantic-scholar", id: sourceId } },
     });
   };
@@ -429,12 +429,9 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
             url = new URL(`${OPENALEX}/works/${encodeURIComponent(paperId)}`);
           }
           const body = await requestJson(fetcher, url, ctx.signal);
-          const papers = action === "search" ? paperList(body.results, openAlexPaper) : singlePaper(body, openAlexPaper);
-          const nextCursor = action === "search" ? openAlexCursor(body) : undefined;
+          const page = action === "search" ? paperList(body.results, openAlexPaper, () => openAlexCursor(body)) : { status: 'ok' as const, papers: singlePaper(body, openAlexPaper) };
           return base(provider, action, {
-            status: papers.length ? "ok" : "empty",
-            papers,
-            ...(nextCursor ? { nextCursor } : {}),
+            ...page,
           });
         }
 
@@ -453,12 +450,9 @@ export function createResearchSearchService(deps: ScholarlySearchDeps = {}): Sch
           url.searchParams.set("fields", S2_PAPER_FIELDS);
         }
         const body = await requestJson(fetcher, url, ctx.signal);
-        const papers = action === "search" ? paperList(body.data, semanticScholarPaper) : singlePaper(body, semanticScholarPaper);
-        const nextOffset = action === "search" ? semanticScholarCursor(body) : undefined;
+        const page = action === "search" ? paperList(body.data, semanticScholarPaper, () => semanticScholarCursor(body)) : { status: 'ok' as const, papers: singlePaper(body, semanticScholarPaper) };
         return base(provider, action, {
-          status: papers.length ? "ok" : "empty",
-          papers,
-          ...(nextOffset ? { nextCursor: nextOffset } : {}),
+          ...page,
         });
       } catch (error) {
         if (ctx.signal.aborted || (error instanceof Error && error.name === "AbortError")) throw error;

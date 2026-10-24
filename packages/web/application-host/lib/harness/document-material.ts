@@ -10,12 +10,13 @@ export interface DocumentMaterialSources {
   readPath?(path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
   readArtifact?(artifact: NonNullable<DocumentReadRequest["artifact"]>, signal?: AbortSignal): Promise<DocumentArtifactSource>;
 }
+export type AlternateDocumentReader = (request: DocumentReadRequest, context: DocumentReaderContext, source?: DocumentIngestInput) => Promise<FetchResult | undefined>;
 
 /** Source owners admit bytes; this shared core only selects, identifies and ingests them.
  * Do not race source/iterator settlement against cancellation or turn an unknown owner
  * failure into a stopped-reader receipt. Runtime adapters retain that distinction. */
 export async function readDocumentMaterial(reader: DocumentReader, request: DocumentReadRequest,
-  context: DocumentReaderContext, sources: DocumentMaterialSources = {}): Promise<FetchResult> {
+  context: DocumentReaderContext, sources: DocumentMaterialSources = {}, alternate?: AlternateDocumentReader): Promise<FetchResult> {
   if (!request || typeof request !== "object" || Array.isArray(request)) {
     return { status: "failed", url: "", reason: "A document read request is required" };
   }
@@ -30,7 +31,7 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
     return { status: "failed", url: "", reason: "A valid experiment attempt and artifact are required" };
   }
   context.signal?.throwIfAborted();
-  if (snapshotId) return reader.read(request, context);
+  if (snapshotId) return await alternate?.(request, context) ?? reader.read(request, context);
   let input: DocumentIngestInput;
   if (artifact) {
     if (!sources.readArtifact) return { status: "failed", url: "", reason: "Experiment artifacts are unavailable" };
@@ -48,7 +49,8 @@ export async function readDocumentMaterial(reader: DocumentReader, request: Docu
   }
   context.signal?.throwIfAborted();
   if (!input.source.subarray(0, 1024).includes(Buffer.from("%PDF-"))) {
-    return { status: "failed", url: input.sourceUrl, reason: artifact ? "The selected artifact is not a PDF" : "The selected material is not a PDF" };
+    return await alternate?.(request, context, input)
+      ?? { status: "failed", url: input.sourceUrl, reason: "This document format is unsupported by the available readers" };
   }
   const { path: _path, artifact: _artifact, ...readRequest } = request;
   return reader.ingest(input, context, { ...readRequest, view: request.view ?? "overview" });

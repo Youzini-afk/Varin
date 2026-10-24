@@ -291,6 +291,11 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
       await kernel.start();
       return kernel.sourceRequest('source.integration.receipt', { ...input, principalId: principal.principalId }, signal);
     },
+    async fileReceipt(principal, input, signal) {
+      requirePrincipal(principal, input.coordinatorHostId);
+      await kernel.start();
+      return kernel.sourceRequest('source.file.receipt', { ...input, principalId: principal.principalId }, signal);
+    },
     async codeExchange(principal, input, signal) {
       requireReadPrincipal(principal, input.coordinatorHostId);
       if (!options.readCodeExchange) throw new Error('The original file exchange reader is unavailable');

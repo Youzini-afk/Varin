@@ -2,10 +2,50 @@
 use super::*;
 use varin_runtime::catalog::journal::JournalAnchor;
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FileJournalBinding {
+    anchor: JournalAnchor,
+    source_mode: varin_runtime::SourceMode,
+    tool: String,
+    before_owner_id: Option<String>,
+}
+
 impl Storage {
     /// Integration already owns durable before/after objects. Attach its original
     /// Catalog input to the same file.apply transaction, including compensation.
     pub(super) fn journal_for_file_reservation(&mut self, input: &Value, grant: &Grant) -> Result<Option<Value>,KernelError> {
+        if let Some(binding) = input.get("journalBinding") {
+            if input.get("reservationOperationId").is_some() {
+                return Err(KernelError::Operation("File apply has two journal owners".into()));
+            }
+            let binding: FileJournalBinding = serde_json::from_value(binding.clone())?;
+            let field = |name: &str| input[name].as_str().ok_or_else(|| KernelError::Operation(format!("File {name} is missing")));
+            let workspace = field("workspaceId")?;
+            let root = field("rootId")?;
+            let operation = field("operationId")?;
+            if binding.tool.trim().is_empty() || binding.source_mode == varin_runtime::SourceMode::FixedBranch {
+                return Err(KernelError::Operation("Journalled file writes require a tool and a physical source".into()));
+            }
+            let expected: Value = serde_json::from_str(field("expectedJson")?)?;
+            Self::validate_recovery_state(&expected, "before")?;
+            // A committed intent owns its before-image. Replay checks its unchanged
+            // argument hash in file.apply, after the original temporary owner was consumed.
+            if self.operation_get(&json!({"operationId":operation}))?.is_null() {
+                match (expected["objectHash"].as_str(), binding.before_owner_id.as_ref()) {
+                    (Some(hash), Some(owner)) => self.validate_object_owners(workspace, &grant.grant_id,
+                        &BTreeMap::from([(owner.clone(), hash.to_owned())]))?,
+                    (None, None) => {},
+                    _ => return Err(KernelError::Authorization("File before-image must belong to the original captured object owner".into())),
+                }
+            }
+            let turn = self.prepare_journal_turn(workspace, root, &binding.anchor, binding.source_mode, grant)?;
+            let mut journalled = input.clone();
+            journalled["__recoveryTurn"] = turn;
+            journalled["__recoveryBeforeOwner"] = json!(binding.before_owner_id);
+            journalled["__recoveryTool"] = json!(binding.tool);
+            return Ok(Some(journalled));
+        }
         let Some(operation)=input["reservationOperationId"].as_str() else {return Ok(None);};
         let workspace=input["workspaceId"].as_str().ok_or_else(||KernelError::Operation("File workspace is missing".into()))?;
         let row=self.read_recovery_operation(workspace,operation,Some(&grant.grant_id))?;

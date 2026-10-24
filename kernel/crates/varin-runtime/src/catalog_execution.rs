@@ -911,6 +911,11 @@ impl ExecutionBodyPreparation {
                     if snapshot.view.binding.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed) {
                         return Err(RuntimeError::Conflict("request differs from the admitted capability selection".into()));
                     }
+                    if snapshot.view.binding.direct_tools.is_some()
+                        && snapshot.view.binding.direct_tools != crate::tool_disclosure::direct_tools(&snapshot.view.binding.tools,
+                            launch.selection.agent.as_ref().map(|agent| agent.work_focus.as_str()).unwrap_or("general")) {
+                        return Err(RuntimeError::Conflict("request disclosure differs from the admitted work focus".into()));
+                    }
                     Some(launch.selection.tools_ref.clone())
                 } else {
                     Some(self.content.save(&serde_json::to_value(&snapshot.view.binding.tools)?)?)

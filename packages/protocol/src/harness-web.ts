@@ -93,7 +93,7 @@ export interface WebSnapshotStructure {
 
 /** A parser-backed document attached to an immutable snapshot. */
 export interface WebSnapshotDocument {
-  kind: "pdf";
+  kind: "pdf" | "docx" | "xlsx" | "pptx";
   /** Unknown when even the PDF probe failed; the original is still retained. */
   pageCount?: number;
   /** Parser and layout strategy that produced the current text view. */
@@ -216,6 +216,7 @@ export interface DocumentFindHit {
 
 /** Independent document reading; a Host must resolve and authorize path bytes. */
 export interface DocumentReadRequest {
+  office?: Omit<import('./office.js').OfficeReadRequest, 'path' | 'snapshotId'>;
   snapshotId?: string;
   path?: string;
   artifact?: { attemptId: string; artifactId: string };
@@ -349,86 +350,6 @@ export interface MaterialsCollectionResult {
   /** Members whose body could not be read under the caller's authority. */
   unreadable?: string[];
   grant?: MaterialGrant;
-  message?: string;
-}
-
-/**
- * `research.decide` (D-315 L5) — batch fast-decision judgment over real Web /
- * scholarly candidates. Candidates must reference material the caller already
- * produced: URLs from `web.search`, snapshots from `web.fetch`, scholarly
- * identities from `research.search`, sections inside a snapshot, or new query
- * expressions the caller wants evaluated. The model never invents ids.
- */
-export type ResearchDecideKind =
-  /** Which candidates are relevant to the goal right now. */
-  | "relevance"
-  /** Which candidates are worth reading next (exploration value, not current relevance). */
-  | "reading-value"
-  /** Which candidates add information the goal's current material lacks. */
-  | "complementary"
-  /** Which candidates likely duplicate material already seen. */
-  | "duplicate"
-  /** Which candidates are worth continuing to trace (relations, terms, links). */
-  | "continuation"
-  /** Choose the single next material to open. Explicit no-suitable-option is allowed. */
-  | "next";
-
-export type ResearchDecideCandidateKind = "url" | "snapshot" | "paper" | "section" | "query";
-
-export interface ResearchDecideCandidate {
-  /** Caller-assigned id; joins request options to ranked results. */
-  id: string;
-  kind: ResearchDecideCandidateKind;
-  title?: string;
-  /** Short description the model may judge: snippet, abstract, heading path, query text. */
-  detail?: string;
-  url?: string;
-  /** Snapshot candidates: the pinned snapshot the caller can already read. */
-  snapshotId?: string;
-  /** Section candidates: snapshot plus readable location. */
-  section?: { snapshotId: string; startLine?: number; endLine?: number; label?: string };
-  /** Paper candidates: provider identity as returned by `research.search`. */
-  paper?: { providerId: string; providerRecordId: string; doi?: string };
-}
-
-export interface ResearchDecideParams {
-  goal: string;
-  kind: ResearchDecideKind;
-  candidates: ResearchDecideCandidate[];
-  /** Purpose slot override; inferred from candidate kinds when absent. */
-  purpose?: "web" | "scholarly";
-}
-
-export interface ResearchDecideRankedCandidate {
-  id: string;
-  /** Score-question answers; absent for `next` selections and missing candidates. */
-  score?: number;
-  probabilities?: Record<string, number>;
-  /** `next` kind: the provider's chosen candidate. */
-  selected?: boolean;
-}
-
-export interface ResearchDecideResult {
-  /**
-   * `ok` — the provider answered at least one question.
-   * `disabled`/`unconfigured`/`unavailable`/`failed`/`cancelled` keep the
-   * caller-supplied order in `ranked` and set `fallback: "order"`; the caller
-   * continues with direct search and its own judgment.
-   */
-  status: "ok" | "disabled" | "unconfigured" | "unavailable" | "failed" | "cancelled";
-  purpose: "web" | "scholarly";
-  kind: ResearchDecideKind;
-  ranked: ResearchDecideRankedCandidate[];
-  /** Candidates rejected before judging (unreadable snapshot, bad reference). */
-  rejected: { id: string; reason: string }[];
-  /** Candidate/question ids the provider did not answer; never scored as zero. */
-  missing: string[];
-  fallback?: "order";
-  providerId?: string;
-  modelId?: string;
-  servedModelId?: string;
-  configurationId?: string;
-  usage?: { inputTokens?: number; outputTokens?: number };
   message?: string;
 }
 

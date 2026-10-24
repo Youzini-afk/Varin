@@ -59,6 +59,17 @@ const directoryHeaders = (getDirectory?: () => string | undefined, override?: st
 };
 
 export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAPI => ({
+  async readOffice(path, input, options) {
+    const params = new URLSearchParams({ path });
+    for (const [key, value] of Object.entries(input)) if (value !== undefined) params.set(key, String(value));
+    if (options?.outsideFileGrant) params.set('outsideFileGrant', options.outsideFileGrant);
+    const response = await runtimeFetch(`/api/fs/office?${params}`, { headers: directoryHeaders(getDirectory, options?.directory), signal: options?.signal });
+    if (!response.ok) {
+      const failure = await response.json().catch(() => ({}));
+      throw new Error((failure as { error?: string }).error || `Office reading failed (${response.status})`);
+    }
+    return response.json();
+  },
   async getHomeDirectory(): Promise<string> {
     const response = await runtimeFetch('/api/fs/home', {
       headers: { Accept: 'application/json' },

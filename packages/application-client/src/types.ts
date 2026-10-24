@@ -645,6 +645,7 @@ export interface FilesAPI {
   createDirectory(path: string, options?: { allowOutsideWorkspace?: boolean }): Promise<{ success: boolean; path: string }>;
   statFile?(path: string, options?: FileReadOptions): Promise<{ path: string; isFile: boolean; size: number; mtimeMs?: number }>;
   readFileBinary?(path: string, options?: FileReadOptions): Promise<{ dataUrl: string; path: string }>;
+  readOffice?(path: string, input: Omit<import('@varin/protocol').OfficeReadRequest, 'path' | 'snapshotId'> & { expectedRevision?: string }, options?: FileReadOptions & { signal?: AbortSignal }): Promise<import('@varin/protocol').OfficeReadResult>;
   delete?(path: string): Promise<{ success: boolean }>;
   rename?(oldPath: string, newPath: string): Promise<{ success: boolean; path: string }>;
   revealPath?(path: string): Promise<{ success: boolean }>;

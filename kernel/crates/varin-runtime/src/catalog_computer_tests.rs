@@ -107,6 +107,7 @@ fn computer_scope_checks_original_model_and_policy_tool_origins_without_a_file_s
                 node_id: call.call_id.clone(),
             };
             let context = FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -120,6 +121,7 @@ fn computer_scope_checks_original_model_and_policy_tool_origins_without_a_file_s
                 &run.run_id,
                 epoch,
                 &PolicyGraphIntent::PolicyToolGraphV1 {
+                    dispatch_history: None,
                     action_id,
                     boundary,
                     identity: launch.policy,

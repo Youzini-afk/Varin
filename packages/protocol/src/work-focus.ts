@@ -1,4 +1,4 @@
-export const WORK_FOCUS_IDS = ["code", "research"] as const;
+export const WORK_FOCUS_IDS = ["general", "code", "research", "office"] as const;
 
 export type WorkFocusId = (typeof WORK_FOCUS_IDS)[number];
 

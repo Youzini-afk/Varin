@@ -570,7 +570,7 @@ impl LaunchSelection {
     /// A delegated child intent retains the parent's handoff while its own source is
     /// Pending. Its actual Run must still pass `validate` after the source becomes Ready.
     pub(super) fn validate_structure(&self) -> Result<()> {
-        if self.agent.as_ref().is_some_and(|agent| !matches!(agent.work_focus.as_str(), "code" | "research")) {
+        if self.agent.as_ref().is_some_and(|agent| !matches!(agent.work_focus.as_str(), "general" | "code" | "research" | "office")) {
             return Err(RuntimeError::Invalid("unknown Agent work focus".into()));
         }
         if let Some(catalog) = &self.child_dispatch {

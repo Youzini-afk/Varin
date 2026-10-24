@@ -41,6 +41,63 @@ fn record_input(id: &str) -> Value {
 }
 
 #[test]
+fn binary_file_apply_joins_the_original_journal_and_replays_after_temporary_owners_are_consumed() {
+    let (mut storage, root) = fixture();
+    let directory = root.join("binary-workspace");
+    fs::create_dir(&directory).unwrap();
+    let before = b"PK\x03\x04original\x00document";
+    let after = b"PK\x03\x04edited\x00document";
+    fs::write(directory.join("report.docx"), before).unwrap();
+    let registered = invoke(&mut storage, "file.root.register", &json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":directory})).unwrap();
+    let upload = |storage: &mut Storage, name: &str, bytes: &[u8]| {
+        let params = json!({"workspaceId":"workspace","operationId":name,"streamId":name,"byteLength":bytes.len()});
+        storage.begin_blob_stream(&params, "actor").unwrap();
+        storage.stream_blob_bytes(name, 0, bytes, "actor").unwrap();
+        storage.finish_blob_stream(&params, "actor").unwrap()
+    };
+    let original = upload(&mut storage, "before-binary", before);
+    let target = upload(&mut storage, "after-binary", after);
+    let state = |blob: &Value, length| json!({"kind":"regular-file","objectHash":blob["hash"],"byteLength":length});
+    let input = json!({"operationId":"office-edit","workspaceId":"workspace","rootId":registered["rootId"],"path":"report.docx",
+        "expectedJson":state(&original,before.len()).to_string(),"targetJson":state(&target,after.len()).to_string(),"ownerId":target["ownerId"],
+        "journalBinding":{"anchor":{"executionId":"turn","threadId":"thread","branchId":"branch","runId":"run","entryId":"input","epoch":1},
+            "sourceMode":"live_root","tool":"office_write","beforeOwnerId":original["ownerId"]}});
+    let first = invoke(&mut storage, "file.apply", &input).unwrap();
+    assert_eq!(first["status"], "applied");
+    assert_eq!(fs::read(directory.join("report.docx")).unwrap(), after);
+    assert_eq!(invoke(&mut storage, "file.apply", &input).unwrap(), first);
+    let (prior, current, tool): (String,String,String) = storage.conn.query_row(
+        "SELECT before_json,after_json,tool_name FROM recovery_changes WHERE path='report.docx'", [],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&prior).unwrap()["objectHash"], original["hash"]);
+    assert_eq!(serde_json::from_str::<Value>(&current).unwrap()["objectHash"], target["hash"]);
+    assert_eq!(tool, "office_write");
+    let mut conflict = input.clone();
+    conflict["operationId"] = json!("stale-edit");
+    let stale_target = upload(&mut storage, "conflict-target", b"stale replacement");
+    conflict["ownerId"] = stale_target["ownerId"].clone();
+    conflict["targetJson"] = json!(state(&stale_target, 17).to_string());
+    conflict["journalBinding"]["beforeOwnerId"] = upload(&mut storage, "conflict-before", before)["ownerId"].clone();
+    assert_eq!(invoke(&mut storage, "file.apply", &conflict).unwrap()["status"], "conflict");
+    assert_eq!(fs::read(directory.join("report.docx")).unwrap(), after);
+    drop(storage);
+    let storage = Storage::open(&root, "host").unwrap();
+    let (reply, _) = std::sync::mpsc::channel();
+    let source = serde_json::from_value(json!({"workspace_id":"workspace","execution_workspace_id":"workspace", "mode":"live_root",
+        "branch_id":null,"revision":null,"live_root":{"hostId":"host","rootId":registered["rootId"],"canonicalRoot":registered["canonicalRoot"]},"resource_owner":{"kind":"local"}})).unwrap();
+    let mut read = crate::tools::SourceEffectReceiptRead { source, run_id:"run".into(), thread_id:"thread".into(), operation_id:"office-edit".into(), reply };
+    let recovered = storage.file_tool_receipt(&read).unwrap();
+    assert_eq!(recovered["receipt"]["status"], "applied");
+    assert_eq!(recovered["tool"], "office_write");
+    read.operation_id = "stale-edit".into();
+    assert_eq!(storage.file_tool_receipt(&read).unwrap()["receipt"]["status"], "conflict");
+    read.thread_id = "other-thread".into();
+    assert!(storage.file_tool_receipt(&read).is_err());
+    drop(storage);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn native_grants_store_null_and_historical_null_grants_reissue_without_migration() {
     let (mut storage, root) = fixture();
     let format = |storage: &Storage| {

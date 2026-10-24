@@ -1,4 +1,4 @@
-import { THINKING_LEVELS } from '@varin/protocol';
+import { THINKING_LEVELS, isWorkFocusId } from '@varin/protocol';
 import { parseThreadMaterials } from './thread-material-input.js';
 import { normalizeThreadSourcePreparation, parseSourceResourceOwner } from './thread-sources.js';
 import { threadSourceFailureMessage } from '@varin/application-client';
@@ -478,7 +478,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
         model: modelSelection(body.model) };
       if (body.agent !== undefined) {
         const agent = object(body.agent);
-        if (Object.keys(agent).some(key => !['profileId', 'workFocus'].includes(key)) || agent.workFocus !== 'code' && agent.workFocus !== 'research') throw new Error('Invalid Agent selection');
+        if (Object.keys(agent).some(key => !['profileId', 'workFocus'].includes(key)) || !isWorkFocusId(agent.workFocus)) throw new Error('Invalid Agent selection');
         input.agent = { profileId: agent.profileId === null ? null : text(agent.profileId), workFocus: agent.workFocus };
       }
       if (body.source !== undefined) {

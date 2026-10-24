@@ -195,6 +195,7 @@ impl Fixture {
             })
             .unwrap();
         let binding = RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -736,6 +737,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
         .map(|value| {
             let node: PolicyToolNode = serde_json::from_value(value).unwrap();
             let context = FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
@@ -753,6 +755,7 @@ fn admitted(f: &Fixture, nodes: Vec<Value>) -> PolicyGraphIntent {
         })
         .collect();
     PolicyGraphIntent::PolicyToolGraphV1 {
+        dispatch_history: None,
         action_id,
         boundary,
         identity: identity(),

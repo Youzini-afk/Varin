@@ -108,6 +108,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 .unwrap(),
         );
         let binding = RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -177,6 +178,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 node_id: call.call_id.clone(),
             };
             let frozen = FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
@@ -187,6 +189,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 source: boundary.source.clone(),
             };
             let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history: None,
                 action_id,
                 boundary,
                 identity,
@@ -252,6 +255,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             .unwrap();
             let origin = ToolOrigin::ModelStep { request_id };
             let frozen = FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
@@ -540,6 +544,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .unwrap();
     let run = submitted.run_id.clone();
     let binding = RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

@@ -507,7 +507,7 @@ pub(super) fn schema_version(view: &RequestView, name: &str) -> Result<String, M
     if matches!(view.origin, RequestOrigin::PolicyModelJob { .. } | RequestOrigin::McpSampling { .. } | RequestOrigin::AuxiliaryInference { .. }) {
         return Ok(String::new());
     }
-    crate::tool_disclosure::model_tool(&view.binding.tools, name)
+    crate::tool_disclosure::model_tool_for(&view.binding.tools, view.binding.direct_tools.as_deref(), name)
         .map(|tool| tool.version.clone()).map_err(ModelFailure::from)
 }
 pub(super) fn opaque(view: &RequestView, value: Value) -> Option<OpaqueProviderItem> {

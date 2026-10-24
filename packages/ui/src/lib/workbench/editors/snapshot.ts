@@ -78,6 +78,7 @@ const normalizeViewState = (value: unknown, snapshotVersion: number): EditorView
   const previewScrollTop = nonNegativeNumber(value.previewScrollTop);
   if (previewScrollTop !== undefined) viewState.previewScrollTop = previewScrollTop;
   if (typeof value.browserTabId === 'string') viewState.browserTabId = value.browserTabId;
+  if (typeof value.browserPageId === 'string') viewState.browserPageId = value.browserPageId;
   if (typeof value.browserUrl === 'string') viewState.browserUrl = value.browserUrl;
   if (isObject(value.browserPosition) && typeof value.browserPosition.x === 'number' && Number.isFinite(value.browserPosition.x)
     && typeof value.browserPosition.y === 'number' && Number.isFinite(value.browserPosition.y)) {

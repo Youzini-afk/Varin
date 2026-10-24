@@ -138,6 +138,7 @@ fn view(family: &str) -> RequestView {
             },
         },
         binding: RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -1855,7 +1856,7 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
         let encoded = first.to_string();
         for name in common_names {
             assert!(encoded.contains(name), "{family}: common tool {name} must be declared");
-            assert_eq!(crate::tool_disclosure::namespace(name), None, "{name}: directly declared tools stay out of the deferred index");
+            assert_eq!(crate::tool_disclosure::deferred_namespace(request.binding.tools.iter().find(|tool| tool.name == name).unwrap()), None, "{name}: directly declared tools stay out of the deferred index");
         }
         assert!(!encoded.contains("computer_browser"), "{family}: deferred function was serialized");
         assert!(encoded.contains(crate::tool_disclosure::DESCRIBE));
@@ -1887,6 +1888,47 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
         let focused = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
         assert!(tools_field(&focused).to_string().contains("research_search"), "{family}: research mode declares research directly");
         assert_eq!(crate::tool_disclosure::deferred_namespace(&research), None);
+    }
+}
+
+#[test]
+fn mode_selection_and_model_call_validation_share_the_frozen_direct_set() {
+    for family in MEDIA_FAMILIES {
+        let provider = media_provider(family, true);
+        let mut request = view(family);
+        let prototype = request.binding.tools[0].clone();
+        request.binding.tools = crate::tool_disclosure::schemas();
+        for name in ["file_read", "document_read", "script_run", "research_search", "browser_read", "follow_up", "mcp_call", "mcp__saved__search"] {
+            let mut tool = prototype.clone();
+            tool.name = name.into();
+            tool.metadata = None;
+            request.binding.tools.push(tool);
+        }
+        let mut reuse = RequestCompileReuse::new();
+        for focus in ["general", "research", "office", "code"] {
+            request.binding.direct_tools = crate::tool_disclosure::direct_tools(&request.binding.tools, focus);
+            reuse.prepare(&request, 1, None, 1, None);
+            let wire = provider.serialize(&request, Some(&mut reuse)).unwrap().to_value();
+            let tools = match family {
+                bedrock::FAMILY => &wire["toolConfig"]["tools"],
+                pi_messages::FAMILY => &wire["context"]["messages"][0]["toolsAdded"],
+                _ => &wire["tools"],
+            }.to_string();
+            for name in ["file_read", "mcp_call", "mcp__saved__search"] {
+                assert!(tools.contains(name), "{family}/{focus} omits {name}");
+            }
+            for (name, expected) in [
+                ("script_run", focus != "general"),
+                ("research_search", focus == "research"),
+                ("browser_read", focus == "office"),
+                ("document_read", focus != "code"),
+                ("follow_up", focus == "general" || focus == "code"),
+            ] {
+                assert_eq!(tools.contains(name), expected, "{family}/{focus}: declaration of {name}");
+                assert_eq!(crate::tool_disclosure::model_tool_for(&request.binding.tools, request.binding.direct_tools.as_deref(), name).is_ok(), expected,
+                    "{family}/{focus}: invocation of {name}");
+            }
+        }
     }
 }
 

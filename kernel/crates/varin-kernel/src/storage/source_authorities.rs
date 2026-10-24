@@ -1509,9 +1509,25 @@ impl Storage {
 }
 
 impl Storage {
+    pub(crate) fn source_file_receipt(&self, p: SourceEffectReceiptParams) -> Result<Value, KernelError> {
+        let mut query = self.conn.prepare("SELECT payload_json FROM domain_records WHERE record_type='source.authority'")?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        for body in rows {
+            let authority: AuthorityRecord = serde_json::from_str(&body?)?;
+            if authority.principal_id == p.principal_id && authority.coordinator_host_id == p.coordinator_host_id
+                && authority.purpose == "source" && authority.result.scope.run_id() == Some(p.run_id.as_str())
+                && authority.result.scope.thread_id() == p.thread_id && authority.result.source == p.source {
+                self.require_native_source_owner(&authority)?;
+                let (reply, _) = std::sync::mpsc::channel();
+                return self.file_tool_receipt(&crate::tools::SourceEffectReceiptRead { source: p.source,
+                    run_id: p.run_id, thread_id: p.thread_id, operation_id: p.operation_id, reply });
+            }
+        }
+        Err(denied("File receipt has no matching original source authority"))
+    }
     pub(crate) fn source_integration_receipt(
         &self,
-        p: SourceIntegrationReceiptParams,
+        p: SourceEffectReceiptParams,
     ) -> Result<Value, KernelError> {
         let mut query = self.conn.prepare(
             "SELECT payload_json FROM domain_records WHERE record_type='source.authority'",
@@ -1539,7 +1555,7 @@ impl Storage {
             ));
         }
         let (reply, _) = std::sync::mpsc::channel();
-        self.integration_receipt(&crate::tools::IntegrationReceiptRead {
+        self.integration_receipt(&crate::tools::SourceEffectReceiptRead {
             source: p.source,
             run_id: p.run_id,
             thread_id: p.thread_id,

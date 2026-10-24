@@ -1,4 +1,8 @@
 import { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
+import { OFFICE_CAPABILITY, OFFICE_TOOL_DECLARATIONS, VARIN_BUILTIN_OFFICE_EXTENSION_ID } from './office-tools.js';
+import { BROWSER_CAPABILITY, BROWSER_TOOL_DECLARATIONS, VARIN_BUILTIN_BROWSER_EXTENSION_ID } from './browser-tools.js';
+export * from './office-tools.js';
+export * from './browser-tools.js';
 import { CODE_EXCHANGE_CAPABILITY, CODE_EXCHANGE_TOOL_DECLARATIONS, VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION_ID } from './code-exchange-tools.js';
 export * from './code-exchange-tools.js';
 export { SETTINGS_CAPABILITY, SETTINGS_TOOL_DECLARATIONS } from './settings-tools.js';
@@ -8,8 +12,6 @@ export { IMAGES_CAPABILITY, IMAGE_TOOL_DECLARATIONS, VARIN_BUILTIN_IMAGES_EXTENS
 export { ENVIRONMENT_FORWARD_CAPABILITY, ENVIRONMENT_FORWARD_TOOL_DECLARATIONS, VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION_ID } from './environment-forward-tools.js';
 import { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
 export { EXTENSION_PACKAGE_TOOL_DECLARATION, RUNTIME_CONTRACT_TOOL_DECLARATIONS, VARIN_BUILTIN_RUNTIME_CONTRACTS_EXTENSION_ID } from './runtime-contract-tools.js';
-import { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
-export { RESEARCH_DECISION_CAPABILITY, RESEARCH_DECISION_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID } from './research-decision-tools.js';
 import { RESEARCH_DISCOVERY_CAPABILITY, RESEARCH_DISCOVERY_TOOL_DECLARATIONS, VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION_ID } from './research-discovery-tools.js';
 import { INTERACTIVE_UI_CAPABILITY, INTERACTIVE_UI_TOOL_DECLARATIONS, VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION_ID } from './interactive-ui-tools.js';
 export * from './interactive-ui-tools.js';
@@ -547,13 +549,6 @@ export const VARIN_BUILTIN_SCRIPT_EXTENSION: VarinBuiltinExtensionDefinition = {
     capabilities: { host: [SCRIPT_CAPABILITY] }, provides: { services: [...SCRIPT_TOOL_DECLARATIONS] } },
 };
 
-export const VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION: VarinBuiltinExtensionDefinition = {
-  enabledByDefault: true,
-  manifest: { id: VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION_ID, displayName: 'Research decisions', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
-    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
-    capabilities: { host: [RESEARCH_DECISION_CAPABILITY] }, provides: { services: [...RESEARCH_DECISION_TOOL_DECLARATIONS] } },
-};
-
 export const VARIN_BUILTIN_IMAGES_EXTENSION: VarinBuiltinExtensionDefinition = {
   enabledByDefault: true,
   manifest: { id: VARIN_BUILTIN_IMAGES_EXTENSION_ID, displayName: 'Image generation and editing', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
@@ -587,6 +582,20 @@ export const VARIN_BUILTIN_WEB_EXTENSION: VarinBuiltinExtensionDefinition = {
   manifest: { id: VARIN_BUILTIN_WEB_EXTENSION_ID, displayName: 'Web and materials', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
     entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
     capabilities: { host: [WEB_CAPABILITY] }, provides: { services: [...WEB_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_OFFICE_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_OFFICE_EXTENSION_ID, displayName: 'Office files', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [OFFICE_CAPABILITY] }, provides: { services: [...OFFICE_TOOL_DECLARATIONS] } },
+};
+
+export const VARIN_BUILTIN_BROWSER_EXTENSION: VarinBuiltinExtensionDefinition = {
+  enabledByDefault: true,
+  manifest: { id: VARIN_BUILTIN_BROWSER_EXTENSION_ID, displayName: 'Browser', version: '1.0.0', schemaVersion: 1, engines: { varin: '*' },
+    entrypoints: { host: { activation: ['service-request'], file: 'host.cjs', mode: 'brokered' } },
+    capabilities: { host: [BROWSER_CAPABILITY] }, provides: { services: [...BROWSER_TOOL_DECLARATIONS] } },
 };
 
 export const VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION: VarinBuiltinExtensionDefinition = {
@@ -668,9 +677,10 @@ export const VARIN_BUILTIN_EXTENSION_DEFINITIONS: readonly VarinBuiltinExtension
   VARIN_BUILTIN_COMPUTER_EXTENSION,
   VARIN_BUILTIN_ENVIRONMENT_FORWARD_EXTENSION,
   VARIN_BUILTIN_WEB_EXTENSION,
+  VARIN_BUILTIN_OFFICE_EXTENSION,
+  VARIN_BUILTIN_BROWSER_EXTENSION,
   VARIN_BUILTIN_RESEARCH_DISCOVERY_EXTENSION,
   VARIN_BUILTIN_CODE_EXCHANGE_EXTENSION,
-  VARIN_BUILTIN_RESEARCH_DECISION_EXTENSION,
   VARIN_BUILTIN_IMAGES_EXTENSION,
   VARIN_BUILTIN_INTERACTIVE_UI_EXTENSION,
   VARIN_BUILTIN_SCRIPT_EXTENSION,

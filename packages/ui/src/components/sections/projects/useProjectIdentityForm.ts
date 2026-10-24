@@ -44,7 +44,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
   const [iconBackground, setIconBackground] = React.useState<string | null>(null);
-  const [defaultWorkFocus, setDefaultWorkFocus] = React.useState<WorkFocusId>('code');
+  const [defaultWorkFocus, setDefaultWorkFocus] = React.useState<WorkFocusId>('general');
   const [isUploadingIcon, setIsUploadingIcon] = React.useState(false);
   const [isRemovingCustomIcon, setIsRemovingCustomIcon] = React.useState(false);
   const [isDiscoveringIcon, setIsDiscoveringIcon] = React.useState(false);
@@ -69,7 +69,7 @@ export const useProjectIdentityForm = (project: EditableProject | null) => {
   const savedIcon = project?.icon ?? null;
   const savedColor = project?.color ?? null;
   const savedBackground = project?.iconBackground ?? null;
-  const savedFocus = project?.defaultWorkFocus ?? 'code';
+  const savedFocus = project?.defaultWorkFocus ?? 'general';
 
   React.useEffect(() => {
     setName(savedName);

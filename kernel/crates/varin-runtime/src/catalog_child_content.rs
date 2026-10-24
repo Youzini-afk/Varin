@@ -16,6 +16,7 @@ pub struct ChildAdmissionPreparation {
     publication: crate::content::ContentPublication,
 }
 pub struct PreparedChildAdmission {
+    pub(super) inherited_context: Option<crate::context_retention::RetainedContext>,
     pub(super) avatar: Option<String>,
     pub(super) source_agent: Option<String>,
     pub(super) context: ToolExecutionContext,
@@ -103,7 +104,22 @@ impl ChildAdmissionPreparation {
         let mut launch = self.launch.selection;
         launch.source = self.handoff.as_ref().map(|handoff| handoff.source.clone());
         let input_ref = self.content.save(&serde_json::to_value(&self.input)?)?;
+        let inherited_context = if self.input.inherit_context {
+            let history = original.history.as_ref().ok_or_else(|| RuntimeError::Invalid(
+                "The original dispatch has no retained conversation background; retry from a new dispatch request".into(),
+            ))?;
+            let history = crate::context_retention::conversation_background(history);
+            crate::execution::validate_history_pairs(&history)
+                .map_err(|error| RuntimeError::Invalid(format!("Cannot inherit incomplete conversation: {error}")))?;
+            let counter = crate::token_count::TokenCounter::for_configuration(&self.launch.configuration);
+            Some(crate::context_retention::RetainedContext {
+                estimated_tokens: history.iter().map(|item| counter.item(item)).sum(),
+                budget_tokens: None,
+                items: self.content.save_items(&history)?,
+            })
+        } else { None };
         Ok(PreparedChildAdmission {
+            inherited_context,
             internal_retrieval: admitted.call.name == "code_retrieval",
             avatar: self.launch.selected_profile.avatar.clone(),
             source_agent:self.input.source_agent.clone(),

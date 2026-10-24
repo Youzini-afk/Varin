@@ -29,6 +29,7 @@ import {
 import { resetWorkbenchPanelsForRuntimeSwitch } from './panels';
 import { resolveEditorProviderId } from './providers';
 import type { EditorViewState, EditorWorkbenchState } from './types';
+import { closeEmbeddedBrowserPageId } from '@/lib/browser-page';
 
 type EditorWorkbenchSession = {
   runtimeKey: string;
@@ -80,6 +81,14 @@ export const replaceEditorWorkbench = (
   state: EditorWorkbenchState,
   options?: { persist?: boolean; notify?: boolean },
 ): EditorWorkbenchState => {
+  const previous = session.byWorkspace.get(state.workspaceId);
+  if (previous) {
+    const retainedPages = new Set(listEditorGroups(state.tree).flatMap(group => group.tabs.map(tab => tab.viewState.browserPageId)));
+    for (const tab of listEditorGroups(previous.tree).flatMap(group => group.tabs)) {
+      const pageId = tab.viewState.browserPageId;
+      if (pageId && !retainedPages.has(pageId)) closeEmbeddedBrowserPageId(pageId);
+    }
+  }
   session.byWorkspace.set(state.workspaceId, state);
   rememberLastGoodEditorWorkbench(state);
   if (options?.persist !== false) persistStructural(state);

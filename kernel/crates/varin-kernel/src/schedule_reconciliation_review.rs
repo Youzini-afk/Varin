@@ -54,6 +54,7 @@ impl Harness {
             metadata: None,
         };
         let binding = RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

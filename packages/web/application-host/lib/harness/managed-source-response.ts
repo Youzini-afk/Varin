@@ -42,7 +42,10 @@ export function decodeManagedSourceResponse<Operation extends SourceServiceOpera
     case 'read': valid = record(value) && ['ready', 'unavailable', 'stale', 'failed', 'forbidden'].includes(String(value.status))
       && (value.status !== 'ready' || text(value.content) && text(value.revision) && text(value.source)); break;
     case 'document_read': valid = record(value) && text(value.bytesBase64) && Number.isSafeInteger(value.byteLength)
-      && Number(value.byteLength) >= 0 && text(value.sourceUrl) && text(value.title) && value.contentType === 'application/pdf'; break;
+      && Number(value.byteLength) >= 0 && text(value.sourceUrl) && text(value.title) && text(value.contentType); break;
+    case 'binary_write': valid = record(value) && ['applied', 'conflict', 'unknown'].includes(String(value.status))
+      && value.operationId === operation.invocation.operationId && text(value.path) && value.fileJournal === true
+      && typeof value.executorStopped === 'boolean' && (value.status === 'unknown' || value.executorStopped === true); break;
     case 'experiment_admit': valid = record(value) && text(value.cwd); break;
     case 'experiment_capture': return parseManagedExperimentInput(value) as SourceServiceResponse<Operation>;
     case 'experiment_read':

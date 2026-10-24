@@ -864,7 +864,7 @@ type AdmissionControl = dyn Fn(
     + Send
     + Sync;
 /// Constructed only after Catalog validated the original native Integration Tool invocation.
-pub(crate) struct IntegrationReceiptRead {
+pub(crate) struct SourceEffectReceiptRead {
     pub source: varin_runtime::catalog::launches::SourceSelection,
     pub run_id: String,
     pub thread_id: String,
@@ -877,7 +877,9 @@ pub(crate) struct KernelResourceClient {
     pub(crate) file_observations: Option<crate::file_observation::Client>,
     pub(crate) interactions: Option<crate::storage::process_interactions::Client>,
     integration_receipts:
-        Option<Arc<dyn Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync>>,
+        Option<Arc<dyn Fn(SourceEffectReceiptRead) -> Result<(), KernelError> + Send + Sync>>,
+    file_receipts:
+        Option<Arc<dyn Fn(SourceEffectReceiptRead) -> Result<(), KernelError> + Send + Sync>>,
     send: Arc<dyn Fn(ResourceCall) -> Result<(), KernelError> + Send + Sync>,
     replay: Arc<dyn Fn(Vec<String>) -> Result<(), KernelError> + Send + Sync>,
     controls: crate::process::ProcessControlRegistry,
@@ -898,6 +900,7 @@ impl KernelResourceClient {
             send: Arc::new(send),
             interactions: None,
             integration_receipts: None,
+            file_receipts: None,
             replay: Arc::new(replay),
             controls,
             admission_control: None,
@@ -1005,10 +1008,27 @@ impl KernelResourceClient {
     }
     pub(crate) fn with_integration_receipts(
         mut self,
-        send: impl Fn(IntegrationReceiptRead) -> Result<(), KernelError> + Send + Sync + 'static,
+        send: impl Fn(SourceEffectReceiptRead) -> Result<(), KernelError> + Send + Sync + 'static,
     ) -> Self {
         self.integration_receipts = Some(Arc::new(send));
         self
+    }
+    pub(crate) fn with_file_receipts(
+        mut self,
+        send: impl Fn(SourceEffectReceiptRead) -> Result<(), KernelError> + Send + Sync + 'static,
+    ) -> Self {
+        self.file_receipts = Some(Arc::new(send)); self
+    }
+    pub(crate) fn file_receipt(&self, source: varin_runtime::catalog::launches::SourceSelection,
+        run_id: String, thread_id: String, operation_id: String) -> Result<Value, KernelError> {
+        if !source.resource_owner.is_local() {
+            return self.source_query(json!({"kind":"file_receipt","source":source,"runId":run_id,"threadId":thread_id,"operationId":operation_id}), &CancellationToken::default())
+                .map_err(|error| KernelError::Operation(error.to_string()));
+        }
+        let (reply, receive) = mpsc::channel();
+        self.file_receipts.as_ref().ok_or_else(|| KernelError::Storage("File receipt reader is unavailable".into()))?(
+            SourceEffectReceiptRead { source, run_id, thread_id, operation_id, reply })?;
+        receive.recv().map_err(|_| KernelError::Storage("File receipt owner stopped".into()))?
     }
     pub(crate) fn integration_receipt(
         &self,
@@ -1023,7 +1043,7 @@ impl KernelResourceClient {
         let (reply, receive) = mpsc::channel();
         self.integration_receipts.as_ref().ok_or_else(|| {
             KernelError::Storage("Integration journal reader is unavailable".into())
-        })?(IntegrationReceiptRead {
+        })?(SourceEffectReceiptRead {
             source,
             run_id,
             thread_id,

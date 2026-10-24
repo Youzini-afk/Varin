@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { settingsDict } from './fr.settings';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -23,11 +25,11 @@ export const dict = {
   "thread.composer.chatOnly": "Discussion seule",
   "thread.message.summarize": "Résumer jusqu’ici",
   "chat.fileAttachment.actions.attachPdfs": "Joindre des PDF",
-  "chat.fileAttachment.actions.choosePdfs": "Choisir des fichiers PDF",
-  "chat.fileAttachment.pdfAttachments": "Pièces jointes PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Choisir des documents",
+  "chat.fileAttachment.pdfAttachments": "Documents joints",
   "chat.fileAttachment.uploading": "Préparation des pièces jointes…",
-  "chat.fileAttachment.unsupportedType": "Joignez une image ou un fichier PDF.",
-  "chat.fileAttachment.pdfNotRetained": "Le PDF n’a pas été conservé. Aucune pièce jointe n’a été ajoutée.",
+  "chat.fileAttachment.unsupportedType": "Joignez des images ou des fichiers PDF, DOCX, XLSX ou PPTX.",
+  "chat.fileAttachment.pdfNotRetained": "Le document n’a pas été conservé. Aucune pièce jointe ajoutée.",
   ...settingsDict,
   "chat.toolResult.fileContents": "Contenu du fichier : {path}",
   "chat.toolResult.byteRange": "{bytes} octets lus sur {total} · décalage {offset}",
@@ -355,10 +357,14 @@ export const dict = {
   'research-facts.remoteArtifact': "distant",
   'research-facts.remoteUnreachable': "Artefact distant indisponible",
   'research-facts.remoteExpired': "Artefact distant expiré",
+  "workFocus.general": "Général",
+  "workFocus.generalDescription": "Des outils équilibrés pour le travail quotidien.",
+  "workFocus.office": "Bureautique",
+  "workFocus.officeDescription": "Documents, données, navigateur et outils de bureau.",
   'workFocus.label': "Orientation du travail",
-  'workFocus.code': "Général",
+  "workFocus.code": "Programmation",
   'workFocus.research': "Recherche",
-  'workFocus.codeDescription': "Programmation et tâches courantes, avec les outils nécessaires.",
+  "workFocus.codeDescription": "Des outils pour travailler sur le code.",
   'workFocus.researchDescription': "Étudier des questions, comparer les explications et concevoir des expériences.",
   'workFocus.pending': "Applicable à la prochaine exécution",
   'workFocus.nextTurn': "Le changement s’applique au démarrage de la prochaine exécution. L’exécution en cours et ses demandes en attente conservent leur orientation.",

@@ -98,7 +98,13 @@ struct PreparedGraphNode {
 }
 impl PolicyGraphSchemaPreparation {
     pub fn load(self, intent: &PolicyGraphIntent) -> Result<PreparedPolicyGraphSchemas> {
-        let (body, run_id) = PolicyGraphBody::prepare(intent)?;
+        let (mut body, run_id) = PolicyGraphBody::prepare(intent)?;
+        let PolicyGraphIntent::PolicyToolGraphV1 { dispatch_history, .. } = intent;
+        if let Some(history) = dispatch_history {
+            let history = crate::context_retention::conversation_background(history);
+            validate_history_pairs(&history).map_err(|error| RuntimeError::Invalid(error.to_string()))?;
+            body.dispatch_history = Some(self.content.save_items(&history)?);
+        }
         let projection = self.context.map(context::ContextRead::load).transpose()?;
         let resource_activations = projection
             .as_ref()
@@ -116,7 +122,9 @@ impl PolicyGraphSchemaPreparation {
         let tools_ref = if let Some(launch) = &self.launch {
             let tools: Vec<ToolSchema> = serde_json::from_value(self.content.load(&launch.selection.tools_ref)?)?;
             let allowed = launch.selection.agent.as_ref().and_then(|agent| agent.tools.as_deref());
-            if body.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed) {
+            let focus = launch.selection.agent.as_ref().map(|agent| agent.work_focus.as_str()).unwrap_or("general");
+            if body.tools != crate::tool_disclosure::request_tools(&tools, self.has_goal, allowed)
+                || body.direct_tools.is_some() && body.direct_tools != crate::tool_disclosure::direct_tools(&body.tools, focus) {
                 return Err(RuntimeError::Conflict("graph differs from the admitted capability selection".into()));
             }
             // Keep the complete launch reference as the commit fence while the graph
@@ -130,7 +138,8 @@ impl PolicyGraphSchemaPreparation {
             boundary: body.boundary.clone(),
             identity: body.identity.clone(),
             node_count: body.nodes.len(),
-            body_ref: self.content.save(&serde_json::to_value(&body)?)?,
+            body_ref: self.content.save_with_dependencies(&serde_json::to_value(&body)?,
+                body.dispatch_history.as_ref().and_then(|reference| reference["content_object"].as_str()).map(str::to_owned).into_iter().collect())?,
         };
         let action = PolicyAction::ToolGraph {
             nodes: intent

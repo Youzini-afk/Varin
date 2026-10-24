@@ -460,6 +460,7 @@ mod tests {
                 },
                 ExecutorOwner::Kernel,
                 Arc::new(FrozenToolContext {
+                    direct_tools: None,
                     run_id: "run".into(),
                     origin,
                     child_dispatch: None,

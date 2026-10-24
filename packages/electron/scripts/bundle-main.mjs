@@ -28,6 +28,7 @@ const result = await Bun.build({
   format: 'esm',
   external: [
     'electron',
+    'puppeteer-core',
     '@varin/web',
     '@varin/web/*',
   ],

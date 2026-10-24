@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -254,11 +256,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "仅聊天",
   "thread.message.summarize": "总结到此处",
   "chat.fileAttachment.actions.attachPdfs": "添加 PDF",
-  "chat.fileAttachment.actions.choosePdfs": "选择 PDF 附件",
-  "chat.fileAttachment.pdfAttachments": "PDF 附件",
+  "chat.fileAttachment.actions.choosePdfs": "选择文档",
+  "chat.fileAttachment.pdfAttachments": "文档附件",
   "chat.fileAttachment.uploading": "正在准备附件…",
-  "chat.fileAttachment.unsupportedType": "请添加图片或 PDF 文件。",
-  "chat.fileAttachment.pdfNotRetained": "PDF 未保存，未添加附件。",
+  "chat.fileAttachment.unsupportedType": "支持图片、PDF、DOCX、XLSX 和 PPTX 文件。",
+  "chat.fileAttachment.pdfNotRetained": "文档未保存，未添加附件。",
   'onboarding.local.continue': '继续',
   'onboarding.local.retry': '重试',
   'onboarding.local.restart': '重启 Varin',
@@ -586,10 +588,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "补跑已选",
   'research-facts.actionFailed': "操作失败",
   'research-facts.unknownTarget': "未知目标",
+  "workFocus.general": "通用",
+  "workFocus.generalDescription": "均衡的基础工具，按需要使用各类能力。",
+  "workFocus.office": "办公",
+  "workFocus.officeDescription": "文档、数据、浏览器与电脑操作工具。",
   'workFocus.label': "工作侧重",
-  'workFocus.code': "通用",
+  "workFocus.code": "编程",
   'workFocus.research': "科研",
-  'workFocus.codeDescription': "处理编程与日常任务，按需要调用工具。",
+  "workFocus.codeDescription": "代码定位、开发执行与协作工具。",
   'workFocus.researchDescription': "调查问题、比较解释，设计并推进实验。",
   'workFocus.pending': "待下次启动生效",
   'workFocus.nextTurn': "修改在下次启动执行时生效；当前运行及其追问队列保留原侧重。",

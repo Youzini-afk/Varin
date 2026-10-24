@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "Somente conversa",
   "thread.message.summarize": "Resumir até aqui",
   "chat.fileAttachment.actions.attachPdfs": "Anexar PDFs",
-  "chat.fileAttachment.actions.choosePdfs": "Escolher arquivos PDF",
-  "chat.fileAttachment.pdfAttachments": "Anexos PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Escolher documentos",
+  "chat.fileAttachment.pdfAttachments": "Documentos anexados",
   "chat.fileAttachment.uploading": "Preparando anexos…",
-  "chat.fileAttachment.unsupportedType": "Anexe uma imagem ou um arquivo PDF.",
-  "chat.fileAttachment.pdfNotRetained": "O PDF não foi salvo. Nenhum anexo foi adicionado.",
+  "chat.fileAttachment.unsupportedType": "Anexe imagens ou arquivos PDF, DOCX, XLSX ou PPTX.",
+  "chat.fileAttachment.pdfNotRetained": "O documento não foi salvo. Nenhum anexo foi adicionado.",
   "onboarding.local.continue": "Continuar",
   "onboarding.local.retry": "Tentar novamente",
   "onboarding.local.restart": "Reiniciar o Varin",
@@ -357,10 +359,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "Executar novamente selecionados",
   'research-facts.actionFailed': "A ação falhou",
   'research-facts.unknownTarget': "destino desconhecido",
+  "workFocus.general": "Geral",
+  "workFocus.generalDescription": "Ferramentas equilibradas para o trabalho cotidiano.",
+  "workFocus.office": "Escritório",
+  "workFocus.officeDescription": "Documentos, dados, navegador e ferramentas de computador.",
   'workFocus.label': "Foco de trabalho",
-  'workFocus.code': "Geral",
+  "workFocus.code": "Programação",
   'workFocus.research': "Pesquisa",
-  'workFocus.codeDescription': "Programação e tarefas do dia a dia com as ferramentas necessárias.",
+  "workFocus.codeDescription": "Ferramentas para trabalhar com código.",
   'workFocus.researchDescription': "Investigar questões, comparar explicações e desenvolver experimentos.",
   'workFocus.pending': "Aplica-se à próxima execução",
   'workFocus.nextTurn': "A alteração se aplica ao iniciar a próxima execução. A execução atual e suas mensagens na fila mantêm o foco.",

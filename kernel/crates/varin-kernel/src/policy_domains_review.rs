@@ -926,6 +926,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             arguments: json!({"questions":[{"id":"question","question":"Original question"}]}),
         };
         let frozen = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -939,6 +940,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             &f.run,
             epoch,
             &PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history: None,
                 action_id,
                 boundary,
                 identity: crate::observations::policy_identity(questions::policy_identity(
@@ -1057,6 +1059,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             node_id: "plan".into(),
         };
         let frozen = FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -1070,6 +1073,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             &f.run,
             epoch,
             &PolicyGraphIntent::PolicyToolGraphV1 {
+                dispatch_history: None,
                 action_id,
                 boundary,
                 identity: crate::observations::policy_identity(questions::policy_identity(

@@ -1,4 +1,5 @@
 import React from 'react';
+import { documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
 import { ThreadAgentControls } from './ThreadAgentControls';
@@ -101,9 +102,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     reading.current = true; setReadingFiles(true); setError(undefined);
     try {
       for (const file of files) {
-        if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        const mimeType = documentMimeType(file.name, file.type);
+        if (mimeType) {
           const data = await fileToBase64(file); if (!current()) return;
-          patch(value => ({ pdfs: [...(value.pdfs ?? []), { id: crypto.randomUUID(), filename: file.name, data }] }));
+          patch(value => ({ pdfs: [...(value.pdfs ?? []), { id: crypto.randomUUID(), filename: file.name, data, mimeType }] }));
         } else if (file.type.startsWith('image/')) {
           if (acceptsImages === false) throw new Error(t('chat.model.imagesUnsupported'));
           const image = await fileToImageAttachment(file); if (!current()) return;
@@ -144,7 +146,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       }}>
         {(error || modelError || draft.firstSend?.error) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || modelError || draft.firstSend?.error}</p>}
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
-        <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
+        <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         {draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
           agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} />}

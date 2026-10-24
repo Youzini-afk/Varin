@@ -12,7 +12,7 @@ import { AutoSaveInput } from './AutoSaveInput';
 import type { HarnessSettingsPageProps } from './harness-settings-state';
 
 
-const researchTools = ['websearch', 'webfetch', 'document_read', 'research_search', 'materials', 'research_decide'] as const;
+const researchTools = ['websearch', 'webfetch', 'document_read', 'research_search', 'materials'] as const;
 const computerTools = ['computer'] as const;
 const shells = ['auto', 'git-bash', 'powershell', 'wsl'] as const;
 

@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "Solo chat",
   "thread.message.summarize": "Resumir hasta aquí",
   "chat.fileAttachment.actions.attachPdfs": "Adjuntar PDF",
-  "chat.fileAttachment.actions.choosePdfs": "Elegir archivos PDF",
-  "chat.fileAttachment.pdfAttachments": "Archivos PDF adjuntos",
+  "chat.fileAttachment.actions.choosePdfs": "Elegir documentos",
+  "chat.fileAttachment.pdfAttachments": "Documentos adjuntos",
   "chat.fileAttachment.uploading": "Preparando archivos adjuntos…",
-  "chat.fileAttachment.unsupportedType": "Adjunta una imagen o un archivo PDF.",
-  "chat.fileAttachment.pdfNotRetained": "El PDF no se guardó. No se añadió ningún archivo adjunto.",
+  "chat.fileAttachment.unsupportedType": "Adjunta imágenes o archivos PDF, DOCX, XLSX o PPTX.",
+  "chat.fileAttachment.pdfNotRetained": "No se conservó el documento. No se añadió ningún adjunto.",
   "computer.feedback.title": "Acciones de escritorio del Agent",
   "computer.feedback.type": "Escribiendo",
   "computer.feedback.value": "Estableciendo valor",
@@ -334,10 +336,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "Volver a ejecutar seleccionados",
   'research-facts.actionFailed': "La acción falló",
   'research-facts.unknownTarget': "destino desconocido",
+  "workFocus.general": "General",
+  "workFocus.generalDescription": "Herramientas equilibradas para el trabajo cotidiano.",
+  "workFocus.office": "Ofimática",
+  "workFocus.officeDescription": "Documentos, datos, navegador y herramientas de escritorio.",
   'workFocus.label': "Enfoque de trabajo",
-  'workFocus.code': "General",
+  "workFocus.code": "Programación",
   'workFocus.research': "Investigación",
-  'workFocus.codeDescription': "Programación y tareas cotidianas con las herramientas necesarias.",
+  "workFocus.codeDescription": "Herramientas para trabajar con código.",
   'workFocus.researchDescription': "Investigar preguntas, comparar explicaciones y desarrollar experimentos.",
   'workFocus.pending': "Se aplica a la próxima ejecución",
   'workFocus.nextTurn': "El cambio se aplica al iniciar la próxima ejecución. La ejecución actual y sus mensajes en cola mantienen su enfoque.",

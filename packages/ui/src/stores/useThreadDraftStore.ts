@@ -19,13 +19,14 @@ export type ThreadPendingInput = {
   | { kind: 'enqueue'; input: Parameters<ThreadsAPI['enqueue']>[0] }
   | { kind: 'continue'; input: Parameters<NonNullable<ThreadsAPI['collaboration']>['continueChild']>[0] }
 );
-/** A retained PDF reference, never the original upload bytes or a filesystem grant. */
+/** A retained document reference, never the original upload bytes or a filesystem grant. */
 export interface ThreadMaterialAttachment {
   snapshotId: string;
   filename: string;
   sourceHash?: string;
+  format?: 'pdf' | import('@varin/protocol').OfficeFormat;
 }
-export interface DraftPdfAttachment { id: string; filename: string; data: string }
+export interface DraftPdfAttachment { id: string; filename: string; data: string; mimeType?: import('@varin/protocol').DocumentMimeType }
 export interface DraftSourceSelection {
   path: string;
   resourceOwner: ThreadPrepareSource['resourceOwner'];

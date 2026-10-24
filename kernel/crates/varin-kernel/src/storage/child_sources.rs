@@ -469,7 +469,7 @@ impl Storage {
     /// Trusted Catalog inspection of an original journal, independent of current disk access.
     pub(crate) fn integration_receipt(
         &self,
-        read: &crate::tools::IntegrationReceiptRead,
+        read: &crate::tools::SourceEffectReceiptRead,
     ) -> Result<Value, KernelError> {
         let id = format!("integration:{}", read.operation_id);
         let receipt = self.read_recovery_operation(&read.source.workspace_id, &id, None)?;
@@ -628,7 +628,7 @@ mod tests {
             .revoke_grant(&json!({"grantId":"actor"}), "host")
             .unwrap();
         let (reply, _) = mpsc::channel();
-        let read = crate::tools::IntegrationReceiptRead {
+        let read = crate::tools::SourceEffectReceiptRead {
             source: source.clone(),
             run_id: "run".into(),
             thread_id: "thread".into(),

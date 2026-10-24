@@ -1,4 +1,4 @@
-import { THINKING_LEVELS } from '@varin/protocol';
+import { THINKING_LEVELS, documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { ContextHistoryDialog } from '../conversation/ContextHistoryDialog';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
 import { MessageHandoff } from '../conversation/messageHandoff';
@@ -287,21 +287,21 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const controller = new AbortController(); fileRead.current = controller;
     const current = () => !controller.signal.aborted && generation === fileReadGeneration.current
       && host === getRuntimeEndpointGeneration() && fileRead.current === controller;
-    const isPdf = (file: File) => file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    const isDocument = (file: File) => !!documentMimeType(file.name, file.type);
     setReadingFiles(true); setError(undefined);
     try {
-      if (files.some(file => !isPdf(file) && !file.type.startsWith('image/'))) throw new Error(t('chat.fileAttachment.unsupportedType'));
-      if (acceptsImages === false && files.some(file => !isPdf(file))) throw new Error('The selected model does not accept images');
+      if (files.some(file => !isDocument(file) && !file.type.startsWith('image/'))) throw new Error(t('chat.fileAttachment.unsupportedType'));
+      if (acceptsImages === false && files.some(file => !isDocument(file))) throw new Error('The selected model does not accept images');
       for (const file of files) {
         if (!current()) return;
-        if (isPdf(file)) {
+        if (isDocument(file)) {
           const data = await fileToBase64(file);
           if (!current()) return;
-          const result = await api.materials.upload(identity, { filename: file.name, mimeType: 'application/pdf', data }, controller.signal);
+          const result = await api.materials.upload(identity, { filename: file.name, mimeType: documentMimeType(file.name, file.type)!, data }, controller.signal);
           if (!current()) return;
           const retained = result.status === 'ok' ? result.sourceSnapshot ?? result.snapshot : undefined;
-          if (!retained?.snapshotId || retained.document?.kind !== 'pdf') throw new Error(t('chat.fileAttachment.pdfNotRetained'));
-          const material = { snapshotId: retained.snapshotId, filename: file.name, sourceHash: retained.document.source?.contentHash };
+          if (!retained?.snapshotId || !retained.document?.source) throw new Error(t('chat.fileAttachment.pdfNotRetained'));
+          const material = { snapshotId: retained.snapshotId, filename: file.name, sourceHash: retained.document.source.contentHash, format: retained.document.kind };
           setMaterials(previous => previous.some(item => item.snapshotId === material.snapshotId) ? previous : [...previous, material]);
         } else {
           const image = await fileToImageAttachment(file);
@@ -567,7 +567,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {images.length > 0 && acceptsImages === false && <p role="alert" className="text-sm text-destructive">{t('chat.model.imagesUnsupported')}</p>}
       <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments"
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
-      <input ref={pdfInput} type="file" accept="application/pdf,.pdf" multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')}
+      <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')}
         onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
       <AutoReviewBanner identity={identity} />
       {draft.goalArmed && <p className="px-2 typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}

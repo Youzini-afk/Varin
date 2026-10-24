@@ -75,6 +75,7 @@ fn proposal(text: &str) -> ContextProposal {
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
     RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -326,6 +327,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
         node_id: "read-node".into(),
     };
     let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+        dispatch_history: None,
         action_id,
         boundary,
         identity: PolicyIdentity {
@@ -345,6 +347,7 @@ fn policy_graph_freezes_original_resource_checkpoint_without_model_step() {
                 },
             },
             context: FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: Some(old.id.clone()),
@@ -1167,6 +1170,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
         node_id: "inherited-skill".into(),
     };
     let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+        dispatch_history: None,
         action_id: action_id.clone(),
         boundary: boundary.clone(),
         identity: PolicyIdentity {
@@ -1186,6 +1190,7 @@ fn explicit_skill_survives_refresh_compaction_fork_reopen_and_real_request_tool_
                 },
             },
             context: FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![activation.clone()],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -1602,6 +1607,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
         node_id: "calendar-resource".into(),
     };
     let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+        dispatch_history: None,
         action_id: action_id.clone(),
         boundary: boundary.clone(),
         identity: PolicyIdentity {
@@ -1621,6 +1627,7 @@ fn cold_calendar_skill_keeps_real_environment_proof_through_compaction_gc_and_re
                 },
             },
             context: FrozenToolContext {
+                direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![activation.clone()],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

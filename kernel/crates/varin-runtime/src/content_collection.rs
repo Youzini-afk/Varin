@@ -418,6 +418,7 @@ impl ContentCollection {
 
             UNION ALL SELECT json_extract(body,'$.launch.child_dispatch_ref') FROM delegated_executions WHERE json_extract(body,'$.launch.child_dispatch_ref') IS NOT NULL
             UNION ALL SELECT json_extract(body,'$.selected_profile_ref') FROM child_tasks
+            UNION ALL SELECT json_extract(body,'$.inherited_context.items') FROM child_tasks WHERE json_extract(body,'$.inherited_context') IS NOT NULL
             UNION ALL SELECT json_extract(body,'$.child_dispatch_ref') FROM model_selections WHERE json_extract(body,'$.child_dispatch_ref') IS NOT NULL");
         let mut references = Vec::new();
         let mut stmt = db.prepare(&roots)?;

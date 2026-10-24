@@ -3,8 +3,9 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 /** Deletion requests maintenance; execution/reader completion supplies the retry opportunity.
  * The native owner decides which records and shared content can actually be released. */
 export function createContentMaintenance(options: {
-  runtime: Pick<AgentRuntimeClient, 'threads' | 'collectContent' | 'onEvent' | 'onReady' | 'onExit'>;
+  runtime: Pick<AgentRuntimeClient, 'collectContent' | 'onEvent' | 'onReady' | 'onExit'>;
   onError(error: unknown): void;
+  releaseDeletedResources?(signal: AbortSignal): Promise<void>;
 }) {
   const lifetime = new AbortController();
   let pending = false;
@@ -22,7 +23,10 @@ export function createContentMaintenance(options: {
       scheduled = undefined;
       dirty = false;
       const owner = generation;
-      running = options.runtime.collectContent(lifetime.signal).then(report => {
+      running = (async () => {
+        await options.releaseDeletedResources?.(lifetime.signal);
+        return options.runtime.collectContent(lifetime.signal);
+      })().then(report => {
         if (owner !== generation || lifetime.signal.aborted) return;
         pending = dirty || report.status !== 'completed' || (report.pendingDeletedThreads ?? 0) > 0;
         if (report.status === 'failed') options.onError(new Error(report.reason ?? 'Content collection failed'));
@@ -37,13 +41,7 @@ export function createContentMaintenance(options: {
     });
     scheduled.unref?.();
   };
-  const initialize = async () => {
-    const owner = ++generation;
-    try {
-      const threads = await options.runtime.threads(lifetime.signal);
-      if (!lifetime.signal.aborted && owner === generation && threads.some(thread => thread.deleted_at_ms !== null)) request();
-    } catch (error) { if (!lifetime.signal.aborted && owner === generation) options.onError(error); }
-  };
+  const initialize = () => { ++generation; request(); };
   const remove = [
     options.runtime.onEvent(event => { if (pending && event.stream === 'durable') request(); }),
     options.runtime.onReady(() => { void initialize(); }),

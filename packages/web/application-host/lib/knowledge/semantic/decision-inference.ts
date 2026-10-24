@@ -7,7 +7,7 @@ import { parseHarnessFastDecisionSettings, resolveFastDecisionPurpose,
 import { requestClassifier, classifierWireUsage, classifierRawUsage, classifierWireResponseValid, ClassifierResponseError, type ClassifierFetch } from '../../models/classifier.js';
 import type { InferenceProviderBinding as HostInferenceProviderBinding } from '../../models/service.js';
 import type { InferenceCall, InferenceInvocationAuthority, InferenceRequests, InferenceRequestsOptions } from './inference-requests.js';
-import { ResearchDecisionFailure } from '../../harness/research-decide.js';
+import { DecisionInferenceFailure } from './decision-failure.js';
 import type { InferenceBinding, InferenceReceipt } from '../../kernel/protocol.generated.js';
 import { acquireTokenCounter } from '../../models/token-count.js';
 import { classifierContextLimits, classifierInputTexts, classifierQuestionInputTexts } from '../../models/classifier.js';
@@ -100,9 +100,9 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
         void acquiring?.then(value => value.release()).catch(() => {}); };
       const assertAvailable = async (signal: AbortSignal) => {
         signal.throwIfAborted();
-        if (closed || released) throw new ResearchDecisionFailure('The original decision binding was released.');
+        if (closed || released) throw new DecisionInferenceFailure('The original decision binding was released.');
         try { await readSelection(purpose); } catch { /* A malformed new candidate cannot retire this accepted binding. */ }
-        if (disabled.has(purpose) || generation !== (revisions.get(purpose) ?? 0)) throw new ResearchDecisionFailure('Fast decision was explicitly disabled for this purpose.');
+        if (disabled.has(purpose) || generation !== (revisions.get(purpose) ?? 0)) throw new DecisionInferenceFailure('Fast decision was explicitly disabled for this purpose.');
         await provider.assertAvailable();
         signal.throwIfAborted();
       };
@@ -128,12 +128,12 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
               catch {
                 // Response accounting precedes this fence. Revocation suppresses answers, never
                 // the original observed usage/provenance, and never switches to a new binding.
-                throw new ResearchDecisionFailure('The original decision connection or material access is no longer available for delivery.',
+                throw new DecisionInferenceFailure('The original decision connection or material access is no longer available for delivery.',
                   { ...result, answers: [], missing: [...base.missing] }, call.cancelled);
               }
             };
             try {
-              if (input.purpose !== purpose) throw new ResearchDecisionFailure('Decision purpose differs from its frozen binding.');
+              if (input.purpose !== purpose) throw new DecisionInferenceFailure('Decision purpose differs from its frozen binding.');
               await assertAvailable(combined);
               const auth = await provider.getAuth();
               const headers = new Headers(provider.headers);
@@ -181,14 +181,14 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                 model: provider.requestModelId ?? binding.modelId,
                 state: { goal: input.goal, materials: input.materials, ...(input.context === undefined ? {} : { context: input.context }) },
                 questions: input.questions, signal: combined, fetchImpl });
-              if (combined.aborted) throw new ResearchDecisionFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
+              if (combined.aborted) throw new DecisionInferenceFailure('Decision interrupted after retaining its original provider receipt.', observed(), call.cancelled);
               const { usage: _usage, ...answers } = result;
               const projected = { ...observed(), ...answers };
               await assertDelivery(projected);
               return projected;
             } catch (error) {
-              if (error instanceof ResearchDecisionFailure) {
-                if (!error.result && receipts().length) throw new ResearchDecisionFailure(error.message, observed(), error.cancelled || call.cancelled);
+              if (error instanceof DecisionInferenceFailure) {
+                if (!error.result && receipts().length) throw new DecisionInferenceFailure(error.message, observed(), error.cancelled || call.cancelled);
                 throw error;
               }
               const partial = error instanceof ClassifierResponseError ? error.result : undefined;
@@ -204,7 +204,7 @@ export function createDecisionInference(authority: DecisionInferenceAuthority, s
                     ? 'Check the selected provider credentials and model access.'
                     : failedRoute[1] === 429 ? 'The provider rejected the request due to its rate or usage limit.'
                       : 'Check the provider response in the original inference receipt.'}` : undefined;
-              throw new ResearchDecisionFailure(wasCancelled ? 'Decision cancelled; inspect its original inference receipt.'
+              throw new DecisionInferenceFailure(wasCancelled ? 'Decision cancelled; inspect its original inference receipt.'
                 : httpFailure ?? 'Decision failed; inspect its original inference receipt and provider configuration.', result, wasCancelled);
             }
           } });

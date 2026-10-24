@@ -291,9 +291,11 @@ impl RunTools {
         generation: u64,
         prepared: PreparedRunTools,
     ) -> Result<Arc<dyn ToolExecutor>, ExecutionError> {
-        let allowed_tools = self.catalog.lock().map_err(failed)?
+        let agent = self.catalog.lock().map_err(failed)?
             .launch_metadata(run).map_err(failed)?
-            .and_then(|launch| launch.selection.agent.and_then(|agent| agent.tools));
+            .and_then(|launch| launch.selection.agent);
+        let work_focus = agent.as_ref().map(|agent| agent.work_focus.clone()).unwrap_or_else(|| "general".into());
+        let allowed_tools = agent.and_then(|agent| agent.tools);
         let slot = self.slot(run)?;
         for extension in &prepared.extensions {
             extension.generation.activate()?;
@@ -331,6 +333,7 @@ impl RunTools {
             slot,
             run_id: run.into(),
             allowed_tools,
+            work_focus,
         }))
     }
     pub fn desire(&self, run: &str, id: &str) -> Result<(), ExecutionError> {
@@ -431,6 +434,7 @@ impl RunTools {
     }
 }
 struct ScopedTools {
+    work_focus: String,
     owner: Arc<RunTools>,
     slot: Arc<Slot>,
     run_id: String,
@@ -525,6 +529,7 @@ impl ToolExecutor for ScopedTools {
             .freeze(&schemas)?
             .ok_or_else(|| failed("tool directory did not retain its endpoints"))?;
         Ok(Some(SelectedTools {
+            direct_tools: varin_runtime::tool_disclosure::direct_tools(&schemas, &self.work_focus),
             generation: active.generation,
             schemas,
             executor,

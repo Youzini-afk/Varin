@@ -243,13 +243,10 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   {
     id: 'harness.models.research', category: 'agents', owner: 'agent-settings',
     fields: [
-      { path: 'harness.models.researchInvestigation', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.researchExperimentalDesign', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.researchFastExploration', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
-      { path: 'harness.models.researchHighThroughputExecution', kind: 'json', scope: 'user', note: '{enabled?: boolean, providerId?: string, modelId?: string}; false disables the role while retaining its model' },
+      { path: 'harness.models.researchPeer', kind: 'json', scope: 'user', note: '{enabled?: boolean, inherit?: boolean, providerId?: string, modelId?: string}; research collaborator configuration' },
     ],
     apply: 'next-run',
-    ui: { page: 'agents', titleKey: 'settings.harness.models.research', keywords: ["researchInvestigation", "researchExperimentalDesign", "researchFastExploration", "researchHighThroughputExecution", "agent", "model", "enable", "disable"] },
+    ui: { page: 'agents', titleKey: 'settings.harness.models.research', keywords: ["researchPeer", "agent", "model", "enable", "disable"] },
   },
   {
     id: 'harness.models.reader', category: 'web', owner: 'agent-settings',

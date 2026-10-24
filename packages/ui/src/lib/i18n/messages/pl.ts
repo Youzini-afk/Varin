@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "Tylko czat",
   "thread.message.summarize": "Podsumuj do tego miejsca",
   "chat.fileAttachment.actions.attachPdfs": "Załącz pliki PDF",
-  "chat.fileAttachment.actions.choosePdfs": "Wybierz pliki PDF",
-  "chat.fileAttachment.pdfAttachments": "Załączniki PDF",
+  "chat.fileAttachment.actions.choosePdfs": "Wybierz dokumenty",
+  "chat.fileAttachment.pdfAttachments": "Załączone dokumenty",
   "chat.fileAttachment.uploading": "Przygotowywanie załączników…",
-  "chat.fileAttachment.unsupportedType": "Załącz obraz lub plik PDF.",
-  "chat.fileAttachment.pdfNotRetained": "Plik PDF nie został zachowany. Nie dodano załącznika.",
+  "chat.fileAttachment.unsupportedType": "Dołącz obrazy lub pliki PDF, DOCX, XLSX albo PPTX.",
+  "chat.fileAttachment.pdfNotRetained": "Dokument nie został zachowany. Nie dodano załącznika.",
   "computer.feedback.title": "Działania Agenta na pulpicie",
   "computer.feedback.type": "Wpisywanie",
   "computer.feedback.value": "Ustawianie wartości",
@@ -334,10 +336,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "Uruchom ponownie wybrane",
   'research-facts.actionFailed': "Akcja nie powiodła się",
   'research-facts.unknownTarget': "nieznany cel",
+  "workFocus.general": "Ogólny",
+  "workFocus.generalDescription": "Zrównoważone narzędzia do codziennej pracy.",
+  "workFocus.office": "Praca biurowa",
+  "workFocus.officeDescription": "Dokumenty, dane, przeglądarka i obsługa komputera.",
   'workFocus.label': "Ukierunkowanie pracy",
-  'workFocus.code': "Ogólne",
+  "workFocus.code": "Programowanie",
   'workFocus.research': "Badania",
-  'workFocus.codeDescription': "Programowanie i codzienne zadania z użyciem potrzebnych narzędzi.",
+  "workFocus.codeDescription": "Narzędzia do pracy z kodem.",
   'workFocus.researchDescription': "Badanie pytań, porównywanie wyjaśnień i opracowywanie eksperymentów.",
   'workFocus.pending': "Obowiązuje od następnego uruchomienia",
   'workFocus.nextTurn': "Zmiana obowiązuje od następnego uruchomienia. Bieżące wykonanie i jego pytania w kolejce zachowują dotychczasowy profil.",

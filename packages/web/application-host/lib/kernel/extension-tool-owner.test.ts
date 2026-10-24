@@ -728,12 +728,12 @@ it('real A-to-B routing keeps A on rejected B publication, ignores disabled B, a
     scope.close(); closeScope = undefined;
     const researchId = await install('Research', 'research_search');
     await route(researchId);
-    for (const workFocus of ['code', 'research'] as const) {
+    for (const workFocus of ['general', 'code', 'research', 'office'] as const) {
       const focused = await createExtensionTools(options)(
         { runId: `focus-${workFocus}`, threadId: 'thread', branchId: 'history-branch', source: null, workFocus }, [], new AbortController().signal);
       try {
         expect(focused.initial.map(value => value.binding.tool.name)).toEqual(['research_search']);
-        expect(focused.initial[0]!.binding.tool.metadata?.always_declared === true).toBe(workFocus === 'research');
+        expect(focused.initial[0]!.binding.tool.metadata?.always_declared === true).toBe(false);
       } finally { focused.close(); for (const retained of focused.initial) retained.lease.release(); }
     }
   } finally {

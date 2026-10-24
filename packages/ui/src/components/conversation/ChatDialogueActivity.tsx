@@ -21,6 +21,8 @@ const actions: Record<string, I18nKey> = {
   process_inspect: 'chat.tools.inspectProcess', process_resize: 'chat.tools.resizeTerminal', process_stop: 'chat.tools.stopProcess', wait_process: 'chat.tools.waitProcess',
   script_run: 'chat.dialogue.script', script_open: 'chat.dialogue.scriptOpen', script_close: 'chat.dialogue.scriptClose',
   websearch: 'chat.dialogue.webSearch', webfetch: 'chat.dialogue.webRead', document_read: 'chat.dialogue.document',
+  office_read: 'chat.dialogue.document', office_render: 'office.reader.preview', office_write: 'chat.dialogue.edit', office_export: 'chat.toolAction.export',
+  browser_tabs: 'chat.toolAction.list', browser_open: 'chat.toolAction.open', browser_read: 'chat.dialogue.webRead', browser_act: 'chat.toolAction.navigate', browser_files: 'chat.toolAction.save',
   todo: 'chat.dialogue.plan', memory: 'chat.dialogue.memory', render_ui: 'chat.dialogue.render',
   recovery_points: 'chat.dialogue.recovery', file_restore: 'chat.dialogue.restore',
   image_generate: 'chat.dialogue.image', image_edit: 'chat.dialogue.image',
@@ -28,12 +30,14 @@ const actions: Record<string, I18nKey> = {
 type Category = 'reads' | 'searches' | 'changes' | 'drafts' | 'branches' | 'commands' | 'scripts' | 'processes' | 'web' | 'collaboration' | 'plans' | 'memory' | 'other';
 const category = (name: string): Category => {
   if (name === 'file_read') return 'reads';
+  if (name === 'office_read' || name === 'office_render') return 'reads';
+  if (name === 'office_write' || name === 'office_export') return 'changes';
   if (['file_search', 'file_list', 'code_retrieval'].includes(name)) return 'searches';
   if (isFileChangeTool(name)) return 'changes';
   if (name === 'process_spawn') return 'commands';
   if (name.startsWith('script_')) return 'scripts';
   if (name.startsWith('process_') || name === 'wait_process') return 'processes';
-  if (['websearch', 'webfetch', 'document_read', 'research_search'].includes(name)) return 'web';
+  if (name.startsWith('browser_') || ['websearch', 'webfetch', 'document_read', 'research_search'].includes(name)) return 'web';
   if (name.startsWith('child_') || ['wait_child', 'threads', 'read_thread', 'send', 'submit_code', 'update', 'agent_rename'].includes(name)) return 'collaboration';
   return name === 'todo' ? 'plans' : name === 'memory' ? 'memory' : 'other';
 };
@@ -70,7 +74,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   for (const { item, status, execution, result, counted } of tools) {
     if (!counted) continue;
     const kind = category(item.call.name);
-    if (kind === 'changes') {
+    if (kind === 'changes' && isFileChangeTool(item.call.name)) {
       const effects = new Set<Category>();
       for (const file of fileChangeTargets(item.call)) {
         const phase = fileChangePhase(execution, result, false, file.path);

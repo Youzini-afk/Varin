@@ -141,6 +141,7 @@ impl ModelProvider for Provider {
 }
 fn binding() -> RequestBinding {
     RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

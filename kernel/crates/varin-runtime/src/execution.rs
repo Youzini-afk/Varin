@@ -374,6 +374,9 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    /// Direct model functions selected for this request; None retains earlier frozen requests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_tools: Option<Vec<String>>,
     /// Original user-configured channel, retained independently of later model selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
@@ -724,7 +727,7 @@ impl RequestCompileReuse {
         selected: Option<Arc<dyn ModelProvider>>,
     ) {
         let mut projected_binding;
-        let b = if let Some(tools) = crate::tool_disclosure::model_tools(&view.binding.tools) {
+        let b = if let Some(tools) = crate::tool_disclosure::model_tools_for(&view.binding.tools, view.binding.direct_tools.as_deref()) {
             projected_binding = view.binding.clone();
             projected_binding.tools = tools;
             // This is only the encoder reuse key. The original request and executable
@@ -991,6 +994,8 @@ impl ToolOrigin {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_tools: Option<Vec<String>>,
     pub child_dispatch: Option<Value>,
     pub resource_activations: Vec<crate::catalog::resources::ResourceActivation>,
     pub resource_checkpoint_id: Option<String>,
@@ -1107,6 +1112,7 @@ impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
 }
 
 pub struct SelectedTools {
+    pub direct_tools: Option<Vec<String>>,
     pub generation: u64,
     pub schemas: Vec<ToolSchema>,
     pub executor: Arc<dyn ToolExecutor>,
@@ -2369,6 +2375,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected {
+                        input.binding.direct_tools = selected.direct_tools.clone();
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
                     }
@@ -2483,6 +2490,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_tools {
+                        input.binding.direct_tools = selected.direct_tools.clone();
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
                     }
@@ -3033,6 +3041,7 @@ impl<
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
         let frozen = FrozenToolContext {
+            direct_tools: snapshot.view.binding.direct_tools.clone(),
             child_dispatch: snapshot.view.binding.child_dispatch.clone(),
             resource_activations: snapshot.view.binding.resource_activations.clone(),
             resource_checkpoint_id: snapshot.view.binding.resource_checkpoint_id.clone(),
@@ -3467,7 +3476,7 @@ pub(crate) fn validate_model_items(
                         "tool call identity is empty or duplicated",
                     ));
                 }
-                let schema = crate::tool_disclosure::model_tool(&snapshot.view.binding.tools, &call.name)?;
+                let schema = crate::tool_disclosure::model_tool_for(&snapshot.view.binding.tools, snapshot.view.binding.direct_tools.as_deref(), &call.name)?;
                 if schema.version != call.schema_version {
                     return Err(crate::tool_disclosure::call_error("stale_tool_schema", &call.name,
                         "The tool call uses a different schema version from this request. Use the declared schema, or refresh the target reference with tool_describe before tool_invoke."));

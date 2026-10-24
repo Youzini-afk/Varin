@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import {
   EXECUTION_PRESETS, HarnessSettingsValidationError,
   agentPresetTools, mergeHarnessSettings, parseHarnessAgent, parseHarnessModelSlots,
-  resolveAgentTools, updateAgentToolSelection,
+  resolveAgentTools, updateAgentToolSelection, harnessModelSlotInheritsMain,
   type HarnessSettingsInput, type HarnessModelBinding,
   type HarnessCustomAgent, type JsonValue, type ChildCapabilityDescriptor,
   type ContextAgentDefinition,
@@ -45,7 +45,7 @@ function sharedAgent(agent: HarnessCustomAgent) {
 }
 function definitions(capabilities: ChildCapabilityDescriptor[], context: ContextAgentDefinition) {
   const native = agentPresetTools(capabilities);
-  return [...Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.id,
+  return [...Object.values(EXECUTION_PRESETS).map(definition => ({ slot: definition.slot, name: definition.name ?? definition.id,
     description: definition.teamDescription, instructions: definition.systemPromptFragment,
     worktree: definition.worktree, workFocus: definition.workFocus ?? [],
     tools: native[definition.id], automation: undefined as ContextAgentDefinition | undefined })),
@@ -66,7 +66,7 @@ function project(snapshot: GlobalSettingsSnapshot, target: 'agent', capabilities
       effective: { name: overrides?.name ?? definition.name, description: overrides?.description ?? definition.description,
         ...(overrides?.avatar ? { avatar: overrides.avatar } : {}),
         instructions: overrides?.instructions ?? definition.instructions, enabled: binding.enabled !== false,
-        model, modelSource: model ? 'selected' : ['worker', 'verifier', 'contextCompaction'].includes(definition.slot) ? 'inherit' : 'unconfigured',
+        model, modelSource: model ? 'selected' : harnessModelSlotInheritsMain(definition.slot, binding) ? 'inherit' : 'unconfigured',
         ...(overrides?.modelSettings ? { modelSettings: overrides.modelSettings } : {}),
         worktree: overrides?.worktree ?? definition.worktree, workFocus: [...definition.workFocus] },
       tools: resolveAgentTools(definition.automation ? undefined : overrides?.tools, target, definition.tools),

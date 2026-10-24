@@ -1,4 +1,5 @@
 import { projectFolders } from '@varin/application-client';
+import { isWorkFocusId } from '@varin/protocol';
 
 export interface SettingsPathModule {
   dirname(value: string): string;
@@ -190,7 +191,7 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
       const iconBackground = normalizeIconBackground(candidate.iconBackground);
       const color = typeof candidate.color === 'string' ? candidate.color.trim() : '';
       const defaultModel = typeof candidate.defaultModel === 'string' ? candidate.defaultModel.trim() : '';
-      const defaultWorkFocus = candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research'
+      const defaultWorkFocus = isWorkFocusId(candidate.defaultWorkFocus)
         ? candidate.defaultWorkFocus
         : null;
       const addedAt = typeof candidate.addedAt === 'number' && Number.isFinite(candidate.addedAt)

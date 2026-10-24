@@ -55,6 +55,7 @@ import { useDeviceInfo } from '@/lib/device';
 import { threadHostKey as getRuntimeKey } from '@/stores/useThreadStore';
 import { createEditorDocumentController } from '@/lib/extensions/editor-document-controller';
 import { WorkbenchPdfReader } from './WorkbenchPdfReader';
+import { WorkbenchOfficeReader } from './WorkbenchOfficeReader';
 import { useThreadStore, selectedComposerKey } from '@/stores/useThreadStore';
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { BrowserResourceView } from './BrowserResourceView';
@@ -150,7 +151,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
   const needsText = TEXT_PROVIDERS.has(activeProviderId) && isEditorProviderEnabled(activeProviderId);
   const needsGitWorkingDocument = activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.gitDiff
     && (tab.viewState.diffScope ?? 'working') === 'working';
-  const needsDocument = needsText || needsGitWorkingDocument || Boolean(surfaceContribution);
+  const needsDocument = needsText || needsGitWorkingDocument || Boolean(surfaceContribution) || activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.office;
   const record = useDocumentRecord(needsDocument ? identity : undefined);
   const [desktopImageSrc, setDesktopImageSrc] = React.useState('');
   const autoSaveEnabled = useUIStore((state) => state.autoSaveEnabled);
@@ -490,7 +491,7 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
     );
   }
 
-  if (record?.status === 'binary' || record?.status === 'unsupported-encoding') {
+  if (activeProviderId !== BUILTIN_EDITOR_PROVIDER_IDS.office && (record?.status === 'binary' || record?.status === 'unsupported-encoding')) {
     return (
       <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
         <div className="flex h-full items-center justify-center p-4 text-center typography-ui text-muted-foreground">
@@ -531,6 +532,15 @@ export const ResourceEditorHost: React.FC<ResourceEditorHostProps> = ({
         </div>
       </HostFrame>
     );
+  }
+
+  if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.office) {
+    const original = getRuntimeUrlResolver().authenticatedAsset('/api/fs/raw', { path, directory: workspaceRoot });
+    const openOriginal = () => { window.open(original, '_blank', 'noopener,noreferrer'); };
+    return <HostFrame chooser={ambiguousChooser} toolbar={toolbar}>
+      <WorkbenchOfficeReader workspaceId={workspaceId} workspaceRoot={workspaceRoot} identity={currentIdentity ?? undefined} tab={tab} path={path}
+        revision={record?.baseRevision ?? undefined} onOpenOriginal={openOriginal} />
+    </HostFrame>;
   }
 
   if (activeProviderId === BUILTIN_EDITOR_PROVIDER_IDS.pdf || isPdfFile(path)) {

@@ -66,6 +66,7 @@ pub struct PreparedSubmission {
     pub(super) _publication: crate::content::ContentPublication,
 }
 pub(super) struct SubmissionBody {
+    pub inherited_context: Option<crate::context_retention::RetainedContext>,
     pub input_preparation: Option<resources::InputResourcePreparation>,
     pub command: SubmitInput,
     pub launch: Option<launches::LaunchSelection>,
@@ -309,6 +310,7 @@ impl SubmissionPreparation {
             }
         } else { None };
         let mut prepared = PreparedSubmission::stage(SubmissionBody {
+            inherited_context: None,
             input_preparation: self.input_preparation,
             command: self.command,
             launch,
@@ -332,6 +334,7 @@ impl SubmissionPreparation {
 impl PreparedSubmission {
     pub(super) fn stage(body: SubmissionBody) -> Result<Self> {
         let SubmissionBody {
+            inherited_context,
             input_preparation,
             command,
             launch,
@@ -479,7 +482,7 @@ impl PreparedSubmission {
                         super::followups::normalized_source(resources.source.take(), &run_id);
                 }
                 let body = context::ContextCheckpoint {
-                    retained: active.as_ref().and_then(|active| active.retained.clone()),
+                    retained: active.as_ref().and_then(|active| active.retained.clone()).or(inherited_context),
                     bot_memory_snapshot: active.as_ref().and_then(|active| active.bot_memory_snapshot.clone()),
                     id: proposal.key.clone(),
                     revision,

@@ -150,6 +150,7 @@ pub fn build_provider(
     connection.tool_output_visible_bytes = configuration.tool_output_visible_bytes.map(|bytes| bytes as usize);
     let provider = selected.bind(&configuration, connection)?;
     let binding = RequestBinding {
+        direct_tools: None,
         provider_id: configuration.provider_id,
         tokenizer: configuration.tokenizer,
         request_context: None,

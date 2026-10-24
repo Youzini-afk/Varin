@@ -1,4 +1,5 @@
 import React from 'react';
+import { WORK_FOCUS_IDS } from '@varin/protocol';
 import { projectFolders } from '@varin/application-client';
 import { ProjectTrustSettings } from '../shared/ProjectTrustSettings';
 import { Input } from '@/components/ui/input';
@@ -99,11 +100,10 @@ export const ProjectIdentityFields: React.FC<ProjectIdentityFieldsProps> = ({ fo
       >
         <Select value={defaultWorkFocus} onValueChange={setDefaultWorkFocus}>
           <SelectTrigger className={cn('h-8 rounded-md px-3', PROJECT_SETTINGS_CONTROL_WIDTH)} aria-label={t('workFocus.projectDefault')}>
-            <SelectValue>{t(defaultWorkFocus === 'research' ? 'workFocus.research' : 'workFocus.code')}</SelectValue>
+            <SelectValue>{t(`workFocus.${defaultWorkFocus}`)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="code">{t('workFocus.code')}</SelectItem>
-            <SelectItem value="research">{t('workFocus.research')}</SelectItem>
+            {WORK_FOCUS_IDS.map(focus => <SelectItem key={focus} value={focus}>{t(`workFocus.${focus}`)}</SelectItem>)}
           </SelectContent>
         </Select>
       </ProjectSettingsSubsection>

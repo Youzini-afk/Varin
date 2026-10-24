@@ -96,6 +96,7 @@ impl Fixture {
             leaf_id: fixture.db.head("branch").unwrap(),
         };
         let binding = RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -1066,6 +1067,7 @@ fn report_dependency(f: &mut Fixture, request: &str, wait: Option<String>) {
         },
     };
     let binding = RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

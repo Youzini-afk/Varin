@@ -187,6 +187,7 @@ impl Fixture {
             .unwrap(),
         );
         let frozen = FrozenToolContext {
+            direct_tools: None,
             run_id: f.context.run_id.clone(),
             origin: f.context.origin.clone(),
             tool_schema_generation: 1,

@@ -33,6 +33,7 @@ export interface ThreadCollaborationOwners {
   settleRunCheckpoints?(runId: string, signal: AbortSignal): Promise<void>;
   prepareContext: ContextPreparer;
   prepareSkillInput?: ThreadSkillInputPreparer;
+  prepareMaterials?(threadId: string, signal: AbortSignal): Promise<void>;
   reconcileDomainReceipts?(signal: AbortSignal): Promise<void>;
   onError(operationId: string | undefined, error: unknown): void;
 }
@@ -557,6 +558,7 @@ export class ThreadCollaboration {
         child = await this.prepareSource(child, signal, progress);
         stage = 'Preparing child context';
         progress({ phase: 'context' });
+        await this.owners.prepareMaterials?.(child.child_thread_id, signal);
         const source = this.childSource(child);
         const identity: ThreadIdentity = { runtime: 'agent', threadId: child.child_thread_id, branchId: child.child_branch_id };
         const checkpoint = child.trigger.kind !== 'dispatch' ? await runtime.context(child.child_branch_id, signal) : null;

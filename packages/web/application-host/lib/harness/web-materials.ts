@@ -223,7 +223,8 @@ export const createWebMaterialStore = (
                 // A malformed collection record grants nothing.
               }
             }
-            for (const candidate of await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE })) {
+            for (const candidate of [...await context.records.list({ recordType: MATERIAL_GRANT_RECORD_TYPE }),
+              ...await context.records.list({ recordType: 'material.inheritance' })]) {
               if (candidate.state === "released"
                 || (candidate.workspaceId !== undefined && candidate.workspaceId !== workspaceId)) continue;
               try {
@@ -237,7 +238,9 @@ export const createWebMaterialStore = (
                 // The trusted collection owner already checked the sender's read
                 // authority when issuing this explicit grant. It may be a reshare;
                 // the sender must match this grant's envelope, not the first fetcher.
-                if (grant.fromThreadId !== candidate.threadId || typeof grant.fromThreadId !== "string") continue;
+                if (typeof grant.fromThreadId !== "string"
+                  || (candidate.recordType === 'material.inheritance'
+                    ? grant.toThreadId !== candidate.threadId : grant.fromThreadId !== candidate.threadId)) continue;
                 if (Array.isArray(grant.snapshotIds) && grant.snapshotIds.includes(snapshotId)) return true;
                 if (!Array.isArray(grant.collectionIds)) continue;
                 for (const collectionId of grant.collectionIds) {

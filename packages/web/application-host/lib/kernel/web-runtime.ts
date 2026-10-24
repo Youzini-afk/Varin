@@ -10,13 +10,14 @@ import type { HostCapabilityHandler } from '@varin/extension-host';
 import { compileToolJsonSchema } from '../models/schema.js';
 import {
   resolveHarnessDocumentReadingSettings,
+  DOCUMENT_MIME_TYPES,
   type DocumentReadRequest, type FetchResult, type HarnessDocumentReadingSettings, type HarnessWebDomainPolicy,
   type WebFetchRequest, type WebSearchRequest, type WebSearchResult,
   type MaterialsCollectionParams,
 } from '@varin/protocol';
 import type { DocumentReader, DocumentReaderContext } from '../harness/document-reading.js';
-import { readDocumentMaterial } from '../harness/document-material.js';
-import { resolveHarnessWebBinding, resolveHarnessMaterialWebPolicy, type HarnessWebBinding } from '../harness/harness-web-settings.js';
+import { readDocumentMaterial, type AlternateDocumentReader, type DocumentMaterialSources } from '../harness/document-material.js';
+import { resolveHarnessWebBinding, type HarnessWebBinding } from '../harness/harness-web-settings.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import type { createWebFetch } from '../harness/web-fetch.js';
 import type { ThreadMaterialAuthority, WebMaterialStore } from '../harness/web-materials.js';
@@ -126,6 +127,7 @@ export interface WebRuntimeOptions {
   runtime: Pick<AgentRuntimeClient, 'familyList' | 'run' | 'launch'>;
   webFetch: ReturnType<typeof createWebFetch>;
   documentReader: DocumentReader;
+  alternateDocumentReader?: AlternateDocumentReader;
   documentSources?: DocumentSources;
   materials: WebMaterialStore;
   collections?: ReturnType<typeof createMaterialCollections>;
@@ -135,6 +137,8 @@ export interface WebRuntimeOptions {
   settings(source: LaunchSource | null): Promise<AgentSettingsSnapshot>;
 }
 export function createWebRuntime(options: WebRuntimeOptions) {
+  const readMaterial = (request: DocumentReadRequest, context: DocumentReaderContext, sources?: DocumentMaterialSources) =>
+    readDocumentMaterial(options.documentReader, request, context, sources, options.alternateDocumentReader);
   const scope = async (identity: ThreadIdentity, signal?: AbortSignal) => {
     if (identity.runtime !== 'agent' || !identity.threadId || !identity.branchId) throw new HarnessServiceError('forbidden', 'A real Thread and branch are required');
     const family = await options.runtime.familyList({ callerThreadId: identity.threadId, includeSelf: true }, signal);
@@ -174,9 +178,8 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       // A client-provided snapshot ID or a copied prompt never grants access.
       const found = await options.materials.read(owner.workspaceId, selectedRef.snapshotId, owner.authority,
         { byteRange: { offset: 0, length: 0 }, ...(signal ? { signal } : {}) });
-      if (!found || found.ref.document?.kind !== 'pdf' || !found.ref.document.source
-        || found.ref.document.source.contentType !== 'application/pdf') {
-        throw new HarnessServiceError('forbidden', 'The attached PDF is unavailable to this Thread');
+      if (!found?.ref.document?.source || !(DOCUMENT_MIME_TYPES as readonly string[]).includes(found.ref.document.source.contentType)) {
+        throw new HarnessServiceError('forbidden', 'The attached document is unavailable to this Thread');
       }
       retained.push(found.ref);
     }
@@ -205,22 +208,27 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       if (!object(request) || Object.keys(request).some(key => !['filename', 'mimeType', 'data'].includes(key))
         || typeof request.filename !== 'string' || !request.filename.trim() || /[\\/]/.test(request.filename)
         || [...request.filename].some(character => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127)
-        || request.mimeType !== 'application/pdf' || typeof request.data !== 'string' || !request.data.length) {
-        throw new HarnessServiceError('invalid-params', 'Upload an original PDF with a filename, MIME type and base64 bytes');
+        || !DOCUMENT_MIME_TYPES.includes(request.mimeType) || typeof request.data !== 'string' || !request.data.length) {
+        throw new HarnessServiceError('invalid-params', 'Upload a PDF, DOCX, XLSX or PPTX with its filename, MIME type and original base64 bytes');
       }
       const owner = await scope(identity, signal);
       const source = Buffer.from(request.data, 'base64');
-      if (source.toString('base64') !== request.data || !source.subarray(0, 1024).includes(Buffer.from('%PDF-'))) {
-        throw new HarnessServiceError('invalid-params', 'The upload must contain original PDF bytes');
+      if (source.toString('base64') !== request.data || (request.mimeType === 'application/pdf'
+        ? !source.subarray(0, 1024).includes(Buffer.from('%PDF-')) : source[0] !== 0x50 || source[1] !== 0x4b)) {
+        throw new HarnessServiceError('invalid-params', 'The upload does not contain the selected document format');
       }
       const runId = owner.branch.activeRunId ?? owner.branch.latestRun?.runId;
       const launch = runId ? await options.runtime.launch(runId, signal) : null;
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
       const sourceHash = createHash('sha256').update(source).digest('hex');
-      return options.documentReader.ingest({ source,
+      const captured = { source,
         sourceUrl: `thread-upload:${encodeURIComponent(identity.threadId)}/${sourceHash}/${encodeURIComponent(request.filename)}`,
-        contentType: 'application/pdf', title: request.filename }, context(owner, config, signal), { view: 'overview' });
+        contentType: request.mimeType, title: request.filename };
+      return request.mimeType === 'application/pdf'
+        ? options.documentReader.ingest(captured, context(owner, config, signal), { view: 'overview' })
+        : await options.alternateDocumentReader?.({ view: 'overview' }, context(owner, config, signal), captured)
+          ?? { status: 'failed', url: captured.sourceUrl, reason: 'The Office document reader is unavailable' };
     },
     async read(identity, request, signal = new AbortController().signal) {
       decode('read', request);
@@ -232,8 +240,8 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
       const retained = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, { byteRange: { offset: 0, length: 0 }, signal });
-      return retained?.ref.document?.kind === 'pdf'
-        ? options.documentReader.read(request, context(owner, config, signal))
+      return retained?.ref.document
+        ? readMaterial(request, context(owner, config, signal))
         : fetchPage(request, owner, config, signal);
     },
     async readSource(selection, request, signal = new AbortController().signal) {
@@ -245,7 +253,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const launch = await options.runtime.launch(selection.sourceRunId, signal);
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
-      return readDocumentMaterial(options.documentReader, request, context(owner, config, signal), { readPath: async () => original });
+      return readMaterial(request, context(owner, config, signal), { readPath: async () => original });
     },
     async readArtifact(selection: ThreadResearchSelection, request: ThreadMaterialArtifactReadRequest, signal = new AbortController().signal) {
       decode('read', request);
@@ -258,7 +266,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
       const launch = await options.runtime.launch(selection.sourceRunId, signal);
       const config = capture(await options.settings(launch?.selection.source ?? null));
       signal.throwIfAborted();
-      return readDocumentMaterial(options.documentReader, request, context(owner, config, signal), {
+      return readMaterial(request, context(owner, config, signal), {
         readArtifact: async () => original,
       });
     },
@@ -293,7 +301,7 @@ export function createWebRuntime(options: WebRuntimeOptions) {
         }
         const result = method === 'search' ? await search.handle(input as WebSearchRequest, { owner, config, signal: call.signal })
           : method === 'fetch' ? await fetchPage(input as WebFetchRequest, owner, config, call.signal)
-            : await readDocumentMaterial(options.documentReader, input as unknown as DocumentReadRequest,
+            : await readMaterial(input as unknown as DocumentReadRequest,
               context(owner, config, call.signal), options.documentSources?.tool(invocation));
         if (call.signal.aborted) return { executor_stopped: true, completion: { kind: 'result', outcome: 'cancelled', effect: 'none', content: webOutput(result) } };
         return receipt(result);
@@ -329,36 +337,5 @@ export function createWebRuntime(options: WebRuntimeOptions) {
     });
   };
   const snapshotCapability = createMaterialToolOwner(options.materials, async (invocation, signal) => (await invocationScope(invocation, signal)).authority);
-  const decisionMaterials = async (invocation: ToolInvocationAuthority, signal: AbortSignal) => {
-    const owner = await invocationScope(invocation, signal);
-    const retained = new Map<string, string>();
-    return { authority: owner.authority,
-      readCandidateText: async (request: { snapshotId: string; startLine?: number; endLine?: number }, authority: import('../harness/web-materials.js').WebSnapshotReadAuthority, readSignal: AbortSignal) => {
-        if (!isDeepStrictEqual(authority, owner.authority)) throw new HarnessServiceError('forbidden', 'Original decision material authority changed');
-        const domainPolicy = resolveHarnessMaterialWebPolicy(await options.settings(invocation.source));
-        const result = await options.webFetch.fetch({ snapshotId: request.snapshotId, view: 'text',
-          ...(request.startLine === undefined ? {} : { position: { kind: 'lines' as const, startLine: request.startLine, ...(request.endLine === undefined ? {} : { endLine: request.endLine }) } }) }, { workspaceId: owner.workspaceId, authority: owner.authority, signal: readSignal, domainPolicy });
-        if (result.status === 'ok' && result.snapshot) {
-          retained.set(result.snapshot.snapshotId, result.snapshot.contentHash);
-          if (result.snapshot.snapshotId !== request.snapshotId) {
-            const original = await options.materials.read(owner.workspaceId, request.snapshotId, owner.authority, {
-              byteRange: { offset: 0, length: 0 }, signal: readSignal,
-            });
-            if (!original) throw new HarnessServiceError('forbidden', 'The original decision candidate is no longer readable');
-            retained.set(request.snapshotId, original.ref.contentHash);
-          }
-        }
-        return result;
-      },
-      assertReadable: async () => {
-        for (const [snapshotId, contentHash] of retained) {
-          const result = await options.materials.read(owner.workspaceId, snapshotId, owner.authority, {
-            byteRange: { offset: 0, length: 0 }, expectedContentHash: contentHash, signal,
-          });
-          if (!result) throw new HarnessServiceError('forbidden', 'A decision material is no longer readable under this Thread authority');
-        }
-      },
-    };
-  };
-  return { user, capability, prepareConfiguration, snapshotCapability, decisionMaterials, inputMaterials };
+  return { user, capability, prepareConfiguration, snapshotCapability, inputMaterials };
 }

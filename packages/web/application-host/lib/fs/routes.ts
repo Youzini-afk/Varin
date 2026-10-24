@@ -864,7 +864,7 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
     }
   });
 
-  app.get('/api/fs/raw', async (req, res) => {
+  const readFile = async (req: Request, res: Response) => {
     const filePath = typeof req.query.path === 'string' ? req.query.path.trim() : '';
     if (!filePath) {
       return res.status(400).json({ error: 'Path is required' });
@@ -915,6 +915,9 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
         '.bmp': 'image/bmp',
         '.avif': 'image/avif',
         '.pdf': 'application/pdf',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       };
       const mimeType = mimeMap[ext] || 'application/octet-stream';
 
@@ -940,6 +943,34 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       if (resolved.granted) {
         res.setHeader('Referrer-Policy', 'no-referrer');
       }
+      if (req.path === '/api/fs/office') {
+        const { OfficePackage } = await import('../office/package.js');
+        const file = new OfficePackage(content);
+        if (typeof req.query.expectedRevision === 'string' && req.query.expectedRevision !== file.revision)
+          return res.status(409).json({ error: 'The Office file changed. Refresh to read its current revision.', revision: file.revision });
+        const view = req.query.view ?? 'overview';
+        if (view === 'preview') {
+          if (!dependencies.renderOffice) return res.status(503).json({ error: 'Office rendering is unavailable on this Host' });
+          const controller = new AbortController();
+          const cancel = () => { if (!res.writableEnded) controller.abort(); };
+          res.once('close', cancel);
+          try {
+            const rendered = await dependencies.renderOffice(content, file.format, controller.signal);
+            res.setHeader('X-Varin-Document-Revision', file.revision);
+            res.setHeader('X-Varin-Render-Engine', `${rendered.engine.name} ${rendered.engine.version}`);
+            return res.type('application/pdf').send(rendered.bytes);
+          } finally { res.removeListener('close', cancel); }
+        }
+        if (!['overview', 'content', 'find'].includes(String(view))) return res.status(400).json({ error: 'Unsupported Office view' });
+        const input: import('@varin/protocol').OfficeReadRequest = { view: view as 'overview' | 'content' | 'find' };
+        for (const key of ['section', 'objectId', 'range', 'query'] as const) if (typeof req.query[key] === 'string') input[key] = req.query[key];
+        for (const key of ['offset', 'limit'] as const) if (req.query[key] !== undefined) {
+          const number = Number(req.query[key]);
+          if (!Number.isSafeInteger(number) || number < (key === 'limit' ? 1 : 0)) return res.status(400).json({ error: `Invalid ${key}` });
+          input[key] = number;
+        }
+        return res.json({ ...file.read(input), title: path.basename(canonicalPath) });
+      }
       return res.type(mimeType).send(content);
     } catch (error) {
       const err = error;
@@ -952,7 +983,9 @@ export const registerFsRoutes = (app: Express, dependencies: FsRouteDependencies
       console.error('Failed to read raw file:', error);
       return res.status(500).json({ error: errorMessage(error, 'Failed to read file') });
     }
-  });
+  };
+  app.get('/api/fs/raw', readFile);
+  app.get('/api/fs/office', readFile);
 
   app.get(/^\/api\/fs\/serve\/(.+)$/, async (req, res) => {
     const rawPath = req.params[0] || '';

@@ -29,7 +29,6 @@ import { registerThreadMemoryRoutes } from './lib/memory/thread-memory-routes.js
 import { createMemoryInference } from './lib/memory/memory-inference.js';
 import { createExtensionPackageOwner, VARIN_EXTENSION_PACKAGES_CAPABILITY } from "./lib/kernel/extension-package-owner.js";
 
-import { createResearchDecisionRuntime, RESEARCH_DECISION_CAPABILITY } from './lib/kernel/research-decision.js';
 import { createImageRuntime, IMAGES_CAPABILITY } from './lib/kernel/image-runtime.js';
 import { createMediaResourceStore } from './lib/harness/media-resources.js';
 import { createResearchDiscoveryRuntime, RESEARCH_DISCOVERY_CAPABILITY } from './lib/kernel/research-discovery.js';
@@ -38,9 +37,15 @@ import { ModelsService } from './lib/models/service.js';
 import { registerModelRoutes } from './lib/models/routes.js';
 import { registerModelTestRoute } from './lib/models/test-route.js';
 import { createWebRuntime, WEB_CAPABILITY } from './lib/kernel/web-runtime.js';
+import { createOfficeRuntime, OFFICE_CAPABILITY } from './lib/kernel/office-runtime.js';
+import { createBrowserRuntime, BROWSER_CAPABILITY } from './lib/kernel/browser-runtime.js';
+import { createOfficeReader } from './lib/office/reader.js';
+import { createOfficeRenderer } from './lib/office/renderer.js';
+import { createBinaryFileOwner } from './lib/kernel/binary-file-owner.js';
 import { createMaterialReceiptReconciler } from './lib/kernel/material-receipts.js';
 import { createDocumentSources } from './lib/kernel/document-sources.js';
 import { createMaterialStorageAccess } from './lib/kernel/material-storage.js';
+import { createThreadMaterialLifetime } from './lib/kernel/thread-material-lifetime.js';
 import { createScriptRuntime, SCRIPT_CAPABILITY } from './lib/kernel/script-runtime.js';
 import { createNestedToolOwner, VARIN_RUNTIME_TOOLS_CAPABILITY } from './lib/kernel/nested-tool-owner.js';
 import { createRuntimeContractOwner } from './lib/kernel/runtime-contract-owner.js';
@@ -106,7 +111,7 @@ import { createChildMcpPreparer } from './lib/kernel/mcp-child-preparation.js';
 import { createManagedChildMcpPreparer } from './lib/kernel/managed-child-mcp-preparation.js';
 import { createExtensionTools, configuredToolAvailability } from './lib/kernel/extension-tool-owner.js';
 import { MATERIAL_SNAPSHOT_CAPABILITY } from './lib/kernel/material-tool-owner.js';
-import { createIntegrationToolOwner, createIntegrationTargetOpener, createIntegrationReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
+import { createIntegrationToolOwner, createIntegrationTargetOpener, createFileEffectReceiptReconciler, CHILD_INTEGRATION_CAPABILITY } from './lib/kernel/integration-tool-owner.js';
 
 import { AgentRuntimeClient } from './lib/kernel/agent-runtime-client.js';
 import { createThreadProcesses } from './lib/kernel/thread-processes.js';
@@ -1300,6 +1305,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     materials: materialStore,
     engineFactory: (settings) => createPdfEngine(settings, { spawn: documentProcesses.spawn, temporaryRoot: documentReadingDirectory }),
   });
+  const officeRenderer = createOfficeRenderer({ spawn: documentProcesses.spawn, temporaryRoot: documentReadingDirectory,
+    command: () => process.env.VARIN_LIBREOFFICE_COMMAND });
+  const officeReader = createOfficeReader({ materials: materialStore, pdf: documentReader, renderer: officeRenderer });
   const webFetchService = createWebFetch({
     ssrf: ssrfPolicy,
     egress: egressRuntime,
@@ -1432,11 +1440,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const scriptRuntimeOwner: { current?: ReturnType<typeof createScriptRuntime> } = {};
   const collaborationOwner: { current?: ThreadCollaboration } = {};
   const computerRuntimeOwner: { current?: ReturnType<typeof createComputerRuntime> } = {};
-  const researchDecisionOwner: { current?: ReturnType<typeof createResearchDecisionRuntime> } = {};
   const imageRuntimeOwner: { current?: ReturnType<typeof createImageRuntime> } = {};
   const extensionConfigurationListeners = new Set<() => void>();
   const researchDiscoveryOwner: { current?: ReturnType<typeof createResearchDiscoveryRuntime> } = {};
   const webRuntimeOwner: { current?: ReturnType<typeof createWebRuntime> } = {};
+  const officeRuntimeOwner: { current?: ReturnType<typeof createOfficeRuntime> } = {};
+  const browserRuntimeOwner: { current?: ReturnType<typeof createBrowserRuntime> } = {};
   const resolveComputerWork = async (work: import('@varin/protocol').ComputerWorkRef) => {
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'The Agent Computer identity owner is unavailable');
     return computerRuntimeOwner.current.resolve(work);
@@ -1570,7 +1579,10 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   memoryOrganizerRef.current = memoryOrganizer;
   const inspectSourceInventory = createSourceGitInventory({ spawn: kernelProcesses.spawn, gitBinary: platformEnvironmentRuntime.resolveGitBinaryForSpawn(), env: { ...process.env, PATH: platformEnvironmentRuntime.buildAugmentedPath() } });
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore, scopeDocumentWorkspace);
-  const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter });
+  let materialWriteSettled: ((scope: string, threadId: string) => Promise<void>) | undefined;
+  const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter,
+    onMutationSettled: async (scope, threadId) => materialWriteSettled?.(scope, threadId),
+    onCleanupError: () => console.error('[Materials] Original material cleanup requires attention') });
   const mediaResources = createMediaResourceStore(materialStorage);
   const webMaterials = createWebMaterialStore(materialStorage);
   webMaterialAccess.put = webMaterials.put;
@@ -1825,11 +1837,16 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     if (!computerRuntimeOwner.current) throw new ComputerError('computer-owner-unavailable', 'Computer tool preparation is unavailable');
     if (!webRuntimeOwner.current) throw new Error('Web tool preparation is unavailable');
     if (!researchDiscoveryOwner.current) throw new Error('Scholarly search tool preparation is unavailable');
-    if (!researchDecisionOwner.current) throw new Error('Research decision tool preparation is unavailable');
     if (!imageRuntimeOwner.current) throw new Error('Image tool preparation is unavailable');
-    const configuration = await imageRuntimeOwner.current.prepareConfiguration(run, required, await researchDecisionOwner.current.prepareConfiguration(run, required, await researchDiscoveryOwner.current.prepareConfiguration(run, required,
-      await webRuntimeOwner.current.prepareConfiguration(run, required,
-        await scriptRuntimeOwner.current.prepareConfiguration(await computerRuntimeOwner.current.prepareConfiguration(run, required), run.source)))));
+    if (!officeRuntimeOwner.current) throw new Error('Office tool preparation is unavailable');
+    if (!browserRuntimeOwner.current) throw new Error('Browser tool preparation is unavailable');
+    let configuration = await computerRuntimeOwner.current.prepareConfiguration(run, required);
+    configuration = await scriptRuntimeOwner.current.prepareConfiguration(configuration, run.source);
+    configuration = await webRuntimeOwner.current.prepareConfiguration(run, required, configuration);
+    configuration = await researchDiscoveryOwner.current.prepareConfiguration(run, required, configuration);
+    configuration = await imageRuntimeOwner.current.prepareConfiguration(run, required, configuration);
+    configuration = await officeRuntimeOwner.current.prepareConfiguration(run, required, configuration);
+    configuration = await browserRuntimeOwner.current.prepareConfiguration(run, required, configuration);
     if (required.length) return configuration;
     try {
       const root = run.source?.resource_owner.kind === 'local'
@@ -1869,7 +1886,22 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       validateLiveSource: liveSources.validate, remote: managedSourceConsumers.query }) }));
   const documentSources = createDocumentSources({ kernel: kernelClient, runtime: agentRuntime,
     resolveLiveSource: liveSources.validate, experiments: experimentService });
+  const binaryFiles = createBinaryFileOwner({ kernel: kernelClient, runtime: agentRuntime, resolveLiveSource: liveSources.validate });
+  browserRuntimeOwner.current = createBrowserRuntime({ browser: options.browser, runtime: agentRuntime, sources: documentSources,
+    files: binaryFiles, materials: webMaterials, documents: documentReader, office: officeReader,
+    settings: async source => {
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      return modelsService.settings.snapshot(root);
+    },
+  });
+  officeRuntimeOwner.current = createOfficeRuntime({ runtime: agentRuntime, reader: officeReader, renderer: officeRenderer, sources: documentSources, files: binaryFiles,
+    settings: async source => {
+      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
+      return modelsService.settings.snapshot(root);
+    },
+  });
   webRuntimeOwner.current = createWebRuntime({ runtime: agentRuntime, webFetch: webFetchService, documentReader, materials: webMaterials,
+    alternateDocumentReader: officeReader.document,
     collections: materialCollectionsService,
     documentSources,
     fetch: egressRuntime.fetch as typeof globalThis.fetch, readAuth: serviceCredentials.read,
@@ -1914,9 +1946,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         isAnyInteractiveClientVisible() ? Promise.resolve() : sendMobilePushToAllDevices(pushPayload), sendApnsToAllUiSessions(pushPayload)]);
     },
   });
+  const threadMaterialLifetime = createThreadMaterialLifetime({ runtime: agentRuntime, storage: materialStorage, materials: webMaterials,
+    ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
+    releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
   });
+  materialWriteSettled = async (scope, threadId) => {
+    // A UI upload admitted before deletion can settle after Catalog maintenance.
+    // Its original namespace still identifies the bytes, even after lineage retires.
+    if ((await agentRuntime.thread(threadId)).deleted_at_ms !== null) {
+      await threadMaterialLifetime.releaseLateWrite(scope, threadId);
+      contentMaintenance.request();
+    }
+  };
   const runObservers = new RunObservers(agentRuntime, extensionRuntime, (threadId, _error) => {
     console.error('[RunObserver] Activity projection requires attention:', threadId ?? 'selection');
   });
@@ -2128,7 +2171,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   await foundationalRecoveryEngine.resumeCombinedOperations();
   const reconcileScheduleReceipts = createManagedScheduleReconciler({ runtime: agentRuntime,
     onError: (_operationId, _error) => console.error('[Schedule] Original effect receipt requires attention') });
-  const reconcileIntegrationReceipts = createIntegrationReceiptReconciler({ runtime: agentRuntime,
+  const reconcileFileEffectReceipts = createFileEffectReceiptReconciler({ runtime: agentRuntime,
     onError: (_operationId, _error) => console.error('[Integration] Original effect receipt requires attention') });
   const reconcileMaterialReceipts = createMaterialReceiptReconciler({ runtime: agentRuntime, kernel: kernelClient, collections: materialCollectionsService,
     onError: (_operationId, _error) => console.error('[Materials] Original mutation receipt requires attention') });
@@ -2139,10 +2182,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
     kernel: kernelClient, storageAdapter: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
     sourceCaptureOwners: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) },
-    reconcileDomainReceipts: async signal => { await Promise.all([reconcileIntegrationReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
+    reconcileDomainReceipts: async signal => { await Promise.all([reconcileFileEffectReceipts(signal), reconcileMaterialReceipts(signal), reconcileScheduleReceipts(signal)]); },
     continueRun: (runId, signal) => threads.continueLaunch(runId, { signal }), recoverLaunches: signal => threads.recover(signal),
     recoverCheckpoints: recoveryCheckpoints.recover, settleRunCheckpoints: recoveryCheckpoints.settle,
     prepareContext: threadContext,
+    prepareMaterials: threadMaterialLifetime.prepareChild,
     prepareSkillInput: createThreadSkillInputPreparer(threadResources),
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
@@ -2431,12 +2475,6 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (!bot || bot.archived) throw new Error('The original Bot memory owner is unavailable');
     },
   });
-  researchDecisionOwner.current = createResearchDecisionRuntime({ inference: semanticInference, materials: webRuntimeOwner.current,
-    settings: async source => {
-      const root = source?.resource_owner.kind === 'local' ? (await documentsAuthority.admitWorkspaceRegistration(source.workspace_id)).canonicalPath : undefined;
-      return modelsService.settings.snapshot(root);
-    },
-  });
   imageRuntimeOwner.current = createImageRuntime({ authority: modelsService, requests: semanticInference.requests!,
     egress: egressRuntime, media: mediaResources, documents: documentSources, runtime: agentRuntime,
     settings: async source => {
@@ -2515,11 +2553,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
 
   const unregisterMaterialToolCapability = extensionRuntime.capabilities.register(MATERIAL_SNAPSHOT_CAPABILITY, webRuntimeOwner.current.snapshotCapability);
-  const unregisterResearchDecisionCapability = extensionRuntime.capabilities.register(RESEARCH_DECISION_CAPABILITY, researchDecisionOwner.current.capability);
   const unregisterImagesCapability = extensionRuntime.capabilities.register(IMAGES_CAPABILITY, imageRuntimeOwner.current.capability);
   const unregisterResearchDiscoveryCapability = extensionRuntime.capabilities.register(RESEARCH_DISCOVERY_CAPABILITY, researchDiscoveryOwner.current.capability);
   const unregisterInteractiveUiCapability = extensionRuntime.capabilities.register(INTERACTIVE_UI_CAPABILITY, interactiveUi.capability);
   const unregisterWebCapability = extensionRuntime.capabilities.register(WEB_CAPABILITY, webRuntimeOwner.current.capability);
+  const unregisterOfficeCapability = extensionRuntime.capabilities.register(OFFICE_CAPABILITY, officeRuntimeOwner.current.capability);
+  const unregisterBrowserCapability = extensionRuntime.capabilities.register(BROWSER_CAPABILITY, browserRuntimeOwner.current.capability);
   const unregisterExtensionPackageCapability = extensionRuntime.capabilities.register(
     VARIN_EXTENSION_PACKAGES_CAPABILITY, createExtensionPackageOwner({ extensions: extensionRuntime, kernel: kernelClient,
       runtime: agentRuntime, storage: kernelStorageAdapter, resolveLiveSource: liveSources.validate,
@@ -2654,6 +2693,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   relayService.registerRoutes(app);
 
   await platformRoutesRuntime.registerRoutes(app, {
+    renderOffice: (bytes, format, signal) => officeRenderer.convert(bytes, format, 'pdf', signal),
     crypto,
     os,
     path,
@@ -2825,7 +2865,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       if (ownsExtensionRuntime) await shutdown.run('extensionRuntime.stop', () => extensionRuntime.stop());
       await shutdown.run('unregisterMaterialToolCapability', () => unregisterMaterialToolCapability());
       await shutdown.run('unregisterWebCapability', () => unregisterWebCapability());
-      await shutdown.run('unregisterResearchDecisionCapability', () => unregisterResearchDecisionCapability());
+      await shutdown.run('unregisterOfficeCapability', () => unregisterOfficeCapability());
+      await shutdown.run('unregisterBrowserCapability', () => unregisterBrowserCapability());
       await shutdown.run('unregisterImagesCapability', () => unregisterImagesCapability());
       await shutdown.run('unregisterResearchDiscoveryCapability', () => unregisterResearchDiscoveryCapability());
       await shutdown.run('unregisterInteractiveUiCapability', () => unregisterInteractiveUiCapability());

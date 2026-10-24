@@ -15,6 +15,7 @@ import type { HostResourceOperation, HostResourceOperationGate } from "../recove
 import type { RecoveryOperationConflict } from "../recovery/journal-engine.js";
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import type { KernelFileAuthorityContext, KernelStorageAdapter } from "./storage-adapter.js";
+import type { KernelFileApplyParams } from './protocol.generated.js';
 
 export interface KernelExecutionRoot {
   workspaceId: string;
@@ -320,7 +321,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath: string,
     state: RecoveryState,
-    options: { expected?: RecoveryState; ownerId?: string; recordId?: string; slot?: string; operationId?: string; reservationOperationId?: string } = {},
+    options: { expected?: RecoveryState; ownerId?: string; recordId?: string; slot?: string; operationId?: string; reservationOperationId?: string; journalBinding?: KernelFileApplyParams['journalBinding'] } = {},
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }> {
     await this.assertApplyState(identity, relativePath, state);
     const resolved = await this.relativePathFor(identity, relativePath);
@@ -335,6 +336,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
       path: pathId,
       targetJson: JSON.stringify(state),
       ...(options.reservationOperationId ? {reservationOperationId:options.reservationOperationId} : {}),
+      ...(options.journalBinding ? { journalBinding: options.journalBinding } : {}),
       ...(expected ? { expectedJson: JSON.stringify(expected) } : {}),
       ...(options.ownerId ? { ownerId: options.ownerId } : {}),
       ...(options.recordId ? { recordId: options.recordId, slot: options.slot } : {}),
@@ -356,7 +358,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     identity: RecoveryIdentity,
     relativePath: string,
     bytes: Uint8Array,
-    options: { expected?: RecoveryState; mode?: number; operationId?: string } = {},
+    options: { expected?: RecoveryState; mode?: number; operationId?: string; journalBinding?: KernelFileApplyParams['journalBinding'] } = {},
   ): Promise<{ status: "applied" | "conflict"; state: RecoveryState }> {
     const context = await this.bind(identity);
     const stored = await context.client.putBlob(bytes, `file-write-object:${randomUUID()}`);
@@ -369,6 +371,7 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     return this.applyStateDetailed(identity, relativePath, target, {
       ...(options.expected ? { expected: options.expected } : {}),
       ownerId: stored.ownerId,
+      ...(options.journalBinding ? { journalBinding: options.journalBinding } : {}),
       operationId: options.operationId ?? `file-write:${randomUUID()}`,
     });
   }

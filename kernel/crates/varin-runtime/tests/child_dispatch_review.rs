@@ -15,6 +15,39 @@ mod fixture;
 use fixture::Fixture;
 
 #[test]
+fn inherited_background_is_fixed_portable_and_retained_through_preparation_and_reopen() {
+    for policy in [false, true] {
+        for inherit in [false, true] {
+            let mut f = Fixture::new_in_project_with_inheritance(inherit, policy);
+            let child = f.accept();
+            assert_eq!(child.inherited_context.is_some(), inherit);
+            let materials = f.db.capture_material_retention(Some(&child.child_thread_id), &[]).unwrap().load().unwrap();
+            assert_eq!(materials.inheritances.len(), usize::from(inherit));
+            if inherit { assert_eq!(materials.inheritances[0].snapshot_ids, ["snapshot-original"]); }
+            content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
+            if policy { f.settle_policy_call(&f.context.clone(), "preparing"); } else { f.settle_exchange(); }
+            assert_eq!(f.accept(), child, "replay keeps the dispatch-time background");
+            let (source, proposal, basis) = child_context(&child);
+            let child = f.db.prepare_child(&child.operation_id, source, proposal, basis).unwrap();
+            let receipt = child.receipt.as_ref().unwrap();
+            content_collection::collect(|| f.db.prepare_content_collection(Default::default())).unwrap();
+            let root = f.root.clone();
+            drop(f.db);
+            f.db = Catalog::open(&root).unwrap();
+            let history = f.db.prepare_context_read(&receipt.run_id, f.db.epoch(), Some(&receipt.input_id))
+                .unwrap().unwrap().load().unwrap().history;
+            assert!(history.iter().any(|item| matches!(&item.content, Content::Text { text } if text == "Read-only child")));
+            assert_eq!(history.iter().filter(|item| matches!(&item.content, Content::Text { text } if text.starts_with("Delegate a read"))).count(), usize::from(inherit));
+            assert!(!history.iter().any(|item| matches!(&item.content, Content::Text { text } if text == "Project main")));
+            assert!(!history.iter().any(|item| matches!(item.content, Content::ToolCall { .. })), "the unfinished dispatch is not inherited");
+            assert!(history.iter().all(|item| item.opaque.is_none()));
+            drop(f);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+}
+
+#[test]
 fn same_committed_origin_is_one_child_before_and_after_reopen_and_changed_task_conflicts() {
     let mut f = Fixture::new();
     let first = f.accept();

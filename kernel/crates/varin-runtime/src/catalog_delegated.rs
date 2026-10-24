@@ -10,6 +10,8 @@ use serde::Deserialize;
 #[serde(deny_unknown_fields)]
 pub struct ChildRelation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_context: Option<crate::context_retention::RetainedContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub operation_id: String,
     pub parent_run_id: String,
@@ -181,6 +183,7 @@ pub(super) fn execution_task(db: &Connection, id: &str) -> Result<ChildTask> {
     let execution = execution(db, id)?;
     let child = relation(db, &execution.child_operation_id)?;
     Ok(ChildTask {
+        inherited_context: child.inherited_context,
         avatar: child.avatar,
         agent_id: db.query_row("SELECT agent_code FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
         name: db.query_row("SELECT title FROM threads WHERE id=?1",[&child.child_thread_id],|r|r.get(0))?,
@@ -238,6 +241,7 @@ pub(super) fn write_child_task(db: &Connection, child: &ChildTask) -> Result<()>
 }
 pub(super) fn insert_initial(db: &Connection, child: &ChildTask) -> Result<()> {
     let relation = ChildRelation {
+        inherited_context: child.inherited_context.clone(),
         avatar: child.avatar.clone(),
         operation_id: child.operation_id.clone(),
         parent_run_id: child.parent_run_id.clone(),

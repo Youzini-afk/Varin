@@ -105,7 +105,7 @@ it('deleting a completed HTTP conversation automatically releases its native his
   const errors: unknown[] = [];
   let removedObjects = 0;
   const maintenance = createContentMaintenance({ runtime: {
-    threads: f.runtime.threads.bind(f.runtime), onEvent: f.runtime.onEvent.bind(f.runtime),
+    onEvent: f.runtime.onEvent.bind(f.runtime),
     onReady: f.runtime.onReady.bind(f.runtime), onExit: f.runtime.onExit.bind(f.runtime),
     collectContent: async signal => { const result = await f.runtime.collectContent(signal); removedObjects += result.removedObjects; return result; },
   }, onError: error => errors.push(error) });

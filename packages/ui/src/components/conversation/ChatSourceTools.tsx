@@ -47,7 +47,7 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
           {item.snippet && <p className="tool-source-snippet">{item.snippet}</p>}
         </div></li>)}
     </ol>}
-    {search && (Array.isArray(data.papers) || Array.isArray(data.items)) && !results.length && !documents.length && status === 'success'
+    {search && (Array.isArray(data.papers) || Array.isArray(data.items)) && !results.length && !documents.length && status === 'success' && data.status !== 'partial'
       && <p className="typography-meta text-muted-foreground">{t('chat.tools.noResults')}</p>}
     {items.filter(item => item.status && !['ok', 'ready', 'completed'].includes(String(item.status))).map((item, index) =>
       <p key={index} className="tool-result-notice typography-meta text-muted-foreground">{[item.query, item.url, item.status, item.detail].filter(value => typeof value === 'string').join(' · ')}</p>)}
@@ -75,6 +75,10 @@ export function ChatWebTools({ call, execution, result, status, generating, outp
     })}</ol>}
     {decision && Boolean(data.fallback) && <p className="typography-micro text-muted-foreground">{t('chat.tools.orderFallback')}</p>}
     <ToolResultNotice data={data} status={status} />
+    {research && list(data.issues).length > 0 && <ToolDisclosure id={'source-issues:' + call.id} className="tool-document-text">
+      <summary className="typography-micro text-muted-foreground">{t('chat.tools.partialResult')}</summary>
+      <div className="space-y-1 typography-meta text-muted-foreground">{list(data.issues).map((issue, index) => <p key={index} className="break-words">{toolText(issue.message)}</p>)}</div>
+    </ToolDisclosure>}
     {output}{details}
   </section>;
 }

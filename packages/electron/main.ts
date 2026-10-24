@@ -25,6 +25,7 @@ import {
 import contextMenu from 'electron-context-menu';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
+import { ElectronBrowserOwner } from './browser-owner.js';
 import log from 'electron-log/main.js';
 import dgram from 'node:dgram';
 import fs from 'node:fs';
@@ -586,6 +587,13 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
     })();
   });
 }
+
+const requestQuitWhenNoProductWindows = () => {
+  if (process.platform === 'darwin' || state.trayEnabled && !state.quitRequested) return;
+  if (BrowserWindow.getAllWindows().some(window => !desktopComputerFeedback?.ownsWindow(window.id) && !desktopComputerControls?.ownsWindow(window.id))) return;
+  if (state.installingUpdate) app.quit();
+  else void requestQuitWithConfirmation();
+};
 
 const requestQuitWithConfirmation = async () => {
   await refreshQuitRiskFlags();
@@ -1551,7 +1559,14 @@ const spawnLocalServer = async () => {
   desktopComputerControls?.dispose(); desktopComputerControls = computerControls;
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = computerFeedback;
   app.once('before-quit', () => { computerFeedback.dispose(); computerControls.dispose(); });
+  desktopBrowser ??= new ElectronBrowserOwner({ scratchDirectory: path.join(app.getPath('userData'), 'browser-transfers') });
+  desktopBrowser.subscribe(event => {
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && isTrustedLocalRendererUrl(window.webContents.getURL(), {
+      uiProtocol: UI_PROTOCOL, developmentUiOrigin: isDev ? `http://127.0.0.1:${process.env.VARIN_HMR_UI_PORT || '5173'}` : '', localOrigins: [state.localOrigin, state.sidecarUrl],
+    })) emitToWindow(window, 'varin:browser', event);
+  });
   const handle = await startWebUiServer({
+    browser: desktopBrowser,
     restartApplicationHost: async () => {
       await prepareForQuit();
       app.relaunch();
@@ -1604,19 +1619,20 @@ const spawnLocalServer = async () => {
   return url;
 };
 
+let desktopBrowser: ElectronBrowserOwner | undefined;
 const killSidecar = async () => {
   desktopComputerFeedback?.dispose(); desktopComputerFeedback = null;
   desktopComputerControls?.dispose(); desktopComputerControls = null;
   const handle = state.serverHandle;
   state.serverHandle = null;
   state.sidecarUrl = null;
-  if (!handle) return;
-
-  try {
-    await handle.stop?.({ exitProcess: false });
-  } catch (error) {
+  const stopping = Promise.resolve(handle?.stop?.({ exitProcess: false })).catch(error => {
     log.warn('[electron] failed to stop embedded web runtime gracefully:', error);
-  }
+  });
+  // A cancelled page Promise may still own a Host invocation. Closing its
+  // original page supplies the real stop before waiting for Host teardown.
+  await desktopBrowser?.dispose(); desktopBrowser = undefined;
+  await stopping;
 };
 
 const macosMajorVersion = () => {
@@ -2489,18 +2505,7 @@ const createBrowserWindow = ({
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
     }
-    if (BrowserWindow.getAllWindows().filter(window => !desktopComputerFeedback?.ownsWindow(window.id) && !desktopComputerControls?.ownsWindow(window.id)).length === 0) {
-      if (state.trayEnabled && !state.quitRequested) {
-        return;
-      }
-      if (process.platform !== 'darwin') {
-        if (state.installingUpdate) {
-          app.quit();
-        } else {
-          void requestQuitWithConfirmation();
-        }
-      }
-    }
+    requestQuitWhenNoProductWindows();
   });
 
   // Any navigation target that isn't our own UI (local server / configured
@@ -2834,6 +2839,9 @@ const createMiniChatWindow = async ({
         state.miniChatWindowsByThread.delete(browserWindow.__varinMiniChatThreadKey);
       }
     }
+    // Hidden browser pages use a BaseWindow, so native window-all-closed may
+    // follow later. The last Mini Chat is still the last product window.
+    requestQuitWhenNoProductWindows();
   });
 
   if (process.platform === 'darwin') {
@@ -3896,6 +3904,24 @@ const handleInvoke = async (
         width: image.getSize().width,
         height: image.getSize().height,
       };
+    }
+
+    case 'desktop_browser_present': case 'desktop_browser_layout': case 'desktop_browser_detach':
+    case 'desktop_browser_action': case 'desktop_browser_read': case 'desktop_browser_control': {
+      if (!desktopBrowser || !browserWindow || browserWindow.isDestroyed()) throw new Error('The local browser is unavailable');
+      const pageId = typeof args.pageId === 'string' ? args.pageId : '';
+      if (!pageId) throw new Error('pageId is required');
+      if (command === 'desktop_browser_action') return desktopBrowser.act(pageId, args.action as import('@varin/protocol').BrowserAction, undefined, true);
+      if (command === 'desktop_browser_read') return desktopBrowser.read(args as unknown as import('@varin/protocol').BrowserReadRequest);
+      if (command === 'desktop_browser_control') return desktopBrowser.takeControl(pageId, args.paused === true);
+      const viewId = typeof args.viewId === 'string' ? args.viewId : '';
+      if (!viewId) throw new Error('viewId is required');
+      if (command === 'desktop_browser_detach') { desktopBrowser.detach(pageId, viewId, browserWindow); return null; }
+      const raw = args.bounds as Record<string, unknown>;
+      if (!raw || !['x', 'y', 'width', 'height'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]))) throw new Error('A finite browser viewport is required');
+      const bounds = { x: Math.round(Number(raw.x)), y: Math.round(Number(raw.y)), width: Math.max(1, Math.round(Number(raw.width))), height: Math.max(1, Math.round(Number(raw.height))) };
+      if (command === 'desktop_browser_layout') { desktopBrowser.layout(pageId, viewId, browserWindow, bounds, args.visible === true); return null; }
+      return desktopBrowser.present({ pageId, viewId, url: String(args.url ?? 'about:blank'), bounds, visible: args.visible === true }, browserWindow);
     }
 
     case 'desktop_capture_page_rect': {

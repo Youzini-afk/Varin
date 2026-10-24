@@ -52,7 +52,7 @@ export function createChildProfilePreparer(owners: {
     const parent = input.parent;
     const catalogModelId = parent.configuration.catalogModelId ?? parent.configuration.model;
     const main = parent.configuration.providerId ? { providerId: parent.configuration.providerId, modelId: catalogModelId } : null;
-    const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined);
+    const focus = input.workFocus ?? (input.projectId ? await owners.projectWorkFocus?.(input.projectId) : undefined) ?? 'general';
     signal?.throwIfAborted();
     const defaults = agentPresetTools(descriptors);
     const observations = [...observePresets(settings.models, main, settings.agents, focus, 'agent', defaults),
@@ -62,7 +62,7 @@ export function createChildProfilePreparer(owners: {
       const toolsSource = definition.slot
         ? resolveAgentTools(settings.models[definition.slot]?.agent?.tools, 'agent', definition.tools).source
         : 'explicit';
-      const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, instructions: definition.systemPromptFragment,
+      const profile: ChildPreset = { id: entry.id, name: definition.name ?? entry.id, description: definition.teamDescription, instructions: definition.systemPromptFragment,
         ...(definition.avatar ? { avatar: definition.avatar } : {}),
         tools: [...definition.tools], tools_source: toolsSource === 'default' ? 'default' : 'explicit', work_mode: definition.worktree === 'isolated' ? 'isolated_write' : definition.worktree === 'shared' ? 'shared' : 'read_only',
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };

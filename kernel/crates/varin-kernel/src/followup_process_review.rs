@@ -59,6 +59,7 @@ fn model_call(
         },
     );
     let binding = RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -132,6 +133,7 @@ fn model_call(
             origin: origin.clone(),
         },
         FrozenToolContext {
+            direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,

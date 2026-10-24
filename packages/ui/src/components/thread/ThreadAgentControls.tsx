@@ -1,5 +1,5 @@
 import React from 'react';
-import type { WorkFocusId } from '@varin/protocol';
+import { WORK_FOCUS_IDS, type WorkFocusId } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
@@ -25,7 +25,7 @@ export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusC
         <Icon name={workFocus === 'research' ? 'workspace-research' : 'workspace-general'} className="size-3.5 shrink-0" /><span className="whitespace-nowrap">{t(`workFocus.${workFocus}`)}</span><Icon name="arrow-down-s" className="size-3 shrink-0 opacity-60" />
       </button>
     </DropdownMenuTrigger><DropdownMenuContent side="top" align="end" className="w-64" portalToBody>
-      {(['code', 'research'] as const).map(focus => <DropdownMenuItem key={focus} className="items-start gap-2" onSelect={() => onWorkFocusChange(focus)}>
+      {WORK_FOCUS_IDS.map(focus => <DropdownMenuItem key={focus} className="items-start gap-2" onSelect={() => onWorkFocusChange(focus)}>
         <Icon name={focus === 'research' ? 'workspace-research' : 'workspace-general'} className="mt-0.5 size-4 shrink-0" /><span className="flex-1"><span className="block">{t(`workFocus.${focus}`)}</span><span className="mt-0.5 block text-xs text-muted-foreground">{t(`workFocus.${focus}Description`)}</span></span>{workFocus === focus && <Icon name="check" className="size-3.5 shrink-0" />}
       </DropdownMenuItem>)}
       {pending && <p className="border-t border-border/50 px-2 py-2 typography-micro text-muted-foreground">{t('workFocus.nextTurn')}</p>}

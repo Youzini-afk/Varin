@@ -141,6 +141,7 @@ grant_id: "parent".into(),
         arguments: serde_json::to_value(f.input).unwrap(),
     };
     let frozen = FrozenToolContext {
+        direct_tools: None,
         child_dispatch: db.lock().unwrap().launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,

@@ -61,6 +61,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 mod integration_reconciliation;
+mod file_tool_reconciliation;
 mod schedule_reconciliation;
 mod reconcile;
 

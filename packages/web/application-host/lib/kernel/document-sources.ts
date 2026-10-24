@@ -18,6 +18,13 @@ import { createResearchAccess, researchCaller } from './research-access.js';
 import { admitRunSourceAuthority, savedSourceLaunch, sourceToolSchemas } from './source-launch.js';
 import type { ToolInvocationAuthority } from './tool-invocation.js';
 
+const contentType = (filename: string): string => ({
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}[path.extname(filename).toLowerCase()] ?? 'application/octet-stream');
+
 export interface DocumentSources {
   tool(authority: ToolInvocationAuthority): DocumentMaterialSources;
   path(selection: ThreadResearchSelection, path: string, signal?: AbortSignal): Promise<DocumentIngestInput>;
@@ -46,7 +53,7 @@ async function sourceBytes(client: Pick<KernelScopedClient, 'getBlob'>, state: E
 
 const regularFile = (state: KernelBranchState | undefined): Extract<KernelBranchState, { kind: 'regular-file' }> => {
   if (!state || state.kind === 'missing') throw new HarnessServiceError('not-found', 'The document is missing from its original source');
-  if (state.kind !== 'regular-file') throw new HarnessServiceError('invalid-params', `The selected document source is a ${state.kind}, not a regular PDF file`);
+  if (state.kind !== 'regular-file') throw new HarnessServiceError('invalid-params', `The selected document source is a ${state.kind}, not a regular file`);
   return state;
 };
 
@@ -68,7 +75,7 @@ export async function readSourceDocument(input: {
       const state = regularFile(entry?.state), resourcePath = entry!.path;
       const bytes = await sourceBytes(client, state, { branchId, revision, path: resourcePath }, signal);
       return { source: bytes, sourceUrl: `${provenance}/branches/${encodeURIComponent(branchId)}/revisions/${revision}/${resourcePath.split('/').map(encodeURIComponent).join('/')}`,
-        title: path.posix.basename(resourcePath), contentType: 'application/pdf' };
+        title: path.posix.basename(resourcePath), contentType: contentType(resourcePath) };
     }
     if (!physicalRoot) throw new HarnessServiceError('unavailable', 'The original physical document source is unavailable');
     const captured = await client.fileCapture({ operationId: `document-source:${input.operationId}`,
@@ -81,7 +88,7 @@ export async function readSourceDocument(input: {
     return { source: bytes, sourceUrl: source.resource_owner.kind === 'managed_host'
       ? `${provenance}/roots/${encodeURIComponent(physicalRoot.rootId)}/${captured.path.split('/').map(encodeURIComponent).join('/')}`
       : pathToFileURL(path.join(physicalRoot.canonicalRoot, captured.path)).href,
-      title: path.posix.basename(captured.path), contentType: 'application/pdf' };
+      title: path.posix.basename(captured.path), contentType: contentType(captured.path) };
   } finally { if (ownerId) await client.releaseBlob(ownerId); }
 }
 

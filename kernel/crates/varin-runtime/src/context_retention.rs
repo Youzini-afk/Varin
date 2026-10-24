@@ -11,6 +11,22 @@ pub struct RetainedContext {
     pub budget_tokens: Option<u64>,
 }
 
+/// Portable conversation background. Runtime authority and opaque continuation stay
+/// with the original request; completed semantic exchanges can cross model bindings.
+pub(crate) fn conversation_background(history: &[std::sync::Arc<ConversationItem>]) -> ConversationHistory {
+    history.iter().filter(|item| {
+        !item.provenance.is_system()
+            && !matches!(item.provenance, Provenance::GoalInstruction { .. })
+            && !matches!(&item.provenance, Provenance::ExternalData { source } if source == "current-teammates")
+            && !matches!(item.content, Content::ProviderOnly)
+    }).map(|item| {
+        let mut item = item.as_ref().clone();
+        item.opaque = None;
+        item.resource_activation = None;
+        std::sync::Arc::new(item)
+    }).collect()
+}
+
 #[derive(Default, Serialize, Deserialize)]
 pub(crate) struct Selection {
     pub summary: String,

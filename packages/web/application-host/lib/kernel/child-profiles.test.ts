@@ -63,10 +63,10 @@ it('compiles original configured profiles without losing unavailable choices, sc
   settings.harness.agents.reader.instructions = 'Changed later.';
   expect(profile('reader').instructions).toBe('Keep the original result.');
   expect((await prepare({ parent: f.parent, workFocus: 'code' })).identity).not.toBe(frozen.identity);
-  expect((await prepare({ parent: f.parent })).presets.find(value => value.id === 'custom:research')?.unavailable).toBeNull();
+  expect((await prepare({ parent: f.parent })).presets.find(value => value.id === 'custom:research')?.unavailable?.code).toBe('child-profile-scope_unavailable');
 });
 
-it('uses the admitted project work focus without disabling focused profiles in an unscoped conversation', async () => {
+it('uses the admitted project work focus and a general default for unscoped conversations', async () => {
   const f = await fixture();
   const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities,
     projectWorkFocus: async id => id === 'research-project' ? 'research' : undefined,

@@ -26,6 +26,9 @@ Web / Electron / mobile renderer
 - `ui` 负责 React 呈现、Thread 投影、Document Registry 与编辑器分组，不拥有文件写入、凭据或耐久执行。
 - `web` 是 Application Host。Electron 内嵌同一 Host 并提供窗口、preload、通知和更新；移动端连接 Host。
   客户端只观察或提交明确操作，不增加另一套后端或对话数据库。
+- 内置 Browser Use 由 Electron 的原 Chromium 会话和 `WebContentsView` 承载，Host 注入受信的 BrowserOwner。
+  UI 只挂载同一页面的视图；页面操作、下载与关闭由该 owner 管理。无此 owner 的远端 Host 不会借用本机登录态。
+- Office 格式引擎在 Host 中读取和转换 DOCX/XLSX/PPTX，输出交给原生文件事务；材料、文件、运行和恢复仍由上述原 owner 管理。
 - `varin-runtime` 负责执行状态机与 provider 协议；`varin-kernel` 将它连接到资源权威和特权 Host bridge。
 - 扩展契约、作者 API、Host 生命周期和 Surface 生命周期分别由对应包拥有。相同扩展 ID 不等于相同权限。
 

@@ -314,6 +314,7 @@ mod engines {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

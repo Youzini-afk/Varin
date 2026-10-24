@@ -150,7 +150,8 @@ describe("scholarly search service", () => {
     });
     const service = createResearchSearchService({ fetch });
     const page = await service.handle({ action: "relations", provider: "semantic-scholar", paperId: "P9", relation: "references" }, context);
-    expect(page.status).toBe("ok");
+    expect(page.status).toBe("partial");
+    expect(page.issues).toMatchObject([{ index: 1, code: 'unresolved-reference' }]);
     expect(page.nextCursor).toBe("10");
     expect(page.papers).toHaveLength(1);
     expect(page.papers[0]).toMatchObject({
@@ -232,6 +233,16 @@ describe("scholarly search service", () => {
     await expect(source.handle({ action: "relations", paperId: "W1", relation: "references" }, context)).resolves.toMatchObject({ status: "failed", relation: { source: { id: "W1" } } });
     const edge = createResearchSearchService({ fetch: vi.fn(async () => json({ data: [{}] })) });
     await expect(edge.handle({ action: "relations", provider: "semantic-scholar", paperId: "P1", relation: "citations" }, context)).resolves.toMatchObject({ status: "failed" });
+  });
+
+  it('keeps usable papers when individual rows or the continuation cursor are invalid', async () => {
+    const service = createResearchSearchService({ fetch: vi.fn(async () => json({
+      results: [{ id: 'https://openalex.org/W1', title: 'Usable paper' }, { title: 'Missing identity' }], meta: { next_cursor: 12 },
+    })) });
+    const page = await service.handle({ action: 'search', query: 'query' }, context);
+    expect(page).toMatchObject({ status: 'partial', papers: [{ id: 'https://openalex.org/W1', title: 'Usable paper' }],
+      issues: [{ index: 1, code: 'invalid-paper' }, { code: 'invalid-cursor' }] });
+    expect(page.nextCursor).toBeUndefined();
   });
 
   it("awaits the actual success body before cancellation settles and issues no dependent request", async () => {

@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { settingsDict } from './en.settings';
 import { followupPanelEn } from './followups';
 import { toolHeadingMessages } from './tool-headings';
@@ -6,6 +8,8 @@ import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
+  ...officeReaderMessages('en'),
+  ...browserMessages('en'),
   ...followupPanelEn,
   "chat.dialogue.read": "Read files",
   "chat.dialogue.list": "Browse files",
@@ -252,11 +256,11 @@ export const dict = {
   "thread.message.summarize": "Summarize through here",
 
   "chat.fileAttachment.actions.attachPdfs": "Attach PDFs",
-  "chat.fileAttachment.actions.choosePdfs": "Choose PDF attachments",
-  "chat.fileAttachment.pdfAttachments": "PDF attachments",
+  "chat.fileAttachment.actions.choosePdfs": "Choose documents",
+  "chat.fileAttachment.pdfAttachments": "Document attachments",
   "chat.fileAttachment.uploading": "Preparing attachments…",
-  "chat.fileAttachment.unsupportedType": "Attach an image or PDF file.",
-  "chat.fileAttachment.pdfNotRetained": "The PDF was not retained. No attachment was added.",
+  "chat.fileAttachment.unsupportedType": "Attach images, PDF, DOCX, XLSX or PPTX files.",
+  "chat.fileAttachment.pdfNotRetained": "The document was not retained. No attachment was added.",
   "filesView.workspaceEdit.operation.create": "Create",
   "filesView.workspaceEdit.operation.rename": "Rename",
   "filesView.workspaceEdit.operation.delete": "Delete",
@@ -581,10 +585,14 @@ export const dict = {
   'research-facts.rerunSelected': "Rerun selected",
   'research-facts.actionFailed': "Action failed",
   'research-facts.unknownTarget': "unknown target",
+  "workFocus.general": "General",
+  "workFocus.generalDescription": "Balanced tools for everyday work.",
+  "workFocus.office": "Office",
+  "workFocus.officeDescription": "Documents, data, browser and computer tools.",
   'workFocus.label': "Work focus",
-  'workFocus.code': "General",
+  "workFocus.code": "Coding",
   'workFocus.research': "Research",
-  'workFocus.codeDescription': "Coding and everyday tasks, with tools as needed.",
+  "workFocus.codeDescription": "Tools for working with code.",
   'workFocus.researchDescription': "Investigate questions, compare explanations, and develop experiments.",
   'workFocus.pending': "Applies to the next run",
   'workFocus.nextTurn': "Changes apply when the next run starts. The current run and its queued follow-ups keep their focus.",

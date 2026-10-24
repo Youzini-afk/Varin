@@ -1,13 +1,13 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, isAbsolute, join, sep } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { PDFDocumentProxy, PDFPageProxy, PageViewport } from "pdfjs-dist";
 import type { TextItem } from "pdfjs-dist/types/src/display/api.js";
-import { launchOwnedProcess, managedExitConfirmed, terminateOwnedProcess, waitForManagedExit,
-  type ManagedProcessOwner, type ManagedSpawn } from "../process/types.js";
+import type { ManagedSpawn } from "../process/types.js";
+import { executableExists, runOwnedCommand as runCommand, type ProcessDirectoryState } from "../process/run-command.js";
 
 /** Every region uses the final, rotated page with a top-left origin. */
 export interface PdfRegion { x: number; y: number; width: number; height: number }
@@ -263,64 +263,6 @@ const renderPageFromDoc = async (doc: PDFDocumentProxy, input: PdfRenderInput, v
       parser: "pdfjs", parserVersion: version };
   } finally {
     canvasFactory.destroy(canvasAndContext);
-  }
-};
-
-const executableExists = async (command: string): Promise<boolean> => {
-  const extensions = process.platform === "win32" ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";") : [""];
-  const names = process.platform === "win32" && !extensions.some((extension) => command.toLowerCase().endsWith(extension.toLowerCase()))
-    ? [command, ...extensions.map((extension) => command + extension)] : [command];
-  const directories = isAbsolute(command) || command.includes(sep) || command.includes("/") ? [""] : (process.env.PATH ?? process.env.Path ?? "").split(delimiter);
-  for (const directory of directories) {
-    for (const name of names) {
-      try {
-        const file = await stat(directory ? join(directory, name) : name);
-        if (file.isFile() && (process.platform === "win32" || (file.mode & 0o111) !== 0)) return true;
-      } catch { /* continue along PATH */ }
-    }
-  }
-  return false;
-};
-
-interface ProcessDirectoryState { safeToRemove: boolean }
-
-const runCommand = async (
-  spawn: ManagedSpawn, command: string, args: string[], cwd: string,
-  signal?: AbortSignal, directoryState?: ProcessDirectoryState,
-): Promise<{ stdout: string; stderr: string }> => {
-  throwIfAborted(signal);
-  const owner: ManagedProcessOwner = { child: null };
-  let aborting: Promise<void> | undefined;
-  const onAbort = (): void => { aborting ??= terminateOwnedProcess(owner, true); void aborting.catch(() => undefined); };
-  signal?.addEventListener("abort", onAbort, { once: true });
-  try {
-    const child = await launchOwnedProcess(owner, (launchSignal) => spawn(command, args, {
-      cwd, stdio: ["ignore", "pipe", "pipe"], windowsHide: true, signal: launchSignal,
-    }));
-    if (directoryState) directoryState.safeToRemove = false;
-    const stdout: Buffer[] = [];
-    const stderr: Buffer[] = [];
-    child.stdout?.on("data", (chunk: Buffer) => stdout.push(Buffer.from(chunk)));
-    child.stderr?.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
-    if (!child.stdout || !child.stderr) throw new Error("Managed process did not provide piped output");
-    if (signal?.aborted) onAbort();
-    await waitForManagedExit(child);
-    if (directoryState) directoryState.safeToRemove = managedExitConfirmed(child);
-    if (signal?.aborted) { await aborting; throw aborted(signal); }
-    if (child.exitCode !== 0 || child.signalCode) {
-      throw new Error(Buffer.concat(stderr).toString("utf8").trim() || `${command} exited with ${child.signalCode ?? child.exitCode ?? "unknown"}`);
-    }
-    return { stdout: Buffer.concat(stdout).toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8") };
-  } catch (error) {
-    if (signal?.aborted) {
-      await (aborting ?? terminateOwnedProcess(owner, true));
-      if (directoryState) directoryState.safeToRemove = managedExitConfirmed(owner.child);
-      throw aborted(signal);
-    }
-    if (directoryState) directoryState.safeToRemove = managedExitConfirmed(owner.child);
-    throw error;
-  } finally {
-    signal?.removeEventListener("abort", onAbort);
   }
 };
 

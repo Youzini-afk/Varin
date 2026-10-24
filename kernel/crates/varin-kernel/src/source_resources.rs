@@ -662,7 +662,7 @@ pub(crate) fn authorize_service_capabilities(
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SourceIntegrationReceiptParams {
+pub(crate) struct SourceEffectReceiptParams {
     pub principal_id: String,
     pub coordinator_host_id: String,
     pub source: SourceSelection,
@@ -975,6 +975,7 @@ pub(crate) fn prepare_request(
         "source.integration.receipt" => {
             storage.source_integration_receipt(serde_json::from_value(params)?)?
         }
+        "source.file.receipt" => storage.source_file_receipt(serde_json::from_value(params)?)?,
         "source.authority.handoff" => {
             storage.inspect_source_handoff(&serde_json::from_value(params)?, epoch)?
         }

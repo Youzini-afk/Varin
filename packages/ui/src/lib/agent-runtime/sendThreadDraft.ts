@@ -65,11 +65,11 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         assertHost();
         for (const pdf of request.pdfs) {
           if (!read().pdfs?.some(item => item.id === pdf.id)) continue;
-          const result = await api.materials.upload(identity, { filename: pdf.filename, mimeType: 'application/pdf', data: pdf.data });
+          const result = await api.materials.upload(identity, { filename: pdf.filename, mimeType: pdf.mimeType ?? 'application/pdf', data: pdf.data });
           assertHost();
           const retained = result.status === 'ok' ? result.sourceSnapshot ?? result.snapshot : undefined;
-          if (!retained?.snapshotId || retained.document?.kind !== 'pdf') throw new Error('PDF attachment could not be retained');
-          const material = { snapshotId: retained.snapshotId, filename: pdf.filename, sourceHash: retained.document.source?.contentHash };
+          if (!retained?.snapshotId || !retained.document?.source) throw new Error('Document attachment could not be retained');
+          const material = { snapshotId: retained.snapshotId, filename: pdf.filename, sourceHash: retained.document.source.contentHash, format: retained.document.kind };
           patch(current => ({ pdfs: current.pdfs?.filter(item => item.id !== pdf.id), materials: [...current.materials,
             material] }));
         }

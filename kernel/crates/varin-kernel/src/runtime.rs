@@ -52,7 +52,8 @@ enum WorkerRequest {
     FileLeasesChanged,
     Interaction(crate::storage::process_interactions::Command),
     ReplayProcessTerminals(Vec<String>),
-    IntegrationReceipt(crate::tools::IntegrationReceiptRead),
+    IntegrationReceipt(crate::tools::SourceEffectReceiptRead),
+    FileReceipt(crate::tools::SourceEffectReceiptRead),
     ResultPublicationDone {
         request: Value,
         task: Arc<crate::storage::result_publication::ResultPublicationTask>,
@@ -1158,6 +1159,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let integration_requests = request_tx.clone();
+    let file_receipt_requests = request_tx.clone();
     let replay_requests = request_tx.clone();
     let agent_cancellations = cancellations.clone();
     let resource_requests = request_tx.clone();
@@ -1298,6 +1300,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         integration_requests
             .send(WorkerRequest::IntegrationReceipt(read))
             .map_err(|_| KernelError::Storage("Storage journal owner stopped".into()))
+    })
+    .with_file_receipts(move |read| {
+        file_receipt_requests.send(WorkerRequest::FileReceipt(read))
+            .map_err(|_| KernelError::Storage("Storage file receipt owner stopped".into()))
     })
     .with_admission_control(move |binding, cancel| {
         use varin_runtime::{execution::ExecutionError, execution_capacity::AdmissionControlGuard};
@@ -1768,6 +1774,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         .and_then(|storage| storage.integration_receipt(&read));
                     let _ = read.reply.send(result);
                     continue;
+                }
+                WorkerRequest::FileReceipt(read) => {
+                    let result = kernel.storage.as_ref().ok_or_else(|| KernelError::Storage("Storage not ready".into()))
+                        .and_then(|storage| storage.file_tool_receipt(&read));
+                    let _ = read.reply.send(result); continue;
                 }
                 WorkerRequest::ReplayProcessTerminals(ids) => {
                     let result = kernel

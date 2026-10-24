@@ -59,7 +59,7 @@ export interface ScholarlyRelationSource {
 }
 
 export interface ScholarlySearchResult {
-  status: "ok" | "empty" | "unavailable" | "failed";
+  status: "ok" | "partial" | "empty" | "unavailable" | "failed";
   provider: ScholarlyProvider;
   action: ScholarlySearchAction;
   papers: ScholarlyPaper[];
@@ -73,4 +73,6 @@ export interface ScholarlySearchResult {
   code?: string;
   httpStatus?: number;
   retryAfter?: string;
+  /** Provider rows/cursors that could not be used; valid papers remain available. */
+  issues?: { index?: number; code: 'invalid-paper' | 'unresolved-reference' | 'invalid-cursor'; message: string }[];
 }

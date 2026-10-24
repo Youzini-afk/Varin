@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 60;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 61;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1324,6 +1324,12 @@ pub(crate) struct ModelSelectParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct MaterialRetentionParams {
+    pub(crate) child_thread_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelTokenizerOpenParams {
     pub(crate) configuration: Value,
 }
@@ -1772,6 +1778,7 @@ pub(crate) struct KernelFileCaptureBatchParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelFileApplyParams {
+    pub(crate) journal_binding: Option<KernelFileJournalBinding>,
     pub(crate) operation_id: String,
     pub(crate) workspace_id: String,
     pub(crate) reservation_operation_id: Option<String>,
@@ -2845,8 +2852,7 @@ pub(crate) type SourceHandoffInspectParams = crate::source_resources::SourceHand
 
 pub(crate) type SourceHandoffClaimParams = crate::source_resources::SourceHandoffClaimParams;
 
-pub(crate) type SourceIntegrationReceiptParams =
-    crate::source_resources::SourceIntegrationReceiptParams;
+pub(crate) type SourceEffectReceiptParams = crate::source_resources::SourceEffectReceiptParams;
 
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -3145,6 +3151,15 @@ pub(crate) struct KernelProcessEnvironmentEntry {
 pub(crate) struct KernelFileLeaseResource {
     pub(crate) path: String,
     pub(crate) scope: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelFileJournalBinding {
+    pub(crate) anchor: RecoveryAnchor,
+    pub(crate) source_mode: varin_runtime::SourceMode,
+    pub(crate) tool: String,
+    pub(crate) before_owner_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4167,6 +4182,11 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.status" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "runtime.material.retention" => {
+            serde_json::from_value::<MaterialRetentionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.content.collect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -5065,7 +5085,12 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "source.integration.receipt" => {
-            serde_json::from_value::<SourceIntegrationReceiptParams>(params.clone())
+            serde_json::from_value::<SourceEffectReceiptParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "source.file.receipt" => {
+            serde_json::from_value::<SourceEffectReceiptParams>(params.clone())
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }

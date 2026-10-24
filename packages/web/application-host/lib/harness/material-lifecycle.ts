@@ -51,10 +51,7 @@ const collectionIdOf = (record: RecordLike): string | undefined => {
 const bodyHashOf = (record: RecordLike): string | undefined => (
   // A PDF source record has an intentionally empty readable body. Its original
   // bytes, rather than the shared empty-string object, are its retention key.
-  (record.recordType === WEB_SNAPSHOT_RECORD_TYPE && (() => {
-    try { return (JSON.parse(record.payloadJson) as { representation?: string }).representation === "pdf-source-v1"; }
-    catch { return false; }
-  })()
+  (record.recordType === WEB_SNAPSHOT_RECORD_TYPE && record.references.some(reference => reference.slot === 'source')
     ? record.references.find((reference) => reference.slot === "source")?.objectHash
     : record.references.find((reference) => reference.slot === "body")?.objectHash)
 );
@@ -99,18 +96,25 @@ export const createMaterialLifecycle = (
   const inKernel = <T>(workspaceId: string, purpose: string,
     operation: Parameters<typeof kernelContext<T>>[3]): Promise<T> =>
     serializer.runSerialized(workspaceId, () => kernelContext(workingStates, workspaceId, purpose, operation));
-  const releaseThreadMaterials = async (workspaceId: string, threadId: string): Promise<void> => inKernel(
+  const releaseThreadMaterials = async (workspaceId: string, threadIds: string | readonly string[]): Promise<void> => inKernel(
     workspaceId,
     "material-thread-release",
     async (_store, context) => {
+      const deleted = new Set(typeof threadIds === 'string' ? [threadIds] : threadIds);
+      const releasesGrant = (record: RecordLike): boolean => {
+        if (deleted.has(record.threadId ?? '')) return true;
+        try { return deleted.has((JSON.parse(record.payloadJson) as { toThreadId?: string }).toThreadId ?? ''); }
+        catch { return false; }
+      };
       const snapshots: RecordLike[] = [];
       const plain: RecordLike[] = [];
       const records = await context.records.list({});
-      const sharedCollections = sharedCollectionIds(records, record => record.threadId !== threadId);
+      const sharedCollections = sharedCollectionIds(records, record => !releasesGrant(record));
       for (const record of records) {
         const isSnapshot = record.recordType === WEB_SNAPSHOT_RECORD_TYPE;
         const isCollection = record.recordType === MATERIAL_COLLECTION_RECORD_TYPE;
-        const isGrant = record.recordType === "material.grant";
+        const isGrant = record.recordType === "material.grant" || record.recordType === 'material.inheritance';
+        if (record.state === 'released') continue;
         if (!(
           isSnapshot
           || isCollection
@@ -118,7 +122,7 @@ export const createMaterialLifecycle = (
           || record.recordType === 'media.resource'
         )) continue;
         if (isCollection && (persistedCollection(record) || sharedCollections.has(collectionIdOf(record) ?? ""))) continue;
-        if (record.threadId === threadId) {
+        if (deleted.has(record.threadId ?? '') || isGrant && releasesGrant(record)) {
           (isSnapshot ? snapshots : plain).push(record);
         }
       }

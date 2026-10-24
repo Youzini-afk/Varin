@@ -274,6 +274,7 @@ fn shipped_defaults_resolve_actual_declarations_with_their_required_sources() {
             .collect();
         assert!(!tools.is_empty());
         selected.catalog.presets.push(ChildPreset {
+            description: None,
             avatar: None,
             tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Default,
             id: id.into(),
@@ -388,6 +389,7 @@ fn absent_source_defaults_derive_from_frozen_declarations_but_explicit_domain_to
             .collect();
         let index = selected.catalog.presets.len();
         selected.catalog.presets.push(ChildPreset {
+            description: None,
             avatar: None,
             id: id.into(),
             name: id.into(),

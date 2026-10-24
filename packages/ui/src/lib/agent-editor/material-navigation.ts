@@ -8,6 +8,7 @@ import { openWorkbenchEditor, patchEditorViewState, peekEditorWorkbench, pinWork
 import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 import { workspacePathFromResourceId } from '@/lib/documents/path';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
+import { embeddedBrowserPageId } from '@/lib/browser-page';
 
 const returnProfiles = new Map<string, string>();
 type BrowserPosition = { x: number; y: number };
@@ -59,7 +60,8 @@ export async function returnMaterialToConversation(workspaceId: string, workspac
     useUIStore.getState().openContextPanelTab(workspaceRoot, {
       mode: tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? 'browser' : 'file',
       targetPath: tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? tab.viewState.browserUrl ?? null : workspacePathFromResourceId(workspaceRoot, tab.resourceId),
-      ...(tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? { dedupeKey: 'browser' } : {}),
+      ...(tab.providerId === BUILTIN_EDITOR_PROVIDER_IDS.browser ? { dedupeKey: tab.viewState.browserTabId?.startsWith('browser:')
+        ? tab.viewState.browserTabId.slice('browser:'.length) : tab.viewState.browserTabId ?? 'browser' } : {}),
       targetDirectory: workspaceRoot, editorViewId: tab.viewId,
     });
   }
@@ -76,7 +78,7 @@ export async function continueBrowserInIde(input: { workspaceRoot: string; tabId
   const browserPosition = await captureBrowserPosition(input.workspaceRoot, input.tabId);
   if (runtimeKey !== getRuntimeKey()) throw new Error('Runtime changed while opening the resource');
   const workbench = openWorkbenchEditor(identity.workspaceId, `browser:${input.tabId}`, BUILTIN_EDITOR_PROVIDER_IDS.browser,
-    { viewState: { browserTabId: input.tabId, browserUrl: input.url, ...(browserPosition ? { browserPosition } : {}) } });
+    { viewState: { browserTabId: input.tabId, browserPageId: embeddedBrowserPageId(input.workspaceRoot, input.tabId), browserUrl: input.url, ...(browserPosition ? { browserPosition } : {}) } });
   const tab = activeEditorTab(workbench);
   if (tab) await continueMaterialInIde({ workspaceId: identity.workspaceId, viewId: tab.viewId, fromProfileId: input.fromProfileId });
 }

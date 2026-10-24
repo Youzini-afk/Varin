@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import type { ProjectEntry } from '@varin/application-client';
-import type { WorkFocusId } from '@varin/protocol';
+import { isWorkFocusId, type WorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { projectFolders, projectPathKey } from '@varin/application-client';
@@ -276,7 +276,7 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
     if (defaultModel) {
       project.defaultModel = defaultModel;
     }
-    if (candidate.defaultWorkFocus === 'code' || candidate.defaultWorkFocus === 'research') {
+    if (isWorkFocusId(candidate.defaultWorkFocus)) {
       project.defaultWorkFocus = candidate.defaultWorkFocus;
     }
     if (candidate.iconBackground === null) {

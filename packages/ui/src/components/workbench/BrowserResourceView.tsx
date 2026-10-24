@@ -1,19 +1,20 @@
 import React from 'react';
+import { DesktopBrowserPane } from './DesktopBrowserPane';
+import { isDesktopLocalOriginActive } from '@/lib/desktop';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
-import { invokeDesktopCommand } from '@/lib/desktopNative';
 import { useUIStore } from '@/stores/useUIStore';
 import { registerBrowserMaterialCapture } from '@/lib/agent-editor/material-navigation';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { addThreadDraftImage } from '@/lib/agent-runtime/draftAttachments';
 import { appendThreadDraftText } from '@/lib/agent-runtime/threadNavigation';
 import { runtimeFetch, getRuntimeUrlResolver, getRuntimeApiBaseUrl, refreshRuntimeUrlAuthToken } from '@varin/application-client';
-import { isPreviewElementMetadata, formatPreviewAnnotationMarkdown, renderPreviewScreenshot, desktopAnnotationToFile, getCachedProxyTarget, getBrowserProxyTargetKey, previewProxyTargetCache, type PreviewElementMetadata } from '@/lib/preview/screenshot-capture';
-import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT, DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT, normalizeBrowserUrl, runIframeScript, stripPreviewQueryParams, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
+import { isPreviewElementMetadata, formatPreviewAnnotationMarkdown, renderPreviewScreenshot, getCachedProxyTarget, getBrowserProxyTargetKey, previewProxyTargetCache, type PreviewElementMetadata } from '@/lib/preview/screenshot-capture';
+import { DESKTOP_BROWSER_INSPECT_SCRIPT, DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT, normalizeBrowserUrl, runIframeScript, stripPreviewQueryParams, type PreviewBridgeMessage, type PreviewProxyState } from '@/lib/preview/browser-view';
 
 type DesktopBrowserPaneProps = {
   initialUrl: string;
@@ -24,7 +25,7 @@ type DesktopBrowserPaneProps = {
 };
 
 const isElectronBrowserRuntime = (): boolean => {
-  return typeof window !== 'undefined' && Boolean(window.__VARIN_ELECTRON__);
+  return typeof window !== 'undefined' && Boolean(window.__VARIN_ELECTRON__) && isDesktopLocalOriginActive();
 };
 
 const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID, onNavigate, initialPosition }) => {
@@ -514,285 +515,6 @@ const IframeBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, dire
           </div>
         )}
         {isLoading ? (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
-            {t('common.loading')}
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-};
-
-const DesktopBrowserPane: React.FC<DesktopBrowserPaneProps> = ({ initialUrl, directory, tabID, onNavigate, initialPosition }) => {
-  const { t } = useI18n();
-  const webviewRef = React.useRef<WebviewElement | null>(null);
-  const setContextPanelTabTargetPath = useUIStore((state) => state.setContextPanelTabTargetPath);
-  const onNavigateRef = React.useRef(onNavigate);
-  onNavigateRef.current = onNavigate;
-  const initialPositionRef = React.useRef(initialPosition);
-  React.useEffect(() => registerBrowserMaterialCapture(directory, tabID, async () => {
-    const webview = webviewRef.current;
-    if (!webview?.isConnected || webview.closest('.hidden, [inert], [aria-hidden="true"], [data-varin-workbench-shell-staging]')) return;
-    const position = await webview.executeJavaScript?.('({ x: window.scrollX, y: window.scrollY })', false);
-    if (position && typeof position === 'object' && 'x' in position && 'y' in position
-      && typeof position.x === 'number' && typeof position.y === 'number'
-      && Number.isFinite(position.x) && Number.isFinite(position.y)) return { x: position.x, y: position.y };
-  }), [directory, tabID]);
-  React.useEffect(() => {
-    const position = initialPositionRef.current;
-    if (!position) return;
-    const webview = webviewRef.current;
-    const restore = () => {
-      const x = Number(position.x), y = Number(position.y);
-      if (Number.isFinite(x) && Number.isFinite(y)) void webview?.executeJavaScript?.(`window.scrollTo(${x}, ${y})`, false).catch(() => undefined);
-    };
-    webview?.addEventListener('did-stop-loading', restore, { once: true });
-    return () => webview?.removeEventListener('did-stop-loading', restore);
-  }, []);
-  const normalized = normalizeBrowserUrl(initialUrl);
-  const startUrl = normalized !== 'about:blank' ? normalized : '';
-  const initialWebviewSrcRef = React.useRef(normalizeBrowserUrl(initialUrl));
-  const [urlInput, setUrlInput] = React.useState(startUrl);
-  const [currentUrl, setCurrentUrl] = React.useState(startUrl);
-  const [isInspecting, setIsInspecting] = React.useState(false);
-  const [isLoading, setIsLoading] = React.useState(true);
-  const loadingTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const showLoading = isLoading;
-
-  const persistUrl = React.useCallback((url: string) => {
-    if (!url || url === 'about:blank' || !directory || !tabID) return;
-    setContextPanelTabTargetPath(directory, tabID, url);
-    onNavigateRef.current?.(url);
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-  const currentSessionId = useThreadStore(state => state.selectedIdentity);
-
-  // Listen to webview navigation events
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    const syncUrl = () => {
-      try {
-        const url = webview.getURL();
-        if (url && url !== 'about:blank') {
-          setCurrentUrl(url);
-          setUrlInput(url);
-          persistUrl(url);
-        }
-      } catch { /* webview not ready */ }
-    };
-
-    const onNavigate = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string }>).detail;
-      if (typeof detail?.url === 'string' && detail.url) {
-        setCurrentUrl(detail.url);
-        setUrlInput(detail.url);
-        persistUrl(detail.url);
-      }
-    };
-
-    const onStartLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      loadingTimerRef.current = setTimeout(() => setIsLoading(true), 200);
-    };
-    const onStopLoading = () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      setIsLoading(false);
-      syncUrl();
-    };
-
-    const onNewWindow = (event: Event) => {
-      const detail = (event as CustomEvent<{ url: string; disposition: string }>).detail;
-      if (detail?.disposition === 'new-window' || detail?.disposition === 'foreground-tab' || detail?.disposition === 'background-tab') {
-        event.preventDefault();
-        const w = webviewRef.current;
-        if (typeof w?.loadURL === 'function' && detail.url) {
-          w.loadURL(detail.url);
-        }
-      }
-    };
-
-    const installSameWebviewNavigation = () => {
-      try {
-        webview.executeJavaScript?.(DESKTOP_BROWSER_SAME_WEBVIEW_NAVIGATION_SCRIPT, true).catch(() => {});
-      } catch { /* webview not ready */ }
-    };
-
-    webview.addEventListener('did-navigate', onNavigate);
-    webview.addEventListener('did-navigate-in-page', onNavigate);
-    webview.addEventListener('did-start-loading', onStartLoading);
-    webview.addEventListener('did-stop-loading', onStopLoading);
-    webview.addEventListener('new-window', onNewWindow);
-    webview.addEventListener('dom-ready', installSameWebviewNavigation);
-
-    // Check current loading state imperatively — we may have missed the event
-    try {
-      if (!webview.isLoading()) {
-        setIsLoading(false);
-        syncUrl();
-      }
-    } catch { /* webview not ready */ }
-    installSameWebviewNavigation();
-
-    return () => {
-      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-      webview.removeEventListener('did-navigate', onNavigate);
-      webview.removeEventListener('did-navigate-in-page', onNavigate);
-      webview.removeEventListener('did-start-loading', onStartLoading);
-      webview.removeEventListener('did-stop-loading', onStopLoading);
-      webview.removeEventListener('new-window', onNewWindow);
-      webview.removeEventListener('dom-ready', installSameWebviewNavigation);
-    };
-  }, [persistUrl]);
-
-  // Safety timeout: hide loading overlay after 30s even if events fire late
-  React.useEffect(() => {
-    const safety = setTimeout(() => setIsLoading(false), 30_000);
-    return () => clearTimeout(safety);
-  }, []);
-
-  // Escape key cancels inspect mode
-  React.useEffect(() => {
-    if (!isInspecting) return;
-    const handler = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      setIsInspecting(false);
-      const webview = webviewRef.current;
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [isInspecting]);
-
-  // Cancel inspect on unmount
-  React.useEffect(() => {
-    const webview = webviewRef.current;
-    return () => {
-      try {
-        const url = webview?.getURL?.();
-        if (url && url !== 'about:blank') {
-          setContextPanelTabTargetPath(directory, tabID, url);
-        }
-      } catch { /* webview not ready */ }
-      try { webview?.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-    };
-  }, [directory, tabID, setContextPanelTabTargetPath]);
-
-  const loadUrl = React.useCallback((value: string) => {
-    const webview = webviewRef.current;
-    if (typeof webview?.loadURL !== 'function') return;
-    const nextUrl = normalizeBrowserUrl(value);
-    try { webview.loadURL(nextUrl); } catch { /* webview may not be ready */ }
-  }, []);
-
-  const handleInspect = React.useCallback(() => {
-    const webview = webviewRef.current;
-    if (!webview) return;
-
-    if (isInspecting) {
-      setIsInspecting(false);
-      try { webview.executeJavaScript?.(DESKTOP_BROWSER_CANCEL_INSPECT_SCRIPT).catch(() => {}); } catch { /* webview not ready */ }
-      return;
-    }
-
-    setIsInspecting(true);
-    webview.executeJavaScript?.(DESKTOP_BROWSER_INSPECT_SCRIPT, true)
-      .then(async (target: unknown) => {
-        setIsInspecting(false);
-        if (!target || !isPreviewElementMetadata(target)) return;
-
-        const sessionKey = currentSessionId;
-        if (!sessionKey) {
-          toast.error(t('contextPanel.preview.inspect.attachNoSession'));
-          return;
-        }
-
-        const wcId = typeof webview.getWebContentsId === 'function' ? webview.getWebContentsId() : null;
-        if (wcId === null || wcId === undefined) return;
-
-        const capture = await invokeDesktopCommand(
-          'desktop_browser_capture_page', { webContentsId: wcId }
-        );
-        if (!capture) throw new Error('Desktop screenshot capture is not available');
-
-        const cssViewport = await webview.executeJavaScript?.(
-          '({ width: window.innerWidth, height: window.innerHeight })', true
-        ).catch(() => null) as { width: number; height: number } | null | undefined;
-
-        const cssWidth = Number.isFinite(cssViewport?.width) ? (cssViewport as { width: number }).width : capture.width;
-        const cssHeight = Number.isFinite(cssViewport?.height) ? (cssViewport as { height: number }).height : capture.height;
-
-        const file = await desktopAnnotationToFile(capture.base64, capture.width, capture.height, cssWidth, cssHeight, target);
-        const screenshotAttached = Boolean(file);
-        if (file) {
-          await addThreadDraftImage(sessionKey, file);
-        }
-
-        appendThreadDraftText(sessionKey, formatPreviewAnnotationMarkdown({
-            pageUrl: currentUrl,
-            viewport: { width: cssWidth, height: cssHeight },
-            devicePixelRatio: window.devicePixelRatio || 1,
-            target,
-            screenshotAttached,
-            intro: t('contextPanel.preview.inspect.attachAnnotationWithScreenshot'),
-          }));
-        toast.success(t('contextPanel.preview.inspect.attached'));
-      })
-      .catch(() => setIsInspecting(false));
-  }, [appendThreadDraftText, currentSessionId, currentUrl, isInspecting, t]);
-
-  return (
-    <div className="absolute inset-0 flex flex-col bg-background">
-      <div className="flex items-center gap-1 border-b border-border bg-[var(--surface-background)] px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goBack?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-left" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.goForward?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="arrow-right" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => { try { webviewRef.current?.reload?.(); } catch { /* webview not ready */ } }}>
-          <Icon name="refresh" className="h-3.5 w-3.5" />
-        </Button>
-        <form className="min-w-0 flex-1" onSubmit={(event) => { event.preventDefault(); loadUrl(urlInput); }}>
-          <input
-            value={urlInput}
-            onChange={(event) => setUrlInput(event.target.value)}
-            className="h-7 w-full rounded-md border border-border/50 bg-[var(--surface-elevated)] px-2 typography-micro text-foreground outline-none focus:border-[var(--interactive-focus-ring)]"
-            aria-label={t('contextPanel.browser.addressAria')}
-          />
-        </form>
-        <Button
-          type="button"
-          variant={isInspecting ? 'secondary' : 'ghost'}
-          size="sm"
-          className="h-7 w-7 p-0"
-          onClick={handleInspect}
-          title={t('contextPanel.preview.inspect.toggle')}
-          aria-label={t('contextPanel.preview.inspect.toggle')}
-        >
-          <Icon name="cursor" className="h-3.5 w-3.5" />
-        </Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => void openExternalUrl(currentUrl)}>
-          <Icon name="external-link" className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <div className="relative min-h-0 flex-1 bg-background">
-        <webview
-          ref={webviewRef}
-          src={initialWebviewSrcRef.current}
-          partition="persist:varin-browser"
-          allowpopups
-          style={{ width: '100%', height: '100%', border: 'none' }}
-        />
-        {(!currentUrl || currentUrl === 'about:blank') && !isLoading ? (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-6 bg-background p-6 text-center">
-            <VarinLogo width={140} height={140} className="opacity-20" />
-            <span className="typography-ui-header text-muted-foreground">{t('contextPanel.browser.empty')}</span>
-          </div>
-        ) : null}
-        {showLoading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-background/70 typography-micro text-muted-foreground">
             {t('common.loading')}
           </div>

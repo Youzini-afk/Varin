@@ -3,6 +3,15 @@
 export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble-blue","overlap-coral","notch-ochre","slant-mint","round-lilac","tile-blue","fold-sage","cap-coral","wave-ivory","capsule-sky","pillar-lilac","lozenge-mint","wedge-apricot","arch-butter","oval-rose","squircle-periwinkle","shield-sage","sail-ivory","lean-coral","bridge-aqua","crest-lilac","step-blue","offset-peach","orbit-sage","cushion-ochre","curve-mint","bevel-rose","drift-blue","stack-ivory","tilt-pistachio","fan-coral","mound-lavender","tab-butter","span-jade","ripple-peach","facet-blue","comma-lilac","inset-sage","pocket-rose","rise-ivory","sweep-aqua","bend-ochre","twin-periwinkle","arc-apricot","tuck-jade","plate-lavender","drop-melon","ribbon-blue","cove-sage","terrace-ivory","slide-rose","ramp-mint","echo-ochre","lens-lilac","ledge-aqua","swell-apricot","parcel-periwinkle","scoop-pistachio","beam-coral","chamfer-jade","float-butter"] as const;
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
+export interface MaterialRetentionParams {
+  childThreadId?: string;
+}
+
+export interface MaterialRetention {
+  threads: Array<{threadId: string; rootThreadId: string; release: boolean}>;
+  inheritances: Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>;
+}
+
 export interface CodeRetrievalDiagnostic {
   kind: string;
   path?: string;
@@ -1440,7 +1449,7 @@ export interface RunReconcileResult {
 export interface AgentSelection {
   profileId: string | null;
   name: string | null;
-  workFocus: "code" | "research";
+  workFocus: "general" | "code" | "research" | "office";
   tools: string[] | null;
 }
 
@@ -1506,7 +1515,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 60; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 61; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2658,7 +2667,7 @@ export interface ChildCapabilityDescriptor {
   name: string;
   version: string;
   source_requirement: 'none' | 'source' | 'physical' | 'live';
-  default_presets: ('worker' | 'verifier' | 'retrieval')[];
+  default_presets: ('worker' | 'verifier' | 'retrieval' | 'research_peer')[];
   process?: boolean;
 }
 
@@ -2675,6 +2684,7 @@ export interface ChildCapabilityFailure {
 }
 
 export interface ChildPreset {
+  description?: string;
   tools_source: 'default' | 'explicit';
   id: string;
   name: string;
@@ -2720,6 +2730,7 @@ export interface TreeCancellationReceipt {
 }
 
 export interface ChildInput {
+  inheritContext?: boolean;
   sourceAgent?: string;
   name?: string;
   task: string;

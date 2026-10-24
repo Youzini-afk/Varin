@@ -11,6 +11,7 @@ import type { DraftStarterRef } from '@/lib/draftStarters';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import { getRuntimeKey } from '@varin/application-client';
+import { closeEmbeddedBrowserPage } from '@/lib/browser-page';
 import type { TerminalShell } from '@varin/application-client';
 import type { RecoveryPreference } from '@varin/protocol';
 import {
@@ -655,7 +656,7 @@ interface UIStore {
   openContextFileAtLine: (directory: string, filePath: string, line: number, column?: number, resourceDirectory?: string) => void;
   openContextOverview: (directory: string) => void;
   openContextPlan: (directory: string) => void;
-  openContextBrowser: (directory: string, url?: string) => void;
+  openContextBrowser: (directory: string, url?: string, pageId?: string) => void;
   setContextPanelTabTargetPath: (directory: string, tabID: string, targetPath: string) => void;
   setActiveContextPanelTab: (directory: string, tabID: string) => void;
   reorderContextPanelTabs: (directory: string, activeTabID: string, overTabID: string) => void;
@@ -1074,6 +1075,8 @@ export const useUIStore = create<UIStore>()(
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];
             const current = touchContextPanelState(prev);
+            if (tab.mode === 'browser' && !tab.dedupeKey) tab = { ...tab,
+              dedupeKey: current.tabs.find(item => item.mode === 'browser')?.dedupeKey ?? `page:${crypto.randomUUID()}` };
             const byDirectory = {
               ...state.contextPanelByDirectory,
               [normalizedDirectory]: upsertContextPanelTab(current, tab),
@@ -1151,7 +1154,7 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, { mode: 'plan' });
         },
 
-        openContextBrowser: (directory, url = '') => {
+        openContextBrowser: (directory, url = '', pageId) => {
           const normalizedDirectory = normalizeDirectoryPath((directory || '').trim());
           const normalizedUrl = (url || '').trim();
           if (!normalizedDirectory) {
@@ -1173,7 +1176,7 @@ export const useUIStore = create<UIStore>()(
           get().openContextPanelTab(normalizedDirectory, {
             mode: 'browser',
             targetPath: normalizedUrl || null,
-            dedupeKey: 'browser',
+            dedupeKey: pageId ? `page:${pageId}` : get().contextPanelByDirectory[normalizedDirectory]?.tabs.find(tab => tab.mode === 'browser')?.dedupeKey ?? `page:${crypto.randomUUID()}`,
             label: label ?? 'Browser',
           });
         },
@@ -1293,6 +1296,9 @@ export const useUIStore = create<UIStore>()(
           if (!normalizedDirectory || !normalizedTabID) {
             return;
           }
+
+          const closing = get().contextPanelByDirectory[normalizedDirectory]?.tabs.find(tab => tab.id === normalizedTabID);
+          if (closing?.mode === 'browser') closeEmbeddedBrowserPage(normalizedDirectory, normalizedTabID);
 
           set((state) => {
             const prev = state.contextPanelByDirectory[normalizedDirectory];

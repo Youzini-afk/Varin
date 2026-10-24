@@ -339,6 +339,7 @@ export type VarinDesktopEventMap = {
   'varin:tray-action': DesktopTrayAction;
   'varin:vibrancy-ready': { ready: boolean };
   'varin:ssh-instance-status': DesktopSshInstanceStatus;
+  'varin:browser': import('@varin/protocol').BrowserEvent;
   'varin:menu-action': string;
   'varin:check-for-updates': void;
 };
@@ -411,6 +412,12 @@ export interface VarinDesktopCommandMap {
 
   // --- capture/file/shell ---
   desktop_browser_capture_page: { args: { webContentsId: number }; result: DesktopCaptureResult };
+  desktop_browser_present: { args: { pageId: string; viewId: string; url: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }; result: import('@varin/protocol').BrowserPage };
+  desktop_browser_layout: { args: { pageId: string; viewId: string; bounds: { x: number; y: number; width: number; height: number }; visible: boolean }; result: null };
+  desktop_browser_detach: { args: { pageId: string; viewId: string }; result: null };
+  desktop_browser_action: { args: { pageId: string; action: import('@varin/protocol').BrowserAction }; result: import('@varin/protocol').BrowserActionResult };
+  desktop_browser_read: { args: import('@varin/protocol').BrowserReadRequest; result: import('@varin/protocol').BrowserObservation };
+  desktop_browser_control: { args: { pageId: string; paused: boolean }; result: import('@varin/protocol').BrowserPage };
   desktop_capture_page_rect: {
     args: { x?: number; y?: number; width?: number; height?: number };
     result: DesktopCaptureResult;
@@ -552,6 +559,12 @@ export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_restart_without_update: true,
   desktop_restart: true,
   desktop_browser_capture_page: true,
+  desktop_browser_present: true,
+  desktop_browser_layout: true,
+  desktop_browser_detach: true,
+  desktop_browser_action: true,
+  desktop_browser_read: true,
+  desktop_browser_control: true,
   desktop_capture_page_rect: true,
   desktop_save_markdown_file: true,
   desktop_read_file: true,
@@ -603,6 +616,7 @@ export const VARIN_DESKTOP_EVENT_CATALOG = {
   'varin:tray-action': true,
   'varin:vibrancy-ready': true,
   'varin:ssh-instance-status': true,
+  'varin:browser': true,
   'varin:menu-action': true,
   'varin:check-for-updates': true,
 } as const satisfies Record<VarinDesktopEvent, true>;

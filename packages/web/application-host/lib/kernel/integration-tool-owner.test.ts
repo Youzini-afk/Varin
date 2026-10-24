@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
 import { ApplicationExtensionRuntime, type HostServiceBinding } from '@varin/extension-host';
 import { parseVarinExtensionManifest } from '@varin/extension-contract';
-import { CHILD_INTEGRATION_CAPABILITY, createIntegrationReceiptReconciler, createIntegrationToolOwner } from './integration-tool-owner.js';
+import { CHILD_INTEGRATION_CAPABILITY, createFileEffectReceiptReconciler, createIntegrationToolOwner } from './integration-tool-owner.js';
 import { retainExtensionTool } from './extension-tool-owner.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ToolBridge, type HostToolCall, type PrivateToolFrame } from './tool-bridge.js';
@@ -279,7 +279,7 @@ it('receipt discovery reconciles only the original unknown external Integration 
   const runtime = new AgentRuntimeClient({ agentRuntimeRequest: request, subscribeExit: () => () => {},
     onToolReleased: () => {} } as unknown as KernelClient);
   const onError = vi.fn();
-  await createIntegrationReceiptReconciler({ runtime, onError })(signal);
+  await createFileEffectReceiptReconciler({ runtime, onError })(signal);
   expect(request.mock.calls).toEqual([
     ['runtime.thread.list', {}, signal],
     ['runtime.thread.operations.active', { threadId: 'original-parent-thread' }, signal],

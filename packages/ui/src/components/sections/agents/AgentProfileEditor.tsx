@@ -1,6 +1,6 @@
 import React from 'react';
 import { SettingsDisclosure } from '../shared/SettingsDisclosure';
-import { type ThinkingLevel } from '@varin/protocol';
+import { WORK_FOCUS_IDS, type ThinkingLevel } from '@varin/protocol';
 import { modelThinkingLevels } from '@varin/application-client';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import type { AgentProfileSaveRequest, AgentProfilesSnapshot, AgentProfileView } from '@varin/application-client';
@@ -148,7 +148,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
         </Select>
       </SettingsStackedField>
       <fieldset className="space-y-2"><legend className="typography-meta">{t('settings.agents.focus')}{builtin ? ` · ${t('settings.agents.builtinFocus')}` : ''}</legend><div className="flex gap-4">
-        {(['code', 'research'] as const).map(focus => <label key={focus} className="flex items-center gap-2 typography-meta"><input type="checkbox" checked={draft.workFocus.includes(focus)} disabled={busy || builtin}
+        {WORK_FOCUS_IDS.map(focus => <label key={focus} className="flex items-center gap-2 typography-meta"><input type="checkbox" checked={draft.workFocus.includes(focus)} disabled={busy || builtin}
           onChange={event => update({ workFocus: event.target.checked ? [...draft.workFocus, focus] : draft.workFocus.filter(value => value !== focus) })} />{t(`workFocus.${focus}`)}</label>)}
       </div></fieldset>
     </SettingsSection>

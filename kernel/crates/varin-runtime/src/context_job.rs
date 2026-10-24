@@ -599,6 +599,7 @@ pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelecti
     RunStart {
         context_preparation: Arc::new(NoopContextPreparation),
         binding: RequestBinding {
+            direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

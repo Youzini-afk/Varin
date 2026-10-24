@@ -120,6 +120,7 @@ fn combined(ending: Ending) {
             run_id: receipt.run_id,
             owner_generation: db.epoch(),
             binding: RequestBinding {
+                direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -337,6 +338,7 @@ grant_id: "search".into(),
         arguments: json!({"action":"read"}),
     };
     let frozen = FrozenToolContext {
+        direct_tools: None,
         child_dispatch: None,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,
@@ -365,6 +367,7 @@ grant_id: "search".into(),
         arguments: json!({"action":"read"}),
     };
     let plan_frozen = FrozenToolContext {
+        direct_tools: None,
         child_dispatch: None,
         resource_activations: Vec::new(),
         resource_checkpoint_id: None,

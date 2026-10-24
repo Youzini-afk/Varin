@@ -210,7 +210,8 @@ fn cancelled_report_leaves_current_directory_only_after_the_parent_receives_the_
     let range=HistoryRange{branch_id:"branch:parent".into(),ancestor_id:None,leaf_id:f.db.head("branch:parent").unwrap()};
     let snapshot=RequestSnapshot {view:RequestView {request_id:"consume-agent-report".into(),run_id:f.context.run_id.clone(),
         origin:RequestOrigin::Conversation{compaction:None,step:2,history_range:range.clone()},
-        binding:RequestBinding {provider_id: None, tokenizer: None,
+        binding:RequestBinding {
+            direct_tools: None,provider_id: None, tokenizer: None,
         request_context:None,child_dispatch:f.db.launch_metadata(&f.context.run_id).unwrap().unwrap().dispatch_context_ref,goal:None,resource_activations:vec![],resource_checkpoint_id:None,
             connection_identity:launch.connection_identity,provider_family:launch.provider_family,model:launch.model,credential_ref:Some("credential-ref".into()),
             configuration_generation:2,tool_schema_generation:1,tools:launch.tools,instruction_sources:vec![],memory_checkpoint:None,attachment_refs:vec![],environment_cursor:0,history_range:range},

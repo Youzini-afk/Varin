@@ -106,6 +106,7 @@ impl PolicyActionMetadata {
         }
         let tools = Arc::new(body.tools);
         Ok(PolicyGraphIntent::PolicyToolGraphV1 {
+            dispatch_history: body.dispatch_history.as_ref().map(|reference| content.load_items(reference, &|| false)).transpose()?,
             action_id: body.action_id.clone(),
             boundary: body.boundary,
             identity: body.identity,
@@ -115,6 +116,7 @@ impl PolicyActionMetadata {
                 .into_iter()
                 .map(|node| PolicyAdmittedNode {
                     context: FrozenToolContext {
+                        direct_tools: body.direct_tools.clone(),
                         child_dispatch: node.child_dispatch,
                         resource_activations: node.resource_activations,
                         resource_checkpoint_id: node.resource_checkpoint_id,
@@ -151,6 +153,10 @@ impl PolicyActionMetadata {
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct PolicyGraphBody {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_history: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub direct_tools: Option<Vec<String>>,
     pub action_id: String,
     pub boundary: PolicyBoundary,
     pub identity: PolicyIdentity,
@@ -176,6 +182,7 @@ impl PolicyGraphBody {
             identity,
             state,
             nodes,
+            ..
         } = intent;
         validate_policy_nodes(
             &nodes
@@ -191,6 +198,7 @@ impl PolicyGraphBody {
                 || node.context.resource_activations != first.resource_activations
                 || node.context.run_id != first.run_id
                 || node.context.tools != first.tools
+                || node.context.direct_tools != first.direct_tools
                 || node.context.origin
                     != (ToolOrigin::PolicyAction {
                         action_id: action_id.clone(),
@@ -208,6 +216,8 @@ impl PolicyGraphBody {
         }
         Ok((
             Self {
+                dispatch_history: None,
+                direct_tools: first.direct_tools.clone(),
                 action_id: action_id.clone(),
                 boundary: boundary.clone(),
                 identity: identity.clone(),

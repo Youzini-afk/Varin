@@ -27,16 +27,6 @@ content or acquire a file source. The accepted enabled setting and original per-
 apply independently of Web settings. The artifact uses the same immutable package-root/fingerprint
 pipeline. Fast decisions/reranking and reader-model prompts are not supplied by this metadata tool.
 
-`varin.builtin.research-decision` separately distributes `research_decide` through the single
-`RESEARCH_DECISION_TOOL_DECLARATIONS` and original `research.decision` capability. Existing material
-readers own candidate ACLs, PDF text and line selection. The original Host inference/credential owner
-binds the configured purpose; each actual TypeSafe/Cloudflare/llama.cpp HTTP request belongs to one
-Catalog Operation. llama.cpp tokenization/template preparation keeps the same controls; only actual
-model computation participates in Goal usage. Unconfigured/off/unavailable inference never
-dispatches; all-rejected material never starts a paid request. Each score prompt identifies its real
-candidate; ordinary partial failures preserve confirmed scores, including zero, while retaining
-original order and explicit missing answers. Rerank remains separate integration work. This tool does not grant additional model/tool access.
-
 `varin.builtin.computer` provides the ordinary native single-call Computer tools. Its shared
 `COMPUTER_TOOL_DECLARATIONS` supplies the product manifest, tool directory and Host argument decoder;
 the immutable `host.cjs` uses SDK `provideTool` and the reviewed `computer.use` capability. The original
@@ -47,6 +37,18 @@ The same declaration exposes request/access/grant/deny and durable request Wait 
 child tasks with or without a file source. Resource assignment does not expand their frozen callable
 tools. Trusted handback continuation and persistent Computer scripts retain their original lifecycle
 owners; actual desktop/platform acceptance remains separate. See the [Computer owner](../web/application-host/lib/computer/DOCUMENTATION.md).
+
+`varin.builtin.browser` exposes `browser_tabs`, `browser_open`, `browser_read`, `browser_act`, and
+`browser_files` through the injected `browser.use` owner. Electron uses its existing persistent profile,
+native input and a page-scoped CDP transport with Puppeteer Core; no second Chromium download or
+remote-debugging server is required. Hidden/reparented UI views retain the same page identity.
+The owner's availability and accepted tool settings determine disclosure.
+
+`varin.builtin.office` exposes `office_environment`, `office_read`, `office_write`, `office_render`, and
+`office_export` through `office.files`. Format engines create editable documents and patch selected
+OOXML parts; native Storage owns file revisions, conflicts and recovery receipts. Actual PDF conversion
+and workbook recalculation use an available LibreOffice executable. The environment response exposes
+component availability and reusable library paths without pretending a conversion occurred.
 
 The lazy brokered `varin.builtin.retrieval-structured`, `varin.builtin.retrieval-keyword`, and
 `varin.builtin.retrieval-semantic` packages

@@ -298,7 +298,8 @@ fn managed_unit_reads_compose_structure_and_bytes_at_the_coordinator() {
     let executor=Arc::new(KernelToolExecutor::new(binding,f.executor.resources.clone().with_source_bridge(source.clone())).unwrap().with_language(language.clone()));
     let call=ToolCall{call_id:"unit".into(),name:"file_read".into(),schema_version:"1".into(),arguments:json!({"path":"source.ts","unit":{"line":1}})};
     let origin=ToolOrigin::ModelStep{request_id:"unit-request".into()};let context=execution_context("run",&call,&origin);
-    let request=FrozenToolContext{run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
+    let request=FrozenToolContext{
+        direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(executor.schemas.clone()),tool_schema_generation:1,source:Some(selection),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
     let cancel=CancellationToken::default();let bound=executor.bind_call(&call,&request,&cancel).unwrap();
     assert_eq!(bound.executor_owner(),varin_runtime::ExecutorOwner::Kernel);
     let plan=bound.prepare(&cancel).unwrap();bound.authorize(&context,&plan,&cancel).unwrap();

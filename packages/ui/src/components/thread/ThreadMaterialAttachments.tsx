@@ -14,7 +14,7 @@ export function ThreadMaterialAttachments({ materials, locked, onRemove }: {
   return <ul aria-label={t('chat.fileAttachment.pdfAttachments')} className="flex flex-wrap gap-2">
     {materials.map(material => <li key={material.snapshotId} className="flex items-center gap-1 rounded border px-2 py-1 text-sm">
       <Button type="button" variant="ghost" size="sm" disabled={!open}
-        onClick={() => open?.(formatPdfMaterialCitationUrl({ ...material, page: 1 }), material.filename)}>
+        onClick={() => open?.(formatPdfMaterialCitationUrl({ ...material, page: 1 }) + (material.format && material.format !== 'pdf' ? `&format=${material.format}` : ''), material.filename)}>
         {t('harness.pdf.openReader')} · {material.filename}
       </Button>
       <Button type="button" variant="ghost" size="sm" disabled={locked}

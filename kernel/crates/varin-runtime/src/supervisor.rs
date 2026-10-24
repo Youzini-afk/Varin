@@ -995,6 +995,16 @@ impl RunSupervisor {
         for run in &runs { self.quiesce_run_workers(run, |run| run.state.terminal(), true)?; }
         self.catalog.lock().map_err(error)?.retire_deleted_threads(&runs).map_err(error)
     }
+    pub fn material_retention(&self, child_id: Option<&str>) -> Result<crate::catalog::material_retention::MaterialRetention> {
+        let candidates = if child_id.is_none() { self.catalog.lock().map_err(error)?
+            .deleted_thread_retirement_candidates().map_err(error)?.0 } else { Vec::new() };
+        for (_, runs) in &candidates {
+            for run in runs { self.quiesce_run_workers(run, |run| run.state.terminal(), true)?; }
+        }
+        let drained = candidates.into_iter().map(|(thread, _)| thread).collect::<Vec<_>>();
+        let read = self.catalog.lock().map_err(error)?.capture_material_retention(child_id, &drained).map_err(error)?;
+        read.load().map_err(error)
+    }
     fn quiesce_run(&self, run_id: &str, waiting: impl Fn(&Run) -> bool) -> Result<()> {
         self.quiesce_run_workers(run_id, waiting, false)
     }

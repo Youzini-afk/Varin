@@ -121,11 +121,12 @@ export class ManagedSourceBridge {
             result={ok:true,value:await client.fileObservation({...authority,requestId:randomUUID(),action:query.action as import('./protocol.generated.js').SourceFileObservationAction},controller.signal)};
           }
         } else {
-        if (record(value.query) && value.query.kind === 'integration_receipt') {
+        if (record(value.query) && (value.query.kind === 'integration_receipt' || value.query.kind === 'file_receipt')) {
           const query=value.query;
           if (!record(query.source) || !record(query.source.resource_owner) || query.source.resource_owner.kind!=='managed_host' || !text(query.runId) || !text(query.threadId) || !text(query.operationId) || !this.owner || !this.coordinator) throw new Error('Invalid original Integration receipt address');
           const client=await this.owner(query.source.resource_owner as unknown as ManagedHostSourceOwner);
-          const receipt=await client.integrationReceipt({coordinatorHostId:this.coordinator(),source:query.source as unknown as LaunchSource,runId:query.runId,threadId:query.threadId,operationId:query.operationId});
+          const address={coordinatorHostId:this.coordinator(),source:query.source as unknown as LaunchSource,runId:query.runId,threadId:query.threadId,operationId:query.operationId};
+          const receipt=await (query.kind === 'file_receipt' ? client.fileReceipt(address) : client.integrationReceipt(address));
           if(this.active.get(id)===pending&&epoch===this.epoch()){this.active.delete(id);await this.send({v:1,kind:'source-resource-response',id,kernelEpoch:epoch,result:{ok:true,value:receipt}});}return;
         }
         const query = value.query as Query;

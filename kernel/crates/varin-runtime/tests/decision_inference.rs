@@ -24,7 +24,7 @@ impl Fixture {
             std::env::temp_dir().join(format!("varin-decision-ledger-{}", uuid::Uuid::new_v4()));
         let mut db = Catalog::open(&root).unwrap();
         db.create_thread("thread", "branch").unwrap();
-        let schema:ToolSchema=serde_json::from_value(json!({"name":"research_decide","version":"1","description":"Judge actual material","schema":{"type":"object"},"output_schema":null,"metadata":null})).unwrap();
+        let schema:ToolSchema=serde_json::from_value(json!({"name":"classify_material","version":"1","description":"Classify actual material","schema":{"type":"object"},"output_schema":null,"metadata":null})).unwrap();
         let launch:LaunchSelection=serde_json::from_value(json!({"extension_bindings":[],"connection_identity":"fixture","provider_family":"fixture","model":"fixture",
             "configuration_generation":1,"tool_schema_generation":1,"tools":[schema],"policy":{"name":"default","version":"1"},"source":null})).unwrap();
         let run = db
@@ -76,7 +76,7 @@ impl Fixture {
             "tools":[schema],"instruction_sources":[],"memory_checkpoint":null,"attachment_refs":[],"environment_cursor":0,"history_range":range})).unwrap();
         let call = ToolCall {
             call_id: "decide".into(),
-            name: "research_decide".into(),
+            name: "classify_material".into(),
             schema_version: "1".into(),
             arguments: json!({"goal":"Judge original"}),
         };
@@ -143,7 +143,7 @@ impl Fixture {
                 tool: AdmittedTool {
                     call,
                     contract: ToolContract {
-                        name: "research_decide".into(),
+                        name: "classify_material".into(),
                         schema_version: "1".into(),
                         read_only: true,
                         completion: CompletionKind::Result,

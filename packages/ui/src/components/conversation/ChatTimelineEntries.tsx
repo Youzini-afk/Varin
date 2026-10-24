@@ -76,6 +76,8 @@ import { ChatMcpTool } from './ChatMcpTool';
 import { ChatMaterialsTool } from './ChatMaterialsTool';
 import { ChatForwardTool, ChatExtensionTool } from './ChatEnvironmentTools';
 import { ChatComputerTool } from './ChatComputerTools';
+import { ChatOfficeTool } from './ChatOfficeTools';
+import { ChatBrowserTool } from './ChatBrowserTools';
 import { ChatFollowupTool } from './ChatFollowupTool';
 import { ChatProcessTool } from './ChatProcessTool';
 import { ChatWorkTool, ChatArtifactTool } from './ChatWorkTools';
@@ -406,6 +408,8 @@ const ChatToolCard: React.FC<{
   if (call.name.startsWith('environment_forward')) return <ChatForwardTool {...specific} />;
   if (call.name === 'runtime_contract' || call.name === 'extension_package') return <ChatExtensionTool {...specific} />;
   if (call.name.startsWith('computer_')) return <ChatComputerTool {...specific} />;
+  if (call.name.startsWith('office_')) return <ChatOfficeTool {...specific} />;
+  if (call.name.startsWith('browser_')) return <ChatBrowserTool {...specific} />;
   if (call.name === 'follow_up') return <ChatFollowupTool {...specific} />;
   if (['image_generate', 'image_edit'].includes(call.name)) return <ChatArtifactTool {...specific} />;
   if (workToolLabels[call.name]) return <ChatWorkTool {...specific} />;

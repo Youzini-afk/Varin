@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -229,11 +231,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "僅聊天",
   "thread.message.summarize": "總結至此處",
   "chat.fileAttachment.actions.attachPdfs": "加入 PDF",
-  "chat.fileAttachment.actions.choosePdfs": "選擇 PDF 附件",
-  "chat.fileAttachment.pdfAttachments": "PDF 附件",
+  "chat.fileAttachment.actions.choosePdfs": "選擇文件",
+  "chat.fileAttachment.pdfAttachments": "文件附件",
   "chat.fileAttachment.uploading": "正在準備附件…",
-  "chat.fileAttachment.unsupportedType": "請加入圖片或 PDF 檔案。",
-  "chat.fileAttachment.pdfNotRetained": "PDF 未儲存，未加入附件。",
+  "chat.fileAttachment.unsupportedType": "支援圖片、PDF、DOCX、XLSX 和 PPTX 檔案。",
+  "chat.fileAttachment.pdfNotRetained": "文件未儲存，未加入附件。",
   "computer.feedback.title": "Agent 桌面操作回饋",
   "computer.feedback.type": "正在輸入",
   "computer.feedback.value": "設定值",
@@ -537,10 +539,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "補跑已選取",
   'research-facts.actionFailed': "操作失敗",
   'research-facts.unknownTarget': "未知目標",
+  "workFocus.general": "通用",
+  "workFocus.generalDescription": "均衡的基礎工具，按需要使用各類能力。",
+  "workFocus.office": "辦公",
+  "workFocus.officeDescription": "文件、資料、瀏覽器與電腦操作工具。",
   'workFocus.label': "工作側重",
-  'workFocus.code': "通用",
+  "workFocus.code": "程式開發",
   'workFocus.research': "科研",
-  'workFocus.codeDescription': "處理程式開發與日常任務，按需要使用工具。",
+  "workFocus.codeDescription": "程式碼定位、開發執行與協作工具。",
   'workFocus.researchDescription': "調查問題、比較解釋，設計並推進實驗。",
   'workFocus.pending': "待下次啟動生效",
   'workFocus.nextTurn': "修改在下次啟動執行時生效；目前執行及其追問佇列保留原側重。",

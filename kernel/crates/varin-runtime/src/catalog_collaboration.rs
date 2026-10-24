@@ -257,6 +257,8 @@ pub struct ChildReport {
 #[serde(deny_unknown_fields)]
 pub struct ChildTask {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inherited_context: Option<crate::context_retention::RetainedContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub agent_id: String,
     pub name: String,
@@ -484,6 +486,7 @@ impl Catalog {
             && matches!(handoff.root,ChildSourceRoot::Physical{..}));
         let mut child =
             ChildTask {
+                inherited_context: prepared.inherited_context,
                 avatar: Some(prepared.avatar.unwrap_or_else(|| {
                     let index = (Uuid::new_v4().as_u128() % crate::AGENT_AVATAR_IDS.len() as u128) as usize;
                     crate::AGENT_AVATAR_IDS[index].to_owned()
@@ -1026,6 +1029,7 @@ impl ChildPreparation {
             Some(content.save_history(&serde_json::to_value(fact)?, &None)?)
         } else { None };
         let mut submission = submissions::PreparedSubmission::stage(submissions::SubmissionBody {
+            inherited_context: if continuing { None } else { child.inherited_context.clone() },
             input_preparation,
             command: SubmitInput {
                 key: format!("child:{operation_id}"),

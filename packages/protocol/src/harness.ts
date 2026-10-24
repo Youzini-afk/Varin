@@ -155,6 +155,8 @@ export type FetchResult =
     /** Original material reference, unaffected by a new text/structure analysis. */
     sourceSnapshot?: WebSnapshotRef;
     overview?: DocumentOverview;
+    office?: import('./office.js').OfficeReadResult;
+    rendering?: { engine: string; version: string };
     pageImages?: DocumentPageImage[];
     analysis?: DocumentAnalysis;
     findHits?: DocumentFindHit[];

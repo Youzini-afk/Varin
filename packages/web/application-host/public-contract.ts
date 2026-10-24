@@ -45,6 +45,8 @@ export interface StartWebUiServerOptions {
   restartApplicationHost?: (() => Promise<void>) | undefined;
   /** Trusted desktop-only offscreen renderer used by harness.web.render. */
   renderWebPage?: ((url: string, signal?: AbortSignal) => Promise<string>) | undefined;
+  /** Real embedded pages shared by the local user and tool invocations. */
+  browser?: import('@varin/protocol').BrowserOwner | undefined;
   tryCfTunnel?: boolean | undefined;
   tunnelConfigPath?: string | null | undefined;
   tunnelHostname?: string | undefined;

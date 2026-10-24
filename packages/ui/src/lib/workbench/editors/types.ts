@@ -9,6 +9,7 @@ export type EditorProviderViewState = {
 export type EditorViewState = {
   diffLayout?: 'auto' | 'inline' | 'split';
   browserTabId?: string;
+  browserPageId?: string;
   browserUrl?: string;
   browserPosition?: { x: number; y: number };
   editorInfo?: { line: number; column: number; languageId: string; languageName?: string; tabSize: number; insertSpaces: boolean };
@@ -87,6 +88,7 @@ export const BUILTIN_EDITOR_PROVIDER_IDS = {
   drawio: 'varin.builtin.drawio',
   image: 'varin.builtin.image',
   pdf: 'varin.builtin.pdf',
+  office: 'varin.builtin.office-file',
   diff: 'varin.builtin.diff',
   /**
    * Git working-tree/staged diff for a tracked file. Declares no languages and is never a

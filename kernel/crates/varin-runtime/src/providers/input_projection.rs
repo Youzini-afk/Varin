@@ -90,7 +90,7 @@ fn process_text(content: &Content) -> Option<Content> {
 /// changed items are reused within the original compile cache without copying image bytes.
 pub(super) fn model_input<'a>(view: &'a RequestView, connection: &Connection, reuse: Option<&mut RequestCompileReuse>) -> Cow<'a, RequestView> {
     let mut projected = text_input(view, connection, reuse);
-    if let Some(tools) = crate::tool_disclosure::model_tools(&view.binding.tools) {
+    if let Some(tools) = crate::tool_disclosure::model_tools_for(&view.binding.tools, view.binding.direct_tools.as_deref()) {
         projected.to_mut().binding.tools = tools;
     }
     projected

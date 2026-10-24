@@ -24,6 +24,10 @@ pub(crate) fn reconcile(
                 let requested: Vec<String> = operations.iter().map(|op| op.id.clone()).collect();
                 let mut reconciled = Vec::new();
                 for operation in &operations {
+                    if matches!(operation.executor.as_deref(), Some("office_write" | "office_export" | "browser_files"))
+                        && crate::file_tool_reconciliation::reconcile(&runtime, &resources, Some(&binding), &operation.id, operation.execution_owner.as_ref())? {
+                        reconciled.push(operation.id.clone());
+                    }
                     if matches!(operation.executor.as_deref(),Some("integrate_child"|"submit_code"|"update"))
                         && crate::integration_reconciliation::reconcile(
                             &runtime,

@@ -16,6 +16,8 @@ cross-cutting contracts.
 | Progressive retrieval and candidate ranking | `explore.ts`, `explore-query.ts`, `retrieval-pipeline.ts` |
 | URL discovery/fetch, scholarly records and original material | `web-search.ts`, `web-fetch.ts`, `research-search.ts`, `web-materials.ts` |
 | PDF/document views and material collections | `document-reading.ts`, `document-material.ts`, `material-collections.ts` |
+| Editable Office packages and actual rendering | `../office/`, `../kernel/office-runtime.ts`, `../kernel/binary-file-owner.ts` |
+| Built-in browser capability and native page owner | `../kernel/browser-runtime.ts`, Electron `browser-owner.ts` |
 | Research attempt orchestration and fixed input | `experiments.ts`, `experiment-workspace.ts`, `experiment-backend.ts` |
 | Machine commitments and observations | `resources.ts`, `gpu-resources.ts` |
 | Environment forwarding | `environment-forwards.ts`, `environment-forward-server.ts` |
@@ -26,6 +28,13 @@ cross-cutting contracts.
 The table locates owners rather than duplicating the public API. Protocol and application-client types
 supply concrete request shapes. Source identity, execution placement and navigation project remain
 separate: changing a selected project or Host cannot retarget already admitted work.
+
+Office originals use the same material snapshot records as PDFs. The overview retains a section
+index without eagerly flattening the whole workbook; `office_read` finds content, ranges and objects
+in the original file. Collection keyword search covers the retained representation. Parent-history
+inheritance uses recipient-owned material references after verifying the parent's original ACL.
+Deletion maintenance reads native lineage and drains execution before releasing records; persisted
+collections and surviving explicit/inherited references retain their source bytes.
 
 ## Files, sources and processes
 

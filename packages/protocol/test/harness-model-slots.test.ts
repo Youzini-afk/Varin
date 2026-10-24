@@ -12,9 +12,23 @@ const builtinTools = {
   worker: ["file_read"],
   verifier: ["file_read"],
   retrieval: ["file_read"],
+  research_peer: ["file_read"],
 } satisfies Record<PresetId, string[]>;
 
 describe("Harness model slots", () => {
+  it("shares Worker across modes and offers an independently configured research collaborator", () => {
+    const main = { providerId: "p", modelId: "main" };
+    for (const focus of ["general", "code", "research", "office"] as const) {
+      const profiles = observePresets({}, main, {}, focus, 'agent', builtinTools);
+      assert.equal(profiles.find(profile => profile.id === 'worker')?.availability, 'available');
+      assert.equal(profiles.find(profile => profile.id === 'retrieval')?.availability, 'available');
+      assert.equal(profiles.find(profile => profile.id === 'research_peer')?.availability, focus === 'research' ? 'available' : 'scope_unavailable');
+    }
+    const peer = observePresets({ researchPeer: { providerId: 'other', modelId: 'peer', agent: { name: 'Independent view' } } }, main, {}, 'research', 'agent', builtinTools)
+      .find(profile => profile.id === 'research_peer')!;
+    assert.deepEqual(peer.model, { providerId: 'other', modelId: 'peer' });
+    assert.equal(peer.definition.name, 'Independent view');
+  });
   it("disabled roles retain their configured model and cannot inherit the main model", () => {
     const main = { providerId: "p", modelId: "main" };
     const slots = { worker: { ...main, enabled: false }, researchInvestigation: { ...main, enabled: false } };

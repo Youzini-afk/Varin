@@ -27,12 +27,54 @@ pub(super) fn file_root_identity(workspace: &str, execution_workspace: &str, can
     format!("file-root-{}", hex::encode(Sha256::digest(identity.as_bytes())))
 }
 
+impl Storage {
+    /// Read an operation's own native receipt after its original Host/grant has
+    /// disappeared. The current checkpoint after-image is not the receipt owner.
+    pub(crate) fn file_tool_receipt(&self, read: &crate::tools::SourceEffectReceiptRead) -> Result<Value, KernelError> {
+        let row: Option<(String, String, Option<String>)> = self.conn.query_row(
+            "SELECT o.kind,o.state,o.result_json FROM operations o JOIN operation_owners w ON w.operation_id=o.operation_id WHERE o.operation_id=?1 AND w.workspace_id=?2",
+            params![read.operation_id, read.source.workspace_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+        let Some((kind, state, body)) = row else { return Ok(Value::Null); };
+        if kind != "file.apply" { return Err(KernelError::Authorization("The original operation is not a binary file write".into())); }
+        let body: Value = serde_json::from_str(body.as_deref().ok_or_else(|| KernelError::Storage("File receipt has no body".into()))?)?;
+        let identity = if state == "started" { &body["intent"] } else { &body };
+        let turn = &identity["__recoveryTurn"];
+        let target = &turn["fileTarget"];
+        let source = &read.source;
+        let expected_root = match source.mode {
+            varin_runtime::SourceMode::LiveRoot => PathBuf::from(&source.live_root.as_ref()
+                .ok_or_else(|| KernelError::Authorization("Original file root is missing".into()))?.canonical_root),
+            varin_runtime::SourceMode::Materialized => {
+                let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([source.workspace_id, source.environment_run_id.as_deref().unwrap_or(&read.run_id)]))?));
+                self.root.join("managed").join("runs").join(key)
+            }
+            _ => return Err(KernelError::Authorization("An immutable source has no binary file write".into())),
+        };
+        let root_id = file_root_identity(&source.workspace_id, &source.execution_workspace_id, &expected_root);
+        if turn["workspaceId"] != source.workspace_id || turn["runId"] != read.run_id || turn["conversation"]["threadId"] != read.thread_id
+            || target["threadId"] != read.thread_id || target["runId"] != read.run_id || target["workspaceId"] != source.workspace_id
+            || target["executionWorkspaceId"] != source.execution_workspace_id || target["sourceMode"] != serde_json::to_value(source.mode)?
+            || target["canonicalRoot"].as_str() != expected_root.to_str() || target["rootId"] != root_id
+            || !matches!(identity["__recoveryTool"].as_str(), Some("office_write" | "office_export" | "browser_files")) {
+            return Err(KernelError::Authorization("File receipt differs from its original Run, source or tool".into()));
+        }
+        Ok(json!({"state":state,"tool":identity["__recoveryTool"],"turn":turn,"receipt":if state=="committed"{body.clone()}else{Value::Null}}))
+    }
+}
+
 fn file_params_value(params_value: &Value) -> Value {
     let mut params = params_value.clone();
     if let Some(object) = params.as_object_mut() {
         object.remove("__pathScopes");
     }
     params
+}
+
+fn public_file_result(mut result: Value) -> Value {
+    if let Some(object) = result.as_object_mut() {
+        object.remove("__recoveryTurn"); object.remove("__recoveryTool");
+    }
+    result
 }
 
 fn file_operation_identity(params_value: &Value) -> Result<(Value, String), KernelError> {
@@ -613,7 +655,7 @@ impl Storage {
         }
         let result = result
             .ok_or_else(|| KernelError::Storage("committed file operation has no result".into()))?;
-        Ok(Some(serde_json::from_str(&result)?))
+        Ok(Some(public_file_result(serde_json::from_str(&result)?)))
     }
 
     pub(super) fn begin_file_operation(
@@ -630,7 +672,7 @@ impl Storage {
                 let result = result.ok_or_else(|| {
                     KernelError::Storage("committed file operation has no result".to_string())
                 })?;
-                return Ok((params_hash, Some(serde_json::from_str(&result)?), false));
+                return Ok((params_hash, Some(public_file_result(serde_json::from_str(&result)?)), false));
             }
             if state == "started" {
                 return Ok((params_hash, None, true));
@@ -702,6 +744,13 @@ impl Storage {
                 if let Some(identity) = envelope["intent"][field].as_str() {
                     durable_result[field] = json!(identity);
                 }
+            }
+            // Keep the native journal identity with this operation's own receipt.
+            // A later write to the same checkpoint path can replace the current
+            // after-image, but must not erase the original external tool outcome.
+            if envelope["intent"]["journalBinding"].is_object() {
+                durable_result["__recoveryTurn"] = envelope["intent"]["__recoveryTurn"].clone();
+                durable_result["__recoveryTool"] = envelope["intent"]["__recoveryTool"].clone();
             }
         }
         self.conn.execute_batch("BEGIN IMMEDIATE")?;

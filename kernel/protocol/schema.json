@@ -12,7 +12,7 @@
     "ramp-mint", "echo-ochre", "lens-lilac", "ledge-aqua", "swell-apricot", "parcel-periwinkle",
     "scoop-pistachio", "beam-coral", "chamfer-jade", "float-butter"
   ],
-  "privateDtos": ["CodeRetrievalDiagnostic","CodeRetrievalCoverage","CodeRetrievalCompletion","KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceIntegrationReceiptParams"],
+  "privateDtos": ["CodeRetrievalDiagnostic","CodeRetrievalCoverage","CodeRetrievalCompletion","KernelWorkingVerificationDocument","KernelWorkingReviewDocument","ContextObservationSource","ContextObservationSources","ContextObservationFact","ContextObservationAdmit","ContextObservationReceipt","HostToolErrorMarker","SourceAuthorityScopeParams","SourceResourceAction","SourceHandoffInspectParams","SourceHandoffClaimParams","SourceEffectReceiptParams"],
   "mcpCapabilities": [
   {"name": "mcp_subscribe_resource", "operation": "subscribe_resource", "version": "1", "description": "Observe resource change notifications from the selected MCP server. Use its resources schemaVersion. Notifications are passive facts; this does not read the resource or authorize new model work. Nonexact resource notifications may be unassociated.", "schema": {"type": "object", "properties": {"server": {"type": "string", "minLength": 1}, "schemaVersion": {"type": "string", "minLength": 1}, "uri": {"type": "string", "minLength": 1}}, "required": ["server", "schemaVersion", "uri"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_subscribe", "argument": "server"}},
   {"name": "mcp_unsubscribe_resource", "operation": "unsubscribe_resource", "version": "1", "description": "Stop the resource observer created by an original subscription Operation. Local listener release and the server unsubscribe acknowledgement are reported separately.", "schema": {"type": "object", "properties": {"operationId": {"type": "string", "minLength": 1}}, "required": ["operationId"], "additionalProperties": false}, "output_schema": null, "metadata": null, "route": {"kind": "resource_unsubscribe", "argument": "operationId"}},
@@ -351,7 +351,7 @@
     }
   }
 ],
-  "runtimeExports": ["CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
+  "runtimeExports": ["MaterialRetention", "MaterialRetentionParams", "CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
   "ModelPresentationParams",
   "ModelPresentation","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
  "FileObservationAuthority",
@@ -864,7 +864,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 60,
+  "protocolVersion": 61,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1356,6 +1356,7 @@
     "runtime.model.select": "ModelSelectParams",
     "runtime.model.inspect": "RunParams",
     "runtime.status": "KernelEmptyParams",
+    "runtime.material.retention": "MaterialRetentionParams",
     "runtime.content.collect": "KernelEmptyParams",
     "runtime.tokenizers.open": "KernelTokenizerOpenParams",
     "runtime.retrieval.finish": "OperationParams",
@@ -1573,10 +1574,11 @@
 "source.authority.inspect_scope": "SourceAuthorityScopeParams",
 "source.authority.handoff": "SourceHandoffInspectParams",
 "source.authority.claim_handoff": "SourceHandoffClaimParams",
-"source.integration.receipt": "SourceIntegrationReceiptParams",
+"source.integration.receipt": "SourceEffectReceiptParams",
+"source.file.receipt": "SourceEffectReceiptParams",
 "source.resource.release": "SourceResourceControlParams"
   },
-  "dto": {
+  "dto": {"MaterialRetentionParams":{"fields": {"childThreadId": {"type": "string", "optional": true}}},"MaterialRetention":{"fields": {"threads": {"type": "Array<{threadId: string; rootThreadId: string; release: boolean}>"}, "inheritances": {"type": "Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>"}}},
     "CodeRetrievalDiagnostic": { "serialize": true, "fields": { "kind": { "type": "string" }, "path": { "type": "string", "optional": true }, "message": { "type": "string" } } },
     "CodeRetrievalSource": { "serialize": true, "fields": { "id": { "type": "string" }, "family": { "type": "string" }, "status": { "type": "string" }, "targets": { "type": "string[]", "optional": true } } },
     "CodeRetrievalCoverage": { "serialize": true, "fields": { "sources": { "type": "CodeRetrievalSource[]" }, "semantic": { "type": "string" }, "unexamined": { "type": "number" } } },
@@ -1595,7 +1597,7 @@
     "ModelToolCompletion": {"raw":"export type ModelToolCompletion = {kind:'not_dispatched';reason:string} | {kind:'result';outcome:Outcome;effect:Effect;content:OutputBody<ResolvedMedia>} | {kind:'job_accepted';operation_id:string;phase:string;effect:Effect;lifetime:Lifetime;content?:OutputBody<ResolvedMedia>};"},
     "ModelContent": {"raw":"export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind:'media';media:ResolvedMedia} | {kind:'output';output:OutputBody<ResolvedMedia>} | {kind:'tool_call';call:ModelToolCall} | {kind:'tool_result';result:{request_id:string;call_id:string;completion:ModelToolCompletion}} | {kind:'provider_only'};"},
     "ModelConversationItem": {"raw":"export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }"},
-    "RequestBinding": {"raw":"export interface RequestBinding {provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }"},
+    "RequestBinding": {"raw":"export interface RequestBinding {direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }"},
     "RequestOrigin": {"raw":"export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};"},
     "RequestView": {"raw":"export interface RequestView { request_id:string; run_id:string; origin:RequestOrigin; binding:RequestBinding; history:ModelConversationItem[] }"},
     "ModelUsageReceipt": {"raw":"export interface ModelUsageReceipt { measurement:'missing'|'estimated'|'actual'; input_tokens:number|null; output_tokens:number|null; cached_input_tokens:number|null; cache_write_tokens:number|null; reasoning_tokens:number|null; raw:unknown|null; pricing_version:string|null }"},
@@ -2053,7 +2055,7 @@
     "HostToolReconcileParams": {"fields":{"operationId":{"type":"string"},"executionOwner":{"type":"ExecutorOwner"}}},
     "RunReconcileParams": {"fields":{"runId":{"type":"string"},"toolBinding":{"type":"unknown"}}},
     "RunReconcileResult": {"fields":{"reconciled":{"type":"string[]"},"unresolved":{"type":"string[]"}}},
-    "AgentSelection": {"rustType":"varin_runtime::catalog::launches::AgentSelection","fields":{"profileId":{"type":"string | null"},"name":{"type":"string | null"},"workFocus":{"type":"\"code\" | \"research\""},"tools":{"type":"string[] | null"}}},
+    "AgentSelection": {"rustType":"varin_runtime::catalog::launches::AgentSelection","fields":{"profileId":{"type":"string | null"},"name":{"type":"string | null"},"workFocus":{"type":"\"general\" | \"code\" | \"research\" | \"office\""},"tools":{"type":"string[] | null"}}},
     "SubmitLaunch": {"fields":{"agent":{"type":"AgentSelection","optional":true},"inheritSource":{"type":"boolean","optional":true},"source":{"type":"LaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"CredentialScope","optional":true},"childDispatch":{"type":"ChildDispatchCatalog","optional":true}}},
     "SourceFailureCode": {"raw":"export type SourceFailureCode = 'source_unavailable' | 'source_registration_missing' | 'source_authority_denied' | 'source_environment_unavailable' | 'source_changed';","rustType":"varin_runtime::catalog::launches::SourceFailureCode"},
     "LaunchFailedParams": {"fields":{"runId":{"type":"string"},"code":{"type":"string"},"detail":{"type":"string","optional":true}}},
@@ -2353,7 +2355,9 @@
     "KernelFileCaptureBatchParams": {"fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "paths": {"type": "string[]"}, "store": {"type": "boolean"}, "leaseId": {"type": "string"}, "expectedStatesJson": {"type": "string", "optional": true}
     }},
+    "KernelFileJournalBinding": {"fields":{"anchor":{"type":"RecoveryAnchor"},"sourceMode":{"type":"SourceMode"},"tool":{"type":"string"},"beforeOwnerId":{"type":"string","optional":true}}},
     "KernelFileApplyParams": {"fields": {
+      "journalBinding": {"type":"KernelFileJournalBinding","optional":true},
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "reservationOperationId": {"type":"string","optional":true}, "rootId": {"type": "string"}, "path": {"type": "string"}, "targetJson": {"type": "string"}, "expectedJson": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "recordId": {"type": "string", "optional": true}, "slot": {"type": "string", "optional": true}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelFileMkdirParams": {"fields": {
@@ -2669,17 +2673,17 @@
     "ChildProgressParams": {"fields":{"executionId":{"type":"string"},"progress":{"type":"ChildPreparationProgress"}}},
     "ChildFailParams": {"fields":{"executionId":{"type":"string"},"code":{"type":"string"},"detail":{"type":"string","optional":true}}},
     "ChildWaitParams": {"fields": {"waitId": {"type": "string"}}},
-    "ChildCapabilityDescriptor": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"source_requirement":{"type":"'none' | 'source' | 'physical' | 'live'"},"default_presets":{"type":"('worker' | 'verifier' | 'retrieval')[]"},"process":{"type":"boolean","optional":true}}},
+    "ChildCapabilityDescriptor": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"source_requirement":{"type":"'none' | 'source' | 'physical' | 'live'"},"default_presets":{"type":"('worker' | 'verifier' | 'retrieval' | 'research_peer')[]"},"process":{"type":"boolean","optional":true}}},
     "ChildWorkMode": {"raw":"export type ChildWorkMode = 'read_only' | 'shared' | 'isolated_write';","rustType":"varin_runtime::catalog::dispatch::ChildWorkMode"},
     "ChildModelBinding": {"fields":{"configuration":{"type":"ModelSessionConfiguration"},"credential_scope":{"type":"CredentialScope | null"}},"rustType":"varin_runtime::catalog::dispatch::ChildModelBinding"},
     "ChildCapabilityFailure": {"fields":{"code":{"type":"string"},"capabilities":{"type":"string[]"}},"rustType":"varin_runtime::catalog::dispatch::ChildCapabilityFailure"},
-    "ChildPreset": {"fields":{"tools_source":{"type":"'default' | 'explicit'"},"id":{"type":"string"},"name":{"type":"string"},"instructions":{"type":"string"},"tools":{"type":"string[]"},"work_mode":{"type":"ChildWorkMode"},"model":{"type":"ChildModelBinding | null"},"unavailable":{"type":"ChildCapabilityFailure | null"},"model_source":{"type":"'inherit' | 'selected'"},"inherit_base":{"type":"ChildModelBinding | null"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildPreset"},
+    "ChildPreset": {"fields":{"description":{"type":"string","optional":true},"tools_source":{"type":"'default' | 'explicit'"},"id":{"type":"string"},"name":{"type":"string"},"instructions":{"type":"string"},"tools":{"type":"string[]"},"work_mode":{"type":"ChildWorkMode"},"model":{"type":"ChildModelBinding | null"},"unavailable":{"type":"ChildCapabilityFailure | null"},"model_source":{"type":"'inherit' | 'selected'"},"inherit_base":{"type":"ChildModelBinding | null"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildPreset"},
     "ChildDispatchCatalog": {"fields":{"native_capabilities":{"type":"ChildCapabilityDescriptor[]"},"identity":{"type":"string"},"presets":{"type":"ChildPreset[]"},"normal_unavailable":{"type":"ChildCapabilityFailure | null"}},"rustType":"varin_runtime::catalog::dispatch::ChildDispatchCatalog"},
     "ChildSelectedProfile": {"fields":{"preset_id":{"type":"string | null"},"catalog_identity":{"type":"string | null"},"work_mode":{"type":"ChildWorkMode"},"tools":{"type":"string[]"},"instructions":{"type":"string"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildSelectedProfile"},
     "TreeCancelTarget": {"raw":"export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };","rustType":"varin_runtime::catalog::dispatch::TreeCancelTarget"},
     "TreeCancelParams": {"fields":{"target":{"type":"TreeCancelTarget"},"expectedParentThreadId":{"type":"string","optional":true}}},
     "TreeCancellationReceipt": {"fields":{"target":{"type":"TreeCancelTarget"},"cursor":{"type":"number"},"run_count":{"type":"number"},"child_count":{"type":"number"},"process_count":{"type":"number"}}},
-    "ChildInput": {"fields":{"sourceAgent":{"type":"string","optional":true},"name":{"type":"string","optional":true},"task":{"type":"string"},"preset":{"type":"string","optional":true},"workMode":{"type":"ChildWorkMode","optional":true},"tools":{"type":"string[]","optional":true}}},
+    "ChildInput": {"fields":{"inheritContext":{"type":"boolean","optional":true},"sourceAgent":{"type":"string","optional":true},"name":{"type":"string","optional":true},"task":{"type":"string"},"preset":{"type":"string","optional":true},"workMode":{"type":"ChildWorkMode","optional":true},"tools":{"type":"string[]","optional":true}}},
     "ChildSourcePin": {"fields":{"pin_id":{"type":"string"},"root":{"type":"string"},"source":{"type":"LaunchSource"}},"rustType":"varin_runtime::catalog::collaboration::ChildSourcePin"},
     "ChildReportReadParams": {"fields": {"operationId": {"type": "string"}, "itemId": {"type": "string"}, "offset": {"type": "number", "optional": true}, "maxBytes": {"type": "number", "optional": true}}},
     "ChildReportPage": {"fields":{"format":{"type":"'text' | 'output_body'"},"operation_id":{"type":"string"},"item_id":{"type":"string"},"offset":{"type":"number"},"next_offset":{"type":"number | null"},"total_bytes":{"type":"number"},"text":{"type":"string"},"execution_id":{"type":"string"}}},
@@ -2981,7 +2985,7 @@
 "ChildSourceAuthority": {"raw":"export interface ChildSourceAuthority { authority_id:string;resource_epoch:string }"},
 "SourceHandoffInspectParams": {"raw":"export interface SourceHandoffInspectParams { principalId:string;coordinatorHostId:string;operationId:string;parentRunId:string;parentThreadId:string;source:LaunchSource; }","rustType":"crate::source_resources::SourceHandoffInspectParams"},
 "SourceHandoffClaimParams": {"raw":"export interface SourceHandoffClaimParams {principalId:string;coordinatorHostId:string;grantId:string;scope:SourceAuthorityScope;source:LaunchSource;handoff?:ChildSourceHandoff;continuation?:{executionId:string;previousRunId:string;root:string;refresh?:AgentSourceSelection};}","rustType":"crate::source_resources::SourceHandoffClaimParams"},
-"SourceIntegrationReceiptParams": {"raw":"export interface SourceIntegrationReceiptParams { principalId:string;coordinatorHostId:string;source:LaunchSource;runId:string;threadId:string;operationId:string }","rustType":"crate::source_resources::SourceIntegrationReceiptParams"},
+"SourceEffectReceiptParams": {"raw":"export interface SourceEffectReceiptParams { principalId:string;coordinatorHostId:string;source:LaunchSource;runId:string;threadId:string;operationId:string }","rustType":"crate::source_resources::SourceEffectReceiptParams"},
 "ChildSourceDelegation": {"rustType":"varin_runtime::catalog::dispatch::ChildSourceDelegation","fields":{"agent_source":{"type":"{ run_id: string; source: LaunchSource }","optional":true},"work_mode":{"type":"ChildWorkMode"},"process":{"type":"boolean"},"configured_preset":{"type":"boolean"},"selection_ref":{"type":"unknown"}}}
   },
   "methods": {"runtime.context.observations.sources":"Read exact original local source observers on branch ancestry","runtime.context.observations.admit":"Publish immutable passive original environment facts without activating model work",
@@ -3157,6 +3161,7 @@
     "runtime.followup.get": "Read the original follow-up instruction and current durable metadata",
     "runtime.followup.list": "Read durable same-thread follow-up definitions and occurrences",
     "runtime.followup.control": "Pause, resume or cancel an unconsumed follow-up authorization",
+    "runtime.material.retention": "Read frozen child material references and drained deleted Thread owners",
     "runtime.content.collect": "Collect unreferenced runtime content on an independent maintenance worker",
     "runtime.tokenizers.open": "Lease the native tokenizer for a frozen model configuration",
     "runtime.retrieval.finish": "Deliver available evidence from the original retrieval operation without cancelling its result",
@@ -3371,6 +3376,7 @@
 "source.authority.handoff": "Authenticated original source handoff permission and receipt.",
 "source.authority.claim_handoff": "Authenticated original source handoff permission and receipt.",
 "source.integration.receipt": "Recall the original Integration journal after verifying its original authenticated source authority.",
+"source.file.receipt": "Recall an original binary file write receipt after verifying its authenticated Run source authority.",
 "source.resource.release": "Release the delivered original read or schedule body while preserving its operation identity"
   }
 }

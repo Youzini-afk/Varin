@@ -1752,6 +1752,8 @@ pub mod usage;
 pub mod threads;
 #[path = "catalog_retention.rs"]
 mod retention;
+#[path = "catalog_material_retention.rs"]
+pub mod material_retention;
 
 #[path = "catalog_context.rs"]
 pub mod context;

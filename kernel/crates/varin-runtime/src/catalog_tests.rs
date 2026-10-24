@@ -440,6 +440,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                 },
             },
             binding: RequestBinding {
+                direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -4033,6 +4034,7 @@ fn admitted_native_query(
             context.clone(),
             ExecutorOwner::Kernel,
             Arc::new(FrozenToolContext {
+                direct_tools: None,
                 run_id: r.run_id,
                 origin: context.origin.clone(),
                 child_dispatch: None,

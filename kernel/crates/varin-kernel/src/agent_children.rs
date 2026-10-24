@@ -28,6 +28,8 @@ pub(super) fn execute(
         let executor = owner.lock().map_err(|_| KernelError::Storage("Catalog unavailable".into()))?
             .operation(&p.operation_id).map_err(domain)?.executor;
         let confirmed = match executor.as_deref() {
+            Some("office_write" | "office_export" | "browser_files") => crate::file_tool_reconciliation::reconcile(
+                &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
             Some("integrate_child"|"submit_code"|"update") => crate::integration_reconciliation::reconcile(
                 &runtime, &resources, None, &p.operation_id, Some(&p.execution_owner))?,
             Some("scheduled_task") => crate::schedule_reconciliation::reconcile(

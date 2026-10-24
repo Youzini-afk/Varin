@@ -287,7 +287,10 @@ impl Fixture {
         )
     }
     pub(crate) fn new_in_project() -> Self {
-        Self::new_parent_scoped(
+        Self::new_in_project_with_inheritance(false, false)
+    }
+    pub(crate) fn new_in_project_with_inheritance(inherit: bool, policy: bool) -> Self {
+        let mut fixture = Self::new_parent_scoped(
             7,
             read_schema(),
             ToolSchema {
@@ -299,13 +302,20 @@ impl Fixture {
                 version: "1".into(),
                 schema: json!({"type":"object"}),
             },
+            policy,
             false,
             false,
-            false,
-            |_, _| {},
+            |input, _| { input.inherit_context = inherit; },
             Some("project-A"),
             None,
-        )
+        );
+        if policy {
+            fixture.context = fixture.admit_policy_call(ToolCall {
+                call_id: "dispatch-call".into(), name: DISPATCH_TOOL.into(), schema_version: "1".into(),
+                arguments: serde_json::to_value(&fixture.input).unwrap(),
+            });
+        }
+        fixture
     }
     pub(crate) fn new_in_bot(bot: &str) -> Self {
         Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot))
@@ -333,6 +343,7 @@ impl Fixture {
             db.create_bot_thread("thread:parent", "branch:parent", bot).unwrap();
         } else { db.create_thread("thread:parent", "branch:parent").unwrap(); }
         let mut input = DispatchInput {
+            inherit_context: false,
         source_agent: None,
             name: None,
             task: "Read the fixed file and report".into(),
@@ -383,6 +394,7 @@ impl Fixture {
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
             presets: if internal { vec![varin_runtime::catalog::dispatch::ChildPreset {
+                description: None,
                 id:"code_retrieval".into(),name:"Quick retrieval".into(),avatar:None,
                 tools_source:varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,
                 tools:vec!["file_read".into()],instructions:"Investigate using ordinary tools".into(),
@@ -405,7 +417,7 @@ impl Fixture {
                     thread_id: "thread:parent".into(),
                     branch_id: "branch:parent".into(),
                     expected_head: None,
-                    input: json!("Delegate a read"),
+                    input: json!(if input.inherit_context { "Delegate a read\nAttached documents:\n[{\"snapshotId\":\"snapshot-original\",\"sourceSnapshotId\":\"snapshot-original\"}]" } else { "Delegate a read" }),
                     configuration,
                 },
                 Some(launch.clone()), false,
@@ -478,7 +490,7 @@ impl Fixture {
         let range = HistoryRange {
             branch_id: receipt.branch_id.clone(),
             ancestor_id: None,
-            leaf_id: Some(receipt.input_id),
+            leaf_id: Some(receipt.input_id.clone()),
         };
         let snapshot = RequestSnapshot {
             view: RequestView {
@@ -489,6 +501,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -509,7 +522,8 @@ impl Fixture {
                     environment_cursor: 0,
                     history_range: range,
                 },
-                history: vec![],
+                history: db.prepare_context_read(&receipt.run_id, db.epoch(), Some(&receipt.input_id)).unwrap()
+                    .map(|read| read.load().unwrap().history).unwrap_or_else(|| db.execution_history(&receipt.branch_id).unwrap()),
             },
             serialized: json!({}).into(),
         };
@@ -682,6 +696,7 @@ impl Fixture {
                     history_range: range.clone(),
                 },
                 binding: RequestBinding {
+                    direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -877,12 +892,15 @@ impl Fixture {
             run_id: run_id.clone(),
         };
         let intent = PolicyGraphIntent::PolicyToolGraphV1 {
+            dispatch_history: Some(self.db.prepare_context_read(&run_id, epoch, boundary.history_range.leaf_id.as_deref()).unwrap()
+                .map(|read| read.load().unwrap().history).unwrap_or_else(|| self.db.execution_history(&boundary.history_range.branch_id).unwrap())),
             action_id,
             boundary,
             identity: launch.policy,
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
                 context: FrozenToolContext {
+                    direct_tools: None,
                     child_dispatch: self
                         .db
                         .launch_metadata(&run_id)

@@ -13,6 +13,7 @@ export function createMaterialStorageAccess(options: {
   kernel: KernelClient;
   storage: KernelStorageAdapter;
   onCleanupError?(error: unknown): void;
+  onMutationSettled?(scopeId: string, threadId: string): Promise<void>;
 }): WorkspaceWorkingStateRootAccess {
   return {
     async withBranchStore(scopeId, purpose, consume, _mode, actor) {
@@ -28,7 +29,7 @@ export function createMaterialStorageAccess(options: {
         // interpret explicit grants/persisted collections. It does not authorize
         // writes: only the original mutation entrances receive storage.write.
         capabilities: ['storage.read', 'storage.maintenance',
-          ...(['web-snapshot-put', 'material-collections-write', 'media-resource-put'].includes(purpose) ? ['storage.write'] : [])],
+          ...(['web-snapshot-put', 'material-collections-write', 'media-resource-put', 'material-inheritance', 'material-thread-release'].includes(purpose) ? ['storage.write'] : [])],
       });
       try {
         const context = await options.storage.contextFromBranchGrant({ grant,
@@ -44,6 +45,10 @@ export function createMaterialStorageAccess(options: {
             if (options.onCleanupError) options.onCleanupError(error);
             else console.error('[Materials] Original storage grant cleanup requires attention');
           } catch { /* Diagnostics cannot change the original committed result. */ }
+        }
+        if (['web-snapshot-put', 'material-collections-write', 'media-resource-put'].includes(purpose)) {
+          try { await options.onMutationSettled?.(scopeId, actor.threadId); }
+          catch (error) { try { options.onCleanupError?.(error); } catch { /* Keep the original result. */ } }
         }
       }
     },

@@ -328,6 +328,7 @@ export type HarnessModelRole =
   | "agentPlanning"
   | "explore"
   | "retrievalAgent"
+  | "researchPeer"
   | "worker"
   | "verifier"
   | "reader"

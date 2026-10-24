@@ -29,6 +29,15 @@ export function toolSubject(call: Pick<ChatToolCall, 'name' | 'arguments'>, data
   const child = (id: unknown) => targets?.children.get(toolText(id)) || toolText(id);
   const thread = (id: unknown) => targets?.threads.get(toolText(id)) || toolText(id);
   switch (call.name) {
+    case 'browser_tabs': case 'browser_open': case 'browser_read': case 'browser_act': case 'browser_files': {
+      const page = toolRecord(data.page);
+      return subjectJoin(page.title || args.url || page.url, args.query, args.ref, args.key,
+        typeof args.text === 'string' ? args.text.replace(/\s+/g, ' ') : '', args.path,
+        count(data.pages ?? data.downloads, t));
+    }
+    case 'office_read': case 'office_write': case 'office_render': case 'office_export': case 'office_environment':
+      return subjectJoin(args.action ? action : '', args.path ?? data.title ?? args.snapshotId, args.section, args.range, args.query,
+        typeof args.page === 'number' ? String(args.page) : '', count(args.edits, t));
     case 'process_spawn': case 'process_write': case 'process_read': case 'process_inspect': case 'process_resize': case 'process_stop': case 'wait_process': {
       const snapshot = toolRecord(data.process ?? data.snapshot ?? data);
       const id = toolText(args.processId) || toolText(snapshot.processId);

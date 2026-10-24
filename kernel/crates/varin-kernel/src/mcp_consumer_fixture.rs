@@ -103,6 +103,7 @@ pub(super) fn prepare_child(
         .unwrap(),
     );
     let frozen = FrozenToolContext {
+        direct_tools: None,
         run_id: context.run_id.clone(),
         origin: context.origin.clone(),
         tools: Arc::new(vec![dispatch_schema.clone()]),
@@ -246,6 +247,7 @@ pub(super) fn prepare_child(
     assert!(launch.source.is_none());
     assert_eq!(launch.tools.len(), count);
     let binding = RequestBinding {
+        direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "チャットのみ",
   "thread.message.summarize": "ここまで要約",
   "chat.fileAttachment.actions.attachPdfs": "PDF を添付",
-  "chat.fileAttachment.actions.choosePdfs": "添付する PDF を選択",
-  "chat.fileAttachment.pdfAttachments": "PDF 添付ファイル",
+  "chat.fileAttachment.actions.choosePdfs": "文書を選択",
+  "chat.fileAttachment.pdfAttachments": "文書の添付",
   "chat.fileAttachment.uploading": "添付ファイルを準備中…",
-  "chat.fileAttachment.unsupportedType": "画像または PDF ファイルを添付してください。",
-  "chat.fileAttachment.pdfNotRetained": "PDF が保存されなかったため、添付されていません。",
+  "chat.fileAttachment.unsupportedType": "画像、PDF、DOCX、XLSX、PPTXを添付できます。",
+  "chat.fileAttachment.pdfNotRetained": "文書が保存されなかったため、添付されませんでした。",
   "computer.feedback.title": "Agent のデスクトップ操作",
   "computer.feedback.type": "入力中",
   "computer.feedback.value": "値を設定",
@@ -280,10 +282,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.remoteArtifact': "リモート",
   'research-facts.remoteUnreachable': "リモート成果物を利用できません",
   'research-facts.remoteExpired': "リモート成果物の期限切れ",
+  "workFocus.general": "汎用",
+  "workFocus.generalDescription": "日常の作業に使えるバランスの取れたツール。",
+  "workFocus.office": "オフィス",
+  "workFocus.officeDescription": "文書、データ、ブラウザー、PC操作のツール。",
   'workFocus.label': "作業の重点",
-  'workFocus.code': "汎用",
+  "workFocus.code": "コーディング",
   'workFocus.research': "研究",
-  'workFocus.codeDescription': "コーディングや日常の作業に必要なツールを使います。",
+  "workFocus.codeDescription": "コードの調査・開発・共同作業のツール。",
   'workFocus.researchDescription': "問題を調べ、説明を比較し、実験を設計して進めます。",
   'workFocus.pending': "次の実行から適用",
   'workFocus.nextTurn': "次の実行開始時に適用されます。現在の実行と待機中の追加質問は元の方針を維持します。",

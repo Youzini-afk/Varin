@@ -428,7 +428,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
         }
         throw error;
       });
-      if (method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
+      if (method !== 'service' && method !== 'handoff' && method !== 'integrationReceipt' && method !== 'fileReceipt' && method !== 'authorize' && method !== 'release' && method !== 'inspectScope'
         && (!result || typeof result !== 'object' || Array.isArray(result))) throw new Error('Managed source response is unconfirmed');
       if (method === 'cancelService') decodeManagedSourceCancellation(input as Parameters<ManagedSourceService['cancelService']>[1], result);
       if (method === 'releaseReceipt') decodeManagedSourceReceiptRelease(input as Parameters<ManagedSourceService['releaseReceipt']>[1], result);
@@ -452,6 +452,7 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
       capabilities: (input, signal) => request('capabilities', input, signal),
       handoff: (input, signal) => request('handoff', input, signal),
       integrationReceipt: (input, signal) => request('integrationReceipt', input, signal),
+      fileReceipt: (input, signal) => request('fileReceipt', input, signal),
       codeExchange: (input, signal) => request('codeExchange', input, signal),
       resolve: (input, signal) => request('resolve', input, signal),
       prepare: (input, signal) => request('prepare', input, signal),

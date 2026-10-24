@@ -36,6 +36,7 @@ pub enum ChildPresetDefault {
     Worker,
     Verifier,
     Retrieval,
+    ResearchPeer,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -52,6 +53,8 @@ pub struct ChildCapabilityDescriptor {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DispatchInput {
     pub task: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub inherit_context: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -88,7 +91,7 @@ impl DispatchInput {
             task.push_str("\n\nSearch scope (relative to the admitted source): ");
             task.push_str(&serde_json::to_string(&paths)?);
         }
-        Ok(Self { task, source_agent: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
+        Ok(Self { task, inherit_context: false, source_agent: None, name: None, preset: Some("code_retrieval".into()), work_mode: Some(ChildWorkMode::Shared), tools: None })
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -161,6 +164,8 @@ pub enum ChildPresetToolsSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avatar: Option<String>,
     pub id: String,
@@ -313,6 +318,7 @@ pub struct ChildDispatchRead {
     _publication: crate::content::ContentPublication,
 }
 pub struct ChildDispatchSelection {
+    pub(crate) history: Option<crate::execution::ConversationHistory>,
     pub reference: Value,
     pub frozen: FrozenChildDispatch,
     pub catalog: ChildDispatchCatalog,
@@ -717,6 +723,7 @@ impl ChildDispatchRead {
             }
         }
         Ok(ChildDispatchSelection {
+            history: None,
             reference: self.reference,
             frozen,
             catalog,
@@ -737,6 +744,7 @@ impl ChildInvocationRead {
     pub fn load(self) -> Result<ChildDispatchSelection> {
         use crate::execution::{RequestSnapshot, ToolOrigin};
         let value = self.content.load(&self.body)?;
+        let mut history = None;
         let reference = match &self.context.origin {
             ToolOrigin::ModelStep { request_id } => {
                 let snapshot: RequestSnapshot = serde_json::from_value(value)?;
@@ -747,6 +755,7 @@ impl ChildInvocationRead {
                         "dispatch request belongs to another origin".into(),
                     ));
                 }
+                history = Some(snapshot.view.history);
                 snapshot.view.binding.child_dispatch
             }
             ToolOrigin::PolicyAction { action_id, node_id } => {
@@ -755,6 +764,9 @@ impl ChildInvocationRead {
                     return Err(RuntimeError::Invalid(
                         "dispatch graph belongs to another origin".into(),
                     ));
+                }
+                if let Some(reference) = body.dispatch_history.as_ref() {
+                    history = Some(self.content.load_items(reference, &|| false)?);
                 }
                 body.nodes
                     .into_iter()
@@ -767,12 +779,14 @@ impl ChildInvocationRead {
         .ok_or_else(|| {
             RuntimeError::Invalid("dispatch has no frozen configuration selection".into())
         })?;
-        ChildDispatchRead {
+        let mut selection = ChildDispatchRead {
             reference,
             content: self.content,
             _publication: self._publication,
         }
-        .load()
+        .load()?;
+        selection.history = history;
+        Ok(selection)
     }
 }
 impl ChildDispatchPreparation {

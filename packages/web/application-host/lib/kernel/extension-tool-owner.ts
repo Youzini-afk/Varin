@@ -18,6 +18,7 @@ import {
   validatePermissionMode,
   validatePermissionRule,
   type PermissionPolicy,
+  type WorkFocusId,
 } from '@varin/protocol';
 import { compileToolJsonSchema } from '../models/schema.js';
 import type { ThreadToolPreparation, AgentSettingsSnapshot } from '@varin/application-client';
@@ -122,7 +123,7 @@ export interface ExtensionToolRun {
   source: LaunchIntent['selection']['source'];
   projectId?: string;
   fixed?: boolean;
-  workFocus?: 'code' | 'research';
+  workFocus?: WorkFocusId;
 }
 class ExtensionToolSourceError extends Error {
   constructor(serviceId: string, dependency: string) {
@@ -150,7 +151,7 @@ export async function retainExtensionTool(
   options: ExtensionToolOwnerOptions,
   selected: HostServiceBinding,
   required?: ExtensionToolBinding,
-  workFocus?: ExtensionToolRun['workFocus'],
+  _workFocus?: ExtensionToolRun['workFocus'],
 ): Promise<ExtensionToolLease> {
   const { runtime, kernel } = options,
     pin = (() => { try { return selected.pin(); } catch (error) { selected.release(); throw error; } })();
@@ -170,9 +171,7 @@ export async function retainExtensionTool(
     } catch (error) { throw new ExtensionToolConfigurationError(originalDescriptor.id, error); }
     const descriptor = parseVarinExtensionServiceProvision(options.configurationIdentity?.declaration?.(originalDescriptor, configurationIdentity) ?? originalDescriptor);
     const schema = extensionToolSchema(descriptor);
-    const alwaysDeclared = required
-      ? required.tool.metadata?.always_declared === true
-      : workFocus === 'research' && ['research_search', 'research_decide'].includes(schema.name);
+    const alwaysDeclared = required?.tool.metadata?.always_declared === true;
     if (alwaysDeclared) schema.metadata!.always_declared = true;
     releaseConfiguration = options.configurationIdentity?.retain?.(descriptor, configurationIdentity);
     // Null states that this service has no separate configuration authority.

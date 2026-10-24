@@ -30,6 +30,13 @@ impl ModelProvider for Provider {
         let step = self.step.fetch_add(1, Ordering::SeqCst);
         if step == 0 {
             emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                id: "tool-details".into(), opaque: None,
+                content: Content::ToolCall { call: ToolCall {
+                    call_id: "details".into(), name: disclosure::DESCRIBE.into(), schema_version: "1".into(),
+                    arguments: json!({"name":if self.mode == "question" { "ask_user" } else { "fixture_effect" }}),
+                } },
+            } }).unwrap();
+            emit(ProviderEvent::ItemCompleted { item: ProviderItem {
                 id: "group-index".into(), opaque: None,
                 content: Content::ToolCall { call: ToolCall {
                     call_id: "index".into(), name: disclosure::DESCRIBE.into(),
@@ -43,7 +50,7 @@ impl ModelProvider for Provider {
                     call_id: "describe".into(),
                     name: disclosure::DESCRIBE.into(),
                     schema_version: "1".into(),
-                    arguments: if self.mode == "question" { json!({"name":"ask_user"}) } else { json!({"namespace":"extensions"}) },
+                    arguments: json!({"namespace":"extensions"}),
                 },
             },
             1 => {
@@ -55,12 +62,20 @@ impl ModelProvider for Provider {
                 assert_eq!(index["groups"].as_array().unwrap().len(), 1);
                 assert_eq!(index["groups"][0]["namespace"], "extensions");
                 assert_eq!(index["groups"][0]["tools"], 1, "common tools stay out of the deferred index");
+                let group = request.view.history.iter().find_map(|item| match &item.content {
+                    Content::ToolResult { result } if result.call_id == "describe" => match &result.completion {
+                        ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
+                    }, _ => None,
+                }).unwrap();
+                assert_eq!(group["tools"][0]["name"], "fixture_effect");
+                assert!(group["tools"][0].get("parameters").is_none(), "group discovery remains a concise directory");
+                assert_eq!(group["tools"][0]["describe"], json!({"tool":"tool_describe","arguments":{"name":"fixture_effect"}}));
                 let result = request
                     .view
                     .history
                     .iter()
                     .find_map(|item| match &item.content {
-                        Content::ToolResult { result } if result.call_id == "describe" => {
+                        Content::ToolResult { result } if result.call_id == "details" => {
                             match &result.completion {
                                 ToolCompletion::Result { content, .. } => {
                                     Some(content.data.clone())
@@ -71,7 +86,7 @@ impl ModelProvider for Provider {
                         _ => None,
                     })
                     .expect("description is a real tool result");
-                let result = if self.mode == "question" { &result } else { &result["tools"][0] };
+                let result = &result;
                 assert_eq!(
                     result["parameters"]["required"],
                     json!([if self.mode == "question" {

@@ -23,7 +23,7 @@ import type { WorkFocusId } from "./work-focus.js";
 
 // ── Types ──────────────────────────────────────────────────────────
 
-export type PresetId = "worker" | "verifier" | "retrieval";
+export type PresetId = "worker" | "verifier" | "retrieval" | "research_peer";
 
 /** Projects the selected runtime's owning declarations; this is not a tool-name registry. */
 export function agentPresetTools(capabilities: readonly { name: string; default_presets: readonly PresetId[] }[]): Record<PresetId, string[]> {
@@ -31,6 +31,7 @@ export function agentPresetTools(capabilities: readonly { name: string; default_
     worker: capabilities.filter(tool => tool.default_presets.includes("worker")).map(tool => tool.name),
     verifier: capabilities.filter(tool => tool.default_presets.includes("verifier")).map(tool => tool.name),
     retrieval: capabilities.filter(tool => tool.default_presets.includes("retrieval")).map(tool => tool.name),
+    research_peer: capabilities.filter(tool => tool.default_presets.includes("research_peer")).map(tool => tool.name),
   };
 }
 
@@ -62,12 +63,13 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
   worker: {
     id: "worker", slot: "worker",
     worktree: "isolated",
-    name: "实现 Agent",
-    systemPromptFragment: "Understand how the assigned work fits the overall goal. Complete the implementation or fix while coordinating related work and keeping the design consistent. Adjust your approach based on findings and deliver results that subsequent work can use.",
-    teamDescription: "Complete implementations or fixes",
+    name: "Worker",
+    systemPromptFragment: "Understand how the assigned work fits the overall goal. Use your judgment to carry it through to a usable result, working through issues as they arise and coordinating with related work. Adjust your approach based on findings, and make the outcome clear enough for subsequent work to build on.",
+    teamDescription: "Independently carry delegated work forward in the context of the overall goal",
   },
   verifier: {
     id: "verifier", slot: "verifier", name: "验证 Agent",
+    workFocus: ["code"],
     worktree: "isolated",
     systemPromptFragment: "Starting from the user's goal and the system as a whole, independently assess correctness, completeness, and design quality, including behavior across related modules. Choose verification methods as needed, base conclusions on evidence, and explain significant findings and their impact. Verify enough to support judgment, balancing new tests and proposed improvements against practical value, design simplicity, and maintenance cost.",
     teamDescription: "Independently assess correctness, completeness, and design quality",
@@ -75,10 +77,17 @@ export const EXECUTION_PRESETS: Readonly<Record<PresetId, Omit<ExecutionPreset, 
   "retrieval": {
     id: "retrieval",
     slot: "retrievalAgent",
+    name: "调研 Agent",
     worktree: "shared",
     systemPromptFragment:
       "Find, verify, and synthesize facts relevant to the assigned question. Understand the surrounding context and follow useful leads across sources and their relationships. Let the evidence guide further retrieval, filling gaps that matter to the answer and examining differences between sources that could change the conclusion.\n\nLet the question and evidence determine the depth of investigation. Deliver when the material answers the question or further retrieval offers little practical value.\n\nProvide a concise, usable synthesis with precise source locations and enough context to understand the conclusions, clearly distinguishing confirmed facts, inferences, and unresolved questions.",
-    teamDescription: "multi-step fact retrieval",
+    teamDescription: "Investigate questions across relevant sources and synthesize findings",
+  },
+  research_peer: {
+    id: "research_peer", slot: "researchPeer", name: "科研搭档",
+    worktree: "shared", workFocus: ["research"],
+    systemPromptFragment: "You are a research collaborator. Take on the assigned work with your own judgment and contribute useful findings, ideas, or results to the collaboration.",
+    teamDescription: "Contribute an independent perspective and pursue the assigned research work",
   },
 };
 
@@ -102,7 +111,7 @@ export function observeQuickRetrieval(
   const definition = customizeHarnessAgent({ ...EXECUTION_PRESETS.retrieval,
     id: 'code_retrieval', slot: 'explore' as const, name: '快速检索',
     tools: tools.filter(name => !['code_retrieval', 'dispatch'].includes(name)),
-    systemPromptFragment: `${EXECUTION_PRESETS.retrieval.systemPromptFragment}\n\nInvestigate this tool call's question using the available search, file and terminal tools. Use commands when useful for analysis or verification. Return the answer directly with precise source locations and sufficient supporting context. The parent owns this investigation; do not create a separate collaboration task.`,
+    systemPromptFragment: "Locate the information needed to answer this question. Follow relevant context and use the available tools as useful. Return a focused answer with precise source locations and enough supporting context to continue the work. This investigation belongs to the calling task.",
   }, binding?.agent, 'agent');
   return { id: 'code_retrieval', definition, model,
     modelSource: binding?.providerId && binding.modelId ? 'selected' : 'inherit',

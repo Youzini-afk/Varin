@@ -1,3 +1,5 @@
+import { browserMessages } from './browser';
+import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
@@ -37,11 +39,11 @@ export const dict: Record<I18nKey, string> = {
   "thread.composer.chatOnly": "채팅만",
   "thread.message.summarize": "여기까지 요약",
   "chat.fileAttachment.actions.attachPdfs": "PDF 첨부",
-  "chat.fileAttachment.actions.choosePdfs": "첨부할 PDF 선택",
-  "chat.fileAttachment.pdfAttachments": "PDF 첨부 파일",
+  "chat.fileAttachment.actions.choosePdfs": "문서 선택",
+  "chat.fileAttachment.pdfAttachments": "문서 첨부",
   "chat.fileAttachment.uploading": "첨부 파일 준비 중…",
-  "chat.fileAttachment.unsupportedType": "이미지 또는 PDF 파일을 첨부하세요.",
-  "chat.fileAttachment.pdfNotRetained": "PDF가 저장되지 않아 첨부 파일이 추가되지 않았습니다.",
+  "chat.fileAttachment.unsupportedType": "이미지, PDF, DOCX, XLSX, PPTX 파일을 첨부할 수 있습니다.",
+  "chat.fileAttachment.pdfNotRetained": "문서가 저장되지 않아 첨부되지 않았습니다.",
   "computer.feedback.title": "Agent 데스크톱 동작",
   "computer.feedback.type": "입력 중",
   "computer.feedback.value": "값 설정",
@@ -334,10 +336,14 @@ export const dict: Record<I18nKey, string> = {
   'research-facts.rerunSelected': "선택 항목 다시 실행",
   'research-facts.actionFailed': "작업 실패",
   'research-facts.unknownTarget': "알 수 없는 대상",
+  "workFocus.general": "일반",
+  "workFocus.generalDescription": "일상적인 작업을 위한 균형 잡힌 도구.",
+  "workFocus.office": "오피스",
+  "workFocus.officeDescription": "문서, 데이터, 브라우저 및 컴퓨터 도구.",
   'workFocus.label': "작업 중점",
-  'workFocus.code': "일반",
+  "workFocus.code": "코딩",
   'workFocus.research': "연구",
-  'workFocus.codeDescription': "코딩과 일상 작업에 필요한 도구를 사용합니다.",
+  "workFocus.codeDescription": "코드 탐색, 개발 및 협업 도구.",
   'workFocus.researchDescription': "문제를 조사하고 설명을 비교하며 실험을 설계하고 진행합니다.",
   'workFocus.pending': "다음 실행부터 적용",
   'workFocus.nextTurn': "다음 실행 시작 시 적용됩니다. 현재 실행과 대기 중인 후속 질문은 기존 작업 방향을 유지합니다.",

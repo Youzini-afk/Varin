@@ -23,8 +23,8 @@ pub(crate) fn descriptors() -> Vec<ChildCapabilityDescriptor> {
         .map(|definition| {
             let (source_requirement, mut default_presets) =
                 definition.child.expect("child declaration");
-            use varin_runtime::catalog::dispatch::ChildPresetDefault::{Worker, Verifier};
-            if default_presets.contains(&Worker) { default_presets.push(Verifier); }
+            use varin_runtime::catalog::dispatch::ChildPresetDefault::{Worker, Verifier, ResearchPeer};
+            if default_presets.contains(&Worker) { default_presets.extend([Verifier, ResearchPeer]); }
             ChildCapabilityDescriptor {
                 process: definition
                     .schema
@@ -187,9 +187,9 @@ impl varin_runtime::execution::ContextPreparation for BindingPreparation {
             let available=|id:&str|view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["id"]==id && preset["unavailable"].is_null()));
             let main=self.catalog.lock().map_err(|e|error(e.to_string()))?.child_task_for_thread(&run.thread_id).map_err(|e|error(e.to_string()))?.is_none();
             let mut text=String::new();
-            if main {text.push_str("Advance the user's goal while maintaining an understanding of the overall design, task relationships, and current progress. Use implementation and verification evidence to adjust the work and judge the overall delivery.");}
+            if main {text.push_str("Advance the user's goal while maintaining an understanding of the overall task, related work, and current progress. Use findings and results to adjust the work and judge the overall delivery.");}
             if binding.tools.iter().any(|tool|tool.name=="dispatch") {
-                if available("worker") {text.push_str("\nYou can delegate implementation or fixes to Agents and organize collaboration as the task requires.");}
+                if available("worker") {text.push_str("\nYou can delegate work to Agents and organize collaboration as the task requires.");}
                 if available("verifier") {text.push_str("\nYou can delegate verification to an independent Agent and proceed with implementation in parallel. When a verification Agent handles verification, you can let implementers focus on implementation and leave test writing and execution to the verifier as needed.");}
             }
             if (!main || view["presets"].as_array().is_some_and(|presets|presets.iter().any(|preset|preset["unavailable"].is_null())))
@@ -307,7 +307,7 @@ pub(crate) fn discovery(
             else if !selected.unavailable_source_tools(&tools).is_empty() { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "source_required".into(), capabilities: selected.unavailable_source_tools(&tools) }) }
             else if preset.inherit_base.as_ref().is_some_and(|base| base != &selected.frozen.parent_model) { Some(varin_runtime::catalog::dispatch::ChildCapabilityFailure { code: "inheritance_basis_changed".into(), capabilities: Vec::new() }) } else { None }
         });
-        json!({"id":preset.id,"name":preset.name,"work_mode":preset.work_mode,"tools":tools,"tools_source":preset.tools_source,"model_source":preset.model_source,"model":preset.model.as_ref().map(|model|json!({"provider_family":model.configuration.provider_family,"model":model.configuration.model})),"unavailable":failure})
+        json!({"id":preset.id,"name":preset.name,"description":preset.description,"work_mode":preset.work_mode,"tools":tools,"tools_source":preset.tools_source,"unavailable":failure})
     }).collect::<Vec<_>>();
     json!({"kind":"child_dispatch_configuration","catalog_identity":selected.catalog.identity,"normal":{"allowed_delegation":normal,"unavailable":selected.catalog.normal_unavailable,"default_unavailable":normal_failure,"selection":"Without tools, the full delegation is selected. Explicit tools may narrow it; unsupported selected tools are rejected."},"presets":presets,
         "work_modes":{"read_only":"fixes an existing file source; ordinary external effects retain their own permissions","isolated_write":"isolates an existing file source; without files, creates no working copy or file result"},
