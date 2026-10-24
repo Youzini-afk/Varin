@@ -27,6 +27,7 @@ import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
 import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
+import { subscribeLiveFence } from './markdown/liveFence';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
   attachMarkdownInteractions,
@@ -847,6 +848,14 @@ const useMorphdomMarkdown = ({
     mermaidViewerRef.current = null;
   }, []);
 
+  // A streaming fence gains colour line by line; re-render when its colour
+  // lands even if no new text arrived (a paused stream).
+  const [fenceRevision, refreshFence] = React.useReducer((value: number) => value + 1, 0);
+  React.useEffect(() => {
+    if (!streaming) return undefined;
+    return subscribeLiveFence((owner) => { if (owner === cacheKey) refreshFence(); });
+  }, [streaming, cacheKey]);
+
   React.useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -918,7 +927,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers, ink]);
+  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers, ink, fenceRevision]);
 
   React.useEffect(() => {
     const container = containerRef.current;

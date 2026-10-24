@@ -5,6 +5,7 @@ import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { pdfMaterialMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 import { highlightCodeInWorker } from './markdown-worker';
+import { liveFenceLines, parseOpenFence, renderOpenFence, type OpenFence } from './liveFence';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
@@ -22,6 +23,8 @@ type MarkdownBlock = {
   // streaming open code fence so we don't re-tokenize a growing block ~40x/sec
   // (O(n^2)); it highlights once the fence closes and becomes a stable block.
   highlight: boolean;
+  // The open fence, coloured line by line as its lines complete (liveFence.ts).
+  fence?: OpenFence;
 };
 
 const hasReferenceDefinitions = (text: string): boolean =>
@@ -90,11 +93,15 @@ const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
     const raw = token.raw ?? '';
     const isLast = i === tail;
     const openFence = token.type === 'code' && hasOpenFence(raw);
+    const parsedFence = openFence && isLast ? parseOpenFence(raw) : null;
+    // Diagrams keep their own streaming placeholder.
+    const fence = parsedFence?.lang === 'mermaid' ? null : parsedFence;
     blocks.push({
       raw,
       src: openFence ? raw : heal(raw),
       mode: isLast ? 'live' : 'full',
       highlight: !openFence,
+      ...(fence ? { fence } : {}),
     });
   }
 
@@ -389,7 +396,9 @@ export const renderMarkdownBlocks = async (
   const blocks = streamBlocks(text, streaming);
   return Promise.all(
     blocks.map(async (block, index) => {
-      const contentHash = hash(block.raw);
+      // An open fence's HTML also depends on how many of its lines have colour.
+      const coloured = block.fence ? liveFenceLines(`${cacheKey}:${index}`, cacheKey, block.fence) : undefined;
+      const contentHash = coloured ? `${hash(block.raw)}.${coloured.length}` : hash(block.raw);
       const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}`;
       const key = `${cacheKey}:${index}:${block.mode}`;
       const cached = htmlCache.get(key);
@@ -397,7 +406,7 @@ export const renderMarkdownBlocks = async (
         touch(key, cached);
         return { id, html: cached.html };
       }
-      const html = await parseBlock(block);
+      const html = block.fence && coloured ? sanitize(renderOpenFence(block.fence, coloured)) : await parseBlock(block);
       touch(key, { hash: contentHash, html });
       return { id, html };
     }),

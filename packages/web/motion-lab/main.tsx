@@ -61,6 +61,9 @@ const history = (turns: number): ChatSessionEntry[] => {
 
 interface FrameSample {
   t: number;
+  /** Lines of a code fence still streaming, and how many of them have colour. */
+  openFenceLines: number;
+  openFenceColoured: number;
   /** Rendered text length of the last Markdown block in the timeline. */
   shown: number;
   /** Ink spans developing in it, and the end dot's state. */
@@ -122,7 +125,10 @@ function Lab() {
         const turn = trackedTurn ? document.querySelector<HTMLElement>(`[data-conversation-entry-id="${CSS.escape(trackedTurn)}"]`) : null;
         const markdown = [...node.querySelectorAll<HTMLElement>('[data-markdown-content]')].at(-1);
         const caret = markdown?.querySelector<HTMLElement>('.markdown-caret');
+        const openFence = markdown?.querySelector<HTMLElement>('pre:not([data-md-lang]) > code[class*="language-"]');
         recording.push({
+          openFenceLines: openFence?.querySelectorAll(':scope > .line').length ?? 0,
+          openFenceColoured: openFence ? [...openFence.querySelectorAll(':scope > .line')].filter(line => line.querySelector('[style*="color"]')).length : 0,
           shown: markdown?.textContent?.length ?? 0,
           ink: markdown?.querySelectorAll('.markdown-ink').length ?? 0,
           caret: caret?.dataset.state ?? null,

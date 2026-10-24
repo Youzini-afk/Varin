@@ -37,7 +37,17 @@ const { openLab, assert } = require('./lab.cjs');
   assert(caretFrames > live.length * 0.8, `the end dot is present while streaming (${caretFrames}/${live.length})`, failures);
   assert(live.filter((frame) => frame.caret).every((frame) => frame.caretLast), 'the end dot always sits right after the last text', failures);
   assert(waiting, 'the dot breathes while the stream pauses', failures);
-  assert(Boolean(drained) && drained.t - endedAt < 600, `after the end the backlog drains and the dot leaves (${drained ? Math.round(drained.t - endedAt) : '-'}ms)`, failures);
+  // Drain 160ms, then the last ink merges 420ms after the final render.
+  assert(Boolean(drained) && drained.t - endedAt < 800, `after the end the backlog drains and the dot leaves (${drained ? Math.round(drained.t - endedAt) : '-'}ms)`, failures);
+
+  // Line-by-line colour while the fence is open: completed lines colour, the
+  // line being written does not.
+  const fenceFrames = live.filter((frame) => frame.openFenceLines > 0);
+  const colouredFrames = fenceFrames.filter((frame) => frame.openFenceColoured > 0);
+  const neverAhead = fenceFrames.every((frame) => frame.openFenceColoured < frame.openFenceLines);
+  console.log(JSON.stringify({ fenceFrames: fenceFrames.length, colouredFrames: colouredFrames.length, maxColoured: Math.max(0, ...fenceFrames.map((frame) => frame.openFenceColoured)), maxLines: Math.max(0, ...fenceFrames.map((frame) => frame.openFenceLines)) }));
+  assert(colouredFrames.length > fenceFrames.length * 0.4, `an open fence colours its completed lines (${colouredFrames.length}/${fenceFrames.length} frames)`, failures);
+  assert(neverAhead, 'the line being written stays uncoloured', failures);
 
   // 2. The final DOM is the plain rendered answer: no ink, no dot, highlighted code.
   const finalState = await page.evaluate(() => {
