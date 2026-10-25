@@ -3,5 +3,5 @@
   "compilerOptions": {
     "baseUrl": ".."
   },
-  "include": ["./main.tsx", "./send.tsx", "./sidebar.tsx", "../src/pwa.d.ts", "../../ui/src"]
+  "include": ["./main.tsx", "./send.tsx", "./sidebar.tsx", "./rail.tsx", "../src/pwa.d.ts", "../../ui/src"]
 }

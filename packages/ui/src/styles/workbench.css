@@ -36,20 +36,23 @@
   isolation: isolate;
 }
 .workbench-sidebar { border-right-color: transparent; }
+/* The panel's width rides the glide spring; its content keeps a fixed width inside (ContextPanel). */
 .workbench-resource-canvas {
   border-radius: 10px;
-  transition-duration: var(--wb-panel-duration);
-  transition-timing-function: var(--wb-ease);
+  transition-duration: var(--motion-dur-glide);
+  transition-timing-function: var(--motion-ease-glide);
 }
-.workbench-resource-canvas[data-open="true"] { margin-left: 6px; }
+/* Custom properties do not transition, so the panel's final gap can be read mid-glide. */
+.workbench-resource-canvas { --wb-canvas-gap: 6px; }
+.workbench-resource-canvas[data-open="true"] { margin-left: var(--wb-canvas-gap); }
 .workbench-resource-canvas[data-expanded="true"] { margin-left: 0; }
-.workbench-resource-canvas > div { transition-duration: var(--wb-panel-duration); }
+.workbench-resource-canvas > div { transition-duration: var(--motion-dur-glide); transition-timing-function: var(--motion-ease-glide); }
 .workbench-rail-reveal {
   height: 100%;
   width: 44px;
   opacity: 1;
   overflow: clip;
-  transition: width var(--wb-panel-duration) var(--wb-ease), opacity var(--wb-state-duration) ease;
+  transition: width var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .workbench-rail-reveal[data-open="false"] { width: 0; opacity: 0; pointer-events: none; }
 .workbench-resource-rail {

@@ -167,6 +167,16 @@ The conversation sidebar keeps plain React rows and layers motion on the DOM:
 - Row status icons (running, error, unread, pinned, default) change in place with `SwapIcon` and settle.
 - `Sidebar` opens and closes on the glide curve. Its content keeps a fixed width; it fades in as the width opens and leaves first on the exit tween.
 
+The context rail and panel (`components/layout/railMotion.ts`):
+
+- `useRailIndicator` draws one active bar for the rail. It slides to the active button on the glide spring, follows a reorder (`layoutKey`), appears in place when a panel opens and fades out in place when it closes.
+- A first Git change count settles in (`rail-badge[data-arrive]`, from `useArrival`). Later counts change in place.
+- One Base UI tooltip root serves every rail button through `Tooltip.createHandle()`; the buttons are detached triggers with a payload. Moving between buttons keeps it open and slides it (`motion-tooltip-follow` on its positioner). `TooltipContent` takes `positionerClassName` for this.
+- `useMainColumnLock` keeps the main column beside a docked panel at one width while the panel glides. Opening narrows it to its final width at once (it reads the panel's `--oc-context-panel-width` and `--wb-canvas-gap`). Closing keeps it until the panel has gone, then it widens once.
+- `useSlidingUnderline` gives a tab row one underline that slides on glide. The Git views (changes / pull request) use it.
+- A newly selected panel view enters on glide (`panel-view-enter`); the same view keeps its node.
+- Git change rows and the collaboration member chips are `FlipList`s, so files and members arrive, leave and regroup in place.
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -178,6 +188,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node send.cjs`: the departing home, docking, icon swaps, the flight's arc and landing, the height glide and reduced motion.
 - `node popover.cjs`: a menu's growth, highlight slide and exit, and tooltip grouping.
 - `node sidebar.cjs` (`?scene=sidebar`, the real sidebar fed through its stores): the selection's travel and re-routing, pinning, a new row, removal, collapse and expansion, status icons, the hover highlight and reduced motion.
+- `node rail.cjs` (`?scene=rail`, the real rail and panel beside a main column): the active bar, the main column lock, the Git tabs' underline, the badge, the shared tooltip and reduced motion. Surfaces that need a Host (Git) are not opened there.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 

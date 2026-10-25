@@ -16,8 +16,11 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
+import { Tooltip as BaseTooltip } from '@base-ui/react/tooltip';
 import { Icon } from '@/components/icon/Icon';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { SwapText } from '@/components/motion/SwapText';
+import { TooltipContent } from '@/components/ui/tooltip';
+import { useArrival, useRailIndicator } from './railMotion';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { useI18n } from '@/lib/i18n';
 import {
@@ -36,7 +39,11 @@ import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUISto
 const RAIL_TOOLTIP_DELAY_MS = 150;
 const EMPTY_TABS: never[] = [];
 
+type RailTip = { label: string; description: string; badgeDescription?: string };
+type RailTooltip = ReturnType<typeof BaseTooltip.createHandle<RailTip>>;
+
 type RailItemProps = {
+  tooltip: RailTooltip;
   surface: ContextSurfaceDescriptor;
   isActive: boolean;
   label: string;
@@ -50,6 +57,7 @@ type RailItemProps = {
 const formatBadgeCount = (count: number): string => count > 99 ? '99+' : String(count);
 
 const ContextPanelRailItem: React.FC<RailItemProps> = ({
+  tooltip,
   surface,
   isActive,
   label,
@@ -62,6 +70,7 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: surface.id,
   });
+  const badgeArrived = useArrival(badgeCount);
 
   return (
     <div
@@ -69,52 +78,45 @@ const ContextPanelRailItem: React.FC<RailItemProps> = ({
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn('relative shrink-0', isDragging && 'z-10 opacity-70')}
     >
-      <Tooltip delayDuration={RAIL_TOOLTIP_DELAY_MS}>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            {...attributes}
-            {...listeners}
-            onClick={() => onSelect(surface)}
-            aria-label={badgeAriaLabel ?? label}
-            aria-pressed={isActive}
-            className={cn(
-              'flex h-8 w-8 touch-none select-none items-center justify-center rounded-md transition-colors',
-              isActive
-                ? 'bg-interactive-selection text-primary'
-                : 'text-muted-foreground hover:text-foreground',
-            )}
+      {/* One tooltip serves the whole rail: moving between buttons slides it instead of reopening. */}
+      <BaseTooltip.Trigger
+        handle={tooltip}
+        payload={{ label, description, badgeDescription }}
+        delay={RAIL_TOOLTIP_DELAY_MS}
+        render={<button
+          type="button"
+          {...attributes}
+          {...listeners}
+          onClick={() => onSelect(surface)}
+          aria-label={badgeAriaLabel ?? label}
+          aria-pressed={isActive}
+          data-rail-surface={surface.mode}
+          className={cn(
+            'flex h-8 w-8 touch-none select-none items-center justify-center rounded-md transition-colors',
+            isActive
+              ? 'bg-interactive-selection text-primary'
+              : 'text-muted-foreground hover:text-foreground',
+          )}
+        />}
+      >
+        <Icon name={surface.icon} className="h-[18px] w-[18px]" />
+        {badgeCount !== undefined && badgeCount > 0 ? (
+          <span
+            aria-hidden="true"
+            // The count is a live signal; keep it legible on top of the icon
+            // with its own status-info chip instead of muted text on the rail.
+            // A first count settles in; later counts change in place.
+            className="rail-badge absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold leading-none"
+            data-arrive={badgeArrived ? '' : undefined}
+            style={{
+              backgroundColor: 'var(--status-info-background)',
+              color: 'var(--status-info)',
+            }}
           >
-            {isActive ? (
-              <span aria-hidden="true" className="absolute -left-1 h-4 w-0.5 rounded-full bg-primary" />
-            ) : null}
-            <Icon name={surface.icon} className="h-[18px] w-[18px]" />
-            {badgeCount !== undefined && badgeCount > 0 ? (
-              <span
-                aria-hidden="true"
-                // The count is a live signal; keep it legible on top of the icon
-                // with its own status-info chip instead of muted text on the rail.
-                className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[0.625rem] font-semibold leading-none"
-                style={{
-                  backgroundColor: 'var(--status-info-background)',
-                  color: 'var(--status-info)',
-                }}
-              >
-                {formatBadgeCount(badgeCount)}
-              </span>
-            ) : null}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="left" sideOffset={8}>
-          <div className="flex flex-col gap-0.5">
-            <span>{label}</span>
-            <span className="typography-micro text-muted-foreground">{description}</span>
-            {badgeDescription ? (
-              <span className="typography-micro text-muted-foreground">{badgeDescription}</span>
-            ) : null}
-          </div>
-        </TooltipContent>
-      </Tooltip>
+            <SwapText text={formatBadgeCount(badgeCount)} hold={0} />
+          </span>
+        ) : null}
+      </BaseTooltip.Trigger>
     </div>
   );
 };
@@ -151,6 +153,9 @@ export const ContextPanelRail: React.FC = () => {
   const surfaces = React.useMemo(() => {
     return availableContextSurfaces(contextRailOrder, tabs, planModeEnabled);
   }, [contextRailOrder, planModeEnabled, tabs]);
+  const [tooltip] = React.useState(() => BaseTooltip.createHandle<RailTip>());
+  const navRef = React.useRef<HTMLElement | null>(null);
+  useRailIndicator(navRef, activeMode, surfaces.map((surface) => surface.id).join('|'));
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
@@ -174,10 +179,24 @@ export const ContextPanelRail: React.FC = () => {
 
   return (
     <nav
+      ref={navRef}
       id="context-panel-rail"
       aria-label={t('contextRail.aria.rail')}
-      className="workbench-resource-rail flex h-full w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto py-2"
+      className="workbench-resource-rail relative flex h-full w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto py-2"
     >
+      <BaseTooltip.Root handle={tooltip}>
+        {({ payload }) => payload ? (
+          <TooltipContent side="left" sideOffset={8} positionerClassName="motion-tooltip-follow">
+            <div className="flex flex-col gap-0.5">
+              <span>{payload.label}</span>
+              <span className="typography-micro text-muted-foreground">{payload.description}</span>
+              {payload.badgeDescription ? (
+                <span className="typography-micro text-muted-foreground">{payload.badgeDescription}</span>
+              ) : null}
+            </div>
+          </TooltipContent>
+        ) : null}
+      </BaseTooltip.Root>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
         <SortableContext items={surfaces.map((surface) => surface.id)} strategy={verticalListSortingStrategy}>
           {surfaces.map((surface) => {
@@ -188,6 +207,7 @@ export const ContextPanelRail: React.FC = () => {
             return (
               <ContextPanelRailItem
                 key={surface.id}
+                tooltip={tooltip}
                 surface={surface}
                 isActive={activeMode === surface.mode}
                 label={label}

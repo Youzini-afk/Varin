@@ -262,6 +262,8 @@ type ContentProps = React.ComponentProps<typeof BaseTooltip.Popup> & {
   sideOffset?: number;
   side?: "top" | "right" | "bottom" | "left";
   align?: "start" | "center" | "end";
+  /** `motion-tooltip-follow` slides a shared tooltip between its triggers. */
+  positionerClassName?: string;
 };
 
 function TooltipContent({
@@ -269,6 +271,7 @@ function TooltipContent({
   sideOffset = 0,
   side,
   align,
+  positionerClassName,
   children,
   style,
   ...props
@@ -276,7 +279,7 @@ function TooltipContent({
   return (
     <TooltipPartBoundary>
       <BaseTooltip.Portal>
-        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className="z-50">
+        <BaseTooltip.Positioner sideOffset={sideOffset} side={side} align={align} className={cn("z-50", positionerClassName)}>
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(

@@ -12,6 +12,7 @@ import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkspaceRecoveryPanel } from './WorkspaceRecoveryPanel';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { ContextPanelGitNavigation } from './ContextPanelGitNavigation';
+import { useMainColumnLock } from './railMotion';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
@@ -470,6 +471,7 @@ export const ContextPanel: React.FC = () => {
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
+  useMainColumnLock(panelRef, isOpen, !isExpanded && !panelState?.expanded);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
@@ -1173,7 +1175,10 @@ export const ContextPanel: React.FC = () => {
           </div>
         ) : null}
         {activeTab?.mode !== 'chat' && !isFileTabActive && activeTab?.mode !== 'browser' && activeTab?.mode !== 'diff' && activeTab?.mode !== 'terminal' ? (
-          <React.Suspense fallback={null}>{activeNonChatContent}</React.Suspense>
+          // A new view arrives instead of appearing; the same view keeps its node.
+          <div key={activeTab?.mode ?? 'none'} className="panel-view-enter h-full min-h-0">
+            <React.Suspense fallback={null}>{activeNonChatContent}</React.Suspense>
+          </div>
         ) : null}
       </div>
       </div>

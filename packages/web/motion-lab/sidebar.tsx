@@ -36,7 +36,17 @@ const seed = (): ThreadSummary[] => [
   summary('misc-2', '读一篇论文', null),
 ];
 
-const inert = (): unknown => new Proxy(() => Promise.resolve(undefined), { get: () => inert() });
+// Stable per path, as real API objects are: effects that depend on one must not re-run each render.
+const inert = (): unknown => {
+  const children = new Map<PropertyKey, unknown>();
+  return new Proxy(() => Promise.resolve(undefined), {
+    get: (_target, key) => {
+      if (key === 'then') return undefined;
+      if (!children.has(key)) children.set(key, inert());
+      return children.get(key);
+    },
+  });
+};
 const inertApis = inert() as React.ContextType<typeof RuntimeAPIContext>;
 
 interface RowSample { id: string; top: number; opacity: number }

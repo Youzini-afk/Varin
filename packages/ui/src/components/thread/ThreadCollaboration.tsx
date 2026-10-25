@@ -9,6 +9,7 @@ import {
 import type { MessageFeedEntry } from "@varin/protocol";
 import { Icon } from "@/components/icon/Icon";
 import { AgentAvatar } from "@/components/ui/AgentAvatar";
+import { FlipList } from "@/components/conversation/FlipList";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -427,11 +428,14 @@ function CollaborationRoomContent({
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
+              {/* A member who joins settles in beside the others; the row is not redrawn. */}
+              <FlipList className="relative mt-2 flex flex-wrap gap-1.5">
                 {current.slice(0, 3).map((member) => (
                   <button
                     type="button"
                     key={member.threadId}
+                    data-flip-key={member.threadId}
+                    data-flip-arrive=""
                     className="flex max-w-full items-center gap-1.5 rounded-lg py-1 pl-0.5 pr-2 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
                     onClick={() => openMember(member.threadId)}
                   >
@@ -455,7 +459,7 @@ function CollaborationRoomContent({
                     +{current.length - 3}
                   </button>
                 )}
-              </div>
+              </FlipList>
             </>
           )}
           {selection?.kind === "member" &&

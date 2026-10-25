@@ -278,3 +278,53 @@
   .sidebar-hover { display: none; }
   [data-sidebar-hover] [data-sidebar-row]:not([data-current], [data-popup-open]):hover { background-color: revert-layer; }
 }
+
+/*
+ * Context rail (components/layout/railMotion.ts). One bar slides to the
+ * active button; a first Git count settles in.
+ */
+.rail-indicator {
+  position: absolute;
+  top: 0;
+  left: 2px;
+  width: 2px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--primary-base, var(--primary));
+  pointer-events: none;
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.rail-indicator[data-hidden] { opacity: 0; }
+.rail-badge[data-arrive] { animation: rail-badge-in var(--motion-dur-settle) var(--motion-ease-settle) both; }
+@keyframes rail-badge-in {
+  from { opacity: 0; scale: .4; }
+}
+
+/*
+ * A tooltip shared by a row of triggers slides to the next one on snap. The
+ * opening frame is placed directly, so it never slides in from the corner.
+ */
+.motion-tooltip-follow:has(> [data-open]:not([data-starting-style], [data-ending-style])) {
+  transition: transform var(--motion-dur-snap) var(--motion-ease-snap);
+}
+
+/* A tab row's single underline (useSlidingUnderline): it slides between tabs on glide. */
+.tab-underline {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--primary-base, var(--primary));
+  pointer-events: none;
+  transition: translate var(--motion-dur-glide) var(--motion-ease-glide), width var(--motion-dur-glide) var(--motion-ease-glide),
+    opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.tab-underline[data-hidden] { opacity: 0; }
+.tab-underline[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+
+/* Switching views: the incoming view's content arrives on glide (ContextPanel). */
+.panel-view-enter { animation: panel-view-enter var(--motion-dur-glide) var(--motion-ease-glide) backwards; }
+@keyframes panel-view-enter {
+  from { opacity: 0; translate: 0 6px; }
+}

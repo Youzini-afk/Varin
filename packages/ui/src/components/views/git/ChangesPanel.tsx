@@ -24,6 +24,7 @@ import type { GitStatus } from '@varin/application-client';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
+import { FlipList } from '@/components/conversation/FlipList';
 
 export interface ChangesGroupConfig {
   /** Stable id (e.g. 'staged' | 'unstaged'). */
@@ -520,10 +521,13 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
               })}
             </div>
           ) : (
-            <div role="list" aria-label={t('gitView.changes.changedFilesAria')}>
+            // Files arrive, leave and regroup in place (FlipList) instead of the list being redrawn.
+            <FlipList role="list" aria-label={t('gitView.changes.changedFilesAria')} className="relative">
               {rows.map((row, index) => (
                 <div
                   key={row.key}
+                  data-flip-key={row.key}
+                  data-flip-arrive={row.key.startsWith('header:') || row.key === 'revert-all' ? undefined : ''}
                   className={cn(
                     'relative',
                     showDivider(index) &&
@@ -533,7 +537,7 @@ export const ChangesPanel: React.FC<ChangesPanelProps> = ({
                   {renderRow(row, index === 0)}
                 </div>
               ))}
-            </div>
+            </FlipList>
           )}
         </ScrollShadow>
         <OverlayScrollbar containerRef={scrollRef} disableHorizontal />
