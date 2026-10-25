@@ -1,6 +1,6 @@
 # 动效与交互：丝滑到底
 
-状态：2026-10-24，设计已确认，正在按第 6 节分期实施。可交互原型：[motion-preview/index.html](motion-preview/index.html)（用浏览器直接打开，纯前端；数据与运行过程均为示例，不连接 Host）。
+状态：2026-10-24，设计已确认，P0–P4 已在 `ui/uiux-20261024` 上按第 6 节实施，进度与差异见第 6 节「实施进度」。尚待真机、Electron 与读屏验证的项目见第 7 节。可交互原型：[motion-preview/index.html](motion-preview/index.html)（用浏览器直接打开，纯前端；数据与运行过程均为示例，不连接 Host）。
 
 原型的界面结构以现有产品为准：`varin-light` / `varin-dark` 主题，44px 标题栏与「工作台 ▾」「通用 ▾」切换，按项目分组的会话侧栏，左上圆角的会话画布，右侧导轨与面板，居中的新会话首屏，对话优先的过程行，思考阅读窗口，派发成员行与任务回复气泡，左操作右用量的轮末，以及设置窗口与 IDE 工作台。本稿只改运动、交互与节奏，不改信息架构和阅读规则（见[工作台文档](../workbench.md#聊天阅读与用户介入)与 [UI 模块说明](../../packages/ui/DOCUMENTATION.md#conversation-and-resource-projections)）。
 
