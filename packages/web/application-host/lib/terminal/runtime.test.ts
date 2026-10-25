@@ -136,7 +136,7 @@ describe('terminal runtime', () => {
   it('rejects regular files as terminal working directories', async () => {
     const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
     const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
-    const workspaceRoot = '/tmp/openchamber-terminal-test-root';
+    const workspaceRoot = '/tmp/varin-terminal-test-root';
     const regularFilePath = path.join(workspaceRoot, 'not-a-directory');
     const postRoutes = new Map<string, RouteHandler>();
     const app = {
@@ -190,7 +190,7 @@ describe('terminal runtime', () => {
   it('rejects terminal working directories outside workspace lockdown', async () => {
     const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
     const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
-    const workspaceRoot = '/tmp/openchamber-terminal-test-root';
+    const workspaceRoot = '/tmp/varin-terminal-test-root';
     const postRoutes = new Map<string, RouteHandler>();
     const app = {
       post(route: string, ...handlers: RouteHandler[]) {
@@ -245,7 +245,7 @@ describe('terminal runtime', () => {
   it('resolves workspace-relative paths for create and restart while enforcing lockdown', async () => {
     const previousWorkspaceRoot = process.env.VARIN_WORKSPACE_ROOT;
     const previousWorkspaceLockdown = process.env.VARIN_WORKSPACE_LOCKDOWN;
-    const workspaceRoot = path.resolve('/tmp/openchamber-terminal-workspace');
+    const workspaceRoot = path.resolve('/tmp/varin-terminal-workspace');
     const harness = createHarness({
       fs: {
         promises: {

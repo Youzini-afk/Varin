@@ -12,9 +12,6 @@ The native product identity is Varin-owned:
 - notification service: `dev.varin.mobile.notification-service`;
 - deep-link scheme: `varin://`.
 
-These identifiers intentionally do not accept the unreleased inherited OpenChamber identity as a
-compatibility alias.
-
 ## Runtime model
 
 - The native app bundles the mobile UI only; the Application Host and native Agent runtime stay on the connected server.

@@ -82,8 +82,6 @@ Varin 的 Harness 负责连接模型、工具、上下文、权限、后台工�
 
 感谢 [LinuxDO](https://linux.do) 社区的支持。
 
-## 来源与许可证
-
-Varin 是独立项目，起源于维护者的 OpenChamber 分支。
+## 许可证
 
 项目按 [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）分发。通过网络提供修改版本时，应按许可证要求提供对应源码。版权与第三方声明保留在 [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md) 中。

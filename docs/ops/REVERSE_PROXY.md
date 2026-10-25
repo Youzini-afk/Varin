@@ -97,8 +97,8 @@ server {
 ```
 
 For Nginx Proxy Manager, enable **Websockets Support** and place the equivalent buffering, body-size,
-and timeout directives in the host's Advanced configuration. Do not recreate the removed
-`/api/event*` locations from older OpenChamber guides.
+and timeout directives in the host's Advanced configuration. Varin has no separate `/api/event*`
+locations; do not add them from older guides.
 
 ## Caddy
 

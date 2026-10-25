@@ -60,7 +60,7 @@ describe('readRuntimeBootstrapConfig', () => {
     current.__VARIN_API_BASE_URL__ = ' https://remote.example.com ';
     current.__VARIN_CLIENT_TOKEN__ = ' remote-token ';
     current.__VARIN_LOCAL_ORIGIN__ = ' http://127.0.0.1:3000 ';
-    current.__VARIN_RUNTIME_HEADERS__ = { 'x-openchamber-relay': 'relay-value' };
+    current.__VARIN_RUNTIME_HEADERS__ = { 'x-varin-relay': 'relay-value' };
     current.__VARIN_RELAY_HOST_ID__ = ' remote-host ';
     installWindow(current);
 
@@ -68,7 +68,7 @@ describe('readRuntimeBootstrapConfig', () => {
       apiBaseUrl: 'https://remote.example.com',
       clientToken: 'remote-token',
       localOrigin: 'http://127.0.0.1:3000',
-      runtimeHeaders: { 'x-openchamber-relay': 'relay-value' },
+      runtimeHeaders: { 'x-varin-relay': 'relay-value' },
       relayHostId: 'remote-host',
     });
   });

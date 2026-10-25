@@ -6,7 +6,6 @@ node_modules
 **/.bun-cache
 .agents
 .opencode
-.openchamber
 artifacts
 **/artifacts
 dist

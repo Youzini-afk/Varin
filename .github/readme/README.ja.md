@@ -82,8 +82,6 @@ Varin の harness は、モデルとツール、コンテキスト、権限、�
 
 [LinuxDO](https://linux.do) コミュニティの支援に感謝します。
 
-## 来歴とライセンス
-
-Varin は、メンテナーの OpenChamber フォークから発展した独立プロジェクトです。
+## ライセンス
 
 本プロジェクトは [GNU Affero General Public License v3.0](../../LICENSE)（`AGPL-3.0-only`）で配布します。ネットワーク経由で提供する改変版は、ライセンスの定めに従って対応するソースを提供する必要があります。著作権と第三者の通知は [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md) に保持しています。

@@ -10,7 +10,7 @@ import {
   isTerminalGitHubAuthConfigured,
 } from './terminal-auth.js';
 
-const makeTempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-gh-terminal-'));
+const makeTempHome = () => fs.mkdtempSync(path.join(os.tmpdir(), 'varin-gh-terminal-'));
 
 describe('terminal GitHub auth helpers', () => {
   it('writes the active Varin GitHub account to gh hosts.yml', () => {

@@ -680,7 +680,7 @@ reliable before broader community use.
 - Establish one settings, project-configuration, and theme persistence contract across hosts
 - Reduce startup work by deferring optional browser capabilities until the UI can use them
 - Harden trusted desktop document writes and remove obsolete compatibility and duplicate ownership
-  paths left from the OpenChamber product base
+  paths
 - Apply Piarium's Bun patches consistently in clean installs and container builds
 - Update the maintained Pi extension integrations for `pi-subagents` 0.55, Magic Context 0.39,
   `pi-web-access` 0.24, `pi-openai-codex-compat` 0.0.9, AFT 0.52, Permission System 27, and
@@ -763,8 +763,7 @@ First public source snapshot of the Pi-native workspace.
 - Safe Dependabot updates: GitHub Actions majors and `concurrently` /
   `cross-env` / `globals` dev tools
 - Piarium extension platform (contract, host, surface, SDK, CLI)
-- OpenChamber upstream capability absorption, including Work Status,
-  walkthroughs, and Markdown task loops
+- Work Status, walkthroughs, and Markdown task loops
 - Piarium-owned Android/iOS application IDs, `piarium://` deep links, Widget/notification-service
   targets, App Group, launcher/splash assets, and external release credential boundaries
 

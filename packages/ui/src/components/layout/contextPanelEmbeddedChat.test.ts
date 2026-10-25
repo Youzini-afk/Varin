@@ -88,7 +88,7 @@ describe('embedded session chat URL', () => {
 
     const src = buildEmbeddedSessionChatURL(
       { runtime: 'agent', threadId: 'thread:abcdefghijklmnopqrstuvwxyz0123456789', branchId: 'branch:main' },
-      '/workspace/projects/openchamber',
+      '/workspace/projects/varin',
       true,
       {
         mode: 'system',
@@ -100,7 +100,7 @@ describe('embedded session chat URL', () => {
 
     const srcWithoutTokens = buildEmbeddedSessionChatURL(
       { runtime: 'agent', threadId: 'thread:abcdefghijklmnopqrstuvwxyz0123456789', branchId: 'branch:main' },
-      '/workspace/projects/openchamber',
+      '/workspace/projects/varin',
       true,
       {
         mode: 'system',

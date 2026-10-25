@@ -11,8 +11,8 @@ describe('GitHub terminal auth routes', () => {
     const auth = { accessToken: 'gho_test', user: { login: 'youzini' } };
     const installTerminalGitHubAuth = vi.fn(() => ({
       success: true,
-      ghConfigPath: '/home/openchamber/.config/gh/hosts.yml',
-      helperPath: '/home/openchamber/.config/varin/bin/git-credential-varin-github.cjs',
+      ghConfigPath: '/home/varin/.config/gh/hosts.yml',
+      helperPath: '/home/varin/.config/varin/bin/git-credential-varin-github.cjs',
       gitCredentialHelperConfigured: true,
       gitCredentialHelperError: '',
       gitCredentialHelper: '!"/helper"',
@@ -21,7 +21,7 @@ describe('GitHub terminal auth routes', () => {
     registerGitHubRoutes(app, {
       getGitHubLibraries: async () => ({
         getGitHubAuth: () => auth,
-        GITHUB_AUTH_FILE: '/home/openchamber/.config/varin/github-auth.json',
+        GITHUB_AUTH_FILE: '/home/varin/.config/varin/github-auth.json',
       }),
       installTerminalGitHubAuth,
     });
@@ -33,13 +33,13 @@ describe('GitHub terminal auth routes', () => {
 
     expect(installTerminalGitHubAuth).toHaveBeenCalledWith({
       auth,
-      authFilePath: '/home/openchamber/.config/varin/github-auth.json',
+      authFilePath: '/home/varin/.config/varin/github-auth.json',
       configureGit: false,
     });
     expect(response.body).toEqual({
       success: true,
-      ghConfigPath: '/home/openchamber/.config/gh/hosts.yml',
-      helperPath: '/home/openchamber/.config/varin/bin/git-credential-varin-github.cjs',
+      ghConfigPath: '/home/varin/.config/gh/hosts.yml',
+      helperPath: '/home/varin/.config/varin/bin/git-credential-varin-github.cjs',
       gitCredentialHelperConfigured: true,
       gitCredentialHelperError: '',
     });

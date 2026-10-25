@@ -89,7 +89,7 @@ const binaryParser = (
 
 describe('workspace routes', () => {
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-workspace-routes-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-workspace-routes-'));
     workspaceRoot = path.join(tempDir, 'workspace');
   });
 

@@ -14,7 +14,7 @@ async function loadPathSafetyModule() {
 
 describe('workspace path safety', () => {
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-workspace-path-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-workspace-path-'));
     workspaceRoot = path.join(tempDir, 'workspace');
     fs.mkdirSync(workspaceRoot, { recursive: true });
   });

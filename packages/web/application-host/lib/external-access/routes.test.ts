@@ -63,13 +63,13 @@ const createApp = ({ auth, documents, activeWorkspace }: {
 
 describe('external access routes', () => {
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-external-routes-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'varin-external-routes-'));
     deploymentRoot = path.join(tempDir, 'deployment');
     dataDir = path.join(tempDir, 'data');
     fs.mkdirSync(path.join(deploymentRoot, 'packages', 'web', 'server'), { recursive: true });
     fs.mkdirSync(path.join(deploymentRoot, 'workspace'), { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(path.join(deploymentRoot, 'package.json'), '{"name":"openchamber-test"}');
+    fs.writeFileSync(path.join(deploymentRoot, 'package.json'), '{"name":"varin-test"}');
     fs.writeFileSync(path.join(deploymentRoot, 'packages', 'web', 'package.json'), '{"name":"@varin/web"}');
   });
 

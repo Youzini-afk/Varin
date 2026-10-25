@@ -82,8 +82,6 @@ Bug reports, UI improvements, tools, documentation, translations, and platform f
 
 Thanks to the [LinuxDO](https://linux.do) community for its support.
 
-## Origins and license
-
-Varin is an independent project that grew from the maintainer's OpenChamber fork.
+## License
 
 The project is distributed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). Modified versions offered over a network must provide their corresponding source as required by the license. Copyright and third-party notices are preserved in [THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES.md).

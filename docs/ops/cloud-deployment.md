@@ -36,7 +36,7 @@ health and host smoke without publishing to GHCR. A manually supplied slim or to
 resolved to its manifest digest before the matching application build begins.
 
 The slim runtime is enough to run the Varin server, Git, SSH, and tunnels. The toolbelt base
-preserves the maintainer fork's cloud development toolbox: Python, Java/Maven, Go/gopls,
+adds a cloud development toolbox: Python, Java/Maven, Go/gopls,
 Rust/rust-analyzer/rustfmt, GitHub CLI, ripgrep, TypeScript language tooling, daemonless rootless
 BuildKit, and cloudflared. Chrome/Playwright is installed on amd64; the arm64 toolbelt image keeps
 the rest of the toolbox and reports the intentional Chrome omission during the image build.

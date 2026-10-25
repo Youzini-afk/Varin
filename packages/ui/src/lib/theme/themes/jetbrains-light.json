@@ -2,7 +2,7 @@
   "metadata": {
     "id": "jetbrains-light",
     "name": "JetBrains",
-    "description": "JetBrains IDE-inspired colors for OpenChamber - light variant",
+    "description": "JetBrains IDE-inspired colors - light variant",
     "author": "Artem Evsevev, adapted for OpenChamber",
     "version": "1.0.0",
     "variant": "light",

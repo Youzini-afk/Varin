@@ -199,7 +199,7 @@ class CdpClient {
   }
 }
 
-const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-(?:varin|openchamber)/i
+const SENSITIVE_HEADER = /authorization|cookie|token|secret|password|api[-_]?key|x-varin/i
 const SENSITIVE_QUERY = /token|secret|password|auth|key|code|credential/i
 
 const redactHeaders = (headers = {}) => Object.entries(headers).map(([name, value]) => ({

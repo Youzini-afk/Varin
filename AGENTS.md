@@ -12,8 +12,8 @@ documents. Git preserves their history.
 
 ## Product and ownership
 
-- Varin is an independent workspace and harness originating from the maintainer's OpenChamber fork.
-  All changes happen in this repository; external OpenChamber checkouts remain read-only.
+- Varin is an independent workspace and harness. All changes happen in this repository; other
+  projects' checkouts beside it are read-only references.
 - The Rust Agent runtime is the conversation execution owner, using native Thread/branch identities
   and Catalog. Pi runtime packages, worker transport and product adapters are retired. Do not reintroduce
   a parallel conversation owner or automatically migrate user assets.
