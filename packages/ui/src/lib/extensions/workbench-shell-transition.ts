@@ -30,7 +30,6 @@ import {
   waitForWorkbenchProfileTransitionCovered,
   waitForWorkbenchProfileTransitionTargetPainted,
 } from '@/lib/workbench/profile-transition';
-import { startWorkbenchMountSession } from './workbench-mount';
 import {
   stageWorkbenchShellRender,
   type WorkbenchShellRenderStagingHandle,
@@ -76,11 +75,11 @@ export class WorkbenchShellTransitionAbortedError extends Error {
 export interface WorkbenchProfileTransitionOptions {
   /** Internal commit gate used by the live cover transaction after candidate preparation succeeds. */
   beforeCommit?: () => Promise<void>;
+  beforePrepare?: () => Promise<void>;
   enableShell?: boolean;
 }
 
 export interface WorkbenchShellTransitionDependencies {
-  createMountContainer(): HTMLElement;
   getCatalogState(): VarinExtensionCatalogStoreState;
   getCatalogWatchGeneration(): number;
   getSurface(): VarinApplicationSurface;
@@ -91,27 +90,12 @@ export interface WorkbenchShellTransitionDependencies {
   stageRender(
     contribution: SurfaceContribution,
     props: Readonly<Record<string, unknown>>,
+    profileId?: string,
   ): Promise<WorkbenchShellRenderStagingHandle>;
-  startMount: typeof startWorkbenchMountSession;
   triggerActivation(contributionId: string, extensionId: string): Promise<void>;
   triggerVisible(contributions: readonly SurfaceContribution[]): Promise<void>;
   updateLayout(request: VarinWorkbenchLayoutUpdateRequest): Promise<void>;
 }
-
-interface MountImplementation<TProps extends object> {
-  mount(
-    container: HTMLElement,
-    context: {
-      contributionId: string;
-      owner: SurfaceContribution['owner'];
-      props: Readonly<TProps>;
-      reportError(error: unknown): void;
-      signal: AbortSignal;
-    },
-  ): void | (() => void | Promise<void>) | Promise<void | (() => void | Promise<void>)>;
-}
-
-type StagingSession = Pick<ReturnType<typeof startWorkbenchMountSession>, 'dispose'>;
 
 let transitionQueue: Promise<void> = Promise.resolve();
 
@@ -127,26 +111,7 @@ const isDeclarativeImplementation = (value: unknown): boolean => (
   && (value as { kind?: unknown }).kind === 'declarative'
 );
 
-const isMountImplementation = <TProps extends object>(
-  value: unknown,
-): value is MountImplementation<TProps> => (
-  typeof value === 'object' && value !== null && typeof (value as { mount?: unknown }).mount === 'function'
-);
-
 const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransitionDependencies => ({
-  createMountContainer: () => {
-    const element = document.createElement('div');
-    element.setAttribute('data-varin-workbench-shell-staging', '');
-    Object.assign(element.style, {
-      inset: '0',
-      pointerEvents: 'none',
-      position: 'fixed',
-      visibility: 'hidden',
-      zIndex: '-1',
-    });
-    document.body.append(element);
-    return element;
-  },
   getCatalogState: getVarinExtensionCatalogState,
   getCatalogWatchGeneration: getVarinExtensionCatalogWatchGeneration,
   getSurface: () => varinSurfaceRuntime.surface,
@@ -159,7 +124,6 @@ const createLiveWorkbenchShellTransitionDependencies = (): WorkbenchShellTransit
   },
   setEnabled: setVarinExtensionEnabled,
   stageRender: stageWorkbenchShellRender,
-  startMount: startWorkbenchMountSession,
   triggerActivation: async (contributionId, extensionId) => {
     const { surfaceExtensionLoader } = await import('./managed-runtime');
     await surfaceExtensionLoader.triggerActivation('contribution-visible', { contributionId, extensionId });
@@ -217,20 +181,13 @@ const findContribution = (
   contribution.descriptor.id === contributionId
 ));
 
-const releaseStaging = async (
-  session: StagingSession | null,
-  container: HTMLElement | null,
-): Promise<void> => {
-  if (session) await session.dispose('workbench shell candidate released');
-  container?.remove();
-};
-
 const proveShellReady = async (
   contributionId: string,
   extensionId: string | undefined,
   deps: WorkbenchShellTransitionDependencies,
   captured: ReturnType<typeof captureIdentity>,
-): Promise<{ container: HTMLElement | null; session: StagingSession | null }> => {
+  profileId: string,
+): Promise<WorkbenchShellRenderStagingHandle> => {
   let contribution = findContribution(deps.getSurfaceSnapshot(), contributionId);
   if (!contribution || isDeclarativeImplementation(contribution.implementation)) {
     if (extensionId) await deps.triggerActivation(contributionId, extensionId);
@@ -243,30 +200,12 @@ const proveShellReady = async (
     throw new Error(`Workbench shell contribution did not activate: ${contributionId}`);
   }
   const props = { target: VARIN_WORKBENCH_REPLACEMENT_TARGETS.shell };
-  if (!isMountImplementation(contribution.implementation)) {
-    const session = await deps.stageRender(contribution, props);
-    assertSameIdentity(captured, deps);
-    return { container: null, session };
-  }
-  const container = deps.createMountContainer();
-  let failed: unknown;
-  const session = deps.startMount({
-    container,
-    contributionId,
-    implementation: contribution.implementation,
-    owner: contribution.owner,
-    props,
-    onError: (error, phase) => {
-      if (phase !== 'dispose') failed = error;
-    },
-  });
+  const session = await deps.stageRender(contribution, props, profileId);
   try {
-    await session.mounted;
-    if (failed !== undefined) throw failed instanceof Error ? failed : new Error(String(failed));
     assertSameIdentity(captured, deps);
-    return { container, session };
+    return session;
   } catch (error) {
-    await releaseStaging(session, container);
+    await session.dispose();
     throw error;
   }
 };
@@ -325,6 +264,7 @@ const commitCandidateShell = async (
   deps: WorkbenchShellTransitionDependencies,
   input: {
     beforeCommit?: () => Promise<void>;
+    beforePrepare?: () => Promise<void>;
     enableShell?: boolean;
     profileId: string;
     replacementSelections: Readonly<Record<string, string>>;
@@ -369,11 +309,14 @@ const commitCandidateShell = async (
         ...(inspected.shellExtensionId ? { shellExtensionId: inspected.shellExtensionId } : {}),
       });
     }
+    await input.beforePrepare?.();
+    assertSameIdentity(captured, deps);
     const staging = await proveShellReady(
       inspected.shellContributionId ?? '',
       inspected.shellExtensionId,
       deps,
       captured,
+      input.profileId,
     );
     try {
       assertSameIdentity(captured, deps);
@@ -381,11 +324,12 @@ const commitCandidateShell = async (
       assertSameIdentity(captured, deps);
       await input.persist(captured.revision);
       committed = true;
+      await staging.promote();
     } catch (error) {
-      await releaseStaging(staging.session, staging.container);
+      await staging.dispose();
       throw error;
     }
-    await releaseStaging(staging.session, staging.container);
+    await staging.dispose();
   } catch (error) {
     if (autoEnabledExtensionId && !committed) {
       await deps.setEnabled(autoEnabledExtensionId, false).catch((rollbackError) => {
@@ -409,6 +353,7 @@ export const runSelectActiveWorkbenchProfile = (
     ...(workspaceId ? { workspaceId } : {}),
   }, profileId);
   await commitCandidateShell(deps, {
+    ...(options?.beforePrepare ? { beforePrepare: options.beforePrepare } : {}),
     ...(options?.beforeCommit ? { beforeCommit: options.beforeCommit } : {}),
     persist: (expectedRevision) => persistProfileSelection(deps, profileId, expectedRevision),
     profileId,
@@ -488,14 +433,19 @@ export const selectActiveWorkbenchProfile = async (
   const transitionIdReady = new Promise<number>((resolve) => {
     resolveTransitionId = resolve;
   });
-  // Candidate Shell staging starts immediately and runs beside lazy scene activation. Its commit gate
-  // waits for the scene transaction to exist and then for that scene to report a fully opaque cover.
+  // Resolve the candidate beside scene activation. Heavy rendering waits for the opaque cover;
+  // the prepared subtree is then promoted in place at the authoritative commit boundary.
   const candidate = runSelectActiveWorkbenchProfile(
     createLiveWorkbenchShellTransitionDependencies(),
     profileId,
     workspaceId,
     {
       ...options,
+      beforePrepare: async () => {
+        await options?.beforePrepare?.();
+        const id = await transitionIdReady;
+        if (!await waitForWorkbenchProfileTransitionCovered(id)) throw new WorkbenchShellTransitionAbortedError();
+      },
       beforeCommit: async () => {
         await options?.beforeCommit?.();
         const transitionId = await transitionIdReady;
@@ -528,11 +478,13 @@ export const selectActiveWorkbenchProfile = async (
     // previous authoritative shell at the scene's quick tempo after cover completes.
     markWorkbenchProfileTransitionOperationPrepared(transitionId);
   } else {
+    // Restore the ordinary conversation before the new Shell crosses its paint boundary.
+    // Restoring after it started a second content mount together with the reveal wave.
+    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) restoreOrdinarySession();
     const targetPainted = await waitForWorkbenchProfileTransitionTargetPainted(transitionId);
     // A newer selection can supersede this transaction after its persistence completed. Its Shell
     // owns the next reveal, so this stale caller must not expose or complete that newer scene.
     if (!targetPainted) return;
-    if (leavingBot && useThreadStore.getState().hostKey === runtimeKey) restoreOrdinarySession();
   }
 
   const covered = await waitForWorkbenchProfileTransitionCovered(transitionId);

@@ -14,7 +14,7 @@ export const WORKBENCH_SWITCHER_ATTRIBUTE = 'data-varin-workbench-switcher';
 /** The cell edge the design is drawn at; larger windows use larger cells so the count stays bounded. */
 export const LATTICE_MIN_CELL_PX = 44;
 export const LATTICE_MAX_CELL_PX = 96;
-/** About a 1920×1080 window at 44px. Each animating cell is its own compositor layer. */
+/** The established density, about a 1920×1080 window at 44px; shared by GPU and DOM renderers. */
 export const LATTICE_MAX_CELLS = 1100;
 /** The nearest cell starts at 0, the farthest this much later. */
 export const LATTICE_SPREAD_MS = 230;

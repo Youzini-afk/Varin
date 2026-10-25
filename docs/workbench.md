@@ -49,7 +49,9 @@ extension storage 保存 Profile。读取失败或数据损坏时保留上次有
 
 [Shell 切换事务](../packages/ui/src/lib/extensions/workbench-shell-transition.ts) 捕获 Host、catalog
 generation 和 Profile revision，激活候选并验证 mount/render ready，之后才写入选择。
-revision 冲突、候选失败或 Host 改变时，旧选择保持权威；成功和失败都释放 staging。
+revision 冲突、候选失败或 Host 改变时，旧选择保持权威。候选在稳定的 Shell slot 中准备；
+选择提交后就地转为活动实例，保留组件状态，之后释放准备记录。失败时卸载候选。
+内置工作台注册延迟加载入口，实际选中或准备时才加载该工作台模块。
 启动时选中 Shell 失败，则显示 Recovery 与诊断，不伪造已经切回默认工作台。
 
 <a id="visual-handoff"></a>
@@ -57,8 +59,8 @@ revision 冲突、候选失败或 Host 改变时，旧选择保持权威；成�
 
 `workbench.transition` 在 Shell 外选择 `transition-scene` contribution。
 [过渡控制器](../packages/ui/src/lib/workbench/profile-transition.ts) 拥有 transition identity 与
-cover/covered/reveal 阶段；scene 拥有画面和声明的时长。Shell 与 scene 可并行准备，选择只在完全覆盖后
-提交；揭示新界面还要等目标实际 mount 并跨过浏览器绘制边界。迟到的阶段或 mount 信号不能推进另一事务。
+cover/covered/reveal 阶段；scene 拥有画面和声明的时长。候选解析与 scene 准备可并行；
+重组件渲染等到完全覆盖后进行，准备成功后才提交选择；揭示新界面还要等目标实际 mount 并跨过浏览器绘制边界。迟到的阶段或 mount 信号不能推进另一事务。
 
 scene 缺失、停用、失败或被撤回时使用 Core 不透明 fallback。事务捕获的 scene owner 保持到交接结束，
 不会在 Profile 提交后中途重挂载。清理先保留终帧跨过 paint，再移除 canvas 和资源；减少动态效果偏好

@@ -42,6 +42,7 @@ import {
   saveFileEditorDocument,
 } from '@/lib/monaco/editor-command-service';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import { languageIdsFromResourceId, languageIdFromResourceId } from '@/lib/language-services/language-id';
 import { registerMonacoExtensionView } from '@/lib/monaco/extension-service';
 import {
@@ -90,6 +91,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     inlineDraftKey ? state.drafts[inlineDraftKey] ?? EMPTY_INLINE_COMMENT_DRAFTS : EMPTY_INLINE_COMMENT_DRAFTS
   ));
   const profileId = useWorkbenchProfileId();
+  const shellActive = useWorkbenchShellActive();
   const [monaco, setMonaco] = React.useState<MonacoRuntime | null>(null);
   const [editorInstance, setEditorInstance] = React.useState<import('monaco-editor/editor').editor.IStandaloneCodeEditor | null>(null);
   const [pendingInlineComment, setPendingInlineComment] = React.useState<PendingInlineComment | null>(null);
@@ -124,10 +126,10 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
   tRef.current = t;
 
   React.useEffect(() => {
-    if (hostRef.current?.closest('[data-varin-workbench-shell-staging]')) return;
+    if (!shellActive) return;
     models.acquire(identity, ownerId);
     return () => models.release(ownerId);
-  }, [identity, models, ownerId]);
+  }, [identity, models, ownerId, shellActive]);
 
   const modelSnapshot = React.useSyncExternalStore(
     React.useCallback((listener) => models.subscribe(identity, listener), [identity, models]),
@@ -165,7 +167,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
 
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || host.closest('[data-varin-workbench-shell-staging]') || !monaco || modelSnapshot.status !== 'ready') return undefined;
+    if (!host || !shellActive || !monaco || modelSnapshot.status !== 'ready') return undefined;
     const themeName = registerVarinMonacoTheme(monaco, currentTheme);
     applyMonacoModelSettings(modelSnapshot.model, fileEditorSettings);
     const editorInstance = monaco.editor.create(host, {
@@ -315,7 +317,7 @@ export const DocumentMonacoEditor: React.FC<DocumentMonacoEditorProps> = ({
     };
     // Theme, profile presentation and settings update the live editor separately; none may recreate the view/model.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [identity, instanceOwner, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, providerId, viewId]);
+  }, [identity, instanceOwner, modelSnapshot.status === 'ready' ? modelSnapshot.model : null, models, monaco, path, providerId, viewId, shellActive]);
 
   React.useEffect(() => {
     captureContextRef.current?.();

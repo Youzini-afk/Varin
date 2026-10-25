@@ -10,6 +10,7 @@
  * requested Surface loads only the official shells it can actually use.
  */
 
+import React from 'react';
 import {
   VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
   VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
@@ -20,71 +21,41 @@ import {
 import { registerWorkbenchShellComponent } from '@/lib/extensions/shell-component-registry';
 import { registerBuiltinSettingsWorkbench } from './settings/register';
 
-let agentRegistration: Promise<void> | null = null;
-let ideRegistration: Promise<void> | null = null;
-let researchRegistration: Promise<void> | null = null;
-let botRegistration: Promise<void> | null = null;
+const registered = new Set<string>();
 
-const registerAgentShell = (): Promise<void> => {
-  if (agentRegistration) return agentRegistration;
-  const pending = import('./agent/AgentWorkspaceShell').then(({ AgentWorkspaceShell }) => {
-    registerWorkbenchShellComponent(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID, AgentWorkspaceShell);
+// Register the contribution synchronously; evaluate its UI only when the selected/candidate
+// Shell actually renders. Suspense belongs to that Shell slot, not the whole application.
+export const registerLazyWorkbenchShell = (
+  id: string,
+  load: () => Promise<{ default: React.ComponentType<Record<string, unknown>> }>,
+): void => {
+  if (registered.has(id)) return;
+  let failed = false;
+  const create = () => React.lazy(async () => {
+    try { return await load(); }
+    catch (error) { failed = true; throw error; }
   });
-  agentRegistration = pending;
-  void pending.catch(() => {
-    if (agentRegistration === pending) agentRegistration = null;
+  let implementation = create();
+  registerWorkbenchShellComponent(id, (props) => React.createElement(implementation, props), () => {
+    if (!failed) return;
+    failed = false;
+    implementation = create();
   });
-  return pending;
+  registered.add(id);
 };
 
-const registerIdeShell = (): Promise<void> => {
-  if (ideRegistration) return ideRegistration;
-  const pending = import('./ide/IdeWorkbenchShell').then(({ IdeWorkbenchShell }) => {
-    registerWorkbenchShellComponent(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID, IdeWorkbenchShell);
-  });
-  ideRegistration = pending;
-  void pending.catch(() => {
-    if (ideRegistration === pending) ideRegistration = null;
-  });
-  return pending;
-};
-
-const registerResearchShell = (): Promise<void> => {
-  if (researchRegistration) return researchRegistration;
-  const pending = import('./research/ResearchWorkbenchShell').then(({ ResearchWorkbenchShell }) => {
-    registerWorkbenchShellComponent(VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID, ResearchWorkbenchShell);
-  });
-  researchRegistration = pending;
-  void pending.catch(() => {
-    if (researchRegistration === pending) researchRegistration = null;
-  });
-  return pending;
-};
-
-const registerBotShell = (): Promise<void> => {
-  if (botRegistration) return botRegistration;
-  const pending = import('./bot/BotWorkspaceShell').then(({ BotWorkspaceShell }) => {
-    registerWorkbenchShellComponent(VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID, BotWorkspaceShell);
-  });
-  botRegistration = pending;
-  void pending.catch(() => {
-    if (botRegistration === pending) botRegistration = null;
-  });
-  return pending;
-};
-
-export const registerWorkbenchShells = async (surface: VarinApplicationSurface): Promise<void> => {
+export const registerWorkbenchShells = (surface: VarinApplicationSurface): void => {
   registerBuiltinSettingsWorkbench();
-  const registrations: Promise<void>[] = [];
   if (surface === 'web' || surface === 'desktop' || surface === 'mobile') {
-    registrations.push(registerAgentShell());
-    registrations.push(registerBotShell());
+    registerLazyWorkbenchShell(VARIN_BUILTIN_AGENT_WORKSPACE_EXTENSION_ID,
+      () => import('./agent/AgentWorkspaceShell').then(m => ({ default: m.AgentWorkspaceShell })));
+    registerLazyWorkbenchShell(VARIN_BUILTIN_BOT_WORKSPACE_EXTENSION_ID,
+      () => import('./bot/BotWorkspaceShell').then(m => ({ default: m.BotWorkspaceShell })));
+    registerLazyWorkbenchShell(VARIN_BUILTIN_RESEARCH_WORKBENCH_EXTENSION_ID,
+      () => import('./research/ResearchWorkbenchShell').then(m => ({ default: m.ResearchWorkbenchShell })));
   }
   if (surface === 'web' || surface === 'desktop') {
-    registrations.push(registerIdeShell());
+    registerLazyWorkbenchShell(VARIN_BUILTIN_IDE_WORKBENCH_EXTENSION_ID,
+      () => import('./ide/IdeWorkbenchShell').then(m => ({ default: m.IdeWorkbenchShell })));
   }
-  if (surface === 'web' || surface === 'desktop' || surface === 'mobile') {
-    registrations.push(registerResearchShell());
-  }
-  await Promise.all(registrations);
 };

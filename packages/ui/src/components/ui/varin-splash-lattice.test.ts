@@ -250,20 +250,22 @@ describe('splash lifecycle', () => {
     const deleteBuffer = vi.fn();
     const deleteProgram = vi.fn();
     const deleteVertexArray = vi.fn();
+    const bufferData = vi.fn();
+    const bufferSubData = vi.fn();
     const noop = () => undefined;
     const allocate = () => ({});
     const gl = {
       MAX_RENDERBUFFER_SIZE: 0x84e8,
       MAX_VIEWPORT_DIMS: 0x0d3a,
       attachShader: noop, bindBuffer: noop, bindVertexArray: noop, blendFunc: noop,
-      bufferData: noop, bufferSubData: noop, clear: noop, clearColor: noop, compileShader: noop,
+      bufferData, bufferSubData, clear: noop, clearColor: noop, compileShader: noop,
       createBuffer: allocate, createProgram: allocate, createShader: allocate, createVertexArray: allocate,
       deleteBuffer, deleteProgram, deleteShader: noop, deleteVertexArray,
       disable: noop, drawArraysInstanced: noop, enable: noop, enableVertexAttribArray: noop,
       getExtension: () => ({ loseContext }),
       getParameter: (parameter: number) => parameter === 0x84e8 ? 4096 : new Int32Array([4096, 4096]),
       getProgramParameter: () => true, getShaderParameter: () => true, getUniformLocation: allocate,
-      linkProgram: noop, shaderSource: noop, uniform1f: noop, uniform2f: noop, uniform4fv: noop,
+      linkProgram: noop, shaderSource: noop, uniform1f: noop, uniform1ui: noop, uniform2f: noop, uniform4fv: noop,
       useProgram: noop, vertexAttribDivisor: noop, vertexAttribPointer: noop, viewport: noop,
     } as unknown as WebGL2RenderingContext;
     const harness = createSplashCanvasHarness(gl);
@@ -274,6 +276,11 @@ describe('splash lifecycle', () => {
       playback: resolveSplashCanvasPlayback({ mode: 'boot', reducedMotion: false, tempo: 'standard' }),
     }));
     expect(harness.canvasAttributes.get('data-varin-splash-renderer')).toBe('webgl2');
+    controller.setPlayback(resolveSplashCanvasPlayback({ mode: 'boot', leaving: true, reducedMotion: false, tempo: 'standard' }));
+    harness.nextFrame(100);
+    harness.nextFrame(240);
+    expect(bufferData).toHaveBeenCalledTimes(1);
+    expect(bufferSubData).not.toHaveBeenCalled();
 
     controller.dispose();
     await Promise.resolve();

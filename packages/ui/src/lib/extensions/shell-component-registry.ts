@@ -11,6 +11,7 @@ import type { ComponentType } from 'react';
 export type ShellComponent = ComponentType<Record<string, unknown>>;
 
 const shellComponents = new Map<string, ShellComponent>();
+const loadRetries = new Map<string, () => void>();
 
 /**
  * Register a shell component for a built-in workbench extension ID.
@@ -19,9 +20,15 @@ const shellComponents = new Map<string, ShellComponent>();
 export const registerWorkbenchShellComponent = (
   extensionId: string,
   component: ShellComponent,
+  retryLoad?: () => void,
 ): void => {
   shellComponents.set(extensionId, component);
+  if (retryLoad) loadRetries.set(extensionId, retryLoad);
+  else loadRetries.delete(extensionId);
 };
+
+/** An explicit recovery action can retry a failed lazy import without changing the Shell's identity. */
+export const retryWorkbenchShellLoad = (extensionId: string): void => loadRetries.get(extensionId)?.();
 
 /**
  * Resolve a shell component by extension ID.

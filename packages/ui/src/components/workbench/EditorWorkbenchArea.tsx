@@ -1,4 +1,5 @@
 import React from 'react';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import {
   Dialog,
   DialogContent,
@@ -40,6 +41,7 @@ import { BUILTIN_EDITOR_PROVIDER_IDS } from '@/lib/workbench/editors/types';
 
 export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPanel = true }) => {
   const { t } = useI18n();
+  const shellActive = useWorkbenchShellActive();
   const { isMobile, isTablet } = useDeviceInfo();
   const workspaceId = useWorkbenchWorkspaceId();
   const root = useEffectiveDirectory() ?? '';
@@ -68,7 +70,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
   }, [closingTab, workspaceId]);
 
   React.useEffect(() => {
-    if (!workspaceId || !root) return;
+    if (!shellActive || !workspaceId || !root) return;
     const legacy = useFilesExplorerStore.getState().consumeLegacyEditorTabs(root);
     const resourceIds = legacy.openPaths
       .map((path) => resourceIdFromWorkspacePath(root, path))
@@ -80,15 +82,16 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
       resourceIds,
       ...(selectedResourceId ? { selectedResourceId } : {}),
     });
-  }, [root, workspaceId]);
+  }, [root, workspaceId, shellActive]);
 
   React.useEffect(() => {
+    if (!shellActive) return;
     setActiveWorkbenchWorkspaceId(workspaceId);
     return () => setActiveWorkbenchWorkspaceId(undefined);
-  }, [workspaceId]);
+  }, [workspaceId, shellActive]);
 
   React.useEffect(() => {
-    if (!workspaceId || !editorWorkbench) return;
+    if (!shellActive || !workspaceId || !editorWorkbench) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!(event.metaKey || event.ctrlKey) || event.altKey || event.key.toLowerCase() !== 's') return;
       const tab = activeEditorTab(editorWorkbench);
@@ -100,18 +103,18 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [editorWorkbench, workspaceId]);
+  }, [editorWorkbench, workspaceId, shellActive]);
 
   React.useEffect(() => {
-    if (!workspaceId) return;
+    if (!shellActive || !workspaceId) return;
     const tab = editorWorkbench ? activeEditorTab(editorWorkbench) : undefined;
     setWorkbenchContextKey('editorIsOpen', Boolean(tab));
     setWorkbenchContextKey('editorDirty', Boolean(tab && dirtyResourceIds.has(tab.resourceId)));
     setWorkbenchContextKey('editorResource', tab?.resourceId ?? '');
-  }, [dirtyResourceIds, editorWorkbench, workspaceId]);
+  }, [dirtyResourceIds, editorWorkbench, workspaceId, shellActive]);
 
   React.useEffect(() => {
-    if (!workspaceId) return;
+    if (!shellActive || !workspaceId) return;
     const dispose = [
       registerWorkbenchCommand('workbench.action.splitEditor', 'files', () => {
         splitActiveEditor(workspaceId, 'vertical');
@@ -135,7 +138,7 @@ export const EditorWorkbenchArea: React.FC<{ showPanel?: boolean }> = ({ showPan
     return () => {
       for (const unregister of dispose) unregister();
     };
-  }, [requestClose, workspaceId]);
+  }, [requestClose, workspaceId, shellActive]);
 
   if (!workspaceId || !root || !editorWorkbench) {
     return <div className="h-full min-h-0 bg-background" />;

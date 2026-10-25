@@ -26,6 +26,7 @@ import {
 } from './workbench-mount';
 import { varinSurfaceRuntime } from './surface-runtime';
 import { createWorkbenchCompositionHost } from './workbench-composition-host';
+import { retryWorkbenchShellLoad } from './shell-component-registry';
 
 export { VARIN_WORKBENCH_REPLACEMENT_TARGETS as WORKBENCH_REPLACEMENT_TARGETS } from '@varin/extension-contract';
 export { startWorkbenchMountSession } from './workbench-mount';
@@ -110,6 +111,7 @@ interface ContributionRenderBoundaryProps {
   children: React.ReactNode;
   contribution: SurfaceContribution;
   fallback: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
+  onError?(error: unknown): void;
 }
 
 interface ContributionRenderBoundaryState {
@@ -128,10 +130,12 @@ class ContributionRenderBoundary extends React.Component<
   }
 
   retry = (): void => {
+    if (this.props.contribution.descriptor.kind === 'shell') retryWorkbenchShellLoad(this.props.contribution.owner.extensionId);
     this.setState({ error: undefined, failed: false });
   };
 
   componentDidCatch(error: unknown, errorInfo: React.ErrorInfo): void {
+    this.props.onError?.(error);
     const { descriptor, owner } = this.props.contribution;
     console.error(
       `[Varin Extensions] Contribution ${descriptor.id} from ${owner.extensionId} failed to render:`,
@@ -152,12 +156,15 @@ const WorkbenchRenderImplementation = <TProps extends object>({
   fallbackOnEmpty,
   implementation,
   props,
+  rejectEmpty,
 }: {
   fallbackOnEmpty: React.ReactNode;
   implementation: unknown;
   props: TProps;
+  rejectEmpty?: boolean;
 }): React.ReactNode => {
   const rendered = renderImplementation(implementation, props);
+  if (rejectEmpty && (rendered === null || rendered === undefined)) throw new Error('Workbench shell rendered no content');
   return rendered === null || rendered === undefined ? fallbackOnEmpty : rendered;
 };
 
@@ -174,6 +181,7 @@ const WorkbenchMountHost = <TProps extends object>({
   fallback,
   implementation,
   onMountReady,
+  onError,
   props,
 }: {
   className?: string;
@@ -181,11 +189,12 @@ const WorkbenchMountHost = <TProps extends object>({
   fallback: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
   implementation: MountImplementation<TProps>;
   onMountReady?: () => void;
+  onError?(error: unknown): void;
   props: TProps;
 }): React.ReactNode => {
   const containerRef = React.useRef<HTMLDivElement>(null);
-  const mountInputs = React.useRef({ contribution, implementation, onMountReady, props });
-  mountInputs.current = { contribution, implementation, onMountReady, props };
+  const mountInputs = React.useRef({ contribution, implementation, onMountReady, onError, props });
+  mountInputs.current = { contribution, implementation, onMountReady, onError, props };
   const [failure, setFailure] = React.useState<MountFailure | null>(null);
   const contributionKey = workbenchContributionInstanceKey(contribution);
   const failed = failure?.contributionKey === contributionKey
@@ -204,6 +213,7 @@ const WorkbenchMountHost = <TProps extends object>({
       );
       if (!active || phase === 'dispose') return;
       mountFailed = true;
+      mountInputs.current.onError?.(error);
       setFailure({ contributionKey, error, implementation, props });
     };
     // Non-shell mount points stay attached across owner generations. Their actual mounted child
@@ -297,7 +307,7 @@ const WorkbenchMountHost = <TProps extends object>({
       },
     });
     void session.mounted.then(() => {
-      if (active && !mountFailed) onMountReady?.();
+      if (active && !mountFailed) mountInputs.current.onMountReady?.();
     });
     return () => {
       active = false;
@@ -339,13 +349,17 @@ export function WorkbenchSurfaceContributionHost<TProps extends object>({
   fallback,
   isolatedProps,
   onMountReady,
+  onError,
+  rejectEmpty,
   props,
 }: {
   className?: string;
   contribution: SurfaceContribution;
-  fallback: React.ReactNode;
+  fallback: React.ReactNode | ((error: unknown, retry: () => void) => React.ReactNode);
   isolatedProps?: JsonValue;
   onMountReady?: () => void;
+  onError?(error: unknown): void;
+  rejectEmpty?: boolean;
   props: TProps;
 }): React.ReactNode {
   useVisibleContributionActivation([contribution]);
@@ -374,15 +388,17 @@ export function WorkbenchSurfaceContributionHost<TProps extends object>({
         fallback={fallback}
         implementation={contribution.implementation}
         onMountReady={onMountReady}
+        onError={onError}
         props={props}
       />
     );
   }
   return (
-    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback}>
+    <ContributionRenderBoundary key={contributionKey} contribution={contribution} fallback={fallback} onError={onError}>
       <ContributionReadySignal onReady={onMountReady}>
         <WorkbenchRenderImplementation
-          fallbackOnEmpty={fallback}
+          fallbackOnEmpty={typeof fallback === 'function' ? null : fallback}
+          rejectEmpty={rejectEmpty}
           implementation={contribution.implementation}
           props={props}
         />

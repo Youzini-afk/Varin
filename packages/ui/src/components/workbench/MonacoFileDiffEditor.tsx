@@ -1,5 +1,6 @@
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import React from 'react';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import type { editor } from 'monaco-editor/editor';
 import type { JsonValue } from '@varin/extension-contract';
 import { createTwoFilesPatch } from 'diff';
@@ -82,6 +83,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   const sessionId = useThreadStore(state => selectedComposerKey(state));
   const sessionDirectory = useEffectiveDirectory();
   const profileId = useWorkbenchProfileId();
+  const shellActive = useWorkbenchShellActive();
   const hostRef = React.useRef<HTMLDivElement | null>(null);
   const instanceOwner = React.useId();
   const modelOwnerId = `diff-model:${viewId}:${instanceOwner}`;
@@ -122,7 +124,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   }, []);
 
   React.useEffect(() => {
-    if (!usesLiveDocument) return undefined;
+    if (!shellActive || !usesLiveDocument) return undefined;
     models.acquire(identity, modelOwnerId);
     return () => {
       const snapshot = models.getSnapshot(identity);
@@ -130,7 +132,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       if (snapshot.status === 'ready' && binding?.modified === snapshot.model) binding.dispose();
       models.release(modelOwnerId);
     };
-  }, [identity, modelOwnerId, models, usesLiveDocument]);
+  }, [identity, modelOwnerId, models, usesLiveDocument, shellActive]);
 
   const liveSnapshot = React.useSyncExternalStore(
     React.useCallback((listener) => (
@@ -149,7 +151,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
   ), [identity.resourceId, monaco]);
 
   React.useEffect(() => {
-    if (!monaco) return undefined;
+    if (!shellActive || !monaco) return undefined;
     const handle = acquireMonacoDiffSnapshotModel(monaco, {
       content: originalContent,
       languageId: monacoLanguageId,
@@ -164,10 +166,10 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       setOriginalHandle((current) => current === handle ? null : current);
       handle.release();
     };
-  }, [modelOwnerId, monaco, monacoLanguageId, originalContent, originalRevision, viewId]);
+  }, [modelOwnerId, monaco, monacoLanguageId, originalContent, originalRevision, viewId, shellActive]);
 
   React.useEffect(() => {
-    if (!monaco || modifiedContent === undefined || !modifiedRevision) return undefined;
+    if (!shellActive || !monaco || modifiedContent === undefined || !modifiedRevision) return undefined;
     const handle = acquireMonacoDiffSnapshotModel(monaco, {
       content: modifiedContent,
       languageId: monacoLanguageId,
@@ -182,11 +184,11 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
       setModifiedHandle((current) => current === handle ? null : current);
       handle.release();
     };
-  }, [modelOwnerId, modifiedContent, modifiedRevision, monaco, monacoLanguageId, viewId]);
+  }, [modelOwnerId, modifiedContent, modifiedRevision, monaco, monacoLanguageId, viewId, shellActive]);
 
   React.useEffect(() => {
     const host = hostRef.current;
-    if (!host || host.closest('[data-varin-workbench-shell-staging]') || !monaco) return undefined;
+    if (!host || !shellActive || !monaco) return undefined;
     const theme = registerVarinMonacoTheme(monaco, currentTheme);
     const instance = monaco.editor.createDiffEditor(host, {
       ...createMonacoEditorOptions({
@@ -221,7 +223,7 @@ export const MonacoFileDiffEditor: React.FC<MonacoFileDiffEditorProps> = ({
     };
     // Theme, profile and settings update the live instance below without rebuilding its models.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [monaco, path, viewId]);
+  }, [monaco, path, viewId, shellActive]);
 
   React.useEffect(() => {
     if (!monaco || !diffEditor) return;

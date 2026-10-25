@@ -6,6 +6,7 @@ import {
   mountWorkbenchShellStagingHost,
   settleWorkbenchShellStagingFailure,
   settleWorkbenchShellStagingReady,
+  settleWorkbenchShellPromotion,
   stageWorkbenchShellRender,
 } from './workbench-shell-staging-store';
 
@@ -60,4 +61,22 @@ test('render staging rejects a candidate that fails during render', async () => 
   settleWorkbenchShellStagingFailure(request!, new Error('render failed'));
   await expect(pending).rejects.toThrow('render failed');
   unmount();
+});
+
+test('promotion waits for the selected slot, and removal releases an outstanding promotion wait', async () => {
+  const unmount = mountWorkbenchShellStagingHost();
+  const first = stageWorkbenchShellRender(contribution(), {});
+  const request = getWorkbenchShellStagingRequest()!;
+  settleWorkbenchShellStagingReady(request);
+  const handle = await first;
+  let promoted = false;
+  const promotion = handle.promote!().then(() => { promoted = true; });
+  await Promise.resolve(); expect(promoted).toBe(false);
+  settleWorkbenchShellPromotion(request); await promotion;
+  expect(promoted).toBe(true); await handle.dispose();
+  const second = stageWorkbenchShellRender(contribution(), {});
+  settleWorkbenchShellStagingReady(getWorkbenchShellStagingRequest()!);
+  const next = await second;
+  const rejected = expect(next.promote!()).rejects.toThrow('host was removed');
+  unmount(); await rejected;
 });

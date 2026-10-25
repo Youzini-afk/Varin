@@ -385,6 +385,7 @@ export function mountSplashTileCanvas(
   colorProbe.remove();
 
   interface Viewport {
+    dpr: number;
     height: number;
     width: number;
   }
@@ -398,7 +399,8 @@ export function mountSplashTileCanvas(
   interface TileRenderer {
     readonly kind: '2d' | 'webgl2';
     dispose(): void;
-    draw(values: readonly TileFrame[], viewport: Viewport, tiltDeg: number): void;
+    setField?(tiles: readonly SplashTile[]): void;
+    draw(values: readonly TileFrame[], viewport: Viewport, tiltDeg: number, elapsed: number, playback: SplashCanvasPlayback): void;
     resize(viewport: Viewport): void;
   }
 
@@ -406,6 +408,7 @@ export function mountSplashTileCanvas(
     const bounds = canvas.parentElement?.getBoundingClientRect();
     const view = canvas.ownerDocument.defaultView;
     return {
+      dpr: Math.max(1, view?.devicePixelRatio || 1),
       height: Math.max(1, Math.round(bounds?.height || view?.innerHeight || canvas.clientHeight || 1)),
       width: Math.max(1, Math.round(bounds?.width || view?.innerWidth || canvas.clientWidth || 1)),
     };
@@ -437,10 +440,12 @@ export function mountSplashTileCanvas(
     try {
       const vertex = compile(gl.VERTEX_SHADER, `#version 300 es
 precision highp float;
-layout(location=0) in vec2 aCenter;
-layout(location=1) in float aScale;
-layout(location=2) in float aOpacity;
-layout(location=3) in float aFillMix;
+layout(location=0) in vec2 aBase;
+layout(location=1) in vec2 aScatter;
+layout(location=2) in vec2 aDelay;
+layout(location=3) in vec2 aGrid;
+uniform float uElapsed, uKind, uReduced, uRelease, uDelayScale, uExit, uTotal, uBreatheShare;
+uniform uint uSeed;
 uniform vec2 uViewport;
 uniform vec2 uOrigin;
 uniform float uCellSize;
@@ -454,9 +459,32 @@ const vec2 corners[6] = vec2[6](
   vec2(-0.5,-0.5), vec2(0.5,-0.5), vec2(-0.5,0.5),
   vec2(-0.5,0.5), vec2(0.5,-0.5), vec2(0.5,0.5)
 );
+float cubic(float a,float b,float t){float r=1.0-t;return 3.0*r*r*t*a+3.0*r*t*t*b+t*t*t;}
+float ease(float t){if(t<=0.0||t>=1.0)return t;float lo=0.0,hi=1.0;for(int i=0;i<12;i++){float m=(lo+hi)*0.5;if(cubic(0.32,0.24,m)<t)lo=m;else hi=m;}return cubic(0.0,1.0,(lo+hi)*0.5);}
+bool breathes(uint cycle){
+  uint v=uSeed ^ 0x6d2b79f5u;
+  v=(v ^ uint(int(aGrid.x)))*0x045d9f3bu;
+  v=(v ^ uint(int(aGrid.y)))*0x119de1f3u;
+  v=(v ^ cycle)*0x27d4eb2du;
+  v=v ^ (v >> 16u);
+  return float(v)/4294967296.0 < uBreatheShare;
+}
 void main() {
+  float progress=0.0;
+  if(uReduced<0.5 && uKind>0.5 && uKind<2.5){
+    float delay=uRelease+aDelay.x*uDelayScale;
+    progress=uKind<1.5 ? clamp((uElapsed-delay)/max(1.0,uExit),0.0,1.0)
+      : 1.0-clamp((uElapsed-max(0.0,uTotal-delay-uExit))/max(1.0,uExit),0.0,1.0);
+  }
+  float eased=ease(progress);
+  float aOpacity=1.0-smoothstep(0.55,1.0,progress);
+  float aFillMix=smoothstep(0.0,0.32,progress);
+  if(uKind<0.5 && uReduced<0.5 && aDelay.y>=0.0){
+    float t=uElapsed-1200.0-aDelay.y;
+    if(t>=0.0 && breathes(uint(floor(t/2800.0)))) aFillMix=(1.0-cos(mod(t,2800.0)/2800.0*6.28318530718))*0.5;
+  }
   vec2 corner = corners[gl_VertexID];
-  vec2 floorPoint = aCenter + corner * uCellSize * aScale;
+  vec2 floorPoint = aBase+aScatter*eased + corner * uCellSize * mix(1.0,0.56,eased);
   float cosSpin = cos(uSpin);
   float sinSpin = sin(uSpin);
   float spunX = floorPoint.x * cosSpin - floorPoint.y * sinSpin;
@@ -538,19 +566,12 @@ void main() {
       if (!buffer || !vertexArray) throw new Error('Unable to allocate splash instance buffer');
       gl.bindVertexArray(vertexArray);
       gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-      const stride = 5 * Float32Array.BYTES_PER_ELEMENT;
-      gl.enableVertexAttribArray(0);
-      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, stride, 0);
-      gl.vertexAttribDivisor(0, 1);
-      gl.enableVertexAttribArray(1);
-      gl.vertexAttribPointer(1, 1, gl.FLOAT, false, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
-      gl.vertexAttribDivisor(1, 1);
-      gl.enableVertexAttribArray(2);
-      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, stride, 3 * Float32Array.BYTES_PER_ELEMENT);
-      gl.vertexAttribDivisor(2, 1);
-      gl.enableVertexAttribArray(3);
-      gl.vertexAttribPointer(3, 1, gl.FLOAT, false, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
-      gl.vertexAttribDivisor(3, 1);
+      const stride = 8 * Float32Array.BYTES_PER_ELEMENT;
+      for (let attribute = 0; attribute < 4; attribute += 1) {
+        gl.enableVertexAttribArray(attribute);
+        gl.vertexAttribPointer(attribute, 2, gl.FLOAT, false, stride, attribute * 2 * Float32Array.BYTES_PER_ELEMENT);
+        gl.vertexAttribDivisor(attribute, 1);
+      }
 
       const uniform = (name: string): WebGLUniformLocation => {
         const location = gl.getUniformLocation(program, name);
@@ -569,6 +590,9 @@ void main() {
         spin: uniform('uSpin'),
         tilt: uniform('uTilt'),
         viewport: uniform('uViewport'),
+        elapsed: uniform('uElapsed'), kind: uniform('uKind'), reduced: uniform('uReduced'),
+        release: uniform('uRelease'), delayScale: uniform('uDelayScale'), exit: uniform('uExit'),
+        total: uniform('uTotal'), breatheShare: uniform('uBreatheShare'), seed: uniform('uSeed'),
       };
       gl.uniform1f(uniforms.cellSize, options.cellPx);
       gl.uniform1f(uniforms.distance, options.camera.distancePx);
@@ -577,7 +601,10 @@ void main() {
       gl.uniform4fv(uniforms.background, new Float32Array(background));
       gl.uniform4fv(uniforms.line, new Float32Array(line));
       gl.uniform4fv(uniforms.pulse, new Float32Array(pulse));
-      let data = new Float32Array(0);
+      gl.uniform1f(uniforms.breatheShare, options.field.breatheShare);
+      gl.uniform1ui(uniforms.seed, breathingRandomSeed >>> 0);
+      let instanceCount = 0;
+      let currentPlayback: SplashCanvasPlayback | null = null;
 
       return {
         kind: 'webgl2',
@@ -589,25 +616,29 @@ void main() {
           gl.deleteVertexArray(vertexArray);
           gl.deleteProgram(program);
         },
-        draw: (values, viewport, tiltDeg) => {
-          const requiredLength = values.length * 5;
-          if (data.length !== requiredLength) {
-            data = new Float32Array(requiredLength);
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, data.byteLength, gl.DYNAMIC_DRAW);
+        setField: tiles => {
+          instanceCount = tiles.length;
+          const data = new Float32Array(instanceCount * 8);
+          for (let i = 0; i < tiles.length; i++) {
+            const tile = tiles[i]!; const offset = i * 8;
+            data.set([tile.xPx, tile.yPx, tile.scatterXPx, tile.scatterYPx,
+              tile.delayMs, tile.breatheDelayMs ?? -1, tile.row, tile.col], offset);
           }
-          for (let index = 0; index < values.length; index += 1) {
-            const value = values[index] as TileFrame;
-            const offset = index * 5;
-            data[offset] = value.x;
-            data[offset + 1] = value.y;
-            data[offset + 2] = value.scale;
-            data[offset + 3] = value.opacity;
-            data[offset + 4] = value.fillMix;
-          }
-          gl.bindVertexArray(vertexArray);
           gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-          gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
+          gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+        },
+        draw: (_values, viewport, tiltDeg, elapsed, playback) => {
+          gl.bindVertexArray(vertexArray);
+          if (currentPlayback !== playback) {
+            currentPlayback = playback;
+            gl.uniform1f(uniforms.kind, playback.kind === 'idle' ? 0 : playback.kind === 'revealing' ? 1 : playback.kind === 'covering' ? 2 : 3);
+            gl.uniform1f(uniforms.reduced, playback.reducedMotion ? 1 : 0);
+            gl.uniform1f(uniforms.release, playback.releaseMs);
+            gl.uniform1f(uniforms.delayScale, playback.delayScale);
+            gl.uniform1f(uniforms.exit, playback.exitMs);
+            gl.uniform1f(uniforms.total, playback.totalMs);
+          }
+          gl.uniform1f(uniforms.elapsed, elapsed);
           gl.uniform2f(uniforms.viewport, viewport.width, viewport.height);
           const originX = viewport.width / 2;
           const originY = viewport.height * options.camera.originYPct / 100;
@@ -615,14 +646,14 @@ void main() {
           gl.uniform1f(uniforms.tilt, tiltDeg * Math.PI / 180);
           gl.clearColor(0, 0, 0, 0);
           gl.clear(gl.COLOR_BUFFER_BIT);
-          gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, values.length);
+          gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, instanceCount);
         },
         resize: (viewport) => {
           const maxRenderbuffer = Number(gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)) || 1;
           const maxViewport = gl.getParameter(gl.MAX_VIEWPORT_DIMS) as Int32Array;
           const maxWidth = Math.min(maxRenderbuffer, Number(maxViewport[0]) || maxRenderbuffer);
           const maxHeight = Math.min(maxRenderbuffer, Number(maxViewport[1]) || maxRenderbuffer);
-          const requestedScale = Math.max(1, canvas.ownerDocument.defaultView?.devicePixelRatio || 1);
+          const requestedScale = viewport.dpr;
           const renderScale = Math.max(
             Number.EPSILON,
             Math.min(requestedScale, maxWidth / viewport.width, maxHeight / viewport.height),
@@ -721,18 +752,13 @@ void main() {
     visibleFarRisePx: options.camera.visibleFarRisePx,
   });
   let field = buildField();
-  let frames: TileFrame[] = field.tiles.map((tile) => ({
-    fillMix: 0,
-    opacity: 1,
-    scale: 1,
-    x: tile.xPx,
-    y: tile.yPx,
-  }));
+  let frames: TileFrame[] = [];
   let hasBreathingTiles = field.tiles.some((tile) => tile.breatheDelayMs !== null);
   let renderer = createWebGlRenderer();
   if (!renderer) renderer = createTwoDimensionalRenderer();
   if (renderer) {
     renderer.resize(viewport);
+    renderer.setField?.(field.tiles);
     canvas.setAttribute('data-varin-splash-renderer', renderer.kind);
   }
 
@@ -754,16 +780,20 @@ void main() {
     return options.camera.tiltDeg * (1 - cubicEase(forwardProgress, 0.4, 0.2));
   };
 
+  const motionByDelay = new Map<number, { elapsed: number; eased: number; fillMix: number; opacity: number }>();
+  const breathingCycles = new Map<string, { cycle: number; active: boolean }>();
+  const restingMotion = { elapsed: -1, eased: 0, fillMix: 0, opacity: 1 };
   const updateFrames = (elapsed: number): void => {
-    const motionByDelay = new Map<number, { eased: number; fillMix: number; opacity: number }>();
+    if (frames.length !== field.tiles.length) frames = field.tiles.map(tile => ({
+      x: tile.xPx, y: tile.yPx, scale: 1, opacity: 1, fillMix: 0,
+    }));
     const motionActive = !playback.reducedMotion
       && (playback.kind === 'covering' || playback.kind === 'revealing');
-    const restingMotion = { eased: 0, fillMix: 0, opacity: 1 };
     for (let index = 0; index < field.tiles.length; index += 1) {
       const tile = field.tiles[index] as SplashTile;
       const frame = frames[index] as TileFrame;
       let motion = motionActive ? motionByDelay.get(tile.delayMs) : restingMotion;
-      if (!motion) {
+      if (!motion || (motionActive && motion.elapsed !== elapsed)) {
         let progress = 0;
         if (playback.kind === 'revealing') {
           const delay = playback.releaseMs + tile.delayMs * playback.delayScale;
@@ -774,12 +804,11 @@ void main() {
           progress = 1 - clamp((elapsed - coverDelay) / Math.max(1, playback.exitMs), 0, 1);
         }
         const eased = progress <= 0 ? 0 : progress >= 1 ? 1 : cubicEase(progress, 0.32, 0.24);
-        motion = {
-          eased,
-          fillMix: smoothstep(0, 0.32, progress),
-          opacity: progress <= 0.55 ? 1 : 1 - smoothstep(0.55, 1, progress),
-        };
-        motionByDelay.set(tile.delayMs, motion);
+        if (!motion) { motion = { elapsed, eased: 0, fillMix: 0, opacity: 1 }; motionByDelay.set(tile.delayMs, motion); }
+        motion.elapsed = elapsed;
+        motion.eased = eased;
+        motion.fillMix = smoothstep(0, 0.32, progress);
+        motion.opacity = progress <= 0.55 ? 1 : 1 - smoothstep(0.55, 1, progress);
       }
       frame.x = tile.xPx + tile.scatterXPx * motion.eased;
       frame.y = tile.yPx + tile.scatterYPx * motion.eased;
@@ -791,13 +820,13 @@ void main() {
         const breathingElapsed = elapsed - 1_200 - tile.breatheDelayMs;
         if (breathingElapsed >= 0) {
           const cycleIndex = Math.floor(breathingElapsed / 2_800);
-          if (breathesInCycle(
-            tile.row,
-            tile.col,
-            cycleIndex,
-            options.field.breatheShare,
-            breathingRandomSeed,
-          )) {
+          let breathing = breathingCycles.get(tile.key);
+          if (!breathing || breathing.cycle !== cycleIndex) {
+            breathing = { cycle: cycleIndex, active: breathesInCycle(tile.row, tile.col, cycleIndex,
+              options.field.breatheShare, breathingRandomSeed) };
+            breathingCycles.set(tile.key, breathing);
+          }
+          if (breathing.active) {
             const cycle = (breathingElapsed % 2_800) / 2_800;
             frame.fillMix = (1 - Math.cos(cycle * Math.PI * 2)) / 2;
           }
@@ -822,12 +851,12 @@ void main() {
       && (playback.kind === 'covering' || playback.kind === 'revealing');
     const elapsed = animated ? Math.min(running, playback.totalMs) : running;
     const tiltDeg = cameraTiltAt(elapsed);
-    updateFrames(elapsed);
+    if (renderer?.kind !== 'webgl2') updateFrames(elapsed);
     if (cameraElement && (appliedCameraTiltDeg === null || Math.abs(appliedCameraTiltDeg - tiltDeg) > 1e-4)) {
       cameraElement.style.setProperty(options.camera.tiltProperty, `${tiltDeg}deg`);
       appliedCameraTiltDeg = tiltDeg;
     }
-    renderer?.draw(frames, viewport, tiltDeg);
+    renderer?.draw(frames, viewport, tiltDeg, elapsed, playback);
     if (shouldContinue(running)) animationFrame = requestAnimationFrame(draw);
     else animationFrame = 0;
   };
@@ -840,18 +869,15 @@ void main() {
 
   const rebuildForViewport = (): void => {
     const nextViewport = measureViewport();
-    if (nextViewport.width === viewport.width && nextViewport.height === viewport.height) return;
+    if (nextViewport.width === viewport.width && nextViewport.height === viewport.height && nextViewport.dpr === viewport.dpr) return;
     viewport = nextViewport;
     field = buildField();
-    frames = field.tiles.map((tile) => ({
-      fillMix: 0,
-      opacity: 1,
-      scale: 1,
-      x: tile.xPx,
-      y: tile.yPx,
-    }));
+    frames = [];
     hasBreathingTiles = field.tiles.some((tile) => tile.breatheDelayMs !== null);
     renderer?.resize(viewport);
+    renderer?.setField?.(field.tiles);
+    motionByDelay.clear();
+    breathingCycles.clear();
     if (!animationFrame) draw(performance.now());
   };
   const view = canvas.ownerDocument.defaultView;
@@ -914,6 +940,7 @@ void main() {
         && playback.totalMs === next.totalMs;
       if (unchanged) return;
       playback = next;
+      motionByDelay.clear();
       start();
     },
   };

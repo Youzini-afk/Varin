@@ -1,5 +1,6 @@
 import { documentMotionLevel, type MotionLevel } from '@/lib/motion/preference';
 import { EASE_EXIT, EASE_OUT } from '@/lib/motion/tokens';
+import { createLatticeCanvas, type LatticeCanvas } from './workbench-lattice-canvas';
 import {
   LATTICE_CLOSED_SCALE,
   LATTICE_COVER_CELL_MS,
@@ -8,18 +9,18 @@ import {
   WORKBENCH_SWITCHER_ATTRIBUTE,
   latticeDelayMs,
   latticeOrigin,
+  latticePhaseMs,
   planLattice,
   type LatticePlan,
   type LatticePoint,
 } from './workbench-lattice';
 
 /**
- * The lattice's DOM and animations (§3.11), driven by WorkbenchLatticeScene one phase at a time.
+ * The lattice's surfaces and playback (§3.11), driven one phase at a time.
  *
- * `full` grows one `<i>` per cell with Web Animations, so the waves run on the compositor even while
- * the Profile commit keeps the main thread busy. `reduced` and `off` use one sheet instead: a 160ms
- * fade, or nothing. The root's `data-state` carries the resting picture (`open`, `closed`, `clear`)
- * so cancelling a finished wave never shows a frame of anything else.
+ * Full motion batches the same cells in one WebGL surface. DOM Web Animations retain the authored
+ * effect when WebGL is unavailable/lost. Reduced and off still use the original sheet. A completed
+ * wave retains its exact terminal picture while Core commits or retires the scene.
  */
 
 export type LatticeMode = 'full' | 'reduced' | 'off';
@@ -39,6 +40,7 @@ const cubic = (points: readonly number[]): string => `cubic-bezier(${points.join
 const CLOSED = `scale(${LATTICE_CLOSED_SCALE})`;
 
 export class LatticeStage {
+  private canvas: LatticeCanvas | null;
   private cells: HTMLElement[] = [];
   private plan: LatticePlan | null = null;
   private running: Running[] = [];
@@ -54,6 +56,12 @@ export class LatticeStage {
     readonly mode: LatticeMode,
   ) {
     root.dataset.mode = mode;
+    this.canvas = mode === 'full' ? createLatticeCanvas(field, () => {
+      // Running waves resume through tick at their current playhead; resting covers must recover too.
+      if (this.disposed || this.running.length) return;
+      this.canvas?.dispose(); this.canvas = null; this.plan = null;
+      this.layout(this.origin ?? { x: 0, y: 0 });
+    }) : null;
     this.setState('open');
   }
 
@@ -65,6 +73,7 @@ export class LatticeStage {
       return this.play([this.fade(0, 1)], 'closed');
     }
     this.layout(origin);
+    if (this.canvas) return this.playCanvas('covering', false);
     const reach = this.plan?.reach;
     if (!reach || !this.canAnimate()) return this.settleNow('closed');
     const easing = cubic(EASE_OUT);
@@ -78,7 +87,8 @@ export class LatticeStage {
   close(): void {
     if (this.disposed) return;
     this.stop();
-    if (this.mode === 'full' && this.cells.length === 0) this.layout(this.origin ?? { x: 0, y: 0 });
+    if (this.mode === 'full' && !this.plan) this.layout(this.origin ?? { x: 0, y: 0 });
+    this.canvas?.draw(0, 'closed');
     this.setState('closed');
   }
 
@@ -92,6 +102,7 @@ export class LatticeStage {
     if (this.mode === 'reduced') return this.play([this.fade(1, 0)], 'clear');
     this.origin = origin;
     this.layout(origin);
+    if (this.canvas) return this.playCanvas('revealing', inward);
     const reach = this.plan?.reach;
     if (!reach || !this.canAnimate()) return this.settleNow('clear');
     const easing = cubic(EASE_EXIT);
@@ -107,6 +118,8 @@ export class LatticeStage {
   dispose(): void {
     this.disposed = true;
     this.stop();
+    this.canvas?.dispose();
+    this.canvas = null;
   }
 
   /**
@@ -119,7 +132,7 @@ export class LatticeStage {
     let anchor: DOMRect | null = null;
     for (const node of doc.querySelectorAll(`[${WORKBENCH_SWITCHER_ATTRIBUTE}]`)) {
       const rect = node.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
+      if (rect.width > 0 && rect.height > 0 && !node.closest('[data-varin-workbench-shell-staging]')) {
         anchor = rect;
         break;
       }
@@ -160,6 +173,7 @@ export class LatticeStage {
       && this.plan.cols === plan.cols
       && this.plan.rows === plan.rows;
     this.plan = plan;
+    if (this.canvas) { this.canvas.layout(plan, width, height); return; }
     if (reuse) return;
     this.field.style.gridTemplateColumns = `repeat(${plan.cols}, ${plan.cellPx}px)`;
     this.field.style.gridAutoRows = `${plan.cellPx}px`;
@@ -189,6 +203,45 @@ export class LatticeStage {
       },
       () => false,
     );
+  }
+
+  private playCanvas(phase: 'covering' | 'revealing', inward: boolean): Promise<boolean> {
+    this.canvas!.direction(inward);
+    const started = performance.now();
+    const duration = latticePhaseMs(phase, false);
+    let frame = 0;
+    let fallback: Animation[] = [];
+    let finish!: (value: Animation) => void;
+    let reject!: (error: Error) => void;
+    const finished = new Promise<Animation>((resolve, fail) => { finish = resolve; reject = fail; });
+    const running: Running = { finished, cancel: () => {
+      cancelAnimationFrame(frame); fallback.forEach(a => a.cancel()); reject(new Error('Lattice superseded'));
+    } };
+    const tick = (now: number) => {
+      const elapsed = Math.min(duration, Math.max(0, now - started));
+      if (!this.canvas?.draw(elapsed, phase)) {
+        // A lost graphics context uses the original DOM renderer at the same playhead.
+        this.canvas?.dispose(); this.canvas = null; this.plan = null;
+        this.layout(this.origin ?? { x: 0, y: 0 });
+        fallback = this.cells.map((cell, index) => {
+          const animation = cell.animate(phase === 'covering'
+            ? [{ transform: 'scale(0)', opacity: .35 }, { transform: CLOSED, opacity: 1 }]
+            : [{ transform: CLOSED, opacity: 1 }, { transform: 'scale(0)', opacity: .2 }], {
+            duration: phase === 'covering' ? LATTICE_COVER_CELL_MS : LATTICE_REVEAL_CELL_MS,
+            delay: latticeDelayMs(this.plan?.reach[index] ?? 1, inward),
+            easing: cubic(phase === 'covering' ? EASE_OUT : EASE_EXIT), fill: 'both',
+          });
+          animation.currentTime = elapsed; return animation;
+        });
+        void Promise.all(fallback.map(a => a.finished)).then(() => finish({} as Animation), reject);
+        return;
+      }
+      if (elapsed === duration) finish({} as Animation);
+      else frame = requestAnimationFrame(tick);
+    };
+    const result = this.play([running], phase === 'covering' ? 'closed' : 'clear');
+    tick(started);
+    return result;
   }
 
   private settleNow(rest: LatticeState): Promise<boolean> {

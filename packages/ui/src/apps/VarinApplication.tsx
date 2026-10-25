@@ -10,7 +10,7 @@ const App = React.lazy(async () => {
     import('@/workbenches/register-shells'),
     import('@/lib/extensions/surface-runtime'),
   ]);
-  await workbenchRegistration.registerWorkbenchShells(surfaceRuntime.varinSurfaceRuntime.surface);
+  workbenchRegistration.registerWorkbenchShells(surfaceRuntime.varinSurfaceRuntime.surface);
   void extensionRuntime.startSurfaceExtensions().catch((error) => {
     console.error('[Varin Extensions] Managed Surface startup failed:', error);
   });

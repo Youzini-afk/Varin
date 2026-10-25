@@ -11,7 +11,6 @@ import {
 import { useVarinExtensionCatalog } from './catalog-store';
 import { varinSurfaceRuntime } from './surface-runtime';
 import {
-  WorkbenchReplacement,
   WORKBENCH_REPLACEMENT_TARGETS,
   useSurfaceRegistrySnapshot,
   workbenchContributionInstanceKey,
@@ -19,7 +18,6 @@ import {
 import { WorkbenchShellStagingHost } from './workbench-shell-staging';
 import { useWorkbenchWorkspace } from './workbench-workspace';
 import { resolveWorkbenchShellView } from './workbench-shell-view';
-import { WorkbenchProfileProvider } from '@/lib/workbench/profile-provider';
 
 const LOADING_SHELL = <div className="h-full min-h-0 w-full bg-background" />;
 
@@ -164,21 +162,15 @@ export const WorkbenchShellHost: React.FC<{
   else if (view === 'recovery') {
     content = <WorkbenchRecoveryShell resolved={resolved} workspaceId={workspaceId} />;
   } else {
-    content = (
-      <WorkbenchReplacement
-        expectedContributionId={resolved.shellContributionId}
-        target={WORKBENCH_REPLACEMENT_TARGETS.shell}
-        fallback={fallback}
-        errorFallback={renderShellFailure}
-        onMountReady={handleShellMountReady}
-      />
-    );
+    content = fallback;
   }
 
   return (
-    <>
-      <WorkbenchShellStagingHost />
-      <WorkbenchProfileProvider profileId={resolvedProfileId}>{content}</WorkbenchProfileProvider>
-    </>
+    <WorkbenchShellStagingHost key={owner}
+      contribution={view === 'ready' && (workspace.status === 'ready' || workspace.status === 'none' || retainShell)
+        && selectedShell?.descriptor.id === resolvedShellContributionId ? selectedShell : undefined}
+      profileId={resolvedProfileId} fallback={content}
+      recovery={workspace.status === 'error' || view === 'recovery'}
+      errorFallback={renderShellFailure} onMountReady={handleShellMountReady} />
   );
 };

@@ -175,7 +175,6 @@ const createDeps = (options: {
   let renders = 0;
   let disposed = 0;
   const deps: WorkbenchShellTransitionDependencies = {
-    createMountContainer: () => ({ remove() {} } as HTMLElement),
     getCatalogState: (): VarinExtensionCatalogStoreState => ({
       busyExtensionId: null,
       error: null,
@@ -194,27 +193,25 @@ const createDeps = (options: {
       snapshot.catalog.extensions[0]!.desired.enabled = nextEnabled;
     },
     stageRender: async (stagedContribution, props) => {
-      renders += 1;
       const implementation = stagedContribution.implementation as {
         render?(value: Readonly<Record<string, unknown>>): unknown;
+        mount?: Parameters<typeof startWorkbenchMountSession>[0]['implementation']['mount'];
       };
+      if (implementation.mount) {
+        mounts += 1;
+        let failure: unknown;
+        const session = startWorkbenchMountSession({ container: {} as HTMLElement,
+          contributionId: stagedContribution.descriptor.id, owner: stagedContribution.owner,
+          implementation: { mount: implementation.mount }, props, onError: error => { failure = error; } });
+        const dispose = async () => { disposed += 1; await session.dispose('test'); };
+        try { await session.mounted; if (failure) throw failure; }
+        catch (error) { await dispose(); throw error; }
+        return { dispose, promote: async () => undefined };
+      }
+      renders += 1;
       const rendered = implementation.render?.(props);
       if (rendered === null || rendered === undefined) throw new Error('shell rendered no content');
-      return {
-        dispose: async () => { disposed += 1; },
-      };
-    },
-    startMount: (mountOptions) => {
-      mounts += 1;
-      const session = startWorkbenchMountSession(mountOptions);
-      const dispose = session.dispose;
-      return {
-        ...session,
-        dispose: async (reason) => {
-          disposed += 1;
-          await dispose(reason);
-        },
-      };
+      return { dispose: async () => { disposed += 1; }, promote: async () => undefined };
     },
     triggerActivation: async () => {
       await options.activate?.();
@@ -286,6 +283,22 @@ test('sync, async, and isolated mounts commit only after they become ready', asy
     expect(harness.mounts).toBe(1);
     expect(harness.disposed).toBe(1);
   }
+});
+
+test('the cover preparation gate keeps heavy candidate rendering out of the closing wave', async () => {
+  const harness = createDeps({ entry: shellEntry(true) });
+  let reach!: () => void, release!: () => void;
+  const reached = new Promise<void>(r => { reach = r; });
+  const covered = new Promise<void>(r => { release = r; });
+  const switching = runSelectActiveWorkbenchProfile(harness.deps, 'studio', undefined, {
+    beforePrepare: async () => { reach(); await covered; },
+  });
+  await reached;
+  expect(harness.renders).toBe(0);
+  expect(harness.persistedProfiles).toEqual([]);
+  release(); await switching;
+  expect(harness.renders).toBe(1);
+  expect(harness.persistedProfiles).toEqual(['studio']);
 });
 
 test('keeps the previous profile when candidate mount fails', async () => {

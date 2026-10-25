@@ -8,6 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { archiveBot, changeBotState, createBot, ensureBotEntry, listBots, listBotWork, updateBot, useBotNavigation, openBotConversation, botWorkId, botWorkTitle, botWorkEntry, sameBotEntry, type BotModelSelection, type BotSummary, type BotWorkItem } from '@/lib/bots';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
+import { useWorkbenchShellActive } from '@/lib/workbench/shell-activity';
 import { ThreadConversation } from '@/components/thread/ThreadConversation';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useThreadStore } from '@/stores/useThreadStore';
@@ -31,7 +32,8 @@ const openBotSettings = () => {
 export const BotWorkspaceShell: React.FC<Record<string, unknown>> = () => {
   // Candidate shells render before profile commit. They must never create a Bot
   // or change the shared session selection during that hidden render.
-  const committed = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID;
+  const active = useWorkbenchShellActive();
+  const committed = useWorkbenchProfileId() === VARIN_WORKBENCH_BOT_PROFILE_ID && active;
   const runtimeKey = useThreadStore((state) => state.hostKey);
   return <BotWorkspace key={runtimeKey} committed={committed} />;
 };
