@@ -253,7 +253,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                         type="button"
                         onClick={() => setColor(c.key)}
                         className={cn(
-                          'w-6 h-6 rounded-md border-2 transition-all cursor-pointer',
+                          'w-6 h-6 rounded-md border-2 transition-[border-color,scale] duration-(--motion-dur-snap) ease-snap cursor-pointer',
                           color === c.key
                             ? 'border-foreground scale-110'
                             : 'border-transparent hover:border-border'
@@ -276,7 +276,7 @@ export const GitIdentityEditorDialog: React.FC<GitIdentityEditorDialogProps> = (
                           type="button"
                           onClick={() => setIcon(i.key)}
                           className={cn(
-                            'w-7 h-7 rounded-md border-2 transition-all flex items-center justify-center cursor-pointer',
+                            'w-7 h-7 rounded-md border-2 transition-[border-color,background-color] flex items-center justify-center cursor-pointer',
                             icon === i.key
                               ? 'border-[var(--interactive-border)] bg-[var(--surface-muted)]'
                               : 'border-transparent hover:border-[var(--interactive-border)] hover:bg-[var(--surface-muted)]/50'

@@ -58,7 +58,7 @@
 @media (max-height: 650px) { .thread-question-dock { max-height: 44dvh; }.thread-question-header, .thread-question-actions { padding-block: 7px; } }
 .tool-question { min-width: 0; overflow-wrap: anywhere; }
 .tool-question-options { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.tool-question-option { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: border-color 140ms ease, background-color 140ms ease; }
+.tool-question-option { display: flex; align-items: flex-start; gap: 10px; width: 100%; min-width: 0; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; transition: border-color var(--motion-dur-fade) var(--motion-ease-out), background-color var(--motion-dur-fade) var(--motion-ease-out); }
 .tool-question-option > input { margin-top: .3em; width: 14px; height: 14px; flex: 0 0 14px; accent-color: var(--foreground); }
 .tool-question-option > span { min-width: 0; flex: 1; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
 .tool-question-option[data-selected="true"] { background: var(--interactive-hover); border-color: var(--muted-foreground); }
@@ -81,7 +81,7 @@
 .tool-share-member strong { font-size: var(--text-meta); font-weight: 500; }
 .tool-share-member small { display: block; font-size: var(--text-micro); color: var(--muted-foreground); }
 .tool-share-receipt { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin-top: 9px; font-size: var(--text-micro); color: var(--muted-foreground); }
-.tool-material-reader { margin-block: 14px; border-left: 2px solid var(--border); padding-left: 16px; min-width: 0; animation: tool-reply-arrive 200ms var(--wb-ease); }
+.tool-material-reader { margin-block: 14px; border-left: 2px solid var(--border); padding-left: 16px; min-width: 0; animation: tool-reply-arrive var(--motion-dur-glide) var(--motion-ease-glide); }
 .tool-material-panel .tool-material-reader { margin: 0; border: 0; padding: 0; }
 .tool-reader-heading { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; font-size: var(--text-meta); }
 .tool-reader-heading strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 500; }
@@ -180,7 +180,7 @@
 .tool-invocation-details { margin-top: 8px; color: var(--muted-foreground); font-size: var(--text-micro); }
 .tool-invocation-details > summary { cursor: pointer; padding-block: 3px; }
 .tool-invocation-details > div { display: grid; gap: 8px; padding: 8px 0; }
-.tool-disclosure-chevron { flex-shrink: 0; color: var(--muted-foreground); transition: transform var(--wb-panel-duration) var(--wb-ease); }
+.tool-disclosure-chevron { flex-shrink: 0; color: var(--muted-foreground); transition: transform var(--motion-dur-snap) var(--motion-ease-snap); }
 details[open] > summary > .tool-disclosure-chevron { transform: rotate(90deg); }
 .tool-resource-summary, .tool-work-heading { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 3px; list-style: none; cursor: pointer; color: var(--muted-foreground); border-radius: 5px; }
 .tool-resource-summary:hover, .tool-work-heading:hover { background: var(--interactive-hover); }
@@ -258,10 +258,10 @@ a.tool-source-link:hover { text-decoration: underline; text-underline-offset: 3p
 .tool-thread-excerpts > div { border-left: 1px solid var(--border); padding-left: 12px; display: grid; gap: 5px; }
 .tool-execution-history, .tool-file-handoff { display: grid; gap: 10px; }
 .tool-handoff-file { display: flex; align-items: baseline; gap: 7px; font-size: var(--text-meta); }
-.tool-inline-actions button, .tool-file-link, .tool-member-line, .tool-resource-summary, .tool-work-heading, .tool-source-link { transition: color 120ms ease, background-color 120ms ease; }
+.tool-inline-actions button, .tool-file-link, .tool-member-line, .tool-resource-summary, .tool-work-heading, .tool-source-link { transition: color var(--motion-dur-fade) var(--motion-ease-out), background-color var(--motion-dur-fade) var(--motion-ease-out); }
 .tool-member-line:focus-visible, .tool-resource-summary:focus-visible, .tool-command-heading:focus-visible, .tool-work-heading:focus-visible,
 .tool-file-link:focus-visible, .tool-inline-actions button:focus-visible, .tool-thread-open:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
-.tool-source-results > li { animation: tool-source-arrive 180ms var(--wb-ease) both; }
+.tool-source-results > li { animation: tool-source-arrive var(--motion-dur-fade) var(--motion-ease-out) both; }
 @keyframes tool-source-arrive { from { opacity: 0; } to { opacity: 1; } }
 @keyframes tool-reply-arrive { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 @media (max-width: 640px) {

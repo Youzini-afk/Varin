@@ -522,7 +522,7 @@ export const MultiRunLauncher: React.FC<MultiRunLauncherProps> = ({
                   </span>
                 )}
                 <Icon name="arrow-down-s" className={cn(
-                  'h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-200 ml-auto',
+                  'h-3.5 w-3.5 text-muted-foreground/50 transition-transform duration-(--motion-dur-snap) ease-snap ml-auto',
                   isSetupCommandsOpen && 'rotate-180',
                 )} />
               </CollapsibleTrigger>

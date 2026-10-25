@@ -501,7 +501,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                   onPointerCancel={usesIndicator ? () => setPressedId(null) : undefined}
                   className={cn(
                     usesActivePillIndicator
-                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors duration-150 !min-h-0'
+                      ? 'animated-tabs__button pill-tabs__button relative z-10 flex flex-1 min-w-0 flex-nowrap items-center justify-center rounded-[9px] [corner-shape:squircle] supports-[corner-shape:squircle]:rounded-[50px] text-sm font-medium transition-colors !min-h-0'
                       : 'flex h-full min-w-0 flex-nowrap items-center typography-micro',
                     usesActivePillIndicator && activePillLowercase ? 'lowercase' : null,
                     usesActivePillIndicator && (showInactiveIconOnly ? 'gap-0' : 'gap-1.5'),
@@ -564,7 +564,7 @@ export const SortableTabsStrip: React.FC<SortableTabsStripProps> = ({
                       {shouldShowIcon ? (
                         <span
                           className={cn(
-                            'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors duration-200 ease-out',
+                            'relative flex h-4 w-4 shrink-0 items-center justify-center transition-colors',
                             isActive ? 'text-[var(--primary-base)]' : 'text-muted-foreground'
                           )}
                         >

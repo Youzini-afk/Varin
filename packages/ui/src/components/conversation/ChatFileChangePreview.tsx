@@ -11,7 +11,7 @@ import { getMarkdownSyntaxVars } from '@/components/chat/markdown/markdownSyntax
 import { highlightLinesInWorker } from '@/components/chat/markdown/markdown-worker';
 import { documentMotionLevel } from '@/lib/motion/preference';
 import { SpringDriver, omegaSpring, tokenSpring } from '@/lib/motion/spring';
-import { springTiming } from '@/lib/motion/tokens';
+import { EASE_OUT, springTiming, TWEENS } from '@/lib/motion/tokens';
 import type { FileChangeLine, FileChangePhase, FileChangePreview } from './fileChangePreview';
 import { timelinePresentationCache } from './timelinePresentationCache';
 
@@ -30,6 +30,8 @@ const HIGHLIGHT_DELAY_MS = 90;
 const FOLLOW_SPRING = omegaSpring(16);
 const TRAVEL_SPRING = tokenSpring('travel');
 const INK_MS = 300;
+/** A row that changed order fades in at its new place on the shared fade tween. */
+const fadeTiming = { duration: TWEENS.fade.duration * 1000, easing: `cubic-bezier(${EASE_OUT.join(', ')})` };
 
 const lineKey = (line: FileChangeLine, index: number): string => line.key ?? `#${index}`;
 
@@ -277,7 +279,7 @@ export const ChatFileChangePreview: React.FC<{
       // A row that changed order would cross others: drop any slide it was
       // carrying and let it appear at its new place instead.
       for (const animation of element.getAnimations()) animation.cancel();
-      element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 140, delay: level === 'full' ? 130 : 0, easing: 'ease-out', fill: 'backwards' });
+      element.animate([{ opacity: 0 }, { opacity: 1 }], { ...fadeTiming, delay: level === 'full' ? 130 : 0, fill: 'backwards' });
     }
     const layer = ghostLayer.current;
     for (const [key, top] of previous.tops) {

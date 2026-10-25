@@ -165,7 +165,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
         style={effectiveResizedHeight !== null ? { height: `${effectiveResizedHeight}px` } : undefined}
         className={cn(
           "group/textarea relative flex w-full flex-col rounded-md border border-input bg-transparent pb-2.5",
-          "transition-[border-color,box-shadow] duration-150",
+          "transition-[border-color,box-shadow]",
           "has-[[disabled]]:pointer-events-none has-[[disabled]]:opacity-50",
           !hasError && [
             "hover:border-[var(--interactive-border-hover)]",
@@ -186,7 +186,7 @@ const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
                 "min-h-[82px] pl-3 pr-2.5 pt-2.5 md:typography-ui-label",
                 "focus-visible:outline-none disabled:cursor-not-allowed",
                 !disabled && [
-                  "placeholder:select-none placeholder:text-muted-foreground placeholder:transition placeholder:duration-200 placeholder:ease-out",
+                  "placeholder:select-none placeholder:text-muted-foreground placeholder:transition",
                   "group-hover/textarea:placeholder:text-foreground/80",
                   "focus:placeholder:text-foreground/80",
                 ],

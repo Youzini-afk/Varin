@@ -217,7 +217,23 @@
   --z-raised: 10;
   --z-overlay: 40;
   --z-modal: 50;
-  --transition-fast: 150ms ease-in-out;
+  --transition-fast: var(--motion-dur-fade) var(--motion-ease-out);
+
+  /*
+   * Motion tokens for Tailwind (styles/motion.css). A bare `transition-*`
+   * utility fades in 160ms on the base out-curve, the same as everything else;
+   * `ease-out` / `ease-in` are the arrival and exit curves, and `ease-glide`,
+   * `ease-snap` and `ease-settle` pair with `duration-(--motion-dur-*)`.
+   * There is no symmetric curve: `ease-in-out` is the arrival curve too.
+   */
+  --default-transition-duration: var(--motion-dur-fade);
+  --default-transition-timing-function: var(--motion-ease-out);
+  --ease-out: var(--motion-ease-out);
+  --ease-in: var(--motion-ease-exit);
+  --ease-in-out: var(--motion-ease-out);
+  --ease-glide: var(--motion-ease-glide);
+  --ease-snap: var(--motion-ease-snap);
+  --ease-settle: var(--motion-ease-settle);
 
   /* Override Tailwind spacing scale with custom properties that respect --padding-scale */
   --spacing-0: 0;

@@ -19,7 +19,7 @@ const TINT_DESTRUCTIVE = [
 const buttonVariants = cva(
   [
     "group relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md typography-ui-label font-medium shrink-0 select-none",
-    "transition-[background-color,border-color,color,opacity] duration-150 ease-out outline-none",
+    "transition-[background-color,border-color,color,opacity] outline-none",
     "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
     "disabled:pointer-events-none disabled:opacity-50",

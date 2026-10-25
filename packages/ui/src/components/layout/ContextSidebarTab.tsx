@@ -125,7 +125,7 @@ function ContextDetails({ api, identity, snapshot, active, error }: {
         <span className="typography-micro tabular-nums text-muted-foreground/70">{number(usage.totalTokens)} / {number(usage.contextLimit)}</span>
       </div>
       <div className="mt-2.5 flex h-1 w-full overflow-hidden rounded-full bg-[var(--surface-subtle)]" role="progressbar" aria-label={t('contextUsage.aria.label')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>
-        {percent > 0 && <div className="rounded-full transition-all duration-300" style={{ backgroundColor: percent > 80 ? 'var(--status-warning)' : 'var(--primary-base)', width: `${Math.max(0.5, percent)}%` }} />}
+        {percent > 0 && <div className="rounded-full transition-[width,background-color] duration-(--motion-dur-glide) ease-glide" style={{ backgroundColor: percent > 80 ? 'var(--status-warning)' : 'var(--primary-base)', width: `${Math.max(0.5, percent)}%` }} />}
       </div>
       <div className="mt-1.5 typography-micro font-medium tabular-nums text-foreground/80">{t('contextSidebar.context.percentUsed', { percent: usage.percentage.toFixed(1) })}</div>
     </section>}

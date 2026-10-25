@@ -36,10 +36,6 @@
  * OS asks for reduced motion. "reduced" keeps colour and opacity changes and
  * ends movement instantly; "off" ends every transition and animation.
  */
-:root[data-motion="reduced"] {
-  --wb-panel-duration: 0ms;
-  --wb-travel-duration: 0ms;
-}
 :root[data-motion="reduced"] *,
 :root[data-motion="reduced"] *::before,
 :root[data-motion="reduced"] *::after {
@@ -50,9 +46,7 @@
   scroll-behavior: auto !important;
 }
 :root[data-motion="off"] {
-  --wb-panel-duration: 0ms;
   --wb-state-duration: 0ms;
-  --wb-travel-duration: 0ms;
 }
 :root[data-motion="off"] *,
 :root[data-motion="off"] *::before,

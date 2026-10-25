@@ -37,7 +37,7 @@ export function ModelCommonSettings({ model, disabled, onChange, validity }: Pro
       })} /></div>
     </div>
     <Collapsible open={model.reasoning === true} className="!mt-0">
-      <CollapsibleContent className="h-[var(--collapsible-panel-height)] transition-[height,opacity] duration-200 ease-out data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0 motion-reduce:transition-none">
+      <CollapsibleContent className="h-[var(--collapsible-panel-height)] transition-[height,opacity] duration-(--motion-dur-glide) ease-glide data-[starting-style]:h-0 data-[starting-style]:opacity-0 data-[ending-style]:h-0 data-[ending-style]:opacity-0 motion-reduce:transition-none">
         <div className="pt-5"><div className="space-y-3 border-l-2 border-border/70 py-1 pl-4">
           {thinking.mode === 'levels' ? <>
             <p className="typography-meta text-muted-foreground">{t('settings.models.availableLevels')}</p>

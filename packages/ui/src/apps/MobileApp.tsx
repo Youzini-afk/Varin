@@ -892,11 +892,11 @@ const MobileConnectionWelcome: React.FC<{ onConnected: () => void }> = ({ onConn
                   className="mx-auto flex items-center gap-1 rounded-full px-2 py-1 typography-small text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <span>{t('mobile.connect.manual.toggle')}</span>
-                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-200', manualOpen && 'rotate-180')} />
+                  <Icon name="arrow-down-s" className={cn('size-4 transition-transform duration-(--motion-dur-snap) ease-snap', manualOpen && 'rotate-180')} />
                 </button>
               ) : null}
               <div
-                className="grid transition-[grid-template-rows] duration-200 ease-out"
+                className="grid transition-[grid-template-rows] duration-(--motion-dur-glide) ease-glide"
                 style={{ gridTemplateRows: manualOpen ? '1fr' : '0fr' }}
               >
                 <div className="min-h-0 overflow-hidden">
@@ -1362,7 +1362,7 @@ const ContextProgressIcon: React.FC<{ percentage: number }> = ({ percentage }) =
         strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - progressPct / 100)}
-        className="transition-[stroke-dashoffset,stroke] duration-300"
+        className="transition-[stroke-dashoffset,stroke] duration-(--motion-dur-glide) ease-glide"
       />
     </svg>
   );
@@ -2120,7 +2120,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             ) : null}
             <div
               className={cn(
-                'flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                'flex h-full shrink-0 flex-col transition-opacity motion-reduce:transition-none',
                 leftResize.isResizing && 'pointer-events-none',
                 !ipadSidebarOpen && 'pointer-events-none select-none opacity-0',
               )}
@@ -2207,7 +2207,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             ) : null}
             <div
               className={cn(
-                'flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                'flex h-full shrink-0 flex-col transition-opacity motion-reduce:transition-none',
                 rightResize.isResizing && 'pointer-events-none',
                 !ipadRightPanel && 'pointer-events-none select-none opacity-0',
               )}

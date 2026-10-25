@@ -1,10 +1,8 @@
 /* Shared Agent / IDE canvas and motion language. Colors come from the selected theme. */
 :root {
-  --wb-ease: cubic-bezier(.22, 1, .36, 1);
-  --wb-ease-settle: cubic-bezier(.18, .88, .24, 1.12);
-  --wb-panel-duration: 280ms;
-  --wb-state-duration: 170ms;
-  --wb-travel-duration: 520ms;
+  /* Aliases of the motion tokens (styles/motion.css): state changes fade on the base out-curve. */
+  --wb-ease: var(--motion-ease-out);
+  --wb-state-duration: var(--motion-dur-fade);
   --wb-overview-compact-width: 240px;
 }
 
@@ -90,7 +88,7 @@
 .ide-workspace-row > [role="separator"] {
   width: 6px;
   background: transparent;
-  transition: background var(--wb-state-duration) ease;
+  transition: background var(--wb-state-duration) var(--wb-ease);
 }
 .ide-workspace-row > [role="separator"]:hover { background: var(--interactive-hover); }
 
@@ -98,8 +96,8 @@
 .workbench-titlebar button,
 .ide-activity button,
 .workbench-resource-rail button {
-  transition: background-color var(--wb-state-duration) ease, color var(--wb-state-duration) ease,
-    opacity var(--wb-state-duration) ease, transform 170ms var(--wb-ease-settle);
+  transition: background-color var(--wb-state-duration) var(--wb-ease), color var(--wb-state-duration) var(--wb-ease),
+    opacity var(--wb-state-duration) var(--wb-ease), transform var(--motion-dur-snap) var(--motion-ease-snap);
 }
 .workbench-icon-button:active:not(:disabled),
 .workbench-titlebar button:not([data-window-control]):active:not(:disabled),
@@ -118,7 +116,7 @@
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
   background-image: linear-gradient(180deg, rgb(255 255 255 / .02), transparent 60%);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / .04), var(--composer-elevation-shadow);
-  transition: box-shadow 280ms var(--wb-ease), opacity 170ms ease;
+  transition: box-shadow var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--wb-state-duration) var(--wb-ease);
 }
 .dark [data-conversation-composer-input-frame] {
   --composer-elevation-shadow: 0 3px 8px rgb(0 0 0 / .18), 0 14px 30px -10px rgb(0 0 0 / .38);
@@ -132,7 +130,7 @@
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition: grid-template-rows 220ms var(--wb-ease), opacity var(--wb-state-duration) ease;
+  transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--wb-state-duration) var(--wb-ease);
 }
 [data-conversation-composer-input-frame]:focus-within .conversation-composer-hints[data-empty="true"] {
   grid-template-rows: 1fr;
@@ -140,7 +138,7 @@
 }
 /* While the frame's height glides (useComposerHeightGlide), the hint row moves with it. */
 [data-conversation-composer-input-frame][data-height-glide] .conversation-composer-hints {
-  transition: opacity var(--wb-state-duration) ease;
+  transition: opacity var(--wb-state-duration) var(--wb-ease);
 }
 .conversation-composer-hints p { margin: 0; }
 .conversation-composer-queue { z-index: 0; }
@@ -165,7 +163,7 @@
   width: calc(var(--turn-base-width) + 12px * var(--turn-proximity)); height: 2px; flex-shrink: 0; border-radius: 2px;
   background: var(--muted-foreground); opacity: calc(.32 + .68 * var(--turn-proximity));
   transform: translateX(calc(1px * var(--turn-proximity)));
-  transition: width 140ms var(--wb-ease), opacity 140ms ease, transform 140ms var(--wb-ease), background-color var(--wb-state-duration) ease;
+  transition: width var(--motion-dur-snap) var(--motion-ease-snap), opacity var(--motion-dur-snap) var(--motion-ease-snap), transform var(--motion-dur-snap) var(--motion-ease-snap), background-color var(--wb-state-duration) var(--wb-ease);
 }
 .conversation-turn-marker[aria-current="location"] { --turn-base-width: 11px; }
 .conversation-turn-marker[aria-current="location"] .conversation-turn-marker-stroke { background: var(--muted-foreground); opacity: .72; }
@@ -174,7 +172,7 @@
   position: absolute; top: var(--turn-preview-top, 8px); left: calc(100% + 6px); width: min(260px, calc(100cqi - 46px));
   overflow: hidden; pointer-events: none; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
   background: var(--surface-elevated); box-shadow: 0 6px 22px color-mix(in srgb, var(--foreground) 9%, transparent);
-  transition: top 140ms var(--wb-ease);
+  transition: top var(--motion-dur-snap) var(--motion-ease-snap);
 }
 @media (prefers-reduced-motion: reduce) {
   .conversation-turn-marker-stroke, .conversation-turn-preview { transition: none; }
@@ -197,7 +195,7 @@
 }
 [data-conversation-composer-primary-action]:hover:not(:disabled) { transform: translateY(-1px); }
 [data-conversation-composer-primary-action]:active:not(:disabled) { transform: scale(.91); }
-.conversation-composer-attachment { animation: wb-material-arrive 360ms var(--wb-ease-settle) both; }
+.conversation-composer-attachment { animation: wb-material-arrive var(--motion-dur-settle) var(--motion-ease-settle) both; }
 
 @container composer (max-width: 600px) {
   .conversation-composer-footer { grid-template-columns: minmax(0, 1fr) auto; }
@@ -258,7 +256,7 @@
   to { opacity: 1; transform: none; }
 }
 @media (prefers-reduced-motion: reduce) {
-  :root { --wb-panel-duration: 0ms; --wb-state-duration: 0ms; --wb-travel-duration: 0ms; }
+  :root { --wb-state-duration: 0ms; }
   [data-workbench-chrome] .workbench-icon-button,
   .workbench-titlebar button, .ide-activity button, .workbench-resource-rail button,
   [data-conversation-composer-input-frame], [data-conversation-composer-primary-action] { transition: none; }
@@ -276,7 +274,7 @@
   max-width: calc(100% - 32px); padding: 5px 10px; border-radius: 8px;
   background: var(--background); pointer-events: none;
   opacity: 0;
-  animation: conversation-loading-reveal .12s ease .22s forwards;
+  animation: conversation-loading-reveal var(--motion-dur-fade) var(--motion-ease-out) .22s forwards;
 }
 @keyframes conversation-loading-reveal { to { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .conversation-loading { opacity: 1; animation: none; } }
@@ -294,7 +292,7 @@
 }
 
 .workbench-resource-canvas { transition-property: width, margin-left; }
-.ide-sidebar-resizer { transition: background-color 170ms ease; }
+.ide-sidebar-resizer { transition: background-color var(--wb-state-duration) var(--wb-ease); }
 .ide-sidebar-resizer:hover { background: var(--interactive-border-hover); }
 
 .agent-conversation-canvas { container: agent-canvas / inline-size; }
@@ -309,7 +307,7 @@
   .oc-draft-starters .draft-starter-trigger {
     width: 100%; min-width: 0; min-height: 38px; justify-content: flex-start;
     border-radius: 8px; text-align: left; font-size: 13px;
-    transition: background-color 170ms ease, border-color 170ms ease, transform 200ms var(--wb-ease-settle);
+    transition: background-color var(--wb-state-duration) var(--wb-ease), border-color var(--wb-state-duration) var(--wb-ease), transform var(--motion-dur-snap) var(--motion-ease-snap);
   }
   .oc-draft-starters .draft-starter-trigger > span { overflow: hidden; text-overflow: ellipsis; }
   .oc-draft-starters .draft-starter-trigger:hover { --draft-starter-background: var(--interactive-hover); }
@@ -337,7 +335,7 @@
 [data-workbench-chrome].workbench-frame,
 .agent-conversation-canvas, .ide-editor-canvas, .ide-primary, .ide-agent-canvas,
 .workbench-resource-rail, .workbench-titlebar, .ide-statusbar {
-  transition: background-color var(--wb-panel-duration) ease, border-color var(--wb-state-duration) ease;
+  transition: background-color var(--wb-state-duration) var(--wb-ease), border-color var(--wb-state-duration) var(--wb-ease);
 }
 .workbench-resource-canvas {
   transition-property: width, margin-left, background-color, border-color;
@@ -411,7 +409,7 @@
   .dialogue-activity-chevron { transition: none; }
 }
 
-.composer-attachment { animation: wb-material-arrive 360ms var(--wb-ease-settle) both; }
+.composer-attachment { animation: wb-material-arrive var(--motion-dur-settle) var(--motion-ease-settle) both; }
 /* Turn end: actions fade in 24ms apart, then the usage numbers roll (CountUp). */
 [data-conversation-turn-footer][data-arriving] > :first-child > * { animation: turn-footer-arrive var(--motion-dur-fade) var(--motion-ease-out) both; }
 [data-conversation-turn-footer][data-arriving] > :first-child > :nth-child(2) { animation-delay: 24ms; }

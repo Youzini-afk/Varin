@@ -39,7 +39,7 @@ export const Checkbox = React.memo<CheckboxProps>(function Checkbox({
         // AlignUI-style rounded box. Use a real border so press/hover states never lose the outline.
         'group/checkbox relative flex shrink-0 self-center items-center justify-center rounded-[4px] border outline-none',
         boxSize,
-        'transition-[background-color,border-color,box-shadow] duration-200 ease-out',
+        'transition-[background-color,border-color,box-shadow]',
         // Drive fill directly from React props so the initial paint matches
         // the final state without waiting for Base UI to hydrate data attrs.
         isOn

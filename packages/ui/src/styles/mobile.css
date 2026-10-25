@@ -680,13 +680,13 @@
    be overridden by this rule's `transition` shorthand). */
 :root.oc-capacitor-app .oc-keyboard-inset-surface {
   bottom: var(--oc-keyboard-inset, 0px);
-  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity 0.2s ease-out;
+  transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 /* While a panel is playing its enter animation, its bottom anchor snaps
    instead of transitioning — opening an overlay typically dismisses the
    keyboard in the same moment, and animating both made the entrance jerky. */
 :root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
-  transition: opacity 0.2s ease-out;
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 
 /* Bottom-sheet overlays live inside a keyboard-inset surface whose bottom is
@@ -877,5 +877,5 @@
    finished growing, then fades in — no clipped controls mid-morph. Timings
    follow the 340ms wrapper morph in ChatInput. */
 .oc-composer-morph-content-fade > * {
-  animation: oc-composer-morph-fade 0.18s ease-out 0.26s both;
+  animation: oc-composer-morph-fade 0.18s var(--motion-ease-out) 0.26s both;
 }

@@ -287,7 +287,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
         className={cn(
           "flex h-8 shrink-0 items-stretch overflow-x-hidden overflow-y-hidden rounded-md border border-border bg-transparent",
           "disabled:pointer-events-none disabled:opacity-50",
-          "transition-[background-color,border-color,box-shadow] duration-150 ease-in-out",
+          "transition-[background-color,border-color,box-shadow]",
           containerClassName
         )}
       >
@@ -300,7 +300,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-r border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
-            "transition-colors duration-150 ease-in-out"
+            "transition-colors"
           )}
         >
           <RiSubtractLine className="block h-3.5 w-3.5" />
@@ -335,7 +335,7 @@ const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
             "flex h-full w-7 shrink-0 items-center justify-center overflow-x-hidden overflow-y-hidden border-l border-border p-0 leading-none touch-manipulation",
             "text-muted-foreground hover:bg-interactive-hover hover:text-foreground",
             "disabled:pointer-events-none disabled:opacity-50",
-            "transition-colors duration-150 ease-in-out"
+            "transition-colors"
           )}
         >
           <RiAddLine className="block h-3.5 w-3.5" />

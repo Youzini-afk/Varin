@@ -117,7 +117,8 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 strokeLinecap="round"
                 strokeDasharray={circularProgressCircumference}
                 strokeDashoffset={circularProgressOffset}
-                className="transition-[stroke-dashoffset,stroke] duration-300"
+                // The ring grows with each tool result on glide (§3.9).
+                className="transition-[stroke-dashoffset,stroke] duration-(--motion-dur-glide) ease-glide"
               />
             </svg>
             <span className="text-foreground tabular-nums">{percentLabel}</span>

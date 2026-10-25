@@ -73,7 +73,7 @@
     font-weight: 500;
     line-height: 1.2;
     color: var(--primary-base);
-    transition: color var(--transition-fast, 150ms ease-in-out);
+    transition: color var(--transition-fast, var(--motion-dur-fade) var(--motion-ease-out));
   }
 
   .typography-settings-link:hover {
@@ -115,7 +115,7 @@
   /* Enhanced focus indicators for small interactive elements */
   .model-favorite-button {
     position: relative;
-    transition: transform 0.1s ease;
+    transition: transform var(--motion-dur-snap) var(--motion-ease-snap);
   }
 
   .model-favorite-button:focus-visible {

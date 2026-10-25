@@ -20,16 +20,16 @@
 .settings-disclosure[open] > summary .settings-disclosure-chevron { transform: rotate(90deg); }
 .settings-disclosure-body { padding: 0 0 22px 24px; min-width: 0; }
 @supports (interpolate-size: allow-keywords) {
-  .settings-disclosure::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; opacity: 0; transition: height 220ms ease, opacity 170ms ease, content-visibility 220ms allow-discrete; }
+  .settings-disclosure::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; opacity: 0; transition: height var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out), content-visibility 220ms allow-discrete; }
   .settings-disclosure[open]::details-content { height: auto; opacity: 1; }
 }
-.settings-action-dock { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 200ms ease, opacity 150ms ease; }
+.settings-action-dock { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
 .settings-action-dock[data-visible=true] { grid-template-rows: 1fr; opacity: 1; }
 .settings-action-dock > div { min-height: 0; overflow: hidden; }
 .settings-action-dock[data-placement=inline] { margin-top: 12px; }
 .settings-action-dock[data-placement=inline] [data-settings-action-bar] { padding-inline: 0; background: transparent; }
 .settings-object-list { border-block: 1px solid var(--interactive-border); }
-.settings-rule-editor { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 200ms ease, opacity 160ms ease; }
+.settings-rule-editor { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out); }
 .settings-rule-editor[data-open=true] { grid-template-rows: 1fr; opacity: 1; }.settings-rule-editor > div { min-height: 0; overflow: hidden; }
 .settings-permission-modes > button { padding: 12px; border: 1px solid transparent; border-radius: 7px; transition: background 150ms,border-color 150ms; }
 .settings-permission-modes > button[aria-checked=true] { border-color: var(--interactive-border); background: var(--surface-muted); }
@@ -54,11 +54,11 @@
 @container (min-width: 760px) { .settings-notification-editor { grid-template-columns: minmax(0,1fr) minmax(260px,.9fr); } }
 @container (max-width: 760px) { .settings-connection-map { padding-top: 0; border-top: 0; gap: 20px; margin-left: 10px; border-left: 1px solid var(--interactive-border); }.settings-connection-node { padding-left: 22px; }.settings-connection-node::before { left: 0; top: 15px; width: 12px; height: 1px; } }
 @supports (interpolate-size: allow-keywords) {
- .settings-nav-group::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; opacity: 0; transition: height 200ms ease, opacity 160ms ease, content-visibility 200ms allow-discrete; }
+ .settings-nav-group::details-content { interpolate-size: allow-keywords; height: 0; overflow: clip; opacity: 0; transition: height var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out), content-visibility 200ms allow-discrete; }
  .settings-nav-group[open]::details-content { height: auto; opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .settings-nav-group::details-content { transition: none; } }
-.settings-tab-panel:not([hidden]),.settings-memory-editor { animation: settings-reveal 180ms ease-out; }
+.settings-tab-panel:not([hidden]),.settings-memory-editor { animation: settings-reveal var(--motion-dur-fade) var(--motion-ease-out); }
 .settings-tabs > button:focus-visible,.settings-page-nav button:focus-visible,.settings-nav-group > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; border-radius: 3px; }
 @keyframes settings-reveal { from { opacity: .35; transform: translateY(2px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .settings-tab-panel:not([hidden]),.settings-memory-editor { animation: none; } }

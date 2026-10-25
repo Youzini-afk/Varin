@@ -328,8 +328,8 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
         ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
         overflowX: 'clip',
         transitionProperty: isResizing ? 'none' : 'width',
-        transitionDuration: '200ms',
-        transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+        transitionDuration: 'var(--motion-dur-glide)',
+        transitionTimingFunction: 'var(--motion-ease-glide)',
       }}
       aria-hidden={!visible}
     >
@@ -350,7 +350,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       )}
       <div
         className={cn(
-          'relative z-10 h-full shrink-0 transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          'relative z-10 h-full shrink-0 transition-opacity motion-reduce:transition-none',
           isResizing && 'pointer-events-none',
           !visible && 'pointer-events-none select-none opacity-0'
         )}
@@ -993,7 +993,7 @@ export const ContextPanel: React.FC = () => {
   );
 
   // width/min/max stay interpolable across open/close (no instant min/max
-  // jumps) so the 200ms width transition matches the sidebars.
+  // jumps) so the glide width transition matches the sidebars.
   const panelStyle: React.CSSProperties = !isOpen
     ? {
         ['--oc-context-panel-width' as string]: `${width}px`,
@@ -1034,8 +1034,8 @@ export const ContextPanel: React.FC = () => {
           ? 'absolute inset-y-0 right-0 z-20 min-w-0'
           : 'relative h-full flex-shrink-0',
         !isOpen && 'pointer-events-none',
+        // Width rides glide; workbench.css owns the properties, duration and curve.
         'will-change-[width] motion-reduce:transition-none',
-        'transition-[width] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)]'
       )}
       onKeyDownCapture={handlePanelKeyDownCapture}
       style={panelStyle}
@@ -1060,7 +1060,7 @@ export const ContextPanel: React.FC = () => {
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col motion-reduce:transition-none',
           // Width animates in sync with the panel (surface switches, resize
           // release); during the drag itself nothing resizes — only the ghost
           // guide line moves.

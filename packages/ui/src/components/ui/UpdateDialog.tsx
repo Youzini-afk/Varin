@@ -480,7 +480,7 @@ export const UpdateDialog: React.FC<UpdateDialogProps> = ({
               </div>
               <div className="h-1.5 bg-[var(--surface-subtle)] rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-[var(--primary-base)] transition-all duration-300"
+                  className="h-full bg-[var(--primary-base)] transition-[width] duration-(--motion-dur-glide) ease-glide"
                   style={{ width: `${progressPercent}%` }}
                 />
               </div>

@@ -249,7 +249,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
         // which iOS Safari clips to the viewport — without it, a static scrim
         // bleeds the dim into the bottom toolbar overscroll zone. Quick fade so
         // it still feels near-instant.
-        'transition-opacity duration-200 ease-out',
+        'transition-opacity',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       role="dialog"
@@ -331,7 +331,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {contentReady ? (
-            <div className="h-full" style={{ animation: 'oc-surface-content-in 200ms ease-out' }}>
+            <div className="h-full" style={{ animation: 'oc-surface-content-in var(--motion-dur-fade) var(--motion-ease-out)' }}>
               {children}
             </div>
           ) : null}

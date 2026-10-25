@@ -142,7 +142,7 @@ export function OfficeMaterialReader(props: OfficeMaterialReaderProps) {
     {view === 'preview' ? 'readOffice' in reader && filePreview ? <iframe title={title} src={filePreview} className="min-h-0 w-full flex-1 border-0" />
       : pdf && !('readOffice' in reader) ? <div className="min-h-0 flex-1"><PdfMaterialReader reader={reader} title={title} presentation="inline" snapshotId={pdf.snapshotId} sourceHash={pdf.sourceHash} /></div>
       : <div role="status" className="p-6 text-sm text-muted-foreground">{rendering ? t('office.reader.rendering') : ''}</div>
-      : <div className={`min-h-0 min-w-0 flex-1 overflow-auto px-4 py-3 transition-opacity duration-150 ${busy ? 'opacity-60' : ''}`} aria-busy={busy}>
+      : <div className={`min-h-0 min-w-0 flex-1 overflow-auto px-4 py-3 transition-opacity ${busy ? 'opacity-60' : ''}`} aria-busy={busy}>
         {!data?.objects && busy && <p role="status" className="text-sm text-muted-foreground">{t('office.reader.loading')}</p>}
         {data?.format === 'xlsx' && cells.length > 0 ? <table className="border-collapse text-sm"><thead className="sticky top-0 z-10 bg-background"><tr><th className="border border-border/50 px-2 py-1" />{columns.map(column => <th key={column} className="min-w-28 border border-border/50 px-3 py-1 text-left font-medium">{column}</th>)}</tr></thead>
           <tbody>{rows.map(row => <tr key={row}><th className="sticky left-0 border border-border/50 bg-background px-2 py-2 font-normal text-muted-foreground">{row}</th>{columns.map(column => {

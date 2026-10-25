@@ -1,5 +1,4 @@
 .thinking-block {
-  --thinking-ease: cubic-bezier(.4, 0, .2, 1);
   min-width: 0;
   margin-block: .25rem;
   color: var(--muted-foreground);
@@ -15,7 +14,7 @@
   border-radius: .5rem;
   text-align: left;
   cursor: pointer;
-  transition: background-color 160ms ease;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out);
 }
 .thinking-heading:hover:not(:disabled) { background: color-mix(in oklab, var(--muted) 25%, transparent); }
 .thinking-heading:focus-visible, .thinking-scroll:focus-visible {
@@ -24,7 +23,7 @@
 }
 .thinking-heading:disabled { cursor: default; }
 .thinking-label { flex-shrink: 0; font-weight: 500; color: color-mix(in oklab, var(--foreground) 80%, transparent); }
-.thinking-chevron { transition: transform 300ms var(--thinking-ease); }
+.thinking-chevron { transition: transform var(--motion-dur-snap) var(--motion-ease-snap); }
 .thinking-block[data-open="true"] .thinking-chevron { transform: rotate(90deg); }
 
 .thinking-preview {
@@ -38,7 +37,7 @@
   pointer-events: none;
   opacity: .75;
   mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 78%, transparent);
-  transition: opacity 200ms ease;
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .thinking-preview-text { display: block; overflow-wrap: anywhere; }
 .thinking-block[data-open="true"] .thinking-preview { opacity: 0; }
@@ -48,7 +47,7 @@
   display: grid;
   grid-template-rows: 0fr;
   opacity: 0;
-  transition: grid-template-rows 320ms var(--thinking-ease), opacity 220ms ease;
+  transition: grid-template-rows var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 .thinking-block[data-open="true"] .thinking-panel { grid-template-rows: 1fr; opacity: 1; }
 .thinking-panel-clip { min-height: 0; overflow: hidden; }

@@ -295,7 +295,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   onClick={() => setColor(null)}
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
-                    'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
+                    'flex size-9 items-center justify-center rounded-xl border-2 transition-[border-color,background-color]',
                     color === null ? 'border-foreground' : 'border-border hover:border-border/80',
                   )}
                   style={{ touchAction: 'manipulation' }}
@@ -310,7 +310,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     aria-label={c.label}
                     title={c.label}
                     className={cn(
-                      'size-9 rounded-xl border-2 transition-all',
+                      'size-9 rounded-xl border-2 transition-[border-color,background-color]',
                       color === c.key ? 'border-foreground' : 'border-transparent hover:border-border',
                     )}
                     style={{ backgroundColor: c.cssVar, touchAction: 'manipulation' }}
@@ -330,7 +330,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                   onClick={() => setIcon(null)}
                   aria-label={t('projectEditDialog.option.none')}
                   className={cn(
-                    'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
+                    'flex size-9 items-center justify-center rounded-xl border-2 transition-[border-color,background-color]',
                     icon === null ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border hover:border-border/80',
                   )}
                   style={{ touchAction: 'manipulation' }}
@@ -345,7 +345,7 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
                     aria-label={i.label}
                     title={i.label}
                     className={cn(
-                      'flex size-9 items-center justify-center rounded-xl border-2 transition-all',
+                      'flex size-9 items-center justify-center rounded-xl border-2 transition-[border-color,background-color]',
                       icon === i.key ? 'border-foreground bg-[var(--surface-elevated)]' : 'border-border hover:border-border/80',
                     )}
                     style={{ touchAction: 'manipulation' }}

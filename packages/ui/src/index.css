@@ -54,7 +54,7 @@ button,
 [data-settings-search-highlight="true"] {
   border-radius: 0.25rem;
   background: color-mix(in srgb, var(--primary-base) 7%, transparent);
-  transition: background-color 180ms ease;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out);
 }
 
 /* ── macOS vibrancy ───────────────────────────────────────────────────────
@@ -683,7 +683,7 @@ html:not(.dark) .chat-scroll {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
   /* Above sticky zone headers (z-20) — the thumb must never dive under
      a stuck sidebar header while scrolling. */
   z-index: 30;
@@ -703,7 +703,7 @@ html:not(.dark) .chat-scroll {
   background: var(--oc-scrollbar-thumb);
   border-radius: 9999px;
   opacity: 0.8;
-  transition: background-color 0.15s ease, opacity 0.15s ease;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out);
   will-change: transform, height;
 }
 
@@ -1398,7 +1398,7 @@ html:not(.dark) .chat-scroll {
 
 .markdown-content [data-markdown="code-block-actions"] {
   pointer-events: auto;
-  transition: opacity 0.15s ease;
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;

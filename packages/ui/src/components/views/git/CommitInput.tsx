@@ -66,7 +66,7 @@ export const CommitInput: React.FC<CommitInputProps> = ({
       spellCheck={isMobile || inputSpellcheckEnabled}
       className={cn(
         'w-full rounded-lg border border-border/60 bg-surface-elevated px-3 py-2 typography-ui-label text-foreground placeholder:text-muted-foreground',
-        'resize-none outline-none transition-[border-color,box-shadow] duration-150',
+        'resize-none outline-none transition-[border-color,box-shadow]',
         'focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]',
         disabled && 'opacity-50'
       )}
