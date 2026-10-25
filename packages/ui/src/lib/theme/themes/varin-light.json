@@ -2,7 +2,7 @@
   "metadata": {
     "id": "varin-light",
     "name": "Varin",
-    "description": "Warm paper workbench surfaces with monochrome controls and Vitesse syntax",
+    "description": "Warm paper workbench surfaces with blue accents and Vitesse syntax",
     "author": "Varin",
     "version": "1.1.0",
     "variant": "light",
@@ -16,12 +16,12 @@
   },
   "colors": {
     "primary": {
-      "base": "#1b1a18",
-      "hover": "#393632",
-      "active": "#0f0e0d",
-      "foreground": "#fcfbf9",
-      "muted": "#1b1a1866",
-      "emphasis": "#1b1a18"
+      "base": "#2563eb",
+      "hover": "#1d4ed8",
+      "active": "#1e40af",
+      "foreground": "#ffffff",
+      "muted": "#2563eb66",
+      "emphasis": "#1d4ed8"
     },
     "surface": {
       "background": "#fcfbf9",
@@ -36,11 +36,11 @@
     "interactive": {
       "border": "#18161314",
       "borderHover": "#18161324",
-      "borderFocus": "#18161355",
-      "selection": "#1816130f",
+      "borderFocus": "#2563eb88",
+      "selection": "#2563eb26",
       "selectionForeground": "#1b1a18",
-      "focus": "#1b1a18",
-      "focusRing": "#1816132e",
+      "focus": "#2563eb",
+      "focusRing": "#2563eb40",
       "cursor": "#1b1a18",
       "hover": "#1816130a",
       "active": "#18161312"
@@ -139,12 +139,7 @@
       "heading4": "#22211f",
       "bold": "#282624",
       "italic": "#373632",
-      "link": "#286b83",
-      "linkHover": "#184e66",
-      "inlineCode": "#65527f",
-      "inlineCodeBackground": "#f0edf3",
       "blockquote": "#55524c",
-      "blockquoteBorder": "#d7cdbd",
       "listMarker": "#77736c",
       "hr": "#e8e5df",
       "codeBackground": "#f5f4f1",
@@ -160,9 +155,7 @@
       "codeType": "#65527f",
       "codeOperator": "#68655f",
       "tableHeader": "#f3f1ec",
-      "tableBorder": "#e8e5df",
-      "selection": "#c9dde6",
-      "selectionForeground": "#183748"
+      "tableBorder": "#e8e5df"
     },
     "chat": {
       "userMessage": "#1b1a18",

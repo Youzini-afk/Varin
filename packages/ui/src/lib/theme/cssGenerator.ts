@@ -32,6 +32,35 @@ const hexToRgb = (value: string | undefined | null): string | null => {
   return `${r} ${g} ${b}`;
 };
 
+const mixRgb = (first: number[], second: number[], weight: number): number[] =>
+  first.map((channel, index) => channel * weight + second[index] * (1 - weight));
+
+const luminance = (rgb: number[]): number => {
+  const linear = rgb.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722;
+};
+
+// Some light themes use pastel button fills. Bring their reading ink toward
+// the theme's text color until small text reaches 4.5:1 on both prose and the
+// tinted inline-code surface. The CSS still references the live accent.
+const readingAccent = (theme: Theme, variable: string, color: string): string => {
+  const channels = [color, theme.colors.surface.foreground, theme.colors.surface.background,
+    theme.colors.primary.base].map((value) => hexToRgb(value)?.split(' ').map(Number));
+  const [accent, foreground, background, primary] = channels;
+  let weight = 85;
+  if (accent && foreground && background && primary) {
+    const surfaces = [background, mixRgb(primary, background, 0.1)].map(luminance);
+    for (; weight > 0; weight -= 1) {
+      const ink = luminance(mixRgb(accent, foreground, weight / 100));
+      if (surfaces.every((surface) => (Math.max(ink, surface) + 0.05) / (Math.min(ink, surface) + 0.05) >= 4.5)) break;
+    }
+  }
+  return `color-mix(in srgb, ${variable} ${weight}%, var(--surface-foreground))`;
+};
+
 export class CSSVariableGenerator {
   private inheritanceMap: Map<string, string> = new Map();
 
@@ -386,7 +415,11 @@ export class CSSVariableGenerator {
 
   private generateMarkdownColors(markdown: Record<string, string>, theme: Theme): string[] {
     const vars: string[] = [];
-    const primary = theme.colors.primary.base;
+    // Keep reading accents linked to the live primary variables. Changing the
+    // theme must recolor existing prose without rebuilding its Markdown DOM.
+    const accent = 'var(--primary-base)';
+    const accentInk = readingAccent(theme, accent, theme.colors.primary.base);
+    const hoverInk = readingAccent(theme, 'var(--primary-hover)', theme.colors.primary.hover || this.darken(theme.colors.primary.base, 10));
 
     vars.push(`  --markdown-body: ${markdown.body || theme.colors.chat?.assistantMessage || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-secondary: ${markdown.secondary || theme.colors.surface.mutedForeground};`);
@@ -394,12 +427,12 @@ export class CSSVariableGenerator {
     vars.push(`  --markdown-heading2: ${markdown.heading2 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading3: ${markdown.heading3 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading4: ${markdown.heading4 || theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-link: ${markdown.link || primary};`);
-    vars.push(`  --markdown-link-hover: ${markdown.linkHover || theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || theme.colors.surface.subtle};`);
+    vars.push(`  --markdown-link: ${markdown.link || accentInk};`);
+    vars.push(`  --markdown-link-hover: ${markdown.linkHover || hoverInk};`);
+    vars.push(`  --markdown-inline-code: ${markdown.inlineCode || accentInk};`);
+    vars.push(`  --markdown-inline-code-bg: ${markdown.inlineCodeBackground || `color-mix(in srgb, ${accent} 10%, transparent)`};`);
     vars.push(`  --markdown-blockquote: ${markdown.blockquote || theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || theme.colors.interactive.border};`);
+    vars.push(`  --markdown-blockquote-border: ${markdown.blockquoteBorder || `color-mix(in srgb, ${accent} 35%, var(--interactive-border))`};`);
     vars.push(`  --markdown-list-marker: ${markdown.listMarker || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-bold: ${markdown.bold || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-italic: ${markdown.italic || this.opacity(theme.colors.surface.foreground, 0.9)};`);
@@ -409,8 +442,8 @@ export class CSSVariableGenerator {
     vars.push(`  --markdown-code-border: ${markdown.codeBorder || theme.colors.interactive.border};`);
     vars.push(`  --markdown-table-header: ${markdown.tableHeader || theme.colors.surface.subtle};`);
     vars.push(`  --markdown-table-border: ${markdown.tableBorder || theme.colors.interactive.border};`);
-    vars.push(`  --markdown-selection: ${markdown.selection || theme.colors.interactive.selection};`);
-    vars.push(`  --markdown-selection-foreground: ${markdown.selectionForeground || theme.colors.interactive.selectionForeground};`);
+    vars.push(`  --markdown-selection: ${markdown.selection || `color-mix(in srgb, ${accent} 25%, var(--surface-background))`};`);
+    vars.push(`  --markdown-selection-foreground: ${markdown.selectionForeground || 'var(--surface-foreground)'};`);
 
     return vars;
   }

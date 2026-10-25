@@ -2406,7 +2406,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "Sin modelo auxiliar",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Superficies claras cálidas y oscuras neutras.",
+  "settings.theme.preset.varin.description": "Acentos azules sobre superficies claras cálidas y oscuras neutras.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Acentos cálidos y sintaxis inspirada en papel y tinta.",
   "settings.theme.preset.fields-of-the-shire.name": "Campos de la Comarca",

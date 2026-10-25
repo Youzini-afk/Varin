@@ -2534,7 +2534,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "Sem modelo auxiliar",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Superfícies claras acolhedoras e escuras neutras.",
+  "settings.theme.preset.varin.description": "Destaques azuis sobre superfícies claras acolhedoras e escuras neutras.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Destaques quentes e sintaxe inspirada em papel e tinta.",
   "settings.theme.preset.fields-of-the-shire.name": "Campos do Condado",

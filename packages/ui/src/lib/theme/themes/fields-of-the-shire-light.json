@@ -134,12 +134,7 @@
       "heading2": "#262626",
       "heading3": "#262626",
       "heading4": "#262626",
-      "link": "#3d4f5a",
-      "linkHover": "#4a6030",
-      "inlineCode": "#262626",
-      "inlineCodeBackground": "#ededed",
       "blockquote": "#626262",
-      "blockquoteBorder": "#dddddd",
       "listMarker": "#626262"
     },
     "chat": {

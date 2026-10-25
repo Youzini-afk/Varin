@@ -2228,7 +2228,7 @@ export const settingsDict = {
 
   "settings.harness.models.noModel": "Sans modèle auxiliaire",
   "settings.theme.preset.varin.name": "Varin",
-  "settings.theme.preset.varin.description": "Surfaces claires chaudes et sombres neutres.",
+  "settings.theme.preset.varin.description": "Accents bleus sur des surfaces claires chaudes et sombres neutres.",
   "settings.theme.preset.flexoki.name": "Flexoki",
   "settings.theme.preset.flexoki.description": "Accents chauds et syntaxe inspirée du papier et de l’encre.",
   "settings.theme.preset.fields-of-the-shire.name": "Champs de la Comté",

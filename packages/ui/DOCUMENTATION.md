@@ -124,8 +124,12 @@ figures retain the chat column's full width. The same selectors handle flat fall
 streaming renderer's `display:contents` block wrappers. Tool/reasoning and collaboration feeds keep
 their compact reading scales.
 
-The default light/dark palettes define `colors.markdown.body`, `secondary`, code/table surfaces and
-selection colors independently of workbench chrome. Optional `codeForeground`, `codeComment`, etc.
+The default light/dark palettes use blue accents over warm paper and neutral charcoal surfaces.
+Built-in themes derive Markdown links, inline-code ink/background, quote borders and text selection
+from the live primary CSS variables. Existing messages follow theme changes without re-rendering;
+reading ink mixes toward the theme's foreground as needed for 4.5:1 contrast on prose and tinted
+inline-code surfaces. Custom theme files may explicitly override these Markdown colors. Body/secondary text and code/table
+surfaces retain their reading palette. Optional `codeForeground`, `codeComment`, etc.
 control prose-fence highlighting through `getMarkdownSyntaxVars(theme, 'prose')`; file/tool code keeps
 the theme's ordinary syntax palette. Other themes fall back to their existing colors. Decoration adds
 code/table controls, but CSS owns layout; table alignment from Markdown is preserved.

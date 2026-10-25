@@ -2,7 +2,7 @@
   "metadata": {
     "id": "varin-dark",
     "name": "Varin",
-    "description": "Neutral charcoal workbench surfaces with monochrome controls and Vitesse syntax",
+    "description": "Neutral charcoal workbench surfaces with soft blue accents and Vitesse syntax",
     "author": "Varin",
     "version": "1.1.0",
     "variant": "dark",
@@ -16,12 +16,12 @@
   },
   "colors": {
     "primary": {
-      "base": "#ededed",
-      "hover": "#ffffff",
-      "active": "#d4d4d4",
-      "foreground": "#141414",
-      "muted": "#ededed66",
-      "emphasis": "#ededed"
+      "base": "#7aa7ef",
+      "hover": "#9bbcf5",
+      "active": "#6394e5",
+      "foreground": "#111b2b",
+      "muted": "#7aa7ef66",
+      "emphasis": "#9bbcf5"
     },
     "surface": {
       "background": "#161616",
@@ -36,11 +36,11 @@
     "interactive": {
       "border": "#ffffff12",
       "borderHover": "#ffffff1f",
-      "borderFocus": "#ffffff55",
-      "selection": "#ffffff12",
+      "borderFocus": "#7aa7ef88",
+      "selection": "#7aa7ef30",
       "selectionForeground": "#ededed",
-      "focus": "#ededed",
-      "focusRing": "#ffffff38",
+      "focus": "#7aa7ef",
+      "focusRing": "#7aa7ef50",
       "cursor": "#ededed",
       "hover": "#ffffff0b",
       "active": "#ffffff13"
@@ -139,12 +139,7 @@
       "heading4": "#ededed",
       "bold": "#e9e8e5",
       "italic": "#d0d2d5",
-      "link": "#8ab8cf",
-      "linkHover": "#b0d2e1",
-      "inlineCode": "#beb3d8",
-      "inlineCodeBackground": "#24212c",
       "blockquote": "#b5b3ae",
-      "blockquoteBorder": "#514a40",
       "listMarker": "#939390",
       "hr": "#30302f",
       "codeBackground": "#1c1c1d",
@@ -160,9 +155,7 @@
       "codeType": "#beb3d8",
       "codeOperator": "#a5a5a5",
       "tableHeader": "#202020",
-      "tableBorder": "#30302f",
-      "selection": "#334e60",
-      "selectionForeground": "#eef6fa"
+      "tableBorder": "#30302f"
     },
     "chat": {
       "userMessage": "#ededed",
