@@ -2,6 +2,7 @@ import * as React from "react"
 import { Tooltip as BaseTooltip } from "@base-ui/react/tooltip"
 
 import { cn } from "@/lib/utils"
+import { tooltipGlideRef } from "./tooltipGlide"
 
 const MOBILE_LONG_PRESS_DELAY = 600
 const MOBILE_LONG_PRESS_CLOSE_DELAY = 1600
@@ -290,6 +291,8 @@ function TooltipContent({
             )}
             style={{ ...style }}
             {...props}
+            // A tooltip opened at once next to the previous one slides over from it (tooltipGlide.ts).
+            ref={tooltipGlideRef}
           >
             {children}
             <BaseTooltip.Arrow className="fill-[var(--surface-elevated)] z-50 size-2" />

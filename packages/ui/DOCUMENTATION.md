@@ -216,7 +216,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node tray.cjs`: tray batches, the linger, the pointer hold and the retraction.
 - `node layout.cjs`: whether the row below follows a row that opens and closes, after paint.
 - `node send.cjs`: the departing home, docking, icon swaps, the flight's arc and landing, the height glide and reduced motion.
-- `node popover.cjs`: a menu's growth, highlight slide and exit, and tooltip grouping.
+- `node popover.cjs`: a menu's growth, highlight slide and exit, tooltip grouping, and the next tooltip sliding over from the previous one.
 - `node sidebar.cjs` (`?scene=sidebar`, the real sidebar fed through its stores): the selection's travel and re-routing, pinning, a new row, removal, collapse and expansion, status icons, the hover highlight and reduced motion.
 - `node rail.cjs` (`?scene=rail`, the real rail and panel beside a main column): the active bar, the main column lock, the Git tabs' underline, the badge, the shared tooltip and reduced motion. Surfaces that need a Host (Git) are not opened there.
 - `node switch.cjs` (`?scene=switch`, three conversations in the real surface and timeline): the old conversation's exit time and direction, the turn stagger and the title direction, moving down and up.

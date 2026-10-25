@@ -84,8 +84,8 @@ const highlightState = () => {
   const fading = close.filter(frame => frame.open && frame.opacity < 1 && frame.opacity > 0).length;
   assert(gone >= 0 && closeMs < 260 && fading >= 1, `the menu leaves in ${Math.round(closeMs)}ms, fading through ${fading} frames`, failures);
 
-  // 4. Tooltips: one wait, then a neighbour opens at once. Timed in the page:
-  // from entering an anchor to its tooltip appearing.
+  // 4. Tooltips: one wait, then a neighbour opens at once and slides over from the
+  // previous one. Timed in the page: from entering an anchor to its tooltip appearing.
   await page.mouse.move(600, 400);
   await page.waitForTimeout(700);
   await page.evaluate(() => {
@@ -102,11 +102,28 @@ const highlightState = () => {
   const tips = page.locator('[data-lab-tooltips] button');
   await tips.nth(0).hover();
   await page.waitForTimeout(900);
+  const tooltipState = () => {
+    const visible = [...document.querySelectorAll('[data-slot="tooltip-content"]')]
+      .filter(popup => getComputedStyle(popup).visibility !== 'hidden' && Number(getComputedStyle(popup).opacity) > 0.05);
+    const last = visible.at(-1);
+    const rect = last?.getBoundingClientRect();
+    return { count: visible.length, x: rect ? rect.left + rect.width / 2 : null, text: last?.textContent ?? '' };
+  };
+  const firstTip = await page.evaluate(tooltipState);
+  const gliding = sample(page, tooltipState, 600);
   await tips.nth(1).hover();
-  await page.waitForTimeout(500);
+  const glide = (await gliding).filter(frame => frame.x !== null && frame.text !== firstTip.text);
+  await page.waitForTimeout(100);
   const timing = await page.evaluate(() => window.__tips.map(tip => tip && tip.shown ? Math.round(tip.shown - tip.entered) : null));
   assert(timing[0] !== null && timing[0] >= 480 && timing[0] < 700, `the first tooltip waits ${timing[0]}ms`, failures);
   assert(timing[1] !== null && timing[1] < 120, `its neighbour opens without waiting (${timing[1]}ms)`, failures);
+  const xs = glide.map(frame => frame.x);
+  if (verbose) console.log('tooltip glide:', firstTip.x?.toFixed(0), '→', xs.map(x => x.toFixed(0)).join(' '));
+  const end = xs.at(-1);
+  const travelled = xs.length > 2 && Math.abs(xs[0] - firstTip.x) < Math.abs(end - firstTip.x) * 0.5;
+  const midway = xs.filter(x => Math.min(firstTip.x, end) + 1 < x && x < Math.max(firstTip.x, end) - 1).length;
+  assert(travelled && midway >= 2, `the next tooltip starts at the previous one and slides over (${midway} frames between)`, failures);
+  assert(glide.every(frame => frame.count === 1), 'only one tooltip is seen at a time', failures);
 
   assert(errors.length === 0, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`, failures);
   await browser.close();
