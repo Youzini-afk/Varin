@@ -1,7 +1,7 @@
 import React from 'react';
 import { requestFrame } from '@/lib/motion/frame';
 import { documentMotionLevel } from '@/lib/motion/preference';
-import { SpringDriver, tokenSpring } from '@/lib/motion/spring';
+import { boxWithin, createSlidingPill, type SlidingPill } from '@/lib/motion/slidingPill';
 import { springTiming, staggerDelay } from '@/lib/motion/tokens';
 
 /**
@@ -12,49 +12,34 @@ import { springTiming, staggerDelay } from '@/lib/motion/tokens';
  * a page outside the list (About in the footer) hides it.
  */
 export function useNavPill(root: HTMLElement | null, selected: string): void {
-  const state = React.useRef<{ pill: HTMLElement | null; driver: SpringDriver | null; visible: boolean }>({ pill: null, driver: null, visible: false });
+  const pill = React.useRef<SlidingPill | null>(null);
 
   const place = React.useCallback((list: HTMLElement, move: boolean) => {
-    const { pill, driver } = state.current;
-    if (!pill || !driver) return;
+    const current = pill.current;
+    if (!current) return;
     const item = list.querySelector<HTMLElement>('[aria-current="page"]');
-    const rect = item?.getBoundingClientRect();
-    if (!item || !rect || !rect.height) {
-      pill.setAttribute('data-hidden', '');
-      state.current.visible = false;
+    if (!item || !item.getBoundingClientRect().height) {
+      current.hide();
       return;
     }
-    const frame = list.getBoundingClientRect();
-    const y = rect.top - frame.top - list.clientTop + list.scrollTop;
-    pill.style.left = `${rect.left - frame.left - list.clientLeft}px`;
-    pill.style.width = `${rect.width}px`;
-    pill.style.height = `${rect.height}px`;
-    if (move && state.current.visible && documentMotionLevel() === 'full') driver.to(y);
-    else if (driver.active) driver.to(y);
-    else driver.jump(y);
-    pill.removeAttribute('data-hidden');
-    state.current.visible = true;
+    const box = boxWithin(item, list);
+    // The pill sits at the item's left inside the list, whatever the list's horizontal scroll.
+    current.moveTo({ y: box.top, left: box.left - list.scrollLeft, width: box.width, height: box.height }, move);
   }, []);
 
   React.useLayoutEffect(() => {
     if (!root) return undefined;
-    const pill = document.createElement('span');
-    pill.className = 'settings-nav-pill';
-    pill.setAttribute('aria-hidden', 'true');
-    pill.setAttribute('data-hidden', '');
-    root.prepend(pill);
+    const current = createSlidingPill(root, 'settings-nav-pill');
+    pill.current = current;
     root.setAttribute('data-settings-nav-pill', '');
-    const driver = new SpringDriver({ spring: tokenSpring('glide'), onUpdate: value => { pill.style.translate = `0 ${value}px`; } });
-    state.current = { pill, driver, visible: false };
     // A group opening or closing moves the items under the pill; it keeps up.
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => place(root, false));
     observer?.observe(root);
     return () => {
       observer?.disconnect();
-      driver.stop();
-      pill.remove();
+      current.dispose();
       root.removeAttribute('data-settings-nav-pill');
-      state.current = { pill: null, driver: null, visible: false };
+      pill.current = null;
     };
   }, [root, place]);
 

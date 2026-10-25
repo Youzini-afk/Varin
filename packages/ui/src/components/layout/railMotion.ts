@@ -1,6 +1,6 @@
 import React from 'react';
 import { documentMotionLevel } from '@/lib/motion/preference';
-import { SpringDriver, tokenSpring } from '@/lib/motion/spring';
+import { boxWithin, createSlidingPill, placeInstantly, type SlidingPill } from '@/lib/motion/slidingPill';
 
 const BAR_HEIGHT = 16;
 
@@ -13,45 +13,29 @@ const BAR_HEIGHT = 16;
  * button to the new place.
  */
 export function useRailIndicator(nav: React.RefObject<HTMLElement | null>, activeId: string | null, layoutKey: string): void {
-  const state = React.useRef<{ bar: HTMLElement | null; driver: SpringDriver | null; visible: boolean }>({ bar: null, driver: null, visible: false });
+  const bar = React.useRef<SlidingPill | null>(null);
 
   React.useLayoutEffect(() => () => {
-    state.current.driver?.stop();
-    state.current.bar?.remove();
-    state.current = { bar: null, driver: null, visible: false };
+    bar.current?.dispose();
+    bar.current = null;
   }, []);
 
   React.useLayoutEffect(() => {
     const root = nav.current;
     if (!root) return;
-    const current = state.current;
-    if (!current.bar || !root.contains(current.bar)) {
-      const bar = document.createElement('span');
-      bar.className = 'rail-indicator';
-      bar.setAttribute('aria-hidden', 'true');
-      bar.setAttribute('data-hidden', '');
-      root.prepend(bar);
-      current.bar = bar;
-      current.driver = new SpringDriver({ spring: tokenSpring('glide'), onUpdate: value => { bar.style.translate = `0 ${value}px`; } });
-      current.visible = false;
+    if (!bar.current || !root.contains(bar.current.element)) {
+      bar.current?.dispose();
+      bar.current = createSlidingPill(root, 'rail-indicator');
     }
-    const bar = current.bar;
-    const driver = current.driver!;
     const button = activeId
       ? [...root.querySelectorAll<HTMLElement>('[data-rail-surface]')].find(candidate => candidate.getAttribute('data-rail-surface') === activeId)
       : undefined;
     if (!button) {
-      bar.setAttribute('data-hidden', '');
-      current.visible = false;
+      bar.current.hide();
       return;
     }
-    const frame = root.getBoundingClientRect();
-    const rect = button.getBoundingClientRect();
-    const y = rect.top - frame.top - root.clientTop + root.scrollTop + (rect.height - BAR_HEIGHT) / 2;
-    if (!current.visible || documentMotionLevel() !== 'full') driver.jump(y);
-    else driver.to(y);
-    bar.removeAttribute('data-hidden');
-    current.visible = true;
+    const box = boxWithin(button, root);
+    bar.current.moveTo({ y: box.top + (box.height - BAR_HEIGHT) / 2 }, true);
   }, [nav, activeId, layoutKey]);
 }
 
@@ -122,15 +106,13 @@ export function useSlidingUnderline(underline: React.RefObject<HTMLElement | nul
     const place = (animate: boolean) => {
       const tab = row.querySelector<HTMLElement>(':scope > [aria-pressed="true"], :scope > [aria-selected="true"]');
       if (!tab) { line.setAttribute('data-hidden', ''); return; }
-      const glide = animate && placed.current && documentMotionLevel() === 'full';
-      if (!glide) line.setAttribute('data-placing', '');
-      line.style.translate = `${tab.offsetLeft}px 0`;
-      line.style.width = `${tab.offsetWidth}px`;
-      line.removeAttribute('data-hidden');
-      if (!glide) {
-        void line.offsetWidth;
-        line.removeAttribute('data-placing');
-      }
+      const apply = () => {
+        line.style.translate = `${tab.offsetLeft}px 0`;
+        line.style.width = `${tab.offsetWidth}px`;
+        line.removeAttribute('data-hidden');
+      };
+      if (animate && placed.current && documentMotionLevel() === 'full') apply();
+      else placeInstantly(line, apply);
       placed.current = true;
     };
     place(true);

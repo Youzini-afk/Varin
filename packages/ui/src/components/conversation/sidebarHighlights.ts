@@ -1,20 +1,10 @@
 import React from 'react';
 import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
 import { documentMotionLevel } from '@/lib/motion/preference';
+import { boxWithin, placeInstantly, type Box } from '@/lib/motion/slidingPill';
 import { springAtRest, stepSpring, tokenSpring, type SpringState } from '@/lib/motion/spring';
 
 /** Highlights for the sidebar list (see FlipList.tsx for its rows). */
-
-type Box = { top: number; left: number; width: number; height: number };
-const boxIn = (element: HTMLElement, root: HTMLElement): Box => {
-  const rect = element.getBoundingClientRect();
-  const frame = root.getBoundingClientRect();
-  return {
-    top: rect.top - frame.top - root.clientTop + root.scrollTop,
-    left: rect.left - frame.left - root.clientLeft + root.scrollLeft,
-    width: rect.width, height: rect.height,
-  };
-};
 const rowFor = (root: HTMLElement, id: string | null): HTMLElement | null => (
   id ? [...root.querySelectorAll<HTMLElement>('[data-sidebar-row]')].find(row => row.getAttribute('data-sidebar-row') === id) ?? null : null
 );
@@ -73,7 +63,7 @@ export function useSelectionGlide(container: React.RefObject<HTMLElement | null>
     if (!arriving || documentMotionLevel() !== 'full' || typeof requestAnimationFrame !== 'function') { land(); return; }
     const from = current.springs
       ? null
-      : leaving ? boxIn(leaving, root) : null;
+      : leaving ? boxWithin(leaving, root) : null;
     if (!current.springs && !from) { land(); return; }
     if (from) {
       current.springs = {
@@ -103,7 +93,7 @@ export function useSelectionGlide(container: React.RefObject<HTMLElement | null>
       if (!row?.isConnected || !current.springs || !current.ghost) { land(); return; }
       const seconds = current.last === null ? 1 / 60 : (time - current.last) / 1000;
       current.last = time;
-      const goal = boxIn(row, root);
+      const goal = boxWithin(row, root);
       let resting = true;
       for (const key of ['top', 'left', 'width', 'height'] as const) {
         const next = stepSpring(current.springs[key], goal[key], spring, seconds);
@@ -140,7 +130,7 @@ export function useHoverPill(container: React.RefObject<HTMLElement | null>): vo
       if (event.pointerType === 'touch') return;
       const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-sidebar-row]') : null;
       if (!target || !root.contains(target) || target.hasAttribute('data-current') || target.closest('[data-flip-ghost]')) { hide(); return; }
-      const box = boxIn(target, root);
+      const box = boxWithin(target, root);
       const rect = target.getBoundingClientRect();
       const lean = (value: number, size: number, reach: number) => Math.max(-1, Math.min(1, (value / (size / 2)))) * reach;
       const x = lean(event.clientX - (rect.left + rect.width / 2), rect.width, 2);
@@ -154,13 +144,9 @@ export function useHoverPill(container: React.RefObject<HTMLElement | null>): vo
         pill.style.setProperty('--hover-height', `${box.height}px`);
         pill.removeAttribute('data-hidden');
       };
-      if (first) {
-        // The first row lights up in place; later ones are reached by sliding.
-        pill.setAttribute('data-placing', '');
-        apply();
-        void pill.offsetWidth;
-        pill.removeAttribute('data-placing');
-      } else apply();
+      // The first row lights up in place; later ones are reached by sliding.
+      if (first) placeInstantly(pill, apply);
+      else apply();
     };
     root.addEventListener('pointermove', place);
     root.addEventListener('pointerleave', hide);

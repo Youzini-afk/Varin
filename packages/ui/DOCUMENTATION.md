@@ -149,6 +149,7 @@ Under reduced motion there is no flight, departure movement or height glide.
 
 Popovers share rules in `styles/motion.css`:
 
+- One highlight per list (the rail bar, the settings pill, menu and sidebar highlights, tab underlines) shares `lib/motion/slidingPill.ts`: `createSlidingPill` (a spring-driven indicator that jumps when first placed or below full motion, and carries its velocity when retargeted), `boxWithin` (an item's box in its list's scrolled coordinates) and `placeInstantly` (one placement under `data-placing`, which each highlight's CSS makes instant).
 - `motion-popover` (menus, context menus, selects, tooltips) grows from the trigger. It opens on snap from 96% and 5px toward the trigger (Base UI's `data-side`), and leaves on the exit tween. Menu items arrive 16ms apart. A popover that takes over from a neighbour (`data-instant` of `delay`, `group` or `trigger-change`) appears in place; dismissing still plays the exit. `motion-instant` opts a popover out.
 - `MenuHighlight` is rendered first in every dropdown, submenu and context menu. It draws the highlight once and slides it between items for the pointer and the arrow keys; the menu (`data-menu-highlight`) stops items painting their own. A checked item keeps its selection colour.
 - `motion-dialog` and `motion-dialog-backdrop` settle a dialog from 98.5% on glide over a fading backdrop.

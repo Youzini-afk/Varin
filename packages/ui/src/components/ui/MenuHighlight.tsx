@@ -1,4 +1,5 @@
 import React from 'react';
+import { boxWithin, placeInstantly } from '@/lib/motion/slidingPill';
 
 /**
  * The highlight of a Base UI menu, drawn once and moved between items on the
@@ -24,20 +25,18 @@ export function MenuHighlight() {
         visible = false;
         return;
       }
-      const box = menu.getBoundingClientRect();
-      const rect = item.getBoundingClientRect();
+      const box = boxWithin(item, menu);
+      const apply = () => {
+        node.style.setProperty('--highlight-x', `${box.left}px`);
+        node.style.setProperty('--highlight-y', `${box.top}px`);
+        node.style.setProperty('--highlight-width', `${box.width}px`);
+        node.style.setProperty('--highlight-height', `${box.height}px`);
+        node.toggleAttribute('data-destructive', item.dataset.variant === 'destructive');
+        node.removeAttribute('data-hidden');
+      };
       // The first highlight appears in place; later ones slide from the last.
-      if (!visible) node.setAttribute('data-placing', '');
-      node.style.setProperty('--highlight-x', `${rect.left - box.left - menu.clientLeft + menu.scrollLeft}px`);
-      node.style.setProperty('--highlight-y', `${rect.top - box.top - menu.clientTop + menu.scrollTop}px`);
-      node.style.setProperty('--highlight-width', `${rect.width}px`);
-      node.style.setProperty('--highlight-height', `${rect.height}px`);
-      node.toggleAttribute('data-destructive', item.dataset.variant === 'destructive');
-      node.removeAttribute('data-hidden');
-      if (!visible) {
-        void node.offsetWidth;
-        node.removeAttribute('data-placing');
-      }
+      if (visible) apply();
+      else placeInstantly(node, apply);
       visible = true;
     };
     const observer = new MutationObserver(place);

@@ -66,9 +66,16 @@
 ### 落地形式
 
 - `packages/ui/src/lib/motion/tokens.ts`：弹簧参数、采样器、`linear()` 生成；导出给 motion 的 transition 预设。
-- `packages/ui/src/styles/motion.css`：`--ease-*`、`--dur-*`、`--t-exit`、`--t-fade`，构建时写死生成结果。
-- 根部 `MotionConfig reducedMotion="user"`，默认 transition 为 glide。
-- 基础件：`<Presence>`（统一进退场）、`<SlidingPill>`（选中 / 悬停胶囊、导轨指示条、标签页底色）、`<SwapText>`（同格换字）、`useSpringValue`（宽度、滚动）、`useTailFlip`（时间线内的高度变化）。
+- `packages/ui/src/styles/motion.css`：`--motion-ease-*`、`--motion-dur-*`，由 `tokens.ts` 生成后写入（`tokens.test.ts` 保持同步）；Tailwind 的默认过渡与 `ease-*` 绑定到这些令牌（`design-system.css`）。
+- 根部 `MotionProvider`：写入 `:root[data-motion]` 与 `data-page-hidden`，`MotionConfig` 默认 transition 为 glide，简化 / 关闭级别下跳过位移与布局动画。
+- 基础件（实际落地）：
+  - `SwapText` / `SwapIcon`：同格换字与换图标。
+  - `Departure`：只用于绘制的离场副本。
+  - `FlipList`：列表的进出与重排。
+  - `lib/motion/slidingPill.ts`：整列只画一个高亮，包括导轨指示条、设置导航、菜单与侧栏高亮、标签下划线（`createSlidingPill`、`boxWithin`、`placeInstantly`）。
+  - `SpringDriver`：逐帧弹簧，用于滚动跟随、外框高度、指示条。
+  - `lib/motion/loops.ts`：不可见时暂停循环。
+  - 进退场直接用 motion 的 `AnimatePresence`，不另包一层；时间线内的高度变化见 3.8。
 
 ## 3. 编排
 
