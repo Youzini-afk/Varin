@@ -1,0 +1,52 @@
+diff --git a/react.js b/react.js
+index a0f962c..52fd304 100644
+--- a/react.js
++++ b/react.js
+@@ -5735,6 +5735,12 @@ var pendingWebShrinkFrame;
+ function cancelWebShrinkMeasurement(state) {
+   pendingWebShrinkMeasurements.delete(state);
+ }
++// Varin: a list marked `data-legend-immediate-shrink` applies a shrinking item's size in the same
++// frame, so the rows below follow a collapsing row instead of trailing it by a frame.
++function shrinksImmediately(ref) {
++  const element = ref.current;
++  return !!(element && typeof element.closest === "function" && element.closest("[data-legend-immediate-shrink]"));
++}
+ function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
+   pendingWebShrinkMeasurements.set(state, confirmMeasurement);
+   if (pendingWebShrinkFrame === void 0) {
+@@ -5768,7 +5774,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize && !shrinksImmediately(ref);
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;
+diff --git a/react.mjs b/react.mjs
+index 9338287..d52c86c 100644
+--- a/react.mjs
++++ b/react.mjs
+@@ -5714,6 +5714,12 @@ var pendingWebShrinkFrame;
+ function cancelWebShrinkMeasurement(state) {
+   pendingWebShrinkMeasurements.delete(state);
+ }
++// Varin: a list marked `data-legend-immediate-shrink` applies a shrinking item's size in the same
++// frame, so the rows below follow a collapsing row instead of trailing it by a frame.
++function shrinksImmediately(ref) {
++  const element = ref.current;
++  return !!(element && typeof element.closest === "function" && element.closest("[data-legend-immediate-shrink]"));
++}
+ function scheduleWebShrinkMeasurement(state, confirmMeasurement) {
+   pendingWebShrinkMeasurements.set(state, confirmMeasurement);
+   if (pendingWebShrinkFrame === void 0) {
+@@ -5747,7 +5753,7 @@ function processContainerLayout({ containerId, ctx, rectangle, ref, state }) {
+       size: layout
+     });
+   };
+-  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize;
++  const shouldDeferWebShrinkLayoutUpdate = !isInMVCPActiveMode(listState) && previousSize !== void 0 && size + 1 < previousSize && !shrinksImmediately(ref);
+   if (shouldDeferWebShrinkLayoutUpdate) {
+     scheduleWebShrinkMeasurement(state, () => {
+       var _a4;

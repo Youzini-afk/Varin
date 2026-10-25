@@ -403,6 +403,7 @@
     "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch",
     "bash-language-server@5.8.1": "bun-patches/bash-language-server@5.8.1.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
+    "@legendapp/list@3.6.0": "bun-patches/@legendapp%2Flist@3.6.0.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "sprintf-js@1.1.3": "bun-patches/sprintf-js@1.1.3.patch",
   },

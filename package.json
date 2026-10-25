@@ -199,6 +199,7 @@
     "vitest": "^5.0.5"
   },
   "patchedDependencies": {
+    "@legendapp/list@3.6.0": "bun-patches/@legendapp%2Flist@3.6.0.patch",
     "ghostty-web@0.4.0": "bun-patches/ghostty-web+0.4.0.patch",
     "braces@3.0.3": "bun-patches/braces@3.0.3.patch",
     "http-cache-semantics@4.2.0": "bun-patches/http-cache-semantics@4.2.0.patch",

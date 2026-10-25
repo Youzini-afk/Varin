@@ -133,7 +133,7 @@ Dispatch and turn end:
 - A task message being sent settles in once (`ChatAgentMessageBubble` `live`). Its preview and body swap on the glide curve.
 - A turn footer that saw its turn run fades its actions in 24ms apart and rolls its usage numbers into place (`CountUp`). Footers from history are static.
 
-Disclosures in the timeline open and close on the glide curve. Measured after paint in the motion lab (`layout.cjs`), growth moves the row below in the same frame. While a row closes, the row below trails by one frame's worth of height: LegendList defers a shrinking item's size by one animation frame outside its scroll-anchoring mode. Rows never overlap.
+Disclosures in the timeline open and close on the glide curve, and the row below follows in the same painted frame both ways (`layout.cjs`, measured after paint). Growth always did. Shrinking needs a patch: LegendList on the web defers a smaller item size by one animation frame outside its scroll-anchoring mode, so the row below trailed a closing row by a frame. `bun-patches/@legendapp%2Flist@3.6.0.patch` skips that deferral inside a list marked `data-legend-immediate-shrink`, which `ChatTimeline` sets. Re-check the patch when upgrading LegendList.
 
 Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it.
 

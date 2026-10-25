@@ -1,6 +1,6 @@
 // Height changes inside the virtual list: while a process row opens and closes,
 // does the row below move in the same frame (no overlap, no gap jumps)?
-// This is the LegendList validation the design asks for before tail FLIP.
+// This is the LegendList validation the design asks for (§3.8), growing and shrinking.
 const { openLab, assert } = require('./lab.cjs');
 
 (async () => {
@@ -39,11 +39,9 @@ const { openLab, assert } = require('./lab.cjs');
     console.log(JSON.stringify({ label, frames: frames.length, moving, heightFrom: Math.round(heights[0]), heightTo: Math.round(heights.at(-1)), gapMin: Math.min(...gaps).toFixed(1), gapMax: Math.max(...gaps).toFixed(1), gapOff: off }));
     assert(moving >= 4, `${label}: the height animates over several frames (${moving})`, failures);
     assert(Math.min(...gaps) >= base - 1.5, `${label}: rows never overlap (smallest gap ${Math.min(...gaps).toFixed(1)}px)`, failures);
-    if (label === 'open') assert(off <= 1, `${label}: growth moves the row below in the same painted frame (${off} frames off)`, failures);
-    // Known: LegendList defers a shrinking item's size by one animation frame
-    // outside its scroll-anchoring mode, so while a row closes the row below
-    // trails by one frame's worth of height. Reported, not failed.
-    else console.log(`note  ${label}: the row below trails a shrinking row by up to ${(Math.max(...gaps) - base).toFixed(1)}px for ${off} frames`);
+    // Shrinking used to trail by a frame: LegendList defers a smaller size outside its anchoring mode
+    // unless the list opts out (`data-legend-immediate-shrink`, bun-patches).
+    assert(off <= 1, `${label}: the row below follows in the same painted frame (${off} frames off, largest gap ${(Math.max(...gaps) - base).toFixed(1)}px)`, failures);
   };
   report('open', await sample());
   report('close', await sample());

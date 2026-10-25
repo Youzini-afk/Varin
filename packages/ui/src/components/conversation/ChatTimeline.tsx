@@ -985,6 +985,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         }}
         recycleItems={false}
         renderItem={renderItem}
+        // Patched LegendList (bun-patches): a collapsing row's smaller size applies in the same frame,
+        // so the rows below follow it instead of trailing a frame behind.
+        data-legend-immediate-shrink="true"
         data-conversation-timeline="true"
         tabIndex={0}
       />
