@@ -55,6 +55,7 @@ import { NotificationListener } from './notification-listener.js';
 import { routeThreadWindow, runtimeTargetKey, threadMiniChatUrl, threadWindowKey as buildThreadWindowKey } from './thread-window-target.js';
 import { resolveStartupUrlProbePlan, shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.js';
 import { createStartupSplashHtml } from './startup-splash.js';
+import { createQuitLifecycle } from './quit-lifecycle.js';
 import { readLocalHostMode, writeLocalHostMode, restartDesktopNormally, type LocalHostModeContext } from './local-host-mode.js';
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.js';
 import { assertUpdaterCapability } from './updater-capability.js';
@@ -558,13 +559,15 @@ const prepareForQuit = async ({ installingUpdate = false }: { installingUpdate?:
   await shutdownBackgroundServices();
 };
 
-const performConfirmedQuit = async () => {
-  if (state.quitInProgress) return;
-  state.quitInProgress = true;
-
-  await prepareForQuit();
-  app.exit(0);
-};
+const quitLifecycle = createQuitLifecycle({
+  app, state, prepare: prepareForQuit,
+  requestConfirmation: () => { void requestQuitWithConfirmation(); },
+  reportError: error => log.error('[electron] quit shutdown failed:', error),
+});
+const performConfirmedQuit = () => quitLifecycle.confirm();
+app.on('web-contents-created', (_event, contents) => {
+  contents.on('will-prevent-unload', () => quitLifecycle.cancel());
+});
 
 // Hard-stop signals (`Ctrl+C` on `electron:dev`, an external `kill`/SIGTERM,
 // terminal close) bypass the normal app-quit flow — which would orphan the
@@ -596,16 +599,15 @@ const requestQuitWhenNoProductWindows = () => {
 };
 
 const requestQuitWithConfirmation = async () => {
+  if (state.quitInProgress || state.quitConfirmationPending) return;
   await refreshQuitRiskFlags();
+  if (state.quitInProgress || state.quitConfirmationPending) return;
 
   if (!shouldRequireQuitConfirmation()) {
     void performConfirmedQuit();
     return;
   }
 
-  if (state.quitConfirmationPending) {
-    return;
-  }
   state.quitConfirmationPending = true;
 
   const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
@@ -5301,27 +5303,6 @@ app.on('window-all-closed', () => {
     } else {
       void requestQuitWithConfirmation();
     }
-  }
-});
-
-app.on('before-quit', (event) => {
-  if (state.installingUpdate) {
-    state.quitRequested = true;
-    return;
-  }
-
-  if (!state.quitConfirmed) {
-    event.preventDefault();
-    state.quitRequested = false;
-    void requestQuitWithConfirmation();
-    return;
-  }
-
-  state.quitRequested = true;
-
-  if (!state.backgroundShutdownComplete) {
-    event.preventDefault();
-    void performConfirmedQuit();
   }
 });
 

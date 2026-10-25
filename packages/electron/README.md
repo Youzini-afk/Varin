@@ -54,6 +54,12 @@ palette, so the application loading animation starts from the same composition.
 
 The TypeScript sources are bundled into `dist-bundle/main.mjs` and `dist-bundle/preload.mjs` by `scripts/bundle-main.mjs`. The `files` config in `package.json` ships only those two bundled entries — no `.ts` source, test, or loader reaches the packaged app.
 
+Ordinary app/tray quit confirms background-work risk, then lets Electron close its windows and run
+`beforeunload` while the embedded Host is still available. `quit-lifecycle.ts` drains services at
+`will-quit`, after renderer clients have disconnected, and then exits. A page that blocks unloading
+cancels the pending quit; tray state and the Host remain available for another attempt. Update install
+retains the updater's existing quit/install sequence.
+
 ## Desktop IPC contract
 
 All `desktop_*` commands, the preload bootstrap payload, desktop events, and shared DTOs (hosts, SSH, updates, capture, dialog) are typed in a single framework-neutral contract at `packages/application-client/src/desktop.ts`, exposed to the native bundle through the focused `@varin/application-client/desktop` subpath.
