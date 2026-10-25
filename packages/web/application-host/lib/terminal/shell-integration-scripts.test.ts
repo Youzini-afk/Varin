@@ -9,6 +9,8 @@ import {
   shellIntegrationFamily,
   shellIntegrationLaunch,
 } from "./shell-integration-scripts.js";
+import { createShellIntegrationParser } from "./shell-integration.js";
+import { sanitizeTerminalHistoryChunk } from "./history.js";
 
 const powershellPath = process.env.SystemRoot
   ? `${process.env.SystemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`
@@ -16,6 +18,8 @@ const powershellPath = process.env.SystemRoot
 const zshCandidate = process.env.VARIN_TEST_ZSH ?? "zsh";
 const hasZsh = !spawnSync(zshCandidate, ["--version"], { encoding: "utf8" }).error;
 const hasPowerShell = process.platform === "win32" && existsSync(powershellPath);
+const pwshCandidate = process.env.VARIN_TEST_PWSH ?? (process.platform === "win32" ? "pwsh.exe" : "pwsh");
+const hasPwsh = spawnSync(pwshCandidate, ["--version"], { encoding: "utf8", windowsHide: true }).status === 0;
 const bashPath = [
   process.env.VARIN_TERMINAL_SHELL,
   "C:/Program Files/Git/bin/bash.exe",
@@ -24,6 +28,32 @@ const bashPath = [
 ].find((candidate) => typeof candidate === "string" && existsSync(candidate));
 
 describe("shell integration launch", () => {
+  for (const shell of [
+    { name: "Windows PowerShell 5.1", executable: powershellPath, available: hasPowerShell },
+    { name: "PowerShell 7", executable: pwshCandidate, available: hasPwsh },
+  ]) {
+    it.skipIf(!shell.available)(`emits real control bytes and replay-safe command facts in ${shell.name}`, () => {
+      const integrationId = "terminal-control-probe:1";
+      const launch = shellIntegrationLaunch(shell.executable, [], false, integrationId)!;
+      const script = launch.args.at(-1)!;
+      const command = 'Write-Output "shell;probe"';
+      const env = { ...process.env, ...launch.env };
+      delete env.VARIN_SHELL_INTEGRATION;
+      const result = spawnSync(shell.executable, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", `
+        . '${script.replace(/'/g, "''")}'
+        __VarinEmit ('E;' + (__VarinEscape '${command}'))
+        __VarinEmit 'C'
+        __VarinEmit 'D;0'
+      `], { env, encoding: "utf8", windowsHide: true });
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.startsWith(`\u001b]633;pi;${integrationId};E;`)).toBe(true);
+      const parser = createShellIntegrationParser({ terminalId: "terminal-control-probe" });
+      parser.reset(1);
+      expect(parser.consume(result.stdout)).toMatchObject([{ command, exitCode: 0, integration: "osc-633" }]);
+      expect(sanitizeTerminalHistoryChunk("", result.stdout)).toEqual({ visible: "", pending: "" });
+    });
+  }
+
   it("injects an init file for bash and a script file for PowerShell", () => {
     const bash = shellIntegrationLaunch("/usr/bin/bash", ["-l"], true, "user-bash:1");
     expect(bash?.args).toEqual(["-l", "--init-file", expect.stringContaining("bash-")]);

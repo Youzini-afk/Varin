@@ -103,7 +103,8 @@ function global:__VarinEscape([string]$Value) {
 }
 
 function global:__VarinEmit([string]$Payload) {
-  [Console]::Write(("\`e]633;pi;" + $env:VARIN_SHELL_INTEGRATION_ID + ";" + $Payload + "\`a"))
+  # Windows PowerShell 5.1 treats backtick-e as the literal letter e.
+  [Console]::Write(([string][char]0x1b + "]633;pi;" + $env:VARIN_SHELL_INTEGRATION_ID + ";" + $Payload + [char]0x07))
 }
 
 $__VarinOriginalPrompt = $function:prompt
