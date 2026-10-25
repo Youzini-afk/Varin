@@ -171,14 +171,17 @@ it('initial context preserves pinned AGENTS and request roles while current pers
   await expect.poll(async () => (await reopened.api.run(forkRun.run_id)).state).toBe('completed');
   expect(JSON.stringify(system(f.requests.at(-1)!.body))).toContain('NEW NOTE AFTER ACCEPTANCE');
   expect(JSON.stringify(system(f.requests.at(-1)!.body))).toContain('CHANGED GLOBAL PROFILE');
-  const compactedPrompt = JSON.stringify(system(f.requests.at(-1)!.body));
+  const compactedInstruction = { role: 'system', content: checkpoint.proposal.effective_system_prompt };
+  expect(messages(f.requests.at(-1)!.body)[0]).toEqual(compactedInstruction);
   expect(JSON.stringify(f.requests.at(-1)!.body)).not.toContain('GENERATED CONTINUATION SUMMARY');
   const latest = await reopened.api.snapshot(identity);
   const finalRun = await reopened.api.submit({ ...identity, key: 'after-summary-input', expectedHead: latest.historyPage.head, text: 'AFTER SUMMARY USER MESSAGE', model });
   await expect.poll(async () => (await reopened.api.run(finalRun.run_id)).state).toBe('completed');
   expect(JSON.stringify(system(f.requests.at(-1)!.body))).toContain('NEW NOTE AFTER ACCEPTANCE');
   expect(JSON.stringify(system(f.requests.at(-1)!.body))).toContain('CHANGED GLOBAL PROFILE');
-  expect(JSON.stringify(system(f.requests.at(-1)!.body))).toBe(compactedPrompt);
+  // The checkpoint remains the leading system instruction. A sourced Run may also
+  // publish execution Host facts that the source-free fork does not need.
+  expect(messages(f.requests.at(-1)!.body)[0]).toEqual(compactedInstruction);
   expect(JSON.stringify(messages(f.requests.at(-1)!.body).filter(value => value.role !== 'system'))).toContain('GENERATED CONTINUATION SUMMARY');
   expect((await reopened.api.snapshot(identity)).history.slice(0, before.history.length)).toEqual(before.history);
   expect(reopened.launchErrors).toEqual([]);

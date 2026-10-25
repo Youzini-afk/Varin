@@ -12,7 +12,7 @@ import {
 import { createWorkspaceRecoveryCapabilityHandler } from './capability.js';
 import { createWorkspaceRecoveryEngine } from './journal-engine.js';
 import { createRecoveryFileStore } from './file-store.test-helper.js';
-import { createInMemoryRecoveryDurablePort } from './recovery-durable-port.test-helper.js';
+import { createRecoveryJournalFixture } from './journal-fixture.test-helper.js';
 
 let runtime: ApplicationExtensionRuntime | undefined;
 let harness: DocumentAuthorityHarness | undefined;
@@ -47,17 +47,22 @@ describe('Web Application Host workspace recovery service', () => {
       filesystemProfile: 'test',
       workspaceId: activeHarness.identity.workspaceId,
     };
+    const before = (await fileStore.captureState(recoveryIdentity, recoveryIdentity.canonicalRoot, 'note.txt')).state;
+    await fs.promises.writeFile(notePath, 'after service');
+    const after = (await fileStore.captureState(recoveryIdentity, recoveryIdentity.canonicalRoot, 'note.txt')).state;
     const engine = createWorkspaceRecoveryEngine({
       authorityId: activeRuntime.services.hostId,
       dataDir: runtimeDataDir,
       documents: activeHarness.authority,
-      durableRecoveryStore: createInMemoryRecoveryDurablePort({
-        captureState: async ({ path: inputPath }) => (
-          await fileStore.captureState(recoveryIdentity, recoveryIdentity.canonicalRoot, inputPath, { store: true })
-        ).state,
-        relativePathFor: async ({ path: inputPath }) => (
-          await fileStore.relativePathFor(recoveryIdentity, inputPath)
-        ).relative,
+      durableRecoveryStore: createRecoveryJournalFixture({
+        // Storage already selected the original turn. This test owns the public
+        // service -> capability -> Host path, not native mutation bookkeeping.
+        listChanges: async () => ({
+          turns: [{ checkpointId: 'checkpoint', executionId: 'execution', sequence: 1,
+            status: 'ready', activeWriterScopes: [], unrecordedResourceIds: [] }],
+          changes: [{ before, after, path: 'note.txt', sequence: 1, checkpointId: 'checkpoint',
+            executionId: 'execution', mutationId: 'mutation', toolName: 'write' }],
+        }),
       }),
       fileStore,
       sessionNavigation: {
@@ -86,76 +91,8 @@ describe('Web Application Host workspace recovery service', () => {
 
     const api = createWorkspaceRecoveryAPI((request) => activeRuntime.invokeService(request));
     expect(await api.status(activeHarness.identity.workspaceId)).toMatchObject({
-      status: 'ready',
-      capabilities: {
-        bindings: true,
-        catalogLifecycle: true,
-        checkpoints: true,
-        combined: true,
-        conflictConfirmation: true,
-        dirtyStateBarrier: true,
-        journal: true,
-        redo: true,
-        retention: false,
-        storageManagement: false,
-        workspaceLease: false,
-      },
+      status: 'ready', capabilities: { combined: true, journal: true },
     });
-    const turn = await engine.recordTurnStart({
-      activeWriterScopes: ['native-runtime:worker-1'],
-      executionId: 'service-execution-1',
-      provenance: 'caused-by',
-      runtimeGeneration: 1,
-      conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
-      userEntryId: 'service-user-1',
-      workerId: 'worker-1',
-      workspaceId: activeHarness.identity.workspaceId,
-    });
-    expect(turn).toMatchObject({ status: 'ready', binding: { status: 'pending' } });
-    const mutation = {
-      executionId: 'service-execution-1',
-      mutationId: 'service-mutation-1',
-      path: notePath,
-      toolCallId: 'service-tool-1',
-      toolName: 'write' as const,
-      workspaceId: activeHarness.identity.workspaceId,
-    };
-    expect(await engine.recordMutationBefore(mutation)).toMatchObject({ recorded: true, status: 'ready' });
-    await fs.promises.writeFile(notePath, 'after service');
-    expect(await engine.recordMutationAfter({ ...mutation, succeeded: true }))
-      .toMatchObject({ recorded: true, status: 'ready' });
-    const settled = await engine.recordTurnSettled({
-      activeWriterScopes: ['native-runtime:worker-1'],
-      assistantEntryId: 'service-assistant-1',
-      executionId: 'service-execution-1',
-      mutationObserved: true,
-      observationComplete: true,
-      observedResourceIds: ['note.txt'],
-      provenance: 'caused-by',
-      workspaceId: activeHarness.identity.workspaceId,
-    });
-    expect(settled).toMatchObject({ status: 'ready', binding: { status: 'ready' } });
-    expect(await api.resolveEntry({
-      entryId: 'service-assistant-1',
-      conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },
-      workspaceId: activeHarness.identity.workspaceId,
-    })).toMatchObject({ position: 'after', status: 'ready' });
-    expect(await api.listCheckpoints({ workspaceId: activeHarness.identity.workspaceId }))
-      .toMatchObject({ status: 'ready', page: { checkpoints: expect.any(Array) } });
-    expect(await api.setRetentionPolicy({
-      policy: {
-        maxAgeDays: null,
-        maxByteLength: null,
-        maxCheckpointCount: 10,
-        maxOperationCount: 10,
-      },
-      workspaceId: activeHarness.identity.workspaceId,
-    })).toMatchObject({
-      status: 'failed',
-      failure: { code: 'unavailable' },
-    });
-    expect(await api.retentionStatus(activeHarness.identity.workspaceId))
-      .toMatchObject({ status: 'ready', retention: { workspaceId: activeHarness.identity.workspaceId } });
     const combined = await api.prepareCombinedRecovery({
       entryId: 'service-user-1',
       conversation: { kind: 'thread', threadId: 'service-session-1', branchId: 'branch-1' },

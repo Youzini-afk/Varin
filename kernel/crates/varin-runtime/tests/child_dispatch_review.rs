@@ -804,6 +804,7 @@ fn unaccepted_dependency_cleanup_preserves_the_original_mcp_cut_across_source_mo
                     }
                 },
             );
+            let original_source = f.launch.source.clone().unwrap();
             if policy {
                 f.context = f.admit_policy_call(ToolCall {
                     call_id: "dispatch-call".into(),
@@ -877,10 +878,11 @@ fn unaccepted_dependency_cleanup_preserves_the_original_mcp_cut_across_source_mo
             );
             assert_eq!(dependency.execution_epoch, original.epoch);
             assert_ne!(dependency.execution_epoch, f.db.epoch());
-            assert_eq!(
-                dependency.source_pin.is_some(),
-                mode == SourceMode::FixedBranch
-            );
+            // This is the original source's cleanup obligation, not proof that a
+            // physical pin exists. Its handoff receipt owns the retained pin.
+            let source_cleanup = dependency.source_pin.as_ref().unwrap();
+            assert_eq!(source_cleanup.source, original_source);
+            assert_eq!(source_cleanup.pin_id, format!("child-pin:{}", original.id));
             assert_eq!(dependency.mcp_binding.as_ref(), Some(&expected));
             assert!(f.db.child_tasks().unwrap().is_empty());
             // The short release acknowledgement must not reload the full immutable input body.

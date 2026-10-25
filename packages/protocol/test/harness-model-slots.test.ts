@@ -104,8 +104,8 @@ describe('Runtime tool selections', () => {
       model: { providerId: "p", modelId: "m" }, tools: ["file_write"], workFocus: ["code"] });
     assert.throws(() => parseHarnessAgent({ ...stored, worktree: "copy" }), /Invalid agent definition/);
     // Raw stored settings may still contain the retired key, outside the current input type.
-    const stored = { models: { worker: { agent: { worktree: "shared", instructions: "Own" } } } } as unknown as Parameters<typeof mergeHarnessSettings>[0];
-    const settings = mergeHarnessSettings(stored, {});
+    const storedSettings = { models: { worker: { agent: { worktree: "shared", instructions: "Own" } } } } as unknown as Parameters<typeof mergeHarnessSettings>[0];
+    const settings = mergeHarnessSettings(storedSettings, {});
     assert.deepEqual(settings.models.worker?.agent, { instructions: "Own" });
   });
 });

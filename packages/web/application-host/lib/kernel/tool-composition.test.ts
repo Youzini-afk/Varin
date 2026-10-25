@@ -358,7 +358,7 @@ it.each(['dispatch', 'user_continuation'] as const)('%s binds only its admitted 
   if (trigger === 'dispatch') expect(f.releaseChildHandoff).toHaveBeenCalledExactlyOnceWith('parent-run', 'parent-dispatch');
   else expect(f.releaseChildHandoff).not.toHaveBeenCalled();
   expect(f.requests.filter(request => request.method === 'runtime.child.execution.for_run').every(request => (request.params as { runId: string }).runId === 'run')).toBe(true);
-  expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', branchId: 'branch', source: null, fixed: true, workFocus: 'code' }]);
+  expect(f.preparedScopes).toEqual([{ runId: 'run', threadId: 'thread', branchId: 'branch', source: null, fixed: true, workFocus: 'general' }]);
   const start = f.requests.find(request => request.method === 'runtime.run.start')!;
   expect((start.params.extensionBindings as LiveExtensionToolBinding[]).map(value => value.binding)).toEqual([extension.binding]);
   await f.publish('unselected@1', contribution('unselected', '1', released));
@@ -625,6 +625,7 @@ it('source start, saved rebind and successor continuation preserve ordinary and 
 it('ordinary service routing uses the admitted Run scope instead of a later active branch checkpoint', async () => {
   for (const projectId of [null, 'admitted-project']) {
     const f = setup();
+    f.launch.selection.agent = { profileId: 'researcher', name: 'Researcher', workFocus: 'research', tools: null };
     f.currentProject('later-project');
     f.admittedScope(
       projectId
@@ -633,7 +634,7 @@ it('ordinary service routing uses the admitted Run scope instead of a later acti
     );
     await f.runtime.startRun('run');
     expect(f.preparedScopes).toEqual([
-      { runId: 'run', threadId: 'thread', branchId: 'branch', source: null, workFocus: 'code', ...(projectId ? { projectId } : {}) },
+      { runId: 'run', threadId: 'thread', branchId: 'branch', source: null, workFocus: 'research', ...(projectId ? { projectId } : {}) },
     ]);
     expect(
       f.requests

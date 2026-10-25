@@ -74,6 +74,9 @@ env:
 jobs:
   container-contract:
     name: Verify container contract
+    # PR source checks already run these helpers in CI's test:tooling. Keep a
+    # direct gate for runs that can publish candidates (including manual/tags).
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     # Bot PR jobs share a background slot; main, release tags and manual builds stay parallel.
     concurrency:
@@ -93,7 +96,6 @@ jobs:
   verify-pr-image:
     name: Build and smoke PR ${{ matrix.variant }} image
     runs-on: ubuntu-latest
-    needs: [container-contract]
     if: ${{ github.event_name == 'pull_request' }}
     concurrency:
       group: ${{ github.event.pull_request.user.login == 'dependabot[bot]' && 'varin-dependabot-background' || format('varin-docker-pr-{0}-{1}', github.run_id, matrix.variant) }}

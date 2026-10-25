@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   WorkspaceCombinedRecoveryApplyInput,
   WorkspaceCombinedRecoveryPrepareInput,
-  WorkspaceRecoveryTurnSettledInput,
+  WorkspaceRecoveryTurnBinding,
 } from '@varin/extension-contract';
 import type { DocumentAuthorityOptions } from '../documents/authority.js';
 import {
@@ -16,6 +16,7 @@ import {
   type CreateWorkspaceRecoveryEngineOptions,
   type RecoverySessionNavigation,
   type WorkspaceRecoveryEngine,
+  type DurableRecoveryChangeSelection,
 } from './journal-engine.js';
 import { RecoveryPrimitiveError } from './errors.js';
 import { createManagedRecoveryCoordinator } from './managed-recovery-coordinator.js';
@@ -23,11 +24,16 @@ import { createManagedRecoveryService } from '../kernel/managed-recovery-service
 import type { RecoveryFileStore } from './journal-files.js';
 import { createRecoveryFileStore } from './file-store.test-helper.js';
 import {
-  createInMemoryRecoveryDurablePort,
-  type InMemoryRecoveryDurablePort,
-} from './recovery-durable-port.test-helper.js';
+  createRecoveryJournalFixture,
+  type RecoveryJournalFixture,
+} from './journal-fixture.test-helper.js';
 
-const harnesses = new Set<DocumentAuthorityHarness>();
+interface RecoveryHarness extends DocumentAuthorityHarness {
+  selection: DurableRecoveryChangeSelection;
+  binding: WorkspaceRecoveryTurnBinding | null;
+  fileStore: RecoveryFileStore;
+}
+const harnesses = new Set<RecoveryHarness>();
 
 type Ready<T> = Extract<T, { status: 'ready' }>;
 
@@ -63,26 +69,24 @@ type HarnessOptions = Partial<Omit<
 };
 
 const createHarness = async (options: HarnessOptions = {}): Promise<{
-  durable: InMemoryRecoveryDurablePort;
+  durable: RecoveryJournalFixture;
   engine: WorkspaceRecoveryEngine;
-  harness: DocumentAuthorityHarness;
+  harness: RecoveryHarness;
   navigation: RecoverySessionNavigation;
 }> => {
   const { documentAuthority, sessionNavigation, ...engineOptions } = options;
-  const harness = await createDocumentAuthorityHarness(
+  const fileStore = engineOptions.fileStore ?? createRecoveryFileStore();
+  const harness: RecoveryHarness = Object.assign(await createDocumentAuthorityHarness(
     documentAuthority ? { authority: documentAuthority } : undefined,
-  );
+  ), { selection: { changes: [], turns: [] }, binding: null, fileStore });
   harnesses.add(harness);
   const navigation = sessionNavigation ?? createTestNavigation();
-  const fileStore = engineOptions.fileStore ?? createRecoveryFileStore();
-  const identity = recoveryIdentity(harness);
-  const durable = createInMemoryRecoveryDurablePort({
-    captureState: async ({ path: inputPath }) => (
-      await fileStore.captureState(identity, identity.canonicalRoot, inputPath, { store: true })
-    ).state,
-    relativePathFor: async ({ path: inputPath }) => (
-      await fileStore.relativePathFor(identity, inputPath)
-    ).relative,
+  // The native journal supplies these facts. This suite verifies how the Host
+  // coordinates them, not how storage derives checkpoints or mutation coverage.
+  const durable = createRecoveryJournalFixture({
+    listChanges: vi.fn(async () => structuredClone(harness.selection)),
+    recordTurnStart: vi.fn(async () => structuredClone(harness.binding!)),
+    recordTurnSettled: vi.fn(async () => structuredClone(harness.binding!)),
   });
   const engine = createWorkspaceRecoveryEngine({
     authorityId: harness.authority.hostId,
@@ -96,55 +100,31 @@ const createHarness = async (options: HarnessOptions = {}): Promise<{
   return { durable, engine, harness, navigation };
 };
 
-const startTurn = (engine: WorkspaceRecoveryEngine, harness: DocumentAuthorityHarness, suffix = '1') => engine.recordTurnStart({
-  activeWriterScopes: [],
-  executionId: `execution-${suffix}`,
-  provenance: 'caused-by',
-  runtimeGeneration: 1,
-  conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' },
-  userEntryId: `user-${suffix}`,
-  workerId: 'worker-1',
-  workspaceId: harness.identity.workspaceId,
-});
-
-type SettleTurnOptions = Partial<Pick<
-  WorkspaceRecoveryTurnSettledInput,
-  'activeWriterScopes' | 'assistantEntryId' | 'executionId' | 'mutationObserved' | 'observationComplete' | 'observedResourceIds'
->>;
-
-const settleTurn = (
-  engine: WorkspaceRecoveryEngine,
-  harness: DocumentAuthorityHarness,
-  options: SettleTurnOptions = {},
-) => engine.recordTurnSettled({
-  activeWriterScopes: options.activeWriterScopes ?? [],
-  assistantEntryId: options.assistantEntryId ?? 'assistant-1',
-  executionId: options.executionId ?? 'execution-1',
-  mutationObserved: options.mutationObserved ?? true,
-  observationComplete: options.observationComplete ?? true,
-  observedResourceIds: options.observedResourceIds ?? ['note.txt'],
-  provenance: 'caused-by',
-  workspaceId: harness.identity.workspaceId,
-});
-
-const recordWrite = async (
-  engine: WorkspaceRecoveryEngine,
-  harness: DocumentAuthorityHarness,
-  content: string,
-): Promise<void> => {
-  const target = path.join(harness.workspaceRoot, 'note.txt');
-  const base = {
-    executionId: 'execution-1',
-    mutationId: 'mutation-1',
-    path: target,
-    toolCallId: 'tool-1',
-    toolName: 'write' as const,
-    workspaceId: harness.identity.workspaceId,
+const seedTurn = (harness: RecoveryHarness, facts: Partial<WorkspaceRecoveryTurnBinding> = {}) => {
+  harness.binding = {
+    activeWriterScopes: [], checkpointId: 'checkpoint-1', executionId: 'execution-1',
+    provenance: 'caused-by', runtimeGeneration: 1, runtimeKey: 'worker-1@1',
+    conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' },
+    userEntryId: 'user-1', assistantEntryId: 'assistant-1', workerId: 'worker-1',
+    workspaceId: harness.identity.workspaceId, startedAt: '2026-01-01T00:00:00Z',
+    status: 'ready', unrecordedResourceIds: [], ...harness.binding, ...facts,
   };
-  expect(await engine.recordMutationBefore(base)).toMatchObject({ recorded: true, status: 'ready' });
-  await fs.promises.writeFile(target, content);
-  expect(await engine.recordMutationAfter({ ...base, succeeded: true }))
-    .toMatchObject({ recorded: true, status: 'ready' });
+  const { failure, ...binding } = harness.binding;
+  harness.selection.turns = [{ ...binding, sequence: 1, ...(failure ? { failure: { ...failure } } : {}) }];
+};
+
+const seedChange = async (harness: RecoveryHarness, content: string, resource = 'note.txt') => {
+  if (!harness.binding) throw new Error('Seed the original recovery turn first');
+  const identity = recoveryIdentity(harness);
+  const capture = async () => (await harness.fileStore.captureState(identity, identity.canonicalRoot, resource, { store: true })).state;
+  const before = await capture();
+  await fs.promises.writeFile(path.join(harness.workspaceRoot, resource), content);
+  harness.selection.changes.push({
+    before, after: await capture(), path: resource, sequence: 1,
+    checkpointId: harness.binding.checkpointId, executionId: harness.binding.executionId,
+    mutationId: `mutation:${resource}`, toolName: 'write',
+    ...(harness.binding.fileTarget ? { fileTarget: harness.binding.fileTarget } : {}),
+  });
 };
 
 const prepareCombined = async (
@@ -218,13 +198,12 @@ describe('affected-file workspace recovery journal', () => {
     await expect(engine.withWorkspaceStorage(workspaceId, { mode: 'shared', purpose: 'after-dispose' }, () => undefined)).rejects.toThrow('disposed');
   });
 
-  it('records only the first before-image and restores the affected path with the conversation', async () => {
-    const { engine, harness, navigation } = await createHarness();
+  it('restores the owner-selected affected path with the conversation', async () => {
+    const { engine, harness, navigation, durable } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
 
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1',
@@ -235,6 +214,8 @@ describe('affected-file workspace recovery journal', () => {
       status: 'ready',
       plan: { affectedPaths: ['note.txt'], conflicts: [], coverage: 'ready', uncoveredPaths: [] },
     });
+    expect(durable.listChanges).toHaveBeenCalledWith({ workspaceId: harness.identity.workspaceId,
+      conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, entryIds: ['user-1', 'assistant-1'] });
     const applied = await applyCombined(engine, {
       confirmedConflicts: [],
       conflictPolicy: 'abort',
@@ -253,9 +234,8 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     const events: DirtyBarrierEvent[] = [];
     const surface = harness.authority.registerDirtySurface({
       generation: 1,
@@ -305,9 +285,8 @@ describe('affected-file workspace recovery journal', () => {
     });
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     const events: unknown[] = [];
     const surface = harness.authority.registerDirtySurface({
       generation: 1,
@@ -329,12 +308,7 @@ describe('affected-file workspace recovery journal', () => {
 
   it('turns an unchanged response into an immediate zero-file rollback', async () => {
     const { engine, harness } = await createHarness();
-    await startTurn(engine, harness);
-    await settleTurn(engine, harness, {
-      mutationObserved: false,
-      observationComplete: false,
-      observedResourceIds: [],
-    });
+    seedTurn(harness);
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1',
       conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' },
@@ -354,48 +328,20 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'same');
-    await startTurn(engine, harness);
-    const mutation = {
-      executionId: 'execution-1', mutationId: 'mutation-same', path: target,
-      toolCallId: 'tool-same', toolName: 'write' as const, workspaceId: harness.identity.workspaceId,
-    };
-    expect(await engine.recordMutationBefore(mutation)).toMatchObject({ recorded: true });
-    await fs.promises.writeFile(target, 'same');
-    expect(await engine.recordMutationAfter({ ...mutation, succeeded: true }))
-      .toMatchObject({ recorded: false });
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'same');
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
     expect(prepared.plan).toMatchObject({ affectedPaths: [], coverage: 'ready' });
   });
 
-  it('rejects an absolute mutation path that does not resolve inside the workspace', async () => {
-    const { engine, harness } = await createHarness();
-    await startTurn(engine, harness);
-
-    const result = await engine.recordMutationBefore({
-      executionId: 'execution-1',
-      mutationId: 'mutation-outside',
-      path: path.join(harness.root, 'outside.txt'),
-      toolCallId: 'tool-outside',
-      toolName: 'write' as const,
-      workspaceId: harness.identity.workspaceId,
-    });
-
-    expect(result).toMatchObject({
-      failure: { code: 'workspace-untrusted', retryable: false },
-      status: 'failed',
-    });
-  });
-
   it('detects later user edits per path and overwrites only after an explicit choice', async () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'agent');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'agent');
     await fs.promises.writeFile(target, 'user-later');
 
     const prepared = await prepareCombined(engine, {
@@ -428,9 +374,8 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     await harness.authority.publishDirtyBuffers({
       generation: 1,
       ownerId: 'surface-1',
@@ -453,12 +398,7 @@ describe('affected-file workspace recovery journal', () => {
   it('does not claim exact file recovery for unjournaled shell changes', async () => {
     const { engine, harness } = await createHarness();
     await fs.promises.writeFile(path.join(harness.workspaceRoot, 'shell.txt'), 'changed by shell');
-    await startTurn(engine, harness);
-    await settleTurn(engine, harness, {
-      mutationObserved: true,
-      observationComplete: true,
-      observedResourceIds: ['shell.txt'],
-    });
+    seedTurn(harness, { status: 'incomplete', unrecordedResourceIds: ['shell.txt'] });
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
@@ -480,15 +420,11 @@ describe('affected-file workspace recovery journal', () => {
     const shellTarget = path.join(harness.workspaceRoot, 'shell.txt');
     await fs.promises.writeFile(target, 'before');
     await fs.promises.writeFile(shellTarget, 'shell-before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     // Simulate a shell change that the watcher observes but the journal never captures.
     await fs.promises.writeFile(shellTarget, 'changed by shell');
-    await settleTurn(engine, harness, {
-      mutationObserved: true,
-      observationComplete: true,
-      observedResourceIds: ['note.txt', 'shell.txt'],
-    });
+    seedTurn(harness, { status: 'incomplete', unrecordedResourceIds: ['shell.txt'] });
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
@@ -511,49 +447,23 @@ describe('affected-file workspace recovery journal', () => {
     expect(await fs.promises.readFile(shellTarget, 'utf8')).toBe('changed by shell');
   });
 
-  it('does not claim ready coverage when a checkpoint is incomplete with no unrecorded paths (worker exit / observationComplete=false)', async () => {
+  it.each([
+    { recorded: false, coverage: 'none', affectedPaths: [] },
+    { recorded: true, coverage: 'partial', affectedPaths: ['note.txt'] },
+  ])('preserves incomplete owner evidence with recorded=$recorded even without named uncovered paths', async ({ recorded, coverage, affectedPaths }) => {
     const { engine, harness } = await createHarness();
-    const target = path.join(harness.workspaceRoot, 'note.txt');
-    await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    // Settle with observationComplete=false to simulate a worker exit / host stop
-    // before the watcher finished. There are no unrecorded paths, but the
-    // checkpoint is incomplete because coverage was never confirmed.
-    await settleTurn(engine, harness, {
-      mutationObserved: true,
-      observationComplete: false,
-      observedResourceIds: ['note.txt'],
-    });
+    seedTurn(harness, { status: 'incomplete', failure: {
+      code: 'checkpoint-incomplete', message: 'Original writer coverage was not confirmed', retryable: false,
+    } });
+    if (recorded) {
+      await fs.promises.writeFile(path.join(harness.workspaceRoot, 'note.txt'), 'before');
+      await seedChange(harness, 'after');
+    }
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
-    // The journaled write is still restorable, so coverage is 'partial', not 'ready'.
-    expect(prepared.plan.coverage).toBe('partial');
-    expect(prepared.plan.affectedPaths).toEqual(['note.txt']);
-    expect(prepared.plan.uncoveredPaths).toEqual([]);
-    expect(prepared.plan.uncoveredReasons.length).toBeGreaterThan(0);
-  });
-
-  it('does not claim ready coverage when an incomplete checkpoint has no unrecorded paths and no restorable paths', async () => {
-    const { engine, harness } = await createHarness();
-    // A turn with no journaled writes and observationComplete=false.
-    // mutationObserved=true with observationComplete=false makes the
-    // checkpoint incomplete. No paths are restorable and no paths are
-    // unrecorded, so coverage is 'none' with uncoveredReasons.
-    await startTurn(engine, harness);
-    await settleTurn(engine, harness, {
-      mutationObserved: true,
-      observationComplete: false,
-      observedResourceIds: [],
-    });
-    const prepared = await prepareCombined(engine, {
-      entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
-    });
-    expect(prepared.plan.coverage).toBe('none');
-    expect(prepared.plan.affectedPaths).toEqual([]);
-    expect(prepared.plan.uncoveredPaths).toEqual([]);
-    expect(prepared.plan.uncoveredReasons.length).toBeGreaterThan(0);
+    expect(prepared.plan).toMatchObject({ coverage, affectedPaths, uncoveredPaths: [],
+      uncoveredReasons: ['Original writer coverage was not confirmed'] });
   });
 
   it('attributes uncovered paths to shell source when a process writer is registered', async () => {
@@ -562,17 +472,11 @@ describe('affected-file workspace recovery journal', () => {
     const shellTarget = path.join(harness.workspaceRoot, 'shell.txt');
     await fs.promises.writeFile(target, 'before');
     await fs.promises.writeFile(shellTarget, 'shell-before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     await fs.promises.writeFile(shellTarget, 'changed by shell');
-    // Settle with a process writer scope active so source attribution
-    // resolves to 'shell' via the `process/` prefix.
-    await settleTurn(engine, harness, {
-      mutationObserved: true,
-      observationComplete: true,
-      observedResourceIds: ['note.txt', 'shell.txt'],
-      activeWriterScopes: ['process/native-runtime:worker-1@1'],
-    });
+    // The owner identifies a process writer for the uncovered path.
+    seedTurn(harness, { status: 'incomplete', unrecordedResourceIds: ['shell.txt'], activeWriterScopes: ['process/native-runtime:worker-1@1'] });
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
@@ -586,9 +490,8 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness, navigation } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
@@ -624,9 +527,8 @@ describe('affected-file workspace recovery journal', () => {
     const { durable, engine, harness } = await createHarness({ sessionNavigation: navigation });
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
     });
@@ -720,9 +622,8 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     await fs.promises.writeFile(target, 'user-later-v1');
 
     const prepared = await prepareCombined(engine, {
@@ -749,9 +650,8 @@ describe('affected-file workspace recovery journal', () => {
     const { engine, harness } = await createHarness();
     const target = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(target, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
     await harness.authority.publishDirtyBuffers({
       generation: 1,
       ownerId: 'surface-1',
@@ -783,9 +683,8 @@ describe('affected-file workspace recovery journal', () => {
     const { durable, engine, harness } = await createHarness();
     const notePath = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(notePath, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
 
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
@@ -881,20 +780,9 @@ describe('affected-file workspace recovery journal', () => {
     const extraPath = path.join(harness.workspaceRoot, 'extra.txt');
     await fs.promises.writeFile(notePath, 'before');
     await fs.promises.writeFile(extraPath, 'before-extra');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    const extraBase = {
-      executionId: 'execution-1',
-      mutationId: 'mutation-extra',
-      path: extraPath,
-      toolCallId: 'tool-extra',
-      toolName: 'write' as const,
-      workspaceId: harness.identity.workspaceId,
-    };
-    await engine.recordMutationBefore(extraBase);
-    await fs.promises.writeFile(extraPath, 'after-extra');
-    await engine.recordMutationAfter({ ...extraBase, succeeded: true });
-    await settleTurn(engine, harness, { observedResourceIds: ['extra.txt', 'note.txt'] });
+    seedTurn(harness);
+    await seedChange(harness, 'after');
+    await seedChange(harness, 'after-extra', 'extra.txt');
 
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
@@ -974,9 +862,8 @@ describe('affected-file workspace recovery journal', () => {
     const { durable, engine, harness } = await createHarness();
     const notePath = path.join(harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(notePath, 'before');
-    await startTurn(engine, harness);
-    await recordWrite(engine, harness, 'after');
-    await settleTurn(engine, harness);
+    seedTurn(harness);
+    await seedChange(harness, 'after');
 
     const prepared = await prepareCombined(engine, {
       entryId: 'user-1', conversation: { kind: 'thread', threadId: 'session-1', branchId: 'branch-1' }, workspaceId: harness.identity.workspaceId,
@@ -1066,14 +953,8 @@ describe('managed file participants in the original recovery journal', () => {
     const executionId = 'run-A:user-1';
     const notePath = path.join(b.harness.workspaceRoot, 'note.txt');
     await fs.promises.writeFile(notePath, 'before-B');
-    ready(await b.engine.recordTurnStart({ activeWriterScopes: [], executionId, provenance: 'caused-by',
-      runtimeGeneration: 1, conversation, userEntryId: 'user-1', workerId: 'kernel',
-      workspaceId: b.harness.identity.workspaceId, fileTarget }));
-    const mutation = { executionId, mutationId: 'mutation-B', path: notePath, toolCallId: 'tool-B', toolName: 'write' as const, workspaceId: b.harness.identity.workspaceId };
-    ready(await b.engine.recordMutationBefore(mutation));
-    await fs.promises.writeFile(notePath, 'after-B');
-    ready(await b.engine.recordMutationAfter({ ...mutation, succeeded: true }));
-    await settleTurn(b.engine, b.harness, { executionId });
+    seedTurn(b.harness, { executionId, conversation, fileTarget });
+    await seedChange(b.harness, 'after-B');
     const owner = { kind: 'managed_host' as const, hostId: 'host-B', connectionId: 'connection-B', endpointIdentity: 'endpoint-B' };
     const physicalRoot = { hostId: owner.hostId, rootId: fileTarget.rootId, canonicalRoot: fileTarget.canonicalRoot };
     const source: import('../kernel/protocol.generated.js').LaunchSource = { resource_owner: owner,
@@ -1088,7 +969,7 @@ describe('managed file participants in the original recovery journal', () => {
       kernel: { start: async () => ({}), sourceRequest: async () => [{ source, physicalRoot,
         scope: { kind: 'run', threadId: 'thread-A', runId: 'run-A', epoch: 1 }, phase: 'retired' }] } as unknown as import('../kernel/kernel-client.js').KernelClient,
       storage: { fileAuthorityContext: async () => ({ rootId: 'root-B', canonicalRoot: b.harness.workspaceRoot, client: {} }) } as unknown as import('../kernel/storage-adapter.js').KernelStorageAdapter,
-      documents: b.harness.authority, store: b.durable, recovery: b.engine, validateLiveSource: async () => {},
+      documents: b.harness.authority, store: { ...b.durable, getTurn: async () => b.harness.binding }, recovery: b.engine, validateLiveSource: async () => {},
     });
     const originalCapture = bFiles.captureState;
     const originalApply = bFiles.applyState;
@@ -1114,10 +995,8 @@ describe('managed file participants in the original recovery journal', () => {
     if (mixed) {
       const localTarget = { ...fileTarget, workspaceId: a.harness.identity.workspaceId, executionWorkspaceId: a.harness.identity.workspaceId,
         canonicalRoot: a.harness.workspaceRoot, rootId: 'root-A', runId: 'run-local' };
-      ready(await a.engine.recordTurnStart({ activeWriterScopes: [], executionId: 'execution-1', provenance: 'caused-by',
-        runtimeGeneration: 1, conversation, userEntryId: 'user-local', workerId: 'worker-A', workspaceId: a.harness.identity.workspaceId, fileTarget: localTarget }));
-      await recordWrite(a.engine, a.harness, 'after-A');
-      await settleTurn(a.engine, a.harness);
+      seedTurn(a.harness, { conversation, userEntryId: 'user-local', fileTarget: localTarget });
+      await seedChange(a.harness, 'after-A');
       navigation.prepare = vi.fn(async () => ({ expectedLeafId: 'leaf-current', targetLeafId: 'leaf-before',
         removedEntryIds: ['user-local', 'user-1', 'assistant-1'], journalTurns: [{ workspaceId: a.harness.identity.workspaceId, executionId: 'execution-1', restore: true }], managedTurns: turns }));
     }
@@ -1132,6 +1011,12 @@ describe('managed file participants in the original recovery journal', () => {
   it('restores on B, navigates only A, and undoes from B-owned safety without A file access', async () => {
     const { a, b, remote, navigation, prepared, apply, capture } = await createPair();
     expect(prepared.plan.workspaceId).toBe('recovery-coordinator:host-A');
+    expect(b.durable.listChanges).toHaveBeenCalledWith({ workspaceId: b.harness.identity.workspaceId, executionId: 'run-A:user-1' });
+    expect(b.durable.recordTurnStart).toHaveBeenCalledWith(expect.objectContaining({
+      workspaceId: b.harness.identity.workspaceId, executionId: 'run-A:user-1',
+      conversation: { kind: 'thread', threadId: 'thread-A', branchId: 'branch-A' },
+      fileTarget: expect.objectContaining({ rootId: 'root-B', canonicalRoot: b.harness.workspaceRoot }),
+    }));
     const result = ready(await a.engine.applyCombinedRecovery(apply));
     expect(result.operation.state).toBe('complete');
     expect(await fs.promises.readFile(path.join(b.harness.workspaceRoot, 'note.txt'), 'utf8')).toBe('before-B');

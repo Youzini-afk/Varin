@@ -174,9 +174,12 @@ async function sourceReleaseFixture() {
   let change!: (value: McpResourceChange) => void;
   let pending!: McpResourcePending;
   const operation = observation();
-  const source = { mode: 'fixed_branch' as const, resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:original', execution_workspace_id: 'workspace:original',
-    branch_id: 'branch:original-source', revision: 1, live_root: null };
-  const pin = { pin_id: 'pin:original-source', root: 'root:original-source', source };
+  const parentSource = { mode: 'fixed_branch' as const, resource_owner: { kind: 'local' as const }, workspace_id: 'workspace:original', execution_workspace_id: 'workspace:original',
+    branch_id: 'branch:parent-source', revision: 1, live_root: null };
+  const handoffPin = { pin_id: 'pin:parent-handoff', root: 'root:original-source', source: parentSource };
+  // The prepared child owns a distinct branch/pin, not its parent's handoff retention.
+  const source = { ...parentSource, branch_id: 'child-source:execution:original-child', revision: 0 };
+  const pin = { pin_id: 'child-source-pin:execution:original-child', root: handoffPin.root, source };
   const child: DelegatedExecution = {
     execution_id: 'execution:original-child', child_operation_id: 'operation:dispatch', parent_run_id: 'run:parent',
     parent_thread_id: 'thread:parent', parent_branch_id: 'branch:parent', origin: { kind: 'model_step', request_id: 'request:dispatch' },
@@ -187,7 +190,7 @@ async function sourceReleaseFixture() {
       connection_identity: 'original', provider_family: 'original', model: 'original', configuration_generation: 1,
       tool_schema_generation: 1, tools: [], policy: { name: 'default', version: '1' }, source },
     policy_target: { kind: 'default' }, source_basis: null,
-    source: { kind: 'ready', handoff: { resource_authority: null, operation_id: 'handoff:original', source, root: { kind: 'fixed', pin } },
+    source: { kind: 'ready', handoff: { resource_authority: null, operation_id: 'handoff:original', source: parentSource, root: { kind: 'fixed', pin: handoffPin } },
       pin, selection: source, provenance: { consistency: 'fixed-root', root: pin.root } },
     code_result: { kind: 'no_changes' }, state: 'completed', revision: 4, cursor: 1,
     receipt: { run_id: run.id, input_id: 'input:child', thread_id: identity.threadId, branch_id: identity.branchId, cursor: 1 },
@@ -240,11 +243,11 @@ async function sourceReleaseFixture() {
       default: throw new Error(`Unexpected source consumer request: ${method}`);
     }
   });
-  const unpin = vi.fn(async (input: unknown) => {
-    expect(pending.cancelRequested && pending.subscription.localReleased).toBe(true);
-    expect(input).toEqual({ operationId: `child-handoff-release:${child.execution_id}`, branchId: source.branch_id, pinId: pin.pin_id });
-    trace.push('source-unpinned');
-  });
+  const unpin = async (input: unknown) => {
+    // Parent retention can be released after preparation. It must never be confused
+    // with the accepted child's source, including while its observer fence fails.
+    expect(input).toMatchObject({ branchId: parentSource.branch_id, pinId: handoffPin.pin_id });
+  };
   const retire = vi.fn(async (runId: string) => {
     expect(runId).toBe(run.id);
     expect(pending.cancelRequested && pending.subscription.localReleased).toBe(true);
@@ -280,14 +283,14 @@ async function sourceReleaseFixture() {
     sourceCaptureOwners: {} as never,  prepareContext: {} as never,
     continueRun: async () => { throw new Error('Must not restart the child'); }, recoverLaunches: async () => {},
     onError: (_id, error) => errors.push(error) });
-  return { trace, faults, fence, body, cleanup, errors, requests, resources, runtime, collaboration, unpin, retire, detach,
+  return { child, trace, faults, fence, body, cleanup, errors, requests, resources, runtime, collaboration, retire, detach,
     pauseFence: () => { waitForFence = true; },
     notify: () => change({ kind: 'updated', notification: { uri: operation.mcp_resource_subscription!.binding.uri } }),
     async close() { collaboration.stop(); fence.resolve(); body.resolve({}); cleanup.resolve({ status: 'unknown' }); await resources.dispose(); },
   };
 }
 
-it('fences and detaches the original child observer before unpin/retire without awaiting notification body or remote cleanup', async () => {
+it('fences and detaches the original child observer before retiring source grants without awaiting notification body or remote cleanup', async () => {
   const f = await sourceReleaseFixture();
   try {
     f.notify();
@@ -295,13 +298,16 @@ it('fences and detaches the original child observer before unpin/retire without 
     f.pauseFence();
     await f.collaboration.recover();
     await vi.waitFor(() => expect(f.trace).toContain('source-fence-request'));
-    expect(f.detach).not.toHaveBeenCalled(); expect(f.unpin).not.toHaveBeenCalled(); expect(f.retire).not.toHaveBeenCalled();
+    expect(f.detach).not.toHaveBeenCalled(); expect(f.retire).not.toHaveBeenCalled();
+    expect(f.child.resources_released).toBe(false);
     f.fence.resolve();
     await vi.waitFor(() => expect(f.retire).toHaveBeenCalledOnce());
-    expect(f.detach).toHaveBeenCalledOnce(); expect(f.unpin).toHaveBeenCalledOnce();
+    expect(f.detach).toHaveBeenCalledOnce();
+    expect(f.child.resources_released).toBe(true);
     for (const [earlier, later] of [['source-fenced', 'listener-detached'], ['listener-detached', 'listener-release-stored'],
-      ['listener-release-stored', 'source-unpinned'], ['source-unpinned', 'grants-retired']]) {
-      expect(f.trace.indexOf(earlier!)).toBeLessThan(f.trace.indexOf(later!));
+      ['listener-release-stored', 'grants-retired'], ['grants-retired', 'child-resource-release']] as const) {
+      expect(f.trace).toContain(earlier); expect(f.trace).toContain(later);
+      expect(f.trace.indexOf(earlier)).toBeLessThan(f.trace.indexOf(later));
     }
     const bodyRequests = f.requests.mock.calls.filter(([method]) => method === 'runtime.mcp.resource.notify').length;
     f.notify(); await new Promise(resolve => setImmediate(resolve));
@@ -310,18 +316,20 @@ it('fences and detaches the original child observer before unpin/retire without 
   } finally { await f.close(); }
 });
 
-it.each(['fence', 'listener'] as const)('keeps source pins/grants on %s rejection and retries the same original child release', async failure => {
+it.each(['fence', 'listener'] as const)('keeps the accepted child source/grants on %s rejection and retries the original child release', async failure => {
   const f = await sourceReleaseFixture();
   try {
     f.faults[failure] = true;
     await f.collaboration.recover();
     await vi.waitFor(() => expect(f.errors).toHaveLength(1));
-    expect(f.unpin).not.toHaveBeenCalled(); expect(f.retire).not.toHaveBeenCalled();
+    expect(f.retire).not.toHaveBeenCalled();
+    expect(f.child.resources_released).toBe(false);
     expect(f.detach).toHaveBeenCalledTimes(failure === 'fence' ? 0 : 1);
     await new Promise(resolve => setImmediate(resolve));
     await f.collaboration.recover();
     await vi.waitFor(() => expect(f.retire).toHaveBeenCalledOnce());
-    expect(f.unpin).toHaveBeenCalledOnce(); expect(f.detach).toHaveBeenCalledOnce();
+    expect(f.detach).toHaveBeenCalledOnce();
+    expect(f.child.resources_released).toBe(true);
     expect(f.requests.mock.calls.filter(([method]) => method === 'runtime.mcp.resource.release_source').every(([, params]) => params.runId === run.id)).toBe(true);
   } finally { await f.close(); }
 });

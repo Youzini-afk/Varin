@@ -5,14 +5,14 @@ import path from 'node:path';
 import { IntegrationCoordinator } from './integration-coordinator.js';
 import type { WorkingStateRootContext, WorkingStateRootStore, WorkspaceWorkingStateRootAccess } from './types.js';
 import type { DocumentSurfaceOperationRequest } from '../../documents/authority.js';
-import { createInMemoryRecoveryDurablePort } from '../../recovery/recovery-durable-port.test-helper.js';
+import { createRecoveryJournalFixture } from '../../recovery/journal-fixture.test-helper.js';
 import { createRecoveryFileStore } from '../../recovery/file-store.test-helper.js';
 import { applyDurableFileOperation, finalizeDurableExternalOperation, markDurableExternalDispatched, undoDurableIntegrationOperation } from '../../recovery/durable-file-operation.js';
 
 /** Coordinator owner behavior only: real durable-operation helpers with the explicit
  * in-memory metadata port and a controlled Surface. Native storage has separate tests. */
 async function fixture(paths = ['draft.txt']) {
-  const durable = createInMemoryRecoveryDurablePort();
+  const durable = createRecoveryJournalFixture();
   const context = {
     identity: { authorityId: 'host', canonicalRoot: '/fixture', filesystemProfile: 'test', workspaceId: 'workspace' },
     root: '/fixture/objects', durableRecoveryStore: durable,
@@ -119,7 +119,7 @@ it('undo removes integrated descendants before restoring an original parent file
     const before = (await fileStore.captureState(identity, contentRoot, 'node', { store: true })).state;
     const directory = (await fileStore.captureState({ ...identity, canonicalRoot: child }, contentRoot, 'node', { store: true })).state;
     const after = (await fileStore.captureState({ ...identity, canonicalRoot: child }, contentRoot, 'node/child.txt', { store: true })).state;
-    const context = { identity, root: contentRoot, fileStore, durableRecoveryStore: createInMemoryRecoveryDurablePort(),
+    const context = { identity, root: contentRoot, fileStore, durableRecoveryStore: createRecoveryJournalFixture(),
       resourceOperationGate: { run: async <T>(_resources: unknown, operation: () => Promise<T>) => operation() } };
     const applied = await applyDurableFileOperation(context, { id: 'file-to-directory', workspaceId: 'workspace', threadId: 'child',
       resultRevision: 1, targets: { node: { expected: before, target: directory },

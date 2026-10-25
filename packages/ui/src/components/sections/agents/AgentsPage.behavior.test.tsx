@@ -17,7 +17,7 @@ import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
 import { agentProfileDrafts } from './agent-profile-draft';
 
 const fixture = vi.hoisted(() => ({ api: {} as { agentProfiles: AgentProfilesAPI; threads: { listModels: ReturnType<typeof vi.fn> } },
-  modelReads: vi.fn(), piCatalog: vi.fn(), piModel: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
+  modelReads: vi.fn(), host: '', writes: [] as AgentProfileSaveRequest[] }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => fixture.api }));
 vi.mock('@/stores/useDirectoryStore', () => ({ useDirectoryStore: (select: (state: { currentDirectory: string }) => unknown) => select({ currentDirectory: '/workspace' }) }));
 vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (state: object) => unknown) => select({ projects: [], activeProjectId: null }) }));
@@ -51,7 +51,7 @@ beforeEach(async () => {
       { name: 'file_write', version: '1', source_requirement: 'physical', default_presets: ['worker'] },
     ],
   });
-  fixture.writes = []; fixture.modelReads.mockClear(); useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); fixture.piCatalog.mockClear(); fixture.piModel.mockClear(); hold = undefined;
+  fixture.writes = []; fixture.modelReads.mockClear(); useModelCatalogStore.setState({ channels: [], loaded: false, loading: false, error: null }); hold = undefined;
   const { window, document } = parseHTML('<html><body></body></html>');
   Object.defineProperty(window, 'location', { value: new URL('http://ui.test/'), configurable: true });
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

@@ -387,7 +387,7 @@ it('fixed branch commands use an isolated execution view even when the binding i
   const registered = await f.kernel.scoped(grant).fileRootRegister({ workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, canonicalRoot: f.workspace });
   await f.runtime.startRun(pending.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: pending.run_id, threadId: identity.threadId,
     workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId, sourceMode: 'fixed_branch', rootId: registered.rootId,
-    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn', 'process_inspect', 'file_read'] });
+    fileSource: { branchId: source.branchId, revision: source.revision }, enabledTools: ['process_spawn', 'process_inspect', 'file_read'], executionEnvironment: await f.runtime.executionEnvironment() });
   await expect.poll(async () => (await f.runtime.run(pending.run_id)).state).toBe('completed');
   expect(read).toMatchObject({ outcome: 'succeeded', content: { source: { mode: 'materialized', base: { branchId: source.branchId, revision: source.revision } } } });
   expect(JSON.stringify(read)).toContain('immutable baseline isolated command');

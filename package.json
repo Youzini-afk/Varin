@@ -57,6 +57,7 @@
     "test:rust": "cd kernel && cargo test --workspace --locked",
     "test:kernel": "node scripts/test-kernel-authority.mjs",
     "kernel:protocol": "node scripts/generate-kernel-protocol.mjs",
+    "test:cloud-deploy": "bash scripts/smoke-cloud-deploy.sh",
     "test:cloud": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js",
     "dev:web": "bun run --cwd packages/web build:watch",
     "dev:web:server": "bun run --cwd packages/web dev:server:watch",

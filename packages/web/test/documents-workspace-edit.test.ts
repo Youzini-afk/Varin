@@ -6,7 +6,7 @@ import type { DocumentsAPI, VarinDocumentWatchEvent } from '@varin/application-c
 import { DocumentRegistry } from '@varin/ui/lib/documents/registry';
 import { createDocumentAuthorityHarness } from '#application-host/lib/documents/contract-fixtures.js';
 import { createRecoveryFileStore } from '#application-host/lib/recovery/file-store.test-helper.js';
-import { createInMemoryRecoveryDurablePort } from '#application-host/lib/recovery/recovery-durable-port.test-helper.js';
+import { createRecoveryJournalFixture } from '#application-host/lib/recovery/journal-fixture.test-helper.js';
 import { objectPath } from '#application-host/lib/recovery/object-path.js';
 import { sameState, type RecoveryState } from '#application-host/lib/recovery/journal-files.js';
 import type { DurableFileOperationContext, HostFileResourceBackend } from '#application-host/lib/recovery/durable-file-operation.js';
@@ -36,7 +36,7 @@ const fixture = async () => {
       release: async () => undefined,
     };
   };
-  const durable = createInMemoryRecoveryDurablePort();
+  const durable = createRecoveryJournalFixture();
   const calls: string[] = [];
   const matches = (expected: RecoveryState, actual: RecoveryState) =>
     sameState('mode' in actual && !('mode' in expected) ? { ...expected, mode: actual.mode } : expected, actual);

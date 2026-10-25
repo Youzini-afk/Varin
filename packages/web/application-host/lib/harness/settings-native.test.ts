@@ -36,8 +36,10 @@ describe('native global/project settings ownership', () => {
   });
   it('denies untrusted project settings and ignores malformed project data for an explicit global read/write', async () => {
     const f = await fixture(), caller = { ...f.caller, workspaceId: 'admitted-project' };
-    expect((await f.service.read(caller, { id: 'harness.shell', scope: 'project' })).state).toBe('denied');
-    await expect(f.service.update(caller, { id: 'harness.shell', scope: 'project', set: { 'harness.shell': 'auto' } })).rejects.toThrow(/trusted/);
+    // Exercise the trust owner with a project-writable field; shell selection is user-owned.
+    expect((await f.service.read(caller, { id: 'harness.output', scope: 'project' })).state).toBe('denied');
+    await expect(f.service.update(caller, { id: 'harness.output', scope: 'project', set: { 'harness.output.visibleBytes': 4096 } })).rejects.toThrow(/trusted/);
+    await expect(readFile(join(f.project, '.varin', 'settings.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     f.trust(); await writeFile(join(f.project, '.varin', 'settings.json'), '{ malformed');
     expect((await f.service.read(caller, { id: 'harness.shell', scope: 'global' })).state).toBe('ok');
     expect((await f.service.update(caller, { id: 'harness.shell', scope: 'global', set: { 'harness.shell': 'auto' } })).status).toBe('applied');

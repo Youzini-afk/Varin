@@ -81,27 +81,38 @@ jobs:
       # Documentation checks use only Node built-ins; prose-only changes do not
       # need the workspace/native dependency installation or postinstall hooks.
       - if: needs.changes.outputs.code == 'true'
+        id: dependencies
         run: bun install --frozen-lockfile
       - run: bun run test:docs
       - run: bun run docs:validate
       - if: needs.changes.outputs.code == 'true'
         run: bun run audit:dependencies
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        id: rust-audit-tool
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-audit@0.22.2
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.rust-audit-tool.outcome == 'success' }}
         name: Audit Rust kernel dependencies
         run: cargo audit --file kernel/Cargo.lock
-      - if: needs.changes.outputs.code == 'true'
-        run: bun run type-check
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        id: prepare
+        run: bun run build:type-dependencies
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run type-check:prepared
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: bun run lint
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: bun run test:tooling
+      # Pure package consumers do not require a native executable. Collect
+      # their result before expensive native work, not behind its success gate.
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run --sequential --no-exit-on-error --filter '!@varin/web' test
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         id: native-build
         name: Build native kernel authority
         run: node scripts/test-kernel-authority.mjs --build-only
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         name: Verify native kernel authority
         run: node scripts/test-kernel-authority.mjs
       # Rust state-machine/unit tests have one Linux owner. The release-binary
@@ -124,20 +135,18 @@ jobs:
         # Report failures from every test binary in one round; Cargo still fails
         # the step if any binary fails, and the execution timeout bounds hangs.
         run: bun run test:rust --no-fail-fast
-      # Type preparation and the native artifact are also the prerequisites for
-      # package suites; collect their results even if native/Rust tests failed.
+      # Only Host package fixtures still need the native directory observer.
+      # Other package suites already ran once above.
       - if: ${{ !cancelled() && needs.changes.outputs.code == 'true' && steps.native-build.outcome == 'success' }}
-        run: bun run test:packages
-      - if: needs.changes.outputs.code == 'true'
+        run: bun run --cwd packages/web test
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         name: Test desktop driver protocols on a private D-Bus
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends python3-gi dbus
           dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         run: bun run --cwd packages/electron test:linux-desktop
-      - if: needs.changes.outputs.code == 'true'
-        run: bun run test:tooling
 
   windows-runtime:
     name: Windows runtime
@@ -156,22 +165,30 @@ jobs:
         with:
           node-version: 24
       - run: bun install --frozen-lockfile
-      - run: bun run build:type-dependencies
+      - id: prepare
+        run: bun run build:type-dependencies
       # Documents package tests use the native directory observer.
-      - name: Build native kernel
+      - id: native-build
+        name: Build native kernel
         run: node scripts/test-kernel-authority.mjs --build-only
       # UI tests use simulated browser/surface inputs and run in source-quality.
       # Keep filesystem, process, worker and Host suites on both operating systems.
       # Bun 1.3 treats multiple filters as alternatives, so use the exclusion alone.
       # Run package and desktop checks before the long native acceptance.
-      - run: bun run --sequential --no-exit-on-error --filter '!@varin/ui' test
-      - run: bun run --cwd packages/electron test:runtime
-      - run: bun run --cwd packages/electron test:packaging-tools
-      - run: bun run --cwd packages/electron test:updater
-      - name: Test Windows input targeting without desktop access
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        run: bun run --sequential --no-exit-on-error --filter '!@varin/ui' test
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run --cwd packages/electron test:runtime
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run --cwd packages/electron test:packaging-tools
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run --cwd packages/electron test:updater
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        name: Test Windows input targeting without desktop access
         shell: pwsh
         run: ./packages/computer-driver/windows/test-targeting.ps1
-      - name: Build and verify native kernel authority
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        name: Verify native kernel authority
         run: node scripts/test-kernel-authority.mjs
 
   production-build:
@@ -201,156 +218,5 @@ jobs:
       # This stages and verifies the production lock/layout once, then exercises
       # the same archive through install, health checks and rollback.
       - name: Smoke atomic cloud deployment and rollback
-        shell: bash
-        run: |
-          set -euo pipefail
-          ROOT="$RUNNER_TEMP/varin-cloud-deploy"
-          DATA_DIR="$ROOT/data"
-          GOOD_ARCHIVE="$RUNNER_TEMP/varin-cloud-good.tgz"
-          BAD_SOURCE="$RUNNER_TEMP/varin-cloud-bad-source.tgz"
-          BAD_ARCHIVE="$RUNNER_TEMP/varin-cloud-bad.tgz"
-          IDEMPOTENT_ARCHIVE="$RUNNER_TEMP/varin-cloud-idempotent.tgz"
-          INSECURE_ENV_ARCHIVE="$RUNNER_TEMP/varin-cloud-insecure-env.tgz"
-          INSECURE_ENV_FILE="$RUNNER_TEMP/varin-cloud-insecure.env"
-          LINK_ARCHIVE="$RUNNER_TEMP/varin-cloud-link-failure.tgz"
-          LOCK_ARCHIVE="$RUNNER_TEMP/varin-cloud-lock-failure.tgz"
-          PORT=$(node -e "const server=require('node:net').createServer();server.listen(0,'127.0.0.1',()=>{console.log(server.address().port);server.close();});")
-
-          cleanup() {
-            if [ -f "$ROOT/current/packages/web/bin/cli.js" ]; then
-              VARIN_DATA_DIR="$DATA_DIR" node "$ROOT/current/packages/web/bin/cli.js" stop --port "$PORT" >/dev/null 2>&1 || true
-            fi
-          }
-          trap cleanup EXIT
-
-          verify_good() {
-            test "$(basename "$(readlink -f "$ROOT/current")")" = "$GOOD_RELEASE"
-            node --input-type=module -e "const response=await fetch('http://127.0.0.1:${PORT}/health');const body=await response.json();if(!response.ok||body.status!=='ok'||body.releaseId!=='${GOOD_RELEASE}'||body.kernel?.ready!==true)throw new Error(JSON.stringify(body));"
-          }
-
-          node scripts/build-cloud-runtime.mjs \
-            --skip-build \
-            --output "$RUNNER_TEMP/varin-cloud-runtime" \
-            --archive "$GOOD_ARCHIVE"
-          cp "$GOOD_ARCHIVE" "$BAD_SOURCE"
-          GOOD_SHA=$(sha256sum "$GOOD_ARCHIVE" | awk '{print $1}')
-          GOOD_RELEASE="good-${GOOD_SHA:0:16}"
-
-          bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$GOOD_ARCHIVE" \
-            --sha256 "$GOOD_SHA" \
-            --release-id "$GOOD_RELEASE" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR"
-
-          verify_good
-
-          cp "$BAD_SOURCE" "$IDEMPOTENT_ARCHIVE"
-          bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$IDEMPOTENT_ARCHIVE" \
-            --sha256 "$GOOD_SHA" \
-            --release-id "$GOOD_RELEASE" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR"
-          verify_good
-
-          cp "$BAD_SOURCE" "$INSECURE_ENV_ARCHIVE"
-          printf '%s\n' 'VARIN_UI_PASSWORD=not-a-real-secret' > "$INSECURE_ENV_FILE"
-          chmod 0644 "$INSECURE_ENV_FILE"
-          if bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$INSECURE_ENV_ARCHIVE" \
-            --sha256 "$GOOD_SHA" \
-            --release-id "insecure-env-${GOOD_SHA:0:16}" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR" \
-            --env-file "$INSECURE_ENV_FILE"; then
-            echo "Deployment unexpectedly sourced a group/world-readable secret file." >&2
-            exit 1
-          fi
-          verify_good
-
-          cp "$BAD_SOURCE" "$LOCK_ARCHIVE"
-          printf '%s\n' "$$" > "$ROOT/.deploy.lock"
-          if bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$LOCK_ARCHIVE" \
-            --sha256 "$GOOD_SHA" \
-            --release-id "locked-${GOOD_SHA:0:16}" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR"; then
-            echo "Concurrent deployment unexpectedly acquired the active lock." >&2
-            exit 1
-          fi
-          rm -f "$ROOT/.deploy.lock"
-          verify_good
-
-          cp "$BAD_SOURCE" "$LINK_ARCHIVE"
-          FAKE_BIN="$RUNNER_TEMP/varin-cloud-fake-bin"
-          MV_FAILURE_MARKER="$RUNNER_TEMP/varin-cloud-mv-failed"
-          REAL_MV=$(command -v mv)
-          mkdir "$FAKE_BIN"
-          cat > "$FAKE_BIN/mv" <<EOF
-          #!/usr/bin/env bash
-          if [ "\${1:-}" = "-Tf" ] && [ ! -e "$MV_FAILURE_MARKER" ]; then
-            touch "$MV_FAILURE_MARKER"
-            exit 73
-          fi
-          exec "$REAL_MV" "\$@"
-          EOF
-          chmod +x "$FAKE_BIN/mv"
-          if PATH="$FAKE_BIN:$PATH" bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$LINK_ARCHIVE" \
-            --sha256 "$GOOD_SHA" \
-            --release-id "link-failure-${GOOD_SHA:0:16}" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR"; then
-            echo "Deployment with an injected current-link failure unexpectedly succeeded." >&2
-            exit 1
-          fi
-          test -e "$MV_FAILURE_MARKER"
-          verify_good
-
-          mkdir "$RUNNER_TEMP/varin-cloud-bad"
-          tar -xzf "$BAD_SOURCE" -C "$RUNNER_TEMP/varin-cloud-bad"
-          node -e "require('node:fs').writeFileSync(process.argv[1], 'throw new Error(\"intentional cloud rollback smoke failure\");\n')" \
-            "$RUNNER_TEMP/varin-cloud-bad/packages/web/server/index.js"
-          tar -czf "$BAD_ARCHIVE" -C "$RUNNER_TEMP/varin-cloud-bad" .
-          BAD_SHA=$(sha256sum "$BAD_ARCHIVE" | awk '{print $1}')
-
-          if bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$BAD_ARCHIVE" \
-            --sha256 "$BAD_SHA" \
-            --release-id "$GOOD_RELEASE" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR"; then
-            echo "A release id was unexpectedly reused for a different archive." >&2
-            exit 1
-          fi
-          verify_good
-
-          if bash scripts/deploy-cloud-runtime.sh \
-            --root "$ROOT" \
-            --archive "$BAD_ARCHIVE" \
-            --sha256 "$BAD_SHA" \
-            --release-id "bad-${BAD_SHA:0:16}" \
-            --port "$PORT" \
-            --bind-host 127.0.0.1 \
-            --data-dir "$DATA_DIR" \
-            --health-timeout 5; then
-            echo "Broken cloud runtime unexpectedly deployed successfully." >&2
-            exit 1
-          fi
-
-          verify_good
+        run: bun run test:cloud-deploy
       - run: bun run test:packages:dist
