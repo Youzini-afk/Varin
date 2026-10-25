@@ -37,6 +37,9 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   const childState = execution?.child?.activity?.state ?? exact?.state;
   const report = exact?.report;
   const active = execution?.operation && canCancelOperation(execution.operation);
+  // A member that joins while it starts arrives with settle; history is still.
+  const [arrives] = React.useState(() => Boolean(generating) || status === 'running'
+    || ['queued', 'preparing', 'starting', 'running'].includes(childState ?? ''));
   React.useEffect(() => {
     if (!expanded || !operationId || !conversation?.api.collaboration || original || result?.notDispatched
       || generating || result?.status !== 'background' && !execution?.child) return;
@@ -59,7 +62,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
     catch (failure) { if (host === getRuntimeEndpointGeneration()) { setStopping(false); setError(String(failure)); } }
   };
   return <ToolDisclosure id={'tool:' + call.id} className="tool-delegation group" onExpanded={setExpanded}>
-    <summary className="tool-member-line">
+    <summary className="tool-member-line" data-arrive={arrives || undefined}>
       {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar} size={23} />
         : <Icon name="ai-agent" className="size-4 text-muted-foreground" />}
       <span className="typography-meta font-medium truncate">{name}</span>

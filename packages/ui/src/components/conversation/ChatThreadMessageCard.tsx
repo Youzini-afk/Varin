@@ -19,6 +19,7 @@ export function ChatThreadMessageCard({ call, execution, result, status, generat
   const text = typeof args.text === 'string' ? args.text : '';
   return <ChatAgentMessageBubble id={`sent:${call.id}`} senderThreadId={senderId} senderBranchId={senderBranch}
     targetThreadId={targetId || undefined} targetBranchId={targetBranch || undefined} text={text} outgoing
+    live={Boolean(generating) || status === 'running'}
     status={<ToolStatus status={status} generating={generating} />}>
     <MarkdownRenderer content={text} messageId={`sent-message:${call.id}`} enableFileReferences={false} />
     {(result || details) && <ToolDisclosure id={`message-receipt:${call.id}`} className="chat-agent-message-receipt">

@@ -3,6 +3,7 @@ import { timelinePresentationCache } from './timelinePresentationCache';
 import { cn } from '@/lib/utils';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { SwapText } from '@/components/motion/SwapText';
 import type { ChatToolExecutionState } from './types';
 import { DisclosureContext, ExpandedToolContext, TimelineSessionContext, useToolDisclosureChoices } from './toolDisclosureContext';
 
@@ -44,6 +45,8 @@ export function ToolStatus({ status, stopped = false, generating = false }: { st
     <Icon name={stopped ? 'stop' : status === 'running' ? 'loader-4' : status === 'success' ? 'check' : status === 'error' || status === 'unknown'
       ? 'error-warning' : status === 'cancelled' ? 'close' : status === 'waiting' ? 'question' : 'time'}
       className={cn('size-3 shrink-0', status === 'running' && !stopped && 'animate-spin motion-reduce:animate-none')} />
-    <span key={generating ? 'generating' : stopped ? 'stopping' : status} className="workbench-status-arrival">{t(generating ? 'chat.tools.preparingCall' : stopped ? 'chat.children.stopping' : ('chat.timeline.tools.' + status) as I18nKey)}</span>
+    {/* The status changes in place rather than remounting its entrance; a
+        failure or a stop is a fact, so it shows at once without a hold. */}
+    <SwapText text={t(generating ? 'chat.tools.preparingCall' : stopped ? 'chat.children.stopping' : ('chat.timeline.tools.' + status) as I18nKey)} hold={0} />
   </span>;
 }

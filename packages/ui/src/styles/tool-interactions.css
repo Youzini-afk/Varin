@@ -166,6 +166,11 @@
 .tool-delegation { container: tool-members / inline-size; }
 .tool-member-line { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 7px 3px; border-radius: 5px; cursor: pointer; list-style: none; }
 .tool-member-line:hover { background: var(--interactive-hover); }
+/* A member joining a dispatch: the row settles in and its avatar turns into place. */
+.tool-member-line[data-arrive] { animation: tool-member-arrive var(--motion-dur-settle) var(--motion-ease-settle) both; }
+.tool-member-line[data-arrive] > :first-child { animation: tool-member-avatar var(--motion-dur-settle) var(--motion-ease-settle) both; }
+@keyframes tool-member-arrive { from { opacity: 0; transform: translateY(6px); } }
+@keyframes tool-member-avatar { from { opacity: 0; transform: rotate(-14deg) scale(.7); } }
 .tool-member-purpose { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-member-detail { margin: 2px 0 12px 14px; padding: 4px 0 4px 20px; border-left: 1px solid var(--border); display: grid; gap: 10px; }
 .tool-inline-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }

@@ -1324,6 +1324,7 @@ export const ChatTimelineEntryList: React.FC<Omit<
           usages={footerUsage?.usages}
           liveAssistant={projection.liveAssistant}
           outputDurationsMs={outputDurationsMs}
+          turnActive={Boolean(turnActive)}
           actions={turnText && !turnActive ? (
             <div className="flex h-6 shrink-0 items-center">
               <Tooltip>

@@ -9,11 +9,15 @@ import { agentMessagePreview } from './agentMessagePresentation';
 
 /** The same folded message surface for received messages, reports and native send calls. */
 export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, targetThreadId, targetBranchId,
-  text, kind = 'message', outgoing = false, status, children }: {
+  text, kind = 'message', outgoing = false, status, live = false, children }: {
   id: string; senderThreadId?: string; senderBranchId?: string; targetThreadId?: string; targetBranchId?: string;
-  text: string; kind?: 'message' | 'report' | 'task'; outgoing?: boolean; status?: React.ReactNode; children: React.ReactNode;
+  text: string; kind?: 'message' | 'report' | 'task'; outgoing?: boolean; status?: React.ReactNode;
+  /** Being sent now: the bubble settles in once instead of appearing. */
+  live?: boolean;
+  children: React.ReactNode;
 }) {
   const { t } = useI18n();
+  const [arrives] = React.useState(live);
   const choices = useToolDisclosureChoices();
   const key = `agent-message:${id}`;
   const [expanded, setExpanded] = React.useState(() => choices?.get(key) ?? false);
@@ -31,7 +35,7 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
   };
   const label = t(kind === 'report' ? 'collaboration.report' : kind === 'task' ? 'collaboration.dispatch' : 'chat.agentMessage.message');
   const preview = agentMessagePreview(text);
-  return <article className="chat-agent-message" data-outgoing={outgoing} data-kind={kind}>
+  return <article className="chat-agent-message" data-outgoing={outgoing} data-kind={kind} data-arrive={arrives || undefined}>
     <button type="button" className="chat-agent-message-avatar" disabled={!senderThreadId}
       aria-label={t('collaboration.viewMember', { name: name(senderThreadId) })} onClick={() => openMember(senderThreadId, senderBranchId)}>
       <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar} size={26} />

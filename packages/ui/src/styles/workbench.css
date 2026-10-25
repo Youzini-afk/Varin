@@ -393,8 +393,9 @@
     height: 0;
     opacity: 0;
     overflow: clip;
-    transition: height var(--wb-panel-duration) var(--wb-ease), opacity var(--wb-state-duration) ease,
-      content-visibility var(--wb-panel-duration) allow-discrete;
+    /* Height on the shared glide spring; content fades on the fade tween. */
+    transition: height var(--motion-dur-glide) var(--motion-ease-glide), opacity var(--motion-dur-fade) var(--motion-ease-out),
+      content-visibility var(--motion-dur-glide) allow-discrete;
   }
   .workbench-disclosure[open]::details-content { height: auto; opacity: 1; }
 }
@@ -405,6 +406,13 @@
 }
 
 .composer-attachment { animation: wb-material-arrive 360ms var(--wb-ease-settle) both; }
+/* Turn end: actions fade in 24ms apart, then the usage numbers roll (CountUp). */
+[data-conversation-turn-footer][data-arriving] > :first-child > * { animation: turn-footer-arrive var(--motion-dur-fade) var(--motion-ease-out) both; }
+[data-conversation-turn-footer][data-arriving] > :first-child > :nth-child(2) { animation-delay: 24ms; }
+[data-conversation-turn-footer][data-arriving] > :first-child > :nth-child(3) { animation-delay: 48ms; }
+[data-conversation-turn-footer][data-arriving] > :first-child > :nth-child(n + 4) { animation-delay: 72ms; }
+[data-conversation-turn-footer][data-arriving] [data-conversation-turn-usage] { animation: turn-footer-arrive var(--motion-dur-fade) var(--motion-ease-out) 72ms both; }
+@keyframes turn-footer-arrive { from { opacity: 0; transform: translateY(2px); } }
 .thread-work-overview section { max-width: 100%; border: 0; padding-inline: 0; }
 .thread-work-overview details { max-width: 100%; padding-inline: 0; }
 .thread-work-overview .workbench-disclosure > summary { padding-inline: 12px; }

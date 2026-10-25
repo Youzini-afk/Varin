@@ -1,6 +1,7 @@
 import type { ChildCodeResult, ChildPreparationProgress } from '@varin/protocol';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { SwapText } from '@/components/motion/SwapText';
 
 const states: Record<string, I18nKey> = {
   queued: 'harness.threads.state.queued', preparing: 'harness.threads.state.starting',
@@ -11,11 +12,13 @@ const states: Record<string, I18nKey> = {
   failed: 'harness.threads.state.failed', cancelled: 'harness.threads.state.cancelled',
   settling: 'chat.children.settling',
 };
+/** A member's state: starting → running → completed change in place. */
 export function ChildState({ state }: { state: string }) {
   const { t } = useI18n();
   return <span className={cn('shrink-0 typography-micro', state === 'failed' || state === 'preparation_failed' ? 'text-destructive'
     : state === 'waiting' ? 'text-[var(--status-warning)]' : 'text-muted-foreground')}>
-    {states[state] ? t(states[state]) : state}
+    {/* States are facts the reader acts on: they swap at once, without a hold. */}
+    <SwapText text={states[state] ? t(states[state]) : state} hold={0} />
   </span>;
 }
 const preparationPhases: Record<ChildPreparationProgress['phase'], I18nKey> = {

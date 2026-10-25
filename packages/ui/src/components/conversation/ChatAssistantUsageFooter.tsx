@@ -1,6 +1,7 @@
 import React from 'react';
 import type { ChatUsage } from './types';
 import { Icon } from '@/components/icon/Icon';
+import { CountUp } from '@/components/motion/CountUp';
 import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
 import {
   projectChatUsagePresentation,
@@ -31,7 +32,8 @@ const UsageMetric: React.FC<{
   icon: React.ComponentProps<typeof Icon>['name'];
   label: string;
   value: number;
-}> = ({ icon, label, value }) => {
+  animate?: boolean;
+}> = ({ icon, label, value, animate = false }) => {
   const formatted = formatNumber(value);
   return (
     <span
@@ -39,13 +41,14 @@ const UsageMetric: React.FC<{
       title={`${label}: ${formatted}`}
     >
       <Icon name={icon} className="size-3 shrink-0" />
-      <span aria-hidden="true">{formatted}</span>
+      <span aria-hidden="true"><CountUp value={value} animate={animate} format={formatNumber} /></span>
       <span className="sr-only">{label} {formatted}</span>
     </span>
   );
 };
 
-export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage: ChatUsage }> = ({ tokensPerSecond, usage }) => {
+/** `animate`: the turn just finished here, so the numbers roll into place. */
+export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usage: ChatUsage; animate?: boolean }> = ({ tokensPerSecond, usage, animate = false }) => {
   const { t } = useI18n();
   const presentation = projectChatUsagePresentation(usage);
   if (!presentation) return null;
@@ -64,6 +67,7 @@ export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usag
           icon={ICON_NAMES[metric.key]}
           label={t(LABEL_KEYS[metric.key])}
           value={metric.value}
+          animate={animate}
         />
       ))}
       {presentation.cacheHitPercent !== undefined && <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap tabular-nums"
@@ -75,6 +79,7 @@ export const ChatAssistantUsageFooter: React.FC<{ tokensPerSecond?: number; usag
           icon="bar-chart-box"
           label={t('contextSidebar.tokens.total')}
           value={presentation.total}
+          animate={animate}
         />
       ) : null}
       {tokensPerSecond !== undefined && Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? (
