@@ -516,8 +516,16 @@ fn invalid_declared_intent_or_class_cannot_dispatch() {
         );
         assert_eq!(worker.join().unwrap().unwrap().state, RunState::Completed);
         assert!(!rx.try_iter().any(|e| e == "execute:invalid"));
-        assert!(store.records.lock().unwrap().iter().any(|r| matches!(r, ExecutionRecord::ToolBatchCommitted { results, .. }
-            if matches!(&results[0].completion, ToolCompletion::Result { effect: Effect::None, content, .. } if content.data["error"] == expected))));
+        assert!(store.records.lock().unwrap().iter().any(|record| {
+            let ExecutionRecord::ToolBatchCommitted { results, .. } = record else {
+                return false;
+            };
+            results.first().is_some_and(|result| {
+                matches!(&result.completion, ToolCompletion::Result {
+                    outcome: Outcome::Failed, effect: Effect::None, ..
+                }) && result.completion.error().is_some_and(|error| error.code == expected)
+            })
+        }));
         assert_eq!(store.admission.summary().queued, 0);
     }
 }

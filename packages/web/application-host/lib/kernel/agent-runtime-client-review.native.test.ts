@@ -302,7 +302,8 @@ it.each([false, true])('tool process settles OS and durable operation evidence (
   const grant = await f.host.issueGrant({ grantId: 'process-owner', threadId: 'process-thread', runId: receipt.run_id, owningWorkspace: 'process-workspace', executionWorkspace: 'process-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const actor = f.host.scoped(grant);
   const registered = await actor.fileRootRegister({ workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', canonicalRoot: workspace });
-  await f.runtimeClient.startRun(receipt.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'client-review', canonicalRoot: registered.canonicalRoot, rootId: registered.rootId }, enabledTools: ['process_spawn'] });
+  // Standalone bindings supply the same execution Host facts as ordinary source admission.
+  await f.runtimeClient.startRun(receipt.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: receipt.run_id, threadId: 'process-thread', workspaceId: 'process-workspace', executionWorkspaceId: 'process-workspace', rootId: registered.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'client-review', canonicalRoot: registered.canonicalRoot, rootId: registered.rootId }, enabledTools: ['process_spawn'], executionEnvironment: await f.runtimeClient.executionEnvironment() });
   await expect.poll(async () => (await f.runtimeClient.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(provider.requests).toHaveLength(2);
   const continuation = provider.requests[1]!.input as Array<Record<string, unknown>>;
@@ -506,7 +507,7 @@ it('model interrupt preserves an accepted background process job until explicit 
   const grant = await f.host.issueGrant({ grantId: 'interrupt-job-owner', threadId: 'interrupt-job-thread', runId: run.run_id, owningWorkspace: 'interrupt-job-workspace', executionWorkspace: 'interrupt-job-workspace', capabilities: ['storage.read', 'storage.write', 'process'], pathScopes: [''] });
   const actor = f.host.scoped(grant);
   const root = await actor.fileRootRegister({ workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', canonicalRoot: workspace });
-  await f.runtimeClient.startRun(run.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'client-review', canonicalRoot: root.canonicalRoot, rootId: root.rootId }, enabledTools: ['process_spawn'] });
+  await f.runtimeClient.startRun(run.run_id, undefined, { resourceOwner: { kind: 'local' }, grantId: grant.grantId, runId: run.run_id, threadId: 'interrupt-job-thread', workspaceId: 'interrupt-job-workspace', executionWorkspaceId: 'interrupt-job-workspace', rootId: root.rootId, sourceMode: 'live_root', liveRoot: { hostId: 'client-review', canonicalRoot: root.canonicalRoot, rootId: root.rootId }, enabledTools: ['process_spawn'], executionEnvironment: await f.runtimeClient.executionEnvironment() });
   await expect.poll(() => provider.requests.length).toBe(2);
   const secondInput = provider.requests[1]!.input as Array<Record<string, unknown>>;
   const receipt = JSON.parse(responsesMetadataText(secondInput.find(item => item.type === 'function_call_output')?.output)) as { operation_id: string };
