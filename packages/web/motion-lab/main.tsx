@@ -4,6 +4,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { I18nProvider, initializeLocale } from '@/lib/i18n';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
+import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
 import { MotionProvider } from '@/components/providers/MotionProvider';
 import { ChatTimeline } from '@/components/conversation/ChatTimeline';
@@ -475,6 +476,16 @@ function Lab() {
   );
 }
 
+/** `window.__theme.mode('light' | 'dark')`: switch the theme as Appearance does. */
+// eslint-disable-next-line react-refresh/only-export-components
+function ThemeControl() {
+  const { setThemeMode } = useThemeSystem();
+  React.useEffect(() => {
+    (window as unknown as { __theme: { mode(mode: 'light' | 'dark'): void } }).__theme = { mode: setThemeMode };
+  }, [setThemeMode]);
+  return null;
+}
+
 initializeLocale();
 // `?scene=send` opens the empty home with the real composer instead of a long Thread.
 const scene = new URLSearchParams(location.search).get('scene');
@@ -483,6 +494,7 @@ createRoot(document.getElementById('root')!).render(
     <ThemeSystemProvider>
       <ThemeProvider>
         <MotionProvider>
+          <ThemeControl />
           <TooltipProvider>
             {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : scene === 'settings' ? <SettingsLab /> : <Lab />}
           </TooltipProvider>

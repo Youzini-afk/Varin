@@ -347,3 +347,18 @@
 }
 .settings-nav-pill[data-hidden] { opacity: 0; }
 [data-settings-nav-pill] [aria-current="page"] { background-color: transparent; box-shadow: none; }
+
+/*
+ * Theme ink (lib/motion/themeInk.ts). The new theme is revealed by a circle
+ * animated in script, so neither snapshot runs its default cross-fade; reduced
+ * motion keeps a short cross-fade instead.
+ */
+:root[data-theme-ink="circle"]::view-transition-old(root),
+:root[data-theme-ink="circle"]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+:root[data-theme-ink="fade"]::view-transition-old(root),
+:root[data-theme-ink="fade"]::view-transition-new(root) {
+  animation-duration: var(--motion-dur-fade);
+}

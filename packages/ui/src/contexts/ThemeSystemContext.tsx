@@ -6,6 +6,7 @@ import React, {
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
+import { inkThemeChange, trackThemeInkPointer } from '@/lib/motion/themeInk';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell } from '@/lib/desktop';
@@ -319,22 +320,32 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     metaThemeColorMedia.setAttribute('content', chromeColor);
   }, []);
 
+  const appliedThemeRef = React.useRef<string | null>(null);
+  React.useEffect(() => { trackThemeInkPointer(); }, []);
   useIsomorphicLayoutEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
-    const restoreTransitions = suppressTransitionsForThemeSwitch();
-    cssGenerator.apply(currentTheme);
-    if (!receivesParentThemeSync) {
-      publishEmbeddedThemeBootstrap(currentTheme);
-    }
-    updateBrowserChrome(currentTheme);
+    let restoreTransitions: (() => void) | undefined;
+    const apply = () => {
+      restoreTransitions = suppressTransitionsForThemeSwitch();
+      cssGenerator.apply(currentTheme);
+      if (!receivesParentThemeSync) {
+        publishEmbeddedThemeBootstrap(currentTheme);
+      }
+      updateBrowserChrome(currentTheme);
 
-    const root = document.documentElement;
-    root.classList.remove('light', 'dark');
-    root.classList.add(currentTheme.metadata.variant);
+      const root = document.documentElement;
+      root.classList.remove('light', 'dark');
+      root.classList.add(currentTheme.metadata.variant);
+    };
+    // The first theme is simply applied; a change spreads from where the user clicked.
+    const previous = appliedThemeRef.current;
+    appliedThemeRef.current = currentTheme.metadata.id;
+    if (previous === null || previous === currentTheme.metadata.id || receivesParentThemeSync) apply();
+    else inkThemeChange(apply);
 
-    return restoreTransitions;
+    return () => restoreTransitions?.();
   }, [cssGenerator, currentTheme, updateBrowserChrome]);
 
   useEffect(() => {

@@ -191,6 +191,8 @@ The settings view (`components/views/settingsMotion.ts`):
 - `SettingsPageScene` keys the page by slug. The old page leaves in 110ms against the move, inert and marked `data-settings-leaving` so search reveals skip it. The new page's header and first sections arrive one after another (`staggerSettingsPage`). The navigation and breadcrumb row stay still.
 - `SettingsWindow` passes `animateEntrance`, so opening the window brings the navigation groups in one after another. The mobile and tablet layouts do not.
 
+Theme changes spread as ink (`lib/motion/themeInk.ts`). `ThemeSystemProvider` applies the first theme directly. A later change runs inside a View Transition, revealed by a circle growing from the last press (within 2s; otherwise the centre) to the farthest corner in 660ms on the base out-curve. The default cross-fade of the snapshots is off (`data-theme-ink="circle"`), and transitions are still suppressed inside the update, so nothing moves again in the new view. Reduced motion cross-fades in 160ms (`data-theme-ink="fade"`). Off, a hidden page, a theme synced from a parent window, or a browser without View Transitions switch directly.
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -205,6 +207,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node rail.cjs` (`?scene=rail`, the real rail and panel beside a main column): the active bar, the main column lock, the Git tabs' underline, the badge, the shared tooltip and reduced motion. Surfaces that need a Host (Git) are not opened there.
 - `node switch.cjs` (`?scene=switch`, three conversations in the real surface and timeline): the old conversation's exit time and direction, the turn stagger and the title direction, moving down and up.
 - `node settings.cjs` (`?scene=settings`, the real settings view with the built-in pages): the navigation pill, the old page's exit, the breadcrumb direction and the section stagger, moving down and up.
+- `node theme.cjs`: the ink's View Transition, its circle from the click, reduced and off. Headless screenshots do not show View Transition snapshots, so it checks the transition and its animation, not pixels.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 
