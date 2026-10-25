@@ -362,3 +362,58 @@
 :root[data-theme-ink="fade"]::view-transition-new(root) {
   animation-duration: var(--motion-dur-fade);
 }
+
+/*
+ * Workbench lattice (components/ui/WorkbenchLatticeScene.tsx). The cells are
+ * the cover, so their fill must be opaque whatever the theme does with alpha:
+ * the tint is painted over the pre-paint splash background, which always is.
+ * `data-state` is the resting picture; the waves themselves are Web Animations
+ * with fills, layered over it.
+ */
+.wb-lattice {
+  --wb-lattice-tint: color-mix(in srgb, var(--sidebar, var(--background)) 58%, var(--background));
+  --wb-lattice-fill: linear-gradient(var(--wb-lattice-tint), var(--wb-lattice-tint)) var(--splash-background, var(--background, #151313));
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  contain: layout paint style;
+  pointer-events: none;
+}
+.wb-lattice-field {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  justify-content: start;
+  align-content: start;
+}
+.wb-lattice-field > i {
+  display: block;
+  background: var(--wb-lattice-fill);
+  /* A faint seam between cells, so the closed cover still reads as a lattice. */
+  box-shadow: inset 0 0 0 .5px color-mix(in srgb, var(--foreground) 6%, transparent);
+  transform: scale(0);
+}
+.wb-lattice[data-state="closed"] .wb-lattice-field > i { transform: scale(1.03); }
+.wb-lattice-sheet {
+  position: absolute;
+  inset: 0;
+  background: var(--wb-lattice-fill);
+  opacity: 0;
+}
+.wb-lattice[data-mode="full"] .wb-lattice-sheet { display: none; }
+.wb-lattice:not([data-mode="full"]) .wb-lattice-field { display: none; }
+.wb-lattice[data-state="closed"] .wb-lattice-sheet { opacity: 1; }
+/* Only a cover that waits for the target Shell says what it is doing. */
+.wb-lattice-hold {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity var(--motion-dur-exit) var(--motion-ease-exit);
+}
+.wb-lattice[data-holding] .wb-lattice-hold {
+  opacity: 1;
+  transition: opacity 240ms var(--motion-ease-out);
+}

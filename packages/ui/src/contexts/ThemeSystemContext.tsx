@@ -6,7 +6,8 @@ import React, {
   useState,
 } from 'react';
 import { flushSync } from 'react-dom';
-import { inkThemeChange, trackThemeInkPointer } from '@/lib/motion/themeInk';
+import { trackRecentPointer } from '@/lib/motion/pointer';
+import { inkThemeChange } from '@/lib/motion/themeInk';
 import type { Theme, ThemeMode } from '@/types/theme';
 import type { DesktopSettings } from '@/lib/desktop';
 import { isDesktopLocalOriginActive, isDesktopShell as detectDesktopShell } from '@/lib/desktop';
@@ -321,7 +322,7 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
   }, []);
 
   const appliedThemeRef = React.useRef<string | null>(null);
-  React.useEffect(() => { trackThemeInkPointer(); }, []);
+  React.useEffect(() => { trackRecentPointer(); }, []);
   useIsomorphicLayoutEffect(() => {
     if (typeof window === 'undefined') {
       return;

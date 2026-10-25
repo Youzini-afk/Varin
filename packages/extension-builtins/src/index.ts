@@ -482,8 +482,10 @@ export const VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION = definition({
       contract: VARIN_TRANSITION_SCENE_DATA_CONTRACT,
       durations: {
         [VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE]: {
-          covering: { quick: 1_040, reduced: 260, standard: 1_900 },
-          revealing: { quick: 1_040, reduced: 260, standard: 1_900 },
+          // The lattice wave (packages/ui workbench-lattice.ts): the wave plus clock headroom. The scene
+          // completes each phase itself; these are Core's ceilings.
+          covering: { quick: 580, reduced: 360, standard: 580 },
+          revealing: { quick: 600, reduced: 360, standard: 600 },
         },
       },
       fallback: true,

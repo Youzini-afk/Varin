@@ -1,10 +1,4 @@
 import { afterEach, describe, expect, test, vi } from 'vitest';
-import { VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION } from '@varin/extension-builtins';
-import {
-  VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
-  parseVarinTransitionSceneContributionData,
-  varinTransitionSceneDuration,
-} from '@varin/extension-contract';
 import {
   buildAdaptiveSplashTiles,
   createSplashCanvasMountOptions,
@@ -21,11 +15,10 @@ import {
   CUBE_EDGE_PX,
   SPLASH_GROUND_ORIGIN_Y_PCT,
   SPLASH_GROUND_VISIBLE_FAR_RISE_PX,
-  SPLASH_REDUCED_EXIT_DURATION_MS,
-  splashWorkbenchPhaseDurationMs,
 } from './varin-splash-lattice';
 
-// Keep viewport coverage, renderer retirement, and the extension duration binding.
+// Keep viewport coverage and renderer retirement. The Profile-switch duration binding moved to
+// workbench-lattice.test.ts with the scene it describes.
 // Animation geometry and choreography remain editable presentation choices.
 
 const SPLASH_TEST_RANDOM_SEED = 0x02f6e2b1;
@@ -291,27 +284,5 @@ describe('splash lifecycle', () => {
     expect(deleteVertexArray).toHaveBeenCalledTimes(1);
     expect(deleteProgram).toHaveBeenCalledTimes(1);
     expect(loseContext).not.toHaveBeenCalled();
-  });
-
-  test('the built-in extension declares the exact duration of the scene it renders', () => {
-    const contribution = VARIN_BUILTIN_TRANSITION_SCENE_EXTENSION.manifest.contributions?.[0];
-    expect(contribution?.kind).toBe('transition-scene');
-    const data = parseVarinTransitionSceneContributionData(contribution?.data);
-    for (const phase of ['covering', 'revealing'] as const) {
-      for (const tempo of ['quick', 'standard'] as const) {
-        expect(varinTransitionSceneDuration(data, {
-          phase,
-          reducedMotion: false,
-          scene: VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
-          tempo,
-        })).toBe(splashWorkbenchPhaseDurationMs(tempo));
-      }
-      expect(varinTransitionSceneDuration(data, {
-        phase,
-        reducedMotion: true,
-        scene: VARIN_WORKBENCH_PROFILE_TRANSITION_SCENE,
-        tempo: 'standard',
-      })).toBe(SPLASH_REDUCED_EXIT_DURATION_MS);
-    }
   });
 });

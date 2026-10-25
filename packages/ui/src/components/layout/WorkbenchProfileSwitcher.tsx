@@ -97,6 +97,8 @@ export const WorkbenchProfileSwitcher: React.FC<{ className?: string }> = ({ cla
             size="sm"
             disabled={busy}
             aria-label={`${t('workbench.switcher.presentation')}: ${selectedMode.label}`}
+            // WORKBENCH_SWITCHER_ATTRIBUTE: the lattice wave starts here.
+            data-varin-workbench-switcher=""
             className={cn('h-7 shrink-0 gap-1.5 rounded-md bg-interactive-hover px-2 typography-meta font-medium', className)}
           >
             <Icon name={selectedMode.icon} className="size-4 shrink-0" />

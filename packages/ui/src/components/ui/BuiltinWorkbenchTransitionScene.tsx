@@ -1,5 +1,5 @@
 import React from 'react';
-import { VarinSplash } from '@/components/ui/VarinSplash';
+import { WorkbenchLatticeScene } from '@/components/ui/WorkbenchLatticeScene';
 import { useI18n } from '@/lib/i18n';
 import { useVarinExtensionCatalog } from '@/lib/extensions/catalog-store';
 import { workbenchProfileLabel } from '@/lib/extensions/workbench-profile-label';
@@ -9,7 +9,10 @@ export interface BuiltinWorkbenchTransitionSceneProps {
   transition: WorkbenchTransitionSceneController;
 }
 
-/** Default Motion extension scene. It owns visuals only; the controller remains Core-owned. */
+/**
+ * Default Motion extension scene: the lattice wave. It owns visuals only; the controller remains
+ * Core-owned. The boot splash (VarinSplash) is no longer used for Profile switches.
+ */
 export const BuiltinWorkbenchTransitionScene: React.FC<BuiltinWorkbenchTransitionSceneProps> = ({
   transition,
 }) => {
@@ -25,22 +28,10 @@ export const BuiltinWorkbenchTransitionScene: React.FC<BuiltinWorkbenchTransitio
   const status = target
     ? t('splash.switchingTo', { profile: workbenchProfileLabel(target, t) })
     : t('splash.switching');
+  const { transitionId } = frame;
+  const onPhaseComplete = React.useCallback((phase: 'covering' | 'revealing') => {
+    transition.complete(transitionId, phase);
+  }, [transition, transitionId]);
 
-  return (
-    <VarinSplash
-      mode="switch"
-      announce={false}
-      direction={frame.direction}
-      phase={frame.phase}
-      tempo={frame.tempo}
-      reducedMotion={frame.reducedMotion}
-      label={t('splash.aria.switching')}
-      status={status}
-      onPhaseComplete={() => {
-        if (frame.phase === 'covering' || frame.phase === 'revealing') {
-          transition.complete(frame.transitionId, frame.phase);
-        }
-      }}
-    />
-  );
+  return <WorkbenchLatticeScene frame={frame} status={status} onPhaseComplete={onPhaseComplete} />;
 };
