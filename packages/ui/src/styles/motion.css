@@ -128,6 +128,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* While the width glides to a longer label, the text is clipped rather than ellipsised. */
+.swap-text[data-resizing] { overflow: hidden; }
+.swap-text[data-resizing] > * { text-overflow: clip; }
 /* `color` is transparent here, so the base tone cannot be currentColor. */
 .swap-text[data-live] > .swap-text-current {
   background: linear-gradient(90deg, var(--swap-text-base, var(--muted-foreground)) 0 38%, var(--foreground) 50%, var(--swap-text-base, var(--muted-foreground)) 62% 100%);
@@ -156,3 +159,89 @@
   color: inherit;
   animation: none;
 }
+
+/*
+ * Popovers: menus, selects and tooltips grow from their trigger. They open on
+ * snap from 96% and 5px toward the trigger, and leave faster than they came.
+ * Base UI writes `data-side` on the popup, so the offset points at the trigger.
+ */
+.motion-popover {
+  transition-property: opacity, scale, translate;
+  transition-duration: var(--motion-dur-snap);
+  transition-timing-function: var(--motion-ease-snap);
+}
+.motion-popover[data-starting-style],
+.motion-popover[data-ending-style] {
+  opacity: 0;
+  scale: .96;
+}
+.motion-popover[data-side="bottom"][data-starting-style] { translate: 0 -5px; }
+.motion-popover[data-side="top"][data-starting-style] { translate: 0 5px; }
+.motion-popover[data-side="left"][data-starting-style] { translate: 5px 0; }
+.motion-popover[data-side="right"][data-starting-style] { translate: -5px 0; }
+.motion-popover[data-ending-style] {
+  transition-duration: var(--motion-dur-exit);
+  transition-timing-function: var(--motion-ease-exit);
+}
+/*
+ * A popover that takes over from a neighbour (a grouped tooltip, the next menu
+ * in a row, a new trigger) appears in place; `motion-instant` always does.
+ * Dismissing still plays the exit.
+ */
+.motion-popover:is([data-instant="delay"], [data-instant="group"], [data-instant="trigger-change"], .motion-instant) { transition-duration: 0s; }
+.motion-popover.motion-instant:is([data-starting-style], [data-ending-style]) { opacity: 1; scale: none; translate: none; }
+
+/* Menu items arrive 16ms apart; the sixth and later together. */
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]) {
+  animation: popover-item-in var(--motion-dur-fade) var(--motion-ease-out) both;
+}
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):nth-child(2) { animation-delay: 16ms; }
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):nth-child(3) { animation-delay: 32ms; }
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):nth-child(4) { animation-delay: 48ms; }
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):nth-child(5) { animation-delay: 64ms; }
+.motion-popover[data-open] :is([role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"]):nth-child(n + 6) { animation-delay: 80ms; }
+@keyframes popover-item-in {
+  from { opacity: 0; translate: 0 2px; }
+}
+
+/* Dialogs: the backdrop fades; the window settles from 98.5% on glide and leaves on the exit tween. */
+.motion-dialog-backdrop {
+  transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.motion-dialog {
+  transition-property: opacity, scale, filter;
+  transition-duration: var(--motion-dur-glide);
+  transition-timing-function: var(--motion-ease-glide);
+}
+.motion-dialog-backdrop:is([data-starting-style], [data-ending-style]) { opacity: 0; }
+.motion-dialog:is([data-starting-style], [data-ending-style]) { opacity: 0; scale: .985; }
+.motion-dialog-backdrop[data-ending-style],
+.motion-dialog[data-ending-style] {
+  transition-duration: var(--motion-dur-exit);
+  transition-timing-function: var(--motion-ease-exit);
+}
+
+/*
+ * The highlight in a menu (components/ui/MenuHighlight.tsx) slides between
+ * items on snap instead of jumping; items stop painting their own.
+ */
+.menu-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--highlight-width, 0);
+  height: var(--highlight-height, 0);
+  translate: var(--highlight-x, 0) var(--highlight-y, 0);
+  border-radius: var(--radius-md, 6px);
+  background: var(--interactive-hover);
+  pointer-events: none;
+  transition: translate var(--motion-dur-snap) var(--motion-ease-snap), width var(--motion-dur-snap) var(--motion-ease-snap),
+    height var(--motion-dur-snap) var(--motion-ease-snap), opacity var(--motion-dur-fade) var(--motion-ease-out),
+    background-color var(--motion-dur-fade) var(--motion-ease-out);
+}
+.menu-highlight[data-hidden] { opacity: 0; }
+.menu-highlight[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+.menu-highlight[data-destructive] { background: color-mix(in srgb, var(--destructive) 10%, transparent); }
+.dark .menu-highlight[data-destructive] { background: color-mix(in srgb, var(--destructive) 20%, transparent); }
+[data-menu-highlight] { position: relative; }
+[data-menu-highlight] [role^="menuitem"]:is([data-highlighted], :hover):not([data-checked]) { background-color: transparent; }

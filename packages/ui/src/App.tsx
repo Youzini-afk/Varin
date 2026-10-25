@@ -643,7 +643,7 @@ function App({ apis }: AppProps) {
     return (
       <ErrorBoundary>
         <RuntimeAPIProvider apis={apis}>
-          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+          <TooltipProvider>
             <div className="h-full text-foreground bg-background">
               <EmbeddedSessionChatContent
                 embeddedSessionChat={embeddedSessionChat}
@@ -677,7 +677,7 @@ function App({ apis }: AppProps) {
     <ErrorBoundary>
       <RuntimeAPIProvider apis={apis}>
         <FireworksProvider>
-          <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+          <TooltipProvider>
             <div className={isDesktopRuntime ? 'h-full text-foreground bg-transparent' : 'h-full text-foreground bg-background'}>
               {catalogLoaded && <ThreadAppEffects />}
               <AgentEditorCoordinator />

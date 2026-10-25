@@ -4,6 +4,7 @@ import { Menu as BaseMenu } from "@base-ui/react/menu"
 import { cn } from "@/lib/utils"
 import { Icon } from "@/components/icon/Icon";
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from "./dropdown-menu.styles";
+import { MenuHighlight } from "./MenuHighlight";
 
 type AsChildProps = { asChild?: boolean };
 type AsChildRenderProps = {
@@ -133,6 +134,7 @@ function DropdownMenuContent({
           )}
           {...props}
         >
+          <MenuHighlight />
           {children}
         </BaseMenu.Popup>
       </BaseMenu.Positioner>
@@ -289,6 +291,7 @@ function DropdownMenuSubContent({
           )}
           {...props}
         >
+          <MenuHighlight />
           {children}
         </BaseMenu.Popup>
       </BaseMenu.Positioner>

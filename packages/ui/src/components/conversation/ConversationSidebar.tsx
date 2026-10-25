@@ -1115,7 +1115,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   };
 
   return (
-    <TooltipProvider delayDuration={400} skipDelayDuration={150}>
+    <TooltipProvider>
       <ContextMenu onOpenChangeComplete={(open) => {
         if (!open && pendingMenuSearchRef.current) {
           pendingMenuSearchRef.current = false;

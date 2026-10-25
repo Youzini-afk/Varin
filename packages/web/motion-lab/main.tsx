@@ -10,6 +10,7 @@ import { ChatTimeline } from '@/components/conversation/ChatTimeline';
 import { ConversationContext, type ConversationPresentation } from '@/components/conversation/ConversationContext';
 import { useTimelineViewStore } from '@/components/conversation/timelineViewStore';
 import { useUIStore, type MotionPreference } from '@/stores/useUIStore';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { SendLab } from './send';
 import type {
   ChatAssistantContent,
@@ -478,7 +479,9 @@ createRoot(document.getElementById('root')!).render(
     <ThemeSystemProvider>
       <ThemeProvider>
         <MotionProvider>
-          {scene === 'send' ? <SendLab /> : <Lab />}
+          <TooltipProvider>
+            {scene === 'send' ? <SendLab /> : <Lab />}
+          </TooltipProvider>
         </MotionProvider>
       </ThemeProvider>
     </ThemeSystemProvider>

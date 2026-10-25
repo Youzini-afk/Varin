@@ -19,18 +19,21 @@ const cubic = (points: readonly number[]) => `cubic-bezier(${points.join(', ')})
  * Reduced motion cross-fades without movement; off swaps directly. The wait is
  * reading time and applies at every level.
  */
-export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_MS }: {
+export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_MS, resize = false }: {
   text: string;
   live?: boolean;
   className?: string;
   /** Minimum time a text stays; counters that only roll pass 0. */
   hold?: number;
+  /** Glide the width to the new text instead of jumping, for labels inside a trigger. */
+  resize?: boolean;
 }) {
   const [shown, setShown] = React.useState(text);
   const shownAt = React.useRef(0);
   const host = React.useRef<HTMLSpanElement>(null);
   const current = React.useRef<HTMLSpanElement>(null);
   const previous = React.useRef(text);
+  const width = React.useRef<number | null>(null);
 
   React.useEffect(() => {
     if (text === shown) return undefined;
@@ -46,9 +49,17 @@ export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_M
     shownAt.current = Date.now();
     const node = current.current;
     const container = host.current;
+    const from = width.current;
+    const to = resize && container ? container.getBoundingClientRect().width : null;
+    width.current = to;
     if (before === shown || !node || !container || typeof node.animate !== 'function') return;
     const level = documentMotionLevel();
     if (level === 'off') return;
+    if (level === 'full' && from !== null && to !== null && Math.abs(from - to) > 1) {
+      container.setAttribute('data-resizing', '');
+      const glide = container.animate([{ width: `${from}px` }, { width: `${to}px` }], springTiming('glide'));
+      void glide.finished.then(() => container.removeAttribute('data-resizing'), () => container.removeAttribute('data-resizing'));
+    }
     container.querySelectorAll(':scope > [data-swap-leaving]').forEach(leaving => leaving.remove());
     const leaving = node.cloneNode(false) as HTMLSpanElement;
     leaving.removeAttribute('id');
@@ -67,7 +78,7 @@ export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_M
       [{ opacity: 0, transform: `translateY(${shift}px)` }, { opacity: 1, transform: 'none' }],
       { ...enter, delay: ENTER_DELAY_MS, fill: 'backwards' },
     );
-  }, [shown]);
+  }, [shown, resize]);
 
   return <span ref={host} className={cn('swap-text', className)} data-live={live || undefined} data-swap-pending={text !== shown || undefined}>
     <span ref={current} className="swap-text-current">{shown}</span>

@@ -7,6 +7,7 @@ import type { ChatAssistantMessage, ChatSessionEntry, ChatSessionMessageEntry } 
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { Departure } from '@/components/motion/Departure';
 import { ThreadComposer } from '@/components/thread/ThreadComposer';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { cn } from '@/lib/utils';
@@ -159,7 +160,15 @@ export function SendLab() {
   };
 
   const noop = () => undefined;
+  // Two neighbouring tooltip anchors, for the grouping check.
+  const anchors = <div className="absolute left-3 top-3 z-10 flex gap-1" data-lab-tooltips>
+    {['甲', '乙'].map(label => <Tooltip key={label}>
+      <TooltipTrigger asChild><button type="button" className="size-8 rounded-md border border-border text-xs">{label}</button></TooltipTrigger>
+      <TooltipContent side="bottom">提示 {label}</TooltipContent>
+    </Tooltip>)}
+  </div>;
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 bg-background text-foreground [container-type:inline-size]" aria-label="Send lab">
+    {anchors}
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>

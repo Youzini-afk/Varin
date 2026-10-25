@@ -7,6 +7,7 @@ import {
   dropdownMenuPopupClass,
   dropdownMenuSeparatorClass,
 } from "./dropdown-menu.styles";
+import { MenuHighlight } from "./MenuHighlight";
 
 const ContextMenuPortalContext = React.createContext<HTMLElement | null>(null);
 
@@ -55,6 +56,7 @@ function ContextMenuContent({ className, positionerClassName, children, style, o
           }}
           {...props}
         >
+          <MenuHighlight />
           {children}
         </BaseContextMenu.Popup>
       </BaseContextMenu.Positioner>

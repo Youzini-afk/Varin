@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { SwapIcon } from '@/components/motion/SwapIcon';
+import { SwapText } from '@/components/motion/SwapText';
 import { INSTANT_TRANSITION, springTransition } from '@/lib/motion/tokens';
 import { useComposerHeightGlide } from './useComposerHeightGlide';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
@@ -96,7 +97,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const modelControls = <div className="conversation-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
         {(selected?.thinkingLevels?.length ?? 0) > 1 && <DropdownMenu><DropdownMenuTrigger asChild>
           <button type="button" disabled={modelDisabled} className="flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover" aria-label={t('chat.modelControls.thinking')}>
-            <Icon name="brain" className="size-3.5" />{t(`settings.agents.thinking.${thinkingLevel}`)}
+            <Icon name="brain" className="size-3.5" /><SwapText text={t(`settings.agents.thinking.${thinkingLevel}`)} hold={0} resize />
           </button>
         </DropdownMenuTrigger><DropdownMenuContent side="top" align="end">
           {selected!.thinkingLevels!.map(level => <DropdownMenuItem key={level} onSelect={() => onModelChange(providerId, modelId, level)}>{t(`settings.agents.thinking.${level}`)}{level === thinkingLevel && <Icon name="check" className="ml-auto size-3.5" />}</DropdownMenuItem>)}
@@ -422,8 +423,11 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                   <button type="button" disabled={sending} title={t('settings.varin.visual.field.followUpBehaviorDescription')}
                     className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
                     aria-label={t('settings.chat.busySend')}>
-                    <Icon name={delivery === 'next_run' ? 'time' : 'arrow-up'} className="size-3 shrink-0" />
-                    <span className="truncate">{t(delivery === 'next_run' ? 'thread.composer.afterRun' : delivery === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</span>
+                    <SwapIcon swapKey={delivery === 'next_run' ? 'time' : 'arrow-up'} className="shrink-0">
+                      <Icon name={delivery === 'next_run' ? 'time' : 'arrow-up'} className="size-3" />
+                    </SwapIcon>
+                    <SwapText text={t(delivery === 'next_run' ? 'thread.composer.afterRun' : delivery === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')} hold={0} resize />
+
                     <Icon name="arrow-down-s" className="size-3 shrink-0" />
                   </button>
                 </DropdownMenuTrigger>

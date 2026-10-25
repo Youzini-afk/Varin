@@ -38,7 +38,7 @@ export function ElectronMiniChatApp({ apis }: { apis: RuntimeAPIs }) {
     void open.catch(error => setError(error instanceof Error ? error.message : String(error))).finally(dismissInitialSplash);
   }, [loaded, config]);
   useAppFontEffects(); useMiniChatKeyboardShortcuts(); useWindowTitle();
-  return <ErrorBoundary><RuntimeAPIProvider apis={apis}><TooltipProvider delayDuration={300} skipDelayDuration={150}>
+  return <ErrorBoundary><RuntimeAPIProvider apis={apis}><TooltipProvider>
     <div className="h-full bg-background text-foreground"><MiniChatLayout unavailable={error ?? catalogError ?? undefined} /><Toaster /></div>
   </TooltipProvider></RuntimeAPIProvider></ErrorBoundary>;
 }

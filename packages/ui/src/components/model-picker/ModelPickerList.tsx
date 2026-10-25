@@ -121,7 +121,7 @@ const ModelPickerRowTooltip: React.FC<{
     <Tooltip delayDuration={0} open={active && delayedActive} onOpenChange={() => {}}>
       <TooltipTrigger asChild>{children}</TooltipTrigger>
       {active && delayedActive ? (
-        <TooltipContent side="right" sideOffset={8} className="max-w-xs text-left transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
+        <TooltipContent side="right" sideOffset={8} className="motion-instant max-w-xs text-left">
           <div className="flex flex-col gap-2 text-left text-xs">
             {capabilities.length > 0 ? (
               <div className="flex items-center justify-between gap-3 text-muted-foreground">

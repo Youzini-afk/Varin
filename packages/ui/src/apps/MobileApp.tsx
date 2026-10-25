@@ -2820,7 +2820,7 @@ export function MobileApp({ apis }: MobileAppProps) {
   return (
     <ErrorBoundary>
       <RuntimeAPIProvider apis={apis}>
-        <TooltipProvider delayDuration={300} skipDelayDuration={150}>
+        <TooltipProvider>
           <div className="h-full bg-background text-foreground">
 
             <AgentEditorCoordinator />

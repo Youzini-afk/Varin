@@ -41,8 +41,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
         <Dialog.Backdrop
           className={cn(
             'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
-            'transition-opacity duration-150 ease-out',
-            'data-[starting-style]:opacity-0 data-[ending-style]:opacity-0',
+            'motion-dialog-backdrop',
           )}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
@@ -53,9 +52,8 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
               'w-[94vw] max-w-[1440px] h-[90vh] max-h-[1000px]',
               'rounded-xl border shadow-none overflow-hidden origin-center',
               'bg-background',
-              'transition-all duration-150 ease-out',
-              'data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]',
-              'data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]',
+              // Settles from 98.5% on glide; leaves on the exit tween.
+              'motion-dialog',
               // Dim this window when a nested dialog (e.g. "Add a device") opens
               // on top of it, mirroring how the page behind a dialog is dimmed.
               'data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]',

@@ -147,6 +147,14 @@ Sending is one choreography:
 
 Under reduced motion there is no flight, departure movement or height glide.
 
+Popovers share rules in `styles/motion.css`:
+
+- `motion-popover` (menus, context menus, selects, tooltips) grows from the trigger. It opens on snap from 96% and 5px toward the trigger (Base UI's `data-side`), and leaves on the exit tween. Menu items arrive 16ms apart. A popover that takes over from a neighbour (`data-instant` of `delay`, `group` or `trigger-change`) appears in place; dismissing still plays the exit. `motion-instant` opts a popover out.
+- `MenuHighlight` is rendered first in every dropdown, submenu and context menu. It draws the highlight once and slides it between items for the pointer and the arrow keys; the menu (`data-menu-highlight`) stops items painting their own. A checked item keeps its selection colour.
+- `motion-dialog` and `motion-dialog-backdrop` settle a dialog from 98.5% on glide over a fading backdrop.
+- Tooltips wait `TOOLTIP_DELAY_MS` (520ms) once. Within `TOOLTIP_GROUP_MS` (400ms) of one closing, the next opens at once. `TooltipProvider` maps Radix's `skipDelayDuration` to Base UI's `timeout`. A tooltip's own `delayDuration` goes to its trigger, so it stays in the shared group.
+- Trigger labels that name a choice (model, thinking level, delivery mode) use `SwapText` with `resize`: the label changes in place and the trigger's width glides.
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -156,6 +164,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node tray.cjs`: tray batches, the linger, the pointer hold and the retraction.
 - `node layout.cjs`: whether the row below follows a row that opens and closes, after paint.
 - `node send.cjs`: the departing home, docking, icon swaps, the flight's arc and landing, the height glide and reduced motion.
+- `node popover.cjs`: a menu's growth, highlight slide and exit, and tooltip grouping.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 

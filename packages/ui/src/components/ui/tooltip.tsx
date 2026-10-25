@@ -8,6 +8,8 @@ const MOBILE_LONG_PRESS_CLOSE_DELAY = 1600
 const MOBILE_LONG_PRESS_MOVE_TOLERANCE = 10
 
 type LongPressTooltipContextValue = {
+  /** This tooltip's own hover delay; the shared provider still groups it with its neighbours. */
+  delay?: number;
   handlePointerDown: (event: React.PointerEvent<HTMLElement>) => void;
   handlePointerMove: (event: React.PointerEvent<HTMLElement>) => void;
   handlePointerEnd: () => void;
@@ -41,22 +43,28 @@ class TooltipPartBoundary extends React.Component<{
   }
 }
 
+/** The first tooltip waits this long, so passing over controls shows nothing. */
+export const TOOLTIP_DELAY_MS = 520
+/** Moving to another anchor within this long after a tooltip closes opens the next one at once. */
+export const TOOLTIP_GROUP_MS = 400
+
 type ProviderProps = React.ComponentProps<typeof BaseTooltip.Provider> & {
   delayDuration?: number;
+  /** Radix name for the grouping window; Base UI calls it `timeout`. */
   skipDelayDuration?: number;
 };
 
 function TooltipProvider({
-  delayDuration = 0,
-  skipDelayDuration,
+  delayDuration = TOOLTIP_DELAY_MS,
+  skipDelayDuration = TOOLTIP_GROUP_MS,
   delay,
-  closeDelay,
+  timeout,
   ...props
 }: ProviderProps) {
   return (
     <BaseTooltip.Provider
       delay={delay ?? delayDuration}
-      closeDelay={closeDelay ?? skipDelayDuration}
+      timeout={timeout ?? skipDelayDuration}
       {...props}
     />
   )
@@ -103,6 +111,7 @@ function Tooltip({
   }, [controlled])
 
   const contextValue = React.useMemo<LongPressTooltipContextValue>(() => ({
+    delay: delayDuration,
     handlePointerDown: (event) => {
       if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
         return
@@ -164,7 +173,7 @@ function Tooltip({
 
       event.preventDefault()
     },
-  }), [clearCloseTimeout, clearLongPressTimeout, controlled, setTooltipOpen])
+  }), [clearCloseTimeout, clearLongPressTimeout, controlled, delayDuration, setTooltipOpen])
 
   React.useEffect(() => {
     return () => {
@@ -181,17 +190,13 @@ function Tooltip({
     onOpenChange?.(nextOpen, event)
   }, [controlled, onOpenChange])
 
-  const tooltip = (
+  // A per-tooltip delay goes to the trigger, not to a provider of its own, so
+  // moving between neighbouring anchors still skips the wait.
+  return (
     <LongPressTooltipContext.Provider value={contextValue}>
       <BaseTooltip.Root open={tooltipOpen} onOpenChange={handleOpenChange} {...props} />
     </LongPressTooltipContext.Provider>
   )
-
-  if (delayDuration === undefined) {
-    return tooltip
-  }
-
-  return <TooltipProvider delayDuration={delayDuration}>{tooltip}</TooltipProvider>
 }
 
 function TooltipTrigger({
@@ -213,6 +218,7 @@ function TooltipTrigger({
     <TooltipPartBoundary fallback={children}>
       <BaseTooltip.Trigger
         data-slot="tooltip-trigger"
+        delay={longPressTooltip?.delay}
         onPointerDown={(event) => {
           onPointerDown?.(event)
           longPressTooltip?.handlePointerDown(event)
@@ -274,10 +280,9 @@ function TooltipContent({
           <BaseTooltip.Popup
             data-slot="tooltip-content"
             className={cn(
-              // data-instant is set when moving between grouped tooltips
-              // (shared TooltipProvider): reposition without replaying the
-              // full exit/enter animation.
-              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 transition-all duration-150 ease-out data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 data-[instant]:transition-none data-[instant]:duration-0 z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
+              // `motion-popover` grows the tooltip from its anchor. A grouped
+              // tooltip that opens without waiting (data-instant) appears in place.
+              "bg-[var(--surface-elevated)] text-[var(--surface-elevated-foreground)] border border-border/60 motion-popover z-50 w-fit origin-[var(--transform-origin)] rounded-xl px-3 py-1.5 typography-meta text-balance overflow-hidden",
               className
             )}
             style={{ ...style }}

@@ -8,6 +8,7 @@ import {
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ModelLogo } from '@/components/ui/ModelLogo';
 import { Icon } from '@/components/icon/Icon';
+import { SwapText } from '@/components/motion/SwapText';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
@@ -287,7 +288,8 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
                     {!isReady ? catalogStatus : (
                         <>
                             {effectiveProviderId ? modelLogo : <Icon name="pencil-ai" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />}
-                            <span className="typography-ui-label min-w-0 flex-1 truncate text-left font-normal text-foreground">{triggerLabel}</span>
+                            {/* A new choice changes the label in place and glides the trigger's width. */}
+                            <SwapText text={String(triggerLabel)} hold={0} resize className="typography-ui-label min-w-0 flex-1 text-left font-normal text-foreground" />
                         </>
                     )}
                     {variant !== 'composer' ? <Icon name="arrow-down-s" className="h-4 w-4 flex-shrink-0 text-muted-foreground/50" /> : null}

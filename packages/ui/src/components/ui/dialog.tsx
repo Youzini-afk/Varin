@@ -62,8 +62,7 @@ const DialogOverlay = React.forwardRef<
       data-slot="dialog-overlay"
       className={cn(
         "fixed inset-0 z-50 bg-black/50 dark:bg-black/75",
-        "transition-opacity duration-150 ease-out",
-        "data-[starting-style]:opacity-0 data-[ending-style]:opacity-0",
+        "motion-dialog-backdrop",
         className
       )}
       {...props}
@@ -94,14 +93,12 @@ function DialogContent({
           data-state-slot="dialog"
           className={cn(
             "relative pointer-events-auto bg-background text-foreground flex flex-col w-full max-w-lg max-h-full gap-4 rounded-xl border p-6 shadow-none overflow-y-auto pwa-dialog-content origin-center",
-            "transition-all duration-150 ease-out",
-            "data-[starting-style]:opacity-0 data-[starting-style]:scale-[0.98]",
-            "data-[ending-style]:opacity-0 data-[ending-style]:scale-[0.98]",
+            "motion-dialog",
             // When a nested dialog opens on top of this one, dim this popup the
             // same way the page behind a dialog is dimmed (Base UI marks the
             // parent popup with data-nested-dialog-open). Brightness dims the
             // whole popup uniformly — including scrolled content — and animates
-            // via the existing transition-all.
+            // with the dialog's own transition.
             "data-[nested-dialog-open]:brightness-[0.55] dark:data-[nested-dialog-open]:brightness-[0.4]",
             className
           )}
