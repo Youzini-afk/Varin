@@ -30,6 +30,7 @@ import { VarinLogo } from '@/components/ui/VarinLogo';
 import { Button } from '@/components/ui/button';
 import type { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { Departure } from '@/components/motion/Departure';
 
 /** Local composition has no execution identity. The first explicit send creates one. */
 export function ThreadDraftConversation({ api, draftKey, handoff }: { api: ThreadsAPI; draftKey: string; handoff: MessageHandoff }) {
@@ -126,10 +127,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       <ChatTurnUserMessage cwd={sourcePath ?? ''} message={firstMessage.message} status={firstMessage.status} />
     </div></div> : <div className="min-h-6 flex-1" />}
     <div className="shrink-0 space-y-5 pb-4">
-      {!firstMessage.message && <div className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
+      {/* On send the title rises away and the starters sink, while the composer docks. */}
+      <Departure present={!firstMessage.message} exit="rise" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
         <VarinLogo width={24} height={24} decorative className="text-muted-foreground" />
         <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{sourcePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(sourcePath) }) : t('chat.emptyState.draftTitle')}</h1>
-      </div>}
+      </Departure>
       <form className="space-y-2" onSubmit={event => {
         event.preventDefault(); if (sendDisabled || reading.current) return;
         const settings = useUIStore.getState();
@@ -172,12 +174,12 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           </div>
         </ThreadComposer>
       </form>
-      {!firstMessage.message && <div className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="oc-draft-starters" onSubmit={starter => {
+      <Departure present={!firstMessage.message} exit="sink" stagger=".oc-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="oc-draft-starters" onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') patch({ goalArmed: true });
         else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true);
         else patch(current => ({ text: [current.text.trimEnd(), starter.submitText].filter(Boolean).join('\n\n') }));
         editor.current?.focus();
-      }} /></div>}
+      }} /></Departure>
     </div>
     {!firstMessage.message && <div className="min-h-6 flex-1" />}
     </div>

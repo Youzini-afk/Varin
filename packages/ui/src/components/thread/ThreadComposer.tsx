@@ -11,6 +11,9 @@ import { useUIStore } from '@/stores/useUIStore';
 import { cn } from '@/lib/utils';
 import { motion } from 'motion/react';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { SwapIcon } from '@/components/motion/SwapIcon';
+import { INSTANT_TRANSITION, springTransition } from '@/lib/motion/tokens';
+import { useComposerHeightGlide } from './useComposerHeightGlide';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from '@/components/chat/SkillAutocomplete';
@@ -53,6 +56,9 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const setModelPickerOpen = useUIStore(state => state.setModelSelectorOpen);
   const inputRef = React.useRef<ComposerEditorHandle | null>(null);
   const frameRef = React.useRef<HTMLDivElement>(null);
+  const inputFrameRef = React.useRef<HTMLDivElement>(null);
+  const inputContentRef = React.useRef<HTMLDivElement>(null);
+  useComposerHeightGlide(inputFrameRef, inputContentRef, value === '');
   const bindEditor = React.useCallback((handle: ComposerEditorHandle | null) => {
     inputRef.current = handle;
     if (typeof editorRef === 'function') editorRef(handle); else if (editorRef) editorRef.current = handle;
@@ -76,6 +82,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const aborting = false;
   const canSend = hasInput;
   const composerActions = { primary: active && !hasInput && !retrying ? 'stop' : 'send', showSecondaryStop: active && hasInput && Boolean(onStop) };
+  const primaryBusy = loading || (composerActions.primary === 'stop' ? aborting : sending);
+  const primaryIcon = { name: primaryBusy ? 'loader-4' : composerActions.primary === 'stop' ? 'stop' : 'arrow-up', spin: primaryBusy } as const;
   const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const handleAbort = () => onStop?.();
   const submit = () => { if (sendDisabled) return; if (value.trim() === '/tree' && onOpenHistory) { setAutocomplete(null); onOpenHistory(); onChange(''); return; } if (value.trim() === '/compact' && onCompact) { setAutocomplete(null); onCompact(); onChange(''); return; } messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit(); };
@@ -254,7 +262,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   return (
     <motion.div ref={frameRef} layout={reducedMotion ? false : 'position'} layoutId={motionId}
       layoutDependency={`${placement}:${isExpandedInput}:${attachmentNames.length}`}
-      initial={false} transition={{ layout: { duration: reducedMotion ? 0 : 0.52, ease: [0.22, 1, 0.36, 1] } }}
+      initial={false} transition={{ layout: reducedMotion ? INSTANT_TRANSITION : springTransition('travel') }}
       className={cn(
       'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-3',
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
@@ -263,6 +271,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
         {queue}
 
         <div
+          ref={inputFrameRef}
           className={cn(
             'relative flex flex-col overflow-visible rounded-xl border border-border bg-muted',
             sending && 'opacity-80',
@@ -278,6 +287,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             onFiles(files);
           }}
         >
+        {/* Measured by the height glide; the frame around it is what animates. */}
+        <div ref={inputContentRef} className="flex min-w-0 shrink-0 flex-col" data-conversation-composer-input-content="true">
         {children}
 
           {isMobile ? (
@@ -488,18 +499,10 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                     aria-busy={loading || (composerActions.primary === 'stop' ? aborting : undefined)}
                     data-conversation-composer-primary-action={composerActions.primary}
                   >
-                    <Icon
-                      key={`${composerActions.primary}:${aborting}:${sending}:${loading}`}
-                      name={loading ? 'loader-4' : composerActions.primary === 'stop'
-                        ? aborting ? 'loader-4' : 'stop'
-                        : sending ? 'loader-4' : 'arrow-up'}
-                      className={cn(
-                        'size-4',
-                        (loading || (composerActions.primary === 'stop' && aborting)
-                          || (composerActions.primary === 'send' && sending))
-                          && 'animate-spin',
-                      )}
-                    />
+                    {/* The arrow rises out as it is sent; Stop drops in once the run starts. */}
+                    <SwapIcon swapKey={primaryIcon.name} enter={primaryIcon.name === 'stop' ? 'settle' : 'glide'}>
+                      <Icon name={primaryIcon.name} className={cn('size-4', primaryIcon.spin && 'animate-spin')} />
+                    </SwapIcon>
                   </button>
                 </TooltipTrigger>
                 <TooltipContent side="top">
@@ -510,6 +513,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
               </Tooltip>
             </div>
           </div>
+        </div>
         </div>
       </div>
     </motion.div>

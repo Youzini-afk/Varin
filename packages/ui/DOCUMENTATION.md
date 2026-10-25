@@ -135,9 +135,29 @@ Dispatch and turn end:
 
 Disclosures in the timeline open and close on the glide curve. Measured after paint in the motion lab (`layout.cjs`), growth moves the row below in the same frame. While a row closes, the row below trails by one frame's worth of height: LegendList defers a shrinking item's size by one animation frame outside its scroll-anchoring mode. Rows never overlap.
 
-Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it. `MessageHandoff` keeps a sent message's flight on its destination while the timeline scrolls, and ends the flight only when the destination leaves the view.
+Each frame the spring compares the scroll position with what it wrote last. A difference means the list or the reader moved it in between, and the spring carries that shift instead of fighting it.
 
-The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`. Headless checks are in `motion-lab/checks`. `node follow.cjs` measures following, release, return, anchoring and reduced motion frame by frame; `node stream.cjs` measures pacing, ink, the dot, the drain and cleanup; `node process.cjs` measures the process row's labels, their hold time, the shimmer and the receipt; `node file-card.cjs` measures a streaming edit's rows, overlaps, identity, overwrite, the late path and phases; `node tray.cjs` measures tray batches, the linger, the pointer hold and the retraction; `node layout.cjs` measures, after paint, whether the row below follows a row that opens and closes. They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
+Sending is one choreography:
+
+- On the empty home, the title and starters leave through `Departure` (`components/motion/Departure.tsx`). React removes the real content in the same commit, so no heading lingers and the layout moves on at once. A paint-only copy (headings become plain elements; `aria-hidden`, `inert`) fades where the content was: the title rises 10px, starters sink 6px, 20ms apart. `ThreadConversation` animates the departure only when it is sending (`sendDeparts`); arriving history or a Thread switch removes the home at once.
+- The composer docks on the travel spring through its motion `layout` animation.
+- `MessageHandoff` flies the message from wherever the composer is to its bubble. Each frame it reads the bubble's live position: x follows glide and y follows travel, so the flight arrives across first, a shallow arc. It also re-reads after every spring step (`onSpringStep` in `lib/motion/spring.ts`), so a scroll the timeline spring writes in the same frame is never one frame behind. The size eases into late changes in the bubble, such as a long message folding to its preview, and the copy inside is refreshed. The flight ends on the frame it reaches the bubble, which takes over in place; it ends early if the bubble leaves the view.
+- The primary button changes its icon in place (`SwapIcon`). The previous icon rises out, the spinner and arrow come up on glide, and Stop drops in on settle.
+- `useComposerHeightGlide` holds the input frame's height. Typing changes it at once. A send or clear, the delivery row arriving and leaving with a run, and attachments glide on the glide spring. While a glide runs it follows every later change, and the hint row moves with the frame (`data-height-glide`). The frame's height moves while its content (`data-conversation-composer-input-content`) is measured, so the observers never see their own writes. `ComposerEditor` applies a controlled value in a layout effect, so a cleared draft lands in the same commit as the rest of the composer.
+
+Under reduced motion there is no flight, departure movement or height glide.
+
+The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
+
+- `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
+- `node stream.cjs`: pacing, ink, the dot, the drain and cleanup.
+- `node process.cjs`: the process row's labels, their hold time, the shimmer and the receipt.
+- `node file-card.cjs`: a streaming edit's rows, overlaps, identity, overwrite, the late path and phases.
+- `node tray.cjs`: tray batches, the linger, the pointer hold and the retraction.
+- `node layout.cjs`: whether the row below follows a row that opens and closes, after paint.
+- `node send.cjs`: the departing home, docking, icon swaps, the flight's arc and landing, the height glide and reduced motion.
+
+They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 
 ## Conversation and resource projections
 

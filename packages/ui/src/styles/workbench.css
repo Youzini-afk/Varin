@@ -135,6 +135,10 @@
   grid-template-rows: 1fr;
   opacity: 1;
 }
+/* While the frame's height glides (useComposerHeightGlide), the hint row moves with it. */
+[data-conversation-composer-input-frame][data-height-glide] .conversation-composer-hints {
+  transition: opacity var(--wb-state-duration) ease;
+}
 .conversation-composer-hints p { margin: 0; }
 .conversation-composer-queue { z-index: 0; }
 .conversation-composer-queue + [data-conversation-composer-input-frame] { z-index: 1; }
@@ -185,11 +189,11 @@
   position: relative;
   flex-shrink: 0;
   border-radius: 50%;
-  transition: background-color 200ms ease, color 200ms ease, transform 220ms var(--wb-ease-settle), box-shadow 200ms ease;
+  transition: background-color var(--motion-dur-fade) var(--motion-ease-out), color var(--motion-dur-fade) var(--motion-ease-out),
+    transform var(--motion-dur-snap) var(--motion-ease-snap), box-shadow var(--motion-dur-fade) var(--motion-ease-out);
 }
 [data-conversation-composer-primary-action]:hover:not(:disabled) { transform: translateY(-1px); }
 [data-conversation-composer-primary-action]:active:not(:disabled) { transform: scale(.91); }
-[data-conversation-composer-primary-action] > svg:not(.animate-spin) { animation: wb-action-arrive 240ms var(--wb-ease) both; }
 .conversation-composer-attachment { animation: wb-material-arrive 360ms var(--wb-ease-settle) both; }
 
 @container composer (max-width: 600px) {
@@ -255,7 +259,6 @@
   [data-workbench-chrome] .workbench-icon-button,
   .workbench-titlebar button, .ide-activity button, .workbench-resource-rail button,
   [data-conversation-composer-input-frame], [data-conversation-composer-primary-action] { transition: none; }
-  [data-conversation-composer-primary-action] > svg,
   .conversation-composer-attachment { animation: none; }
 }
 

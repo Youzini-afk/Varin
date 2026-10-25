@@ -1,20 +1,51 @@
 import type { ThreadSnapshot } from '@varin/application-client';
+import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
+import { onSpringStep } from '@/lib/motion/spring';
+import { EASE_OUT, springProgress, springSettleMs, springTiming, TWEENS } from '@/lib/motion/tokens';
 
 type Source = { left: number; top: number; width: number; height: number; radius: string };
+type Box = { x: number; y: number; width: number; height: number };
+type Flight = {
+  target: HTMLElement;
+  opacity: string;
+  overlay: HTMLElement;
+  /** A copy of the bubble, and the bubble size it was copied at. */
+  paint: HTMLElement;
+  painted: { width: number; height: number };
+  /** Corner radius and opacity. Position and size are written every frame. */
+  animations: Animation[];
+  /** Where the flight left from, relative to the root. */
+  from: Box;
+  /** The bubble size it flies toward, eased so a late change in the bubble does not snap. */
+  size: { width: number; height: number };
+  started: number;
+  stepped: number;
+  /** The timeline scroller the destination lives in. */
+  scroller: HTMLElement | null;
+};
 type Transfer = {
   sessionId: string;
   source: Source | null;
+  /** A send leaves from wherever the composer is when its bubble appears. */
+  fromComposer?: boolean;
   turnId?: string;
-  flight?: {
-    target: HTMLElement;
-    opacity: string;
-    overlay: HTMLElement;
-    animation: Animation;
-    /** The timeline scroller the destination lives in, and its offset at takeoff. */
-    scroller: HTMLElement | null;
-    scrollTop: number;
-  };
+  flight?: Flight;
 };
+
+const FADE_MS = TWEENS.fade.duration * 1000;
+/** Time constant for following a change in the bubble's size. */
+const SIZE_EASE_MS = 80;
+const mix = (from: number, to: number, progress: number): number => from + (to - from) * progress;
+
+/** A paint-only copy of the bubble, at its current size and type. */
+function paintOf(target: HTMLElement, rect: DOMRect): HTMLElement {
+  const paint = target.cloneNode(true) as HTMLElement;
+  paint.removeAttribute('id');
+  for (const element of paint.querySelectorAll('[id]')) element.removeAttribute('id');
+  const style = getComputedStyle(target);
+  Object.assign(paint.style, { width: `${rect.width}px`, margin: '0', font: style.font, color: style.color, opacity: '1' });
+  return paint;
+}
 
 /** View-local paint projections. No prompt, queue, history or scroll ownership. */
 export class MessageHandoff {
@@ -28,18 +59,16 @@ export class MessageHandoff {
   private observer: MutationObserver | null = null;
   private frame: number | null = null;
   private paintFrame: number | null = null;
+  private loop: FrameHandle | null = null;
+  private stopFollowingSprings: (() => void) | null = null;
 
   setRoot = (root: HTMLElement | null): void => {
     if (root === this.root) return;
     this.observer?.disconnect();
     this.observer = null;
-    this.root?.removeEventListener('scroll', this.scrolled, true);
     for (const [id, transfer] of this.transfers) if (transfer.flight) this.finish(id);
     this.root = root;
-    if (root) {
-      root.addEventListener('scroll', this.scrolled, { capture: true, passive: true });
-      this.watch();
-    }
+    if (root) this.watch();
   };
 
   select(runtimeKey: string, sessionId: string | null, enabled: boolean, reduced: boolean): void {
@@ -63,7 +92,7 @@ export class MessageHandoff {
 
   submit(id: string, sessionId: string, source: Source | null): void {
     if (!this.enabled || this.reduced) return;
-    this.transfers.set(`submit:${id}`, { sessionId, source });
+    this.transfers.set(`submit:${id}`, { sessionId, source, fromComposer: true });
     this.watch();
   }
 
@@ -123,7 +152,8 @@ export class MessageHandoff {
 
   private target(transfer: Transfer): HTMLElement | null {
     if (!transfer.turnId || transfer.sessionId !== this.sessionId) return null;
-    return this.root?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(transfer.turnId)}"] [data-conversation-user-message] > div`) ?? null;
+    // The bubble is the message's first child; its action row follows it.
+    return this.root?.querySelector<HTMLElement>(`[data-turn-id="${CSS.escape(transfer.turnId)}"] [data-conversation-user-message] > div:first-child`) ?? null;
   }
 
   private watch(): void {
@@ -146,90 +176,140 @@ export class MessageHandoff {
         for (const [id, transfer] of this.transfers) {
           const target = this.target(transfer);
           if (!target) continue;
-          if (transfer.flight) {
-            // A native entry replaces its optimistic/live node without replaying the motion.
-            if (transfer.flight.target !== target) {
-              transfer.flight.target.style.opacity = transfer.flight.opacity;
-              transfer.flight.opacity = target.style.opacity;
-              transfer.flight.target = target;
-              target.style.opacity = '0';
-            }
-          } else this.fly(id, transfer, target);
+          // A native entry replaces its optimistic/live node without replaying the motion.
+          if (transfer.flight) { if (transfer.flight.target !== target) this.land(transfer.flight, target); }
+          else this.fly(id, transfer, target);
         }
       });
     });
   }
 
+  /** Move a flight's destination to the node that now renders the same message. */
+  private land(flight: Flight, target: HTMLElement): void {
+    flight.target.style.opacity = flight.opacity;
+    flight.opacity = target.style.opacity;
+    flight.target = target;
+    flight.scroller = target.closest<HTMLElement>('.overlay-scrollbar-container');
+    // Copy the new node on the next step.
+    flight.painted = { width: -1, height: -1 };
+    target.style.opacity = '0';
+  }
+
   private fly(id: string, transfer: Transfer, target: HTMLElement): void {
     const bounds = this.bounds();
     const destination = this.capture(target);
-    const viewport = target.closest('.overlay-scrollbar-container')?.getBoundingClientRect();
+    const scroller = target.closest<HTMLElement>('.overlay-scrollbar-container');
+    const viewport = scroller?.getBoundingClientRect();
     if (!bounds || !destination || (viewport && (destination.top >= viewport.bottom || destination.top + destination.height <= viewport.top))) {
       this.finish(id);
       return;
     }
-    if (!transfer.source || typeof target.animate !== 'function') {
+    const source = (transfer.fromComposer ? this.captureDraft() : null) ?? transfer.source;
+    if (!source || typeof target.animate !== 'function') {
       // A missing/offscreen source still gets a small arrival at its real destination.
       if (typeof target.animate === 'function') target.animate([{ opacity: 0.4 }, { opacity: 1 }], { duration: 180 });
       this.finish(id);
       return;
     }
-    const source = transfer.source;
-    const scroller = target.closest<HTMLElement>('.overlay-scrollbar-container');
     const overlay = document.createElement('div');
     overlay.className = 'conversation-message-handoff';
     overlay.setAttribute('aria-hidden', 'true');
     overlay.inert = true;
-    const paint = target.cloneNode(true) as HTMLElement;
-    paint.removeAttribute('id');
-    for (const element of paint.querySelectorAll('[id]')) element.removeAttribute('id');
+    const rect = target.getBoundingClientRect();
+    const paint = paintOf(target, rect);
     const style = getComputedStyle(target);
-    Object.assign(paint.style, {
-      width: `${target.getBoundingClientRect().width}px`, margin: '0',
-      font: style.font, color: style.color, opacity: '1',
-    });
     overlay.append(paint);
+    const from = { x: source.left - bounds.left, y: source.top - bounds.top, width: source.width, height: source.height };
     Object.assign(overlay.style, {
-      left: `${destination.left - bounds.left}px`, top: `${destination.top - bounds.top}px`,
-      width: `${destination.width}px`, height: `${destination.height}px`, borderRadius: destination.radius,
-      background: style.backgroundColor,
+      left: '0px', top: '0px', width: `${from.width}px`, height: `${from.height}px`,
+      transform: `translate3d(${from.x}px, ${from.y}px, 0)`,
+      borderRadius: destination.radius, background: style.backgroundColor,
     });
     this.root!.append(overlay);
     const opacity = target.style.opacity;
     target.style.opacity = '0';
-    const animation = overlay.animate([
-      { transform: `translate(${source.left - destination.left}px, ${source.top - destination.top}px)`,
-        width: `${source.width}px`, height: `${source.height}px`, borderRadius: source.radius, opacity: 0.75 },
-      { transform: 'none', width: `${destination.width}px`, height: `${destination.height}px`, borderRadius: destination.radius, opacity: 1 },
-    ], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
-    transfer.flight = { target, opacity, overlay, animation, scroller, scrollTop: scroller?.scrollTop ?? 0 };
-    void animation.finished.then(() => this.finish(id), () => this.finish(id));
+    const animations = [
+      overlay.animate([{ borderRadius: source.radius }, { borderRadius: destination.radius }], springTiming('glide')),
+      overlay.animate([{ opacity: 0.75 }, { opacity: 1 }], { duration: FADE_MS, easing: `cubic-bezier(${EASE_OUT.join(', ')})` }),
+    ];
+    const started = performance.now();
+    transfer.flight = {
+      target, opacity, overlay, paint, painted: { width: rect.width, height: rect.height },
+      animations, from, size: { width: rect.width, height: rect.height }, started, stepped: started, scroller,
+    };
+    this.run();
   }
 
-  private interrupt = (): void => { for (const [id, transfer] of this.transfers) if (transfer.flight) this.finish(id); };
+  /** One frame of every flight, and again whenever a spring moves the page under it. */
+  private run(): void {
+    this.stopFollowingSprings ??= onSpringStep(this.step);
+    if (this.loop) return;
+    const tick = () => {
+      this.loop = null;
+      this.step();
+      if (this.flying()) this.loop = requestFrame(tick);
+    };
+    this.loop = requestFrame(tick);
+  }
+
+  private flying(): boolean {
+    for (const transfer of this.transfers.values()) if (transfer.flight) return true;
+    return false;
+  }
 
   /**
-   * The timeline keeps scrolling while a message lands: the follow and anchor
-   * springs write the scroll position every frame. The flight rides along with
-   * its destination; only a scroll that carries the destination out of view,
-   * or one of an unrelated ancestor, ends it early.
+   * Fly toward where the bubble is now. The timeline keeps scrolling while a
+   * message lands, so the destination is read every frame rather than at
+   * takeoff. x follows glide and y travel: the flight arrives across first and
+   * settles down last, a shallow arc. It ends on the frame it reaches the
+   * bubble, which takes over in place.
    */
-  private scrolled = (event: Event): void => {
+  private step = (): void => {
+    const bounds = this.bounds();
+    const now = performance.now();
+    const across = springSettleMs('glide');
+    const down = springSettleMs('travel');
     for (const [id, transfer] of this.transfers) {
       const flight = transfer.flight;
       if (!flight) continue;
-      const source = event.target;
-      if (flight.scroller && source === flight.scroller) {
-        const delta = flight.scroller.scrollTop - flight.scrollTop;
-        flight.overlay.style.translate = `0px ${-delta}px`;
-        const viewport = flight.scroller.getBoundingClientRect();
-        const destination = flight.target.getBoundingClientRect();
-        if (destination.top >= viewport.bottom || destination.bottom <= viewport.top) this.finish(id);
-      } else if (typeof Node !== 'undefined' && source instanceof Node && source.contains(flight.target)) {
-        this.finish(id);
+      if (!bounds) { this.finish(id); continue; }
+      if (!flight.target.isConnected) {
+        const next = this.target(transfer);
+        if (!next) { this.finish(id); continue; }
+        this.land(flight, next);
       }
+      const rect = flight.target.getBoundingClientRect();
+      const viewport = flight.scroller?.isConnected ? flight.scroller.getBoundingClientRect() : null;
+      if (viewport && (rect.top >= viewport.bottom || rect.bottom <= viewport.top)) { this.finish(id); continue; }
+      // The bubble can still change after it mounts, such as folding a long
+      // message to its preview; the flight carries what it will land on.
+      if (Math.abs(rect.width - flight.painted.width) > 1 || Math.abs(rect.height - flight.painted.height) > 1) {
+        const paint = paintOf(flight.target, rect);
+        flight.paint.replaceWith(paint);
+        flight.paint = paint;
+        flight.painted = { width: rect.width, height: rect.height };
+      }
+      const elapsed = now - flight.started;
+      const ease = 1 - Math.exp(-Math.max(0, now - flight.stepped) / SIZE_EASE_MS);
+      flight.stepped = now;
+      flight.size.width += (rect.width - flight.size.width) * ease;
+      flight.size.height += (rect.height - flight.size.height) * ease;
+      const x = springProgress('glide', elapsed / across);
+      const y = springProgress('travel', elapsed / down);
+      const to = { x: rect.left - bounds.left, y: rect.top - bounds.top };
+      const box = {
+        x: mix(flight.from.x, to.x, x), y: mix(flight.from.y, to.y, y),
+        width: mix(flight.from.width, flight.size.width, x), height: mix(flight.from.height, flight.size.height, x),
+      };
+      flight.overlay.style.transform = `translate3d(${box.x}px, ${box.y}px, 0)`;
+      flight.overlay.style.width = `${box.width}px`;
+      flight.overlay.style.height = `${box.height}px`;
+      const remaining = Math.max(Math.abs(to.x - box.x), Math.abs(to.y - box.y), Math.abs(rect.width - box.width), Math.abs(rect.height - box.height));
+      if (elapsed >= down || (elapsed >= FADE_MS && remaining < 0.5)) this.finish(id);
     }
   };
+
+  private interrupt = (): void => { for (const [id, transfer] of this.transfers) if (transfer.flight) this.finish(id); };
 
   private finish(id: string): void {
     const transfer = this.transfers.get(id);
@@ -237,8 +317,14 @@ export class MessageHandoff {
     this.transfers.delete(id);
     if (transfer.flight) {
       transfer.flight.target.style.opacity = transfer.flight.opacity;
-      transfer.flight.animation.cancel();
+      for (const animation of transfer.flight.animations) animation.cancel();
       transfer.flight.overlay.remove();
+    }
+    if (!this.flying()) {
+      this.loop?.cancel();
+      this.loop = null;
+      this.stopFollowingSprings?.();
+      this.stopFollowingSprings = null;
     }
     if (!this.transfers.size) {
       this.observer?.disconnect();

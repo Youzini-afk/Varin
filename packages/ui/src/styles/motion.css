@@ -141,6 +141,15 @@
   from { background-position: 100% 0; }
   to { background-position: -160% 0; }
 }
+/* In-place icon (components/motion/SwapIcon.tsx): both icons share one cell. */
+.swap-icon {
+  display: inline-grid;
+  place-items: center;
+}
+.swap-icon > * {
+  grid-area: 1 / 1;
+  display: inline-flex;
+}
 :root[data-motion="reduced"] .swap-text[data-live] > .swap-text-current,
 :root[data-motion="off"] .swap-text[data-live] > .swap-text-current {
   background: none;

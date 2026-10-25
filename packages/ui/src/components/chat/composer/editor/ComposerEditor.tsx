@@ -176,7 +176,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       };
     }, []);
 
-    React.useEffect(() => {
+    // A controlled change (a send clearing the draft) lands in the same commit
+    // as the rest of the composer, so no frame paints the old text beside it.
+    React.useLayoutEffect(() => {
       const view = viewRef.current;
       if (!view) return;
       const current = view.state.doc.toString();

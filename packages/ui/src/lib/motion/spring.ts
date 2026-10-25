@@ -51,6 +51,19 @@ export const springAtRest = (
 
 type Frame = FrameHandle;
 
+const stepListeners = new Set<() => void>();
+
+/**
+ * Called after any spring has written its value for this frame. Code that
+ * follows something a spring moves, such as a message flying onto a row the
+ * timeline scroll spring is carrying, reads it here in the same frame instead
+ * of one frame late.
+ */
+export function onSpringStep(listener: () => void): () => void {
+  stepListeners.add(listener);
+  return () => { stepListeners.delete(listener); };
+}
+
 export interface SpringDriverOptions {
   value?: number;
   spring: SpringCoefficients;
@@ -148,6 +161,7 @@ export class SpringDriver {
     // callback cancels the next frame instead of racing it.
     this.frame = { cancel: () => undefined };
     this.onUpdate(this.state.position);
+    for (const listener of stepListeners) listener();
     if (!this.frame) return;
     // `onUpdate` may have moved the target; only a still-reached target rests.
     if (resting && springAtRest(this.state, this.goal, this.restDelta, this.restSpeed)) {

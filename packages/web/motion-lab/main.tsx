@@ -10,6 +10,7 @@ import { ChatTimeline } from '@/components/conversation/ChatTimeline';
 import { ConversationContext, type ConversationPresentation } from '@/components/conversation/ConversationContext';
 import { useTimelineViewStore } from '@/components/conversation/timelineViewStore';
 import { useUIStore, type MotionPreference } from '@/stores/useUIStore';
+import { SendLab } from './send';
 import type {
   ChatAssistantContent,
   ChatAssistantMessage,
@@ -470,12 +471,14 @@ function Lab() {
 }
 
 initializeLocale();
+// `?scene=send` opens the empty home with the real composer instead of a long Thread.
+const scene = new URLSearchParams(location.search).get('scene');
 createRoot(document.getElementById('root')!).render(
   <I18nProvider>
     <ThemeSystemProvider>
       <ThemeProvider>
         <MotionProvider>
-          <Lab />
+          {scene === 'send' ? <SendLab /> : <Lab />}
         </MotionProvider>
       </ThemeProvider>
     </ThemeSystemProvider>
