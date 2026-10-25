@@ -7,6 +7,22 @@ const user: ChatSessionMessageEntry = { id: 'prompt', parentId: null, runId: 'ru
 const answer = (id: string, content: ChatAssistantMessage['content']): ChatSessionMessageEntry => ({ id, parentId: user.id, runId: 'run', timestamp: '', type: 'message',
   message: { id, role: 'assistant', model: 'model', provider: '', api: '', stopReason: 'stop', timestamp: 0, content } });
 
+it('lifts a newly received image out of a cached folded process without loading its bytes', () => {
+  const call = answer('images-call', [{ type: 'thinking', thinking: 'Inspect the image' },
+    { type: 'toolCall', id: 'image-call', name: 'script_run', arguments: {} }]);
+  const initial = projectChatTimeline([user, call]);
+  const before = projectChatTimelineBlocks(initial, { sorted: false, dialogue: true, expanded: () => false });
+  const receipt: ChatSessionMessageEntry = { id: 'image-receipt', parentId: call.id, runId: 'run', timestamp: '', type: 'message', message: {
+    role: 'toolResult', toolCallId: 'image-call', toolName: 'script_run', content: [], timestamp: 0, isError: false, historyId: 'image-receipt',
+    imageParts: [{ partIndex: 2, media: { media_type: 'image/png', source: { kind: 'operation', operation_id: 'image-op' }, content_ref: { content_object: 'image-bytes' } } }],
+  } };
+  const complete = projectChatTimeline([user, call, receipt], undefined, undefined, initial);
+  const after = projectChatTimelineBlocks(complete, { sorted: false, dialogue: true, expanded: () => false, previous: before });
+  expect(after.items.some(item => item.kind === 'dialogue' && item.itemId === 'tool:image-call')).toBe(true);
+  const sorted = projectChatTimelineBlocks(complete, { sorted: true, expanded: () => false });
+  expect(sorted.items.some(item => item.kind === 'activity' && item.activityId === 'tool:image-call')).toBe(true);
+});
+
 it('keeps native message keys when an earlier prompt is discovered and virtualizes a long Run into small rows', () => {
   const messages = Array.from({ length: 200 }, (_, index) => answer(`answer:${index}`, [{ type: 'text', text: `${index}` }]));
   const aliases: ChatTimelineBlockAliases = new Map();

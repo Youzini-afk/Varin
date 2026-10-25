@@ -1,5 +1,31 @@
 /* Reading typography for ordinary Markdown. Compact tools and reasoning keep
    their own scale. Theme colors are separate from workbench/editor colors. */
+.markdown-content [data-md-color] {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.35em;
+  max-inline-size: 100%;
+  vertical-align: baseline;
+}
+.markdown-content [data-md-color] > :first-child {
+  min-inline-size: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.markdown-content [data-md-color]::after {
+  content: '';
+  display: block;
+  flex: 0 0 0.8em;
+  inline-size: 0.8em;
+  block-size: 0.8em;
+  align-self: center;
+  border: 1px solid color-mix(in srgb, var(--foreground) 22%, transparent);
+  border-radius: 3px;
+  background-image: linear-gradient(var(--md-color), var(--md-color)),
+    conic-gradient(#d6d6d6 25%, #fff 0 50%, #d6d6d6 0 75%, #fff 0);
+  background-size: 100% 100%, 6px 6px;
+  user-select: none;
+}
 .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
   --markdown-paragraph-spacing: 1.05em;
   --markdown-reading-width: calc(var(--text-markdown) * 50);

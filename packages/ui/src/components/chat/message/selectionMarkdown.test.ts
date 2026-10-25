@@ -62,6 +62,12 @@ const codeWrapper = (lines: string[], language = 'ts'): TestNode => element('div
 ], { component: 'markdown-code' });
 
 describe('selectionNodesToMarkdown', () => {
+  test('preserves surrounding spaces when a color value has a decorative inline wrapper', () => {
+    expect(selectionNodesToMarkdown([element('p', [
+      text('Use '), element('span', [element('span', [text('#cfbfb9')])]),
+      text(' with '), element('span', [element('code', [text('#161616')])]), text(' for contrast.'),
+    ])], '')).toBe('Use #cfbfb9 with `#161616` for contrast.');
+  });
   test('serializes a complete grid code block without its header or line numbers', () => {
     expect(selectionNodesToMarkdown([codeWrapper(['range.cloneContents()', 'next()'])], '')).toBe(multiline(
       '```ts',

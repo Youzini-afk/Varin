@@ -1,4 +1,4 @@
-import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState } from './types';
+import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from './types';
 import type { ChatTimelineEntry } from './chatTimelineProjection';
 import { presentInvocation } from './toolInvocation';
 import { isStandaloneTool, standaloneDescendants } from './standaloneTools';
@@ -59,6 +59,7 @@ export const projectChatSortedTurn = (
   entries: readonly ChatTimelineEntry[],
   liveAssistant?: ChatAssistantMessage,
   executions?: Record<string, ChatToolExecutionState>,
+  results?: ReadonlyMap<string, ChatToolResultMessage>,
 ): ChatSortedTurnProjection => {
   const activity: ChatSortedTurnActivityItem[] = [];
   const answersBySourceId = new Map<string, ChatAssistantMessage>();
@@ -92,7 +93,7 @@ export const projectChatSortedTurn = (
         activityAnchorId ??= source.id;
         activity.push({
           call,
-          standalone: isStandaloneTool(call.name),
+          standalone: isStandaloneTool(call.name, executions?.[call.id], results?.get(call.id)),
           id: 'tool:' + call.id,
           kind: 'tool',
           sourceId: source.id,

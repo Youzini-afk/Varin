@@ -1,4 +1,4 @@
-import type { JsonValue, Operation, ChildTask, DelegatedExecution } from '@varin/protocol';
+import type { JsonValue, Operation, ChildTask, DelegatedExecution, StoredMedia } from '@varin/protocol';
 
 /** Read-only conversation presentation. Native history remains authoritative. */
 export interface ChatUsage {
@@ -84,6 +84,8 @@ export interface ChatAssistantMessage {
 }
 
 export interface ChatToolResultMessage {
+  /** Retained typed image parts, readable through historyId even after the Operation leaves the snapshot. */
+  imageParts?: Array<{ partIndex: number; media: StoredMedia }>;
   originalDetails?: JsonValue;
   operation?: Operation;
   historyId?: string;

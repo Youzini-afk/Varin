@@ -117,12 +117,12 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     useTimelineViewStore.getState().enter(timelineKey, head, working, preserveReading);
   }, [snapshot, historyReady, historyReset, timelineKey, head, working]);
   const nativeItems = React.useMemo(() => new Map(history.map(item => [item.id, item])), [history]);
-  const renderExtras = React.useCallback((itemId: string) => {
+  const renderExtras = React.useCallback((itemId: string, options?: { hideImages?: boolean }) => {
     const item = nativeItems.get(itemId); if (!item) return null;
     const parts = historyParts(item.content, item.source);
     return <>
-      <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId }} messageId={itemId} parts={parts.filter(part => part.kind === 'media')} />
-      {parts.flatMap(part => part.kind !== 'output' ? [] : part.output.parts.flatMap((part, index) => part.kind === 'media'
+      <ThreadContent api={api} identity={identity} holder={{ kind: 'history', itemId }} messageId={itemId} parts={parts.filter(part => part.kind === 'media' && !(options?.hideImages && part.media.media_type.startsWith('image/')))} />
+      {parts.flatMap(part => part.kind !== 'output' ? [] : part.output.parts.flatMap((part, index) => part.kind === 'media' && !(options?.hideImages && part.media.media_type.startsWith('image/'))
         ? [<ThreadMedia key={index} api={api} identity={identity} holder={{ kind: 'history', itemId }} media={part.media} partIndex={index} />] : []))}
       <ThreadSkillMaterials content={item.content} />
       {!readOnly && <ReviewTransferActions identity={identity} item={item} />}

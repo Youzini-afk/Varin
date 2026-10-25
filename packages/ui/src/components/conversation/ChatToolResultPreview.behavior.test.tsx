@@ -11,6 +11,7 @@ import { ConversationContext, type ConversationPresentation } from './Conversati
 import { HistoryPresentation } from './historyPresentation';
 import { OfficeGrid } from './ChatComputerTools';
 import { ThreadQuestion } from '../thread/ThreadQuestion';
+import { viewedImages } from './viewedImages';
 
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: keyof typeof dict, params?: Record<string, unknown>) =>
   (dict[key] ?? key).replace(/\{(\w+)\}/g, (_match, name: string) => String(params?.[name] ?? name)) }) }));
@@ -76,6 +77,43 @@ async function render(data: JsonValue, outcome?: Outcome, name?: string, args?: 
   }
   return container.querySelector<HTMLElement>('section[aria-label="File contents: audit-note.txt"]');
 }
+
+it.each(['live', 'dialogue', 'sorted'] as const)('shows image receipts outside folded activity and reads original media on expansion in %s mode', async mode => {
+  useUIStore.setState({ chatRenderMode: mode });
+  const media = { media_type: 'image/png', source: { kind: 'operation', operation_id: 'capture' }, content_ref: { content_object: 'sha256-image' } } as const;
+  const items = history({}, 'succeeded', 'script_run', { script: 'emitImage(image)' });
+  items[1]!.content = { content: { kind: 'tool_result', result: { request_id: 'request', call_id: 'read',
+    completion: { kind: 'result', outcome: 'succeeded', effect: 'none', content: { data: {}, parts: [
+      { kind: 'text', text: 'Read two images' }, { kind: 'media', media },
+      { kind: 'text', text: 'Second image' }, { kind: 'media', media },
+    ] } } } } };
+  const projected = new HistoryPresentation('images').project(items, undefined);
+  const receipt = projected.entries.find(entry => entry.type === 'message' && entry.message.role === 'toolResult');
+  if (receipt?.type !== 'message' || receipt.message.role !== 'toolResult') throw new Error('Missing receipt');
+  expect(viewedImages('script_run', receipt.message)).toHaveLength(2);
+  expect(viewedImages('image_generate', receipt.message)).toEqual([]);
+  const mediaRead = vi.fn(async (input: { partIndex: number; chunkIndex: number }) => ({ media,
+    partIndex: input.partIndex, chunkIndex: input.chunkIndex, chunkCount: 1, totalBytes: 3, bytesBase64: 'AQID' }));
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:observed-image');
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const presentation: ConversationPresentation = { identity: { runtime: 'agent', threadId: 'thread:audit', branchId: 'branch:audit' },
+    head: 'history:result', toolExecutions: projected.toolExecutions, api: { mediaRead } as unknown as ConversationPresentation['api'], quote() {},
+    openFile: async () => { throw new Error('Not a file navigation'); },
+    fileTarget: async () => { throw new Error('Not a file navigation'); } };
+  await act(async () => root.render(<ConversationContext.Provider value={presentation}>
+    <ChatTimelineEntryList cwd="/audit" entries={projected.entries} sessionId={`images:${mode}`} toolExecutions={projected.toolExecutions} />
+  </ConversationContext.Provider>));
+  const row = container.querySelector<HTMLDetailsElement>('.tool-viewed-images')!;
+  expect(row.querySelector('summary')?.textContent).toContain('Images viewed: 2');
+  expect(row.open).toBeFalsy(); expect(container.querySelector('img')).toBeNull();
+  expect(mediaRead).not.toHaveBeenCalled();
+  await act(async () => { row.open = true; row.dispatchEvent(new window.Event('toggle')); });
+  expect(container.querySelectorAll('.tool-viewed-image img')).toHaveLength(2);
+  expect(mediaRead.mock.calls.map(([input]) => input)).toEqual([1, 3].map(partIndex => ({ ...presentation.identity,
+    holder: { kind: 'history', itemId: 'history:result' }, partIndex, chunkIndex: 0, expectedContentRef: 'sha256-image' })));
+  expect(row.querySelector('[data-conversation-tool-disclosure^="image-details:"]')).not.toBeNull();
+  expect(container.textContent).not.toContain('emitImage(image)');
+});
 
 it('renders the native file body as readable text while retaining original arguments and details', async () => {
   const reader = await render(auditRead);

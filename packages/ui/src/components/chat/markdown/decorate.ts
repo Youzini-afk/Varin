@@ -3,6 +3,7 @@ import { getExternalFaviconUrl, isExternalHttpUrl } from '@/lib/url';
 import { dropdownMenuItemClass, dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
 import type { IconName } from '@/components/icon/icons';
 import { getMermaidViewerController } from './mermaidViewer';
+import { decorateColorSwatches } from './colorSwatches';
 
 // ---------------------------------------------------------------------------
 // Shared decoration context
@@ -465,6 +466,7 @@ export const decorateMarkdown = (root: HTMLElement, ctx: DecorateContext): void 
   decorateCodeBlocks(root, ctx);
   decorateTables(root, ctx.labels);
   decorateLinks(root);
+  decorateColorSwatches(root);
 };
 
 // ---------------------------------------------------------------------------

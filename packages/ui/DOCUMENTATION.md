@@ -112,6 +112,11 @@ The conversation timeline has one scroll spring, owned by one motion at a time:
 - Wheel, touch and key intent stop the spring at once. A motion whose owner went stale (mode, generation or return token) stops on its next frame.
 - Entering a Thread, a resized viewport, and `reduced` or `off` place the end directly.
 
+Literal hex and CSS functional colors in Markdown prose/inline code receive small color swatches after
+the value. The DOM decorator preserves source text, skips code blocks, links and math, and paints empty
+pseudo-elements with a border and transparency checkerboard. Both streamed and final blocks use it;
+copying text/Markdown or exporting a table retains the original values without decorative characters.
+
 Ordinary Markdown reading styles live in `styles/markdown.css`: body text and emphasis have separate
 theme colors, inline code keeps word boundaries, and links remain visibly actionable. Prose in chat
 has an 800px measure at the default text size, scaling with the text preference; code, tables and
@@ -422,6 +427,13 @@ preferences disable movement.
 `ThreadContent`/`ThreadMedia` consume declared typed text/media holders, not arbitrary JSON that looks
 like an image descriptor. Visible image previews and explicit attachment reads retain the original holder, part ordinal and execution
 identity. Object URLs belong to the mounted view and are revoked on cancellation or target change.
+Image observations from tools (including `script_run`'s `emitImage`) have an independent collapsed
+"Images viewed" receipt in all chat modes. Expanding loads wrapping, uncropped 80px thumbnails;
+clicking opens the existing full-image viewer and its save/download controls. The original tool remains
+available under details without duplicating the images. History projection retains typed image part
+ordinals and holders, so reopening old history does not depend on its Operation still being in the live
+snapshot. Binary JSON, image URLs and screenshot references alone do not produce an image receipt;
+generation/editing and dedicated collaboration/UI outputs keep their own presentation.
 Incomplete output-body pages must not be rendered as a complete report or reinterpreted as Markdown.
 
 `components/materials/PdfMaterialReader` is the shared reader core. Thread adapters provide the

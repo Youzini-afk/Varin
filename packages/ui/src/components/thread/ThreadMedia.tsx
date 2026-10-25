@@ -15,12 +15,12 @@ type Reader = Pick<ThreadsAPI, 'mediaRead'>;
 type Scope = { api: Reader; identity: ThreadIdentity; holder: OutputMediaHolder };
 
 /** Only an explicit typed part reaches the byte reader. The holder supplies authority. */
-export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: number }) {
+export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: number; thumbnail?: boolean }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const key = JSON.stringify([host, props.identity, props.holder, props.partIndex, props.media]);
   return <MediaView key={key} {...props} host={host} />;
 }
-function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { media: StoredMedia; partIndex: number; host: number }) {
+function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = false }: Scope & { media: StoredMedia; partIndex: number; host: number; thumbnail?: boolean }) {
   const { t } = useI18n();
   const figure = React.useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = React.useState(false);
@@ -71,13 +71,14 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
   loadRef.current = load;
   React.useEffect(() => {
     const element = figure.current;
-    if (!image || !element || typeof IntersectionObserver === 'undefined') return;
+    if (!image || !element) return;
+    if (typeof IntersectionObserver === 'undefined') { if (thumbnail) void loadRef.current(); return; }
     const observer = new IntersectionObserver(entries => {
       if (entries.some(entry => entry.isIntersecting)) { observer.disconnect(); void loadRef.current(); }
     });
     observer.observe(element);
     return () => observer.disconnect();
-  }, [image]);
+  }, [image, thumbnail]);
   const save = async () => {
     if (!runtime?.workspace || !loaded.current || savingRef.current || host !== getRuntimeEndpointGeneration()) return;
     if (!saveName.trim() || /[/\\]/.test(saveName) || saveName === '.' || saveName === '..') { setSaveError('Enter a file name without a directory.'); return; }
@@ -96,17 +97,10 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
       if (host === getRuntimeEndpointGeneration()) setSaveError(error instanceof Error ? error.message : 'Image save failed. The original image is still available.');
     } finally { savingRef.current = false; setSaving(false); }
   };
-  return <figure ref={figure} className="my-2 max-w-full space-y-2" aria-label="Stored media">
-    {!image && <figcaption className="typography-meta text-muted-foreground">{media.media_type}</figcaption>}
-    {error && <p role="alert" className="typography-meta text-destructive">{error}</p>}
-    {url && image && !displayFailed && <button type="button" className="block max-w-full overflow-hidden rounded-lg border border-border/70 bg-background" onClick={() => setExpanded(true)} aria-label={t('chat.media.view')}>
-      <img src={url} alt={t('chat.media.image')} className="max-h-[32rem] max-w-full object-contain" onError={() => {
-        setDisplayFailed(true); setError('The browser could not display this image.');
-      }} />
-    </button>}
+  const actions = <>
     {url && <div className="flex items-center gap-3 typography-micro text-muted-foreground">
       <a href={url} download={saveName} className="inline-flex items-center gap-1 hover:text-foreground"><Icon name="download" className="size-3.5" />{t('chat.media.download')}</a>
-      <button type="button" className="hover:text-foreground" onClick={() => { clear(); setUrl(undefined); }}>{t('chat.media.close')}</button>
+      <button type="button" className="hover:text-foreground" onClick={() => { setExpanded(false); clear(); setUrl(undefined); }}>{t('chat.media.close')}</button>
     </div>}
     {url && image && runtime?.workspace && <details className="typography-meta text-muted-foreground"><summary className="cursor-pointer">{t('chat.media.saveToProject')}</summary>
       <div className="my-2 flex flex-wrap gap-2">
@@ -117,9 +111,19 @@ function MediaView({ api, identity, holder, media, partIndex, host }: Scope & { 
       {savedPath && <p role="status">{t('chat.media.saved', { path: savedPath })}</p>}
       {saveError && <p role="alert">{saveError}</p>}
     </details>}
-    {!url && !loading && <Button type="button" variant="ghost" size="sm" onClick={() => void load()}>{t(error ? 'chat.media.retry' : image ? 'chat.media.view' : 'chat.media.read')}</Button>}
+  </>;
+  return <figure ref={figure} className={thumbnail ? "tool-viewed-image-media" : "my-2 max-w-full space-y-2"} aria-label="Stored media">
+    {!image && <figcaption className="typography-meta text-muted-foreground">{media.media_type}</figcaption>}
+    {error && <p role="alert" className={thumbnail ? "sr-only" : "typography-meta text-destructive"}>{error}</p>}
+    {url && image && !displayFailed && <button type="button" className={thumbnail ? "tool-viewed-image" : "block max-w-full overflow-hidden rounded-lg border border-border/70 bg-background"} onClick={() => setExpanded(true)} aria-label={t('chat.media.view')}>
+      <img src={url} alt={t('chat.media.image')} className={thumbnail ? "h-full w-full object-contain" : "max-h-[32rem] max-w-full object-contain"} decoding="async" onError={() => {
+        setDisplayFailed(true); setError('The browser could not display this image.');
+      }} />
+    </button>}
+    {!thumbnail && actions}
+    {(!url || displayFailed) && !loading && <Button type="button" variant="ghost" size="sm" title={error} onClick={() => void load()}>{t(error ? 'chat.media.retry' : image ? 'chat.media.view' : 'chat.media.read')}</Button>}
     {loading && <span role="status" className="inline-flex items-center gap-2 typography-meta text-muted-foreground"><Icon name="loader-4" className="size-3.5 animate-spin" />{t('chat.media.loading')}</span>}
-    {url && image && <Dialog open={expanded} onOpenChange={setExpanded}><DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle><img src={url} alt={t('chat.media.image')} className="max-h-[85vh] w-full object-contain" /></DialogContent></Dialog>}
+    {url && image && <Dialog open={expanded} onOpenChange={setExpanded}><DialogContent className="max-w-[90vw] p-2"><DialogTitle className="sr-only">{t('chat.media.image')}</DialogTitle><img src={url} alt={t('chat.media.image')} className={thumbnail ? "max-h-[75vh] w-full object-contain" : "max-h-[85vh] w-full object-contain"} />{thumbnail && <div className="px-2 pb-2">{actions}</div>}</DialogContent></Dialog>}
   </figure>;
 }
 

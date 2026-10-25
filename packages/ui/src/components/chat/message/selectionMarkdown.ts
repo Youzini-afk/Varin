@@ -22,7 +22,8 @@ const BLOCK_TAGS = new Set([
 
 const normalizeLineBreaks = (value: string): string => value.replace(/\r\n?/g, '\n');
 export const trimSelectionValue = (value: string): string => normalizeLineBreaks(value).trim();
-const textToMarkdownInline = (value: string): string => value.replace(/\s+/g, ' ').trim();
+// Keep spaces at inline decoration boundaries; the containing block trims its outer edges.
+const textToMarkdownInline = (value: string): string => value.replace(/\s+/g, ' ');
 
 const getCodeLanguageFromClassName = (className: string): string => {
   return (className.match(/language-([\w+#.-]+)/)?.[1] || '').trim();

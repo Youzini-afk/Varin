@@ -1,4 +1,5 @@
-import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState } from './types';
+import { viewedImages } from './viewedImages';
+import type { ChatAssistantMessage, ChatTextContent, ChatThinkingContent, ChatToolCall, ChatToolExecutionState, ChatToolResultMessage } from './types';
 import type { ChatTimelineEntry } from './chatTimelineProjection';
 import { presentInvocation } from './toolInvocation';
 import { isStandaloneTool, standaloneDescendants } from './standaloneTools';
@@ -24,8 +25,8 @@ export type DialogueItem = DialogueProcess | (Source & (
 /** Presentation only: public prose stays in place; ordinary activity between
  * spoken messages has one disclosure. Delegations and questions keep their own row. */
 export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?: ChatAssistantMessage,
-  { showThinking = true, customIds = new Set<string>(), executions }: {
-    showThinking?: boolean; customIds?: ReadonlySet<string>; executions?: Record<string, ChatToolExecutionState>;
+  { showThinking = true, customIds = new Set<string>(), executions, results }: {
+    showThinking?: boolean; customIds?: ReadonlySet<string>; executions?: Record<string, ChatToolExecutionState>; results?: ReadonlyMap<string, ChatToolResultMessage>;
   } = {}): DialogueItem[] {
   const items: DialogueItem[] = [];
   const seen = new Set<string>();
@@ -54,7 +55,10 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
       } else {
         const call = presentInvocation(content);
         const tool = { ...source, kind: 'tool' as const, call, streaming: source.streaming && !call.interrupted };
-        if (isStandaloneTool(call.name)) { if (call.name === 'send') seal(); items.push(tool); }
+        if (isStandaloneTool(call.name, executions?.[call.id], results?.get(call.id))) {
+          if (call.name === 'send' || viewedImages(call.name, results?.get(call.id), executions?.[call.id]).length) seal();
+          items.push(tool);
+        }
         else append(tool);
         // A dispatch inside script_run has the same native child owner. Keep it
         // visible beside the parent process instead of burying it in the script.

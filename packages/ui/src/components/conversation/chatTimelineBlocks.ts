@@ -1,6 +1,6 @@
 import { CHAT_SORTED_LIVE_ASSISTANT_ID, projectChatSortedTurn, type ChatSortedTurnProjection } from './chatSortedTurnProjection';
 import { resolveChatTimelineItem, type ChatTimelineEntry, type ChatTimelineProjection, type ChatTimelineTurn } from './chatTimelineProjection';
-import type { ChatAssistantMessage, ChatToolExecutionState } from './types';
+import type { ChatAssistantMessage, ChatToolExecutionState, ChatToolResultMessage } from './types';
 import { projectChatDialogue, type DialogueItem } from './chatDialogueProjection';
 
 export interface ChatTimelineBlockGroup {
@@ -27,29 +27,30 @@ export interface ChatTimelineBlocks {
   groups: ReadonlyMap<string, ChatTimelineBlockGroup>;
 }
 export type ChatTimelineBlockAliases = Map<string, { runId: string; id: string }>;
-const sortedLive = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; executions?: Record<string, ChatToolExecutionState>; value: ChatSortedTurnProjection }>();
+type ToolResults = ReadonlyMap<string, ChatToolResultMessage>;
+const sortedLive = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; executions?: Record<string, ChatToolExecutionState>; results?: ToolResults; value: ChatSortedTurnProjection }>();
 const EMPTY_CUSTOM_IDS: ReadonlySet<string> = new Set();
-const dialogues = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; showThinking: boolean; executions?: Record<string, ChatToolExecutionState>; items: DialogueItem[] }>();
+const dialogues = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; showThinking: boolean; executions?: Record<string, ChatToolExecutionState>; results?: ToolResults; items: DialogueItem[] }>();
 const sameEntries = (a: readonly ChatTimelineEntry[], b: readonly ChatTimelineEntry[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
 
 export function blockGroupLive(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>): ChatAssistantMessage | undefined {
   return group.liveId === projection.liveAssistant?.id ? projection.liveAssistant : undefined;
 }
-export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>, executions?: Record<string, ChatToolExecutionState>) {
+export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'> & { resultByCallId?: ToolResults }, executions?: Record<string, ChatToolExecutionState>) {
   const live = blockGroupLive(group, projection);
-  if (!live && !executions) return group.sorted;
+  if (!live && !executions && !projection.resultByCallId) return group.sorted;
   const previous = sortedLive.get(group);
-  if (previous && previous.live === live && previous.executions === executions) return previous.value;
-  const value = projectChatSortedTurn(group.entries.filter(entry => !group.customIds.has(entry.id)), live, executions);
-  sortedLive.set(group, { live, executions, value });
+  if (previous && previous.live === live && previous.executions === executions && previous.results === projection.resultByCallId) return previous.value;
+  const value = projectChatSortedTurn(group.entries.filter(entry => !group.customIds.has(entry.id)), live, executions, projection.resultByCallId);
+  sortedLive.set(group, { live, executions, results: projection.resultByCallId, value });
   return value;
 }
 
-export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
+export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'> & { resultByCallId?: ToolResults }, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
   const live = blockGroupLive(group, projection), previous = dialogues.get(group);
-  if (previous && previous.live === live && previous.showThinking === showThinking && previous.executions === executions) return previous.items;
-  const items = projectChatDialogue(group.entries, live, { showThinking, customIds: group.customIds, executions });
-  dialogues.set(group, { live, showThinking, executions, items });
+  if (previous && previous.live === live && previous.showThinking === showThinking && previous.executions === executions && previous.results === projection.resultByCallId) return previous.items;
+  const items = projectChatDialogue(group.entries, live, { showThinking, customIds: group.customIds, executions, results: projection.resultByCallId });
+  dialogues.set(group, { live, showThinking, executions, results: projection.resultByCallId, items });
   return items;
 }
 

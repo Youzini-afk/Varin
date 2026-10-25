@@ -19,7 +19,7 @@ export interface ConversationPresentation {
   fileTarget(callId: string, path: string): Promise<Extract<ThreadFileTarget, { kind: 'document' }>>;
   memory?: ThreadMemoryAPI;
   followups?: readonly import('@varin/protocol').Followup[];
-  renderExtras?(itemId: string): React.ReactNode;
+  renderExtras?(itemId: string, options?: { hideImages?: boolean }): React.ReactNode;
 }
 /** Presentation-only examples never activate extension renderers or file links. */
 export const ConversationPreviewContext = React.createContext(false);

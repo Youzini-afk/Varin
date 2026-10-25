@@ -1,3 +1,6 @@
+import { ChatViewedImages } from './ChatViewedImages';
+import { ViewedImageDetailsContext } from './toolDisclosureContext';
+import { viewedImages } from './viewedImages';
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
 import { standaloneDescendants } from './standaloneTools';
 import { scriptToolLabels } from './scriptPresentation';
@@ -258,15 +261,16 @@ const ToolResultContent: React.FC<{
 }> = ({ messageId, result, hideDetails = false }) => {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
+  const suppressImages = React.useContext(ViewedImageDetailsContext) === result.toolCallId;
   const calls = projectToolCalls(result);
   const completion = result.operation?.call_completion;
   const mediaOutput = completion && completion.kind !== 'not_dispatched' ? completion.content : undefined;
   return (
     <div className="space-y-2">
-      <ChatUserContentView content={result.content} messageId={messageId} variant="tool" />
+      <ChatUserContentView content={suppressImages ? result.content.filter(part => part.type !== 'image') : result.content} messageId={messageId} variant="tool" />
       <ChatToolResultPreview result={result} />
-      <EntryExtras itemId={result.historyId} />
-      {conversation && result.operation && mediaOutput?.parts.flatMap((part, index) => part.kind === 'media' ? [
+      <EntryExtras itemId={result.historyId} hideImages={suppressImages} />
+      {conversation && result.operation && mediaOutput?.parts.flatMap((part, index) => part.kind === 'media' && !(suppressImages && part.media.media_type.startsWith('image/')) ? [
         <ThreadMedia key={index} api={conversation.api} identity={conversation.identity}
           holder={{ kind: 'operation', operationId: result.operation!.id, output: 'completion' }} media={part.media} partIndex={index} />,
       ] : [])}
@@ -346,6 +350,7 @@ const ChatToolCard: React.FC<{
   executionById?: Record<string, ChatToolExecutionState>;
   result?: ChatToolResultMessage;
 }> = ({ call: originalCall, cwd, generating = false, execution: originalExecution, executionById, result: originalResult }) => {
+  const imageDetails = React.useContext(ViewedImageDetailsContext) === originalCall.id;
   const call = presentInvocation(originalCall);
   const result = call !== originalCall && originalResult ? { ...originalResult, toolName: call.name,
     details: invocationData(originalResult.details, call) as JsonValue, originalDetails: originalResult.details } : originalResult;
@@ -410,6 +415,10 @@ const ChatToolCard: React.FC<{
       </div>
     </ToolDisclosure>,
   };
+  const images = imageDetails ? [] : viewedImages(call.name, result, execution);
+  if (images.length) return <ChatViewedImages callId={call.id} images={images} status={status}>
+    <ChatToolCard call={originalCall} cwd={cwd} generating={generating} execution={originalExecution} executionById={executionById} result={originalResult} />
+  </ChatViewedImages>;
   if (call.name === 'dispatch') return <ChatDelegation {...specific} />;
   if (call.name.startsWith('process_') || call.name === 'wait_process') return <ChatProcessTool {...specific} />;
   if (['file_read', 'file_list', 'file_search'].includes(call.name)) return <ChatFileTools {...specific} />;
@@ -1065,14 +1074,14 @@ export const ChatTimelineEntryList: React.FC<Omit<
   );
   const sortedProjection = React.useMemo(
     () => sortedPresentation ?? (chatRenderMode === 'sorted'
-      ? projectChatSortedTurn(builtInEntries, projection.liveAssistant, toolExecutions)
+      ? projectChatSortedTurn(builtInEntries, projection.liveAssistant, toolExecutions, projectedResultByCallId ?? projection.resultByCallId)
       : undefined),
-    [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation, toolExecutions],
+    [builtInEntries, chatRenderMode, projection.liveAssistant, sortedPresentation, toolExecutions, projectedResultByCallId, projection.resultByCallId],
   );
   const resolvedThinkingLabel = hiddenThinkingLabel || t('chat.reasoningTrace.thinking');
   const dialogue = React.useMemo(() => chatRenderMode === 'dialogue' && part !== 'footer'
-    ? projectChatDialogue(projection.visibleEntries, projection.liveAssistant, { showThinking, customIds: new Set(extensionEntries.keys()), executions: toolExecutions }) : undefined,
-  [chatRenderMode, part, projection.visibleEntries, projection.liveAssistant, showThinking, extensionEntries, toolExecutions]);
+    ? projectChatDialogue(projection.visibleEntries, projection.liveAssistant, { showThinking, customIds: new Set(extensionEntries.keys()), executions: toolExecutions, results: projectedResultByCallId ?? projection.resultByCallId }) : undefined,
+  [chatRenderMode, part, projection.visibleEntries, projection.liveAssistant, showThinking, extensionEntries, toolExecutions, projectedResultByCallId, projection.resultByCallId]);
   // The row owns the whole turn, independent of live/sorted presentation.
   // Only assistant prose belongs in copy/memory; thinking and tool output do
   // not. Native discussion/fork actions still need a persisted text message.

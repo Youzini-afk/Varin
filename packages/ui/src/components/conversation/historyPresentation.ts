@@ -166,6 +166,7 @@ export class HistoryPresentation {
             ...(completion.kind === 'not_dispatched' ? { notDispatched: true } : {}),
             status: completion.kind === 'not_dispatched' ? 'error' : completion.kind === 'job_accepted' || gateway?.completion.kind === 'job_accepted' ? 'background' : outcomeStatus(completion.outcome),
             content: completion.kind === 'not_dispatched' ? [{ type: 'text', text: String(completion.reason ?? '') }] : outputParts(output),
+            imageParts: output?.parts.flatMap((part, partIndex) => part.kind === 'media' && part.media.media_type.startsWith('image/') ? [{ partIndex, media: part.media }] : []),
             ...(output?.data == null ? {} : { details: json(invocationData(output.data, calls.get(id))), originalDetails: json(output.data) }) } };
         } else if (content.kind === 'output' && item.source === 'agent' && object(object(content.output).data).kind === 'retrieval_result') {
           const output = content.output as OutputBody;

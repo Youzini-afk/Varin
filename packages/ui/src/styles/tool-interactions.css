@@ -155,6 +155,30 @@
 @media (pointer: coarse) {
   .tool-material-title, .tool-text-button, .tool-reader-heading button, .tool-sheet-scroll td button { min-height: 44px; }
 }
+
+/* Image observations stay a quiet receipt; only the thumbnails have a surface. */
+.tool-viewed-images { min-width: 0; margin-block: 8px; }
+.tool-viewed-images-heading {
+  display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%;
+  min-height: 28px; cursor: pointer; color: var(--muted-foreground);
+}
+.tool-viewed-images-heading:hover { color: var(--foreground); }
+.tool-viewed-images-heading > span { min-width: 0; overflow-wrap: anywhere; }
+.tool-viewed-images-body { padding-top: 6px; }
+.tool-viewed-images-grid { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; }
+.tool-viewed-image-media { margin: 0; width: 80px; min-height: 80px; max-width: 100%; }
+.tool-viewed-image-media > button { width: 80px; min-height: 80px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.tool-viewed-image {
+  display: flex; align-items: center; justify-content: center;
+  width: 80px; height: 80px; max-width: 100%; padding: 5px;
+  overflow: hidden; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--background); cursor: zoom-in;
+}
+.tool-viewed-image > img { width: 100%; height: 100%; object-fit: contain; }
+.tool-viewed-image:hover { border-color: var(--muted-foreground); }
+.tool-viewed-image:focus-visible, .tool-viewed-images-heading:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.tool-viewed-image-media > [role="status"] { min-height: 80px; justify-content: center; flex-wrap: wrap; }
+.tool-viewed-images-body > .tool-invocation-details { margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) {
   .tool-question-option { transition: none; }
   .tool-material-reader { animation: none; }
