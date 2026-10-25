@@ -2,7 +2,7 @@
   "metadata": {
     "id": "varin-light",
     "name": "Varin",
-    "description": "Warm paper workbench surfaces with blue accents and Vitesse syntax",
+    "description": "Neutral off-white surfaces with clear elevation, blue accents and Vitesse syntax",
     "author": "Varin",
     "version": "1.1.0",
     "variant": "light",
@@ -24,26 +24,26 @@
       "emphasis": "#1d4ed8"
     },
     "surface": {
-      "background": "#fcfbf9",
-      "foreground": "#1b1a18",
-      "muted": "#fffefd",
-      "mutedForeground": "#615e59",
+      "background": "#fafafa",
+      "foreground": "#242424",
+      "muted": "#ffffff",
+      "mutedForeground": "#666666",
       "elevated": "#ffffff",
-      "elevatedForeground": "#1b1a18",
-      "overlay": "#18161333",
-      "subtle": "#1816130a"
+      "elevatedForeground": "#242424",
+      "overlay": "#00000033",
+      "subtle": "#eaeaea"
     },
     "interactive": {
-      "border": "#18161314",
-      "borderHover": "#18161324",
+      "border": "#dedede",
+      "borderHover": "#bcbcbc",
       "borderFocus": "#2563eb88",
       "selection": "#2563eb26",
-      "selectionForeground": "#1b1a18",
+      "selectionForeground": "#242424",
       "focus": "#2563eb",
       "focusRing": "#2563eb40",
-      "cursor": "#1b1a18",
-      "hover": "#1816130a",
-      "active": "#18161312"
+      "cursor": "#242424",
+      "hover": "#ebebeb",
+      "active": "#e3e3e3"
     },
     "status": {
       "error": "#b7493f",
@@ -72,8 +72,8 @@
     },
     "syntax": {
       "base": {
-        "background": "#fcfbf9",
-        "foreground": "#1b1a18",
+        "background": "#f3f3f3",
+        "foreground": "#383838",
         "comment": "#9dae9d",
         "keyword": "#15764e",
         "string": "#c25f4b",
@@ -131,60 +131,60 @@
       }
     },
     "markdown": {
-      "body": "#373632",
-      "secondary": "#6a6762",
-      "heading1": "#22211f",
-      "heading2": "#22211f",
-      "heading3": "#22211f",
-      "heading4": "#22211f",
-      "bold": "#282624",
-      "italic": "#373632",
-      "blockquote": "#55524c",
-      "listMarker": "#77736c",
-      "hr": "#e8e5df",
-      "codeBackground": "#f5f4f1",
-      "codeBorder": "#e5e2da",
-      "codeForeground": "#373632",
-      "codeComment": "#716e66",
+      "body": "#383838",
+      "secondary": "#666666",
+      "heading1": "#242424",
+      "heading2": "#242424",
+      "heading3": "#242424",
+      "heading4": "#242424",
+      "bold": "#292929",
+      "italic": "#383838",
+      "blockquote": "#555555",
+      "listMarker": "#737373",
+      "hr": "#dedede",
+      "codeBackground": "#f3f3f3",
+      "codeBorder": "#dedede",
+      "codeForeground": "#383838",
+      "codeComment": "#707070",
       "codeKeyword": "#805c83",
       "codeString": "#486958",
       "codeNumber": "#8a5e2e",
-      "codeFunction": "#373632",
-      "codeVariable": "#373632",
-      "codeProperty": "#373632",
+      "codeFunction": "#383838",
+      "codeVariable": "#383838",
+      "codeProperty": "#383838",
       "codeType": "#65527f",
-      "codeOperator": "#68655f",
-      "tableHeader": "#f3f1ec",
-      "tableBorder": "#e8e5df"
+      "codeOperator": "#666666",
+      "tableHeader": "#ffffff",
+      "tableBorder": "#dedede"
     },
     "chat": {
-      "userMessage": "#1b1a18",
-      "userMessageBackground": "#f0efed",
-      "assistantMessage": "#1b1a18",
-      "assistantMessageBackground": "#fcfbf9",
-      "timestamp": "#615e59",
-      "divider": "#18161314"
+      "userMessage": "#242424",
+      "userMessageBackground": "#eeeeee",
+      "assistantMessage": "#383838",
+      "assistantMessageBackground": "#fafafa",
+      "timestamp": "#666666",
+      "divider": "#dedede"
     },
     "tools": {
-      "background": "#fffefd",
-      "border": "#18161314",
-      "headerHover": "#1816130a",
-      "icon": "#615e59",
-      "title": "#1b1a18",
-      "description": "#615e59",
+      "background": "#ffffff",
+      "border": "#dedede",
+      "headerHover": "#ebebeb",
+      "icon": "#666666",
+      "title": "#242424",
+      "description": "#666666",
       "edit": {
         "added": "#2c751e",
         "addedBackground": "#2c751e25",
         "removed": "#ab5959",
         "removedBackground": "#ab595925",
-        "lineNumber": "#b9b6b0"
+        "lineNumber": "#666666"
       }
     },
     "header": {
-      "background": "#eeedeb"
+      "background": "#f2f2f2"
     },
     "sidebar": {
-      "background": "#eeedeb"
+      "background": "#f2f2f2"
     }
   },
   "config": {

@@ -244,6 +244,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
     } = useThemeSystem();
 
     const [themesReloading, setThemesReloading] = React.useState(false);
+    const [themePreviewVariant, setThemePreviewVariant] = React.useState<'light' | 'dark'>();
 
     // macOS-desktop-only vibrancy toggle. Changing it needs a full relaunch
     // (vibrancy is a window-creation option), so we persist + restart on save.
@@ -486,8 +487,10 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                     <div className="space-y-0">
                         {hasThemeSettings && (
                             <>
-                            <AppearanceThemePreview lightTheme={selectedLightTheme} darkTheme={selectedDarkTheme} />
+                            <AppearanceThemePreview lightTheme={selectedLightTheme} darkTheme={selectedDarkTheme}
+                                previewVariant={themePreviewVariant} onModeChange={() => setThemePreviewVariant(undefined)} />
                             <SettingsSection title={t('settings.varin.visual.section.colorModeAndTheme')} divider={false}>
+                                <p className="mb-3 typography-meta text-muted-foreground">{t('settings.theme.paletteNote')}</p>
                                 <div className="divide-y divide-border/50">
                                     <div className={SETTINGS_FIELDS_STACK_CLASS}>
                                         {showMobileLayoutSetting && (
@@ -513,7 +516,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             settingsItem="appearance.light-theme"
                                         >
                                             <ThemePicker themes={lightThemes} selected={selectedLightTheme}
-                                                onChange={setLightThemePreference}
+                                                onChange={id => { setThemePreviewVariant('light'); setLightThemePreference(id); }}
                                                 label={t('settings.varin.visual.field.selectLightThemeAria')} />
                                         </SettingsFieldRow>
                                         <SettingsFieldRow
@@ -521,7 +524,7 @@ export const VarinVisualSettings: React.FC<VarinVisualSettingsProps> = ({ visibl
                                             settingsItem="appearance.dark-theme"
                                         >
                                             <ThemePicker themes={darkThemes} selected={selectedDarkTheme}
-                                                onChange={setDarkThemePreference}
+                                                onChange={id => { setThemePreviewVariant('dark'); setDarkThemePreference(id); }}
                                                 label={t('settings.varin.visual.field.selectDarkThemeAria')} />
                                         </SettingsFieldRow>
 

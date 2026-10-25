@@ -38,8 +38,8 @@
       "borderFocus": "#195ce3",
       "selection": "#195ce31a",
       "selectionForeground": "#262626",
-      "focus": "#0055FF",
-      "focusRing": "#0055FF40",
+      "focus": "#195ce3",
+      "focusRing": "#195ce340",
       "cursor": "#262626",
       "hover": "#00000008",
       "active": "#00000012"

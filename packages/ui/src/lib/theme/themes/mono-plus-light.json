@@ -14,11 +14,11 @@
   "colors": {
     "primary": {
       "base": "#4a6a9e",
-      "hover": "#1A1A1A",
-      "active": "#333333",
+      "hover": "#3d5885",
+      "active": "#31466b",
       "foreground": "#FFFFFF",
-      "muted": "#00000080",
-      "emphasis": "#000000"
+      "muted": "#4a6a9e1a",
+      "emphasis": "#3d5885"
     },
     "surface": {
       "background": "#fcfcfc",
@@ -36,8 +36,8 @@
       "borderFocus": "#4a6a9e",
       "selection": "#4a6a9e1a",
       "selectionForeground": "#262626",
-      "focus": "#000000",
-      "focusRing": "#00000040",
+      "focus": "#4a6a9e",
+      "focusRing": "#4a6a9e40",
       "cursor": "#262626",
       "hover": "#00000008",
       "active": "#00000012"

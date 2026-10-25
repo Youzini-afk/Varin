@@ -33,8 +33,11 @@ meaning. Light and dark variants need their own contrast choices rather than ide
 
 Built-in palettes share neutral work surfaces and text, with distinct accent and syntax colors. The
 accent remains visible in primary buttons, softly tinted selected rows/chips and focus indicators;
-it does not wash over whole panels. User messages use a raised neutral background. Markdown headings,
-inline code and list markers use surface text, while links and syntax remain independently colored.
+it does not wash over whole panels. User messages use a raised neutral background. Markdown headings
+and list markers use neutral reading colors; links and inline code follow the accent, while syntax keeps
+its own palette. The theme picker groups similar accents and displays background, body-text and accent
+swatches. Its larger preview uses the actual resolved theme variables, including syntax colors and
+fallback surfaces; custom theme surface choices remain intact.
 Tool results use opaque muted surfaces rather than stacking translucent tints. Interface typography
 stays consistent when switching built-in themes; code keeps its monospace font. Secondary text and solid-action labels are tuned for
 at least 4.5:1 contrast against their defined surfaces, including the action hover/active states.
