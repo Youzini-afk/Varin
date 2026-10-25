@@ -15,6 +15,7 @@ import { SwapIcon } from '@/components/motion/SwapIcon';
 import { SwapText } from '@/components/motion/SwapText';
 import { INSTANT_TRANSITION, springTransition } from '@/lib/motion/tokens';
 import { useComposerHeightGlide } from './useComposerHeightGlide';
+import { useFileDropField } from '../conversation/useFileDropField';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { SkillAutocomplete, type SkillAutocompleteHandle } from '@/components/chat/SkillAutocomplete';
@@ -60,6 +61,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const inputFrameRef = React.useRef<HTMLDivElement>(null);
   const inputContentRef = React.useRef<HTMLDivElement>(null);
   useComposerHeightGlide(inputFrameRef, inputContentRef, value === '');
+  // Files dragged over the conversation raise the drop field; anywhere in it takes them.
+  useFileDropField(inputFrameRef, { disabled: attachmentDisabled, onFiles });
   const bindEditor = React.useCallback((handle: ComposerEditorHandle | null) => {
     inputRef.current = handle;
     if (typeof editorRef === 'function') editorRef(handle); else if (editorRef) editorRef.current = handle;
