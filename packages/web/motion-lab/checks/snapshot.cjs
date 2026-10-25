@@ -7,6 +7,7 @@ const { openLab } = require('./lab.cjs');
   const { browser, page } = await openLab({ width: 1100, height: 760 });
   const running = page.evaluate((kind) => kind === 'process' ? window.__lab.process()
     : kind === 'file' ? window.__lab.fileEdit({ pace: 3, pathLast: true })
+      : kind === 'tray' ? window.__lab.tray()
       : window.__lab.stream({ chars: 1400, cps: 150, interval: 100, rich: true }), scenario);
   await page.waitForTimeout(Number(delay));
   const out = path.resolve(outDir, `${name}.png`);

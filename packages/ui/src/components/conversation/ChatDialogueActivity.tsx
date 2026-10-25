@@ -2,8 +2,14 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { getToolSummary } from '@/components/chat/message/parts/toolSummary';
+import { AnimatePresence, motion } from 'motion/react';
 import { ThinkingPreview } from './ThinkingPreview';
 import { SwapText } from '@/components/motion/SwapText';
+import { documentMotionLevel } from '@/lib/motion/preference';
+import { springTransition, transitionFor } from '@/lib/motion/tokens';
+import { FileChangeTrayContext, useFileChangeTray } from './fileChangeTray';
+
+const TRAY_GLIDE = springTransition('glide');
 import { ToolDisclosure } from './ToolDisclosure';
 import { invocationData, invocationStatus, operationInvocation, toolRecord, toolText } from './toolInvocation';
 import { fileChangePhase, fileChangeTargets, isFileChangeTool } from './fileChangePreview';
@@ -49,6 +55,15 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
 }) {
   const { t } = useI18n();
   const targets = useToolTargets();
+  // File changes still being written or applied show in a tray under the
+  // collapsed row; see fileChangeTray.ts for how batches retract.
+  const workingFiles = process.activities.flatMap(item => {
+    if (item.kind !== 'tool' || !isFileChangeTool(item.call.name)) return [];
+    const status = invocationStatus(results.get(item.call.id), executions[item.call.id], item.streaming);
+    return item.streaming || status === 'running' || status === 'waiting' || status === 'background' ? [item.id] : [];
+  });
+  const tray = useFileChangeTray(workingFiles, !(process.tail && active));
+  const motionLevel = documentMotionLevel();
   // A single activity keeps its own disclosure without a second summary around it.
   if (process.activities.length === 1) return <>{renderActivity(process.activities[0]!)}</>;
   const describe = (item: Extract<DialogueActivity, { kind: 'tool' }>, execution?: ChatToolExecutionState, result?: ChatToolResultMessage) => {
@@ -118,7 +133,7 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
   }
   const busy = liveThinking || current?.item.streaming || pending.some(row => row.status === 'running');
   const title = [label, subject].filter(Boolean).join(' · ');
-  return <ToolDisclosure id={`dialogue:${process.id}`} className="dialogue-activity" open={expanded} onOpenChange={onExpandedChange}>
+  const row = <ToolDisclosure id={`dialogue:${process.id}`} className="dialogue-activity" open={expanded} onOpenChange={onExpandedChange}>
     <summary className="dialogue-activity-heading">
       <Icon name="arrow-right-s" className="dialogue-activity-chevron size-3.5 shrink-0" />
       {/* One label for the whole segment: actions, thinking and the closing
@@ -137,4 +152,25 @@ export function ChatDialogueActivity({ process, executions, results, active, exp
     </summary>
     <div className="dialogue-activity-body">{process.activities.map(item => <React.Fragment key={item.id}>{renderActivity(item)}</React.Fragment>)}</div>
   </ToolDisclosure>;
+  // Expanded, the cards are in the body; the tray only serves the folded row.
+  const trayItems = !expanded && tray.batch
+    ? tray.batch.ids.flatMap(id => process.activities.filter(item => item.id === id)) : [];
+  return <>
+    {row}
+    <AnimatePresence initial={false}>
+      {trayItems.length ? <motion.div key={tray.batch!.id} ref={tray.ref} className="dialogue-activity-tray"
+        data-conversation-file-tray="true" onPointerEnter={tray.onPointerEnter} onPointerLeave={tray.onPointerLeave}
+        initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1, transition: transitionFor(motionLevel, TRAY_GLIDE) }}
+        exit={{ height: 0, opacity: 0, transition: transitionFor(motionLevel, TRAY_GLIDE) }} style={{ overflow: 'hidden' }}>
+        <FileChangeTrayContext.Provider value={true}>
+          <AnimatePresence initial={false}>
+            {trayItems.map(item => <motion.div key={item.id} className="dialogue-activity-tray-card"
+              initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0, transition: transitionFor(motionLevel, TRAY_GLIDE) }}>
+              {renderActivity(item)}
+            </motion.div>)}
+          </AnimatePresence>
+        </FileChangeTrayContext.Provider>
+      </motion.div> : null}
+    </AnimatePresence>
+  </>;
 }

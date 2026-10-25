@@ -322,7 +322,8 @@ export const ChatFileChangePreview: React.FC<{
 
   const overflowing = totalHeight > (expanded ? 24 : 8) * rowHeight + 1;
   return <section className="my-2 min-w-0 overflow-hidden rounded-xl border border-border/60 bg-muted/20"
-    data-conversation-file-preview={file.path} data-phase={phase} style={syntaxVars as React.CSSProperties}>
+    data-conversation-file-preview={file.path} data-phase={phase} style={syntaxVars as React.CSSProperties}
+    data-preview-expanded={expanded || undefined} data-preview-paused={paused && overflowing || undefined}>
     <header className="flex min-w-0 items-center gap-2 bg-muted/35 px-3 py-2 typography-meta">
       {showFileIcons || busy || failed ? <Icon key={busy ? 'busy' : failed ? 'failed' : 'file'} name={busy ? 'loader-4' : failed ? 'error-warning' : 'file-code'}
         className={cn('size-3.5 shrink-0', busy && 'animate-spin', settles && 'workbench-diff-icon-settle', failed && 'text-[var(--status-error)]')} /> : null}

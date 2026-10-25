@@ -55,6 +55,7 @@ import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
 import { ChatFileChangePreview, ChatFileChangePreviewScope } from './ChatFileChangePreview';
 import { fileChangePhase, fileChangeStreamLength, isFileChangeTool, paceFileChangeCall, projectFileChanges } from './fileChangePreview';
 import { usePacedLength } from '@/components/chat/usePacedText';
+import { FileChangeTrayContext } from './fileChangeTray';
 import { CODE_PACE } from '@/lib/motion/pace';
 import { ChatExploreCard, ChatExploreScope } from './ChatExploreCard';
 import { explorePresentation } from './explorePresentation';
@@ -373,6 +374,7 @@ const ChatToolCard: React.FC<{
     result?: ChatToolResultMessage;
   }>('tool-renderer', 'chat.timeline.tools', !preview);
   const sessionId = React.useContext(TimelineSessionContext);
+  const inFileTray = React.useContext(FileChangeTrayContext);
   const conversation = useOptionalConversationPresentation();
   const extensionRendered = preview ? undefined : renderFirstWorkbenchMatch(toolRenderers, { call, cwd, execution, result });
   // File changes stream at typing pace: the preview reads the arguments as far
@@ -446,12 +448,15 @@ const ChatToolCard: React.FC<{
     ...(transientOutput === undefined ? {} : { details: transientOutput }),
   }, execution?.status === 'running')?.calls.filter(row => row.name === 'models.classify' || row.name === 'models.generateImages') ?? [];
   const applyPatchFiles = call.name === 'apply_patch' ? getApplyPatchFileEntries(result?.details ?? transientOutput) : [];
+  const previews = fileChanges.map((file, index) => <ChatFileChangePreview key={index} file={file}
+    previewId={`${call.id}:${index}`}
+    phase={fileChangePhase(execution, result, fileGenerating, file.path)}
+    onOpen={!file.path || file.operation === 'delete' || !conversation || fileGenerating ? undefined : () => void conversation.openFile(call.id, file.path)} />);
+  // The folded row's tray shows only the cards; the tool row stays in the body.
+  if (inFileTray) return <>{previews}</>;
   return (
     <>
-    {fileChanges.map((file, index) => <ChatFileChangePreview key={index} file={file}
-      previewId={`${call.id}:${index}`}
-      phase={fileChangePhase(execution, result, fileGenerating, file.path)}
-      onOpen={!file.path || file.operation === 'delete' || !conversation || fileGenerating ? undefined : () => void conversation.openFile(call.id, file.path)} />)}
+    {previews}
     <ChatToolDisclosure
       disclosureId={`tool:${call.id}`}
       initiallyExpanded={isFileChangeTool(call.name) && expandEdits}

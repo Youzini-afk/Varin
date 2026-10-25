@@ -62,6 +62,9 @@ const history = (turns: number): ChatSessionEntry[] => {
 
 interface FrameSample {
   t: number;
+  /** Paths of the cards in the folded row's tray, and the tray's height. */
+  tray: string[];
+  trayHeight: number;
   /** The last file change card: phase, name, visible rows, remounted rows, ghosts. */
   card: {
     phase: string;
@@ -164,7 +167,10 @@ function Lab() {
         if (activity && !labelIdentity.has(activity)) labelIdentity.set(activity, ++labelIds);
         const swap = activity?.querySelector('.swap-text');
         if (swap && !labelIdentity.has(swap)) labelIdentity.set(swap, ++labelIds);
+        const tray = [...node.querySelectorAll<HTMLElement>('[data-conversation-file-tray]')].at(-1);
         recording.push({
+          tray: tray ? [...tray.querySelectorAll<HTMLElement>('[data-conversation-file-preview]')].map(preview => preview.getAttribute('data-conversation-file-preview') || '?') : [],
+          trayHeight: tray?.getBoundingClientRect().height ?? 0,
           card: card ? {
             phase: card.dataset.phase ?? '',
             name: card.querySelector('header .swap-text-current')?.textContent ?? '',
@@ -313,6 +319,80 @@ function Lab() {
           executions: { ...current.executions, [callId]: { toolCallId: callId, name: 'file_edit', args: argumentsAt(total) as ChatToolExecutionState['args'], status: 'success', result: { status: 'applied' } } },
           entries: [...current.entries, messageEntry({ role: 'toolResult', toolCallId: callId, toolName: 'file_edit', content: [{ type: 'text', text: 'applied' }], details: { status: 'applied' }, isError: false, timestamp: sequence }, runId)] }));
         await sleep(200 * pace);
+        setState(current => ({ ...current, activeRunId: undefined }));
+      },
+      /**
+       * Conversation-first tray: a read, then two writes streamed in one step
+       * and applied concurrently, a pause, a third write, then the answer.
+       * `holdAt` (ms after the pair finishes) is when a check may point in.
+       */
+      async tray({ pace = 1 } = {}) {
+        const runId = `run-tray-${Date.now()}`;
+        let step = 0;
+        const toolCall = (callId: string, name: string, args: Record<string, unknown>) => ({ type: 'toolCall' as const, id: callId, name, arguments: args as Extract<ChatAssistantContent, { type: 'toolCall' }>['arguments'] });
+        const live = (id: string, content: ChatAssistantContent[]) => setState(current => ({ ...current, activeRunId: runId, liveAssistant: assistant(id, content, 'pending') }));
+        const persist = (id: string, content: ChatAssistantContent[], stopReason: ChatAssistantMessage['stopReason']) => setState(current => ({
+          ...current, liveAssistant: undefined, entries: [...current.entries, messageEntry(assistant(id, content, stopReason), runId)] }));
+        const execute = (callId: string, name: string, args: Record<string, unknown>, status: ChatToolExecutionState['status'], result?: Record<string, unknown>) => setState(current => ({
+          ...current, executions: { ...current.executions, [callId]: { toolCallId: callId, name, args: args as ChatToolExecutionState['args'], status, ...(result ? { result: result as ChatToolExecutionState['result'] } : {}) } } }));
+        const report = (callId: string, name: string, details?: Record<string, unknown>) => setState(current => ({
+          ...current, entries: [...current.entries, messageEntry({ role: 'toolResult', toolCallId: callId, toolName: name, content: [{ type: 'text', text: 'ok' }], isError: false, timestamp: sequence, ...(details ? { details: details as ChatToolExecutionState['result'] } : {}) }, runId)] }));
+        const files = {
+          a: { path: 'src/auth/session.ts', content: 'export function remember(user: string, token: string) {\n  sessions.set(user, token);\n  return token;\n}\n' },
+          b: { path: 'tests/auth.refresh.test.ts', content: "import { remember } from '../src/auth/session';\n\nit('keeps the refresh token', () => {\n  expect(remember('u', 't')).toBe('t');\n});\n" },
+          c: { path: 'src/auth/login.ts', content: "import { remember } from './session';\n\nexport const login = (user: string) => remember(user, issue(user));\n" },
+        };
+        // 1. A quick read, so the work folds into one process row.
+        let id = `a-tray-${runId}-${step += 1}`;
+        live(id, [{ type: 'thinking', id: `${id}:t`, thinking: '先补上会话记忆，再加一个刷新令牌的测试。' }, toolCall('read', 'file_read', { path: 'src/auth/login.ts' })]);
+        await sleep(160 * pace);
+        persist(id, [{ type: 'thinking', id: `${id}:t`, thinking: '先补上会话记忆，再加一个刷新令牌的测试。' }, toolCall('read', 'file_read', { path: 'src/auth/login.ts' })], 'toolUse');
+        execute('read', 'file_read', { path: 'src/auth/login.ts' }, 'running');
+        await sleep(200 * pace);
+        execute('read', 'file_read', { path: 'src/auth/login.ts' }, 'success');
+        report('read', 'file_read');
+        // 2. Two writes streamed in one step, then applied together.
+        id = `a-tray-${runId}-${step += 1}`;
+        const streamWrites = async (keys: Array<keyof typeof files>) => {
+          const calls: ChatAssistantContent[] = [];
+          for (const key of keys) {
+            const { path, content } = files[key];
+            for (let length = 0; length <= content.length; length += 14) {
+              live(id, [...calls, toolCall(`write-${key}`, 'file_write', { path, content: content.slice(0, length) })]);
+              await sleep(48 * pace);
+            }
+            calls.push(toolCall(`write-${key}`, 'file_write', { path, content }));
+          }
+          persist(id, calls, 'toolUse');
+          return calls;
+        };
+        await streamWrites(['a', 'b']);
+        execute('write-a', 'file_write', files.a, 'running');
+        execute('write-b', 'file_write', files.b, 'running');
+        await sleep(300 * pace);
+        execute('write-a', 'file_write', files.a, 'success', { status: 'applied' });
+        report('write-a', 'file_write', { status: 'applied' });
+        await sleep(400 * pace);
+        execute('write-b', 'file_write', files.b, 'success', { status: 'applied' });
+        report('write-b', 'file_write', { status: 'applied' });
+        (window as unknown as { __trayPairDone?: number }).__trayPairDone = performance.now();
+        // 3. Reading time passes; a later write opens a new batch.
+        await sleep(1500 * pace);
+        id = `a-tray-${runId}-${step += 1}`;
+        await streamWrites(['c']);
+        execute('write-c', 'file_write', files.c, 'running');
+        await sleep(300 * pace);
+        execute('write-c', 'file_write', files.c, 'success', { status: 'applied' });
+        report('write-c', 'file_write', { status: 'applied' });
+        await sleep(200 * pace);
+        // 4. The answer: the segment ends and a finished batch retracts at once.
+        id = `a-tray-${runId}-${step += 1}`;
+        const answer = '会话记忆已补上，并加了刷新令牌的测试。';
+        for (let length = 2; length <= answer.length; length += 2) {
+          live(id, [{ type: 'text', id: `${id}:text`, text: answer.slice(0, length) }]);
+          await sleep(50 * pace);
+        }
+        persist(id, [{ type: 'text', id: `${id}:text`, text: answer }], 'stop');
         setState(current => ({ ...current, activeRunId: undefined }));
       },
       /** Submit a user turn and anchor it, as ThreadConversation does once the Host accepts it. */

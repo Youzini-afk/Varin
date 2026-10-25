@@ -21,6 +21,8 @@ const scroll = vi.fn(function (this: HTMLElement, options?: ScrollToOptions | nu
 beforeEach(() => {
   const { window, document } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  // The file change tray animates with motion, which checks the DOM classes.
+  vi.stubGlobal('Element', window.Element); vi.stubGlobal('HTMLElement', window.HTMLElement); vi.stubGlobal('SVGElement', window.SVGElement);
   height = 60; scroll.mockClear();
   vi.useFakeTimers();
   useUIStore.setState({ showReasoningTraces: true, collapsibleThinkingBlocks: true });
@@ -129,6 +131,58 @@ test('a quick action stays readable before the next one replaces it', async () =
   expect(text()).toContain('Second.ts');
   await settle();
   expect(text()).toContain('chat.dialogue.list');
+});
+
+test('file changes show in a tray under the folded row and retract together once all have finished', async () => {
+  document.documentElement.dataset.motion = 'off';
+  const write = (id: string, path: string) => ({ type: 'toolCall' as const, id, name: 'file_write', arguments: { path, content: 'x' } });
+  const tray = () => [...container.querySelectorAll('[data-conversation-file-tray] [data-tray-activity]')].map(node => node.getAttribute('data-tray-activity'));
+  const renderTray = async (expanded = false) => {
+    const item = projectChatDialogue([], message, { showThinking: true })[0]!;
+    await act(async () => root.render(item.kind === 'process' ? <ChatDialogueActivity process={item} executions={executions} results={new Map()}
+      active expanded={expanded} renderActivity={activity => <div data-tray-activity={activity.id} />} /> : null));
+  };
+  message = { ...message, content: [...message.content, write('a', 'a.ts'), write('b', 'b.ts'), { type: 'toolCall', id: 'r', name: 'file_read', arguments: { path: 'c.ts' } }] };
+  executions = {
+    a: { toolCallId: 'a', name: 'file_write', args: {}, status: 'running' },
+    b: { toolCallId: 'b', name: 'file_write', args: {}, status: 'running' },
+    r: { toolCallId: 'r', name: 'file_read', args: {}, status: 'running' },
+  };
+  message = { ...message, stopReason: 'toolUse' };
+  await renderTray();
+  // Only the changes, in the order they began; ordinary tools stay folded.
+  expect(tray()).toEqual(['tool:a', 'tool:b']);
+  // One finishing does not retract it while another is still applying.
+  executions = { ...executions, a: { ...executions.a!, status: 'success' } };
+  await renderTray();
+  await settle();
+  expect(tray()).toEqual(['tool:a', 'tool:b']);
+  // All finished: it lingers for reading time, then retracts as a batch.
+  executions = { ...executions, b: { ...executions.b!, status: 'success' } };
+  await renderTray();
+  await act(async () => { vi.advanceTimersByTime(500); });
+  expect(tray()).toEqual(['tool:a', 'tool:b']);
+  // A change that begins during the linger joins the batch and restarts it.
+  message = { ...message, content: [...message.content, write('c', 'c.ts')] };
+  executions = { ...executions, c: { toolCallId: 'c', name: 'file_write', args: {}, status: 'running' } };
+  await renderTray();
+  expect(tray()).toEqual(['tool:a', 'tool:b', 'tool:c']);
+  executions = { ...executions, c: { ...executions.c!, status: 'success' } };
+  await renderTray();
+  await act(async () => { vi.advanceTimersByTime(500); });
+  expect(tray()).toHaveLength(3);
+  // (Pointer hold is checked in a real browser: motion-lab/checks/tray.cjs.)
+  await act(async () => { vi.advanceTimersByTime(300); });
+  expect(tray()).toEqual([]);
+  // Expanded, the cards belong to the body: no tray.
+  executions = { ...executions, d: { toolCallId: 'd', name: 'file_write', args: {}, status: 'running' } };
+  message = { ...message, content: [...message.content, write('d', 'd.ts')] };
+  await renderTray(true);
+  expect(tray()).toEqual([]);
+  // Folded again: a new batch with only the change that is working.
+  await renderTray();
+  expect(tray()).toEqual(['tool:d']);
+  delete document.documentElement.dataset.motion;
 });
 
 test('redacted and disabled thinking never exposes text through the collapsed header', async () => {
