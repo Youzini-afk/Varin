@@ -4,13 +4,16 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <img src=".github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>An open-source workspace for AI agents.</strong></p>
+<p align="center"><strong>The open-source agent harness, ready out of the box.</strong></p>
+
+<p align="center">Everything around the model, ready out of the box and customizable in depth.</p>
 
 <p align="center">
-  <a href="https://github.com/Youzini-afk/Varin/releases">Download</a> ·
+  <a href="https://varin.dev">Website</a> ·
+  <a href="https://github.com/Youzini-afk/Varin/releases/latest">Download</a> ·
   <a href="packages/docs/README.md">User guides</a> ·
   <a href="docs/ops/varin-extension-authoring.md">Build extensions</a> ·
-  <a href=".github/CONTRIBUTING.md">Contribute</a>
+  <a href="https://github.com/Youzini-afk/Varin/discussions">Discussions</a>
 </p>
 
 <p align="center">
@@ -19,33 +22,65 @@ English | [简体中文](.github/readme/README.zh-CN.md) | [繁體中文](.githu
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
-Bring your models, tools, files, and projects into one workspace. Work with an agent to investigate a problem, write code, read papers, or build an interactive explanation. Follow the work as it happens and review the results in the same conversation.
+<p align="center">
+  <img src=".github/readme/assets/code-mode.png" alt="Varin in code mode: the agent searches the project, edits profile.js, hands a regression test to a Verifier teammate and reports that all tests pass" width="960" />
+</p>
 
-Varin runs on desktop and the web, with a mobile client for connecting to your Host. Its own Rust runtime manages agent execution and conversation history.
+The model does the thinking. The harness is everything around it: tools, context, execution, permissions, collaboration and recovery. Varin prepares all of it, so the same model can finish longer, more complex tasks. Install it, add your own API key, and start.
 
-## What you can do
+## Why Varin
 
-| Your work | In Varin |
-| --- | --- |
-| Work through a task | Streaming conversations, queued messages, plans, child agents, and scheduled follow-ups. |
-| Develop a project | Edit files, inspect diffs, use Git and worktrees, run terminals, and search code with language and retrieval tools. |
-| Read and research | Search the web and scholarly sources, read PDFs, and keep source material alongside the conversation. |
-| Make something visual | Generate and edit images; create interactive HTML charts and small tools inside a message. |
-| Choose your setup | Connect cloud or local models, set permissions, and configure instructions, skills, and MCP servers. |
-| Work across machines | Use a local workspace or connect to a remote Host from desktop, a browser, or mobile. |
+**The same model goes further.**
 
-The bundled Agent, IDE, Research, and Bot workbenches arrange these capabilities for different workflows. IDE is available on desktop and web; the other workbenches also support mobile. [Workbench details](docs/workbench.md)
+- Self-curated context: tidied in the background ahead of time, summarized with the key originals kept, and counted with local tokenizers calibrated against real usage.
+- Durable runs: every step is recorded and resumes after a restart. An action with an unclear outcome stops for a check instead of running again.
+- Questions don't block: other work goes on while the agent waits for you, and budgeted goals resume when their conditions are met.
+- Tools on demand: common tools are always at hand and the rest load when needed. MCP servers can be exposed directly or discovered on demand.
+
+**Ready out of the box.** About 80 native tools, 4 work modes, 4 official workbenches, 6 bundled language servers and 8 native model protocols, with the interface in 10 languages.
+
+**Deep customization, no code required.** Give any preset agent a new model, instructions or tools, or create your own. Choose separate models for titles, context curation, planning, images and embeddings. Edit system instructions and memory, use Skills from `.claude` and `.agents` folders or install them from a Git repository, and allow, ask or deny each tool.
+
+**Your keys, your data.** Keys stay on your own Host, and requests go straight to the providers you configure: OpenAI, Anthropic, Gemini, Vertex AI, Azure OpenAI, Bedrock, Mistral, Alibaba Model Studio, Zhipu and StepFun, or Ollama, LM Studio and any compatible endpoint. Usage is recorded per channel and model, turn by turn.
+
+## Four ways to work
+
+The mode decides which tools the agent starts with and which teammates help out.
+
+| Mode | What it does | For example |
+| --- | --- | --- |
+| Code | Reads and changes code, runs commands and terminals. Every edited file is checkpointed by turn. | "Refactor the login module and ping me when all the tests pass." |
+| Research | Searches OpenAlex and Semantic Scholar, reads papers and PDFs, and moves an experiment forward step by step. | "Find the last two years of papers on this and build a filterable comparison table." |
+| Office | Works with Word, Excel and PowerPoint, plus the browser and the apps on your computer. | "Export last month's orders into an Excel sheet with charts." |
+| General | Looks things up, writes, or builds a small interactive tool. | "Compare these three cameras and make a chart I can tweak." |
+
+<p align="center">
+  <img src=".github/readme/assets/research-mode.png" alt="Varin in research mode: a comparison of recent papers laid out as a table in the conversation" width="960" />
+</p>
+
+## Teams, bots and changes you can undo
+
+- **Teams.** The lead agent splits a task and assigns the parts: a Worker writes the implementation, a research agent gathers context, a verifier runs the tests. Teammates work in parallel, message each other, hand over code with file-by-file diffs, and report back. Follow along in the collaboration panel and step in whenever you like.
+- **Bots.** A bot has its own name, instructions, model and working directory, and keeps several pieces of work moving. You can see, correct or erase what it remembers. Put it to sleep and its work is suspended; wake it and it picks up where it left off.
+- **File timeline.** Every edited file lines up by turn. Roll back in one step, and undo the rollback too. Files you changed by hand are never overwritten.
+
+<p align="center">
+  <img src=".github/readme/assets/team.png" alt="A lead agent hands a check to a teammate, which runs the tests and reports back in the collaboration panel" width="960" />
+</p>
 
 ## Get started
 
-| Where to run | Start here |
-| --- | --- |
-| Windows, macOS, or Linux desktop | [Download a release](https://github.com/Youzini-afk/Varin/releases). Choose the asset for your OS and CPU architecture. |
-| A server or your own machine, accessed in a browser | [Self-host with Docker](docs/ops/cloud-deployment.md). Includes persistent storage, passwords, and remote access. |
-| iOS or Android | [Mobile setup](packages/mobile/README.md). The mobile client connects to an existing Host. |
-| From source | Follow the development steps below. |
+1. Install Varin.
 
-In the app, open Settings to connect a model provider or local service. Select a model, choose a project folder when the task needs one, and start a conversation. The composer lets you choose permissions and switch between general and research work.
+   | Where | How |
+   | --- | --- |
+   | Windows, macOS or Linux | [Download the installer](https://github.com/Youzini-afk/Varin/releases/latest) for your system and CPU architecture. |
+   | Your own server, used from a browser | [Self-host with Docker](docs/ops/cloud-deployment.md), with persistent storage, passwords and remote access. |
+   | Your phone | Pair it with your Host from Settings. Until the native apps are released, install the web app (PWA). [Mobile guide](packages/docs/content/docs/mobile.mdx) |
+   | From source | See [Run from source](#run-from-source). |
+
+2. Open Settings and add an API key for a model provider, or connect a local service. [Providers and models](packages/docs/content/docs/providers.mdx)
+3. Pick a work mode, choose a project folder if the task needs one, and start your first task.
 
 Varin is in active development before 1.0. This README describes the current source; [release notes](https://github.com/Youzini-afk/Varin/releases) describe each published build. Back up important application data before upgrading.
 
@@ -64,21 +99,17 @@ Open the UI URL printed in the terminal. The command starts the web interface an
 
 For the desktop app, run `bun run electron:dev` from the same checkout. It prepares the native kernel and launches Electron with the development UI. [Desktop development and packaging](packages/electron/README.md#development)
 
-## A workspace you can extend
+## Extend Varin
 
-Varin's harness connects the model to tools, context, permissions, background work, and child agents. A native Rust runtime stores conversations and execution records; the shared Application Host supplies model connections and workspace services.
+The Agent, IDE, Research and Bot workbenches, along with the browser, Office, computer use and language servers, are extensions themselves. They use the same contracts as third-party extensions, any of them can be turned off, and a workbench can be replaced entirely. Extensions can add tools, model protocols, context algorithms, panels and whole workbenches. Start with the [authoring guide](docs/ops/varin-extension-authoring.md), the [SDK](packages/extension-sdk/README.md) or the [working examples](examples/extensions/README.md).
 
-Common tools are declared directly. Other available capabilities have an index and on-demand descriptions, so discovering a tool keeps the declaration prefix stable. Research tools are available on demand in general mode and declared directly in research mode.
+For how the pieces fit together, read the [architecture](docs/architecture.md), [runtime](docs/runtime.md) and [documentation index](docs/README.md).
 
-Extensions can add tools, model adapters, panels, and entire workbench layouts. Start with the [authoring guide](docs/ops/varin-extension-authoring.md), [SDK](packages/extension-sdk/README.md), or [working examples](examples/extensions/README.md).
+## Community and contributing
 
-For implementation details, read the [architecture](docs/architecture.md), [runtime](docs/runtime.md), and [documentation index](docs/README.md).
-
-## Contribute
-
-Bug reports, UI improvements, tools, documentation, translations, and platform feedback are welcome. The [contribution guide](.github/CONTRIBUTING.md) covers setup, choosing a change, and submitting a pull request.
-
-[Report a bug](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [Suggest a feature](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [Report a vulnerability privately](.github/SECURITY.md)
+- Ask questions in [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a), share what you built, and suggest ideas in [Discussions](https://github.com/Youzini-afk/Varin/discussions). [Getting help](.github/SUPPORT.md) lists where each kind of request goes.
+- Contributions are welcome: tools and context handling, model providers, extensions, documentation and translations, and test reports from your platform. The [contribution guide](.github/CONTRIBUTING.md) covers setup and pull requests.
+- [Report a bug](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [Suggest a feature](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [Report a vulnerability privately](.github/SECURITY.md)
 
 Thanks to the [LinuxDO](https://linux.do) community for its support.
 

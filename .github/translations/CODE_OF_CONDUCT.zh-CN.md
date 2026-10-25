@@ -38,9 +38,8 @@
 
 ## 执行
 
-请通过 GitHub 向维护者报告事件：从仓库发起私密维护者联系，或在报告涉及漏洞时提交
-[私密安全公告](https://github.com/Youzini-afk/Varin/security/advisories/new)。
-不要把骚扰报告发成公开 Issue。
+请通过 GitHub 的[私密报告表单](https://github.com/Youzini-afk/Varin/security/advisories/new)向维护者报告事件，
+标题以「Conduct report:」开头；报告只有维护者可以看到。不要在公开的 Issue、讨论区或 Pull Request 中发布骚扰报告。
 
 所有投诉都将得到及时、公正的审查和调查。
 

@@ -2,11 +2,19 @@
 
 # 為 Varin 貢獻
 
-修復問題、改善工作流程、開發擴充功能、編寫文件，以及分享平台實測結果，都是參與 Varin 的方式。
+Varin 是一個應當開箱即用的 Agent Harness。最有價值的貢獻，是讓同一個模型走得更遠，或讓預設體驗對使用者更好用：
+
+- 工具，以及工具結果如何呈現給模型和對話；
+- 上下文、檢索與記憶；
+- 模型服務商與協定；
+- 擴充功能、範本與範例；
+- 程式開發、科研、辦公、通用四種模式的預設設定；
+- 文件與翻譯；
+- 各平台的實測報告：Windows、macOS、Linux、Docker 或遠端 Host。
 
 ## 從哪裡開始
 
-先在 [Issues](https://github.com/Youzini-afk/Varin/issues) 和 [Pull Requests](https://github.com/Youzini-afk/Varin/pulls) 中尋找相關工作。第一次貢獻可以從小而明確、能重現的問題開始。較大的改動，適合提早說明想改善的工作流程，並分享草圖或原型。
+先在 [Issues](https://github.com/Youzini-afk/Varin/issues)、[Pull Requests](https://github.com/Youzini-afk/Varin/pulls) 和[討論區](https://github.com/Youzini-afk/Varin/discussions)中尋找相關工作。第一次貢獻可以從小而明確、能重現的問題開始，標有 [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) 的 Issue 適合入手。較大的改動，先在 [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) 或功能建議中說明想改善的工作流程，並提早分享草圖或原型。使用問題請到 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a)；其他管道見[取得協助](SUPPORT.zh-TW.md)。
 
 問題報告本身也很有幫助。請提供版本、安裝方式、實際現象，以及重現步驟或範例。日誌和截圖中請移除金鑰與私人內容。漏洞報告請使用[安全政策](../SECURITY.md)中的管道。
 
@@ -31,7 +39,10 @@ bun run dev
 | 修改內容 | 入口 |
 | --- | --- |
 | 對話、面板、編輯器和共用介面 | [packages/ui](../../packages/ui/DOCUMENTATION.md) |
-| 模型連線、應用程式服務與遠端存取 | [Application Host](../../packages/web/README.md) |
+| Agent 迴圈、工具、上下文、權限、重試與復原 | [Agent 執行環境](../../kernel/crates/varin-runtime/README.md)、[執行環境](../../docs/runtime.md)、[檢索與上下文](../../docs/retrieval.md) |
+| Agent 使用的網頁、科研、文件、Office、瀏覽器與 MCP 服務 | [Host harness 服務](../../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
+| 模型服務商、協定與帳號 | [模型與帳號](../../packages/web/application-host/lib/models/DOCUMENTATION.md) |
+| 應用程式服務與遠端存取 | [Application Host](../../packages/web/README.md) |
 | Agent 執行、歷史、檔案和程序 | [Rust 核心](../../kernel/README.md) |
 | 擴充介面與開發 | [擴充功能作者指南](../../docs/ops/varin-extension-authoring.md)、[範例](../../examples/extensions/README.md) |
 | 使用指南與翻譯 | [公開文件編寫](../../packages/docs/CONTRIBUTING.md) |
@@ -57,6 +68,6 @@ bun run dev
 
 ## 社群與授權
 
-請遵守[行為準則](CODE_OF_CONDUCT.zh-TW.md)。
+請遵守[行為準則](CODE_OF_CONDUCT.zh-TW.md)。討論區、Issues 和 Pull Request 是交流專案的公共場所，[取得協助](SUPPORT.zh-TW.md)說明了各自適合什麼。
 
 提交貢獻即表示你同意相關內容可依 [AGPL-3.0-only](../../LICENSE) 散布。引入第三方內容時保留其著作權與授權聲明，詳見 [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md)。

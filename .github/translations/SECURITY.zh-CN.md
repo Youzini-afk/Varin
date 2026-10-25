@@ -24,12 +24,8 @@ Varin 目前仍处于 1.0 之前的开发阶段，不维护 LTS 分支。
 
 不要在公开 Issue、Discussion、Pull Request、截图、终端日志或聊天记录中披露疑似漏洞。
 
-1. 当仓库向报告者开放时，优先使用 GitHub 的
-   [私密漏洞报告表单](https://github.com/Youzini-afk/Varin/security/advisories/new)。
-2. 如果 GitHub 没有显示私密表单，请创建一个
-   [最小联系 Issue](https://github.com/Youzini-afk/Varin/issues/new?title=Private%20security%20report%20requested)，
-   标题为 **`Private security report requested`**。其中不要包含技术细节、密钥、受影响路径或
-   PoC。维护者会先建立私密通道，再请你发送报告。
+请使用 GitHub 的[私密漏洞报告表单](https://github.com/Youzini-afk/Varin/security/advisories/new)。
+报告只有维护者及其邀请的人可以看到。
 
 私密报告请包含：
 

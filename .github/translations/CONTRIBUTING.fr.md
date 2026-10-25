@@ -2,11 +2,19 @@
 
 # Contribuer à Varin
 
-Vous pouvez corriger un bug, améliorer un parcours, créer une extension, écrire de la documentation ou partager vos observations sur une plateforme.
+Varin est un harness d'agents qui doit bien fonctionner dès l'installation. Les contributions les plus utiles permettent au même modèle d'aller plus loin, ou améliorent les réglages par défaut pour les personnes qui les utilisent :
+
+- les outils, et la façon dont leurs résultats parviennent au modèle et à la conversation ;
+- le contexte, la recherche d'informations et la mémoire ;
+- les fournisseurs et les protocoles de modèles ;
+- les extensions, les templates et les exemples ;
+- les réglages par défaut des modes Programmation, Recherche, Bureautique et Général ;
+- la documentation et les traductions ;
+- les comptes rendus de tests sur votre plateforme : Windows, macOS, Linux, Docker ou un Host distant.
 
 ## Choisir un point de départ
 
-Cherchez les travaux liés dans les [issues](https://github.com/Youzini-afk/Varin/issues) et les [pull requests](https://github.com/Youzini-afk/Varin/pulls). Un petit problème reproductible convient bien à une première contribution. Pour un changement plus large, expliquez tôt le parcours à améliorer et partagez un croquis ou un prototype.
+Cherchez les travaux liés dans les [issues](https://github.com/Youzini-afk/Varin/issues), les [pull requests](https://github.com/Youzini-afk/Varin/pulls) et les [Discussions](https://github.com/Youzini-afk/Varin/discussions). Un petit problème reproductible convient bien à une première contribution ; les issues portant le label [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) sont un bon point de départ. Pour un changement plus large, décrivez le parcours à améliorer dans [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) ou dans une demande de fonctionnalité, et partagez tôt un croquis ou un prototype. Les questions vont dans [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) ; la page [Obtenir de l'aide](SUPPORT.fr.md) indique les autres canaux.
 
 Un rapport de bug est déjà utile. Indiquez la version, le mode d'installation, le comportement observé et les étapes ou un exemple pour le reproduire. Retirez les identifiants et les données privées des journaux et captures. Signalez les vulnérabilités selon la [politique de sécurité](../SECURITY.md).
 
@@ -31,7 +39,10 @@ Lisez [AGENTS.md](../../AGENTS.md) et le README ou DOCUMENTATION le plus proche 
 | Domaine | Point de départ |
 | --- | --- |
 | Conversations, panneaux, éditeurs et interface partagée | [packages/ui](../../packages/ui/DOCUMENTATION.md) |
-| Connexions aux modèles, services applicatifs et accès distant | [Application Host](../../packages/web/README.md) |
+| Boucle de l'agent, outils, contexte, permissions, nouvelles tentatives et reprise | [Runtime des agents](../../kernel/crates/varin-runtime/README.md), [runtime](../../docs/runtime.md), [recherche d'informations et contexte](../../docs/retrieval.md) |
+| Services web, de recherche, de documents, Office, de navigateur et MCP utilisés par l'agent | [Services harness du Host](../../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
+| Fournisseurs de modèles, protocoles et comptes | [Modèles et comptes](../../packages/web/application-host/lib/models/DOCUMENTATION.md) |
+| Services applicatifs et accès distant | [Application Host](../../packages/web/README.md) |
 | Exécution des agents, historique, fichiers et processus | [Noyau Rust](../../kernel/README.md) |
 | Contrats et création d'extensions | [Guide](../../docs/ops/varin-extension-authoring.md), [exemples](../../examples/extensions/README.md) |
 | Guides utilisateur et traductions | [Documentation publique](../../packages/docs/CONTRIBUTING.md) |
@@ -57,6 +68,6 @@ Choisissez un titre de commit concis qui décrit la modification. Résolvez les 
 
 ## Communauté et licence
 
-Respectez le [Code de conduite](CODE_OF_CONDUCT.fr.md).
+Respectez le [Code de conduite](CODE_OF_CONDUCT.fr.md). Les Discussions, les issues et les pull requests sont les espaces communs pour parler du projet ; la page [Obtenir de l'aide](SUPPORT.fr.md) indique lequel convient.
 
 En soumettant une contribution, vous acceptez qu'elle puisse être distribuée sous [AGPL-3.0-only](../../LICENSE). Conservez les mentions de droits d'auteur et de licence des éléments tiers importés ; consultez [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md).

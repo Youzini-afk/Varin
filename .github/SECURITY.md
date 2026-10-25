@@ -28,14 +28,9 @@ whenever possible. A floating `latest` tag is not sufficient to identify affecte
 Do not disclose a suspected vulnerability in a public issue, discussion, pull request, screenshot,
 terminal log, or chat transcript.
 
-1. Prefer GitHub's
-   [private vulnerability reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new)
-   when the repository exposes it to reporters.
-2. If GitHub does not offer the private form,
-   [open a minimal contact issue](https://github.com/Youzini-afk/Varin/issues/new?title=Private%20security%20report%20requested)
-   titled **`Private security report requested`** with no technical details, secrets, affected
-   paths, or proof of concept. A maintainer will establish a private channel before you send the
-   report.
+Use GitHub's
+[private vulnerability reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new).
+Only the maintainers and the people they invite can see the report.
 
 Please include in the private report:
 

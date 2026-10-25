@@ -60,11 +60,10 @@ representative at an online or offline event.
 
 ## Enforcement
 
-Report incidents to the maintainers through GitHub by opening a private
-maintainer contact from the repository, or by filing a
-[private security advisory](https://github.com/Youzini-afk/Varin/security/advisories/new)
-when the report involves a vulnerability. Do not post harassment reports as
-public issues.
+Report incidents to the maintainers privately through GitHub's
+[private reporting form](https://github.com/Youzini-afk/Varin/security/advisories/new).
+Start the title with "Conduct report:"; only the maintainers can see it. Do not
+post harassment reports in public issues, discussions or pull requests.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

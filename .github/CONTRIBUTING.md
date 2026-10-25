@@ -2,11 +2,19 @@ English | [简体中文](https://github.com/Youzini-afk/Varin/blob/main/.github/
 
 # Contributing to Varin
 
-You can contribute by fixing a bug, improving a workflow, building an extension, writing documentation, or sharing what happens on your platform.
+Varin is an agent harness that should work well out of the box. The most useful contributions help the same model go further, or make the defaults better for the people who use them:
+
+- tools, and how their results reach the model and the conversation;
+- context, retrieval and memory;
+- model providers and protocols;
+- extensions, templates and examples;
+- the defaults of the code, research, office and general modes;
+- documentation and translations;
+- test reports from your platform: Windows, macOS, Linux, Docker, or a remote Host.
 
 ## Pick a starting point
 
-Search [issues](https://github.com/Youzini-afk/Varin/issues) and [pull requests](https://github.com/Youzini-afk/Varin/pulls) for related work. A small, reproducible problem is a useful first contribution. For a larger change, explain the workflow you want to improve and share a sketch or prototype early.
+Search [issues](https://github.com/Youzini-afk/Varin/issues), [pull requests](https://github.com/Youzini-afk/Varin/pulls) and [Discussions](https://github.com/Youzini-afk/Varin/discussions) for related work. A small, reproducible problem is a useful first contribution; issues labeled [good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) are a good place to begin. For a larger change, describe the workflow you want to improve in [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) or a feature request, and share a sketch or prototype early. Questions go to [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a); [Getting help](SUPPORT.md) lists the other channels.
 
 Bug reports are useful on their own. Include the version, installation method, what happened, and steps or an example that reproduce it. Remove credentials and private content from logs and screenshots. Use the [security policy](SECURITY.md) for vulnerability reports.
 
@@ -31,7 +39,10 @@ Read [AGENTS.md](../AGENTS.md) and the README or DOCUMENTATION nearest the code 
 | Area | Start here |
 | --- | --- |
 | Conversations, panels, editors, and shared UI | [packages/ui](../packages/ui/DOCUMENTATION.md) |
-| Model connections, application services, and remote access | [Application Host](../packages/web/README.md) |
+| The agent loop, tools, context, permissions, retries, and recovery | [Agent runtime](../kernel/crates/varin-runtime/README.md), [runtime](../docs/runtime.md), [retrieval and context](../docs/retrieval.md) |
+| Web, research, document, Office, browser, and MCP services the agent uses | [Host harness services](../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
+| Model providers, protocols, and accounts | [Models and accounts](../packages/web/application-host/lib/models/DOCUMENTATION.md) |
+| Application services and remote access | [Application Host](../packages/web/README.md) |
 | Agent execution, history, files, and processes | [Rust kernel](../kernel/README.md) |
 | Extension contracts and authoring | [Extension guide](../docs/ops/varin-extension-authoring.md), [examples](../examples/extensions/README.md) |
 | User guides and translations | [Public docs](../packages/docs/CONTRIBUTING.md) |
@@ -57,6 +68,6 @@ Use a concise commit subject that describes the change. Resolve conflicts with a
 
 ## Community and license
 
-Please follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+Please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Discussions, issues and pull requests are the shared places to talk about the project; [Getting help](SUPPORT.md) says which one fits.
 
 By submitting a contribution, you agree that it may be distributed under [AGPL-3.0-only](../LICENSE). Keep the copyright and license notices for imported third-party material; see [THIRD_PARTY_NOTICES](../THIRD_PARTY_NOTICES.md).

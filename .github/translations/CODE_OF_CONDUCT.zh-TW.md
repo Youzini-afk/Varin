@@ -44,9 +44,9 @@
 
 ## 執行
 
-請透過 GitHub 向維護者回報事件：從儲存庫開啟與維護者的私人聯絡管道；若回報內容涉及漏洞，請提交
-[私人安全性公告](https://github.com/Youzini-afk/Varin/security/advisories/new)。請勿將騷擾回報發布為
-公開議題。
+請透過 GitHub 的[私密回報表單](https://github.com/Youzini-afk/Varin/security/advisories/new)私下向維護者回報事件。
+標題請以「Conduct report:」開頭；回報內容只有維護者看得到。
+請勿在公開的議題、討論區或 Pull Request 中發布騷擾回報。
 
 所有投訴都會迅速且公平地接受審查與調查。
 

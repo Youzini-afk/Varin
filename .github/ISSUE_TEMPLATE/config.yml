@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: 提问与交流 / Questions and discussion
+    url: https://github.com/Youzini-afk/Varin/discussions/categories/q-a
+    about: 使用问题、想法和经验分享请到 Discussions。Ask questions and share ideas in Discussions.
   - name: 安全报告 / Security report
     url: https://github.com/Youzini-afk/Varin/security/advisories/new
     about: 请私密报告漏洞，不要开公开 Issue。Report vulnerabilities privately, not as a public issue.

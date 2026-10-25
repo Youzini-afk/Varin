@@ -2,11 +2,19 @@
 
 # Varin への貢献
 
-バグの修正、作業手順の改善、拡張機能の開発、文書の作成、各プラットフォームでの動作報告などで参加できます。
+Varin は、導入してすぐにしっかり使えることを目指す Agent Harness です。特に役立つのは、同じモデルでもっと先まで進めるようにする貢献や、使う人のために既定の設定を改善する貢献です。たとえば次の分野があります。
+
+- ツールと、その結果がモデルや会話にどう届くか
+- コンテキスト、検索、記憶
+- モデルプロバイダーとプロトコル
+- 拡張機能、テンプレート、サンプル
+- コーディング、研究、オフィス、汎用の各モードの既定設定
+- ドキュメントと翻訳
+- お使いのプラットフォームでのテスト報告：Windows、macOS、Linux、Docker、リモートの Host
 
 ## 最初の作業を選ぶ
 
-[Issues](https://github.com/Youzini-afk/Varin/issues) と [Pull Requests](https://github.com/Youzini-afk/Varin/pulls) で関連する作業を確認してください。最初の貢献には、小さく再現可能な問題が適しています。大きな変更では、改善したい作業手順を早めに説明し、スケッチや試作品を共有すると議論しやすくなります。
+[Issues](https://github.com/Youzini-afk/Varin/issues)、[Pull Requests](https://github.com/Youzini-afk/Varin/pulls)、[ディスカッション](https://github.com/Youzini-afk/Varin/discussions)で関連する作業を確認してください。最初の貢献には、小さく再現可能な問題が適しています。[good first issue](https://github.com/Youzini-afk/Varin/labels/good%20first%20issue) ラベルの付いた Issue から始めるのもよいでしょう。大きな変更では、改善したい作業手順を [Ideas](https://github.com/Youzini-afk/Varin/discussions/categories/ideas) か機能の提案で説明し、スケッチや試作品を早めに共有してください。質問は [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) へどうぞ。そのほかの窓口は[サポート窓口](SUPPORT.ja.md)にまとめています。
 
 バグ報告だけでも役立ちます。バージョン、インストール方法、起きた現象、再現手順や例を記載してください。ログや画像から認証情報と個人のデータを取り除き、脆弱性は[セキュリティポリシー](../SECURITY.md)に沿って報告してください。
 
@@ -31,7 +39,10 @@ bun run dev
 | 対象 | 入口 |
 | --- | --- |
 | 会話、パネル、エディター、共通 UI | [packages/ui](../../packages/ui/DOCUMENTATION.md) |
-| モデル接続、アプリのサービス、リモートアクセス | [Application Host](../../packages/web/README.md) |
+| エージェントループ、ツール、コンテキスト、権限、リトライ、復旧 | [エージェントランタイム](../../kernel/crates/varin-runtime/README.md)、[ランタイム](../../docs/runtime.md)、[検索とコンテキスト](../../docs/retrieval.md) |
+| エージェントが使う Web、研究、文書、Office、ブラウザー、MCP のサービス | [Host の harness サービス](../../packages/web/application-host/lib/harness/DOCUMENTATION.md) |
+| モデルプロバイダー、プロトコル、アカウント | [モデルとアカウント](../../packages/web/application-host/lib/models/DOCUMENTATION.md) |
+| アプリのサービスとリモートアクセス | [Application Host](../../packages/web/README.md) |
 | エージェントの実行、履歴、ファイル、プロセス | [Rust カーネル](../../kernel/README.md) |
 | 拡張機能の契約と開発 | [作成ガイド](../../docs/ops/varin-extension-authoring.md)、[実例](../../examples/extensions/README.md) |
 | 利用ガイドと翻訳 | [公開ドキュメント](../../packages/docs/CONTRIBUTING.md) |
@@ -57,6 +68,6 @@ UI の変更には該当する状態の画像や録画、性能の変更には�
 
 ## コミュニティとライセンス
 
-[行動規範](CODE_OF_CONDUCT.ja.md)に従ってください。
+[行動規範](CODE_OF_CONDUCT.ja.md)に従ってください。ディスカッション、Issues、Pull Requests は、プロジェクトについて話し合う共通の場です。どれが適しているかは[サポート窓口](SUPPORT.ja.md)で確認できます。
 
 貢献を提出することで、その内容を [AGPL-3.0-only](../../LICENSE) で配布できることに同意したものとします。取り込む第三者の素材の著作権とライセンスの通知を保持してください。詳細は [THIRD_PARTY_NOTICES](../../THIRD_PARTY_NOTICES.md) を参照してください。

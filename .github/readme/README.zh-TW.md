@@ -4,13 +4,16 @@
   <img src="../../.github/readme/assets/wordmark.svg" alt="Varin" width="720" />
 </p>
 
-<p align="center"><strong>開源的通用 Agent 工作台。</strong></p>
+<p align="center"><strong>開箱即用的開源 Agent Harness。</strong></p>
+
+<p align="center">模型之外的一切都已備妥，開箱即用，也能深度自訂。</p>
 
 <p align="center">
-  <a href="https://github.com/Youzini-afk/Varin/releases">下載</a> ·
-  <a href="../../packages/docs/README.md">使用指南</a> ·
+  <a href="https://varin.dev/zh-tw/">官網</a> ·
+  <a href="https://github.com/Youzini-afk/Varin/releases/latest">下載</a> ·
+  <a href="../../packages/docs/README.zh-CN.md">使用指南</a> ·
   <a href="../../docs/ops/varin-extension-authoring.md">開發擴充功能</a> ·
-  <a href="../translations/CONTRIBUTING.zh-TW.md">參與貢獻</a>
+  <a href="https://github.com/Youzini-afk/Varin/discussions">討論區</a>
 </p>
 
 <p align="center">
@@ -19,33 +22,65 @@
   <a href="../../LICENSE"><img src="https://img.shields.io/badge/License-AGPL_v3-blue.svg" alt="License: AGPL v3" /></a>
 </p>
 
-把模型、工具、檔案和專案放在同一個工作空間裡。你可以和 Agent 一起排查問題、撰寫程式、閱讀論文，或製作互動式說明；執行過程和結果都保留在對話中，方便查看與繼續工作。
+<p align="center">
+  <img src="assets/code-mode.png" alt="程式開發模式下的 Varin：Agent 檢索專案、修改 profile.js，把回歸測試交給驗證隊友，最後回報測試全部通過" width="960" />
+</p>
 
-Varin 提供桌面版和網頁版，也有連接 Host 的行動客戶端。它使用自己的 Rust 執行環境管理 Agent 執行和對話歷史。
+模型負責思考，Harness 是它周圍的一切：工具、上下文、執行、權限、協作與復原。Varin 把這些都準備好了，同一個模型放進來，能完成更長、更複雜的任務。下載安裝，填上自己的 API Key，就能開始。
 
-## 用 Varin 做什麼
+## 為什麼是 Varin
 
-| 手頭的工作 | Varin 提供的能力 |
-| --- | --- |
-| 推進一項任務 | 串流對話、訊息佇列、計畫、子 Agent 和排程接續。 |
-| 開發專案 | 檔案編輯、差異檢視、Git 與 worktree、終端機，以及程式碼檢索和語言工具。 |
-| 閱讀與研究 | 網頁與學術檢索、PDF 閱讀，在對話旁保留原始資料。 |
-| 製作視覺化內容 | 生成和編輯圖像，在訊息中製作互動式 HTML 圖表和小工具。 |
-| 組織自己的工具 | 連接雲端或本機模型，設定權限，配置指令、skills 和 MCP 服務。 |
-| 跨裝置工作 | 使用本機工作區，或從桌面、瀏覽器和行動裝置連接遠端 Host。 |
+**同一個模型，走得更遠。**
 
-內建的 Agent、IDE、Research 和 Bot 工作台為不同任務提供相應配置。IDE 支援桌面與網頁，其他工作台也支援行動裝置。[工作台說明](../../docs/workbench.md)
+- 上下文自整理：在背景提前整理，寫摘要時保留關鍵原文；用本機分詞計算 token，並依實際用量校準。
+- 持久執行：每一步都有紀錄，重啟後從中斷處繼續；結果不明的操作先停下核對，不會再執行一遍。
+- 提問不阻塞：等你回覆時，其他工作照常進行；附預算的目標在條件滿足時自動繼續。
+- 工具按需：常用工具常駐，其餘按需載入；MCP 服務可以直接開放，也可以按需探索。
+
+**開箱即用。** 近 80 個原生工具、4 種工作模式、4 個官方工作台、6 個內建語言伺服器、8 種原生模型協定，介面支援 10 種語言。
+
+**深度自訂，不寫程式碼。** 每個預設 Agent 都能換模型、改指示、調工具，也能自建 Agent；標題產生、上下文整理、規劃、生圖、嵌入可分別指定模型。系統指示與記憶可編輯；Skills 相容 `.claude` 與 `.agents` 目錄，也能從 Git 儲存庫安裝；每個工具都能設為允許、詢問或拒絕。
+
+**你的 Key，你的資料。** 金鑰只存在你自己的 Host 上，請求直接送往你設定的服務商：OpenAI、Anthropic、Gemini、Vertex AI、Azure OpenAI、Bedrock、Mistral、阿里雲百鍊、智譜、階躍星辰，也可以是 Ollama、LM Studio 或任意相容端點。用量依管道和模型逐輪記錄。
+
+## 四種工作方式
+
+模式決定 Agent 先拿到哪些工具、有哪些隊友協助。
+
+| 模式 | 用來做什麼 | 例如 |
+| --- | --- | --- |
+| 程式開發 | 讀程式碼、改程式碼、執行指令、開終端機，被修改的檔案按輪次留存。 | 「把登入模組重構一下，測試全部通過再叫我。」 |
+| 科研 | 檢索 OpenAlex 與 Semantic Scholar，閱讀論文與 PDF，一步步推進實驗。 | 「找出近兩年這個方向的論文，做一張能篩選的比較表。」 |
+| 辦公 | 直接操作 Word、Excel、PowerPoint，以及瀏覽器和電腦上的應用程式。 | 「把上個月的訂單匯出來，整理成附圖表的 Excel。」 |
+| 通用 | 查資料、寫東西、做一個能互動的小工具。 | 「比較這三款相機，做一張能調參數的比較圖。」 |
+
+<p align="center">
+  <img src="assets/research-mode.png" alt="科研模式下的 Varin：在對話裡用表格比較近期的論文" width="960" />
+</p>
+
+## 團隊、Bot 與可還原的改動
+
+- **團隊**：主 Agent 先拆分任務，再分給隊友：Worker 寫實作，調研 Agent 查資料，驗證 Agent 跑測試。隊友並行推進，彼此直接傳訊息、交接程式碼（附逐檔差異），完成後回報。你可以在協作面板裡查看它們的討論，也能隨時插話。
+- **Bot**：有自己的名字、指示、模型和工作目錄，能同時推進好幾件事。它記住的內容你都看得到，可以更正，也可以讓它忘掉。讓它睡眠，手上的工作會暫停；喚醒後從原處繼續。
+- **檔案時間軸**：每輪被修改的檔案都排在時間軸上，一鍵還原，還原本身也能撤銷；你手動改過的檔案不會被覆寫。
+
+<p align="center">
+  <img src="assets/team.png" alt="主 Agent 把檢查交給隊友，隊友跑完測試後在協作面板裡回報" width="960" />
+</p>
 
 ## 開始使用
 
-| 使用方式 | 入口 |
-| --- | --- |
-| Windows、macOS 或 Linux 桌面版 | [下載發行版](https://github.com/Youzini-afk/Varin/releases)，選擇與系統和 CPU 架構對應的安裝檔。 |
-| 在自己的電腦或伺服器執行，透過瀏覽器存取 | [Docker 自行部署](../../docs/ops/cloud-deployment.md)，包含持久化目錄、密碼和遠端存取設定。 |
-| iOS 或 Android | [行動端設定](../../packages/mobile/README.md)。行動客戶端連接既有 Host。 |
-| 從原始碼執行 | 見下方開發步驟。 |
+1. 安裝 Varin。
 
-開啟應用程式後，先在設定中連接模型提供者或本機服務。選擇模型，依任務需要選擇專案資料夾，即可開始對話。輸入框中可以選擇權限，並切換通用或科研工作模式。
+   | 使用方式 | 入口 |
+   | --- | --- |
+   | Windows、macOS 或 Linux | [下載安裝檔](https://github.com/Youzini-afk/Varin/releases/latest)，選擇與系統和 CPU 架構對應的版本。 |
+   | 在自己的伺服器上執行，用瀏覽器存取 | [Docker 自行託管](../../docs/ops/cloud-deployment.md)，包含持久化目錄、密碼和遠端存取設定。 |
+   | 手機 | 在設定中把手機與 Host 配對。原生應用程式發布前，可以安裝網頁應用程式（PWA）。[行動裝置指南](../../packages/docs/content/docs/zh-cn/mobile.mdx) |
+   | 從原始碼執行 | 見[從原始碼執行](#從原始碼執行)。 |
+
+2. 開啟設定，填入模型服務商的 API Key，或連接本機服務。[服務商與模型](../../packages/docs/content/docs/zh-cn/providers.mdx)
+3. 選擇工作模式，任務需要時選一個專案資料夾，開始第一個任務。
 
 Varin 正處於 1.0 之前的活躍開發階段。本頁介紹目前原始碼，[發行說明](https://github.com/Youzini-afk/Varin/releases)記錄各發行版的內容。升級前請備份重要的應用程式資料。
 
@@ -64,21 +99,17 @@ bun run dev
 
 開發桌面版時，在同一份原始碼中執行 `bun run electron:dev`。它會準備原生核心，並啟動帶有開發介面的 Electron 應用程式。[桌面開發與打包](../../packages/electron/README.md#development)
 
-## 擴充你的工作台
+## 擴充 Varin
 
-Varin 的 Harness 負責連接模型、工具、上下文、權限、背景工作和子 Agent。原生 Rust 執行環境儲存對話與執行紀錄，共享的 Application Host 提供模型連線和工作區服務。
+官方的 Agent、IDE、科研、Bot 工作台，以及瀏覽器、Office、電腦操作、語言伺服器，本身都是擴充功能，和第三方擴充功能用的是同一套契約。每一個都能停用，工作台也能整個替換。擴充功能可以加入工具、模型協定、上下文演算法、面板，乃至整套工作台。從[擴充功能開發指南](../../docs/ops/varin-extension-authoring.md)、[SDK](../../packages/extension-sdk/README.md)或[範例](../../examples/extensions/README.md)開始。
 
-常用工具直接宣告，其他可用能力透過索引和按需說明提供。讀取說明時保持工具宣告前綴穩定。研究工具在通用模式下按需揭露，在科研模式下直接常駐。
+想了解各部分如何配合，見[架構](../../docs/architecture.md)、[執行環境](../../docs/runtime.md)和[文件索引](../../docs/README.md)。
 
-擴充功能可以加入工具、模型轉接器、面板，乃至整套工作台配置。從[擴充功能作者指南](../../docs/ops/varin-extension-authoring.md)、[SDK](../../packages/extension-sdk/README.md)或[範例](../../examples/extensions/README.md)開始。
+## 交流與參與
 
-實作細節見[架構](../../docs/architecture.md)、[執行環境](../../docs/runtime.md)和[文件索引](../../docs/README.md)。
-
-## 參與貢獻
-
-歡迎提交問題報告、改進介面和工具、補充文件與翻譯，或分享平台實測結果。[貢獻指南](../translations/CONTRIBUTING.zh-TW.md)介紹開發準備、如何選擇改動和提交 Pull Request。
-
-[回報問題](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
+- 使用問題到 [Q&A](https://github.com/Youzini-afk/Varin/discussions/categories/q-a) 提問，作品分享和想法建議在[討論區](https://github.com/Youzini-afk/Varin/discussions)交流。[取得協助](../translations/SUPPORT.zh-TW.md)列出了各類問題該去哪裡。
+- 歡迎貢獻：工具與上下文處理、模型服務商串接、擴充功能、文件與翻譯，以及各平台的實測報告。[貢獻指南](../translations/CONTRIBUTING.zh-TW.md)介紹了開發準備和 Pull Request 流程。
+- [回報問題](https://github.com/Youzini-afk/Varin/issues/new?template=bug.yml) · [提出建議](https://github.com/Youzini-afk/Varin/issues/new?template=feature.yml) · [私下回報安全漏洞](../SECURITY.md)
 
 感謝 [LinuxDO](https://linux.do) 社群的支持。
 

@@ -58,11 +58,10 @@ d'un événement en ligne ou hors ligne.
 
 ## Application
 
-Signalez les incidents aux mainteneurs via GitHub en ouvrant un contact privé avec les mainteneurs depuis le
-dépôt, ou en déposant un
-[avis de sécurité privé](https://github.com/Youzini-afk/Varin/security/advisories/new)
-lorsque le signalement concerne une vulnérabilité. Ne publiez pas les signalements de harcèlement dans des
-issues publiques.
+Signalez les incidents aux mainteneurs en privé, via le
+[formulaire de signalement privé](https://github.com/Youzini-afk/Varin/security/advisories/new) de GitHub.
+Commencez le titre par « Conduct report: » ; seuls les mainteneurs peuvent le voir. Ne publiez pas de
+signalements de harcèlement dans des issues, des discussions ou des pull requests publiques.
 
 Toutes les plaintes seront examinées et feront rapidement l'objet d'une enquête impartiale.
 

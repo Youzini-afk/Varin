@@ -48,10 +48,9 @@
 
 ## 施行
 
-インシデントは、リポジトリからメンテナーへの非公開連絡を開始して GitHub 経由でメンテナーに報告して
-ください。報告が脆弱性に関するものである場合は、
-[非公開のセキュリティアドバイザリ](https://github.com/Youzini-afk/Varin/security/advisories/new)
-を提出してください。嫌がらせの報告を公開 issue に投稿しないでください。
+インシデントは、GitHub の[非公開の報告フォーム](https://github.com/Youzini-afk/Varin/security/advisories/new)からメンテナーに非公開で報告してください。
+タイトルは「Conduct report:」で始めてください。報告はメンテナーだけが閲覧できます。
+嫌がらせの報告を、公開の issue、ディスカッション、Pull Request に投稿しないでください。
 
 すべての申し立ては、速やかに、公平に審査および調査されます。
 
