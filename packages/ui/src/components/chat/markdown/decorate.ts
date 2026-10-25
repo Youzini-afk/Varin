@@ -221,13 +221,12 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const wrapper = document.createElement('div');
     wrapper.setAttribute('data-component', 'markdown-code');
-    wrapper.className =
-      'my-4 group overflow-hidden rounded-2xl border border-border/80 bg-[var(--surface-elevated)]';
+    wrapper.className = 'group';
 
     const header = document.createElement('div');
-    header.className = 'flex items-center justify-between border-b border-border/70 px-3 py-1.5';
+    header.setAttribute('data-md-code-header', '');
     const langLabel = document.createElement('span');
-    langLabel.className = 'font-mono text-[13px] text-muted-foreground';
+    langLabel.setAttribute('data-md-code-language', '');
     langLabel.textContent = language;
     const copyBtn = makeIconButton('copy', ctx.labels.copy, 'copy-code');
     const wrapBtn = makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap');
@@ -241,7 +240,7 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
 
     const body = document.createElement('div');
     body.setAttribute('data-md-code-body', '');
-    body.className = 'px-3 py-2.5 overflow-x-auto';
+    body.className = 'overflow-x-auto';
 
     parent.replaceChild(wrapper, pre);
     pre.style.margin = '0';
@@ -313,11 +312,12 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     if (existing) continue;
 
     const wrapper = document.createElement('div');
-    wrapper.className = 'group my-4 flex flex-col space-y-2';
+    wrapper.className = 'group';
     wrapper.setAttribute('data-markdown', 'table-wrapper');
 
     const toolbar = document.createElement('div');
     toolbar.className = 'flex items-center justify-end gap-1';
+    toolbar.setAttribute('data-md-table-actions', '');
 
     const copyGroup = document.createElement('div');
     copyGroup.className = 'relative';
@@ -340,26 +340,12 @@ const decorateTables = (root: HTMLElement, labels: DecorateLabels): void => {
     toolbar.appendChild(downloadGroup);
 
     const scroll = document.createElement('div');
-    scroll.className = 'overflow-x-auto rounded-lg border border-border/80 bg-[var(--surface-elevated)]';
+    scroll.setAttribute('data-md-table-scroll', '');
 
     const parent = table.parentElement;
     if (!parent) continue;
     parent.replaceChild(wrapper, table);
     table.setAttribute('data-markdown', 'table');
-    table.classList.add('w-full', 'border-collapse', 'text-sm');
-
-    for (const tr of Array.from(table.querySelectorAll('tr'))) {
-      tr.classList.add('border-b', 'border-border/60');
-    }
-    const lastBodyRow = table.querySelector('tbody tr:last-child');
-    lastBodyRow?.classList.remove('border-b');
-    lastBodyRow?.classList.add('border-0');
-    for (const th of Array.from(table.querySelectorAll('th'))) {
-      th.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'text-left', 'align-middle', 'font-semibold', 'text-foreground', 'last:border-r-0');
-    }
-    for (const td of Array.from(table.querySelectorAll('td'))) {
-      td.classList.add('border-r', 'border-border/60', 'px-4', 'py-2.5', 'align-middle', 'text-foreground/90', 'last:border-r-0');
-    }
 
     scroll.appendChild(table);
     wrapper.appendChild(toolbar);

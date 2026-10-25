@@ -67,6 +67,37 @@ const visibleColumn = (main: HTMLElement): HTMLElement | null => {
   return null;
 };
 
+type CanvasGlide = { boundaries: Map<HTMLElement, number>; animations: Set<Animation> };
+const canvasGlides = new WeakMap<HTMLElement, CanvasGlide>();
+const outerWidth = (element: HTMLElement) => element.getBoundingClientRect().width + (Number.parseFloat(getComputedStyle(element).marginLeft) || 0);
+
+/** Both sides can reverse independently. Their remaining widths contribute to
+ * one content layout, so neither completion releases the other's width lock. */
+function placeCanvas(main: HTMLElement, state: CanvasGlide): void {
+  const before = visibleColumn(main)?.getBoundingClientRect().left;
+  if (!state.boundaries.size) {
+    for (const animation of state.animations) animation.cancel();
+    state.animations.clear();
+    main.removeAttribute('data-width-gliding');
+    main.style.removeProperty('--main-glide-width');
+    canvasGlides.delete(main);
+    return;
+  }
+  let width = main.clientWidth;
+  for (const [boundary, final] of state.boundaries) width += outerWidth(boundary) - final;
+  if (!(width > 0)) return;
+  main.style.setProperty('--main-glide-width', `${width}px`);
+  main.setAttribute('data-width-gliding', '');
+  const after = visibleColumn(main)?.getBoundingClientRect().left;
+  const dx = before !== undefined && after !== undefined ? before - after : 0;
+  if (Math.abs(dx) >= 0.5) for (const layer of main.querySelectorAll<HTMLElement>(':scope > .absolute.inset-0')) {
+    const animation = layer.animate([{ translate: `${dx}px 0` }, { translate: '0 0' }], { ...springTiming('glide'), composite: 'add' });
+    state.animations.add(animation);
+    const done = () => state.animations.delete(animation);
+    void animation.finished.then(done, done);
+  }
+}
+
 /**
  * The docked panel and the main canvas beside it move as one (docs/design/motion-and-interaction.md
  * §3.10). The panel's width glides and the canvas, still flexible, gives up or takes back exactly that
@@ -75,52 +106,57 @@ const visibleColumn = (main: HTMLElement): HTMLElement | null => {
  * translate carries it from where it was drawn to its new place on the same glide, so a centred column
  * slides over rather than jumping. A move that reverses mid-way starts again from where everything is.
  */
-export function useMainColumnGlide(panel: React.RefObject<HTMLElement | null>, open: boolean, docked: boolean): void {
-  const previous = React.useRef(open);
+export function useMainColumnGlide(panel: React.RefObject<HTMLElement | null>, open: boolean, docked: boolean, targetWidth?: number, side: 'panel' | 'sidebar' = 'panel'): void {
+  const previous = React.useRef({ open, targetWidth, docked });
   const active = React.useRef<(() => void) | null>(null);
 
   React.useLayoutEffect(() => () => { active.current?.(); active.current = null; }, []);
 
   React.useLayoutEffect(() => {
     const was = previous.current;
-    previous.current = open;
+    previous.current = { open, targetWidth, docked };
     const aside = panel.current;
-    const main = aside?.parentElement?.querySelector<HTMLElement>(':scope > main');
-    if (was === open || !aside || !main || !docked || documentMotionLevel() !== 'full') {
+    const main = side === 'sidebar'
+      ? aside?.parentElement?.querySelector<HTMLElement>('.agent-conversation-canvas')
+      : aside?.parentElement?.querySelector<HTMLElement>(':scope > main');
+    if (was.open === open && was.targetWidth === targetWidth && was.docked === docked) return;
+    if (!aside || !main || !docked || documentMotionLevel() !== 'full') {
       active.current?.();
       active.current = null;
       return;
     }
-    // Where the content is drawn now, including an earlier move still in flight.
-    const before = visibleColumn(main)?.getBoundingClientRect().left;
-    active.current?.();
-    active.current = null;
+    // Preserve the currently painted position through a reversal. Retiring a
+    // boundary doesn't unlock content until its replacement has joined.
+    const state = canvasGlides.get(main) ?? { boundaries: new Map(), animations: new Set<Animation>() };
+    canvasGlides.set(main, state);
     const style = getComputedStyle(aside);
-    const gap = Number.parseFloat(style.getPropertyValue('--wb-canvas-gap')) || 0;
-    // Reading the box starts the panel's width transition; it reports where that transition is now.
-    const outerNow = aside.getBoundingClientRect().width + (Number.parseFloat(style.marginLeft) || 0);
-    const outerFinal = open ? (Number.parseFloat(style.getPropertyValue('--varin-context-panel-width')) || 0) + gap : 0;
-    const box = main.getBoundingClientRect().width;
-    // The content fills the canvas inside its border.
-    const width = box + outerNow - outerFinal - (box - main.clientWidth);
-    if (!(width > 0)) return;
-    main.style.setProperty('--main-glide-width', `${width}px`);
-    main.setAttribute('data-width-gliding', '');
+    const gap = side === 'panel' ? Number.parseFloat(style.getPropertyValue('--wb-canvas-gap')) || 0 : 0;
+    const outerFinal = open ? (targetWidth ?? (Number.parseFloat(style.getPropertyValue('--varin-context-panel-width')) || 0)) + gap : 0;
+    state.boundaries.set(aside, outerFinal);
+    const retiring = active.current;
+    active.current = null;
+    // The old cleanup must not remove the new boundary during retargeting.
+    aside.setAttribute('data-glide-retargeting', '');
+    retiring?.();
+    aside.removeAttribute('data-glide-retargeting');
     aside.setAttribute('data-gliding', '');
-    const after = visibleColumn(main)?.getBoundingClientRect().left;
-    const dx = before !== undefined && after !== undefined ? before - after : 0;
-    const layers = [...main.querySelectorAll<HTMLElement>(':scope > .absolute.inset-0')];
+    const area = side === 'sidebar' ? main.parentElement : null;
+    if (area) {
+      area.dataset.layoutTargetWidth = String(Math.max(0, area.clientWidth + outerWidth(aside) - outerFinal));
+      area.dispatchEvent(new Event('varin:layout-target'));
+    }
+    placeCanvas(main, state);
     const glide = springTiming('glide');
-    const animations = Math.abs(dx) < 0.5 ? [] : layers.map(layer => layer.animate([{ translate: `${dx}px 0` }, { translate: '0 0' }], glide));
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
       clearTimeout(timer);
       aside.removeEventListener('transitionend', onEnd);
-      for (const animation of animations) animation.cancel();
-      main.removeAttribute('data-width-gliding');
-      main.style.removeProperty('--main-glide-width');
+      if (aside.hasAttribute('data-glide-retargeting')) return;
+      state.boundaries.delete(aside);
+      placeCanvas(main, state);
+      if (area) { delete area.dataset.layoutTargetWidth; area.dispatchEvent(new Event('varin:layout-target')); }
       aside.removeAttribute('data-gliding');
     };
     const onEnd = (event: TransitionEvent) => { if (event.target === aside && event.propertyName === 'width') release(); };
@@ -128,7 +164,7 @@ export function useMainColumnGlide(panel: React.RefObject<HTMLElement | null>, o
     // A transition that never runs (no change, a hidden tab) still lets go.
     const timer = setTimeout(release, glide.duration + 300);
     active.current = release;
-  }, [panel, open, docked]);
+  }, [panel, open, docked, targetWidth, side]);
 }
 
 /**

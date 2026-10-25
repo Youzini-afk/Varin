@@ -4,20 +4,29 @@ import type { ChatTimelineProjection } from './chatTimelineProjection';
 import { blockGroupLive, blockGroupSorted, blockGroupDialogue, type ChatTimelineBlock } from './chatTimelineBlocks';
 import { ChatDialogueBlock, ChatSortedActivityGroup, ChatTimelineEntryList, ChatTurnUserMessage, type ChatTimelineProps } from './ChatTimelineEntries';
 import { ChatTurnAssistantChrome } from './ChatTurnAssistantChrome';
-import { useConversationPresentation } from './ConversationContext';
+import { ConversationContext, useConversationPresentation } from './ConversationContext';
+import { projectTimelineRow } from './timelineRowProjection';
 import { useI18n } from '@/lib/i18n';
 import { pauseLoopsOffscreen } from '@/lib/motion/loops';
 import { useUIStore } from '@/stores/useUIStore';
 
-export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, expanded, activityTransition, onExpandedChange, extensionPresentation, ...props }: Omit<ChatTimelineProps, 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'> & {
+type BlockProps = Omit<ChatTimelineProps, 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'> & {
   block: ChatTimelineBlock;
-  projection: ChatTimelineProjection;
+  projection: Pick<ChatTimelineProjection, 'liveAssistant' | 'resultByCallId'>;
   sorted: boolean;
   expanded: boolean;
   activityTransition?: 'opening' | 'closing';
   onExpandedChange(groupId: string, expanded: boolean): void;
   extensionPresentation: ReadonlyMap<string, () => React.ReactNode>;
-}) => {
+};
+
+export const ChatTimelineBlockView = (props: Omit<BlockProps, 'projection'> & { projection: ChatTimelineProjection }) => {
+  const context = useConversationPresentation();
+  const row = projectTimelineRow(props.block, props.projection, context);
+  return <ConversationContext.Provider value={row.presentation}><TimelineRow {...props} projection={row.projection} /></ConversationContext.Provider>;
+};
+
+const TimelineRow = React.memo(({ block, projection, sorted, expanded, activityTransition, onExpandedChange, extensionPresentation, ...props }: BlockProps) => {
   const presentation = useConversationPresentation();
   const { t } = useI18n();
   const showThinking = useUIStore(state => state.showReasoningTraces);

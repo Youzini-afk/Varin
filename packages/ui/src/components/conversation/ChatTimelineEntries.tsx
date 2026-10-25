@@ -53,7 +53,7 @@ import {
 } from './chatSortedTurnProjection';
 import { ChatMoreButton, ChatTextSource } from './ChatContextMenu';
 import { ChatFileChangePreview, ChatFileChangePreviewScope } from './ChatFileChangePreview';
-import { fileChangePhase, fileChangeStreamLength, isFileChangeTool, paceFileChangeCall, projectFileChanges } from './fileChangePreview';
+import { createFileChangeProjector, fileChangePhase, fileChangeStreamLength, isFileChangeTool, paceFileChangeCall } from './fileChangePreview';
 import { usePacedLength } from '@/components/chat/usePacedText';
 import { FileChangeTrayContext } from './fileChangeTray';
 import { CODE_PACE } from '@/lib/motion/pace';
@@ -385,7 +385,8 @@ const ChatToolCard: React.FC<{
   const fileGenerating = generating || (changesFiles && pacedFile.revealing);
   const pacedCall = React.useMemo(() => changesFiles && pacedFile.revealing ? paceFileChangeCall(call, pacedFile.shown) : call,
     [call, changesFiles, pacedFile.revealing, pacedFile.shown]);
-  const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(pacedCall, fileGenerating) : [], [pacedCall, fileGenerating, extensionRendered]);
+  const projectFileChanges = React.useMemo(createFileChangeProjector, []);
+  const fileChanges = React.useMemo(() => extensionRendered === undefined ? projectFileChanges(pacedCall, fileGenerating) : [], [pacedCall, fileGenerating, extensionRendered, projectFileChanges]);
   if (extensionRendered !== undefined) return <>{extensionRendered}</>;
   if (call.name === 'render_ui') {
     const projected = conversation?.uiCards?.[call.id];

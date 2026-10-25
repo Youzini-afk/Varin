@@ -79,6 +79,7 @@ export class MarkdownInk {
   private length: number | null = null;
   private runs: InkRun[] = [];
   private readonly spans = new Set<HTMLElement>();
+  private readonly blockLengths = new Map<Element, number>();
   private caret: HTMLElement | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private mergeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -99,14 +100,25 @@ export class MarkdownInk {
   }
 
   /** Call after every morph of `target`; `revealing` is the paced reveal state. */
-  update(target: HTMLElement, revealing: boolean, level: MotionLevel = documentMotionLevel()): void {
+  update(target: HTMLElement, revealing: boolean, level: MotionLevel = documentMotionLevel(), changedBlocks?: ReadonlySet<Element>): void {
     if (level === 'off') {
       this.clear();
       return;
     }
     const now = clock();
     this.unwrap();
-    const length = target.textContent?.length ?? 0;
+    let length = 0;
+    if (changedBlocks) {
+      const present = new Set(target.children);
+      for (const block of this.blockLengths.keys()) if (!present.has(block)) this.blockLengths.delete(block);
+      for (const block of present) {
+        if (changedBlocks.has(block) || !this.blockLengths.has(block)) this.blockLengths.set(block, block.textContent?.length ?? 0);
+        length += this.blockLengths.get(block)!;
+      }
+    } else {
+      this.blockLengths.clear();
+      length = target.textContent?.length ?? 0;
+    }
     if (this.length === null) this.length = revealing && length <= JOIN_BASELINE_CHARS ? 0 : length;
     const grew = length > this.length;
     if (grew) this.runs.push({ start: this.length, end: length, born: now });
@@ -124,6 +136,7 @@ export class MarkdownInk {
   clear(): void {
     this.unwrap();
     this.runs = [];
+    this.blockLengths.clear();
     this.caret?.remove();
     this.caret = null;
     for (const timer of [this.idleTimer, this.mergeTimer, this.leaveTimer]) if (timer) clearTimeout(timer);

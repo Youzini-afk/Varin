@@ -471,7 +471,7 @@ export const ContextPanel: React.FC = () => {
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
-  useMainColumnGlide(panelRef, isOpen, !isExpanded && !panelState?.expanded);
+  useMainColumnGlide(panelRef, isOpen, !isExpanded && !panelState?.expanded && !isResizing, width);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
@@ -484,13 +484,14 @@ export const ContextPanel: React.FC = () => {
       return;
     }
 
-    const observer = new ResizeObserver(() => {
-      setAvailablePanelAreaWidth(parent.clientWidth || null);
-    });
+    const update = () => setAvailablePanelAreaWidth(parent.dataset.layoutTargetWidth === undefined
+      ? parent.clientWidth || null : Number(parent.dataset.layoutTargetWidth));
+    const observer = new ResizeObserver(update);
     observer.observe(parent);
-    setAvailablePanelAreaWidth(parent.clientWidth || null);
+    parent.addEventListener('varin:layout-target', update);
+    update();
 
-    return () => observer.disconnect();
+    return () => { observer.disconnect(); parent.removeEventListener('varin:layout-target', update); };
   }, []);
 
   React.useEffect(() => {
@@ -1088,7 +1089,12 @@ export const ContextPanel: React.FC = () => {
           />
         </React.Suspense>
       ) : null}
-      <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}>
+      {/* Keep the header and frame's width motion. Heavy content takes the
+          destination width once and is revealed by the moving frame. */}
+      <div className={cn('relative min-h-0 flex-1 overflow-hidden', isResizing && 'pointer-events-none')}
+        style={{ width: isExpanded
+          ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
+          : 'var(--varin-context-panel-width)' }}>
         {hasFileTabs ? (
           <div className={cn('absolute inset-0 flex', isFileTabActive ? 'flex' : 'hidden')}>
             <div className="h-full min-w-0 flex-1">

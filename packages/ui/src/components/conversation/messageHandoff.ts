@@ -1,6 +1,5 @@
 import type { ThreadSnapshot } from '@varin/application-client';
-import { requestFrame, type FrameHandle } from '@/lib/motion/frame';
-import { onSpringStep } from '@/lib/motion/spring';
+import { requestAfterFrame, type FrameHandle } from '@/lib/motion/frame';
 import { EASE_OUT, springProgress, springSettleMs, springTiming, TWEENS } from '@/lib/motion/tokens';
 
 type Source = { left: number; top: number; width: number; height: number; radius: string };
@@ -60,7 +59,6 @@ export class MessageHandoff {
   private frame: number | null = null;
   private paintFrame: number | null = null;
   private loop: FrameHandle | null = null;
-  private stopFollowingSprings: (() => void) | null = null;
 
   setRoot = (root: HTMLElement | null): void => {
     if (root === this.root) return;
@@ -240,16 +238,15 @@ export class MessageHandoff {
     this.run();
   }
 
-  /** One frame of every flight, and again whenever a spring moves the page under it. */
+  /** Follow once after all springs have moved the page in this same frame. */
   private run(): void {
-    this.stopFollowingSprings ??= onSpringStep(this.step);
     if (this.loop) return;
     const tick = () => {
       this.loop = null;
       this.step();
-      if (this.flying()) this.loop = requestFrame(tick);
+      if (this.flying()) this.loop = requestAfterFrame(tick);
     };
-    this.loop = requestFrame(tick);
+    this.loop = requestAfterFrame(tick);
   }
 
   private flying(): boolean {
@@ -323,8 +320,6 @@ export class MessageHandoff {
     if (!this.flying()) {
       this.loop?.cancel();
       this.loop = null;
-      this.stopFollowingSprings?.();
-      this.stopFollowingSprings = null;
     }
     if (!this.transfers.size) {
       this.observer?.disconnect();

@@ -1,0 +1,182 @@
+/* Reading typography for ordinary Markdown. Compact tools and reasoning keep
+   their own scale. Theme colors are separate from workbench/editor colors. */
+.markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
+  --markdown-paragraph-spacing: 1.05em;
+  --markdown-reading-width: calc(var(--text-markdown) * 50);
+  color: var(--markdown-body, var(--foreground));
+  font-weight: var(--markdown-body-font-weight, 400);
+  line-height: round(1.8em, 1px);
+  overflow-wrap: anywhere;
+
+  & p { margin-block: 0 var(--markdown-paragraph-spacing); }
+
+  & :is(h1, h2, h3, h4, h5, h6) {
+    font-weight: 600;
+    line-height: 1.45;
+    letter-spacing: 0.005em;
+    text-wrap: pretty;
+  }
+  & h1 { font-size: 1.5em; margin-block: 1.7em 0.65em; }
+  & h2 { font-size: 1.25em; margin-block: 1.9em 0.7em; }
+  & h3 { font-size: 1.1em; margin-block: 1.75em 0.6em; }
+  & :is(h4, h5, h6) { font-size: 1em; margin-block: 1.55em 0.55em; }
+
+  & :is(strong, b) { font-weight: 600; color: var(--markdown-bold, var(--foreground)); }
+
+  & code[data-markdown="inline-code"] {
+    font-size: 0.875em;
+    font-weight: 400;
+    line-height: inherit;
+    padding: 0.12em 0.3em;
+    border-radius: 3px;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+    font-variant-ligatures: none;
+  }
+  & :is(strong, b) code[data-markdown="inline-code"] { font-weight: 600; }
+
+  & :is(a, [data-varin-file-link="true"]) {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+    text-underline-offset: 3px;
+    transition: color var(--motion-dur-fade), text-decoration-color var(--motion-dur-fade);
+  }
+  & :is(a, [data-varin-file-link="true"]):hover { text-decoration-color: currentColor; }
+  & a code[data-markdown="inline-code"],
+  & code[data-varin-file-link="true"] { color: var(--markdown-link, var(--primary)); }
+  & a:hover code[data-markdown="inline-code"],
+  & code[data-varin-file-link="true"]:hover { color: var(--markdown-link-hover, var(--primary)); }
+
+  & :is(ul, ol) {
+    margin-block: 0.4em 1.15em;
+    padding-inline-start: 1.45em;
+  }
+  & li { padding-inline-start: 0.2em; margin-block: 0.45em; }
+  & li::marker { color: var(--markdown-list-marker, var(--muted-foreground)); font-size: 0.86em; }
+  & li p { margin-block: 0.4em 0.8em; }
+  & li :is(ul, ol) { margin-block: 0.4em 0.6em; }
+  & li:has(> input[type="checkbox"]) {
+    list-style: none;
+    & > input { margin-inline: -1.25em 0.5em; accent-color: var(--markdown-link, var(--primary)); }
+  }
+
+  & blockquote {
+    margin-block: 1.5em;
+    padding-block: 0.15em;
+    padding-inline: 1.15em 0;
+    border-inline-start: 2px solid var(--markdown-blockquote-border, var(--border));
+    color: var(--markdown-blockquote, var(--muted-foreground));
+  }
+  & blockquote > :last-child { margin-bottom: 0; }
+  & hr { border: 0; border-top: 1px solid var(--markdown-hr, var(--border)); margin-block: 1.8em; }
+  & small { font-size: 0.8em; line-height: 1.7; color: var(--markdown-secondary, var(--muted-foreground)); }
+  & sup { font-size: 0.7em; line-height: 0; margin-inline-start: 2px; }
+  & sup a { text-decoration: none; }
+
+  /* The live renderer wraps each block in display:contents. Keep the same
+     edge spacing as flat/static Markdown, including single-heading replies. */
+  & > :first-child,
+  & > [data-md-block]:first-child > :first-child { margin-block-start: 0; }
+  & > :last-child,
+  & > [data-md-block]:last-child > :last-child { margin-block-end: 0; }
+
+  & [data-component="markdown-code"] { font-size: 0.85em; }
+  & [data-markdown="table"] { font-size: 0.875em; }
+}
+
+/* Limit prose measure, not the user's chat column: tables, code, figures and
+   tool surfaces can still use the full available width. Both DOM shapes occur
+   while the lazy renderer loads and during block-by-block streaming. */
+.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
+  & > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr),
+  & > [data-md-block] > :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, hr) {
+    max-inline-size: var(--markdown-reading-width);
+  }
+}
+
+[data-conversation-user-message] .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
+  color: var(--chat-user-message, var(--foreground));
+  font-size: var(--text-ui-label);
+  line-height: round(1.65em, 1px);
+  --markdown-paragraph-spacing: 0.75em;
+}
+
+.markdown-content::selection,
+.markdown-content ::selection {
+  background: var(--markdown-selection, var(--interactive-selection));
+  color: var(--markdown-selection-foreground, var(--foreground));
+}
+
+/* Chrome for the actual marked/Shiki decorators. Colors and font sizes also
+   apply to the synchronous first paint, before highlighting arrives. */
+.markdown-content [data-component="markdown-code"] {
+  margin-block: 1.3em 1.5em;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  border: 1px solid var(--markdown-code-border, var(--border));
+  border-radius: 8px;
+  background: var(--markdown-code-background, var(--surface-muted));
+  font-size: var(--text-code);
+  font-weight: 400;
+  color: var(--md-syntax-foreground, var(--foreground));
+
+  & [data-md-code-header] {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--markdown-code-border, var(--border));
+    color: var(--markdown-secondary, var(--muted-foreground));
+    font-size: var(--text-micro);
+    line-height: 1.5;
+  }
+  & [data-md-code-language] { min-width: 0; overflow-wrap: anywhere; }
+  & [data-md-code-actions] { flex-shrink: 0; }
+  & [data-md-code-body] { padding: 12px 14px; min-width: 0; }
+  & pre,
+  & pre code {
+    font-size: inherit;
+    font-weight: 400;
+    line-height: 1.85;
+    font-variant-ligatures: none;
+    tab-size: 2;
+  }
+}
+
+.markdown-content [data-markdown="table-wrapper"] {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-block: 1.3em 1.5em;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+}
+.markdown-content [data-md-table-scroll] { overflow-x: auto; min-width: 0; scrollbar-width: thin; }
+.markdown-content [data-markdown="table"] {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-code);
+  line-height: 1.7;
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+
+  & :is(th, td) {
+    padding: 12px 13px;
+    border-bottom: 1px solid var(--markdown-table-border, var(--border));
+    vertical-align: top;
+    text-align: start;
+  }
+  & th {
+    padding-block: 10px;
+    font-weight: 500;
+    color: var(--markdown-secondary, var(--muted-foreground));
+    background: var(--markdown-table-header, var(--surface-subtle));
+  }
+  & [align="right"] { text-align: right; }
+  & [align="center"] { text-align: center; }
+  & [align="left"] { text-align: left; }
+  & :is(th, td) > :last-child { margin-bottom: 0; }
+}

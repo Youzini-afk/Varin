@@ -32,10 +32,10 @@ const EMPTY_CUSTOM_IDS: ReadonlySet<string> = new Set();
 const dialogues = new WeakMap<ChatTimelineBlockGroup, { live?: ChatAssistantMessage; showThinking: boolean; executions?: Record<string, ChatToolExecutionState>; items: DialogueItem[] }>();
 const sameEntries = (a: readonly ChatTimelineEntry[], b: readonly ChatTimelineEntry[]) => a.length === b.length && a.every((entry, i) => entry === b[i]);
 
-export function blockGroupLive(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection): ChatAssistantMessage | undefined {
+export function blockGroupLive(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>): ChatAssistantMessage | undefined {
   return group.liveId === projection.liveAssistant?.id ? projection.liveAssistant : undefined;
 }
-export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection, executions?: Record<string, ChatToolExecutionState>) {
+export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>, executions?: Record<string, ChatToolExecutionState>) {
   const live = blockGroupLive(group, projection);
   if (!live && !executions) return group.sorted;
   const previous = sortedLive.get(group);
@@ -45,7 +45,7 @@ export function blockGroupSorted(group: ChatTimelineBlockGroup, projection: Chat
   return value;
 }
 
-export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: ChatTimelineProjection, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
+export function blockGroupDialogue(group: ChatTimelineBlockGroup, projection: Pick<ChatTimelineProjection, 'liveAssistant'>, showThinking = true, executions?: Record<string, ChatToolExecutionState>) {
   const live = blockGroupLive(group, projection), previous = dialogues.get(group);
   if (previous && previous.live === live && previous.showThinking === showThinking && previous.executions === executions) return previous.items;
   const items = projectChatDialogue(group.entries, live, { showThinking, customIds: group.customIds, executions });

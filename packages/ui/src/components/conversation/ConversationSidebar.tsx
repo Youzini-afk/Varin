@@ -114,6 +114,8 @@ const collectConversationSessionForestIds = (nodes: readonly ConversationSession
   return ids;
 };
 
+const forestLayout = (nodes: readonly ConversationSessionNode[]): unknown[] => nodes.map(node => [node.session.id, forestLayout(node.children)]);
+
 const isSidebarEditor = (target: EventTarget | null): boolean => (
   target instanceof Element && Boolean(target.closest('input, textarea, [contenteditable="true"]'))
 );
@@ -570,6 +572,13 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
       }];
     });
   }, [query, untitled, workspaceGroups]);
+
+  // Geometry, not status/usage labels, determines whether sidebar rows move.
+  const listLayoutKey = JSON.stringify([
+    projectsExpanded, selectionMode, editingId,
+    [...collapsedGroupIds].sort(), [...collapsedSessionIds].sort(),
+    groups.map(group => [group.id, forestLayout(group.forest)]),
+  ]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
     // The conversation leaves against the move through the list, and the title follows it.
@@ -1319,7 +1328,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
         ) : null}
 
         {/* Rows move, arrive and leave instead of jumping (sidebarMotion.tsx); a search replaces them at once. */}
-        <FlipList containerRef={listRef} instantKey={query.trim()} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+        <FlipList containerRef={listRef} instantKey={query.trim()} layoutKey={listLayoutKey} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <div className="relative mb-1 flex min-h-8 items-center gap-1 rounded-md text-muted-foreground">
             <button
               type="button"

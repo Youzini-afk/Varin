@@ -367,12 +367,7 @@ export class CSSVariableGenerator {
   private generateComponentColors(colors: Theme['colors'], theme: Theme): string[] {
     const vars: string[] = [];
 
-    if (colors.markdown) {
-      vars.push(...this.generateMarkdownColors(colors.markdown, theme));
-    } else {
-
-      vars.push(...this.generateDefaultMarkdownColors(theme));
-    }
+    vars.push(...this.generateMarkdownColors(colors.markdown ?? {}, theme));
 
     if (colors.chat) {
       vars.push(...this.generateChatColors(colors.chat, theme));
@@ -393,6 +388,8 @@ export class CSSVariableGenerator {
     const vars: string[] = [];
     const primary = theme.colors.primary.base;
 
+    vars.push(`  --markdown-body: ${markdown.body || theme.colors.chat?.assistantMessage || theme.colors.surface.foreground};`);
+    vars.push(`  --markdown-secondary: ${markdown.secondary || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-heading1: ${markdown.heading1 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading2: ${markdown.heading2 || theme.colors.surface.foreground};`);
     vars.push(`  --markdown-heading3: ${markdown.heading3 || theme.colors.surface.foreground};`);
@@ -408,29 +405,12 @@ export class CSSVariableGenerator {
     vars.push(`  --markdown-italic: ${markdown.italic || this.opacity(theme.colors.surface.foreground, 0.9)};`);
     vars.push(`  --markdown-strikethrough: ${markdown.strikethrough || theme.colors.surface.mutedForeground};`);
     vars.push(`  --markdown-hr: ${markdown.hr || theme.colors.interactive.border};`);
-
-    return vars;
-  }
-
-  private generateDefaultMarkdownColors(theme: Theme): string[] {
-    const vars: string[] = [];
-    const primary = theme.colors.primary.base;
-
-    vars.push(`  --markdown-heading1: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-heading2: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-heading3: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-heading4: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-link: ${primary};`);
-    vars.push(`  --markdown-link-hover: ${theme.colors.primary.hover || this.darken(primary, 10)};`);
-    vars.push(`  --markdown-inline-code: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-inline-code-bg: ${theme.colors.surface.subtle};`);
-    vars.push(`  --markdown-blockquote: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-blockquote-border: ${theme.colors.interactive.border};`);
-    vars.push(`  --markdown-list-marker: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-bold: ${theme.colors.surface.foreground};`);
-    vars.push(`  --markdown-italic: ${this.opacity(theme.colors.surface.foreground, 0.9)};`);
-    vars.push(`  --markdown-strikethrough: ${theme.colors.surface.mutedForeground};`);
-    vars.push(`  --markdown-hr: ${theme.colors.interactive.border};`);
+    vars.push(`  --markdown-code-background: ${markdown.codeBackground || theme.colors.surface.muted};`);
+    vars.push(`  --markdown-code-border: ${markdown.codeBorder || theme.colors.interactive.border};`);
+    vars.push(`  --markdown-table-header: ${markdown.tableHeader || theme.colors.surface.subtle};`);
+    vars.push(`  --markdown-table-border: ${markdown.tableBorder || theme.colors.interactive.border};`);
+    vars.push(`  --markdown-selection: ${markdown.selection || theme.colors.interactive.selection};`);
+    vars.push(`  --markdown-selection-foreground: ${markdown.selectionForeground || theme.colors.interactive.selectionForeground};`);
 
     return vars;
   }

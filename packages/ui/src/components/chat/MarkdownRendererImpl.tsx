@@ -26,7 +26,7 @@ import { openFileInMainEditor } from '@/lib/openFileInMainEditor';
 import { useWorkbenchProfileId } from '@/lib/workbench/profile-context';
 import { VARIN_WORKBENCH_IDE_PROFILE_ID } from '@varin/extension-contract';
 import { getDirectoryForFilePath, isFilePathWithinDirectory, toAbsoluteFilePath } from '@/lib/path-utils';
-import { renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
+import { MarkdownBlockStream, renderMarkdownBlocks, renderMarkdownSync } from './markdown/markdownCore';
 import { subscribeLiveFence } from './markdown/liveFence';
 import { getMarkdownSyntaxVars } from './markdown/markdownSyntaxVars';
 import {
@@ -797,6 +797,9 @@ const useMorphdomMarkdown = ({
 }) => {
   const onContentChangeRef = React.useRef(onContentChange);
   onContentChangeRef.current = onContentChange;
+  // Message identity owns this mutable cache, even when two messages share a prefix.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const blockStream = React.useMemo(() => new MarkdownBlockStream(), [cacheKey]);
 
   const mermaidViewerRef = React.useRef<ReturnType<typeof createMermaidViewerRegistry> | null>(null);
   const refreshMermaidViewers = React.useCallback(() => {
@@ -862,10 +865,11 @@ const useMorphdomMarkdown = ({
     const target = container.querySelector<HTMLElement>('[data-markdown-content]') ?? container;
     let active = true;
 
-    void renderMarkdownBlocks(text, streaming, cacheKey).then((blocks) => {
+    void renderMarkdownBlocks(text, streaming, cacheKey, blockStream).then((blocks) => {
       if (!active) return;
       const existing = Array.from(target.children) as HTMLElement[];
       let changed = false;
+      const changedBlocks = new Set<Element>();
       const inking = Boolean(ink && (streaming || ink.engaged));
       if (inking && (existing.length !== blocks.length || blocks.some((block, index) => existing[index]?.getAttribute('data-md-id') !== block.id))) {
         ink!.prepare();
@@ -895,6 +899,7 @@ const useMorphdomMarkdown = ({
           onBeforeElUpdated: (fromEl, toEl) => !fromEl.isEqualNode(toEl),
         });
         el.setAttribute('data-md-id', block.id);
+        changedBlocks.add(el);
         changed = true;
         if (hadMermaidBlock || tempHasMermaidBlock || shouldRefreshMermaidViewers(el)) {
           refreshMermaidViewers();
@@ -902,7 +907,6 @@ const useMorphdomMarkdown = ({
       });
 
       // Remove any trailing block elements no longer present.
-      const hadMermaidBeforeTrailingCleanup = shouldRefreshMermaidViewers(target);
       let removedMermaidBlock = false;
       for (let i = existing.length - 1; i >= blocks.length; i -= 1) {
         const removed = existing[i];
@@ -914,11 +918,11 @@ const useMorphdomMarkdown = ({
           changed = true;
         }
       }
-      if (removedMermaidBlock || (existing.length > blocks.length && hadMermaidBeforeTrailingCleanup)) {
+      if (removedMermaidBlock) {
         refreshMermaidViewers();
       }
 
-      if (changed && inking) ink!.update(target, streaming);
+      if (changed && inking) ink!.update(target, streaming, undefined, changedBlocks);
       if (changed) {
         onContentChangeRef.current?.('structural');
       }
@@ -927,7 +931,7 @@ const useMorphdomMarkdown = ({
     return () => {
       active = false;
     };
-  }, [containerRef, text, streaming, cacheKey, ctx, refreshMermaidViewers, ink, fenceRevision]);
+  }, [containerRef, text, streaming, cacheKey, blockStream, ctx, refreshMermaidViewers, ink, fenceRevision]);
 
   React.useEffect(() => {
     const container = containerRef.current;
@@ -1004,7 +1008,7 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   useExternalLinkInteractions({ containerRef });
   usePdfMaterialLinkInteractions({ containerRef });
 
-  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
+  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme, variant === 'assistant' ? 'prose' : 'code'), [currentTheme, variant]);
   const ctx = useDecorateContext(currentTheme, live, DEFAULT_MERMAID_CONTROLS);
 
   useMorphdomMarkdown({
@@ -1097,7 +1101,7 @@ const SimpleMarkdownRendererImpl: React.FC<{
   useExternalLinkInteractions({ containerRef, enabled: !disableLinkSafety });
   usePdfMaterialLinkInteractions({ containerRef });
 
-  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme), [currentTheme]);
+  const syntaxVars = React.useMemo(() => getMarkdownSyntaxVars(currentTheme, variant === 'assistant' ? 'prose' : 'code'), [currentTheme, variant]);
   const ctx = useDecorateContext(currentTheme, false, mermaidControls);
 
   useMorphdomMarkdown({

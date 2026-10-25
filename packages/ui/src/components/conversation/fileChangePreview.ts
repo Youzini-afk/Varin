@@ -60,6 +60,22 @@ const linesOf = (text: string): string[] => {
 };
 
 type LineOp = { kind: 'add'; ni: number } | { kind: 'remove'; oi: number } | { kind: 'context'; oi: number; ni: number };
+type EditProjection = { oldText: string; completed: string; oldLines: string[]; newLines: string[]; ops: LineOp[] };
+type ProjectionCache = {
+  edits: Map<number, EditProjection>;
+  write?: { text: string; offset: number; stable: FileChangeLine[] };
+};
+
+/** One cache per mounted tool call, released with its preview. Character-level
+ * reveals do not change a diff until a new complete line arrives. */
+export function createFileChangeProjector(): typeof projectFileChanges {
+  const cache: ProjectionCache = { edits: new Map() };
+  let owner = '';
+  return (call, generating = false) => {
+    if (owner !== call.id) { cache.edits.clear(); cache.write = undefined; owner = call.id; }
+    return projectFileChanges(call, generating, cache);
+  };
+}
 
 /** Line diff with source indices; within a change, removals precede additions. */
 const lineOps = (before: string[], after: string[]): LineOp[] => {
@@ -82,19 +98,24 @@ const lineOps = (before: string[], after: string[]): LineOp[] => {
  * `ahead`. A line being written over an old line with the same prefix is
  * shown on that old line (`typed`) instead of flashing as an addition first.
  */
-const editLines = (edit: number, oldText: string, newText: string | undefined, oldDone: boolean, newDone: boolean): FileChangeLine[] => {
+const editLines = (edit: number, oldText: string, newText: string | undefined, oldDone: boolean, newDone: boolean, cache?: ProjectionCache): FileChangeLine[] => {
   const oldKey = (index: number) => `e${edit}o${index}`;
   const newKey = (index: number) => `e${edit}n${index}`;
   // `linesOf` keeps an unfinished last line; it is the one being written.
-  const oldLines = linesOf(oldText);
+  const previous = cache?.edits.get(edit);
+  const oldLines = previous?.oldText === oldText ? previous.oldLines : linesOf(oldText);
   if (newText === undefined) {
     return oldLines.map((text, index) => ({ key: oldKey(index), kind: 'remove', text,
       ...(!oldDone && index === oldLines.length - 1 && !oldText.endsWith('\n') ? { pending: true } : {}) }));
   }
-  const written = newText.replace(/\r\n/g, '\n').split('\n');
-  const partial = newDone ? undefined : written.pop();
-  const newLines = newDone ? linesOf(newText) : written;
-  const ops = lineOps(oldLines, newLines);
+  const normalized = newText.includes('\r') ? newText.replace(/\r\n/g, '\n') : newText;
+  const end = newDone ? normalized.length : normalized.lastIndexOf('\n') + 1;
+  const completed = normalized.slice(0, end);
+  const partial = newDone ? undefined : normalized.slice(end);
+  const same = previous?.oldText === oldText && previous.completed === completed;
+  const newLines = same ? previous.newLines : linesOf(completed);
+  const ops = same ? previous.ops : lineOps(oldLines, newLines);
+  if (!same) cache?.edits.set(edit, { oldText, completed, oldLines, newLines, ops });
   const row = (op: LineOp): FileChangeLine => op.kind === 'add'
     ? { key: newKey(op.ni), kind: 'add', text: newLines[op.ni]! }
     : { key: oldKey(op.oi), kind: op.kind, text: oldLines[op.oi]! };
@@ -126,7 +147,7 @@ const withCounts = (file: FileChangePreview): FileChangePreview => ({
  * This is a display projection, never a patch validator or an application path.
  * Codex context anchors are not file line numbers, so none are synthesized.
  */
-export function projectFileChanges(call: ChatToolCall, generating = false): FileChangePreview[] {
+export function projectFileChanges(call: ChatToolCall, generating = false, cache?: ProjectionCache): FileChangePreview[] {
   const args = record(call.arguments);
   if (!args) return [];
   if (call.name === 'apply_patch' && typeof args.patch === 'string') {
@@ -164,6 +185,18 @@ export function projectFileChanges(call: ChatToolCall, generating = false): File
   if (!path && !generating) return [];
   if (call.name === 'file_write' && (generating || typeof args.content === 'string')) {
     const content = typeof args.content === 'string' ? args.content : '';
+    if (cache) {
+      const text = content.includes('\r') ? content.replace(/\r\n/g, '\n') : content;
+      const previous = cache.write && text.startsWith(cache.write.text) ? cache.write : undefined;
+      const lines = previous?.stable.slice() ?? [];
+      const offset = previous?.offset ?? 0;
+      const suffix = linesOf(text.slice(offset));
+      const complete = text.endsWith('\n');
+      for (const [index, value] of suffix.entries()) lines.push({ key: `w${lines.length}`, kind: 'add', text: value,
+        ...(!complete && generating && index === suffix.length - 1 ? { pending: true } : {}) });
+      cache.write = { text, offset: text.lastIndexOf('\n') + 1, stable: complete ? lines : lines.slice(0, -1) };
+      return [{ path, operation: 'write', lines }];
+    }
     const lines = linesOf(content);
     const writing = generating && Boolean(content) && !content.endsWith('\n');
     return [{ path, operation: 'write', lines: lines.map((text, index) => ({ key: `w${index}`, kind: 'add', text,
@@ -182,7 +215,7 @@ export function projectFileChanges(call: ChatToolCall, generating = false): File
       const later = index < edits.length - 1;
       const newText = typeof edit.newText === 'string' ? edit.newText : generating && !later ? undefined : '';
       lines.push(...editLines(index, typeof edit.oldText === 'string' ? edit.oldText : '', newText,
-        !generating || later || newText !== undefined, !generating || later));
+        !generating || later || newText !== undefined, !generating || later, cache));
     }
     return [withCounts({ path, operation: 'update', lines })];
   }

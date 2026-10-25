@@ -42,7 +42,10 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
   const head = history.at(-1)?.id ?? null;
+  const sourceView = React.useRef(view);
+  React.useLayoutEffect(() => { sourceView.current = view; }, [view]);
   const sourceEntry = React.useCallback((callId: string) => {
+    const view = sourceView.current;
     const visited = new Set<string>();
     let original = callId;
     while (!visited.has(original)) {
@@ -54,7 +57,7 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
       if (!parent) return;
       original = parent;
     }
-  }, [view.entries, view.toolExecutions]);
+  }, []);
   const uiCards = React.useMemo(() => {
     const cards: Record<string, UiCardProjection> = {}, calls = new Map<string, ChatToolCall>();
     const firstByWork = new Map<string, string>();

@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "./styles/design-system.css";
 @import "./styles/typography.css";
+@import "./styles/markdown.css";
 @import "./styles/mobile.css";
 @import "./styles/motion.css";
 @import "./styles/workbench.css";
@@ -966,8 +967,8 @@ html:not(.dark) .chat-scroll {
 }
 
 ::highlight(varin-chat-selection) {
-  background: color-mix(in srgb, var(--interactive-border-focus) 25%, transparent);
-  color: var(--surface-foreground);
+  background: var(--markdown-selection, var(--interactive-selection));
+  color: var(--markdown-selection-foreground, var(--surface-foreground));
 }
 
 .markdown-content p,
@@ -993,47 +994,6 @@ html:not(.dark) .chat-scroll {
    messages don't gain extra space at the bottom. */
 .markdown-content > [data-md-block]:last-child p:last-child {
   margin-bottom: 0;
-}
-
-/* Conversation prose has a reading rhythm independent of compact tool output.
-   Round streamed line growth to whole pixels, as with the scroll controller's
-   other text surfaces. Column width follows the global chat layout preference. */
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) {
-  line-height: round(1.75em, 1px);
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) :is(ul, ol) {
-  margin-block: 0 var(--markdown-paragraph-spacing);
-  padding-left: 1.5em !important;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) li + li {
-  margin-top: 0.375em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) li :is(ul, ol) {
-  margin-block: 0.375em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) :is(h1, h2, h3, h4, h5, h6) {
-  line-height: 1.4;
-  margin-block: 1.25em 0.5em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h1 {
-  font-size: 1.375em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h2 {
-  font-size: 1.25em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) h3 {
-  font-size: 1.125em;
-}
-
-.chat-message-column .markdown-content:not(.markdown-tool):not(.markdown-reasoning) code[data-markdown="inline-code"] {
-  font-size: 0.875em;
 }
 
 /* Tool cards (code size) and reasoning (meta size, dimmed) are intentionally
@@ -1145,12 +1105,13 @@ html:not(.dark) .chat-scroll {
   font-size: var(--text-code);
 }
 
-/* Override Streamdown's hardcoded bg-muted for inline code - use theme colors instead */
+/* Inline technical names keep normal word boundaries, breaking only when a
+   name is wider than its container. Linked code inherits the link treatment. */
 .markdown-content code[data-markdown="inline-code"] {
-  background-color: var(--markdown-inline-code-bg, var(--surface-muted)) !important;
-  color: var(--markdown-inline-code, var(--foreground)) !important;
-  word-break: break-all;
-  overflow-wrap: break-word;
+  background-color: var(--markdown-inline-code-bg, var(--surface-muted));
+  color: var(--markdown-inline-code, var(--foreground));
+  word-break: normal;
+  overflow-wrap: anywhere;
 }
 
 /* Markdown headings - use theme colors */
@@ -1368,7 +1329,7 @@ html:not(.dark) .chat-scroll {
   align-self: stretch;
   padding-right: 0.75rem;
   border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  color: var(--markdown-secondary, var(--muted-foreground));
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;

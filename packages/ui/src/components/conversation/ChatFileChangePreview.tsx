@@ -44,6 +44,7 @@ function useHighlightedDiff(lines: FileChangeLine[], language: string) {
   const running = React.useRef(false);
   const alive = React.useRef(true);
   const [highlighted, setHighlighted] = React.useState<Map<string, { text: string; html: string }>>(() => new Map());
+  const completed = React.useRef<{ language: string; before: string; after: string; oldHtml: string[] | null; newHtml: string[] | null } | null>(null);
   React.useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   React.useEffect(() => {
     latest.current = { lines, language };
@@ -58,15 +59,21 @@ function useHighlightedDiff(lines: FileChangeLine[], language: string) {
           const settled = job.lines.map((line, index) => ({ line, key: lineKey(line, index) })).filter(({ line }) => !line.pending && line.kind !== 'hunk');
           const before = settled.filter(({ line }) => line.kind === 'remove' || line.kind === 'context');
           const after = settled.filter(({ line }) => line.kind === 'add' || line.kind === 'context');
+          const beforeText = before.map(({ line }) => line.text).join('\n');
+          const afterText = after.map(({ line }) => line.text).join('\n');
+          const saved = completed.current?.language === job.language ? completed.current : null;
           const [oldHtml, newHtml] = await Promise.all([
-            before.length ? highlightLinesInWorker(before.map(({ line }) => line.text).join('\n'), job.language) : null,
-            after.length ? highlightLinesInWorker(after.map(({ line }) => line.text).join('\n'), job.language) : null,
+            saved?.before === beforeText ? saved.oldHtml : before.length ? highlightLinesInWorker(beforeText, job.language) : null,
+            saved?.after === afterText ? saved.newHtml : after.length ? highlightLinesInWorker(afterText, job.language) : null,
           ]);
           if (!alive.current) break;
+          completed.current = { language: job.language, before: beforeText, after: afterText, oldHtml, newHtml };
           const next = new Map<string, { text: string; html: string }>();
           before.forEach(({ line, key }, index) => { const html = oldHtml?.[index]; if (html !== undefined && line.kind === 'remove') next.set(key, { text: line.text, html }); });
           after.forEach(({ line, key }, index) => { const html = newHtml?.[index]; if (html !== undefined) next.set(key, { text: line.text, html }); });
-          setHighlighted(next);
+          setHighlighted(previous => previous.size === next.size && [...next].every(([key, row]) => {
+            const old = previous.get(key); return old?.text === row.text && old.html === row.html;
+          }) ? previous : next);
           if (job === latest.current) break;
         }
       } catch {
@@ -147,7 +154,14 @@ export const ChatFileChangePreview: React.FC<{
   const [expanded, setExpanded] = React.useState(view.expanded);
   const [rowHeight, setRowHeight] = React.useState(22);
   const html = useHighlightedDiff(file.lines, getLanguageFromExtension(file.path.replace(/\\/g, '/')) ?? 'text');
-  const keys = React.useMemo(() => file.lines.map(lineKey), [file.lines]);
+  const stableKeys = React.useRef<string[]>([]);
+  const keys = React.useMemo(() => {
+    if (stableKeys.current.length === file.lines.length && file.lines.every((line, index) => lineKey(line, index) === stableKeys.current[index])) return stableKeys.current;
+    return stableKeys.current = file.lines.map(lineKey);
+  }, [file.lines]);
+  const presentKeys = React.useMemo(() => new Set(keys), [keys]);
+  const presentKeysRef = React.useRef(presentKeys);
+  presentKeysRef.current = presentKeys;
   const keysRef = React.useRef(keys);
   keysRef.current = keys;
   const ink = useLineInk();
@@ -250,6 +264,26 @@ export const ChatFileChangePreview: React.FC<{
   // unchanged, so rows never cross), new rows unfold from their top edge, and
   // removed rows fold away from a snapshot at their last place.
   const rowElements = React.useRef(new Map<string, HTMLElement>());
+  // Removed rows survive only until this commit paints their exit. Virtualized
+  // rows still present in the source release their DOM immediately.
+  const departingRows = React.useRef(new Map<string, HTMLElement>());
+  const rowRefs = React.useRef(new Map<string, (element: HTMLDivElement | null) => void>());
+  const rowRef = (key: string) => {
+    let ref = rowRefs.current.get(key);
+    if (!ref) {
+      ref = element => {
+        if (element) { virtualizer.measureElement(element); rowElements.current.set(key, element); }
+        else {
+          const previous = rowElements.current.get(key);
+          if (previous && !presentKeysRef.current.has(key)) departingRows.current.set(key, previous);
+          rowElements.current.delete(key);
+          rowRefs.current.delete(key);
+        }
+      };
+      rowRefs.current.set(key, ref);
+    }
+    return ref;
+  };
   const placed = React.useRef<{ keys: string[]; tops: Map<string, number> }>({ keys: [], tops: new Map() });
   const items = virtualizer.getVirtualItems();
   React.useLayoutEffect(() => {
@@ -257,10 +291,10 @@ export const ChatFileChangePreview: React.FC<{
     const tops = new Map(items.map(item => [String(item.key), item.start]));
     placed.current = { keys, tops };
     const level = documentMotionLevel();
-    if (!previous.keys.length || level === 'off') return;
-    const known = new Set(previous.keys);
-    const present = new Set(keys);
-    const stable = stableRows(previous.keys, keys);
+    if (!previous.keys.length || level === 'off') { departingRows.current.clear(); return; }
+    const known = previous.keys === keys ? presentKeys : new Set(previous.keys);
+    const present = presentKeys;
+    const stable = previous.keys === keys ? presentKeys : stableRows(previous.keys, keys);
     const snap = springTiming('snap');
     for (const [key, top] of tops) {
       const element = rowElements.current.get(key);
@@ -284,7 +318,7 @@ export const ChatFileChangePreview: React.FC<{
     const layer = ghostLayer.current;
     for (const [key, top] of previous.tops) {
       if (present.has(key)) continue;
-      const element = rowElements.current.get(key);
+      const element = departingRows.current.get(key) ?? rowElements.current.get(key);
       rowElements.current.delete(key);
       if (!element || !layer || level !== 'full' || typeof element.animate !== 'function') continue;
       const ghost = element.cloneNode(true) as HTMLElement;
@@ -294,7 +328,8 @@ export const ChatFileChangePreview: React.FC<{
       const fold = ghost.animate([{ opacity: 1, transform: 'scaleY(1)' }, { opacity: 0, transform: 'scaleY(0)' }], { ...snap, fill: 'forwards' });
       void fold.finished.then(() => ghost.remove(), () => ghost.remove());
     }
-  }, [items, keys]);
+    departingRows.current.clear();
+  }, [items, keys, presentKeys]);
 
   const navigateChange = (direction: -1 | 1) => {
     const element = viewport.current;
@@ -371,10 +406,7 @@ export const ChatFileChangePreview: React.FC<{
           const code = line.typed !== undefined
             ? <>{line.text.slice(0, line.typed)}<span className="workbench-diff-caret" /><span className="workbench-diff-rest">{line.text.slice(line.typed)}</span></>
             : <>{line.pending ? ink(key, line.text, writing) : line.text || ' '}{line.pending && writing ? <span className="workbench-diff-caret" /> : null}</>;
-          return <div key={key} ref={element => {
-            virtualizer.measureElement(element);
-            if (element) rowElements.current.set(key, element);
-          }} data-index={item.index} data-row-key={key} data-change-kind={line.kind} data-ahead={line.ahead || undefined} data-pending={line.pending || undefined}
+          return <div key={key} ref={rowRef(key)} data-index={item.index} data-row-key={key} data-change-kind={line.kind} data-ahead={line.ahead || undefined} data-pending={line.pending || undefined}
             className={cn('workbench-diff-row absolute left-0 flex w-full min-w-0 pr-3',
               line.kind === 'add' && 'bg-[var(--status-success)]/10',
               line.kind === 'remove' && 'bg-[var(--status-error)]/10',

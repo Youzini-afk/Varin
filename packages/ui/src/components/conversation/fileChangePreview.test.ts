@@ -19,7 +19,7 @@ it('keeps dirty editor edits, committed branches and failed per-file mutations d
   expect(fileChangePhase(undefined, result({ status: 'applied' }, 'unknown'), false)).toBe('preview');
 });
 
-import { fileChangeStreamLength, paceFileChangeCall, projectFileChanges } from './fileChangePreview';
+import { createFileChangeProjector, fileChangeStreamLength, paceFileChangeCall, projectFileChanges } from './fileChangePreview';
 import type { ChatToolCall } from './types';
 
 const edit = (edits: unknown[], path = 'src/login.ts'): ChatToolCall => ({ type: 'toolCall', id: 'edit', name: 'file_edit', arguments: { path, edits } as ChatToolCall['arguments'] });
@@ -63,4 +63,22 @@ it('paces a call in writing order without showing new text before its old text',
   expect(paceFileChangeCall(call, 6).arguments).toEqual({ path: 'src/login.ts', edits: [{ oldText: 'abc\n', newText: 'xy' }] });
   expect(paceFileChangeCall(call, 10).arguments).toEqual({ path: 'src/login.ts', edits: [{ oldText: 'abc\n', newText: 'xyz\n' }, { oldText: 'de' }] });
   expect(paceFileChangeCall(call, 12)).toBe(call);
+});
+
+it('retains complete write rows and matches the full projection through edits and rewinds', () => {
+  const project = createFileChangeProjector();
+  const write = (content: string): ChatToolCall => ({ type: 'toolCall', id: 'write', name: 'file_write', arguments: { path: 'a.ts', content } });
+  const first = project(write('first\nsec'), true);
+  const next = project(write('first\nsecond'), true);
+  expect(next[0]!.lines[0]).toBe(first[0]!.lines[0]);
+  for (const content of ['first\nsecond\n', 'first\nsecond\nthird', 'replacement', 'replacement\r\n中文']) {
+    expect(project(write(content), true)).toEqual(projectFileChanges(write(content), true));
+    expect(project(write(content), false)).toEqual(projectFileChanges(write(content), false));
+  }
+  const oldText = 'first\nold\nlast\n';
+  for (const newText of ['f', 'first\n', 'first\nne', 'first\nnew\nlast\n', 'replacement']) {
+    const call = edit([{ oldText, newText }]);
+    expect(project(call, true)).toEqual(projectFileChanges(call, true));
+    expect(project(call, false)).toEqual(projectFileChanges(call, false));
+  }
 });

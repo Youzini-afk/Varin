@@ -95,6 +95,15 @@ The same spring drives every motion layer:
 
 Values that a motion component cannot own, such as a scroll position the virtual list also reads, use `SpringDriver` from `lib/motion/spring.ts`. It integrates one spring per frame, keeps its velocity when retargeted, and can be shifted when the underlying content moves.
 
+`lib/motion/frame.ts` shares one browser frame across these drivers. Geometry followers use
+`requestAfterFrame`: the message handoff follows once after the frame's spring writes, before paint,
+instead of remeasuring after every individual spring. Curves, stagger and reveal rates stay in the
+original motion tokens. Sidebar FLIP measures only when its ordered hierarchy or expansion/editing
+state changes; retargets add a compositor displacement while existing slides keep their velocity.
+Both sidebars contribute to one canvas width lock. The content lays out at its destination once,
+the frames keep giving way continuously, and completing one side does not release the other side's
+lock. The panel's proportional width consumes the sidebar's destination width during this motion.
+
 The conversation timeline has one scroll spring, owned by one motion at a time:
 
 - Following the end uses a critically damped spring (ω = 14). Its target only grows, so a long reply glides instead of stepping once per measurement. While it catches up, the timeline still counts as at the end.
@@ -103,12 +112,38 @@ The conversation timeline has one scroll spring, owned by one motion at a time:
 - Wheel, touch and key intent stop the spring at once. A motion whose owner went stale (mode, generation or return token) stops on its next frame.
 - Entering a Thread, a resized viewport, and `reduced` or `off` place the end directly.
 
+Ordinary Markdown reading styles live in `styles/markdown.css`: body text and emphasis have separate
+theme colors, inline code keeps word boundaries, and links remain visibly actionable. Prose in chat
+has an 800px measure at the default text size, scaling with the text preference; code, tables and
+figures retain the chat column's full width. The same selectors handle flat fallback HTML and the
+streaming renderer's `display:contents` block wrappers. Tool/reasoning and collaboration feeds keep
+their compact reading scales.
+
+The default light/dark palettes define `colors.markdown.body`, `secondary`, code/table surfaces and
+selection colors independently of workbench chrome. Optional `codeForeground`, `codeComment`, etc.
+control prose-fence highlighting through `getMarkdownSyntaxVars(theme, 'prose')`; file/tool code keeps
+the theme's ordinary syntax palette. Other themes fall back to their existing colors. Decoration adds
+code/table controls, but CSS owns layout; table alignment from Markdown is preserved.
+
 Streamed Markdown is revealed by `usePacedText` one frame at a time (`lib/motion/pace.ts`):
 
 - The reveal rate is `max(26/s, backlog / 0.24s)`. Arriving text only moves the target, so a burst speeds the front up and a pause slows it down smoothly.
 - When the stream ends, what is left drains evenly in 0.16s. `revealing` stays true until then, so the open block keeps its streaming render until the last character.
 - History and windowless environments show text in full immediately. Joining a stream already in progress reveals only its last 160 characters. A reply remounted within 1.5s continues where it was.
 - The pace runs under every motion level; it is reading rhythm, not animation.
+
+Each Markdown renderer owns a `MarkdownBlockStream`. Stable root blocks retain source and rendered
+identity; only the mutable tail is lexed/healed again. Reference definitions and display math that
+span blocks retain document-wide parsing. Stream completion preserves the block structure. Ink caches
+stable blocks' text lengths and only reads changed blocks. Timeline rows project their own live
+message, results and gateway-child executions into a stable context, so unrelated progress does not
+invalidate their body renderers.
+
+File-change projections are owned by the mounted tool call. Complete write rows retain identity;
+edit diffs reuse the previous complete-line comparison while the next line is being typed. Highlighting
+reuses unchanged before/after sources independently. Virtualized rows release detached DOM immediately;
+deleted rows survive only until their exit snapshot is prepared. Row-order analysis is skipped when
+identities have not changed, preserving all movement and ink effects.
 
 A code fence that is still streaming is coloured line by line (`components/chat/markdown/liveFence.ts`). Each change to its completed lines is sent to the Shiki worker once, 90ms after the line completes, with one request in flight per fence. Renders reuse the newest result that is still a prefix of the code, and a result that lands during a pause re-renders its owner. The line being written stays plain. The open fence uses the same `.line` structure as the closed block, so closing it only adds line numbers. Fences over 400 lines and Mermaid stay plain until they close.
 

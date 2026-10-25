@@ -155,31 +155,20 @@
   /* Restore default list styling inside markdown content - override Tailwind preflight */
   .markdown-content ul,
   .markdown-content ol {
-    padding-left: 2em !important;
+    padding-inline-start: 2em;
   }
 
   .markdown-content ul {
-    list-style-type: none !important;
-  }
-
-  .markdown-content ul > li {
-    position: relative;
-  }
-
-  .markdown-content ul > li::before {
-    content: "–";
-    position: absolute;
-    left: -1.25em;
-    color: inherit;
+    list-style-type: disc;
   }
 
   .markdown-content ol {
-    list-style-type: decimal !important;
-    list-style-position: outside !important;
+    list-style-type: decimal;
+    list-style-position: outside;
   }
 
   .markdown-content li {
-    display: list-item !important;
+    display: list-item;
   }
 
   /* Keyboard navigation stays visible; pointer clicks do not paint a focus ring. */

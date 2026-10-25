@@ -1,11 +1,11 @@
 import { marked, type Tokens } from 'marked';
-import remend from 'remend';
 import katex from 'katex';
 import DOMPurify from 'dompurify';
 import { buildAgentMentionUrl, parseAgentHref, parseSkillHref } from '@/lib/messages/inlineMessageLinks';
 import { pdfMaterialMarkdownHref } from '@/lib/materials/pdfMaterialCitation';
 import { highlightCodeInWorker } from './markdown-worker';
-import { liveFenceLines, parseOpenFence, renderOpenFence, type OpenFence } from './liveFence';
+import { liveFenceLines, parseOpenFence, renderOpenFence } from './liveFence';
+import { MarkdownBlockStream, type MarkdownBlockSource } from './markdownBlocks';
 import { escapeRawMarkdownHtml, MARKDOWN_FORBIDDEN_TAGS } from './markdownSecurity';
 
 const escapeAttr = (value: string): string =>
@@ -15,101 +15,7 @@ const escapeAttr = (value: string): string =>
 // Streaming block segmentation (port of OpenCode's markdown-stream)
 // ---------------------------------------------------------------------------
 
-type MarkdownBlock = {
-  raw: string;
-  src: string;
-  mode: 'full' | 'live';
-  // When false, skip syntax highlighting for this block. Set for the actively
-  // streaming open code fence so we don't re-tokenize a growing block ~40x/sec
-  // (O(n^2)); it highlights once the fence closes and becomes a stable block.
-  highlight: boolean;
-  // The open fence, coloured line by line as its lines complete (liveFence.ts).
-  fence?: OpenFence;
-};
-
-const hasReferenceDefinitions = (text: string): boolean =>
-  /^\[[^\]]+\]:\s+\S+/m.test(text) || /^\[\^[^\]]+\]:\s+/m.test(text);
-
-// Returns true when `raw` opens a fenced code block whose closing fence has not
-// arrived yet — meaning the block is still streaming and must be rendered as
-// raw text, not parsed.
-const hasOpenFence = (raw: string): boolean => {
-  const match = raw.match(/^[ \t]{0,3}(`{3,}|~{3,})/);
-  if (!match) return false;
-  const mark = match[1];
-  if (!mark) return false;
-  const char = mark[0];
-  const size = mark.length;
-  const last = raw.trimEnd().split('\n').at(-1)?.trim() ?? '';
-  return !new RegExp(`^[\\t ]{0,3}${char}{${size},}[\\t ]*$`).test(last);
-};
-
-const heal = (text: string): string => {
-  try {
-    return remend(text, { linkMode: 'text-only' });
-  } catch {
-    return text;
-  }
-};
-
-/**
- * Split markdown into render blocks. When not streaming, returns a single
- * `full` block. While streaming, heals incomplete syntax and isolates an
- * unclosed trailing code fence into its own `live` block so a partial fence
- * does not corrupt the parse of stable content above it.
- */
-const streamBlocks = (text: string, live: boolean): MarkdownBlock[] => {
-  if (!live) return [{ raw: text, src: text, mode: 'full', highlight: true }];
-  // Reference-style links/footnotes span multiple tokens (definition elsewhere);
-  // keep them as a single block so per-block parsing doesn't break the refs.
-  if (hasReferenceDefinitions(text)) {
-    return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
-  }
-
-  let tokens: Tokens.Generic[];
-  try {
-    tokens = marked.lexer(text) as Tokens.Generic[];
-  } catch {
-    return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
-  }
-
-  let tail = -1;
-  for (let i = tokens.length - 1; i >= 0; i -= 1) {
-    if (tokens[i]?.type !== 'space') {
-      tail = i;
-      break;
-    }
-  }
-  if (tail < 0) return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
-
-  // Split into per-token blocks. Stable leading blocks become `full` (complete,
-  // cache-stable, not re-healed); only the trailing block is `live` and gets
-  // re-parsed as content streams in. This keeps per-step work proportional to
-  // the last block rather than the whole message.
-  const blocks: MarkdownBlock[] = [];
-  for (let i = 0; i < tokens.length; i += 1) {
-    const token = tokens[i];
-    if (!token || token.type === 'space') continue;
-    const raw = token.raw ?? '';
-    const isLast = i === tail;
-    const openFence = token.type === 'code' && hasOpenFence(raw);
-    const parsedFence = openFence && isLast ? parseOpenFence(raw) : null;
-    // Diagrams keep their own streaming placeholder.
-    const fence = parsedFence?.lang === 'mermaid' ? null : parsedFence;
-    blocks.push({
-      raw,
-      src: openFence ? raw : heal(raw),
-      mode: isLast ? 'live' : 'full',
-      highlight: !openFence,
-      ...(fence ? { fence } : {}),
-    });
-  }
-
-  if (blocks.length === 0) {
-    return [{ raw: text, src: heal(text), mode: 'live', highlight: true }];
-  }
-  return blocks;
-};
+export { MarkdownBlockStream } from './markdownBlocks';
 
 // ---------------------------------------------------------------------------
 // marked parser (HTML string output) with safe external links
@@ -349,7 +255,7 @@ const touch = (key: string, entry: { hash: string; html: string }): void => {
   if (oldest) htmlCache.delete(oldest);
 };
 
-const parseBlock = async (block: MarkdownBlock): Promise<string> => {
+const parseBlock = async (block: MarkdownBlockSource): Promise<string> => {
   const parsed = await Promise.resolve(parser.parse(block.src));
   const withMath = renderMathExpressions(parsed);
   const highlighted = block.highlight ? await highlightCodeBlocks(withMath) : withMath;
@@ -380,6 +286,10 @@ export type RenderedBlock = {
   html: string;
 };
 
+// Weak ownership: stable blocks and in-flight parses are reused without adding
+// a second permanent message cache. Discarding a renderer releases its sources.
+const renderedSources = new WeakMap<MarkdownBlockSource, { coloured?: number; result: Promise<RenderedBlock> }>();
+
 /**
  * Render markdown into an array of per-block sanitized HTML. Streaming-aware:
  * splits into blocks, caches per-block, heals incomplete syntax. Returning
@@ -390,25 +300,36 @@ export const renderMarkdownBlocks = async (
   text: string,
   streaming: boolean,
   cacheKey: string,
+  stream: MarkdownBlockStream,
 ): Promise<RenderedBlock[]> => {
   if (!text) return [];
 
-  const blocks = streamBlocks(text, streaming);
+  const blocks = stream.read(text, streaming);
   return Promise.all(
     blocks.map(async (block, index) => {
       // An open fence's HTML also depends on how many of its lines have colour.
-      const coloured = block.fence ? liveFenceLines(`${cacheKey}:${index}`, cacheKey, block.fence) : undefined;
+      const parsedFence = !block.highlight ? parseOpenFence(block.raw) : null;
+      const fence = parsedFence?.lang === 'mermaid' ? null : parsedFence;
+      const coloured = fence ? liveFenceLines(`${cacheKey}:${index}`, cacheKey, fence) : undefined;
+      const previous = renderedSources.get(block);
+      if (previous && previous.coloured === coloured?.length) return previous.result;
       const contentHash = coloured ? `${hash(block.raw)}.${coloured.length}` : hash(block.raw);
       const id = `${contentHash}:${block.mode}:${block.highlight ? 1 : 0}`;
       const key = `${cacheKey}:${index}:${block.mode}`;
       const cached = htmlCache.get(key);
       if (cached && cached.hash === contentHash) {
         touch(key, cached);
-        return { id, html: cached.html };
+        const result = Promise.resolve({ id, html: cached.html });
+        renderedSources.set(block, { coloured: coloured?.length, result });
+        return result;
       }
-      const html = block.fence && coloured ? sanitize(renderOpenFence(block.fence, coloured)) : await parseBlock(block);
-      touch(key, { hash: contentHash, html });
-      return { id, html };
+      const result = (async () => {
+        const html = fence && coloured ? sanitize(renderOpenFence(fence, coloured)) : await parseBlock(block);
+        touch(key, { hash: contentHash, html });
+        return { id, html };
+      })();
+      renderedSources.set(block, { coloured: coloured?.length, result });
+      return result;
     }),
   );
 };

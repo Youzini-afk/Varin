@@ -3,6 +3,7 @@ import { cn } from '@/lib/utils';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { useI18n } from '@/lib/i18n';
 import { LEFT_SIDEBAR_DEFAULT_WIDTH, useUIStore } from '@/stores/useUIStore';
+import { useMainColumnGlide } from './railMotion';
 
 const SIDEBAR_CONTENT_WIDTH = LEFT_SIDEBAR_DEFAULT_WIDTH;
 const SIDEBAR_MIN_WIDTH = 224;
@@ -58,15 +59,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         }
     }, [isResizing]);
 
-    if (isMobile) {
-        return null;
-    }
-
     const openWidth = Math.min(
         SIDEBAR_MAX_WIDTH,
         Math.max(SIDEBAR_MIN_WIDTH, hasManuallyResized ? sidebarWidth : SIDEBAR_CONTENT_WIDTH)
     );
     const appliedWidth = isOpen ? openWidth : 0;
+    useMainColumnGlide(sidebarRef, isOpen, !isMobile && !isResizing, openWidth, 'sidebar');
+
+    if (isMobile) return null;
 
     const handlePointerDown = (event: React.PointerEvent) => {
         if (!isOpen) {

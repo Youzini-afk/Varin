@@ -40,6 +40,9 @@ const ancestorsOf = (element: HTMLElement, root: HTMLElement): string[] => {
 interface FlipListProps extends React.HTMLAttributes<HTMLDivElement> {
   /** A change means the content was replaced (a search), not moved: that commit is not animated. */
   instantKey?: string;
+  /** Ordered visible identities and expansion/editing state. Status/text
+   * updates with unchanged geometry leave running motions and measurements alone. */
+  layoutKey?: string;
   containerRef?: React.Ref<HTMLDivElement>;
 }
 
@@ -60,7 +63,7 @@ export class FlipList extends React.Component<FlipListProps> {
   /** Every key seen since mount: an unknown one is new, a known one is returning. */
   private known = new Set<string>();
   private lastInstantKey = this.props.instantKey;
-  private moving = new WeakMap<Element, Animation>();
+  private moving = new Map<HTMLElement, Set<Animation>>();
   private ghosts = new Set<HTMLElement>();
 
   private setNode = (node: HTMLDivElement | null): void => {
@@ -75,11 +78,13 @@ export class FlipList extends React.Component<FlipListProps> {
   }
 
   componentWillUnmount(): void {
+    for (const element of [...this.moving.keys()]) this.stopMoving(element);
     for (const ghost of this.ghosts) ghost.remove();
     this.ghosts.clear();
   }
 
-  getSnapshotBeforeUpdate(): Snapshot | null {
+  getSnapshotBeforeUpdate(previous: FlipListProps): Snapshot | null {
+    if (this.props.layoutKey !== undefined && previous.layoutKey === this.props.layoutKey && previous.instantKey === this.props.instantKey) return null;
     return this.node ? this.measure(this.node) : null;
   }
 
@@ -90,11 +95,13 @@ export class FlipList extends React.Component<FlipListProps> {
     if (!root || !before) return;
     const level = documentMotionLevel();
     if (instant || level === 'off' || typeof root.animate !== 'function') {
+      for (const element of [...this.moving.keys()]) this.stopMoving(element);
       this.remember(this.measure(root));
       return;
     }
-    // Where things are now, without the slides still running from last time.
-    for (const element of root.querySelectorAll<HTMLElement>(`[${KEY}]`)) this.moving.get(element)?.cancel();
+    // Keep existing translations while measuring the layout delta. Before and
+    // after contain the same animation offset, so it cancels out; a retarget
+    // adds the delta to the live spring without dropping its velocity.
     const after = this.measure(root);
     // The first rows to appear (a catalog loading) fade in; later new ones settle.
     const firstPopulation = ![...before.items.values()].some(item => item.element.hasAttribute('data-flip-arrive'));
@@ -120,9 +127,8 @@ export class FlipList extends React.Component<FlipListProps> {
     const deleting = leaving.some(([, then]) => !then.ancestors.some(ancestor => after.collapsed.has(ancestor)));
     if (!reduced && moves.length <= MAX_MOVING) {
       // Rows close a removed row's gap a beat later, once its copy has mostly faded.
-      const glide = { ...springTiming('glide'), delay: deleting ? CLOSE_DELAY_MS : 0, fill: 'backwards' as const };
       for (const { element, x, y } of moves) {
-        this.moving.set(element, element.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: 'none' }], glide));
+        this.move(element, x, y, deleting);
       }
     }
 
@@ -167,6 +173,7 @@ export class FlipList extends React.Component<FlipListProps> {
 
   private depart(root: HTMLElement, box: DOMRect, item: Measured, folded: boolean, reduced: boolean): void {
     const ghost = item.element;
+    this.stopMoving(ghost);
     for (const element of [ghost, ...ghost.querySelectorAll(`[${KEY}]`)]) element.removeAttribute(KEY);
     ghost.setAttribute('aria-hidden', 'true');
     ghost.setAttribute('data-flip-ghost', '');
@@ -188,6 +195,28 @@ export class FlipList extends React.Component<FlipListProps> {
     void leave.finished.then(done, done);
   }
 
+  private move(element: HTMLElement, x: number, y: number, deleting: boolean): void {
+    const motions = this.moving.get(element) ?? new Set<Animation>();
+    // The additional displacement starts at rest; the previous animation
+    // keeps its velocity. Both finish at zero on the original glide curve,
+    // entirely in the compositor, without a JS loop for each sidebar row.
+    const animation = element.animate([{ transform: `translate(${x}px, ${y}px)` }, { transform: 'translate(0, 0)' }], {
+      ...springTiming('glide'), composite: 'add', fill: 'backwards', delay: deleting && !motions.size ? CLOSE_DELAY_MS : 0,
+    });
+    motions.add(animation);
+    this.moving.set(element, motions);
+    const release = () => {
+      motions.delete(animation);
+      if (!motions.size && this.moving.get(element) === motions) this.moving.delete(element);
+    };
+    void animation.finished.then(release, release);
+  }
+
+  private stopMoving(element: HTMLElement): void {
+    for (const animation of this.moving.get(element) ?? []) animation.cancel();
+    this.moving.delete(element);
+  }
+
   private measure(root: HTMLElement): Snapshot {
     const items = new Map<string, Measured>();
     const collapsed = new Set<string>();
@@ -207,8 +236,9 @@ export class FlipList extends React.Component<FlipListProps> {
   }
 
   render(): React.ReactNode {
-    const { instantKey: _instantKey, containerRef: _containerRef, children, ...rest } = this.props;
+    const { instantKey: _instantKey, layoutKey: _layoutKey, containerRef: _containerRef, children, ...rest } = this.props;
     void _instantKey; void _containerRef;
+    void _layoutKey;
     return <div ref={this.setNode} {...rest}>{children}</div>;
   }
 }
