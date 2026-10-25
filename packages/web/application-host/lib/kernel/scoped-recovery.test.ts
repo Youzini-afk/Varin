@@ -7,7 +7,7 @@ import type { KernelFileAuthorityContext, KernelStorageAdapter } from './storage
 import type { KernelScopedClient } from './kernel-client.js';
 import type { HostResourceOperationGate } from '../recovery/durable-file-operation.js';
 import { createWorkspaceRecoveryEngine } from '../recovery/journal-engine.js';
-import { createInMemoryRecoveryDurablePort } from '../recovery/recovery-durable-port.test-helper.js';
+import { createRecoveryJournalFixture } from '../recovery/journal-fixture.test-helper.js';
 import type { RecoveryIdentity } from '../recovery/journal-files.js';
 import { KernelFileResourceBackend } from './file-resource-backend.js';
 
@@ -104,7 +104,7 @@ it('rejects another root, workspace and owner without a maintenance fallback', a
 it('the production facade uses the original short metadata coordinator without widening an admitted context', async () => {
   const h = await fixture();
   const base = createWorkspaceRecoveryEngine({ authorityId: 'host', dataDir: h.root, fileStore: h.fileStore,
-    durableRecoveryStore: createInMemoryRecoveryDurablePort(),
+    durableRecoveryStore: createRecoveryJournalFixture(),
     documents: { inspectWorkspace: async workspaceId => ({ workspaceId, root: h.root }),
       listWorkspaceRegistrations: async () => [], inspectDirtyBuffers: async () => [] },
     sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null }),

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { expect, it, vi } from "vitest";
-import { createInMemoryRecoveryDurablePort } from "../recovery/recovery-durable-port.test-helper.js";
+import { createRecoveryJournalFixture } from "../recovery/journal-fixture.test-helper.js";
 import {
   applyDurableFileOperation,
   finalizeDurableExternalOperation,
@@ -14,7 +14,7 @@ import {
 } from "./thread-code-exchange.js";
 
 it("reads the versions retained by the original integration writer and keeps sender and operation scope on local and managed reads", async () => {
-  const journal = createInMemoryRecoveryDurablePort();
+  const journal = createRecoveryJournalFixture();
   const objects = new Map<string, Buffer>();
   const state = (text: string) => {
     const bytes = Buffer.from(text);
