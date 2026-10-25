@@ -66,6 +66,18 @@
 }
 
 /*
+ * Loops stop while nobody can see them (lib/motion/loops.ts): everywhere
+ * while the window is hidden, and inside a row scrolled out of view. Only
+ * infinite loops are listed; finite animations finish as usual.
+ */
+:root[data-page-hidden] :is(.animate-spin, .animate-pulse, .animate-ping, .animate-busy-pulse, .animate-navrail-dot-wave, .animate-border-glow-pulse, .open-file-name-marquee-track, .marquee-text--auto, .marquee-text--active, .swap-text[data-live] > .swap-text-current, .workbench-diff-caret),
+:root[data-page-hidden] .markdown-caret::after,
+[data-offscreen] :is(.animate-spin, .animate-pulse, .animate-ping, .animate-busy-pulse, .open-file-name-marquee-track, .marquee-text--auto, .marquee-text--active, .swap-text[data-live] > .swap-text-current, .workbench-diff-caret),
+[data-offscreen] .markdown-caret::after {
+  animation-play-state: paused !important;
+}
+
+/*
  * Streamed Markdown (components/chat/markdownInk.ts). Each frame's new text
  * develops from a faint secondary grey to its own colour; the dot at the end
  * stays lit while text arrives and breathes once it has waited a beat.

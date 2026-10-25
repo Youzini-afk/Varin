@@ -6,6 +6,7 @@ import { Icon } from '@/components/icon/Icon';
 import { SwapIcon } from '@/components/motion/SwapIcon';
 import { FlipList } from './FlipList';
 import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
+import { pauseLoopsOffscreen } from '@/lib/motion/loops';
 import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
@@ -290,6 +291,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
       >
       <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
       <div
+        ref={pauseLoopsOffscreen}
         data-sidebar-row={session.id}
         data-current={isCurrent ? '' : undefined}
         className={cn(

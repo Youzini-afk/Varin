@@ -6,6 +6,7 @@ import { ChatDialogueBlock, ChatSortedActivityGroup, ChatTimelineEntryList, Chat
 import { ChatTurnAssistantChrome } from './ChatTurnAssistantChrome';
 import { useConversationPresentation } from './ConversationContext';
 import { useI18n } from '@/lib/i18n';
+import { pauseLoopsOffscreen } from '@/lib/motion/loops';
 import { useUIStore } from '@/stores/useUIStore';
 
 export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, expanded, activityTransition, onExpandedChange, extensionPresentation, ...props }: Omit<ChatTimelineProps, 'entries' | 'liveAssistant' | 'liveUser' | 'toolExecutions'> & {
@@ -22,7 +23,7 @@ export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, ex
   const showThinking = useUIStore(state => state.showReasoningTraces);
   const toolExecutions = presentation.toolExecutions;
   const { cwd, hiddenThinkingLabel, assistantWaiting } = props;
-  if (block.kind === 'user') return <div className="chat-message-column py-1.5 bg-background/95" data-turn-entry={block.id} data-turn-id={block.ownerId}>
+  if (block.kind === 'user') return <div ref={pauseLoopsOffscreen} className="chat-message-column py-1.5 bg-background/95" data-turn-entry={block.id} data-turn-id={block.ownerId}>
     <ChatTurnUserMessage {...props} entry={block.turn.userEntry} message={block.turn.user} status={block.turn.liveUser ? props.liveUserStatus : undefined} />
   </div>;
   const { group } = block;
@@ -55,7 +56,8 @@ export const ChatTimelineBlockView = React.memo(({ block, projection, sorted, ex
       turnActive={props.activeRunId === group.runId || assistantWaiting !== undefined || liveAssistant?.stopReason === 'pending'}
       projectedResultByCallId={projection.resultByCallId} part={block.kind === 'footer' ? 'footer' : 'body'} sortedPresentation={sortedPresentation} extensionPresentation={extensionPresentation} />;
   }
-  const body = <div className="chat-message-column conversation-block" data-conversation-block={bodyKind} data-turn-entry={block.id} data-turn-id={block.ownerId}
+  // Rows above and below the viewport stay mounted; their loops pause until they scroll back in.
+  const body = <div ref={pauseLoopsOffscreen} className="chat-message-column conversation-block" data-conversation-block={bodyKind} data-turn-entry={block.id} data-turn-id={block.ownerId}
     data-conversation-entry-id={block.kind === 'activity' ? block.sourceId : undefined}
     data-conversation-message-role={block.kind === 'chrome' || block.kind === 'activity' ? 'assistant' : undefined}>{content}</div>;
   return ordinaryActivity ? <motion.div initial={activityTransition === 'opening' ? { height: 0, opacity: 0 } : false}
