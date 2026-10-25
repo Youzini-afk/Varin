@@ -49,9 +49,19 @@ bun run dev
 | 外壳、文档与渲染 / UI、extension-surface、Electron | 相应包的行为测试；平台专用生命周期走对应 desktop 入口 | CSS/源码字符串、退役渲染路径不能充当产品契约 |
 | 已构建/安装产物 / 发布与平台 owner | `test:packages:dist`、Node smoke、cloud 原子部署及目标安装包 smoke | 源码测试不能替代真实导出、布局、启动与回滚 |
 
+恢复的 first-before/last-after、外部修改缺口和 reopen 由 Rust `storage/recovery_journal.rs` 的真实写入测试负责；
+Host→Rust 的恢复/undo 与响应丢失重启由 `recovery/kernel-durable-engine.native.test.ts` 负责。Host
+`recovery/engine.test.ts` 接收这些 owner 提供的变更事实，验证 dirty buffer、冲突确认、取消、原 Thread 身份
+与未知导航结果的协调，不在 fixture 中再实现 checkpoint、覆盖率或 GC 算法。
+
 共享 fixture 只负责准备输入、故障注入和资源回收。若测试结果完全由 fixture 自己算出，改为观察真实 owner，
 或在已有 owner 回归足够时删除该重复证明；仍需保留 Host 对冲突、未知效果、权限及取消的独立处理。
 CI 的 cloud 部署 smoke 直接消费本轮生成并校验锁文件/布局的 archive，不另造一份无人消费的 staging 输出。
+`bun run test:cloud-deploy` 在 Linux/Bash 下复用这一验收：先准备正式 build，再验证临时目录与 loopback 上的
+安装、重复投递、保密配置拒绝、部署锁、链接提交失败和启动失败回滚。退出时关闭该 Host 并清理本次临时目录。
+PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 native handshake；cloud helper 单元测试由主 CI
+的 `test:tooling` 统一拥有，不再为 PR 单独安装一次整个 workspace。能够发布候选镜像的非 PR 运行仍保留
+直接 helper 门禁，不能将另一个 workflow 的成功当作它的发布依赖。
 
 ## 命令入口
 
@@ -81,7 +91,9 @@ Node 测试包可用 `node --import tsx --test packages/<包>/test/<文件>.test
 
 `test:tooling` 是 CI 中轻量工具测试的统一入口；`test:cloud` 是其子集，无需顺序重复运行。
 CI 的手动运行会对所选 ref 执行完整 code/Rust 检查，不依赖最近一次提交的差异；普通 push/PR
-仍按改动范围选择检查。原生构建成功后，即使 Host 验收失败，也继续收集独立的 Rust 和包测试结果，
+仍按改动范围选择检查。不依赖 native executable 的包测试和 tooling 在原生构建前执行一次；只有 Host 包的 Documents fixture
+仍需原生目录观察器。各组按依赖安装/类型输出准备的真实结果启动，任一独立检查失败不会遮蔽其他组，
+也不把失败改成成功。原生构建成功后，即使 Host 验收失败，也继续收集独立的 Rust 和 Host 包测试结果，
 任何失败仍使 CI 失败。Rust 测试编译与执行分开，执行超过十分钟会明确失败，保留日志供排查。
 Linux driver 的私有 D-Bus 协议测试使用
 `dbus-run-session -- env VARIN_TEST_PRIVATE_BUS=1 /usr/bin/python3 -m unittest discover -s packages/computer-driver/linux -p 'test_*.py'`，
