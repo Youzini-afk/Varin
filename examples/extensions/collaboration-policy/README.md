@@ -40,7 +40,9 @@ can make model calls on that configured provider; building and installing it do 
 
 ## Sequence and ownership
 
-1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 3.
+1. Submit one `dispatch` graph with the declared task, `workMode: read_only` and `tools: [file_read]` using dispatch schema version 4.
+   Policy inputs do not advertise tool schemas, so the example selects this supported contract
+   explicitly; core rejects unavailable versions rather than silently upgrading a call.
    The core commits the real policy-action/node origin, independent child Thread, source pin and
    preparation owner. `job_accepted.operation_id` identifies the original dispatch operation.
 2. Keep that handle and submit a separate `file_read(source.txt)` graph. It can finish while

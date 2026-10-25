@@ -84,8 +84,10 @@ export default defineHostExtension({
           }
           return fail('Unexpected graph after the parent answer began');
         }
+        // Policy inputs do not advertise tool schemas. Select the supported dispatch contract
+        // explicitly; core must reject unavailable versions rather than silently reinterpret calls.
         if (input.state === null && (event.kind === 'started' || event.kind === 'input_delivered')) return {
-          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, workMode: 'read_only', tools: ['file_read'] }, '3')] }, state: asJson(state),
+          action: { kind: 'tool_graph', nodes: [node('dispatch', 'dispatch', { task: config.task, workMode: 'read_only', tools: ['file_read'] }, '4')] }, state: asJson(state),
         };
         return fail('Collaboration policy requires its committed operation event');
       },
