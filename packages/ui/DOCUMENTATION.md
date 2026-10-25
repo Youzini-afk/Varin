@@ -177,6 +177,12 @@ The context rail and panel (`components/layout/railMotion.ts`):
 - A newly selected panel view enters on glide (`panel-view-enter`); the same view keeps its node.
 - Git change rows and the collaboration member chips are `FlipList`s, so files and members arrive, leave and regroup in place.
 
+Switching sessions:
+
+- The sidebar (`handleSelect`, by the two rows' order) and `switchRelativeThread` (by the step, including a wrap) call `noteSwitchDirection` before they change the selection. `recentSwitchDirection()` (`lib/motion/switchDirection.ts`) reads it for 4s: 1 is down the list, -1 up, 0 unknown.
+- `ConversationSurface` keeps painting the old conversation until the next one is ready. The old one then leaves in 110ms against the move: up when the user moved down the list. The new one's visible turns arrive top to bottom, 20ms apart, from the side moved toward. The first conversation shown is not animated.
+- The title bar's session title is a `SwapText` with `direction`, so it changes the same way. When a draft becomes a thread, its title arrives (`header-title-arrive`).
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -189,6 +195,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node popover.cjs`: a menu's growth, highlight slide and exit, and tooltip grouping.
 - `node sidebar.cjs` (`?scene=sidebar`, the real sidebar fed through its stores): the selection's travel and re-routing, pinning, a new row, removal, collapse and expansion, status icons, the hover highlight and reduced motion.
 - `node rail.cjs` (`?scene=rail`, the real rail and panel beside a main column): the active bar, the main column lock, the Git tabs' underline, the badge, the shared tooltip and reduced motion. Surfaces that need a Host (Git) are not opened there.
+- `node switch.cjs` (`?scene=switch`, three conversations in the real surface and timeline): the old conversation's exit time and direction, the turn stagger and the title direction, moving down and up.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 

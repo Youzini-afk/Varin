@@ -43,6 +43,8 @@ import { TitlebarLeftControls } from '@/components/layout/TitlebarLeftControls';
 import { ThreadSwitcherDropdown } from '@/components/thread/ThreadSwitcherDropdown';
 import { invokeDesktop, isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
+import { SwapText } from '@/components/motion/SwapText';
+import { recentSwitchDirection } from '@/lib/motion/switchDirection';
 import { useI18n } from '@/lib/i18n';
 import { shouldResetDesktopMainTabToChat } from '@/components/layout/mainTabGuards';
 import { useShallow } from 'zustand/react/shallow';
@@ -118,6 +120,14 @@ export const Header: React.FC<HeaderProps> = ({
   const identity = useThreadStore(state => state.selectedIdentity);
   const contextUsage = useThreadContextUsageStore(state => identity ? state.views[contextUsageKey(identity)]?.usage : null);
   const currentSessionId = identity?.threadId ?? null;
+  // A draft that has just become a thread: its title arrives rather than appearing.
+  const [titleArrives, setTitleArrives] = React.useState(false);
+  const titleSession = React.useRef(currentSessionId);
+  React.useLayoutEffect(() => {
+    const before = titleSession.current;
+    titleSession.current = currentSessionId;
+    setTitleArrives(before === null && currentSessionId !== null);
+  }, [currentSessionId]);
   const currentSessionSummary = useThreadStore(state => state.threads.find(thread => thread.thread_id === state.selectedIdentity?.threadId));
   const threadCatalog = useThreadStore(state => state.threads);
   const archiveSession = React.useCallback((threadId: string) => useThreadStore.getState().updateThread(threadId, { archived: true }), []);
@@ -860,9 +870,10 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 </form>
               ) : currentSessionId ? (
-                <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
-                  {currentSessionTitle}
-                </span>
+                // The title changes in place, the same way the conversation moved; a new
+                // session's title arrives when its draft becomes a thread.
+                <SwapText text={currentSessionTitle} hold={0} direction={recentSwitchDirection() === -1 ? -1 : 1}
+                  className={cn('typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full', titleArrives && 'header-title-arrive')} />
               ) : (
                 <span className="truncate typography-ui-label text-[14px] font-normal leading-tight text-foreground max-w-full">
                   {projectNameMenu ?? t('sessions.sidebar.grouping.generalChat')}

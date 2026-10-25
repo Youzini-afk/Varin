@@ -323,6 +323,12 @@
 .tab-underline[data-hidden] { opacity: 0; }
 .tab-underline[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
 
+/* A new session's title arrives in the title bar when its draft becomes a thread (Header). */
+.header-title-arrive { animation: header-title-arrive var(--motion-dur-glide) var(--motion-ease-glide) backwards; }
+@keyframes header-title-arrive {
+  from { opacity: 0; translate: 0 6px; }
+}
+
 /* Switching views: the incoming view's content arrives on glide (ContextPanel). */
 .panel-view-enter { animation: panel-view-enter var(--motion-dur-glide) var(--motion-ease-glide) backwards; }
 @keyframes panel-view-enter {

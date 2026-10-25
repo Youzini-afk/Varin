@@ -19,7 +19,7 @@ const cubic = (points: readonly number[]) => `cubic-bezier(${points.join(', ')})
  * Reduced motion cross-fades without movement; off swaps directly. The wait is
  * reading time and applies at every level.
  */
-export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_MS, resize = false }: {
+export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_MS, resize = false, direction = 1, title }: {
   text: string;
   live?: boolean;
   className?: string;
@@ -27,7 +27,12 @@ export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_M
   hold?: number;
   /** Glide the width to the new text instead of jumping, for labels inside a trigger. */
   resize?: boolean;
+  /** 1: the old text rises and the new comes from below; -1 the other way, for a move up a list. */
+  direction?: 1 | -1;
+  title?: string;
 }) {
+  const directionRef = React.useRef(direction);
+  directionRef.current = direction;
   const [shown, setShown] = React.useState(text);
   const shownAt = React.useRef(0);
   const host = React.useRef<HTMLSpanElement>(null);
@@ -67,7 +72,7 @@ export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_M
     leaving.setAttribute('aria-hidden', 'true');
     leaving.textContent = before;
     container.prepend(leaving);
-    const shift = level === 'full' ? SHIFT_PX : 0;
+    const shift = level === 'full' ? SHIFT_PX * directionRef.current : 0;
     const exit = leaving.animate(
       [{ opacity: 1, transform: 'none' }, { opacity: 0, transform: `translateY(${-shift}px)` }],
       { duration: TWEENS.exit.duration * 1000, easing: cubic(EASE_EXIT), fill: 'forwards' },
@@ -80,7 +85,7 @@ export function SwapText({ text, live = false, className, hold = SWAP_TEXT_MIN_M
     );
   }, [shown, resize]);
 
-  return <span ref={host} className={cn('swap-text', className)} data-live={live || undefined} data-swap-pending={text !== shown || undefined}>
+  return <span ref={host} className={cn('swap-text', className)} title={title} data-live={live || undefined} data-swap-pending={text !== shown || undefined}>
     <span ref={current} className="swap-text-current">{shown}</span>
   </span>;
 }

@@ -1,6 +1,7 @@
 import { getRuntimeEndpointGeneration, type ThreadIdentity } from '@varin/application-client';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { resolveVarinWorkbenchLayout, VARIN_WORKBENCH_BOT_PROFILE_ID, VARIN_WORKBENCH_DEFAULT_PROFILE_ID } from '@varin/extension-contract';
@@ -61,7 +62,10 @@ export async function switchRelativeThread(offset: number): Promise<void> {
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated_at_ms - a.updated_at_ms);
   if (!visible.length || !Number.isFinite(offset)) return;
   const index = visible.findIndex(thread => thread.thread_id === selectedIdentity?.threadId);
-  const target = visible[((index + Math.trunc(offset)) % visible.length + visible.length) % visible.length];
+  const targetIndex = ((index + Math.trunc(offset)) % visible.length + visible.length) % visible.length;
+  const target = visible[targetIndex];
+  // A step that wraps around the list moves the other way on screen.
+  noteSwitchDirection(index < 0 ? 0 : targetIndex - index);
   await openThreadFromNavigation({ threadId: target.thread_id });
 }
 export function appendThreadDraftText(identity: ThreadIdentity | string, text: string): void {

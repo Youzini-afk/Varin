@@ -14,6 +14,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { SendLab } from './send';
 import { SidebarLab } from './sidebar';
 import { RailLab } from './rail';
+import { SwitchLab } from './switch';
 import type {
   ChatAssistantContent,
   ChatAssistantMessage,
@@ -482,7 +483,7 @@ createRoot(document.getElementById('root')!).render(
       <ThemeProvider>
         <MotionProvider>
           <TooltipProvider>
-            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : <Lab />}
+            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : <Lab />}
           </TooltipProvider>
         </MotionProvider>
       </ThemeProvider>

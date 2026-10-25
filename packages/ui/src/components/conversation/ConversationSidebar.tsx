@@ -6,6 +6,7 @@ import { Icon } from '@/components/icon/Icon';
 import { SwapIcon } from '@/components/motion/SwapIcon';
 import { FlipList } from './FlipList';
 import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
+import { noteSwitchDirection } from '@/lib/motion/switchDirection';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -569,6 +570,11 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   }, [query, untitled, workspaceGroups]);
 
   const handleSelect = React.useCallback(async (session: SessionSummary) => {
+    // The conversation leaves against the move through the list, and the title follows it.
+    const rows = [...(listRef.current?.querySelectorAll('[data-sidebar-row]') ?? [])].filter(row => !row.closest('[data-flip-ghost]'));
+    const from = rows.findIndex(row => row.getAttribute('data-sidebar-row') === currentSessionId);
+    const to = rows.findIndex(row => row.getAttribute('data-sidebar-row') === session.id);
+    noteSwitchDirection(from >= 0 && to >= 0 ? to - from : 0);
     if (mobileVariant) setSessionSwitcherOpen(false);
     onRequestClose?.();
     try {
@@ -577,7 +583,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
       console.error('Failed to open conversation:', error);
       toast.error(error instanceof Error ? error.message : String(error));
     }
-  }, [mobileVariant, onRequestClose, setSessionSwitcherOpen]);
+  }, [currentSessionId, mobileVariant, onRequestClose, setSessionSwitcherOpen]);
 
   const handleCreate = React.useCallback(async (projectId: string | null) => {
     try {
