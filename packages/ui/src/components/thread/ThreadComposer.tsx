@@ -268,7 +268,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
       layoutDependency={`${placement}:${isExpandedInput}:${attachmentNames.length}`}
       initial={false} transition={{ layout: reducedMotion ? INSTANT_TRANSITION : springTransition('travel') }}
       className={cn(
-      'bottom-safe-area oc-mobile-composer shrink-0 bg-background pb-3',
+      'bottom-safe-area varin-mobile-composer shrink-0 bg-background pb-3',
       isExpandedInput && 'fixed inset-0 z-40 flex items-end bg-background/95',
     )} data-conversation-composer-shell="true">
       <div className={cn('chat-input-column', isExpandedInput && 'flex h-full flex-col justify-end py-6')}>

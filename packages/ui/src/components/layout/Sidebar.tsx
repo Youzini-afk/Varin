@@ -42,7 +42,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
         sidebar.style.width = `${nextWidth}px`;
         sidebar.style.minWidth = `${nextWidth}px`;
         sidebar.style.maxWidth = `${nextWidth}px`;
-        sidebar.style.setProperty('--oc-left-sidebar-width', `${nextWidth}px`);
+        sidebar.style.setProperty('--varin-left-sidebar-width', `${nextWidth}px`);
     }, []);
 
     React.useEffect(() => {
@@ -138,7 +138,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 width: `${currentWidth}px`,
                 minWidth: `${currentWidth}px`,
                 maxWidth: `${currentWidth}px`,
-                ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
+                ['--varin-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
                 overflowX: 'clip',
                 // The width rides the glide spring; the content inside keeps its width and only fades.
                 transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
@@ -171,7 +171,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}
-                style={{ width: 'var(--oc-left-sidebar-width)', overflowX: 'hidden' }}
+                style={{ width: 'var(--varin-left-sidebar-width)', overflowX: 'hidden' }}
                 aria-hidden={!isOpen}
             >
                 {topBar}

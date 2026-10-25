@@ -18,7 +18,7 @@ const config: CapacitorConfig = {
   plugins: {
     Keyboard: {
       // 'none' leaves the WebView at full height; the UI follows the keyboard
-      // itself via the --oc-keyboard-inset CSS variable driven by keyboardWillShow
+      // itself via the --varin-keyboard-inset CSS variable driven by keyboardWillShow
       // (see useNativeMobileChrome). The built-in 'native' resize lands only after
       // the keyboard animation finishes, which looked like a ~1.5s lag.
       resize: 'none',

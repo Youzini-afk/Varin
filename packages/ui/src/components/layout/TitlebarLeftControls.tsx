@@ -40,7 +40,7 @@ export const TitlebarLeftControls: React.FC = () => {
     <div
       className="app-region-no-drag flex shrink-0 select-none items-center pr-3"
       style={{
-        paddingLeft: 'var(--oc-titlebar-left-inset, 0.75rem)',
+        paddingLeft: 'var(--varin-titlebar-left-inset, 0.75rem)',
       }}
     >
       <div className="flex items-center gap-1">

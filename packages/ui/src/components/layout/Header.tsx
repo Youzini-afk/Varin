@@ -511,16 +511,16 @@ export const Header: React.FC<HeaderProps> = ({
   // traffic lights / window-controls-overlay). When the sidebar is open this
   // space is owned by the sidebar's top strip instead, so the header drops back
   // to its normal content padding. The full value is published as
-  // `--oc-titlebar-left-inset` so the sidebar strip can mirror it.
+  // `--varin-titlebar-left-inset` so the sidebar strip can mirror it.
   const titlebarLeftInset = React.useMemo(() => {
     if (isDesktopApp && isMacPlatform && !isDesktopWindowFullscreen) {
       return '5.5rem';
     }
     if (isTabletStandalonePwa) {
-      return 'max(calc(0.75rem + var(--oc-wco-left-inset, 0px)), 5.5rem)';
+      return 'max(calc(0.75rem + var(--varin-wco-left-inset, 0px)), 5.5rem)';
     }
     if (!isDesktopApp || usesFramelessChrome) {
-      return 'calc(0.75rem + var(--oc-wco-left-inset, 0px))';
+      return 'calc(0.75rem + var(--varin-wco-left-inset, 0px))';
     }
     return '0.75rem';
   }, [isDesktopApp, isDesktopWindowFullscreen, isMacPlatform, isTabletStandalonePwa, usesFramelessChrome]);
@@ -529,7 +529,7 @@ export const Header: React.FC<HeaderProps> = ({
     if (typeof document === 'undefined') {
       return;
     }
-    document.documentElement.style.setProperty('--oc-titlebar-left-inset', titlebarLeftInset);
+    document.documentElement.style.setProperty('--varin-titlebar-left-inset', titlebarLeftInset);
   }, [titlebarLeftInset]);
 
   useEffect(() => {
@@ -587,9 +587,9 @@ export const Header: React.FC<HeaderProps> = ({
     return {
       // Left inset is handled by the no-drag spacer (see renderDesktop); only
       // the right inset / titlebar height are owned by the window-controls overlay.
-      paddingRight: usesFramelessChrome && windowControlsSide === 'right' ? 0 : 'calc(0.75rem + var(--oc-wco-right-inset, 0px))',
-      minHeight: 'max(2.75rem, var(--oc-wco-titlebar-height, 0px))',
-      height: 'max(2.75rem, var(--oc-wco-titlebar-height, 0px))',
+      paddingRight: usesFramelessChrome && windowControlsSide === 'right' ? 0 : 'calc(0.75rem + var(--varin-wco-right-inset, 0px))',
+      minHeight: 'max(2.75rem, var(--varin-wco-titlebar-height, 0px))',
+      height: 'max(2.75rem, var(--varin-wco-titlebar-height, 0px))',
     };
   }, [isDesktopApp, usesFramelessChrome, windowControlsSide]);
 
@@ -600,7 +600,7 @@ export const Header: React.FC<HeaderProps> = ({
 
     const height = headerRef.current?.getBoundingClientRect().height;
     if (height) {
-      document.documentElement.style.setProperty('--oc-header-height', `${height}px`);
+      document.documentElement.style.setProperty('--varin-header-height', `${height}px`);
     }
   }, []);
 
@@ -1108,7 +1108,7 @@ export const Header: React.FC<HeaderProps> = ({
               <DropdownMenuContent
                 align="end"
                 sideOffset={0}
-                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--oc-header-height,56px)] !transform-none"
+                positionerClassName="!fixed !bottom-0 !left-0 !right-0 !top-[var(--varin-header-height,56px)] !transform-none"
                 className="h-full w-screen max-h-none rounded-none border-0 p-0 pt-1 overflow-hidden"
               >
                 <div className="flex h-full flex-col bg-[var(--surface-elevated)]">

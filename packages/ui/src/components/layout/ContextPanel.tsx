@@ -265,7 +265,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       return;
     }
     column.style.width = `${nextWidth}px`;
-    column.style.setProperty('--oc-editor-tree-width', `${nextWidth}px`);
+    column.style.setProperty('--varin-editor-tree-width', `${nextWidth}px`);
   }, []);
 
   const handlePointerDown = (event: React.PointerEvent) => {
@@ -325,7 +325,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
       )}
       style={{
         width: `${isResizing ? (liveWidthRef.current ?? appliedWidth) : appliedWidth}px`,
-        ['--oc-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
+        ['--varin-editor-tree-width' as string]: `${isResizing ? (liveWidthRef.current ?? width) : width}px`,
         overflowX: 'clip',
         transitionProperty: isResizing ? 'none' : 'width',
         transitionDuration: 'var(--motion-dur-glide)',
@@ -354,7 +354,7 @@ const EditorTreeColumn: React.FC<{ visible: boolean }> = ({ visible }) => {
           isResizing && 'pointer-events-none',
           !visible && 'pointer-events-none select-none opacity-0'
         )}
-        style={{ width: 'var(--oc-editor-tree-width)' }}
+        style={{ width: 'var(--varin-editor-tree-width)' }}
         aria-hidden={!visible}
       >
         <SidebarFilesTree />
@@ -524,7 +524,7 @@ export const ContextPanel: React.FC = () => {
     if (!panel || next === null) {
       return;
     }
-    panel.style.setProperty('--oc-context-panel-width', `${next}px`);
+    panel.style.setProperty('--varin-context-panel-width', `${next}px`);
   }, []);
 
   React.useEffect(() => () => {
@@ -996,7 +996,7 @@ export const ContextPanel: React.FC = () => {
   // jumps) so the glide width transition matches the sidebars.
   const panelStyle: React.CSSProperties = !isOpen
     ? {
-        ['--oc-context-panel-width' as string]: `${width}px`,
+        ['--varin-context-panel-width' as string]: `${width}px`,
         width: 0,
         maxWidth: '100%',
         overflowX: 'clip',
@@ -1005,15 +1005,15 @@ export const ContextPanel: React.FC = () => {
       ? {
           // px, not '100%': px↔% width changes do not interpolate, which
           // would make the expand/collapse width snap instead of animating.
-          ['--oc-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
+          ['--varin-context-panel-width' as string]: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           width: availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%',
           maxWidth: '100%',
         }
       : {
-          width: 'min(var(--oc-context-panel-width), 100%)',
+          width: 'min(var(--varin-context-panel-width), 100%)',
           maxWidth: '100%',
           overflowX: 'clip',
-          ['--oc-context-panel-width' as string]: `${width}px`,
+          ['--varin-context-panel-width' as string]: `${width}px`,
         };
 
   return (
@@ -1072,7 +1072,7 @@ export const ContextPanel: React.FC = () => {
         style={{
           width: isExpanded
             ? (availablePanelAreaWidth !== null ? `${availablePanelAreaWidth}px` : '100%')
-            : 'var(--oc-context-panel-width)',
+            : 'var(--varin-context-panel-width)',
         }}
         aria-hidden={!isOpen}
       >

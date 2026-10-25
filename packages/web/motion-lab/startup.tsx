@@ -57,7 +57,7 @@ export function StartupLab() {
             const element = document.querySelector(`[data-startup-part="${part}"]`)!;
             return [part, { opacity: Number(getComputedStyle(element).opacity), ...offset(element) }];
           })),
-          starters: [...document.querySelectorAll('.oc-draft-starters > *')].map(chip => Number(getComputedStyle(chip).opacity)),
+          starters: [...document.querySelectorAll('.varin-draft-starters > *')].map(chip => Number(getComputedStyle(chip).opacity)),
         });
       }
       frame = requestAnimationFrame(sample);
@@ -92,7 +92,7 @@ export function StartupLab() {
           <h1 className="text-3xl font-medium tracking-tight">今天想做什么？</h1>
         </div>
         <div data-startup-part="composer" className="h-28 w-full max-w-2xl rounded-2xl border border-border bg-background shadow-sm" />
-        <div className="oc-draft-starters flex flex-wrap justify-center gap-2">
+        <div className="varin-draft-starters flex flex-wrap justify-center gap-2">
           {['解释这个仓库', '写测试', '修复构建', '整理变更', '安排任务'].map(label => (
             <span key={label} className="rounded-full border border-border px-3 py-1 typography-meta">{label}</span>
           ))}

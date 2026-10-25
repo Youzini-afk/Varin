@@ -124,7 +124,7 @@ export function PierreDiffCommentOverlays(props: PierreDiffCommentOverlaysProps)
 
     const computeMaxWidth = () => {
       const styles = getComputedStyle(root);
-      const cssWidth = parseCssWidth(styles.getPropertyValue('--oc-context-panel-width'));
+      const cssWidth = parseCssWidth(styles.getPropertyValue('--varin-context-panel-width'));
       const rootRect = root.getBoundingClientRect();
       const measured = cssWidth ?? rootRect.width;
       setFallbackMaxWidth(measured > 0 ? measured : null);

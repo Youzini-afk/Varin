@@ -13,7 +13,7 @@ const requireTask = (task: ScheduledTask | undefined): ScheduledTask => {
 };
 
 const createRuntime = async () => {
-  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-scheduled-project-config-'));
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'varin-scheduled-project-config-'));
   const runtime = createProjectConfigRuntime({
     fsPromises: await import('fs/promises'),
     path,

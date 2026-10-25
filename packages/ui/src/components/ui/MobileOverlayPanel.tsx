@@ -79,9 +79,9 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   // keyboard in an installed PWA.
   React.useLayoutEffect(() => {
     if (!open) return;
-    window.dispatchEvent(new Event('oc:mobile-overlay-opened'));
+    window.dispatchEvent(new Event('varin:mobile-overlay-opened'));
     return () => {
-      window.dispatchEvent(new Event('oc:mobile-overlay-closed'));
+      window.dispatchEvent(new Event('varin:mobile-overlay-closed'));
     };
   }, [open]);
 
@@ -112,8 +112,8 @@ export const MobileOverlayPanel: React.FC<MobileOverlayPanelProps> = ({
   const content = (
     <div
       className={cn(
-        'oc-keyboard-inset-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity',
-        !enterSettled && 'oc-keyboard-inset-snap',
+        'varin-keyboard-inset-surface fixed inset-0 z-[60] flex flex-col bg-[rgb(0_0_0_/_0.45)] transition-opacity',
+        !enterSettled && 'varin-keyboard-inset-snap',
         entered ? 'opacity-100' : 'opacity-0',
       )}
       role="dialog"

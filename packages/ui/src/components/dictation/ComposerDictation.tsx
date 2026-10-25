@@ -366,7 +366,7 @@ export const ComposerDictation: React.FC<ComposerDictationProps> = ({
                         // pill → voice morph), its content fades in only after the
                         // shape has grown — otherwise the controls paint clipped
                         // inside the still-small pill.
-                        isMobile && 'oc-composer-morph-content-fade',
+                        isMobile && 'varin-composer-morph-content-fade',
                     )}
                     style={{
                         borderRadius: radius,

@@ -258,8 +258,8 @@ const applyDesktopClientToken = async (
 const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const titlebarDragStyle = React.useMemo<React.CSSProperties>(() => {
     return {
-      height: 'var(--oc-wco-titlebar-height, 0px)',
-      right: 'var(--oc-wco-right-inset, 0px)',
+      height: 'var(--varin-wco-titlebar-height, 0px)',
+      right: 'var(--varin-wco-right-inset, 0px)',
     };
   }, []);
 
@@ -916,7 +916,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
                     }}
                     className="pl-10"
                     aria-invalid={Boolean(errorMessage) || undefined}
-                    aria-describedby={errorMessage ? 'oc-ui-auth-error' : undefined}
+                    aria-describedby={errorMessage ? 'varin-ui-auth-error' : undefined}
                     disabled={isSubmitting}
                   />
                 </div>
@@ -973,7 +973,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
                 </label>
               )}
               {errorMessage && (
-                <p id="oc-ui-auth-error" className="typography-meta text-destructive">
+                <p id="varin-ui-auth-error" className="typography-meta text-destructive">
                   {errorMessage}
                 </p>
               )}

@@ -130,14 +130,14 @@ export const NATIVE_SELECTION_THEME_SPEC = {
     // re-renders its caret UI after every keystroke's decoration redraw, which
     // arrives as severe input lag. The handles only exist while a RANGE is
     // selected — exactly when there is no caret — so the native caret (and the
-    // drawn cursor layer's absence) are scoped to `.oc-native-range`, which
+    // drawn cursor layer's absence) are scoped to `.varin-native-range`, which
     // `composerNativeSelectionExtension` sets on the editor whenever the main
     // selection is non-empty. Typing stays on the transparent-native-caret
     // fast path.
-    '&.cm-editor.oc-native-range .cm-content, &.cm-editor.oc-native-range .cm-content .cm-line': {
+    '&.cm-editor.varin-native-range .cm-content, &.cm-editor.varin-native-range .cm-content .cm-line': {
         caretColor: 'var(--surface-foreground) !important',
     },
-    '&.oc-native-range .cm-scroller > .cm-cursorLayer': {
+    '&.varin-native-range .cm-scroller > .cm-cursorLayer': {
         display: 'none',
     },
     // The layers live beside the content, as children of the scroller.
@@ -150,7 +150,7 @@ export const composerNativeSelectionTheme = EditorView.theme(NATIVE_SELECTION_TH
 
 /**
  * The native-selection arrangement, installed on every device: the theme
- * above plus the `.oc-native-range` marker class that scopes its caret rules
+ * above plus the `.varin-native-range` marker class that scopes its caret rules
  * to the moments a range is actually selected. `editorAttributes`
  * re-evaluates on every update, so the class follows the selection with no
  * listener of its own.
@@ -158,5 +158,5 @@ export const composerNativeSelectionTheme = EditorView.theme(NATIVE_SELECTION_TH
 export const composerNativeSelectionExtension = [
     composerNativeSelectionTheme,
     EditorView.editorAttributes.of((view) =>
-        view.state.selection.main.empty ? null : { class: 'oc-native-range' }),
+        view.state.selection.main.empty ? null : { class: 'varin-native-range' }),
 ];

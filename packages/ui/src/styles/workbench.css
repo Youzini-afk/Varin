@@ -288,7 +288,7 @@
 .conversation-scene { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .conversation-composer { grid-row: 3; }
 .conversation-starters { grid-row: 2; padding: 0 16px 18px; }
-.conversation-starters .oc-draft-starters { margin: 0 auto; }
+.conversation-starters .varin-draft-starters { margin: 0 auto; }
 .conversation-loading {
   position: absolute; top: 12px; left: 50%; z-index: 1; transform: translateX(-50%);
   max-width: calc(100% - 32px); padding: 5px 10px; border-radius: 8px;
@@ -308,7 +308,7 @@
   [data-workbench-chrome="agent"] .conversation-layout[data-centered] .conversation-composer { grid-row: 3; margin-top: 26px; }
   [data-workbench-chrome="agent"] .conversation-layout[data-centered] [data-conversation-composer-shell] { padding-bottom: 0; }
   [data-workbench-chrome="agent"] .conversation-starters { grid-row: 4; padding: 0; margin-top: 14px; }
-  [data-workbench-chrome="agent"] .oc-draft-starters { width: min(100% - 48px, var(--chat-content-width, 960px) - 48px); max-width: none; }
+  [data-workbench-chrome="agent"] .varin-draft-starters { width: min(100% - 48px, var(--chat-content-width, 960px) - 48px); max-width: none; }
 }
 
 .workbench-resource-canvas { transition-property: width, margin-left; }
@@ -318,37 +318,37 @@
 .agent-conversation-canvas { container: agent-canvas / inline-size; }
 [data-workbench-chrome="agent"] > header { min-height: 44px; border-bottom-color: transparent; }
 @media (min-width: 768px) {
-  [data-workbench-chrome="agent"] .oc-draft-starters {
+  [data-workbench-chrome="agent"] .varin-draft-starters {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     --draft-starter-background: transparent;
   }
-  .oc-draft-starters .draft-starter-trigger {
+  .varin-draft-starters .draft-starter-trigger {
     width: 100%; min-width: 0; min-height: 38px; justify-content: flex-start;
     border-radius: 8px; text-align: left; font-size: 13px;
     transition: background-color var(--wb-state-duration) var(--wb-ease), border-color var(--wb-state-duration) var(--wb-ease), transform var(--motion-dur-snap) var(--motion-ease-snap);
   }
-  .oc-draft-starters .draft-starter-trigger > span { overflow: hidden; text-overflow: ellipsis; }
-  .oc-draft-starters .draft-starter-trigger:hover { --draft-starter-background: var(--interactive-hover); }
-  .oc-draft-starters .draft-starter-trigger:active { transform: scale(.97); }
-  .oc-draft-starters > button { grid-column: 1 / -1; justify-self: center; margin-top: 4px; }
+  .varin-draft-starters .draft-starter-trigger > span { overflow: hidden; text-overflow: ellipsis; }
+  .varin-draft-starters .draft-starter-trigger:hover { --draft-starter-background: var(--interactive-hover); }
+  .varin-draft-starters .draft-starter-trigger:active { transform: scale(.97); }
+  .varin-draft-starters > button { grid-column: 1 / -1; justify-self: center; margin-top: 4px; }
 }
 @container agent-canvas (max-width: 720px) {
-  [data-workbench-chrome="agent"] .oc-draft-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-workbench-chrome="agent"] .varin-draft-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .conversation-draft-heading h1 { font-size: 24px; }
 }
 
 @media (min-width: 768px) {
   .ide-agent-canvas .conversation-draft-heading h1 { font-size: 22px; line-height: 1.35; }
-  .ide-agent-canvas .oc-draft-starters {
+  .ide-agent-canvas .varin-draft-starters {
     display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px;
     width: 100%; max-width: 100%; --draft-starter-background: transparent;
   }
-  .ide-agent-canvas .oc-draft-center { padding-inline: 16px; overflow-y: auto; }
+  .ide-agent-canvas .varin-draft-center { padding-inline: 16px; overflow-y: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .oc-draft-starters .draft-starter-trigger { transition: none; }
+  .varin-draft-starters .draft-starter-trigger { transition: none; }
 }
 
 /* Theme changes remain interruptible color transitions, not captured copies of the workspace. */

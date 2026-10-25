@@ -389,7 +389,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ renderConversation, rend
                     {isSettingsDialogOpen && (
                         <div
                             className="absolute inset-0 z-10 bg-background"
-                            style={{ paddingTop: 'var(--oc-safe-area-top, 0px)' }}
+                            style={{ paddingTop: 'var(--varin-safe-area-top, 0px)' }}
                         >
                             <ErrorBoundary>
                                 <WorkbenchReplacement

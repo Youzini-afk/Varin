@@ -1380,7 +1380,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
           )}
         </FlipList>
 
-        <div className="shrink-0 border-t border-border/60 px-2.5 py-2 pb-[max(0.5rem,var(--oc-safe-area-bottom-visual,0px))]">
+        <div className="shrink-0 border-t border-border/60 px-2.5 py-2 pb-[max(0.5rem,var(--varin-safe-area-bottom-visual,0px))]">
           {selectionMode ? (
             <div className="mb-1.5 flex items-center gap-1">
               <span className="min-w-0 flex-1 truncate px-1 typography-micro text-muted-foreground">

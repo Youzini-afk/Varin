@@ -24,7 +24,7 @@ function ensureSpriteOnce() {
   svg.setAttribute("aria-hidden", "true")
   svg.style.display = "none"
   svg.innerHTML = Object.entries(iconSpriteData)
-    .map(([name, content]) => `<symbol id="oc-${name}" viewBox="0 0 24 24">${content}</symbol>`)
+    .map(([name, content]) => `<symbol id="varin-${name}" viewBox="0 0 24 24">${content}</symbol>`)
     .join("")
   body.insertBefore(svg, body.firstChild)
   spriteInjected = true
@@ -36,7 +36,7 @@ export interface IconProps extends React.ComponentPropsWithoutRef<"svg"> {
 
 export const Icon = React.memo(({ name, className, ...rest }: IconProps) => {
   // Inline sprite injection during render – must run before <use> tries
-  // to resolve the #oc-* reference during the same commit.
+  // to resolve the #varin-* reference during the same commit.
   if (typeof document !== "undefined") {
     ensureSpriteOnce()
   }
@@ -49,7 +49,7 @@ export const Icon = React.memo(({ name, className, ...rest }: IconProps) => {
       aria-hidden="true"
       {...rest}
     >
-      <use href={`#oc-${name}`} />
+      <use href={`#varin-${name}`} />
     </svg>
   )
 })

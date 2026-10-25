@@ -31,9 +31,9 @@ const applyOverlayInsets = (
   rightInsetPx: number,
   titlebarHeightPx: number,
 ) => {
-  root.style.setProperty('--oc-wco-left-inset', clampPx(leftInsetPx));
-  root.style.setProperty('--oc-wco-right-inset', clampPx(rightInsetPx));
-  root.style.setProperty('--oc-wco-titlebar-height', clampPx(titlebarHeightPx));
+  root.style.setProperty('--varin-wco-left-inset', clampPx(leftInsetPx));
+  root.style.setProperty('--varin-wco-right-inset', clampPx(rightInsetPx));
+  root.style.setProperty('--varin-wco-titlebar-height', clampPx(titlebarHeightPx));
 };
 
 export const useWindowControlsOverlayLayout = () => {

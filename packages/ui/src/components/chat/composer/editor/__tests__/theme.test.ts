@@ -23,7 +23,7 @@ describe('composer themes', () => {
         expect(caretRules.length).toBeGreaterThan(0);
         for (const [selectors] of caretRules) {
             for (const selector of selectors.split(',')) {
-                expect(selector).toContain('.oc-native-range');
+                expect(selector).toContain('.varin-native-range');
             }
         }
     });

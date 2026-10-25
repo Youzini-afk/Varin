@@ -679,7 +679,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       {isMobile ? (
         <div
           className={cn(
-            'flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b px-3',
+            'flex h-[var(--varin-header-height,56px)] shrink-0 items-center gap-2 border-b px-3',
             'bg-background'
           )}
           style={{ borderColor: 'var(--interactive-border)' }}

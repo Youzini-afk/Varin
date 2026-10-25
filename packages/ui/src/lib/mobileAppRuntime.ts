@@ -14,10 +14,10 @@ export const useMobileAppViewport = (enabled: boolean): void => {
     const root = document.documentElement;
     let rafId: number | null = null;
     root.classList.add('runtime-mobile-app');
-    root.style.setProperty('--oc-safe-area-top', 'env(safe-area-inset-top, 0px)');
-    root.style.setProperty('--oc-safe-area-right', 'env(safe-area-inset-right, 0px)');
-    root.style.setProperty('--oc-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
-    root.style.setProperty('--oc-safe-area-left', 'env(safe-area-inset-left, 0px)');
+    root.style.setProperty('--varin-safe-area-top', 'env(safe-area-inset-top, 0px)');
+    root.style.setProperty('--varin-safe-area-right', 'env(safe-area-inset-right, 0px)');
+    root.style.setProperty('--varin-safe-area-bottom', 'env(safe-area-inset-bottom, 0px)');
+    root.style.setProperty('--varin-safe-area-left', 'env(safe-area-inset-left, 0px)');
 
     const updateViewportVars = () => {
       const viewport = window.visualViewport;
@@ -27,11 +27,11 @@ export const useMobileAppViewport = (enabled: boolean): void => {
       const nextKeyboardHeight = `${Math.round(keyboardHeight)}px`;
       const nextViewportHeight = `${Math.round(viewport?.height ?? window.innerHeight)}px`;
 
-      if (root.style.getPropertyValue('--oc-mobile-keyboard-height') !== nextKeyboardHeight) {
-        root.style.setProperty('--oc-mobile-keyboard-height', nextKeyboardHeight);
+      if (root.style.getPropertyValue('--varin-mobile-keyboard-height') !== nextKeyboardHeight) {
+        root.style.setProperty('--varin-mobile-keyboard-height', nextKeyboardHeight);
       }
-      if (root.style.getPropertyValue('--oc-mobile-viewport-height') !== nextViewportHeight) {
-        root.style.setProperty('--oc-mobile-viewport-height', nextViewportHeight);
+      if (root.style.getPropertyValue('--varin-mobile-viewport-height') !== nextViewportHeight) {
+        root.style.setProperty('--varin-mobile-viewport-height', nextViewportHeight);
       }
     };
 
@@ -58,12 +58,12 @@ export const useMobileAppViewport = (enabled: boolean): void => {
       window.visualViewport?.removeEventListener('scroll', scheduleViewportVarsUpdate);
       window.removeEventListener('resize', scheduleViewportVarsUpdate);
       root.classList.remove('runtime-mobile-app');
-      root.style.removeProperty('--oc-mobile-keyboard-height');
-      root.style.removeProperty('--oc-mobile-viewport-height');
-      root.style.removeProperty('--oc-safe-area-top');
-      root.style.removeProperty('--oc-safe-area-right');
-      root.style.removeProperty('--oc-safe-area-bottom');
-      root.style.removeProperty('--oc-safe-area-left');
+      root.style.removeProperty('--varin-mobile-keyboard-height');
+      root.style.removeProperty('--varin-mobile-viewport-height');
+      root.style.removeProperty('--varin-safe-area-top');
+      root.style.removeProperty('--varin-safe-area-right');
+      root.style.removeProperty('--varin-safe-area-bottom');
+      root.style.removeProperty('--varin-safe-area-left');
     };
   }, [enabled]);
 };

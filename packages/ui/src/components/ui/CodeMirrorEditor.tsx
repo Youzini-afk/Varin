@@ -177,7 +177,7 @@ class BlockWidget extends WidgetType {
     let div = this.containerMap.get(this.id);
     if (!div) {
       div = document.createElement('div');
-      div.className = 'oc-block-widget';
+      div.className = 'varin-block-widget';
       div.dataset.widgetId = this.id;
       this.containerMap.set(this.id, div);
     }
@@ -253,7 +253,7 @@ const createHighlightLinesExtension = (range?: { start: number; end: number }): 
       const builder = new RangeSetBuilder<Decoration>();
       for (let lineNo = start; lineNo <= end && lineNo <= view.state.doc.lines; lineNo += 1) {
         const line = view.state.doc.line(lineNo);
-        builder.add(line.from, line.from, Decoration.line({ class: 'oc-cm-selected-line' }));
+        builder.add(line.from, line.from, Decoration.line({ class: 'varin-cm-selected-line' }));
       }
       return builder.finish();
     }
@@ -332,7 +332,7 @@ export function CodeMirrorEditor({
 
     const gutters = resolvedView.dom.querySelector('.cm-gutters');
     const gutterWidth = gutters instanceof HTMLElement ? gutters.getBoundingClientRect().width : 0;
-    host.style.setProperty('--oc-editor-gutter-width', `${gutterWidth}px`);
+    host.style.setProperty('--varin-editor-gutter-width', `${gutterWidth}px`);
   }, []);
 
   React.useEffect(() => {

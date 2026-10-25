@@ -42,9 +42,9 @@ export type DecorateContext = {
 
 // Reference the app's icon sprite (injected into <body> by the shared Icon
 // component) so DOM-built controls use the same themed icons as the rest of
-// the app. Sprite symbols are registered under `#oc-<name>`.
+// the app. Sprite symbols are registered under `#varin-<name>`.
 const spriteIcon = (name: IconName): string =>
-  `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#oc-${name}"></use></svg>`;
+  `<svg class="remixicon size-3.5" viewBox="0 0 24 24" aria-hidden="true"><use href="#varin-${name}"></use></svg>`;
 
 const ICONS = {
   copy: spriteIcon('file-copy'),

@@ -53,7 +53,7 @@ export function DesktopBrowserPane({ initialUrl, directory, tabID, onNavigate }:
       frame = 0; if (disposed || !element.isConnected) return;
       const rect = element.getBoundingClientRect();
       const bounds = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-      const blocked = document.documentElement.classList.contains('oc-dialog-open') || [...document.querySelectorAll('[role="menu"], [role="listbox"], [role="tooltip"], [data-slot="popover-content"]')].some(popup => {
+      const blocked = document.documentElement.classList.contains('varin-dialog-open') || [...document.querySelectorAll('[role="menu"], [role="listbox"], [role="tooltip"], [data-slot="popover-content"]')].some(popup => {
         if (!(popup instanceof HTMLElement) || !popup.checkVisibility()) return false;
         const box = popup.getBoundingClientRect(); return box.left < rect.right && box.right > rect.left && box.top < rect.bottom && box.bottom > rect.top;
       });

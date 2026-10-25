@@ -99,7 +99,7 @@ export function useMainColumnGlide(panel: React.RefObject<HTMLElement | null>, o
     const gap = Number.parseFloat(style.getPropertyValue('--wb-canvas-gap')) || 0;
     // Reading the box starts the panel's width transition; it reports where that transition is now.
     const outerNow = aside.getBoundingClientRect().width + (Number.parseFloat(style.marginLeft) || 0);
-    const outerFinal = open ? (Number.parseFloat(style.getPropertyValue('--oc-context-panel-width')) || 0) + gap : 0;
+    const outerFinal = open ? (Number.parseFloat(style.getPropertyValue('--varin-context-panel-width')) || 0) + gap : 0;
     const box = main.getBoundingClientRect().width;
     // The content fills the canvas inside its border.
     const width = box + outerNow - outerFinal - (box - main.clientWidth);

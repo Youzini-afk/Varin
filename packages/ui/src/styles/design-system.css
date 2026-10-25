@@ -1,20 +1,20 @@
 @layer base {
   :root {
     color-scheme: light;
-    --oc-safe-area-top: 0px;
-    --oc-safe-area-right: 0px;
-    --oc-safe-area-bottom: 0px;
-    --oc-safe-area-bottom-visual: 0px;
-    --oc-safe-area-left: 0px;
-    --oc-header-height: 40px;
-    --oc-visual-viewport-offset-top: 0px;
-    --oc-visual-viewport-height: 100dvh;
-    --oc-wco-left-inset: 0px;
-    --oc-wco-right-inset: 0px;
-    --oc-wco-titlebar-height: 0px;
+    --varin-safe-area-top: 0px;
+    --varin-safe-area-right: 0px;
+    --varin-safe-area-bottom: 0px;
+    --varin-safe-area-bottom-visual: 0px;
+    --varin-safe-area-left: 0px;
+    --varin-header-height: 40px;
+    --varin-visual-viewport-offset-top: 0px;
+    --varin-visual-viewport-height: 100dvh;
+    --varin-wco-left-inset: 0px;
+    --varin-wco-right-inset: 0px;
+    --varin-wco-titlebar-height: 0px;
     --ui-regular-font-weight: 400;
-    --oc-scrollbar-thumb: color-mix(in srgb, var(--foreground) 22%, transparent);
-    --oc-scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 35%, transparent);
+    --varin-scrollbar-thumb: color-mix(in srgb, var(--foreground) 22%, transparent);
+    --varin-scrollbar-thumb-hover: color-mix(in srgb, var(--foreground) 35%, transparent);
     --padding-scale: 1;
 
     /* Semantic typography defaults (must match SEMANTIC_TYPOGRAPHY) */

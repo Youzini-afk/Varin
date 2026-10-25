@@ -41,8 +41,8 @@ test('desktop editor tabs expose close directly instead of a more-actions trigge
   );
 
   expect(markup).toContain('aria-label="Close main.ts"');
-  expect(markup).toContain('href="#oc-close"');
-  expect(markup).not.toContain('href="#oc-more-2-fill"');
+  expect(markup).toContain('href="#varin-close"');
+  expect(markup).not.toContain('href="#varin-more-2-fill"');
 });
 
 

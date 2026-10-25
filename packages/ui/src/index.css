@@ -44,9 +44,9 @@ button,
   font-family: codicon !important;
 }
 
-:root.oc-theme-switching *,
-:root.oc-theme-switching *::before,
-:root.oc-theme-switching *::after {
+:root.varin-theme-switching *,
+:root.varin-theme-switching *::before,
+:root.varin-theme-switching *::after {
   transition: none !important;
   animation: none !important;
 }
@@ -143,7 +143,7 @@ html[data-varin-vibrancy] .varin-vibrancy-pill {
   color: var(--surface-foreground);
 }
 
-.oc-cm-selected-line {
+.varin-cm-selected-line {
   background: color-mix(in srgb, var(--primary-base) 22%, transparent);
 }
 
@@ -355,12 +355,12 @@ div[data-chat-input-footer="true"] {
    overlay appears in the exact frame the mask hides the real header (no blink).
    ScrollShadow sets data-top-scroll when nothing is below the viewport and
    data-top-bottom-scroll when content is both above and below. */
-.oc-sticky-fade-overlay {
+.varin-sticky-fade-overlay {
   opacity: 0;
 }
 
-.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-scroll="true"]) .oc-sticky-fade-overlay,
-.oc-sticky-fade-root:has(.oc-sidebar-scroller[data-top-bottom-scroll="true"]) .oc-sticky-fade-overlay {
+.varin-sticky-fade-root:has(.varin-sidebar-scroller[data-top-scroll="true"]) .varin-sticky-fade-overlay,
+.varin-sticky-fade-root:has(.varin-sidebar-scroller[data-top-bottom-scroll="true"]) .varin-sticky-fade-overlay {
   opacity: 1;
 }
 
@@ -389,7 +389,7 @@ div[data-chat-input-footer="true"] {
   }
 }
 
-@keyframes oc-migrate-up {
+@keyframes varin-migrate-up {
   0% {
     opacity: 1;
     transform: translateY(0);
@@ -421,7 +421,7 @@ div[data-chat-input-footer="true"] {
   }
 }
 
-@keyframes oc-file-mention-marquee {
+@keyframes varin-file-mention-marquee {
   0% {
     transform: translateX(0%);
   }
@@ -438,7 +438,7 @@ div[data-chat-input-footer="true"] {
 }
 
 .file-mention-marquee {
-  animation: oc-file-mention-marquee var(--file-mention-marquee-duration, 4s) linear 0.2s 1 both;
+  animation: varin-file-mention-marquee var(--file-mention-marquee-duration, 4s) linear 0.2s 1 both;
   will-change: transform;
 }
 
@@ -555,21 +555,21 @@ svg.animate-spin {
 }
 
 *::-webkit-scrollbar-thumb {
-  background: var(--oc-scrollbar-thumb);
+  background: var(--varin-scrollbar-thumb);
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 *::-webkit-scrollbar-thumb:hover {
-  background: var(--oc-scrollbar-thumb-hover);
+  background: var(--varin-scrollbar-thumb-hover);
   background-clip: padding-box;
 }
 
 .dark {
   color-scheme: dark;
-  --oc-scrollbar-thumb: oklch(0.6 0.02 80 / 0.3);
-  --oc-scrollbar-thumb-hover: oklch(0.6 0.02 80 / 0.5);
+  --varin-scrollbar-thumb: oklch(0.6 0.02 80 / 0.3);
+  --varin-scrollbar-thumb-hover: oklch(0.6 0.02 80 / 0.5);
 }
 
 [data-scrollbar="chat"]::-webkit-scrollbar-thumb {
@@ -613,7 +613,7 @@ html:not(.dark) .chat-scroll {
 }
 
 [data-scrollbar="chat"]::-webkit-scrollbar-thumb {
-  background: var(--oc-scrollbar-thumb) !important;
+  background: var(--varin-scrollbar-thumb) !important;
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -621,20 +621,20 @@ html:not(.dark) .chat-scroll {
 
 [data-scrollbar="chat"].chat-scroll::-webkit-scrollbar-thumb,
 .chat-scroll::-webkit-scrollbar-thumb {
-  background: var(--oc-scrollbar-thumb) !important;
+  background: var(--varin-scrollbar-thumb) !important;
   border-radius: 6px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 [data-scrollbar="chat"]::-webkit-scrollbar-thumb:hover {
-  background: var(--oc-scrollbar-thumb-hover) !important;
+  background: var(--varin-scrollbar-thumb-hover) !important;
   background-clip: padding-box;
 }
 
 [data-scrollbar="chat"].chat-scroll::-webkit-scrollbar-thumb:hover,
 .chat-scroll::-webkit-scrollbar-thumb:hover {
-  background: var(--oc-scrollbar-thumb-hover) !important;
+  background: var(--varin-scrollbar-thumb-hover) !important;
   background-clip: padding-box;
 }
 
@@ -662,7 +662,7 @@ html:not(.dark) .chat-scroll {
 /* Firefox scrollbar support */
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--oc-scrollbar-thumb) transparent;
+  scrollbar-color: var(--varin-scrollbar-thumb) transparent;
 }
 
 .scrollbar-hidden {
@@ -700,7 +700,7 @@ html:not(.dark) .chat-scroll {
   pointer-events: auto;
   position: absolute;
   width: 6px;
-  background: var(--oc-scrollbar-thumb);
+  background: var(--varin-scrollbar-thumb);
   border-radius: 9999px;
   opacity: 0.8;
   transition: background-color var(--motion-dur-fade) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out);
@@ -709,7 +709,7 @@ html:not(.dark) .chat-scroll {
 
 .overlay-scrollbar__thumb:hover,
 .overlay-scrollbar__thumb:active {
-  background: var(--oc-scrollbar-thumb-hover);
+  background: var(--varin-scrollbar-thumb-hover);
   opacity: 1;
 }
 
@@ -1639,7 +1639,7 @@ input[aria-label="Terminal input"] {
   font-family: "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Fira Code", "JetBrains Mono", "SFMono-Regular", Menlo, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-@keyframes oc-busy-pulse {
+@keyframes varin-busy-pulse {
   0%, 100% {
     opacity: 0.2;
   }
@@ -1649,7 +1649,7 @@ input[aria-label="Terminal input"] {
 }
 
 .animate-busy-pulse {
-  animation: oc-busy-pulse 1.2s ease-in-out infinite;
+  animation: varin-busy-pulse 1.2s ease-in-out infinite;
 }
 
 @keyframes navrail-dot-wave {

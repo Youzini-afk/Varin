@@ -176,7 +176,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           </div>
         </ThreadComposer>
       </form>
-      <Departure present={!firstMessage.message} exit="sink" stagger=".oc-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="oc-draft-starters" onSubmit={starter => {
+      <Departure present={!firstMessage.message} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="varin-draft-starters" onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') patch({ goalArmed: true });
         else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true);
         else patch(current => ({ text: [current.text.trimEnd(), starter.submitText].filter(Boolean).join('\n\n') }));

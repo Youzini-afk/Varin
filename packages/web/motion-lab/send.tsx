@@ -93,7 +93,7 @@ export function SendLab() {
         const input = document.querySelector('[data-conversation-composer-input-frame]');
         const copies = [...document.querySelectorAll<HTMLElement>('[data-departing]')];
         const parts = copies.flatMap(copy => {
-          const chips = [...copy.querySelectorAll<HTMLElement>('.oc-draft-starters > *')];
+          const chips = [...copy.querySelectorAll<HTMLElement>('.varin-draft-starters > *')];
           return chips.length ? chips : [copy];
         });
         const overlay = document.querySelector('.conversation-message-handoff');
@@ -108,7 +108,7 @@ export function SendLab() {
           copyOpacity: parts.length ? parts.reduce((sum, part) => sum + Number(getComputedStyle(part).opacity), 0) / parts.length : 0,
           overlay: overlay ? rectOf(overlay) : null,
           bubble: bubble ? { ...rectOf(bubble), opacity: bubble.style.opacity } : null,
-          icon: button?.querySelector('.swap-icon-current use')?.getAttribute('href')?.replace('#oc-', '') ?? '',
+          icon: button?.querySelector('.swap-icon-current use')?.getAttribute('href')?.replace('#varin-', '') ?? '',
           leavingIcons: button?.querySelectorAll('[data-swap-leaving]').length ?? 0,
         });
       }
@@ -191,8 +191,8 @@ export function SendLab() {
               onFiles={noop} onAttachImages={noop} onAttachPdfs={noop} onGoal={noop} onStop={activeRunId ? noop : undefined}
               hasInput={Boolean(text.trim())} onWorkspace={noop} workspaceLabel="lab" attachmentNames={[]} skills={[]} />
           </form>
-          <Departure present={empty} animated={pending} exit="sink" stagger=".oc-draft-starters > *" className="conversation-starters">
-            <div className="oc-draft-starters mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2">
+          <Departure present={empty} animated={pending} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters">
+            <div className="varin-draft-starters mx-auto flex max-w-3xl flex-wrap items-center justify-center gap-2">
               {STARTERS.map(label => <button key={label} type="button" className="draft-starter-trigger rounded-full border border-border px-3 py-1.5 text-sm text-muted-foreground">{label}</button>)}
             </div>
           </Departure>

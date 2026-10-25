@@ -353,7 +353,7 @@ const tagFixedElementsForClonePinning = (doc: Document, scrollX: number, scrollY
 // live DOM. snapDOM's own scroll-translate wrapper on the clone is preserved, so the
 // sidebar's internal scroll position stays baked in.
 const snapdomFixedPinPlugin = {
-  name: 'oc-fixed-pin',
+  name: 'varin-fixed-pin',
   afterClone(context: { clone?: Element | null }): void {
     const clone = context?.clone;
     if (!clone || typeof (clone as Element).querySelectorAll !== 'function') return;
@@ -422,7 +422,7 @@ const captureNestedScrollState = (doc: Document): { reapply: () => void; cleanup
 // when present, or create the wrapper ourselves if snapDOM saw scrollTop 0 at clone
 // time. Runs after the fixed-pin pass so sidebar gets both correct box and scroll.
 const snapdomNestedScrollPlugin = {
-  name: 'oc-nested-scroll',
+  name: 'varin-nested-scroll',
   afterClone(context: { clone?: Element | null }): void {
     const clone = context?.clone;
     if (!clone || typeof (clone as Element).querySelectorAll !== 'function') return;

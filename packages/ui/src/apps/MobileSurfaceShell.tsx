@@ -239,7 +239,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
   return createPortal(
     <div
       className={cn(
-        'oc-keyboard-inset-surface fixed inset-0 z-50 flex bg-[rgb(0_0_0_/_0.45)]',
+        'varin-keyboard-inset-surface fixed inset-0 z-50 flex bg-[rgb(0_0_0_/_0.45)]',
         isSidePanel
           ? side === 'left'
             ? 'items-stretch justify-start'
@@ -278,13 +278,13 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
           // Sized to leave the top safe area (plus a small gap) uncovered so the
           // scrim dims it and the sheet sits a few px below the very top.
           height: isSidePanel
-            ? `calc(100% - var(--oc-safe-area-top, 0px) - var(--oc-safe-area-bottom-visual, 0px) - ${TOP_GAP_PX * 2}px)`
-            : `calc(100% - var(--oc-safe-area-top, 0px) - ${TOP_GAP_PX}px)`,
-          marginTop: isSidePanel ? `calc(var(--oc-safe-area-top, 0px) + ${TOP_GAP_PX}px)` : undefined,
-          marginBottom: isSidePanel ? `calc(var(--oc-safe-area-bottom-visual, 0px) + ${TOP_GAP_PX}px)` : undefined,
+            ? `calc(100% - var(--varin-safe-area-top, 0px) - var(--varin-safe-area-bottom-visual, 0px) - ${TOP_GAP_PX * 2}px)`
+            : `calc(100% - var(--varin-safe-area-top, 0px) - ${TOP_GAP_PX}px)`,
+          marginTop: isSidePanel ? `calc(var(--varin-safe-area-top, 0px) + ${TOP_GAP_PX}px)` : undefined,
+          marginBottom: isSidePanel ? `calc(var(--varin-safe-area-bottom-visual, 0px) + ${TOP_GAP_PX}px)` : undefined,
           width: isSidePanel ? sideWidth : undefined,
           maxWidth: isSidePanel
-            ? 'calc(100vw - var(--oc-safe-area-left, 0px) - var(--oc-safe-area-right, 0px) - 1rem)'
+            ? 'calc(100vw - var(--varin-safe-area-left, 0px) - var(--varin-safe-area-right, 0px) - 1rem)'
             : undefined,
           transform: visualTransform,
           transition: isDraggingRef.current
@@ -307,7 +307,7 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
             </div>
           )}
           {!headerless ? (
-            <header className="flex h-[var(--oc-header-height,56px)] items-center gap-2 px-3">
+            <header className="flex h-[var(--varin-header-height,56px)] items-center gap-2 px-3">
               {leading}
               <div className="min-w-0 flex-1 px-1">
                 {title ? (
@@ -331,13 +331,13 @@ export const MobileSurfaceShell: React.FC<MobileSurfaceShellProps> = ({
         </div>
         <div className="min-h-0 flex-1 overflow-hidden">
           {contentReady ? (
-            <div className="h-full" style={{ animation: 'oc-surface-content-in var(--motion-dur-fade) var(--motion-ease-out)' }}>
+            <div className="h-full" style={{ animation: 'varin-surface-content-in var(--motion-dur-fade) var(--motion-ease-out)' }}>
               {children}
             </div>
           ) : null}
         </div>
       </section>
-      <style>{'@keyframes oc-surface-content-in { from { opacity: 0 } to { opacity: 1 } }'}</style>
+      <style>{'@keyframes varin-surface-content-in { from { opacity: 0 } to { opacity: 1 } }'}</style>
     </div>,
     rootRef.current,
   );

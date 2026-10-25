@@ -5,64 +5,64 @@
   --is-mobile: 0;
   --device-type: 'desktop';
   --font-scale: 1;
-  --oc-mobile-keyboard-height: 0px;
-  --oc-mobile-viewport-height: 100vh;
+  --varin-mobile-keyboard-height: 0px;
+  --varin-mobile-viewport-height: 100vh;
 }
 
 :root.runtime-mobile-app {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  --oc-safe-area-top: env(safe-area-inset-top, 0px);
-  --oc-safe-area-right: env(safe-area-inset-right, 0px);
-  --oc-safe-area-bottom: env(safe-area-inset-bottom, 0px);
-  --oc-safe-area-bottom-visual: max(var(--oc-safe-area-bottom), 0px);
-  --oc-safe-area-left: env(safe-area-inset-left, 0px);
+  --varin-safe-area-top: env(safe-area-inset-top, 0px);
+  --varin-safe-area-right: env(safe-area-inset-right, 0px);
+  --varin-safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  --varin-safe-area-bottom-visual: max(var(--varin-safe-area-bottom), 0px);
+  --varin-safe-area-left: env(safe-area-inset-left, 0px);
 }
 
 :root.runtime-mobile-app body {
-  height: var(--oc-mobile-viewport-height, 100vh);
+  height: var(--varin-mobile-viewport-height, 100vh);
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-overflow-scrolling: touch;
 }
 
 :root.runtime-mobile-app .header-safe-area {
-  padding-top: var(--oc-safe-area-top);
+  padding-top: var(--varin-safe-area-top);
 }
 
 :root.runtime-mobile-app .main-content-safe-area {
-  padding-left: var(--oc-safe-area-left);
-  padding-right: var(--oc-safe-area-right);
+  padding-left: var(--varin-safe-area-left);
+  padding-right: var(--varin-safe-area-right);
 }
 
 :root.runtime-mobile-app .bottom-safe-area {
-  padding-bottom: max(var(--oc-safe-area-bottom-visual, 0px), var(--oc-mobile-keyboard-height, 0px)) !important;
+  padding-bottom: max(var(--varin-safe-area-bottom-visual, 0px), var(--varin-mobile-keyboard-height, 0px)) !important;
 }
 
 :root.runtime-mobile-app textarea[data-chat-input="true"] {
-  scroll-margin-bottom: calc(var(--oc-mobile-keyboard-height, 0px) + var(--oc-safe-area-bottom-visual, 0px) + 96px);
+  scroll-margin-bottom: calc(var(--varin-mobile-keyboard-height, 0px) + var(--varin-safe-area-bottom-visual, 0px) + 96px);
 }
 
 :root.runtime-mobile-app[data-varin-mobile-layout-kind="tablet"] {
-  --oc-header-height: 60px;
+  --varin-header-height: 60px;
 }
 
 :root.runtime-mobile-app[data-varin-mobile-layout-tier="tablet-landscape"] {
-  --oc-header-height: 56px;
+  --varin-header-height: 56px;
 }
 
-.oc-mobile-shell[data-mobile-layout-kind="tablet"] {
-  --oc-tablet-rail-width: 64px;
+.varin-mobile-shell[data-mobile-layout-kind="tablet"] {
+  --varin-tablet-rail-width: 64px;
 }
 
-.oc-mobile-shell[data-mobile-layout-kind="tablet"] .mobile-tablet-rail {
-  width: var(--oc-tablet-rail-width);
-  padding-top: calc(var(--oc-safe-area-top, 0px) + 0.5rem);
-  padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 0.5rem);
+.varin-mobile-shell[data-mobile-layout-kind="tablet"] .mobile-tablet-rail {
+  width: var(--varin-tablet-rail-width);
+  padding-top: calc(var(--varin-safe-area-top, 0px) + 0.5rem);
+  padding-bottom: calc(var(--varin-safe-area-bottom-visual, 0px) + 0.5rem);
 }
 
-.oc-mobile-shell[data-mobile-layout-kind="tablet"] .mobile-tablet-rail svg {
+.varin-mobile-shell[data-mobile-layout-kind="tablet"] .mobile-tablet-rail svg {
   flex-shrink: 0;
 }
 
@@ -310,20 +310,20 @@
   :root.device-mobile:not(.desktop-runtime),
   :root.device-tablet:not(.desktop-runtime),
   :root.mobile-pointer:not(.desktop-runtime) {
-    --oc-safe-area-top: env(safe-area-inset-top, 0);
-    --oc-safe-area-right: env(safe-area-inset-right, 0);
-    --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-    --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
-    --oc-safe-area-left: env(safe-area-inset-left, 0);
+    --varin-safe-area-top: env(safe-area-inset-top, 0);
+    --varin-safe-area-right: env(safe-area-inset-right, 0);
+    --varin-safe-area-bottom: env(safe-area-inset-bottom, 0);
+    --varin-safe-area-bottom-visual: clamp(0px, calc(var(--varin-safe-area-bottom) * 0.05), 4px);
+    --varin-safe-area-left: env(safe-area-inset-left, 0);
   }
 
   :root.device-mobile:not(.desktop-runtime) .header-safe-area,
   :root.device-tablet:not(.desktop-runtime) .header-safe-area,
   :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-    padding-top: var(--oc-safe-area-top);
+    padding-top: var(--varin-safe-area-top);
   }
 
-  :root.oc-capacitor-app [data-sonner-toaster][data-y-position='top'] {
+  :root.varin-capacitor-app [data-sonner-toaster][data-y-position='top'] {
     top: calc(env(safe-area-inset-top, 0px) + 16px) !important;
   }
 }
@@ -336,17 +336,17 @@
     :root.device-mobile:not(.desktop-runtime),
     :root.device-tablet:not(.desktop-runtime),
     :root.mobile-pointer:not(.desktop-runtime) {
-      --oc-safe-area-top: env(safe-area-inset-top, 0);
-      --oc-safe-area-right: env(safe-area-inset-right, 0);
-      --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
-      --oc-safe-area-left: env(safe-area-inset-left, 0);
+      --varin-safe-area-top: env(safe-area-inset-top, 0);
+      --varin-safe-area-right: env(safe-area-inset-right, 0);
+      --varin-safe-area-bottom: env(safe-area-inset-bottom, 0);
+      --varin-safe-area-bottom-visual: clamp(0px, calc(var(--varin-safe-area-bottom) * 0.05), 4px);
+      --varin-safe-area-left: env(safe-area-inset-left, 0);
     }
 
     :root.device-mobile:not(.desktop-runtime) .header-safe-area,
     :root.device-tablet:not(.desktop-runtime) .header-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      padding-top: var(--oc-safe-area-top);
+      padding-top: var(--varin-safe-area-top);
     }
 
     :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
@@ -354,15 +354,15 @@
     :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
-      padding-left: var(--oc-safe-area-left);
-      padding-right: var(--oc-safe-area-right);
+      padding-left: var(--varin-safe-area-left);
+      padding-right: var(--varin-safe-area-right);
     }
 
     /* Safe area for bottom fixed/bottom-0 elements */
     :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
     :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
-      padding-bottom: var(--oc-safe-area-bottom-visual) !important;
+      padding-bottom: var(--varin-safe-area-bottom-visual) !important;
     }
 
     /* Drawer safe area - top already offset by header height */
@@ -370,7 +370,7 @@
     :root.device-tablet:not(.desktop-runtime) .drawer-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .drawer-safe-area {
       padding-top: 0;
-      padding-bottom: var(--oc-safe-area-bottom-visual);
+      padding-bottom: var(--varin-safe-area-bottom-visual);
     }
 
     /* Fix iOS viewport issues */
@@ -439,17 +439,17 @@
     :root.device-mobile:not(.desktop-runtime),
     :root.device-tablet:not(.desktop-runtime),
     :root.mobile-pointer:not(.desktop-runtime) {
-      --oc-safe-area-top: env(safe-area-inset-top, 0);
-      --oc-safe-area-right: env(safe-area-inset-right, 0);
-      --oc-safe-area-bottom: env(safe-area-inset-bottom, 0);
-      --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
-      --oc-safe-area-left: env(safe-area-inset-left, 0);
+      --varin-safe-area-top: env(safe-area-inset-top, 0);
+      --varin-safe-area-right: env(safe-area-inset-right, 0);
+      --varin-safe-area-bottom: env(safe-area-inset-bottom, 0);
+      --varin-safe-area-bottom-visual: clamp(0px, calc(var(--varin-safe-area-bottom) * 0.05), 4px);
+      --varin-safe-area-left: env(safe-area-inset-left, 0);
     }
 
     :root.device-mobile:not(.desktop-runtime) .header-safe-area,
     :root.device-tablet:not(.desktop-runtime) .header-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .header-safe-area {
-      padding-top: var(--oc-safe-area-top);
+      padding-top: var(--varin-safe-area-top);
     }
 
     :root.device-mobile:not(.desktop-runtime) .main-content-safe-area,
@@ -457,14 +457,14 @@
     :root.mobile-pointer:not(.desktop-runtime) .main-content-safe-area {
       padding-top: 0;
       padding-bottom: 0;
-      padding-left: var(--oc-safe-area-left);
-      padding-right: var(--oc-safe-area-right);
+      padding-left: var(--varin-safe-area-left);
+      padding-right: var(--varin-safe-area-right);
     }
 
     :root.device-mobile:not(.desktop-runtime) .bottom-safe-area,
     :root.device-tablet:not(.desktop-runtime) .bottom-safe-area,
     :root.mobile-pointer:not(.desktop-runtime) .bottom-safe-area {
-      padding-bottom: var(--oc-safe-area-bottom-visual) !important;
+      padding-bottom: var(--varin-safe-area-bottom-visual) !important;
     }
   }
 }
@@ -479,18 +479,18 @@
        Chrome's collapsible URL bar doesn't push the dialog footer off-screen. */
     max-height: calc(
       100vh
-      - var(--oc-safe-area-top, 0px)
-      - var(--oc-safe-area-bottom-visual, 0px)
+      - var(--varin-safe-area-top, 0px)
+      - var(--varin-safe-area-bottom-visual, 0px)
       - 20px
     );
     max-height: calc(
       100dvh
-      - var(--oc-safe-area-top, 0px)
-      - var(--oc-safe-area-bottom-visual, 0px)
+      - var(--varin-safe-area-top, 0px)
+      - var(--varin-safe-area-bottom-visual, 0px)
       - 20px
     );
     padding: var(--pwa-dialog-padding);
-    padding-top: calc(var(--pwa-dialog-padding) + (var(--oc-safe-area-top, 0px) * 0.35));
+    padding-top: calc(var(--pwa-dialog-padding) + (var(--varin-safe-area-top, 0px) * 0.35));
     row-gap: clamp(0.75rem, 2vw, 1.25rem);
   }
 
@@ -500,12 +500,12 @@
   }
 
   .pwa-dialog-content [data-slot="dialog-close"] {
-    top: calc(0.25rem + (var(--oc-safe-area-top, 0px) * 0.35));
+    top: calc(0.25rem + (var(--varin-safe-area-top, 0px) * 0.35));
     right: var(--pwa-dialog-padding);
   }
 
   .pwa-dialog-content.pwa-compact [data-slot="dialog-close"] {
-    top: calc(0.2rem + (var(--oc-safe-area-top, 0px) * 0.3));
+    top: calc(0.2rem + (var(--varin-safe-area-top, 0px) * 0.3));
   }
 
   .pwa-dialog-content .settings-page-body {
@@ -531,7 +531,7 @@
   }
 
   .pwa-overlay-panel .pwa-overlay-scroll {
-    padding-bottom: calc(var(--oc-safe-area-bottom-visual, 0px) + 12px);
+    padding-bottom: calc(var(--varin-safe-area-bottom-visual, 0px) + 12px);
   }
 }
 
@@ -545,7 +545,7 @@
     bottom: 0;
     left: 0;
     right: 0;
-    height: var(--oc-safe-area-bottom-visual, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0)));
+    height: var(--varin-safe-area-bottom-visual, var(--varin-safe-area-bottom, env(safe-area-inset-bottom, 0)));
     background: linear-gradient(
       to top,
       var(--background) 0%,
@@ -592,11 +592,11 @@
    padding is gated behind display-mode: standalone — which the Capacitor WebView does
    not match — so nothing reserves bottom room in the native app. Expose it as a token
    so any native surface can consume it; the chat shell does so below. */
-:root.oc-capacitor-app {
-  --oc-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
+:root.varin-capacitor-app {
+  --varin-app-bottom-safe: max(16px, calc(var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)) * 0.5));
 }
 
-/* Android native safe areas. Every --oc-safe-area-* definition above is gated
+/* Android native safe areas. Every --varin-safe-area-* definition above is gated
    behind -webkit-touch-callout (iOS) or display-mode: standalone, neither of
    which matches the Capacitor Android WebView — so the Android app used to rely
    entirely on StatusBar overlay:false insetting the WebView natively. Android 15
@@ -605,20 +605,20 @@
    <html> (env() still reads 0 on WebViews without the safe-area passthrough
    fix), so read those first and fall back to env(). On devices where the native
    inset still applies, both sources report 0 — no double padding. */
-:root.oc-capacitor-app.oc-platform-android {
-  --oc-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
-  --oc-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
-  --oc-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
-  --oc-safe-area-bottom-visual: clamp(0px, calc(var(--oc-safe-area-bottom) * 0.05), 4px);
-  --oc-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+:root.varin-capacitor-app.varin-platform-android {
+  --varin-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --varin-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --varin-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --varin-safe-area-bottom-visual: clamp(0px, calc(var(--varin-safe-area-bottom) * 0.05), 4px);
+  --varin-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
 }
 
-:root.oc-capacitor-app.oc-platform-android .header-safe-area {
-  padding-top: var(--oc-safe-area-top);
+:root.varin-capacitor-app.varin-platform-android .header-safe-area {
+  padding-top: var(--varin-safe-area-top);
 }
 
-:root.oc-capacitor-app.oc-platform-android [data-sonner-toaster][data-y-position='top'] {
-  top: calc(var(--oc-safe-area-top) + 16px) !important;
+:root.varin-capacitor-app.varin-platform-android [data-sonner-toaster][data-y-position='top'] {
+  top: calc(var(--varin-safe-area-top) + 16px) !important;
 }
 
 /* Paint the document canvas with the theme background in the native app — the same
@@ -627,9 +627,9 @@
    makes the bare UA canvas dark, so any sliver not covered by content (notably the
    area behind the status bar) bled through as a dark band at the top. It only showed
    in dark mode, which is why it tracked the system theme. */
-:root.oc-capacitor-app,
-:root.oc-capacitor-app body,
-:root.oc-capacitor-app #root {
+:root.varin-capacitor-app,
+:root.varin-capacitor-app body,
+:root.varin-capacitor-app #root {
   background: var(--background) !important;
   background-color: var(--background) !important;
 }
@@ -637,11 +637,11 @@
 /* Native (Capacitor) keyboard handling.
    The Keyboard plugin runs in `resize: 'none'` mode so the WebView keeps its full
    height; instead we shrink the app shell by the keyboard frame height. Two vars,
-   both set by useNativeMobileChrome: --oc-keyboard-inset is the keyboard's target
+   both set by useNativeMobileChrome: --varin-keyboard-inset is the keyboard's target
    height from the moment `keyboardWillShow` fires (overlay surfaces below animate
-   against it as before), while --oc-kb-layout is the same height applied to the
+   against it as before), while --varin-kb-layout is the same height applied to the
    shell's LAYOUT only at the choreography point where a resize is invisible.
-   Scoped to .oc-capacitor-app so the browser PWA keeps its dvh / interactive-widget
+   Scoped to .varin-capacitor-app so the browser PWA keeps its dvh / interactive-widget
    behaviour untouched.
 
    The shell height is NOT transitioned. Animating `height` reflows the whole shell
@@ -653,7 +653,7 @@
      show: shell keeps its full height for the whole 0.25s; the composer (and, when
            pinned, the chat scroll container — see useChatAutoFollow) slides up via
            inline transforms in sync with the keyboard; at the end the shell snaps to
-           its final height (--oc-kb-layout, one reflow) and the shift is removed
+           its final height (--varin-kb-layout, one reflow) and the shift is removed
            in the same frame — visually identical, so the swap is invisible.
      hide: the shell snaps back to full height immediately (still hidden behind the
            keyboard), the composer/content are FLIP-offset to their raised position
@@ -663,12 +663,12 @@
    height, and the duration/curve mimic the native keyboard (≈0.25s,
    cubic-bezier(0.38, 0.7, 0.125, 1)). (visualViewport live-tracking would be exact
    but doesn't report under WKWebView's `resize: 'none'`, so this is the best signal.) */
-:root.oc-capacitor-app .oc-mobile-app-shell {
-  height: calc(100dvh - var(--oc-kb-layout, 0px));
+:root.varin-capacitor-app .varin-mobile-app-shell {
+  height: calc(100dvh - var(--varin-kb-layout, 0px));
   /* Reserve the bottom safe area only while the keyboard is down — when it's up the
      inset cancels it out (the home indicator is hidden and the composer should sit
      flush above the keyboard). The shell keeps its own bg behind this padding. */
-  padding-bottom: max(0px, calc(var(--oc-app-bottom-safe, 0px) - var(--oc-kb-layout, 0px)));
+  padding-bottom: max(0px, calc(var(--varin-app-bottom-safe, 0px) - var(--varin-kb-layout, 0px)));
 }
 
 /* Portal surfaces (bottom sheets, overlay panels) render at <body> level, outside
@@ -678,14 +678,14 @@
    any input above the keyboard instead of hiding it underneath. The opacity term
    preserves the scrim's enter fade (Tailwind's `transition-opacity` would otherwise
    be overridden by this rule's `transition` shorthand). */
-:root.oc-capacitor-app .oc-keyboard-inset-surface {
-  bottom: var(--oc-keyboard-inset, 0px);
+:root.varin-capacitor-app .varin-keyboard-inset-surface {
+  bottom: var(--varin-keyboard-inset, 0px);
   transition: bottom 0.25s cubic-bezier(0.38, 0.7, 0.125, 1), opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 /* While a panel is playing its enter animation, its bottom anchor snaps
    instead of transitioning — opening an overlay typically dismisses the
    keyboard in the same moment, and animating both made the entrance jerky. */
-:root.oc-capacitor-app .oc-keyboard-inset-surface.oc-keyboard-inset-snap {
+:root.varin-capacitor-app .varin-keyboard-inset-surface.varin-keyboard-inset-snap {
   transition: opacity var(--motion-dur-fade) var(--motion-ease-out);
 }
 
@@ -695,10 +695,10 @@
    Without this cap a sheet with the keyboard raised (typing inside it) can
    grow past the top safe area and slide under the notch/status bar. Subtract
    both the keyboard inset and the top safe area from the available height. */
-:root.oc-capacitor-app .pwa-overlay-panel {
+:root.varin-capacitor-app .pwa-overlay-panel {
   max-height: calc(
     100dvh
-    - var(--oc-keyboard-inset, 0px)
+    - var(--varin-keyboard-inset, 0px)
     - max(0.75rem, env(safe-area-inset-top))
   );
 }
@@ -708,18 +708,18 @@
    the height (instead of min-height: 100dvh) is what makes overflow-y-auto actually
    scroll, so a field near the bottom lifts above the keyboard rather than staying
    hidden behind it. min-height: 0 neutralises the Tailwind min-h-dvh baseline. */
-:root.oc-capacitor-app .oc-keyboard-fill-screen {
-  height: calc(100dvh - var(--oc-keyboard-inset, 0px));
+:root.varin-capacitor-app .varin-keyboard-fill-screen {
+  height: calc(100dvh - var(--varin-keyboard-inset, 0px));
   min-height: 0;
   transition: height 0.25s cubic-bezier(0.38, 0.7, 0.125, 1);
 }
 
 /* Keyboard slide choreography: the composer (and the draft title, see
-   .oc-draft-center note below) are moved with INLINE transform/transition set
+   .varin-draft-center note below) are moved with INLINE transform/transition set
    by useNativeMobileChrome — WebKit does not reliably start transitions when a
    transform changes via a CSS custom property, which parked the composer until
    the keyboard finished. Only the sliding backdrop lives here. */
-:root.oc-capacitor-app.oc-kb-animating .oc-mobile-composer {
+:root.varin-capacitor-app.varin-kb-animating .varin-mobile-composer {
   /* While sliding, the composer passes over chat content that hasn't moved (user
      scrolled up) — give it an opaque backdrop so text doesn't show through the
      form's transparent padding. */
@@ -727,7 +727,7 @@
 }
 
 /* Constant-viewport trick for the chat scroller: when the keyboard settles the
-   shell shrinks by --oc-kb-layout, but the scroller keeps its full height by
+   shell shrinks by --varin-kb-layout, but the scroller keeps its full height by
    extending that far below its (shrunken) region — behind the composer and the
    keyboard — and converts the covered strip into its own bottom padding. For
    the virtualizer NOTHING resizes across keyboard transitions: clientHeight is
@@ -735,29 +735,29 @@
    open/close reposition is a single cheap scrollTop change (the settle re-pin /
    the clamp) instead of a viewport resize that mounts rows with a visible
    pause on long chats. */
-:root.oc-capacitor-app .oc-mobile-app-shell .chat-scroll {
+:root.varin-capacitor-app .varin-mobile-app-shell .chat-scroll {
   /* The shell shrinks by the keyboard height BUT also gives up its bottom
      safe-area padding at the same moment (see the shell's padding-bottom
      formula) — so the scroller's parent only loses (keyboard − safe). Extend
      by exactly that, or the settle grows clientHeight by the safe inset and
      the pinned chat clamps one row down a beat after the keyboard opens. */
-  bottom: calc(-1 * max(var(--oc-kb-layout, 0px) - var(--oc-app-bottom-safe, 0px), 0px));
+  bottom: calc(-1 * max(var(--varin-kb-layout, 0px) - var(--varin-app-bottom-safe, 0px), 0px));
   /* The padding leg is driven by its own variable so it can be applied at the
      very START of the keyboard rise (with an immediate re-pin — the bottom of
      the chat moves up as the keyboard begins, not after it finishes), while
      the bottom-extension leg still tracks the shell's settle-time shrink. Both
      legs equal the keyboard height once settled, so the settle snap is
      geometry-neutral for the scroller. */
-  padding-bottom: var(--oc-kb-scroll-inset, var(--oc-kb-layout, 0px));
+  padding-bottom: var(--varin-kb-scroll-inset, var(--varin-kb-layout, 0px));
 }
 
 /* WKWebView draws the text caret as a native layer that ignores CSS transforms:
    after the keyboard rise it visibly flies from the pre-keyboard position to
    the final one. Hide it during the transition (+ UIKit's reposition lag,
-   see oc-kb-caret-hold timing in useNativeMobileChrome) and pop it back in. */
-:root.oc-capacitor-app.oc-kb-caret-hold textarea,
-:root.oc-capacitor-app.oc-kb-caret-hold input,
-:root.oc-capacitor-app.oc-kb-caret-hold [contenteditable] {
+   see varin-kb-caret-hold timing in useNativeMobileChrome) and pop it back in. */
+:root.varin-capacitor-app.varin-kb-caret-hold textarea,
+:root.varin-capacitor-app.varin-kb-caret-hold input,
+:root.varin-capacitor-app.varin-kb-caret-hold [contenteditable] {
   caret-color: transparent;
 }
 
@@ -765,8 +765,8 @@
    input, and its caret is not the native one either: drawSelection() hides
    that and paints a .cm-cursor element instead. Hiding caret-color alone
    would leave that element riding across the screen. */
-:root.oc-capacitor-app.oc-kb-caret-hold .cm-cursor,
-:root.oc-capacitor-app.oc-kb-caret-hold .cm-dropCursor {
+:root.varin-capacitor-app.varin-kb-caret-hold .cm-cursor,
+:root.varin-capacitor-app.varin-kb-caret-hold .cm-dropCursor {
   opacity: 0;
 }
 
@@ -776,8 +776,8 @@
    the plain [contenteditable] rule above, so the caret-hold needs its own
    heavier rule for the composer — !important plus more specificity than the
    theme's `.cm-editor .cm-content` selector. */
-:root.oc-capacitor-app.oc-kb-caret-hold .cm-editor .cm-content,
-:root.oc-capacitor-app.oc-kb-caret-hold .cm-editor .cm-content .cm-line {
+:root.varin-capacitor-app.varin-kb-caret-hold .cm-editor .cm-content,
+:root.varin-capacitor-app.varin-kb-caret-hold .cm-editor .cm-content .cm-line {
   caret-color: transparent !important;
 }
 
@@ -786,25 +786,25 @@
    the keyboard — so tighten it while the keyboard is open. Snaps at the start of the
    show animation (a ~10px pre-slide change; transitioning it would reflow the chat
    every frame). */
-:root.oc-capacitor-app.oc-keyboard-open .oc-mobile-composer {
+:root.varin-capacitor-app.varin-keyboard-open .varin-mobile-composer {
   padding-bottom: 12px;
 }
 
 /* Draft starter chips leave when the full composer takes over — with the
    composer expanded (and hence the keyboard up) there is only room for the
-   draft title. oc-composer-expanded is set in the SAME frame as the pill swap
+   draft title. varin-composer-expanded is set in the SAME frame as the pill swap
    (see useMobileComposerShell), so the chips leave together with the morph;
    the keyboard classes remain as fallbacks for keyboard-up states that do not
    go through the pill (and for mobile browsers). Instant show/hide (no squish
-   animation); the title's own keyboard compensation (.oc-draft-center below)
+   animation); the title's own keyboard compensation (.varin-draft-center below)
    carries the smooth motion. */
-:root.oc-composer-expanded .oc-draft-starters,
-:root.oc-capacitor-app.oc-keyboard-open .oc-draft-starters,
-:root.oc-browser-keyboard-open .oc-draft-starters {
+:root.varin-composer-expanded .varin-draft-starters,
+:root.varin-capacitor-app.varin-keyboard-open .varin-draft-starters,
+:root.varin-browser-keyboard-open .varin-draft-starters {
   display: none;
 }
 
-/* The draft title (.oc-draft-center) is vertically centered, so it has no
+/* The draft title (.varin-draft-center) is vertically centered, so it has no
    scroll-pinning to compensate the keyboard like the chat does. It rides the
    keyboard choreography with an INLINE transform of half the keyboard shift
    (exactly how far the center moves after the shell snap) — see the kb-movers
@@ -814,13 +814,13 @@
 /* Mobile-browser fullscreen composer (visual-viewport pinned form in
    ChatInput): the header would otherwise paint above it — the form can't
    out-stack it from inside the composer wrapper's z-10 context. */
-:root.oc-browser-kb-fullscreen .oc-mobile-header {
+:root.varin-browser-kb-fullscreen .varin-mobile-header {
   visibility: hidden;
 }
 
 /* Installed PWA (standalone) safe areas. In the in-browser page Safari's own
    chrome covers the home indicator and status bar, and the Capacitor shell has
-   its own choreography (--oc-app-bottom-safe + keyboard FLIP) — neither matches
+   its own choreography (--varin-app-bottom-safe + keyboard FLIP) — neither matches
    display-mode: standalone, so this block is PWA-only and cannot regress them.
    Standalone runs the page edge-to-edge (viewport-fit=cover), so the composer
    needs real top/bottom safe-area room of its own. */
@@ -834,20 +834,20 @@
      keyboard, and the pinned form anchors by its offsetHeight). The class flip
      is deliberately delayed (tap race, see ChatInput onBlur) — the transition
      turns that late flip into a slide instead of a dip-then-pop. */
-  :root:not(.oc-capacitor-app) .oc-mobile-composer {
+  :root:not(.varin-capacitor-app) .varin-mobile-composer {
     transition: padding-bottom 220ms cubic-bezier(0.33, 1, 0.68, 1);
   }
 
-  :root:not(.oc-capacitor-app):not(.oc-browser-keyboard-open) .oc-mobile-composer {
-    padding-bottom: calc(0.75rem + max(16px, var(--oc-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
+  :root:not(.varin-capacitor-app):not(.varin-browser-keyboard-open) .varin-mobile-composer {
+    padding-bottom: calc(0.75rem + max(16px, var(--varin-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
   }
 
   /* Fullscreen composer: ChatInput pins the form to the visual viewport from
      y = visualViewport.offsetTop, which is 0 in standalone (no URL bar), so the
      form's first row lands under the status bar / Dynamic Island. Pad the
      content down into the safe region instead. */
-  :root.oc-browser-kb-fullscreen:not(.oc-capacitor-app) .oc-mobile-composer {
-    padding-top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 0.5rem) !important;
+  :root.varin-browser-kb-fullscreen:not(.varin-capacitor-app) .varin-mobile-composer {
+    padding-top: calc(var(--varin-safe-area-top, env(safe-area-inset-top, 0px)) + 0.5rem) !important;
   }
 
   /* iOS standalone can leave 100dvh stuck at the keyboard-shrunk value after
@@ -856,18 +856,18 @@
      collapsing browser chrome, so the dynamic and large viewports are the same
      thing — pin the shell to 100lvh, which always reports full screen height.
      Initial geometry is identical (lvh == dvh on load). */
-  :root:not(.oc-capacitor-app) .h-\[100dvh\] {
+  :root:not(.varin-capacitor-app) .h-\[100dvh\] {
     height: 100lvh;
   }
 
   /* Top toasts: same offset the Capacitor shell already applies — without it
      they render under the clock / Dynamic Island. */
-  :root:not(.oc-capacitor-app) [data-sonner-toaster][data-y-position='top'] {
-    top: calc(var(--oc-safe-area-top, env(safe-area-inset-top, 0px)) + 16px) !important;
+  :root:not(.varin-capacitor-app) [data-sonner-toaster][data-y-position='top'] {
+    top: calc(var(--varin-safe-area-top, env(safe-area-inset-top, 0px)) + 16px) !important;
   }
 }
 
-@keyframes oc-composer-morph-fade {
+@keyframes varin-composer-morph-fade {
   from { opacity: 0; }
   to { opacity: 1; }
 }
@@ -876,6 +876,6 @@
    the morphing shape), but its content stays hidden until the shape has mostly
    finished growing, then fades in — no clipped controls mid-morph. Timings
    follow the 340ms wrapper morph in ChatInput. */
-.oc-composer-morph-content-fade > * {
-  animation: oc-composer-morph-fade 0.18s var(--motion-ease-out) 0.26s both;
+.varin-composer-morph-content-fade > * {
+  animation: varin-composer-morph-fade 0.18s var(--motion-ease-out) 0.26s both;
 }
