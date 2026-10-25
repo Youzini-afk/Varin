@@ -62,7 +62,7 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
             <Dialog.Description id={descriptionId} className="sr-only">
               {t('settings.window.description')}
             </Dialog.Description>
-            <SettingsView onClose={() => onOpenChange(false)} isWindowed />
+            <SettingsView onClose={() => onOpenChange(false)} isWindowed animateEntrance />
           </Dialog.Popup>
         </div>
       </Dialog.Portal>

@@ -183,6 +183,14 @@ Switching sessions:
 - `ConversationSurface` keeps painting the old conversation until the next one is ready. The old one then leaves in 110ms against the move: up when the user moved down the list. The new one's visible turns arrive top to bottom, 20ms apart, from the side moved toward. The first conversation shown is not animated.
 - The title bar's session title is a `SwapText` with `direction`, so it changes the same way. When a draft becomes a thread, its title arrives (`header-title-arrive`).
 
+The settings view (`components/views/settingsMotion.ts`):
+
+- `useNavPill` draws one selection pill for the navigation and slides it to the current page on the glide spring; items stop painting their own (`data-settings-nav-pill`). A group opening or closing keeps it with its item. About (in the footer) paints its own.
+- The direction of a page change is the move through the navigation's order (groups, then each group's order, About last). The start page's swap to General is not animated.
+- The breadcrumb's group and page change in place with that direction (`SwapText`).
+- `SettingsPageScene` keys the page by slug. The old page leaves in 110ms against the move, inert and marked `data-settings-leaving` so search reveals skip it. The new page's header and first sections arrive one after another (`staggerSettingsPage`). The navigation and breadcrumb row stay still.
+- `SettingsWindow` passes `animateEntrance`, so opening the window brings the navigation groups in one after another. The mobile and tablet layouts do not.
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -196,6 +204,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node sidebar.cjs` (`?scene=sidebar`, the real sidebar fed through its stores): the selection's travel and re-routing, pinning, a new row, removal, collapse and expansion, status icons, the hover highlight and reduced motion.
 - `node rail.cjs` (`?scene=rail`, the real rail and panel beside a main column): the active bar, the main column lock, the Git tabs' underline, the badge, the shared tooltip and reduced motion. Surfaces that need a Host (Git) are not opened there.
 - `node switch.cjs` (`?scene=switch`, three conversations in the real surface and timeline): the old conversation's exit time and direction, the turn stagger and the title direction, moving down and up.
+- `node settings.cjs` (`?scene=settings`, the real settings view with the built-in pages): the navigation pill, the old page's exit, the breadcrumb direction and the section stagger, moving down and up.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 

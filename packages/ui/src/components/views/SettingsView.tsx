@@ -3,6 +3,11 @@ import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@
 import { SettingsNavigationContext } from '@/components/sections/shared/settings-context';
 import { requestSettingsNavigation } from '@/lib/settings/drafts';
 import { SettingsDraftDialog } from '@/components/sections/shared/SettingsDraftDialog';
+import { AnimatePresence, motion, useIsPresent, type Variants } from 'motion/react';
+import { SwapText } from '@/components/motion/SwapText';
+import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
+import { EASE_EXIT, TWEENS } from '@/lib/motion/tokens';
+import { staggerSettingsPage, useNavEntrance, useNavPill } from './settingsMotion';
 import { cn, getModifierLabel } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
@@ -41,7 +46,37 @@ interface SettingsViewProps {
   /** Restrict top-level settings navigation to a specific product surface. */
   visiblePageSlugs?: SettingsPageSlug[];
   initialMobileStage?: MobileStage;
+  /** The settings window opening: its navigation groups arrive one after another. */
+  animateEntrance?: boolean;
 }
+
+/**
+ * One settings page. When the page changes it leaves in 110ms against the move
+ * through the navigation (inert, out of the way of search reveals), and the
+ * next page's header and first sections arrive one after another.
+ */
+const SettingsPageScene: React.FC<{ direction: 1 | -1; animate: boolean; children: React.ReactNode }> = ({ direction, animate, children }) => {
+  const present = useIsPresent();
+  const reduced = usePrefersReducedMotion();
+  const node = React.useRef<HTMLDivElement>(null);
+  React.useLayoutEffect(() => {
+    if (animate && node.current) staggerSettingsPage(node.current, direction);
+    // The arrival plays once, when this page mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const variants = React.useMemo<Variants>(() => ({
+    shown: { opacity: 1, y: 0 },
+    leave: (move: 1 | -1) => ({
+      opacity: 0, y: reduced ? 0 : -move * 4,
+      transition: { duration: reduced ? 0 : TWEENS.exit.duration, ease: [...EASE_EXIT] },
+    }),
+  }), [reduced]);
+  return <motion.div ref={node} className="h-full min-h-0" variants={variants} initial={false} animate="shown" exit="leave"
+    inert={!present} aria-hidden={!present || undefined} data-settings-leaving={present ? undefined : ''}
+    style={present ? undefined : { position: 'absolute', inset: 0 }}>
+    {children}
+  </motion.div>;
+};
 
 const NAV_GROUP_ORDER = ['general', 'harness', 'projects', 'connections'] as const;
 
@@ -62,7 +97,7 @@ function isPageAvailable(page: SettingsPageMeta, ctx: SettingsRuntimeContext): b
   return page.isAvailable(ctx);
 }
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav' }) => {
+export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile, isWindowed, visiblePageSlugs, initialMobileStage = 'nav', animateEntrance }) => {
   const { t } = useI18n();
   const runtimeEpoch = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const deviceInfo = useDeviceInfo();
@@ -144,6 +179,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   const activePageMeta = React.useMemo(() => {
     return settingsPageRegistrations.find((registration) => registration.meta.slug === settingsSlug)?.meta ?? null;
   }, [settingsPageRegistrations, settingsSlug]);
+
+  // Which way the navigation moved to the current page: down the list is 1.
+  // The first page, and the start page's swap to General, are not animated.
+  const pageOrder = React.useMemo(() => [
+    ...NAV_GROUP_ORDER.flatMap(group => visiblePages.filter(page => page.group === group && page.slug !== 'about')),
+    ...visiblePages.filter(page => page.slug === 'about'),
+  ].map(page => page.slug), [visiblePages]);
+  const pageMove = React.useRef<{ slug: SettingsPageSlug; direction: 1 | -1; animate: boolean }>({ slug: settingsSlug, direction: 1, animate: false });
+  if (pageMove.current.slug !== settingsSlug) {
+    const from = pageOrder.indexOf(pageMove.current.slug);
+    const to = pageOrder.indexOf(settingsSlug);
+    pageMove.current = { slug: settingsSlug, direction: from >= 0 && to >= 0 && to < from ? -1 : 1, animate: pageMove.current.slug !== 'home' };
+  }
+  const [navList, setNavList] = React.useState<HTMLDivElement | null>(null);
+  useNavPill(navList, settingsSlug);
+  useNavEntrance(navList, Boolean(animateEntrance) && !isMobile);
 
   const [collapsedGroups, setCollapsedGroups] = React.useState<Set<string>>(() => new Set());
   React.useEffect(() => {
@@ -272,7 +323,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       const escapedId = typeof CSS !== 'undefined' && CSS.escape
         ? CSS.escape(targetId)
         : targetId.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
-      const target = containerRef.current?.querySelector<HTMLElement>(`[data-settings-item="${escapedId}"]`);
+      // A page that is leaving still has its items for a moment; reveal only in the arriving one.
+      const target = [...(containerRef.current?.querySelectorAll<HTMLElement>(`[data-settings-item="${escapedId}"]`) ?? [])]
+        .find(candidate => !candidate.closest('[data-settings-leaving]'));
       if (!target || target.closest('[hidden]')) {
         return;
       }
@@ -403,9 +456,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
           </div>
         </div>
 
-        {/* Scrollable nav items */}
+        {/* Scrollable nav items; one selection pill slides between them (settingsMotion.ts). */}
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-          <div className="flex flex-col gap-0.5 px-3 pt-4 pb-3">
+          <div ref={setNavList} className="relative flex flex-col gap-0.5 px-3 pt-4 pb-3">
             {hasSearchQuery ? (
               settingsSearchResults.length > 0 ? (() => {
                 let resultIndex = 0;
@@ -495,7 +548,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
                             onClick={() => openPage(page.slug)}
                             aria-current={selected ? 'page' : undefined}
                             className={cn(
-                              'flex h-11 w-full items-center gap-2.5 rounded-lg px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
+                              'relative flex h-11 w-full items-center gap-2.5 rounded-lg px-3 overflow-hidden sm:h-9 sm:gap-2.5 sm:px-2.5',
                               selected
                                 ? 'bg-background text-foreground shadow-xs'
                                 : 'text-foreground hover:bg-interactive-hover'
@@ -724,10 +777,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
             </div>
 
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
-              {activePageMeta ? <div className="flex h-11 shrink-0 items-center gap-2 border-b border-border/40 px-5 pr-10 typography-micro text-muted-foreground">
-                <span>{t(`settings.view.nav.group.${activePageMeta.group}`)}</span><Icon name="arrow-right-s" className="size-3 shrink-0" /><span className="truncate text-foreground">{getPageTitle(settingsSlug)}</span>
+              {/* The breadcrumb changes in place, the way the navigation moved. */}
+              {activePageMeta ? <div data-settings-breadcrumb="" className="flex h-11 shrink-0 items-center gap-2 border-b border-border/40 px-5 pr-10 typography-micro text-muted-foreground">
+                <SwapText text={t(`settings.view.nav.group.${activePageMeta.group}`)} hold={0} direction={pageMove.current.direction} /><Icon name="arrow-right-s" className="size-3 shrink-0" /><SwapText text={getPageTitle(settingsSlug)} hold={0} direction={pageMove.current.direction} className="text-foreground" />
               </div> : null}
-              <div className="min-h-0 flex-1">{renderDesktopContent()}</div>
+              {/* The old page leaves quickly against the move; the new one's sections arrive one after another. */}
+              <div className="relative min-h-0 flex-1">
+                <AnimatePresence initial={false} custom={pageMove.current.direction}>
+                  <SettingsPageScene key={settingsSlug} direction={pageMove.current.direction} animate={pageMove.current.animate}>
+                    {renderDesktopContent()}
+                  </SettingsPageScene>
+                </AnimatePresence>
+              </div>
             </div>
           </>
         )}
