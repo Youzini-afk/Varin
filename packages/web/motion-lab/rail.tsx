@@ -14,7 +14,7 @@ import { normalizeContextPanelDirectoryKey, useUIStore, type MotionPreference } 
  */
 
 const DIRECTORY = '/workspace/lab';
-const PROSE = '对话优先的阅读节奏：面板打开时，主列一次缩到最终宽度，文字只重排一次，面板随后以 glide 弹簧展开到位。'.repeat(12);
+const PROSE = '对话优先的阅读节奏：面板从导轨一侧滑出，会话画布同步让出位置，正文一次排到最终宽度，再随画布居中滑到新位置。'.repeat(12);
 // Stable per path, as real API objects are: effects that depend on one must not re-run each render.
 const inert = (): unknown => {
   const children = new Map<PropertyKey, unknown>();
@@ -47,7 +47,23 @@ interface RailSample {
   /** The main column and the panel beside it. */
   main: number;
   panel: number;
+  edges: { mainLeft: number; mainRight: number; panelLeft: number; gap: number };
+  column: { left: number; width: number } | null;
+  content: { left: number; opacity: number } | null;
 }
+
+const geometry = (): Pick<RailSample, 'edges' | 'column' | 'content'> => {
+  const main = document.querySelector<HTMLElement>('[data-lab-main]')!.getBoundingClientRect();
+  const aside = document.querySelector<HTMLElement>('[data-context-panel]')!;
+  const panel = aside.getBoundingClientRect();
+  const column = document.querySelector<HTMLElement>('[data-lab-main] .chat-message-column')?.getBoundingClientRect();
+  const content = aside.querySelector<HTMLElement>(':scope > div:last-child');
+  return {
+    edges: { mainLeft: main.left, mainRight: main.right, panelLeft: panel.left, gap: Number.parseFloat(getComputedStyle(aside).marginLeft) || 0 },
+    column: column ? { left: column.left, width: column.width } : null,
+    content: content ? { left: content.getBoundingClientRect().left, opacity: Number(getComputedStyle(content).opacity) } : null,
+  };
+};
 
 export function RailLab() {
   const [gitMode, setGitMode] = React.useState<'git' | 'pr'>('git');
@@ -75,6 +91,7 @@ export function RailLab() {
           badge: badge ? { scale: getComputedStyle(badge).scale, opacity: Number(getComputedStyle(badge).opacity), text: badge.querySelector('.swap-text-current')?.textContent ?? '' } : null,
           main: document.querySelector('[data-lab-main]')?.getBoundingClientRect().width ?? 0,
           panel: document.querySelector('[data-context-panel]')?.getBoundingClientRect().width ?? 0,
+          ...geometry(),
         });
       }
       frame = requestAnimationFrame(sample);
@@ -115,12 +132,17 @@ export function RailLab() {
   return <RuntimeAPIContext.Provider value={inertApis}>
     <div className="flex h-full bg-background text-foreground">
       <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
-        <main className="agent-conversation-canvas relative min-w-0 flex-1 overflow-hidden bg-background p-6" data-lab-main>
-          {/* The Git panel's view tabs on their own, without a Git Host. */}
-          <header className="mb-4 flex h-10 w-80 items-stretch border-b border-border" data-lab-git-tabs>
-            <ContextPanelGitNavigation mode={gitMode} panelDirectory={DIRECTORY} repositoryDirectory={null} onReturnToChanges={() => undefined} />
-          </header>
-          <p className="max-w-none text-sm leading-7">{PROSE}</p>
+        {/* As MainLayout: the content is an absolute layer in the canvas, with a centred chat column. */}
+        <main className="agent-conversation-canvas relative min-w-0 flex-1 overflow-hidden bg-background" data-lab-main>
+          <div className="absolute inset-0 overflow-y-auto py-6">
+            <div className="chat-message-column">
+              {/* The Git panel's view tabs on their own, without a Git Host. */}
+              <header className="mb-4 flex h-10 w-80 items-stretch border-b border-border" data-lab-git-tabs>
+                <ContextPanelGitNavigation mode={gitMode} panelDirectory={DIRECTORY} repositoryDirectory={null} onReturnToChanges={() => undefined} />
+              </header>
+              <p className="max-w-none text-sm leading-7">{PROSE}</p>
+            </div>
+          </div>
         </main>
         <ContextPanel />
       </div>

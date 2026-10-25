@@ -1,6 +1,7 @@
 import React from 'react';
 import { documentMotionLevel } from '@/lib/motion/preference';
 import { boxWithin, createSlidingPill, placeInstantly, type SlidingPill } from '@/lib/motion/slidingPill';
+import { springTiming } from '@/lib/motion/tokens';
 
 const BAR_HEIGHT = 16;
 
@@ -54,41 +55,79 @@ export function useArrival(count: number | undefined): boolean {
   return arrived;
 }
 
+/** A centred column in the main canvas, to measure where its content is drawn. */
+const COLUMN_SELECTOR = '.chat-message-column, .chat-input-column, [data-main-glide-column]';
+
+const visibleColumn = (main: HTMLElement): HTMLElement | null => {
+  const frame = main.getBoundingClientRect();
+  for (const node of main.querySelectorAll<HTMLElement>(COLUMN_SELECTOR)) {
+    const rect = node.getBoundingClientRect();
+    if (rect.width > 0 && rect.bottom > frame.top && rect.top < frame.bottom) return node;
+  }
+  return null;
+};
+
 /**
- * While the docked panel opens or closes, the main column beside it holds a
- * single width instead of reflowing every frame of the panel's glide. Opening
- * narrows it to its final width at once; closing keeps it until the panel has
- * gone, then it widens once. The space between shows the frame behind.
+ * The docked panel and the main canvas beside it move as one (docs/design/motion-and-interaction.md
+ * §3.10). The panel's width glides and the canvas, still flexible, gives up or takes back exactly that
+ * much each frame, so there is never a gap between them. What would be expensive is the conversation
+ * re-wrapping every frame; instead its content takes its final width once, when the move starts, and a
+ * translate carries it from where it was drawn to its new place on the same glide, so a centred column
+ * slides over rather than jumping. A move that reverses mid-way starts again from where everything is.
  */
-export function useMainColumnLock(panel: React.RefObject<HTMLElement | null>, open: boolean, docked: boolean): void {
+export function useMainColumnGlide(panel: React.RefObject<HTMLElement | null>, open: boolean, docked: boolean): void {
   const previous = React.useRef(open);
+  const active = React.useRef<(() => void) | null>(null);
+
+  React.useLayoutEffect(() => () => { active.current?.(); active.current = null; }, []);
+
   React.useLayoutEffect(() => {
     const was = previous.current;
     previous.current = open;
     const aside = panel.current;
     const main = aside?.parentElement?.querySelector<HTMLElement>(':scope > main');
-    if (was === open || !aside || !main || !docked || documentMotionLevel() !== 'full') return undefined;
-    const parent = aside.parentElement!;
+    if (was === open || !aside || !main || !docked || documentMotionLevel() !== 'full') {
+      active.current?.();
+      active.current = null;
+      return;
+    }
+    // Where the content is drawn now, including an earlier move still in flight.
+    const before = visibleColumn(main)?.getBoundingClientRect().left;
+    active.current?.();
+    active.current = null;
     const style = getComputedStyle(aside);
-    // Opening: the column takes what the panel leaves once it arrives. Closing: what it has now.
-    const width = open
-      ? parent.clientWidth - (Number.parseFloat(style.getPropertyValue('--oc-context-panel-width')) || 0) - (Number.parseFloat(style.getPropertyValue('--wb-canvas-gap')) || 0)
-      : main.getBoundingClientRect().width;
-    if (!(width > 0)) return undefined;
-    Object.assign(main.style, { flex: 'none', width: `${width}px` });
+    const gap = Number.parseFloat(style.getPropertyValue('--wb-canvas-gap')) || 0;
+    // Reading the box starts the panel's width transition; it reports where that transition is now.
+    const outerNow = aside.getBoundingClientRect().width + (Number.parseFloat(style.marginLeft) || 0);
+    const outerFinal = open ? (Number.parseFloat(style.getPropertyValue('--oc-context-panel-width')) || 0) + gap : 0;
+    const box = main.getBoundingClientRect().width;
+    // The content fills the canvas inside its border.
+    const width = box + outerNow - outerFinal - (box - main.clientWidth);
+    if (!(width > 0)) return;
+    main.style.setProperty('--main-glide-width', `${width}px`);
+    main.setAttribute('data-width-gliding', '');
+    aside.setAttribute('data-gliding', '');
+    const after = visibleColumn(main)?.getBoundingClientRect().left;
+    const dx = before !== undefined && after !== undefined ? before - after : 0;
+    const layers = [...main.querySelectorAll<HTMLElement>(':scope > .absolute.inset-0')];
+    const glide = springTiming('glide');
+    const animations = Math.abs(dx) < 0.5 ? [] : layers.map(layer => layer.animate([{ translate: `${dx}px 0` }, { translate: '0 0' }], glide));
     let released = false;
     const release = () => {
       if (released) return;
       released = true;
+      clearTimeout(timer);
       aside.removeEventListener('transitionend', onEnd);
-      main.style.flex = '';
-      main.style.width = '';
+      for (const animation of animations) animation.cancel();
+      main.removeAttribute('data-width-gliding');
+      main.style.removeProperty('--main-glide-width');
+      aside.removeAttribute('data-gliding');
     };
     const onEnd = (event: TransitionEvent) => { if (event.target === aside && event.propertyName === 'width') release(); };
     aside.addEventListener('transitionend', onEnd);
     // A transition that never runs (no change, a hidden tab) still lets go.
-    const timer = setTimeout(release, 900);
-    return () => { clearTimeout(timer); release(); };
+    const timer = setTimeout(release, glide.duration + 300);
+    active.current = release;
   }, [panel, open, docked]);
 }
 

@@ -34,7 +34,13 @@
   isolation: isolate;
 }
 .workbench-sidebar { border-right-color: transparent; }
-/* The panel's width rides the glide spring; its content keeps a fixed width inside (ContextPanel). */
+/*
+ * The docked panel is a card that comes out from the rail (railMotion.ts useMainColumnGlide). Its
+ * width glides and the conversation canvas beside it gives up exactly that much each frame, so the
+ * two never part. The card's content keeps its own width and rides the leading edge, trailing it a
+ * little, so it slides in rather than being uncovered from the divider; leaving, it stays readable
+ * and fades only at the end. While it moves the card casts a soft shadow onto the canvas.
+ */
 .workbench-resource-canvas {
   border-radius: 10px;
   transition-duration: var(--motion-dur-glide);
@@ -44,7 +50,21 @@
 .workbench-resource-canvas { --wb-canvas-gap: 6px; }
 .workbench-resource-canvas[data-open="true"] { margin-left: var(--wb-canvas-gap); }
 .workbench-resource-canvas[data-expanded="true"] { margin-left: 0; }
-.workbench-resource-canvas > div { transition-duration: var(--motion-dur-glide); transition-timing-function: var(--motion-ease-glide); }
+.workbench-resource-canvas[data-gliding] { box-shadow: -14px 0 28px -22px color-mix(in srgb, var(--foreground) 38%, transparent); }
+.workbench-resource-canvas > div {
+  transition-property: width, opacity, translate;
+  transition-duration: var(--motion-dur-glide), var(--motion-dur-fade), var(--motion-dur-glide);
+  transition-timing-function: var(--motion-ease-glide), var(--motion-ease-out), var(--motion-ease-glide);
+}
+.workbench-resource-canvas[data-open="false"] > div {
+  opacity: 0;
+  translate: 28px 0;
+  transition-duration: var(--motion-dur-glide), 200ms, var(--motion-dur-glide);
+  transition-delay: 0s, 220ms, 0s;
+  transition-timing-function: var(--motion-ease-glide), var(--motion-ease-exit), var(--motion-ease-glide);
+}
+/* The conversation takes its final width once while the canvas glides around it. */
+.agent-conversation-canvas[data-width-gliding] > .absolute.inset-0 { right: auto; width: var(--main-glide-width); }
 .workbench-rail-reveal {
   height: 100%;
   width: 44px;
@@ -338,7 +358,7 @@
   transition: background-color var(--wb-state-duration) var(--wb-ease), border-color var(--wb-state-duration) var(--wb-ease);
 }
 .workbench-resource-canvas {
-  transition-property: width, margin-left, background-color, border-color;
+  transition-property: width, margin-left, background-color, border-color, box-shadow;
 }
 
 /* The content owns density; a narrow material does not change the saved pane arrangement. */

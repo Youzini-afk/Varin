@@ -12,7 +12,7 @@ import { ProjectContextPanel } from './RightSidebarTabs';
 import { WorkspaceRecoveryPanel } from './WorkspaceRecoveryPanel';
 import { SidebarFilesTree } from './SidebarFilesTree';
 import { ContextPanelGitNavigation } from './ContextPanelGitNavigation';
-import { useMainColumnLock } from './railMotion';
+import { useMainColumnGlide } from './railMotion';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { cn } from '@/lib/utils';
@@ -471,7 +471,7 @@ export const ContextPanel: React.FC = () => {
   const resizingWidthRef = React.useRef<number | null>(null);
   const activeResizePointerIDRef = React.useRef<number | null>(null);
   const panelRef = React.useRef<HTMLElement | null>(null);
-  useMainColumnLock(panelRef, isOpen, !isExpanded && !panelState?.expanded);
+  useMainColumnGlide(panelRef, isOpen, !isExpanded && !panelState?.expanded);
   const chatFrameRefs = React.useRef<Map<string, HTMLIFrameElement>>(new Map());
   const chatFrameSrcByTabIDRef = React.useRef<Map<string, EmbeddedSessionChatURLCacheEntry>>(new Map());
   const wasOpenRef = React.useRef(false);
@@ -1060,12 +1060,12 @@ export const ContextPanel: React.FC = () => {
       )}
       <div
         className={cn(
-          'relative z-10 flex h-full min-h-0 shrink-0 flex-col motion-reduce:transition-none',
           // Width animates in sync with the panel (surface switches, resize
           // release); during the drag itself nothing resizes — only the ghost
-          // guide line moves.
-          'transition-[width,opacity]',
-          !isOpen && 'pointer-events-none select-none opacity-0'
+          // guide line moves. Opening and closing move it with the panel's
+          // leading edge (workbench.css).
+          'relative z-10 flex h-full min-h-0 shrink-0 flex-col motion-reduce:transition-none',
+          !isOpen && 'pointer-events-none select-none'
         )}
         // px in the expanded state too: px↔% width changes cannot interpolate,
         // so the header controls would snap instead of riding the animation.
