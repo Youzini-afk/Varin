@@ -1,5 +1,3 @@
-import { browserMessages } from './browser';
-import { officeReaderMessages } from './office';
 import { settingsDict } from './fr.settings';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';

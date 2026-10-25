@@ -1583,9 +1583,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   memoryOrganizerRef.current = memoryOrganizer;
   const inspectSourceInventory = createSourceGitInventory({ spawn: kernelProcesses.spawn, gitBinary: platformEnvironmentRuntime.resolveGitBinaryForSpawn(), env: { ...process.env, PATH: platformEnvironmentRuntime.buildAugmentedPath() } });
   const harnessWorkingStates = createKernelWorkspaceWorkingStateAccess(kernelStorageAdapter, foundationalRecoveryEngine, kernelRecoveryStore, scopeDocumentWorkspace);
-  let materialWriteSettled: ((scope: string, threadId: string) => Promise<void>) | undefined;
+  const materialWriteSettled: { current?: (scope: string, threadId: string) => Promise<void> } = {};
   const materialStorage = createMaterialStorageAccess({ kernel: kernelClient, storage: kernelStorageAdapter,
-    onMutationSettled: async (scope, threadId) => materialWriteSettled?.(scope, threadId),
+    onMutationSettled: async (scope, threadId) => materialWriteSettled.current?.(scope, threadId),
     onCleanupError: () => console.error('[Materials] Original material cleanup requires attention') });
   const mediaResources = createMediaResourceStore(materialStorage);
   const webMaterials = createWebMaterialStore(materialStorage);
@@ -1963,7 +1963,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
   });
-  materialWriteSettled = async (scope, threadId) => {
+  materialWriteSettled.current = async (scope, threadId) => {
     // A UI upload admitted before deletion can settle after Catalog maintenance.
     // Its original namespace still identifies the bytes, even after lineage retires.
     if ((await agentRuntime.thread(threadId)).deleted_at_ms !== null) {

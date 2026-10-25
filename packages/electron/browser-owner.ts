@@ -469,7 +469,7 @@ export class ElectronBrowserOwner implements BrowserOwner {
       const check = () => {
         const download = this.downloadsById.get(request.downloadId!);
         if (!download || download.state.pageId !== entry.id) { cleanup(); reject(new Error('The selected download is unavailable')); }
-        else if (download.state.state !== 'progressing') { cleanup(); download.state.state === 'completed' ? resolve() : reject(new Error(`Download ${download.state.state}`)); }
+        else if (download.state.state !== 'progressing') { cleanup(); if (download.state.state === 'completed') resolve(); else reject(new Error(`Download ${download.state.state}`)); }
       };
       const abort = () => { cleanup(); reject(signal.reason); };
       const stop = this.subscribe(event => { if (event.kind === 'download' && event.download.downloadId === request.downloadId) check(); });

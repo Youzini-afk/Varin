@@ -1,5 +1,3 @@
-import { browserMessages } from './browser';
-import { officeReaderMessages } from './office';
 import { dict as enDict, type I18nKey } from './en';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';

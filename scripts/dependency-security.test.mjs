@@ -240,3 +240,75 @@ test('ordinary stale reuse and explicit/private cookie caching remain available'
     policy({ 'cache-control': 'max-age=600', 'set-cookie': 'fixture=private' }, false),
   ]) assert.ok(current.evaluateRequest(staleRequest).response);
 });
+
+// pptxgenjs declares image-size without importing it in its emitted runtime;
+// retain a safe installed parser for the dependency tree and any future use.
+test('the PPTX dependency rejects zero-length image containers without hanging', () => {
+  const pptx = createRequire(web.resolve('pptxgenjs'));
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { imageSize } = require(process.argv[1]);
+    const box = (type, payload = Buffer.alloc(0), size = 8 + payload.length) => {
+      const header = Buffer.alloc(8); header.writeUInt32BE(size); header.write(type, 4);
+      return Buffer.concat([header, payload]);
+    };
+    const fixtures = [
+      Buffer.from('69636e73000000106963703400000000', 'hex'),
+      Buffer.concat([box('JXL ', Buffer.from('0d0a870a', 'hex')), box('ftyp', Buffer.from('jxl ')), box('free', Buffer.alloc(0), 0)]),
+      Buffer.concat([box('ftyp', Buffer.from('heic')), box('free', Buffer.alloc(0), 0)]),
+    ];
+    for (const bytes of fixtures) assert.throws(() => imageSize(bytes));
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+    assert.deepEqual(imageSize(png), { width: 1, height: 1, type: 'png' });
+  `, pptx.resolve('image-size')], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
+
+test('installed upload middleware tolerates a late asynchronous filter after teardown', () => {
+  const result = spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert/strict');
+    const { PassThrough } = require('node:stream');
+    const multer = require(process.argv[1]);
+    const timer = setTimeout(() => { throw new Error('upload teardown did not finish'); }, 2000);
+    const req = new PassThrough();
+    const failure = new Error('rejected');
+    let resume, parser, calls = 0;
+    const body = ['first', 'second'].map(name => '--boundary\\r\\nContent-Disposition: form-data; name="' + name + '"; filename="a.txt"\\r\\nContent-Type: text/plain\\r\\n\\r\\nx\\r\\n').join('');
+    req.headers = { 'content-type': 'multipart/form-data; boundary=boundary', 'content-length': Buffer.byteLength(body) };
+    const upload = multer({ fileHwm: 1,
+      streamHandler(request, stream) { parser = stream; request.pipe(stream); },
+      fileFilter(request, file, callback) {
+        if (file.fieldname === 'first') resume = callback;
+        else request.once('end', () => setImmediate(() => callback(failure)));
+      }
+    }).any();
+    upload(req, null, error => {
+      assert.equal(error, failure); calls++;
+      setImmediate(() => {
+        parser.once('close', () => { assert.equal(calls, 1); assert.deepEqual(req.files, []); clearTimeout(timer); });
+        resume(null, true);
+      });
+    });
+    req.end(body);
+  `, web.resolve('multer')], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+  assert.equal(result.status, 0, result.stderr || result.error?.message);
+});
+
+test('installed schema URI resolution rejects encoded schemes and keeps ordinary references', () => {
+  const contract = createRequire(new URL('../packages/extension-contract/package.json', import.meta.url));
+  const ajv = createRequire(contract.resolve('ajv'));
+  const uri = ajv('fast-uri');
+  assert.notEqual(uri.normalize('%6Aavascript:alert(1)'), 'javascript:alert(1)');
+  assert.equal(uri.resolve('https://example.com/schemas/root.json', 'child.json'), 'https://example.com/schemas/child.json');
+});
+
+test('installed build serializer escapes a script terminator at a function boundary', () => {
+  const pwa = createRequire(web.resolve('vite-plugin-pwa'));
+  const workbox = createRequire(pwa.resolve('workbox-build'));
+  const terser = createRequire(workbox.resolve('@rollup/plugin-terser'));
+  const serialize = terser('serialize-javascript');
+  function payload() {}
+  payload.toString = () => 'function payload(){}//</script';
+  assert.doesNotMatch(serialize({ payload }, { space: 2 }), /<\/script/i);
+  assert.equal(serialize({ normal: 'value' }), '{"normal":"value"}');
+});

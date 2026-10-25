@@ -58,3 +58,21 @@ it('creates editable presentation charts and changes one text shape without rebu
   expect(preserved.length).toBeGreaterThan(1);
   for (const entry of preserved) expect(output.getEntry(entry.entryName)!.getData()).toEqual(entry.getData());
 });
+
+it('creates a presentation with an embedded PNG and rejects unsupported image bytes', async () => {
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
+  const content = { format: 'pptx' as const, slides: [{ objects: [
+    { kind: 'image' as const, path: 'figure.png', x: 1, y: 2, width: 3, height: 4 },
+  ] }] };
+  const requested: string[] = [];
+  const bytes = await createOfficeFile(content, async path => { requested.push(path); return png; });
+  expect(requested).toEqual(['figure.png']);
+  const archive = new AdmZip(bytes);
+  const image = archive.getEntries().find(entry => entry.entryName.startsWith('ppt/media/') && entry.entryName.endsWith('.png'));
+  expect(image?.getData()).toEqual(png);
+  const relations = archive.readAsText('ppt/slides/_rels/slide1.xml.rels');
+  expect(relations).toContain(`../media/${image!.entryName.split('/').pop()}`);
+  expect(archive.readAsText('ppt/slides/slide1.xml')).toContain('<p:pic>');
+  await expect(createOfficeFile(content, async () => Buffer.from('not an image')))
+    .rejects.toThrow('Unsupported presentation image format: figure.png');
+});

@@ -27,6 +27,18 @@ Electron 44.9.3 includes the compromised-intermediate-certificate mitigation. No
 authentication and event streams use standard certificate verification: untrusted/self-signed
 endpoints must establish trust rather than relying on the former verification bypass.
 
+安全更新固定到已发布的 fast-uri 3.1.9、multer 2.5.0、serialize-javascript 7.1.3 和
+image-size 2.0.3。审计从实际消费者解析依赖：通过 AJV 验证 URI 解析，通过 Workbox/Terser
+验证脚本序列化，通过已安装的 Multer 验证请求清理后的异步过滤器回调；异常图片容器在有超时的
+子进程中检查。正常图片嵌入使用真实 `createOfficeFile`，核对 PPTX 中的媒体字节与关系引用。
+
+PptxGenJS 4.0.1 仍声明 image-size ^1.2.1，但已发布的 CJS/ESM 运行时不导入此依赖。
+根 override 移除实际安装图中的易受攻击解析器，不为未使用的 v1 API 增加兼容适配；Varin 向
+`addImage` 提供经校验的图片字节和明确几何尺寸。image-size v2 使用具名导出，并将文件读取
+移到 `image-size/fromFile`；未来直接消费者必须使用此 API，不能假定 v1 的可调用导出/路径接口。
+待 PptxGenJS 正式发布安全依赖范围后，经实际图片创建和开发/生产解析验证再移除 override。
+两个 Bun 锁文件须保留相同修复；发布 CI 还负责完整 staged production 布局及打包原生运行时的验收。
+
 Dependabot checks Bun, Cargo, and GitHub Actions dependencies once every 24 hours at 00:00 UTC,
 including weekends, with no additional release cooldown. Discovery is scheduled, not an upstream-release
 webhook, so GitHub's
