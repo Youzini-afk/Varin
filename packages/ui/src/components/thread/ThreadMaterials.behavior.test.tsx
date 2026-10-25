@@ -81,6 +81,7 @@ import { listEditorContextAttachments, resetEditorContextAttachments } from '@/l
 import { threadComposerKey, threadHostKey } from '@/stores/useThreadStore';
 import { threadSummary } from '@/test/threadFixtures';
 import { ThreadMaterials } from './ThreadMaterials';
+import { toast } from '@/components/ui';
 import { ThreadRequestError } from '@varin/application-client';
 import type { ThreadMaterialsAPI, ThreadIdentity, ThreadResearchAPI, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import { ThreadResearch } from './ThreadResearch';
@@ -178,6 +179,7 @@ afterEach(async () => {
   if (priorObjectUrl) URL.createObjectURL = priorObjectUrl;
   if (priorRevokeUrl) URL.revokeObjectURL = priorRevokeUrl;
   vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:original', branchId: 'branch:original' };
@@ -207,8 +209,11 @@ const render = async (api: Pick<ThreadMaterialsAPI, 'read'>, selected = identity
 
 it('opens a tool-result material through the original Thread and shares page, text, structure and errors', async () => {
   const read = vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => respond(request)); const api = { read };
-  await render(api); expect(read).not.toHaveBeenCalled(); await click('Read PDF');
-  expect(read.mock.calls.map(call => [call[0], call[1].view])).toEqual([[identity, 'overview'], [identity, 'page-image']]);
+  await render(api); expect(read).not.toHaveBeenCalled(); await click('https://example.test/paper.pdf');
+  // Format discovery and the reader may each inspect the retained material;
+  // the contract is its original scope and page, not a fixed number of reads.
+  expect(read).toHaveBeenCalledWith(identity, expect.objectContaining({ snapshotId: 'snapshot-a', view: 'page-image', page: 1 }), expect.any(AbortSignal));
+  expect(read.mock.calls.every(([owner, request]) => owner.threadId === identity.threadId && owner.branchId === identity.branchId && request.snapshotId === 'snapshot-a')).toBe(true);
   expect(container.querySelector('img')?.getAttribute('src')).toBe('blob:page-1');
   expect(mocks.runtimeFetch).not.toHaveBeenCalled();
   await click('harness.pdf.textView');
@@ -228,12 +233,12 @@ it('rejects late page images after Thread, API, source or Host changes and dismi
   for (const change of ['thread', 'api', 'source', 'host', 'close'] as const) {
     const pending = deferred<FetchResult>();
     const read = vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => request.view === 'page-image' && request.snapshotId === 'snapshot-a' ? pending.promise : respond(request));
-    const api = { read }; await render(api); await click('Read PDF');
+    const api = { read }; await render(api); await click('https://example.test/paper.pdf');
     const signal = read.mock.calls.find(call => call[1].view === 'page-image')?.[2];
     if (change === 'close') await click('Close material');
     if (change === 'thread') await render(api, { ...identity, threadId: 'thread:new' });
     if (change === 'api') await render({ read: vi.fn(async (_owner, request) => respond(request)) });
-    if (change === 'source') { await render(api, identity, okOverview('snapshot-b', 'hash-a')); await click('Read PDF'); }
+    if (change === 'source') { await render(api, identity, okOverview('snapshot-b', 'hash-a')); await click('https://example.test/paper.pdf'); }
     if (change === 'host') await act(async () => { mocks.changing.forEach(listener => listener()); mocks.generation += 1; mocks.changed.forEach(listener => listener()); await settle(); });
     expect(signal?.aborted).toBe(true); objectUrlMock.mockClear();
     await act(async () => { pending.resolve(respond({ snapshotId: 'snapshot-a', view: 'page-image', page: 1 })); await settle(); });
@@ -250,25 +255,30 @@ it('routes a citation only to its enclosing Thread and never consumes another co
   await act(async () => { container.querySelector('a')!.dispatchEvent(event); await settle(); });
   expect(read.mock.calls.every(call => call[0].threadId === identity.threadId)).toBe(true);
   expect(read.mock.calls[0]?.[1]).toEqual({ snapshotId: 'material:citation', view: 'overview' });
-  expect(read.mock.calls[1]?.[1]).toMatchObject({ page: 2 }); expect(globalEvent).not.toHaveBeenCalled();
+  expect(read).toHaveBeenCalledWith(identity, expect.objectContaining({ snapshotId: 'material:citation', view: 'page-image', page: 2 }), expect.any(AbortSignal));
+  expect(globalEvent).not.toHaveBeenCalled();
+  const readsBeforeGlobalEvent = [...read.mock.calls];
   await act(async () => { window.dispatchEvent(new CustomEvent(PDF_MATERIAL_OPEN_EVENT, { detail: { href: formatPdfMaterialCitationUrl({ snapshotId: 'foreign', page: 1 }) } })); await settle(); });
-  expect(read).toHaveBeenCalledTimes(2); window.removeEventListener(PDF_MATERIAL_OPEN_EVENT, globalEvent);
+  expect(read.mock.calls).toEqual(readsBeforeGlobalEvent); window.removeEventListener(PDF_MATERIAL_OPEN_EVENT, globalEvent);
 });
 
 it('finds WebSearchResult PDF references without recursively scanning arbitrary nested data', async () => {
   const api = { read: vi.fn<ThreadMaterialsAPI['read']>(async (_owner, request) => respond(request)) };
-  await render(api, identity, { items: [{ fetch: okOverview('snapshot-a', 'hash-a') }] }); await click('Read PDF'); expect(api.read).toHaveBeenCalled();
+  await render(api, identity, { items: [{ fetch: okOverview('snapshot-a', 'hash-a') }] }); await click('https://example.test/paper.pdf'); expect(api.read).toHaveBeenCalled();
   await render(api, identity, { arbitrary: okOverview('snapshot-a', 'hash-a') });
-  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Read PDF'))).toBe(false);
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('https://example.test/paper.pdf'))).toBe(false);
 });
 
 it('shows a missing material as a finished error rather than an empty page or endless loader', async () => {
+  const errorToast = vi.spyOn(toast, 'error').mockReturnValue('missing-material');
   const read = vi.fn<ThreadMaterialsAPI['read']>(async () => ({ status: 'snapshot-missing', snapshotId: 'snapshot-a' }));
-  await render({ read }); await click('Read PDF');
-  expect(container.textContent).toContain('snapshot-missing');
+  await render({ read }); await click('https://example.test/paper.pdf');
+  expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/unavailable/i));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
   expect(container.textContent).not.toContain('harness.pdf.loading');
   expect(container.querySelector('img')).toBeNull();
-  expect(read).toHaveBeenCalledTimes(1);
+  expect(read).toHaveBeenCalledWith(identity, { snapshotId: 'snapshot-a', view: 'overview' }, expect.any(AbortSignal));
+  expect(read.mock.calls.some(([, request]) => request.view === 'page-image')).toBe(false);
 });
 
 const originalAttempt: ExperimentAttemptView = { attemptId: 'attempt:original', specId: 'spec:original',

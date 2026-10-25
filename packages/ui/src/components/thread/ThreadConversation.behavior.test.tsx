@@ -12,6 +12,7 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, FetchResult } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { toast } from '@/components/ui';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
 import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
@@ -923,6 +924,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
 
 it('uploads original PDF bytes under the selected Thread and sends its retained source snapshot with a text-only model', async () => {
   const f = fixture();
+  const errorToast = vi.spyOn(toast, 'error').mockReturnValue('missing-material');
   f.api.listModels = async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model', acceptsImages: false }];
   const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
   vi.mocked(f.api.materials.read).mockResolvedValue({ status: 'snapshot-missing', snapshotId: 'retained-original' });
@@ -935,8 +937,12 @@ it('uploads original PDF bytes under the selected Thread and sends its retained 
     data: Buffer.from(await file.arrayBuffer()).toString('base64') }, expect.any(AbortSignal));
   expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')?.textContent).toContain(file.name);
   await act(async () => button('harness.pdf.openReader · original.pdf').click());
-  expect(f.api.materials.read).toHaveBeenCalledExactlyOnceWith(identity, { snapshotId: 'retained-original', view: 'overview' }, expect.any(AbortSignal));
-  expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(f.api.materials.read).toHaveBeenCalledWith(identity, { snapshotId: 'retained-original', view: 'overview' }, expect.any(AbortSignal));
+  // A missing retained material fails before mounting a PDF/Office reader,
+  // but its accepted attachment remains available for the original submission.
+  expect(errorToast).toHaveBeenCalledWith(expect.stringMatching(/unavailable/i));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')?.textContent).toContain(file.name);
   expect(button('Send').disabled).toBe(false);
   await submitForm(composerForm());
   expect(f.submit).toHaveBeenCalledWith(expect.objectContaining({ ...identity, text: '', images: [], materials: [{ snapshotId: 'retained-original' }] }));
