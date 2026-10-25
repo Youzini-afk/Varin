@@ -153,6 +153,8 @@
   grid-area: 1 / 1;
   display: inline-flex;
 }
+/* An empty cell takes no space, so a row's gap is the same as without it. */
+.swap-icon:not(:has(> [data-swap-leaving])):has(> .swap-icon-current:empty) { display: none; }
 :root[data-motion="reduced"] .swap-text[data-live] > .swap-text-current,
 :root[data-motion="off"] .swap-text[data-live] > .swap-text-current {
   background: none;
@@ -245,3 +247,34 @@
 .dark .menu-highlight[data-destructive] { background: color-mix(in srgb, var(--destructive) 20%, transparent); }
 [data-menu-highlight] { position: relative; }
 [data-menu-highlight] [role^="menuitem"]:is([data-highlighted], :hover):not([data-checked]) { background-color: transparent; }
+
+/*
+ * Sidebar (components/conversation/FlipList.tsx, sidebarHighlights.ts). The selection colour
+ * travels between rows as one copy and hands back to the row; one hover
+ * highlight follows the pointer instead of each row lighting up alone.
+ */
+.sidebar-selection,
+.sidebar-hover {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--radius-md, 6px);
+  pointer-events: none;
+}
+.sidebar-selection { background: var(--interactive-selection); }
+[data-sidebar-row][data-selection-arriving] { background-color: transparent; }
+.sidebar-hover {
+  width: var(--hover-width, 0);
+  height: var(--hover-height, 0);
+  translate: var(--hover-x, 0) var(--hover-y, 0);
+  background: var(--interactive-hover);
+  transition: translate var(--motion-dur-snap) var(--motion-ease-snap), width var(--motion-dur-snap) var(--motion-ease-snap),
+    height var(--motion-dur-snap) var(--motion-ease-snap), opacity var(--motion-dur-fade) var(--motion-ease-out);
+}
+.sidebar-hover[data-hidden] { opacity: 0; }
+.sidebar-hover[data-placing] { transition: opacity var(--motion-dur-fade) var(--motion-ease-out); }
+[data-sidebar-hover] [data-sidebar-row]:not([data-current], [data-popup-open]):hover { background-color: transparent; }
+@media (hover: none) {
+  .sidebar-hover { display: none; }
+  [data-sidebar-hover] [data-sidebar-row]:not([data-current], [data-popup-open]):hover { background-color: revert-layer; }
+}

@@ -155,6 +155,18 @@ Popovers share rules in `styles/motion.css`:
 - Tooltips wait `TOOLTIP_DELAY_MS` (520ms) once. Within `TOOLTIP_GROUP_MS` (400ms) of one closing, the next opens at once. `TooltipProvider` maps Radix's `skipDelayDuration` to Base UI's `timeout`. A tooltip's own `delayDuration` goes to its trigger, so it stays in the shared group.
 - Trigger labels that name a choice (model, thinking level, delivery mode) use `SwapText` with `resize`: the label changes in place and the trigger's width glides.
 
+The conversation sidebar keeps plain React rows and layers motion on the DOM:
+
+- `FlipList` (`components/conversation/FlipList.tsx`) is the list's scroller. Items carry `data-flip-key`: a session (its row, tree line and subsessions together), a project section and the projects container. Collapsible ones carry `data-collapsed` while collapsed. Before every commit it measures the items; after it, it animates what changed:
+  - Moves (a pin, new activity, a group collapsing above) slide on glide from where they were drawn. A nested item slides only by its offset relative to its keyed ancestor.
+  - A session never seen before settles in (`data-flip-arrive`). Rows of a group that expands enter 20ms apart. The first rows of a catalog fade in.
+  - A removed item leaves as its own detached node, fading and drifting left, and the rows below close the gap 70ms later. Rows of a collapsing group just fade.
+  - A change of `instantKey` (the search query) is not animated. More than 12 arrivals or 80 moves at once are treated as a reload.
+- `useSelectionGlide` (`sidebarHighlights.ts`) carries the selection between rows. A copy of the selection colour travels on the glide spring to the new row's live position, keeps its velocity when the selection changes again, and hands back to the row (`data-selection-arriving` while it travels). Without a previous row, the colour fades in place.
+- `useHoverPill` draws one hover highlight for the list. It slides to the row under the pointer on snap and leans a couple of pixels toward the pointer; rows stop painting their own hover. Touch has none.
+- Row status icons (running, error, unread, pinned, default) change in place with `SwapIcon` and settle.
+- `Sidebar` opens and closes on the glide curve. Its content keeps a fixed width; it fades in as the width opens and leaves first on the exit tween.
+
 The motion lab (`packages/web/motion-lab`, development only) mounts real conversation components on simulated streams. Start it with `bunx vite --config motion-lab/vite.config.ts` in `packages/web`; `?scene=send` opens the empty home with the real composer instead of a long Thread. Headless checks are in `motion-lab/checks`:
 
 - `node follow.cjs`: following, release, return, anchoring and reduced motion, frame by frame.
@@ -165,6 +177,7 @@ The motion lab (`packages/web/motion-lab`, development only) mounts real convers
 - `node layout.cjs`: whether the row below follows a row that opens and closes, after paint.
 - `node send.cjs`: the departing home, docking, icon swaps, the flight's arc and landing, the height glide and reduced motion.
 - `node popover.cjs`: a menu's growth, highlight slide and exit, and tooltip grouping.
+- `node sidebar.cjs` (`?scene=sidebar`, the real sidebar fed through its stores): the selection's travel and re-routing, pinning, a new row, removal, collapse and expansion, status icons, the hover highlight and reduced motion.
 
 They need `PLAYWRIGHT_PATH` and `LAB_BROWSER` when Playwright and its browser are not installed in the workspace.
 

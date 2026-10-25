@@ -139,9 +139,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
                 maxWidth: `${currentWidth}px`,
                 ['--oc-left-sidebar-width' as string]: `${isResizing ? currentWidth : openWidth}px`,
                 overflowX: 'clip',
+                // The width rides the glide spring; the content inside keeps its width and only fades.
                 transitionProperty: isResizing ? 'none' : 'width, min-width, max-width',
-                transitionDuration: 'var(--wb-panel-duration, 280ms)',
-                transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+                transitionDuration: 'var(--motion-dur-glide)',
+                transitionTimingFunction: 'var(--motion-ease-glide)',
             }}
             inert={!isOpen}
             aria-hidden={!isOpen || appliedWidth === 0}
@@ -163,7 +164,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
             )}
             <div
                 className={cn(
-                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:transition-none',
+                    'relative z-10 flex h-full shrink-0 flex-col transition-opacity motion-reduce:transition-none',
+                    // Arriving content fades in as the width opens; leaving content goes first.
+                    isOpen ? 'delay-[60ms] duration-[var(--motion-dur-fade)] ease-[var(--motion-ease-out)]' : 'duration-[var(--motion-dur-exit)] ease-[var(--motion-ease-exit)]',
                     isResizing && 'pointer-events-none',
                     !isOpen && 'pointer-events-none select-none opacity-0'
                 )}

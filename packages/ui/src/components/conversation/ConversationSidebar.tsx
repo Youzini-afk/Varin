@@ -3,6 +3,9 @@ import { ProjectActionsButton } from '@/components/layout/ProjectActionsButton';
 import { useSidebarCatalog, type SidebarConversation as SessionSummary, type ConversationSessionAttentionState } from './sidebarCatalog';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { Icon } from '@/components/icon/Icon';
+import { SwapIcon } from '@/components/motion/SwapIcon';
+import { FlipList } from './FlipList';
+import { useHoverPill, useSelectionGlide } from './sidebarHighlights';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -154,6 +157,8 @@ interface SessionRowProps {
   onContextTarget(session: SessionSummary): void;
   onBulkAction(action: 'archive' | 'delete'): void;
   onExitSelection(): void;
+  /** A subsession draws its branch of the tree line beside it. */
+  treeLine?: 'middle' | 'last';
 }
 
 const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
@@ -261,8 +266,17 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
     </>}
   </>;
 
+  // One keyed element per session (FlipList): its row, tree line and children move together.
   return (
-    <div>
+    <div data-flip-key={session.id} data-flip-arrive="" data-collapsed={hasChildren && !expanded ? '' : undefined}
+      className={props.treeLine ? 'relative pl-2' : undefined}>
+      {props.treeLine ? <>
+        <span aria-hidden="true" className={cn(
+          'pointer-events-none absolute left-0 top-0 border-l border-border/60',
+          props.treeLine === 'last' ? 'h-4' : 'bottom-0',
+        )} />
+        <span aria-hidden="true" className="pointer-events-none absolute left-0 top-4 w-2 border-t border-border/60" />
+      </> : null}
       <ContextMenu
         disabled={props.editingId === session.id}
         onOpenChange={(open) => {
@@ -275,8 +289,11 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
       >
       <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
       <div
+        data-sidebar-row={session.id}
+        data-current={isCurrent ? '' : undefined}
         className={cn(
-          'group/session flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
+          // Positioned so it paints over the travelling selection and hover highlights.
+          'group/session relative flex min-h-8 items-center gap-1 rounded-md px-1.5 text-muted-foreground transition-colors',
           'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
           isCurrent ? 'bg-interactive-selection font-medium text-foreground' : 'hover:bg-interactive-hover hover:text-foreground',
           selected && 'bg-interactive-selection text-foreground',
@@ -318,6 +335,8 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         )}
 
         {session.parentId && <AgentAvatar identity={session.id} avatar={session.avatar} size={20} />}
+        {/* The status changes in place: the previous icon rises out and the next settles in. */}
+        <SwapIcon className="shrink-0" enter="settle" swapKey={isBusy ? 'busy' : attention?.kind === 'error' ? 'error' : attention ? 'unread' : pinned ? 'pinned' : !session.parentId ? 'default' : 'none'}>
         {isBusy ? (
           <span
             className="mx-[3px] size-2 shrink-0 rounded-full bg-primary"
@@ -335,6 +354,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         ) : !session.parentId ? (
           <Icon name="chat-4" className="size-3.5 shrink-0 text-muted-foreground/70" />
         ) : null}
+        </SwapIcon>
 
         {props.editingId === session.id ? (
           <Input
@@ -403,14 +423,8 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
       {hasChildren && expanded && (
         <div className="ml-3">
           {node.children.map((child, index) => (
-            <div key={child.session.id} className="relative pl-2">
-              <span aria-hidden="true" className={cn(
-                'pointer-events-none absolute left-0 top-0 border-l border-border/60',
-                index === node.children.length - 1 ? 'h-4' : 'bottom-0',
-              )} />
-              <span aria-hidden="true" className="pointer-events-none absolute left-0 top-4 w-2 border-t border-border/60" />
-              <ConversationSessionRow {...props} node={child} />
-            </div>
+            <ConversationSessionRow key={child.session.id} {...props} node={child}
+              treeLine={index === node.children.length - 1 ? 'last' : 'middle'} />
           ))}
         </div>
       )}
@@ -428,6 +442,9 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const { summaries, attentionBySession, activeSessions } = useSidebarCatalog();
   const allSummaries = summaries;
   const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const listRef = React.useRef<HTMLDivElement | null>(null);
+  useSelectionGlide(listRef, currentSessionId);
+  useHoverPill(listRef);
   const catalogLoaded = useThreadStore(state => state.catalogLoaded);
   const catalogLoading = useThreadStore(state => state.catalogLoading);
   const lastError = useThreadStore(state => state.catalogError);
@@ -921,7 +938,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
       </>
     );
     return (
-      <section key={group.id} className="group/workspace mb-2">
+      <section key={group.id} className="group/workspace mb-2" data-flip-key={`group:${group.id}`} data-collapsed={expanded ? undefined : ''}>
       {project ? (
         <ProjectActionsButton
           projectRef={{ id: project.id, path: project.path }}
@@ -931,7 +948,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             trigger: (
               <div
                 className={cn(
-                  'flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+                  'relative flex min-w-0 select-none items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
                   'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
                   stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
                 )}
@@ -1027,7 +1044,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
         <ContextMenu>
         <ContextMenuTrigger asChild onKeyDown={openSidebarMenuWithKeyboard}>
         <div className={cn(
-          'flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
+          'relative flex min-w-0 items-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
           'data-[popup-open]:bg-interactive-hover data-[popup-open]:text-foreground',
           stickyZoneHeaders && 'sticky top-0 z-10 bg-sidebar/95 backdrop-blur-sm',
         )}>
@@ -1293,8 +1310,9 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
           </div>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          <div className="mb-1 flex min-h-8 items-center gap-1 rounded-md text-muted-foreground">
+        {/* Rows move, arrive and leave instead of jumping (sidebarMotion.tsx); a search replaces them at once. */}
+        <FlipList containerRef={listRef} instantKey={query.trim()} className="relative min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <div className="relative mb-1 flex min-h-8 items-center gap-1 rounded-md text-muted-foreground">
             <button
               type="button"
               onClick={() => setProjectsSectionCollapsed(!projectsSectionCollapsed)}
@@ -1344,7 +1362,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
             </div>
           ) : (
             <>
-              <div id={projectsSectionId} hidden={!projectsExpanded} className="space-y-1">
+              <div id={projectsSectionId} hidden={!projectsExpanded} className="space-y-1" data-flip-key="projects" data-collapsed={projectsExpanded ? undefined : ''}>
                 {groups.some(group => group.project) ? groups.filter(group => group.project).map(renderGroup) : !query.trim() ? (
                   <p className="px-2 py-3 typography-meta text-muted-foreground">{t('mobile.sessions.empty.noProjectsTitle')}</p>
                 ) : null}
@@ -1352,7 +1370,7 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
               {groups.filter(group => !group.project).map(renderGroup)}
             </>
           )}
-        </div>
+        </FlipList>
 
         <div className="shrink-0 border-t border-border/60 px-2.5 py-2 pb-[max(0.5rem,var(--oc-safe-area-bottom-visual,0px))]">
           {selectionMode ? (

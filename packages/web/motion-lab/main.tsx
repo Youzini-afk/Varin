@@ -12,6 +12,7 @@ import { useTimelineViewStore } from '@/components/conversation/timelineViewStor
 import { useUIStore, type MotionPreference } from '@/stores/useUIStore';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { SendLab } from './send';
+import { SidebarLab } from './sidebar';
 import type {
   ChatAssistantContent,
   ChatAssistantMessage,
@@ -480,7 +481,7 @@ createRoot(document.getElementById('root')!).render(
       <ThemeProvider>
         <MotionProvider>
           <TooltipProvider>
-            {scene === 'send' ? <SendLab /> : <Lab />}
+            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : <Lab />}
           </TooltipProvider>
         </MotionProvider>
       </ThemeProvider>
