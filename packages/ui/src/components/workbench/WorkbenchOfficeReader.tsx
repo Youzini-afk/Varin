@@ -57,6 +57,6 @@ export function WorkbenchOfficeReader({ workspaceId, workspaceRoot, identity, ta
       if (!reader.isCurrent()) return;
       const href = formatPdfMaterialCitationUrl({ snapshotId: quote.snapshotId, sourceHash: quote.sourceHash, page: 1 })
         + `&format=${quote.format}&section=${encodeURIComponent(quote.section)}&objectId=${encodeURIComponent(quote.objectId)}`;
-      appendThreadDraftText(identity, `[${tab.resourceId.replace(/[\[\]]/g, '')}](${href})\n${quote.text.split('\n').map(line => `> ${line}`).join('\n')}`);
+      appendThreadDraftText(identity, `[${tab.resourceId.replace(/[[\]]/g, '')}](${href})\n${quote.text.split('\n').map(line => `> ${line}`).join('\n')}`);
     } : undefined} />;
 }

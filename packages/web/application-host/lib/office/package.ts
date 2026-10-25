@@ -9,7 +9,6 @@ import type { OfficeEdit, OfficeFormat, OfficeObject, OfficeReadRequest, OfficeR
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 const S = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-const A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const REL = 'http://schemas.openxmlformats.org/package/2006/relationships';
 const CT = 'http://schemas.openxmlformats.org/package/2006/content-types';
 const builtinNumberFormats = createRequire(import.meta.url)('exceljs/lib/xlsx/defaultnumformats.js') as Record<string, { f?: string } & Record<string, string>>;
@@ -364,7 +363,7 @@ export class OfficePackage {
   }
   private addSheet(name: string): void {
     if (this.format !== 'xlsx') throw new Error('Sheets belong to an XLSX workbook');
-    if (!name || name.length > 31 || /[\\/*?:\[\]]/.test(name) || this.sections().some(section => section.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error('Excel sheet names must be unique, at most 31 characters, and exclude \\ / * ? : [ ]');
+    if (!name || name.length > 31 || /[\\/*?:[\]]/.test(name) || this.sections().some(section => section.name.toLocaleLowerCase() === name.toLocaleLowerCase())) throw new Error('Excel sheet names must be unique, at most 31 characters, and exclude \\ / * ? : [ ]');
     const workbook = this.xml('xl/workbook.xml'), sheets = first(workbook, 'sheets'); if (!sheets) throw new Error('The workbook sheet list is missing');
     const relPart = 'xl/_rels/workbook.xml.rels', rels = this.xml(relPart);
     let id = Math.max(0, ...children(sheets, 'sheet').map(sheet => Number(sheet.getAttribute('sheetId')))) + 1;

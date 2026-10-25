@@ -113,7 +113,7 @@ export function ThreadMaterials({ api, identity, onAddRegion, children }: {
         if (!reader.isCurrent()) return;
         const href = formatPdfMaterialCitationUrl({ snapshotId: quote.snapshotId, sourceHash: quote.sourceHash, page: 1 })
           + `&format=${quote.format}&section=${encodeURIComponent(quote.section)}&objectId=${encodeURIComponent(quote.objectId)}`;
-        appendThreadDraftText(identity, `[${material.title.replace(/[\[\]]/g, '')}](${href})\n${quote.text.split('\n').map(line => `> ${line}`).join('\n')}`);
+        appendThreadDraftText(identity, `[${material.title.replace(/[[\]]/g, '')}](${href})\n${quote.text.split('\n').map(line => `> ${line}`).join('\n')}`);
       }} /> : material && <PdfMaterialReader key={reader.key} reader={reader} title={material.title} snapshotId={material.snapshotId}
       sourceHash={material.sourceHash} initialPage={material.page} initialRegion={material.region} analysisId={material.analysisId}
       onOpenChange={value => { if (!value) setSelected(null); }} />}
