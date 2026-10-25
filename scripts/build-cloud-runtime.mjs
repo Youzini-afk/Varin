@@ -40,7 +40,10 @@ const cloudRuntimePatches = (rootPackage) => {
   return { 'braces@3.0.3': bracePatch };
 };
 
-export const CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES = Object.freeze([
+// Inherited services, endpoints and commands that must never ship: Varin has its own update path and
+// no default relay (VARIN_RELAY_URL only).
+export const CLOUD_RUNTIME_RETIRED_IDENTITIES = Object.freeze([
+  'relay.openchamber.dev',
   'api.openchamber.dev/v1/update/check',
   'github.com/openchamber/openchamber/releases',
   'api.github.com/repos/openchamber/openchamber/releases',
@@ -204,9 +207,9 @@ export const verifyCloudRuntimeIdentity = (outputDir) => {
       if (!entry.isFile() || !cloudIdentityTextExtensions.has(path.extname(entry.name).toLowerCase())) continue;
 
       const source = readFileSync(entryPath, 'utf8').toLowerCase();
-      const retiredIdentity = CLOUD_RUNTIME_FORBIDDEN_UPDATE_IDENTITIES.find((value) => source.includes(value));
+      const retiredIdentity = CLOUD_RUNTIME_RETIRED_IDENTITIES.find((value) => source.includes(value));
       if (retiredIdentity) {
-        throw new Error(`Cloud runtime contains retired update identity "${retiredIdentity}" in ${path.relative(outputDir, entryPath)}.`);
+        throw new Error(`Cloud runtime contains retired identity "${retiredIdentity}" in ${path.relative(outputDir, entryPath)}.`);
       }
     }
   }

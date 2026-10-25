@@ -75,6 +75,12 @@ Varin 语音功能调用 OpenAI 兼容服务时使用的 API 密钥。
 
 Varin 隧道命令使用的 ngrok auth token。你也可以用 `ngrok config add-authtoken <token>` 配置 ngrok。
 
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+服务器为 **任何地方** 配对而连出的 [Private Relay](/zh-cn/private-relay/) 端点，必须是 `ws://` 或 `wss://`。Varin 没有默认中继：不设置这个变量时，**任何地方** 不可用，服务器也不会连接任何中继。`varin connect-url --relay` 也要设为同一个值。
+
 ## 运行时辅助
 
 ### `BUN_BINARY`

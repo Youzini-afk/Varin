@@ -216,7 +216,16 @@ describe('Varin cloud runtime layout', () => {
     const serverEntry = path.join(fixture, 'packages', 'web', 'server', 'package-manager.js');
     fs.writeFileSync(serverEntry, "export const updateUrl = 'https://api.openchamber.dev/v1/update/check';\n");
 
-    assert.throws(() => verifyCloudRuntimeIdentity(fixture), new RegExp("Cloud runtime contains retired update identity"));
-    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("Cloud runtime contains retired update identity"));
+    assert.throws(() => verifyCloudRuntimeIdentity(fixture), new RegExp("Cloud runtime contains retired identity"));
+    assert.throws(() => verifyCloudRuntimeLayout(fixture), new RegExp("Cloud runtime contains retired identity"));
+  });
+
+  it('rejects an inherited default relay from the staged production artifact', () => {
+    const fixture = createFixture();
+    const serverEntry = path.join(fixture, 'packages', 'web', 'server', 'lib', 'relay', 'service.js');
+    fs.mkdirSync(path.dirname(serverEntry), { recursive: true });
+    fs.writeFileSync(serverEntry, "export const DEFAULT_RELAY_URL = 'wss://relay.openchamber.dev/ws';\n");
+
+    assert.throws(() => verifyCloudRuntimeIdentity(fixture), new RegExp('retired identity "relay.openchamber.dev"'));
   });
 });

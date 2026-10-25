@@ -63,7 +63,8 @@ export const getOrCreateRelaySigningKeypair = async ({ crypto, readSettingsFromD
 };
 
 // Fixed key order so the hash is stable regardless of stored JSON field order.
-// Byte-for-byte mirror of canonicalJwk in openchamber-website apps/api relay-auth.ts.
+// A relay that checks `serverId = SHA-256(pk)` must serialise the JWK the same
+// way, byte for byte (relay/DOCUMENTATION.md, host authentication).
 /** @param {JsonWebKey} jwk */
 export const canonicalPublicJwkString = (jwk: JsonWebKey): string =>
   JSON.stringify({ crv: jwk.crv, kty: jwk.kty, x: jwk.x, y: jwk.y });

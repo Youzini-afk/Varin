@@ -14,7 +14,7 @@ Sparuj inne urządzenie — aplikację mobilną, aplikację desktopową lub prze
 3. Wybierz, gdzie będziesz go używać:
    - **Tylko ten komputer** — dla aplikacji działających na tej samej maszynie
    - **Tylko sieć domowa** — łączy się bezpośrednio przez Wi-Fi; nie działa poza tą siecią
-   - **Wszędzie** — działa w domu i poza nim; poza domem ruch przechodzi przez [Private Relay](/pl/private-relay/), szyfrowany end-to-end tunel bez żadnej konfiguracji
+   - **Wszędzie** — działa w domu i poza nim; poza domem ruch przechodzi przez [Private Relay](/pl/private-relay/), szyfrowany end-to-end tunel. Dostępne, gdy serwer ma relay skonfigurowany przez `VARIN_RELAY_URL`
 4. Naciśnij **Utwórz kod QR**.
 5. Na drugim urządzeniu zeskanuj kod:
    - **aplikacja mobilna** — stuknij **Skanuj kod QR** na ekranie łączenia (lub na liście instancji)
@@ -54,7 +54,7 @@ Dla urządzenia, które ma łączyć się **z dowolnego miejsca** — odpowiedni
 varin connect-url --relay --qr
 ```
 
-Link `--relay` zawiera obie trasy, dokładnie jak okno dialogowe: urządzenie łączy się bezpośrednio przez sieć lokalną, gdy może dotrzeć do serwera, a poza domem przełącza się na [Private Relay](/pl/private-relay/). Relay uruchamia się sam: działająca instancja podejmuje link w ciągu minuty, a zatrzymana — przy następnym starcie.
+Link `--relay` zawiera obie trasy, dokładnie jak okno dialogowe: urządzenie łączy się bezpośrednio przez sieć lokalną, gdy może dotrzeć do serwera, a poza domem przełącza się na [Private Relay](/pl/private-relay/). Relay uruchamia się sam: działająca instancja podejmuje link w ciągu minuty, a zatrzymana — przy następnym starcie. Polecenie odczytuje `VARIN_RELAY_URL` tak samo jak serwer, więc ustaw tę zmienną na ten sam relay; bez niej `--relay` kończy się błędem, zamiast wypisać link, który nie zadziała poza domem.
 
 > Trasa bezpośrednia działa tylko wtedy, gdy serwer rzeczywiście nasłuchuje w Twojej sieci. Domyślnie Varin nasłuchuje wyłącznie na samej maszynie — uruchom go z `--lan`, aby był osiągalny przez Wi-Fi. Polecenie ostrzega (`[LAN_UNREACHABLE]`), gdy trasa bezpośrednia linku nie będzie użyteczna z innych urządzeń; link `--relay` nadal wtedy działa, tyle że zawsze przez relay.
 

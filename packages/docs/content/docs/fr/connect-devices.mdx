@@ -14,7 +14,7 @@ Associez un autre appareil — l’application mobile, l’application desktop o
 3. Choisissez où vous utiliserez l’appareil :
    - **Cet ordinateur uniquement** — pour les applications sur cette même machine
    - **Réseau domestique uniquement** — connexion directe via votre Wi-Fi ; ne fonctionne pas hors de ce réseau
-   - **Partout** — fonctionne à la maison et en déplacement ; en déplacement, le trafic passe par le [Relais privé](/fr/private-relay/), un tunnel chiffré de bout en bout sans aucune configuration
+   - **Partout** — fonctionne à la maison et en déplacement ; en déplacement, le trafic passe par le [Relais privé](/fr/private-relay/), un tunnel chiffré de bout en bout. Disponible dès qu’un relais est configuré sur le serveur avec `VARIN_RELAY_URL`
 4. Pressez **Créer le code QR**.
 5. Sur l’autre appareil, scannez le code :
    - **application mobile** — touchez **Scanner le code QR** sur l’écran de connexion (ou dans la liste des instances)
@@ -54,7 +54,7 @@ Pour un appareil qui doit se connecter depuis **n’importe où** — l’équiv
 varin connect-url --relay --qr
 ```
 
-Un lien `--relay` contient les deux routes, exactement comme le dialogue : l’appareil se connecte directement via votre réseau local quand il peut joindre le serveur, et bascule sur le [Relais privé](/fr/private-relay/) en déplacement. Le relais démarre tout seul : une instance en cours d’exécution prend le lien en compte en moins d’une minute, une instance arrêtée au prochain lancement.
+Un lien `--relay` contient les deux routes, exactement comme le dialogue : l’appareil se connecte directement via votre réseau local quand il peut joindre le serveur, et bascule sur le [Relais privé](/fr/private-relay/) en déplacement. Le relais démarre tout seul : une instance en cours d’exécution prend le lien en compte en moins d’une minute, une instance arrêtée au prochain lancement. La commande lit `VARIN_RELAY_URL` comme le serveur, définissez-la donc sur le même relais ; sans elle, `--relay` s’arrête avec une erreur au lieu d’afficher un lien qui ne peut pas fonctionner hors du domicile.
 
 > La route directe ne fonctionne que si le serveur écoute réellement sur votre réseau. Par défaut, Varin n’écoute que sur la machine elle-même — démarrez-le avec `--lan` pour le rendre joignable en Wi-Fi. La commande vous prévient (`[LAN_UNREACHABLE]`) quand la route directe du lien ne sera pas utilisable depuis d’autres appareils ; un lien `--relay` fonctionne quand même dans ce cas, simplement toujours via le relais.
 

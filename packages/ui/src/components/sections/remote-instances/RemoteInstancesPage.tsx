@@ -933,7 +933,8 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
     } catch {
       // keep null
     }
-    return { localUrl, lanUrl, relayAvailable: true };
+    // The relay needs a server-side endpoint (VARIN_RELAY_URL) the client cannot see, so it is not offered.
+    return { localUrl, lanUrl, relayAvailable: false };
   }, [clientAuth]);
 
   const openAddDevice = React.useCallback(async () => {
@@ -947,8 +948,8 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
     setAddDeviceOpen(true);
     const opts = await resolveTransportOptions();
     setTransportOptions(opts);
-    // "Anywhere" (relay, with home-network preference) is the right default for
-    // most people; fall back to narrower options only when relay is unavailable.
+    // "Anywhere" (relay, with home-network preference) is the right default when
+    // the server has a relay; otherwise fall back to the narrower options.
     setAddDeviceTransport(opts.relayAvailable ? 'relay' : opts.lanUrl ? 'lan' : 'local');
   }, [resolveTransportOptions]);
 
@@ -967,7 +968,7 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
         includeRelay = false;
       } else if (addDeviceTransport === 'lan') {
         serverUrl = transportOptions.lanUrl ?? undefined;
-        includeRelay = addDeviceFallback;
+        includeRelay = addDeviceFallback && transportOptions.relayAvailable;
       } else if (addDeviceFallback && transportOptions.lanUrl) {
         // Relay, but prefer the local network when available: carry both.
         serverUrl = transportOptions.lanUrl;
@@ -1790,7 +1791,15 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
                       plain words — "relay" appears only inside the description. */}
                   <div role="radiogroup" aria-label={t('settings.remoteInstances.clientAuth.addDevice.transportLabel')} className="space-y-1.5">
                     {([
-                      { key: 'relay' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.relay'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.relayHint'), available: Boolean(transportOptions?.relayAvailable) },
+                      {
+                        key: 'relay' as const,
+                        label: t('settings.remoteInstances.clientAuth.addDevice.transport.relay'),
+                        // Unavailable means the server has no relay endpoint; say how to get one.
+                        hint: transportOptions && !transportOptions.relayAvailable
+                          ? t('settings.remoteInstances.clientAuth.addDevice.transport.relayUnavailable')
+                          : t('settings.remoteInstances.clientAuth.addDevice.transport.relayHint'),
+                        available: Boolean(transportOptions?.relayAvailable),
+                      },
                       { key: 'lan' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.lan'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.lanHint'), available: Boolean(transportOptions?.lanUrl) },
                       { key: 'local' as const, label: t('settings.remoteInstances.clientAuth.addDevice.transport.local'), hint: t('settings.remoteInstances.clientAuth.addDevice.transport.localHint'), available: Boolean(transportOptions?.localUrl) },
                     ]).map((option) => {
@@ -1817,7 +1826,7 @@ const RemoteInstancesContent: React.FC<RemoteInstancesPageProps> = ({ view = 'ho
                       );
                     })}
                   </div>
-                  {addDeviceTransport === 'lan' ? (
+                  {addDeviceTransport === 'lan' && transportOptions?.relayAvailable ? (
                     <label className="flex w-fit cursor-pointer items-center gap-2 pt-1">
                       <Checkbox checked={addDeviceFallback} onChange={setAddDeviceFallback} ariaLabel={t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')} />
                       <span className="typography-meta text-muted-foreground">{t('settings.remoteInstances.clientAuth.addDevice.fallback.relay')}</span>

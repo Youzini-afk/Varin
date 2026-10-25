@@ -75,6 +75,12 @@ Zezwala na zdalne bazowe URL-e zgodne z OpenAI dla funkcji głosowych, gdy ustaw
 
 Token uwierzytelniania ngrok używany przez polecenia tuneli Varin. Możesz też skonfigurować ngrok poleceniem `ngrok config add-authtoken <token>`.
 
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+Endpoint `ws://` lub `wss://` usługi [Private Relay](/pl/private-relay/), z którym serwer nawiązuje połączenie wychodzące na potrzeby parowania **Wszędzie**. Varin nie ma domyślnego relaya: bez tej zmiennej opcja **Wszędzie** jest niedostępna, a serwer nigdy nie łączy się z żadnym relayem. Podaj tę samą wartość w `varin connect-url --relay`.
+
 ## Pomocniki runtime
 
 ### `BUN_BINARY`

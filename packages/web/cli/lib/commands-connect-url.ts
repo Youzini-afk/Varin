@@ -16,7 +16,7 @@ import { getInstanceFilePath, readInstanceOptions } from './cli-process.js';
 import { createRemoteClientAuthRuntime } from '#application-host/lib/client-auth/remote-clients.js';
 import { createClientPairingRuntime } from '#application-host/lib/client-auth/pairing.js';
 import { createRelayIdentityRuntime } from '#application-host/lib/relay/identity.js';
-import { DEFAULT_RELAY_URL } from '#application-host/lib/relay/service.js';
+import { relayUnavailableMessage, resolveRelayEndpoint } from '#application-host/lib/relay/endpoint.js';
 import { bytesToBase64Url } from '#application-host/lib/relay/e2ee.js';
 import { createSettingsFileStore } from '@varin/settings-store';
 import {
@@ -34,27 +34,6 @@ const REMOTE_CLIENTS_FILE_NAME = 'remote-clients.json';
 const SETTINGS_FILE_NAME = 'settings.json';
 const PAIRING_SESSIONS_FILE_NAME = 'client-pairing-sessions.json';
 
-function isValidRelayUrl(value: unknown): value is string {
-  if (typeof value !== 'string') return false;
-  try {
-    const url = new URL(value.trim());
-    return url.protocol === 'ws:' || url.protocol === 'wss:';
-  } catch {
-    return false;
-  }
-}
-
-// Resolve the relay endpoint the same way the running host does (service.js):
-// VARIN_RELAY_URL env override, then the stored setting, then the default —
-// so the pairing link points at the same relay the host connects out to.
-function resolveRelayUrl(settings: Record<string, unknown>): string {
-  const envUrl = process.env.VARIN_RELAY_URL;
-  if (isValidRelayUrl(envUrl)) return envUrl.trim();
-  const stored = recordOf(settings.privateRelay).relayUrl;
-  if (isValidRelayUrl(stored)) return stored.trim();
-  return DEFAULT_RELAY_URL;
-}
-
 // Minimal settings.json read/write for the relay identity runtime. It reads the
 // whole object and writes it back with the relay keys added, so other settings
 // are preserved. Enough for the CLI without wiring the full settings runtime.
@@ -67,25 +46,30 @@ function createSettingsAccessors() {
   };
 }
 
-// Resolves the instance's relay identity (serverId + encryption public key,
-// generating it if the relay was never enabled) into a pairing-v2 relay
-// candidate. Relay is a transport, not a separate link format: the candidate
-// carries no token — the client redeems the one-time pairing secret over the
-// E2EE tunnel like any other candidate. `enabled` reports whether the host relay
-// is actually on (a relay candidate only connects when the host is relaying).
+// Resolves the relay endpoint the same way the running host does (VARIN_RELAY_URL,
+// relay/endpoint.ts) and the instance's relay identity (serverId + encryption
+// public key, generating it if the relay was never enabled) into a pairing-v2
+// relay candidate. Relay is a transport, not a separate link format: the
+// candidate carries no token — the client redeems the one-time pairing secret
+// over the E2EE tunnel like any other candidate. `enabled` reports whether the
+// host relay is on (a relay candidate only connects when the host is relaying);
+// `candidate` is null when no relay endpoint is configured.
 async function buildRelayPairingCandidate() {
   const accessors = createSettingsAccessors();
   const settings = await accessors.readSettingsFromDisk();
-  const relayUrl = resolveRelayUrl(settings);
+  const enabled = recordOf(settings.privateRelay).enabled === true;
+  const endpoint = resolveRelayEndpoint();
+  if (endpoint.state !== 'configured') {
+    return { enabled, unavailable: relayUnavailableMessage(endpoint), candidate: null };
+  }
   const identityRuntime = createRelayIdentityRuntime({ crypto, ...accessors });
   const identity = await identityRuntime.getRelayIdentity();
   return {
-    enabled: recordOf(settings.privateRelay).enabled === true,
-    relayUrl,
-    serverId: identity.serverId,
+    enabled,
+    unavailable: null,
     candidate: {
       type: 'relay' as const,
-      relayUrl,
+      relayUrl: endpoint.url,
       serverId: identity.serverId,
       hostEncPubJwk: identity.hostEncPubJwk,
       priority: 30,
@@ -239,6 +223,11 @@ function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand 
     if (options.server && !explicitServerUrl) {
       throw new TunnelCliError('Invalid --server URL. Use an http:// or https:// URL.', EXIT_CODE.USAGE_ERROR);
     }
+    // Refuse before starting a server: a --relay link without a relay endpoint would not work away from home.
+    const relayEndpoint = resolveRelayEndpoint();
+    if (options.relay && relayEndpoint.state !== 'configured') {
+      throw new TunnelCliError(relayUnavailableMessage(relayEndpoint), EXIT_CODE.AUTH_CONFIG_ERROR);
+    }
 
     const normalizedOptions = { ...options, port };
     const running = await discoverRunningInstances();
@@ -273,7 +262,8 @@ function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand 
     // otherwise the relay rides along only when it is already enabled.
     const candidates: PairingCandidate[] = [{ type: serverUrl.startsWith('https://') ? 'tunnel' : 'lan', url: serverUrl, priority: 10 }];
     const relay = await buildRelayPairingCandidate();
-    if (options.relay || relay.enabled) candidates.push(relay.candidate);
+    const includeRelay = Boolean(relay.candidate) && (options.relay === true || relay.enabled);
+    if (includeRelay && relay.candidate) candidates.push(relay.candidate);
 
     const pairingRuntime = createCliPairingRuntime();
     // Mark relay-carrying sessions like the server route does, so the host's
@@ -306,10 +296,13 @@ function createConnectUrlCommand({ serveCommand }: { serveCommand: ServeCommand 
     }
     logStatus('success', connectUrl);
     clackLog.info(`Server URL: ${serverUrl}`);
-    if (options.relay || relay.enabled) {
-      clackLog.info(`Relay fallback: ${relay.relayUrl}`);
+    if (includeRelay && relay.candidate) {
+      clackLog.info(`Relay fallback: ${relay.candidate.relayUrl}`);
+    } else if (relay.enabled && relay.unavailable) {
+      // Paired devices use the relay, but this link cannot carry it.
+      logStatus('warning', '[RELAY_UNAVAILABLE]', `${relay.unavailable} This link works only on the direct connection.`);
     }
-    if (options.relay && !relay.enabled) {
+    if (includeRelay && !relay.enabled) {
       logStatus('info', '[RELAY_STARTING]', 'Relay is not up yet. A running instance starts it within a minute; a stopped instance starts it on next launch.');
     }
     if (pairing.fingerprint) {

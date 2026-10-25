@@ -1,6 +1,7 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type expressModule from 'express';
 import type { VarinAuthenticatedClient, VarinRequestAuthContext } from '../client-auth/request-context.js';
+import { isRelayUnavailableError } from '../relay/endpoint.js';
 
 type TunnelAuthController = ReturnType<typeof import('./tunnel-auth.js').createTunnelAuth>;
 type UiAuthController = ReturnType<typeof import('../ui-auth/ui-auth.js').createUiAuth>;
@@ -345,7 +346,7 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
     // Returns { local, lan, relayAvailable } — the direct transport URLs the
     // server can actually be reached on (LAN derived from the server bind, not
     // the UI origin), for the create-device dialog.
-    getPairingTransports = () => ({ local: null, lan: null, relayAvailable: true }),
+    getPairingTransports = () => ({ local: null, lan: null, relayAvailable: false }),
     // Returns ALL direct LAN URLs the server is currently reachable on (client-
     // reached address first, then interface scan) for the candidates-refresh
     // endpoint. Empty when the server is loopback-only.
@@ -587,7 +588,8 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
   // for remote callers where the Host header IS the reachable address.
   //
   // `includeRelay` is the per-link transport choice from the create-link dialog:
-  //   true  → add the relay candidate, enabling the relay host on demand;
+  //   true  → add the relay candidate, enabling the relay host on demand; a
+  //           relay that cannot be offered (no VARIN_RELAY_URL) fails the link;
   //   false → direct only, never relay;
   //   undefined → legacy: advertise relay only if it is already enabled.
   // `includeDirect === false` produces a relay-only link (no direct candidate).
@@ -620,8 +622,10 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
         if (relayCandidate && typeof relayCandidate.type === 'string' && typeof relayCandidate.priority === 'number') {
           candidates.push(relayCandidate as Record<string, unknown> & { priority: number; type: string });
         }
-      } catch {
-        // A relay enable/status failure must not break direct pairing.
+      } catch (error) {
+        // A link that asked for the relay must not silently go out without it.
+        if (includeRelay === true) throw error;
+        // Otherwise a relay status failure must not break direct pairing.
       }
     }
     return candidates;
@@ -860,11 +864,21 @@ export const registerAuthAndAccessRoutes = (app: Express, rawDependencies: unkno
 
   app.post('/api/client-auth/pairing/sessions', express.json({ limit: '64kb' }), async (req, res, next) => {
     await runWithClientCreateAuth(req, res, next, async (authContext) => {
-      const candidates = await pairingServerCandidates(req, {
-        preferredServerUrl: req.body?.serverUrl,
-        includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
-        includeDirect: req.body?.includeDirect !== false,
-      });
+      let candidates: Awaited<ReturnType<typeof pairingServerCandidates>>;
+      try {
+        candidates = await pairingServerCandidates(req, {
+          preferredServerUrl: req.body?.serverUrl,
+          includeRelay: typeof req.body?.includeRelay === 'boolean' ? req.body.includeRelay : undefined,
+          includeDirect: req.body?.includeDirect !== false,
+        });
+      } catch (error) {
+        if (isRelayUnavailableError(error)) {
+          res.status(409).json({ error: error.message, code: error.code });
+          return;
+        }
+        res.status(503).json({ error: `The relay could not be prepared for this link: ${error instanceof Error && error.message ? error.message : 'unknown error'}` });
+        return;
+      }
       const usesRelay = candidates.some((candidate) => candidate.type === 'relay');
       const result = await clientPairingRuntime.createPairingSession({
         label: req.body?.label,

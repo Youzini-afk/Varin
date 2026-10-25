@@ -75,6 +75,12 @@ OpenAI 互換サービスを呼び出す Varin 音声機能が使う API キー�
 
 Varin のトンネルコマンドが使う ngrok auth token です。`ngrok config add-authtoken <token>` で ngrok を設定することもできます。
 
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+**どこでも** ペアリングのためにサーバーが外向きに接続する [Private Relay](/ja/private-relay/) の `ws://` または `wss://` エンドポイントです。Varin にはデフォルトのリレーがありません。この変数がない場合、**どこでも** は利用できず、サーバーがリレーに接続することもありません。`varin connect-url --relay` にも同じ値を指定してください。
+
 ## ランタイム補助
 
 ### `BUN_BINARY`

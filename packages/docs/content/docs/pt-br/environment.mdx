@@ -75,6 +75,12 @@ Permite URLs base remotas compatíveis com OpenAI para recursos de voz quando de
 
 Token de autenticação do ngrok usado pelos comandos de túnel do Varin. Você também pode configurar o ngrok com `ngrok config add-authtoken <token>`.
 
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+Endpoint `ws://` ou `wss://` do [Private Relay](/pt-br/private-relay/) ao qual o servidor se conecta para o pareamento **Em qualquer lugar**. O Varin não tem relay padrão: sem esta variável, **Em qualquer lugar** fica indisponível e o servidor nunca se conecta a um relay. Passe o mesmo valor para `varin connect-url --relay`.
+
 ## Ajudantes de runtime
 
 ### `BUN_BINARY`

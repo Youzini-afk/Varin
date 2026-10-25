@@ -5,7 +5,7 @@ description: Connectez les appareils associés via un relais disponible chiffré
 
 # Relais privé
 
-Prérequis de déploiement : configurez un relais de confiance avec `VARIN_RELAY_URL`. La valeur par défaut du code provient de l’infrastructure héritée d’OpenChamber ; ce dépôt ne confirme pas la disponibilité d’un relais Varin hébergé. Le jumelage et le chiffrement décrits ci-dessous nécessitent un relais configuré disponible.
+Prérequis de déploiement : Varin ne fournit aucun service de relais ni aucun point de terminaison par défaut. Définissez `VARIN_RELAY_URL` sur le serveur avec un relais `ws://` ou `wss://` que vous exploitez ou auquel vous faites confiance ; d’ici là, **Partout** n’est pas disponible et le serveur ne se connecte jamais à un relais. L’association et le chiffrement décrits ci-dessous s’appliquent une fois ce relais configuré et joignable.
 
 Le relais privé Varin (Private Relay) permet à vos appareils associés de joindre votre serveur depuis n’importe où — réseau cellulaire, Wi-Fi de café, autre ville — sans ouvrir de ports, sans configurer de tunnel et sans exposer votre machine à internet. Une fois le relais du serveur configuré et disponible, associez un appareil avec **Partout** dans [Connecter un appareil](/fr/connect-devices/) pour l’utiliser.
 
@@ -31,7 +31,7 @@ Le relais gère son propre cycle de vie — aucun interrupteur à retenir :
 - **Il démarre à la demande.** Créer une association **Partout** active le relais, et il revient après un redémarrage tant qu’un appareil associé en dépend encore.
 - **Il s’arrête tout seul.** Dès qu’aucun appareil ni aucune association en attente n’utilise le relais — par exemple après avoir révoqué le dernier appareil associé via le relais — il s’éteint automatiquement.
 
-**Paramètres → Instances distantes → Varin Relay** affiche l’état en direct (Connecté, Reconnexion, …) et le nombre d’appareils connectés à travers lui en ce moment. Vous pouvez aussi y presser **Désactiver** pour couper immédiatement l’accès via le relais ; les appareils sur votre réseau local ne sont pas affectés.
+**Paramètres → Instances distantes → Se connecter à ce serveur** affiche chaque appareil associé et indique s’il est connecté via le relais. Révoquez-y un appareil pour couper immédiatement son accès via le relais ; les appareils sur votre réseau local ne sont pas affectés.
 
 ## Relais ou tunnel ?
 

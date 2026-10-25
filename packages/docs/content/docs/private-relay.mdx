@@ -5,7 +5,7 @@ description: Connect paired devices through an available end-to-end encrypted re
 
 # Private Relay
 
-Deployment requirement: configure a trusted relay endpoint with `VARIN_RELAY_URL`. The current source default is inherited OpenChamber infrastructure; this repository does not establish the availability of a hosted Varin relay. The pairing and encryption behavior below applies when the configured relay is available.
+Deployment requirement: Varin ships no relay service and no default endpoint. Set `VARIN_RELAY_URL` on the server to a `ws://` or `wss://` relay you run or trust; until then **Anywhere** is unavailable and the server never connects to a relay. The pairing and encryption behavior below applies once that relay is configured and reachable.
 
 The Varin Private Relay lets your paired devices reach your server from anywhere — cellular, a café network, another city — without opening ports, setting up a tunnel, or exposing your machine to the internet. Once the server’s relay endpoint is configured and available, pair a device with **Anywhere** in [Connect a Device](/connect-devices/) to use it.
 
@@ -31,7 +31,7 @@ The relay manages its own lifecycle — there is no switch to remember:
 - **It starts on demand.** Creating an **Anywhere** pairing turns the relay on, and it comes back after a restart for as long as any paired device still relies on it.
 - **It stops on its own.** Once no device or pending pairing uses the relay — for example after you revoke the last relay-paired device — it shuts down automatically.
 
-**Settings → Remote Instances → Varin Relay** shows the live state (Connected, Reconnecting, …) and how many devices are connected through it right now. You can also press **Disable** there to cut relay access off immediately; devices on your local network are unaffected.
+**Settings → Remote Instances → Connect to this server** shows each paired device and whether it is connected through the relay. Revoke a device there to cut its relay access off immediately; devices on your local network are unaffected.
 
 ## Relay or a tunnel?
 

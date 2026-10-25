@@ -283,6 +283,7 @@ import { createPreviewProxyRuntime } from './lib/preview/proxy-runtime.js';
 import { attachRealtimeProxy } from './lib/realtime-proxy.js';
 import { attachObservations } from './lib/observations.js';
 import { createRelayService } from './lib/relay/service.js';
+import { resolveRelayEndpoint } from './lib/relay/endpoint.js';
 import { createRelayHostLock } from './lib/relay/host-lock.js';
 
 import { createScheduledTasksRuntime } from './lib/scheduled-tasks/runtime.js';
@@ -808,6 +809,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   let dictationRuntime: ReturnType<typeof createDictationRuntime> | null = null;
 
   const activePort = () => tunnelRuntimeContext?.getActivePort() || port;
+  // Anywhere pairing needs an operator-configured relay (VARIN_RELAY_URL); there is no built-in one.
   const resolvePairingTransports = (req: Request) => {
     const local = `http://127.0.0.1:${activePort()}`;
     let lanHost = null;
@@ -823,7 +825,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       lanHost = effectiveBindHost;
     }
     const lan = lanHost ? `http://${lanHost.includes(':') ? `[${lanHost}]` : lanHost}:${activePort()}` : null;
-    return { local, lan, relayAvailable: true };
+    return { local, lan, relayAvailable: resolveRelayEndpoint().state === 'configured' };
   };
   const resolveDirectLanUrls = (req: Request): string[] => {
     const urls: string[] = [];

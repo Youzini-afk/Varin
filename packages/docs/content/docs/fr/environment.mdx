@@ -75,6 +75,12 @@ Autorise les URL de base distantes compatibles OpenAI pour les fonctionnalités 
 
 Jeton d’auth ngrok utilisé par les commandes de tunnel Varin. Vous pouvez aussi configurer ngrok avec `ngrok config add-authtoken <token>`.
 
+## Relais privé
+
+### `VARIN_RELAY_URL`
+
+Point de terminaison `ws://` ou `wss://` du [Relais privé](/fr/private-relay/) auquel le serveur se connecte pour l’association **Partout**. Varin n’a pas de relais par défaut : sans cette variable, **Partout** n’est pas disponible et le serveur ne se connecte jamais à un relais. Donnez la même valeur à `varin connect-url --relay`.
+
 ## Aides runtime
 
 ### `BUN_BINARY`

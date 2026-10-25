@@ -5,7 +5,7 @@ description: Conecte dispositivos pareados por um relay disponível com criptogr
 
 # Private Relay
 
-Requisito de implantação: configure um endpoint de relay confiável com `VARIN_RELAY_URL`. O padrão atual do código vem da infraestrutura herdada do OpenChamber; este repositório não confirma a disponibilidade de um relay Varin hospedado. O pareamento e a criptografia descritos abaixo exigem que o relay configurado esteja disponível.
+Requisito de implantação: o Varin não inclui nenhum serviço de relay nem endpoint padrão. Defina `VARIN_RELAY_URL` no servidor com um relay `ws://` ou `wss://` que você opera ou em que confia; até lá, **Em qualquer lugar** fica indisponível e o servidor nunca se conecta a um relay. O pareamento e a criptografia descritos abaixo valem depois que esse relay estiver configurado e acessível.
 
 O Varin Private Relay permite que seus dispositivos pareados alcancem seu servidor de qualquer lugar — rede celular, o Wi-Fi de um café, outra cidade — sem abrir portas, configurar um túnel ou expor sua máquina à internet. Depois que o endpoint de relay do servidor estiver configurado e disponível, pareie um dispositivo com **Em qualquer lugar** em [Conectar um Dispositivo](/pt-br/connect-devices/) para usá-lo.
 
@@ -31,7 +31,7 @@ O relay gerencia o próprio ciclo de vida — não há interruptor para lembrar:
 - **Ele inicia sob demanda.** Criar um pareamento **Em qualquer lugar** liga o relay, e ele volta após um reinício enquanto algum dispositivo pareado ainda depender dele.
 - **Ele para sozinho.** Quando nenhum dispositivo ou pareamento pendente usa o relay — por exemplo, depois de você revogar o último dispositivo pareado pelo relay — ele desliga automaticamente.
 
-**Settings → Remote Instances → Varin Relay** mostra o estado ao vivo (Conectado, Reconectando, …) e quantos dispositivos estão conectados por ele neste momento. Você também pode pressionar **Desativar** ali para cortar o acesso pelo relay imediatamente; os dispositivos na sua rede local não são afetados.
+**Settings → Remote Instances → Conectar a este servidor** mostra cada dispositivo pareado e se ele está conectado pelo relay. Revogue um dispositivo ali para cortar o acesso dele pelo relay imediatamente; os dispositivos na sua rede local não são afetados.
 
 ## Relay ou túnel?
 

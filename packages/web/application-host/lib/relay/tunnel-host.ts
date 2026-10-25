@@ -4,7 +4,7 @@
 // WS streams -> `ws` client to the loopback WebSocket endpoints.
 // The dispatcher NEVER injects credentials: tunneled requests authenticate
 // exactly like any remote client (Varin bearer token and URL auth token).
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
+// Spec: relay/DOCUMENTATION.md (Layer 3); shared contract in packages/ui/src/lib/relay/protocol.ts.
 
 import { WebSocket } from 'ws';
 import type { RawData } from 'ws';

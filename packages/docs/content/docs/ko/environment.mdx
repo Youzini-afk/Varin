@@ -75,6 +75,12 @@ OpenAI 호환 서비스를 호출하는 Varin 음성 기능이 사용하는 API 
 
 Varin 터널 명령이 사용하는 ngrok auth token입니다. `ngrok config add-authtoken <token>`으로 ngrok를 구성할 수도 있습니다.
 
+## Private Relay
+
+### `VARIN_RELAY_URL`
+
+**어디서나** 페어링을 위해 서버가 외부로 연결하는 [Private Relay](/ko/private-relay/)의 `ws://` 또는 `wss://` 엔드포인트입니다. Varin에는 기본 릴레이가 없습니다. 이 변수가 없으면 **어디서나**를 사용할 수 없고, 서버는 릴레이에 전혀 연결하지 않습니다. `varin connect-url --relay`에도 같은 값을 지정하세요.
+
 ## 런타임 도우미
 
 ### `BUN_BINARY`

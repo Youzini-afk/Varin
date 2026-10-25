@@ -1469,6 +1469,7 @@ export interface ClientAuthAPI {
   cancelPairing(id: string): Promise<{ cancelled: boolean }>;
   // Direct transports the server can be reached on, for the create-device dialog.
   // LAN reflects the server's actual bind, independent of the UI origin.
+  // `relayAvailable` is false unless the server has a relay endpoint (VARIN_RELAY_URL).
   getPairingTransports(): Promise<{ local: string | null; lan: string | null; relayAvailable: boolean }>;
 }
 

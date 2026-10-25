@@ -14,7 +14,7 @@ Pareie outro dispositivo — o app móvel, o app de desktop ou um navegador em o
 3. Escolha onde você vai usar o dispositivo:
    - **Somente este computador** — para aplicativos nesta mesma máquina
    - **Somente rede doméstica** — conecta diretamente pela sua rede Wi-Fi; não funciona fora dessa rede
-   - **Em qualquer lugar** — funciona em casa e fora; fora de casa o tráfego passa pelo [Private Relay](/pt-br/private-relay/), um túnel criptografado de ponta a ponta sem configuração
+   - **Em qualquer lugar** — funciona em casa e fora; fora de casa o tráfego passa pelo [Private Relay](/pt-br/private-relay/), um túnel criptografado de ponta a ponta. Disponível quando o servidor tem um relay configurado com `VARIN_RELAY_URL`
 4. Pressione **Criar código QR**.
 5. No outro dispositivo, escaneie o código:
    - **app móvel** — toque em **Ler código QR** na tela de conexão (ou na lista de instâncias)
@@ -54,7 +54,7 @@ Para um dispositivo que deve conectar de **qualquer lugar** — o equivalente a 
 varin connect-url --relay --qr
 ```
 
-Um link com `--relay` carrega as duas rotas, igual ao diálogo: o dispositivo conecta diretamente pela sua rede local quando consegue alcançar o servidor e recorre ao [Private Relay](/pt-br/private-relay/) quando está fora. O relay inicia sozinho: uma instância em execução capta o link em até um minuto; uma parada, na próxima vez que iniciar.
+Um link com `--relay` carrega as duas rotas, igual ao diálogo: o dispositivo conecta diretamente pela sua rede local quando consegue alcançar o servidor e recorre ao [Private Relay](/pt-br/private-relay/) quando está fora. O relay inicia sozinho: uma instância em execução capta o link em até um minuto; uma parada, na próxima vez que iniciar. O comando lê `VARIN_RELAY_URL` assim como o servidor, então defina essa variável com o mesmo relay; sem ela, `--relay` para com um erro em vez de imprimir um link que não funciona fora de casa.
 
 > A rota direta só funciona se o servidor de fato escutar na sua rede. Por padrão, o Varin escuta apenas na própria máquina — inicie-o com `--lan` para torná-lo alcançável pelo Wi-Fi. O comando avisa (`[LAN_UNREACHABLE]`) quando a rota direta do link não será utilizável de outros dispositivos; um link com `--relay` ainda funciona nesse caso, só que sempre pelo relay.
 

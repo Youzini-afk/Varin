@@ -16,7 +16,7 @@ Quand vous ne pouvez pas joindre Varin depuis votre téléphone ou une autre mac
 
 - le QR code / lien d’association est **à usage unique** — s’il a déjà été scanné (ou a expiré), créez-en un nouveau depuis **Ajouter un appareil**
 - si l’appareil a été associé avec **Réseau domestique uniquement**, il ne peut pas se connecter depuis l’extérieur de ce réseau — associez-le à nouveau avec **Partout**
-- pour une association **Partout**, vérifiez **Paramètres → Instances distantes → Varin Relay** sur le serveur : le statut doit être **Connecté** ; sinon, désactivez puis réactivez le relais
+- **Partout** nécessite un relais : s’il est grisé dans **Ajouter un appareil**, le serveur n’a pas de `VARIN_RELAY_URL` ; si elle est définie, vérifiez que le relais qu’elle indique est joignable depuis le serveur
 - si un appareil a été **révoqué**, son token est perdu définitivement — associez-le à nouveau avec un nouveau QR code
 
 Voir [Connecter un appareil](/fr/connect-devices/) et [Relais privé](/fr/private-relay/) pour comprendre comment ces connexions fonctionnent.

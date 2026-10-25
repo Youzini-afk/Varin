@@ -5,7 +5,7 @@ description: Conecta dispositivos vinculados mediante un relay disponible con ci
 
 # Private Relay
 
-Requisito de despliegue: configura un endpoint de relay de confianza con `VARIN_RELAY_URL`. El valor predeterminado del código procede de la infraestructura heredada de OpenChamber; este repositorio no confirma la disponibilidad de un relay alojado de Varin. El emparejamiento y cifrado descritos abajo requieren que el relay configurado esté disponible.
+Requisito de despliegue: Varin no incluye ningún servicio de relay ni un endpoint predeterminado. Configura `VARIN_RELAY_URL` en el servidor con un relay `ws://` o `wss://` que ejecutes tú o en el que confíes; hasta entonces, **En cualquier lugar** no está disponible y el servidor nunca se conecta a un relay. La vinculación y el cifrado descritos abajo se aplican una vez que ese relay esté configurado y sea accesible.
 
 El Private Relay de Varin permite que tus dispositivos vinculados alcancen tu servidor desde cualquier lugar —datos móviles, la red de una cafetería, otra ciudad— sin abrir puertos, montar un túnel ni exponer tu máquina a internet. Una vez que el endpoint de relay del servidor esté configurado y disponible, vincula un dispositivo con **En cualquier lugar** en [Conectar un dispositivo](/es/connect-devices/) para usarlo.
 
@@ -31,7 +31,7 @@ El relay gestiona su propio ciclo de vida: no hay ningún interruptor que record
 - **Se inicia bajo demanda.** Crear una vinculación **En cualquier lugar** enciende el relay, y este vuelve tras un reinicio mientras algún dispositivo vinculado siga dependiendo de él.
 - **Se detiene solo.** Cuando ningún dispositivo ni vinculación pendiente usa el relay —por ejemplo, después de revocar el último dispositivo vinculado por relay—, se apaga automáticamente.
 
-**Settings → Remote Instances → Varin Relay** muestra el estado en vivo (Conectado, Reconectando, …) y cuántos dispositivos están conectados a través de él en ese momento. Allí también puedes pulsar **Desactivar** para cortar el acceso por relay de inmediato; los dispositivos de tu red local no se ven afectados.
+**Settings → Remote Instances → Conectarse a este servidor** muestra cada dispositivo vinculado y si está conectado a través del relay. Revoca allí un dispositivo para cortar su acceso por relay de inmediato; los dispositivos de tu red local no se ven afectados.
 
 ## ¿Relay o túnel?
 

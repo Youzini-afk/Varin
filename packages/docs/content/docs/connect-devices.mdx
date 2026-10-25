@@ -14,7 +14,7 @@ Pair another device — the mobile app, the desktop app, or a browser on another
 3. Pick where you'll use the device:
    - **This computer only** — for apps running on this same machine
    - **Home network only** — connects directly over your Wi-Fi; does not work away from this network
-   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel with no setup needed
+   - **Anywhere** — works at home and away; away traffic goes through the [Private Relay](/private-relay/), an end-to-end encrypted tunnel. Available once the server has a relay configured with `VARIN_RELAY_URL`
 4. Press **Create QR code**.
 5. On the other device, scan the code:
    - **mobile app** — tap **Scan QR code** on the connect screen (or in the instances list)
@@ -54,7 +54,7 @@ For a device that should connect from **anywhere** — the equivalent of picking
 varin connect-url --relay --qr
 ```
 
-A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch.
+A `--relay` link carries both routes, just like the dialog: the device connects directly over your local network when it can reach the server, and falls back to the [Private Relay](/private-relay/) when away. The relay starts on its own: a running instance picks the link up within a minute, a stopped one on its next launch. The command reads `VARIN_RELAY_URL` like the server does, so set it to the same relay; without it, `--relay` stops with an error instead of printing a link that cannot work away from home.
 
 > The direct route only works if the server actually listens on your network. By default Varin listens on the machine itself only — start it with `--lan` to make it reachable over Wi-Fi. The command warns you (`[LAN_UNREACHABLE]`) when the link's direct route won't be usable from other devices; a `--relay` link still works then, just always through the relay.
 

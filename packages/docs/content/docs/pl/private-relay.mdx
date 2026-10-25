@@ -5,7 +5,7 @@ description: Połącz sparowane urządzenia przez dostępny przekaźnik z szyfro
 
 # Private Relay
 
-Wymaganie wdrożenia: skonfiguruj zaufany endpoint przekaźnika przez `VARIN_RELAY_URL`. Domyślna wartość w kodzie pochodzi z odziedziczonej infrastruktury OpenChamber; repozytorium nie potwierdza dostępności hostowanego przekaźnika Varin. Opisane poniżej parowanie i szyfrowanie wymagają dostępnego skonfigurowanego przekaźnika.
+Wymaganie wdrożenia: Varin nie zawiera żadnej usługi relay ani domyślnego endpointu. Ustaw na serwerze `VARIN_RELAY_URL` na adres `ws://` lub `wss://` relaya, który sam prowadzisz lub któremu ufasz; do tego czasu opcja **Wszędzie** jest niedostępna, a serwer nigdy nie łączy się z żadnym relayem. Opisane poniżej parowanie i szyfrowanie obowiązują, gdy ten relay jest skonfigurowany i osiągalny.
 
 Varin Private Relay pozwala Twoim sparowanym urządzeniom dotrzeć do serwera z dowolnego miejsca — z sieci komórkowej, kawiarnianego Wi-Fi, innego miasta — bez otwierania portów, konfigurowania tunelu czy wystawiania maszyny do internetu. Gdy endpoint relay serwera jest skonfigurowany i dostępny, sparuj urządzenie z opcją **Wszędzie** w [Połącz urządzenie](/pl/connect-devices/), aby z niego korzystać.
 
@@ -31,7 +31,7 @@ Relay sam zarządza swoim cyklem życia — nie ma przełącznika, o którym trz
 - **Uruchamia się na żądanie.** Utworzenie parowania **Wszędzie** włącza relay, a po restarcie wraca on tak długo, jak długo korzysta z niego jakiekolwiek sparowane urządzenie.
 - **Zatrzymuje się sam.** Gdy żadne urządzenie ani oczekujące parowanie nie używa relaya — na przykład po unieważnieniu ostatniego sparowanego przez relay urządzenia — wyłącza się automatycznie.
 
-**Settings → Remote Instances → Varin Relay** pokazuje bieżący stan (Połączono, Ponowne łączenie, …) oraz liczbę aktualnie połączonych przez relay urządzeń. Możesz tam też nacisnąć **Wyłącz**, aby natychmiast odciąć dostęp przez relay; urządzenia w Twojej sieci lokalnej pozostają bez zmian.
+**Settings → Remote Instances → Połącz z tym serwerem** pokazuje każde sparowane urządzenie oraz to, czy jest połączone przez relay. Unieważnij tam urządzenie, aby natychmiast odciąć mu dostęp przez relay; urządzenia w Twojej sieci lokalnej pozostają bez zmian.
 
 ## Relay czy tunel?
 

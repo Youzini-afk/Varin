@@ -1,5 +1,5 @@
 // JSON payload guards and HTTP request normalization for the relay tunnel client.
-// Spec: .opencode/plans/private-relay/01-protocol-spec.md (Layer 3).
+// Spec: packages/web/application-host/lib/relay/DOCUMENTATION.md (Layer 3); contract in ./protocol.ts.
 
 import type {
   TunnelHttpResponsePayload,

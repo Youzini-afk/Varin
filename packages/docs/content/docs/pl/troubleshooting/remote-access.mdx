@@ -16,7 +16,7 @@ Gdy nie możesz dotrzeć do Varin z telefonu lub innej maszyny, rozwiązanie zal
 
 - kod QR / link parowania jest **jednorazowy** — jeśli został już zeskanowany (lub wygasł), utwórz nowy przez **Dodaj urządzenie**
 - jeśli urządzenie sparowano z opcją **Tylko sieć domowa**, nie połączy się spoza tej sieci — sparuj je ponownie z opcją **Wszędzie**
-- przy parowaniu **Wszędzie** sprawdź **Settings → Remote Instances → Varin Relay** na serwerze: status powinien brzmieć **Połączono**; jeśli nie, wyłącz i włącz relay ponownie
+- **Wszędzie** wymaga relaya: jeśli ta opcja jest wyszarzona w **Dodaj urządzenie**, serwer nie ma ustawionej zmiennej `VARIN_RELAY_URL`; jeśli jest ustawiona, sprawdź, czy wskazany w niej relay jest osiągalny z serwera
 - jeśli urządzenie zostało **unieważnione**, jego token przepadł bezpowrotnie — sparuj je ponownie nowym kodem QR
 
 Zobacz [Połącz urządzenie](/pl/connect-devices/) i [Private Relay](/pl/private-relay/), aby dowiedzieć się, jak działają te połączenia.

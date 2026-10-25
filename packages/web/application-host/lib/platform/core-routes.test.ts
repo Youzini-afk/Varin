@@ -4,6 +4,7 @@ import * as zlib from 'node:zlib';
 import express from 'express';
 import request from 'supertest';
 import { createTunnelAuth } from './tunnel-auth.js';
+import { RelayUnavailableError } from '../relay/endpoint.js';
 import type { NextFunction, Request, Response } from 'express';
 import {
   registerAuthAndAccessRoutes,
@@ -429,6 +430,53 @@ describe('core-routes', () => {
       .expect(201);
 
     expect(response.body.server.candidates).toEqual([{ type: 'lan', url: 'http://runtime.example', priority: 10 }]);
+  });
+
+  it('refuses an Anywhere link when the server has no relay endpoint, without creating a session', async () => {
+    const { app, dependencies } = createPairingRouteApp({
+      getRelayPairingCandidate: vi.fn(async () => { throw new RelayUnavailableError({ state: 'missing' }); }),
+    });
+
+    const relayOnly = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone', includeRelay: true, includeDirect: false })
+      .expect(409);
+    expect(relayOnly.body).toEqual({
+      error: expect.stringContaining('VARIN_RELAY_URL'),
+      code: 'relay_unconfigured',
+    });
+
+    const withDirect = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone', includeRelay: true })
+      .expect(409);
+    expect(withDirect.body.code).toBe('relay_unconfigured');
+    expect(dependencies.clientPairingRuntime.createPairingSession).not.toHaveBeenCalled();
+  });
+
+  it('fails an Anywhere link whose relay cannot be prepared instead of dropping the relay', async () => {
+    const { app, dependencies } = createPairingRouteApp({
+      getRelayPairingCandidate: vi.fn(async () => { throw new Error('identity unreadable'); }),
+    });
+
+    const response = await request(app)
+      .post('/api/client-auth/pairing/sessions')
+      .set('Host', 'runtime.example')
+      .send({ label: 'Pair phone', includeRelay: true })
+      .expect(503);
+    expect(response.body.error).toContain('identity unreadable');
+    expect(dependencies.clientPairingRuntime.createPairingSession).not.toHaveBeenCalled();
+  });
+
+  it('does not offer the relay transport unless the server reports one', async () => {
+    const { app } = createPairingRouteApp();
+
+    const response = await request(app)
+      .get('/api/client-auth/pairing/transports')
+      .expect(200);
+    expect(response.body.relayAvailable).toBe(false);
   });
 
   it('requires owner auth before creating or cancelling pairing sessions', async () => {

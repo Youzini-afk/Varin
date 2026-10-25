@@ -14,7 +14,7 @@ Vincula otro dispositivo —la app móvil, la app de escritorio o un navegador e
 3. Elige dónde usarás el dispositivo:
    - **Solo este equipo** — para aplicaciones en esta misma máquina
    - **Solo red doméstica** — se conecta directamente por tu Wi-Fi; no funciona fuera de esta red
-   - **En cualquier lugar** — funciona en casa y fuera; fuera de casa el tráfico pasa por el [Private Relay](/es/private-relay/), un túnel cifrado de extremo a extremo sin configuración
+   - **En cualquier lugar** — funciona en casa y fuera; fuera de casa el tráfico pasa por el [Private Relay](/es/private-relay/), un túnel cifrado de extremo a extremo. Disponible una vez que el servidor tenga un relay configurado con `VARIN_RELAY_URL`
 4. Pulsa **Crear código QR**.
 5. En el otro dispositivo, escanea el código:
    - **app móvil** — toca **Escanear código QR** en la pantalla de conexión (o en la lista de instancias)
@@ -54,7 +54,7 @@ Para un dispositivo que debe conectarse desde **cualquier lugar** —el equivale
 varin connect-url --relay --qr
 ```
 
-Un enlace `--relay` lleva ambas rutas, igual que el diálogo: el dispositivo se conecta directamente por tu red local cuando puede alcanzar el servidor, y recurre al [Private Relay](/es/private-relay/) cuando está fuera. El relay arranca por sí solo: una instancia en marcha recoge el enlace en menos de un minuto, y una detenida lo hace en su próximo arranque.
+Un enlace `--relay` lleva ambas rutas, igual que el diálogo: el dispositivo se conecta directamente por tu red local cuando puede alcanzar el servidor, y recurre al [Private Relay](/es/private-relay/) cuando está fuera. El relay arranca por sí solo: una instancia en marcha recoge el enlace en menos de un minuto, y una detenida lo hace en su próximo arranque. El comando lee `VARIN_RELAY_URL` igual que el servidor, así que configúralo con el mismo relay; sin él, `--relay` se detiene con un error en lugar de imprimir un enlace que no puede funcionar fuera de casa.
 
 > La ruta directa solo funciona si el servidor realmente escucha en tu red. De forma predeterminada, Varin solo escucha en la propia máquina; inícialo con `--lan` para que sea accesible por Wi-Fi. El comando te avisa (`[LAN_UNREACHABLE]`) cuando la ruta directa del enlace no será utilizable desde otros dispositivos; un enlace `--relay` sigue funcionando en ese caso, solo que siempre a través del relay.
 
