@@ -87,11 +87,12 @@ jobs:
       - run: bun run docs:validate
       - if: needs.changes.outputs.code == 'true'
         run: bun run audit:dependencies
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        id: rust-audit-tool
         uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-audit@0.22.2
-      - if: needs.changes.outputs.code == 'true'
+      - if: ${{ !cancelled() && steps.rust-audit-tool.outcome == 'success' }}
         name: Audit Rust kernel dependencies
         run: cargo audit --file kernel/Cargo.lock
       - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}

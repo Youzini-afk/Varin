@@ -77,7 +77,7 @@ function fixture(owner: 'local' | 'managed' = 'managed') {
       return structuredClone(child);
     }),
   };
-  const scoped = { unpinBranch: vi.fn(async () => { trace.push('handoff-release'); }), deleteBranch: vi.fn(async () => {}) };
+  const scoped = { unpinBranch: vi.fn(async (_request: { branchId: string; pinId: string }) => { trace.push('handoff-release'); }), deleteBranch: vi.fn(async () => {}) };
   const kernel = { reconcileChildToolHandoffs() {}, releaseChildToolHandoff: vi.fn(),
     claimChildSource: vi.fn(async () => ({ grantId: 'original-cleanup-grant' })), scoped: () => scoped,
     revokeGrant: vi.fn(async () => { trace.push('cleanup-authority-retired'); }) };
@@ -175,7 +175,11 @@ it('leaves final cleanup unconfirmed when the managed handoff authority itself f
     collaboration.stop(); collaboration = f.open();
     await collaboration.recover();
     await vi.waitFor(() => expect(f.child.resources_released).toBe(true));
-    expect(f.service.service).toHaveBeenCalledTimes(2);
+    // Retention and handoff cleanup may both revisit the same admitted owner.
+    // Only successful authority retirement permits the final Run/resource release.
+    expect(f.runtime.retireSourceGrants).toHaveBeenCalledExactlyOnceWith('original-child-run');
+    expect(f.runtime.releaseChildResources).toHaveBeenCalledOnce();
+    expect(f.trace.lastIndexOf('cleanup-authority-retired')).toBeLessThan(f.trace.indexOf('run-grants-retired'));
   } finally { collaboration.stop(); }
 });
 
@@ -210,7 +214,10 @@ it('handoff cleanup does not retire a materialized source while its original res
     // Exercise the cleanup boundary with that unchanged durable result.
     await (collaboration as unknown as { releaseHandoff(child: DelegatedExecution, signal: AbortSignal): Promise<void> })
       .releaseHandoff(structuredClone(f.child), new AbortController().signal);
-    expect(f.scoped.unpinBranch).toHaveBeenCalledOnce();
+    expect(f.scoped.unpinBranch).toHaveBeenCalled();
+    for (const [request] of f.scoped.unpinBranch.mock.calls) {
+      expect(request).toMatchObject({ branchId: 'parent-source', pinId: 'original-handoff-pin' });
+    }
     expect(f.runtime.retireSourceGrants).not.toHaveBeenCalled();
     expect(f.runtime.releaseChildResources).not.toHaveBeenCalled();
     expect(f.scoped.deleteBranch).not.toHaveBeenCalled();
