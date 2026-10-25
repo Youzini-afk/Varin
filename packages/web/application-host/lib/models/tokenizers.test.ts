@@ -9,11 +9,21 @@ import { modelList, openRouterModels } from './discovery.js';
 import { directoryModels } from './directory-models.js';
 import { ModelsService } from './service.js';
 import { createModelAuthority } from '../kernel/model-authority.js';
+import { discoveredTokenizer, validTokenizer } from './tokenizer-metadata.js';
 import type { ModelChannel, ModelTokenizer } from '@varin/application-client';
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function root() { const dir = await mkdtemp(join(tmpdir(), 'varin-tokenizers-')); roots.push(dir); return dir; }
+test('encoding names normalize independently of case-sensitive repository, revision and file identities', async () => {
+  const cache = new ModelTokenizers(await root(), () => undefined, () => {});
+  expect(validTokenizer({ kind: 'encoding', name: '  O200K-BASE ' })).toBe(true);
+  expect(await cache.resolve({ kind: 'encoding', name: '  O200K-BASE ' })).toEqual({ kind: 'encoding', name: 'o200k_base' });
+  expect(discoveredTokenizer({ tokenizer: ' CL100K_BASE ' })).toEqual({ kind: 'encoding', name: 'cl100k_base' });
+  expect(discoveredTokenizer({ tokenizer: { kind: 'huggingface', repository: 'Org/Case-Sensitive', revision: 'Release-V2' } }))
+    .toEqual({ kind: 'huggingface', repository: 'Org/Case-Sensitive', revision: 'Release-V2' });
+  expect(validTokenizer({ kind: 'encoding', name: 'unknown' })).toBe(false);
+});
 const body = JSON.stringify({ version: '1.0', model: { type: 'WordLevel', vocab: { '[UNK]': 0, 'hello': 1 }, unk_token: '[UNK]' } });
 
 test('public metadata selects arbitrary repositories; preparation shares pinned content without delaying a conversation', async () => {

@@ -7,7 +7,7 @@ import { gzip } from 'node:zlib';
 import type { ModelTokenizer } from '@varin/application-client';
 import type { TokenizerBinding } from '../kernel/protocol.generated.js';
 import type { EgressFetch } from '../harness/egress.js';
-import { validTokenizer } from './tokenizer-metadata.js';
+import { validTokenizer, normalizeEncodingName } from './tokenizer-metadata.js';
 
 const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 const compress = promisify(gzip);
@@ -31,7 +31,7 @@ export class ModelTokenizers {
     this.#root = join(directory, 'cache', 'tokenizers');
   }
   #key(source: ModelTokenizer) {
-    return digest(JSON.stringify(source.kind === 'encoding' ? [source.kind, source.name]
+    return digest(JSON.stringify(source.kind === 'encoding' ? [source.kind, normalizeEncodingName(source.name)]
       : source.kind === 'huggingface' ? [source.kind, source.repository, source.revision ?? 'main']
         : source.kind === 'url' ? [source.kind, source.url] : [source.kind, source.path]));
   }
@@ -46,7 +46,7 @@ export class ModelTokenizers {
     return { kind: 'file', path: join(this.#root, `${entry.sha256}.json.gz`), sha256: entry.sha256 };
   }
   async #cached(source: ModelTokenizer): Promise<TokenizerBinding | undefined> {
-    if (source.kind === 'encoding') return { kind: 'encoding', name: source.name };
+    if (source.kind === 'encoding') return validTokenizer(source) ? { kind: 'encoding', name: normalizeEncodingName(source.name) } : undefined;
     const key = this.#key(source), ready = this.#ready.get(key);
     try {
       const local = source.kind === 'file' ? await stat(source.path) : undefined;

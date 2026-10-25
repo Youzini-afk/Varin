@@ -67,6 +67,56 @@ impl Default for TokenizerBinding {
         }
     }
 }
+
+/// Match a known encoding through channel/deployment decorations. Keep the model ID sent to
+/// the provider untouched. Prefix rules remain owned by tiktoken, rather than a second model table.
+fn model_encoding(model: &str) -> Option<Encoding> {
+    let normalized = model.trim().to_ascii_lowercase();
+    // Fine-tune IDs explicitly name their base before the next colon. Organization/job labels
+    // after that base must not participate in tokenizer selection.
+    for (index, _) in normalized.match_indices("ft:") {
+        if index == 0 || !normalized[..index].chars().next_back()?.is_ascii_alphanumeric() {
+            let base = normalized[index + 3..].split(':').next()?.trim();
+            return tiktoken_rs::tokenizer::get_tokenizer(base).map(Encoding::from_openai);
+        }
+    }
+    fn candidate(value: &str) -> Option<Encoding> {
+        if let Some(encoding) = tiktoken_rs::tokenizer::get_tokenizer(value) {
+            return Some(Encoding::from_openai(encoding));
+        }
+        // A dated/versioned model family is tried whole first. A numeric dot is part of a
+        // version (gpt-4.2), not a removable label that would incorrectly turn it into gpt-4.
+        for (index, separator) in value.char_indices().rev() {
+            if separator == '-' || separator == '_'
+                || separator == '.' && value[index + 1..].starts_with(|ch: char| ch.is_ascii_alphabetic())
+            {
+                if let Some(encoding) = tiktoken_rs::tokenizer::get_tokenizer(&value[..index]) {
+                    return Some(Encoding::from_openai(encoding));
+                }
+            }
+        }
+        None
+    }
+    let mut found = None;
+    for segment in normalized.split(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '-' | '_' | '.')) {
+        let mut encoding = candidate(segment);
+        if encoding.is_none() {
+            // Only start at a real separator; `mygpt-4o` is not a spelling of `gpt-4o`.
+            for (index, ch) in segment.char_indices() {
+                if matches!(ch, '-' | '_') {
+                    encoding = candidate(&segment[index + 1..]);
+                    if encoding.is_some() { break; }
+                }
+            }
+        }
+        if let Some(encoding) = encoding {
+            // Routing expressions naming incompatible families have no single known vocabulary.
+            if found.is_some_and(|previous| previous != encoding) { return None; }
+            found = Some(encoding);
+        }
+    }
+    found
+}
 #[derive(Default)]
 struct Loaded {
     file: OnceLock<Result<tokenizers::Tokenizer, String>>,
@@ -128,12 +178,7 @@ impl TokenCounter {
         if let Some(binding) = binding {
             return Self::new(binding.clone(), true);
         }
-        let model = model
-            .rsplit('/')
-            .next()
-            .unwrap_or(model)
-            .to_ascii_lowercase();
-        let encoding = tiktoken_rs::tokenizer::get_tokenizer(&model).map(Encoding::from_openai);
+        let encoding = model_encoding(model);
         Self::new(
             TokenizerBinding::Encoding {
                 name: encoding.unwrap_or_default(),
@@ -356,6 +401,38 @@ pub(crate) fn opaque(object: &serde_json::Map<String, Value>, key: &str) -> bool
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn decorated_model_ids_preserve_known_tokenizer_families() {
+        for (model, expected) in [
+            ("  Channel-A/GPT-4O:FREE  ", Encoding::O200kBase),
+            ("[高速]relay_gpt-4.1-mini/high", Encoding::O200kBase),
+            ("gateway/vendor/gpt-4o.high", Encoding::O200kBase),
+            ("供应商-gpt-4-turbo_2024-04", Encoding::Cl100kBase),
+            ("deployment-text-embedding-3-small-v2", Encoding::Cl100kBase),
+            ("gpt-oss-120b:turbo", Encoding::O200kHarmony),
+            ("vendor/FT:GPT-4O-2024-08-06:org:custom", Encoding::O200kBase),
+            ("openai/gpt-3.5-turbo@custom", Encoding::Cl100kBase),
+            ("gpt-4o/openai", Encoding::O200kBase),
+        ] {
+            let counter = TokenCounter::for_model(model);
+            assert!(counter.matched, "{model}");
+            assert_eq!(counter.name, TokenizerBinding::Encoding { name: expected }, "{model}");
+        }
+    }
+
+    #[test]
+    fn unknown_and_ambiguous_names_remain_reference_counts_and_explicit_bindings_win() {
+        for model in ["mygpt-4o", "gpt-4.2", "claude-sonnet", "deepseek-chat", "gpt-4 + gpt-4o", "gpt-oss-120b / gpt-4o", "ft:unknown:gpt-4o"] {
+            let counter = TokenCounter::for_model(model);
+            assert!(!counter.matched, "{model}");
+            assert!(counter.description().contains("reference tokenizer"), "{model}");
+        }
+        let binding = TokenizerBinding::Encoding { name: Encoding::Cl100kBase };
+        let counter = TokenCounter::for_binding("route/GPT-4O:free", Some(&binding));
+        assert!(counter.matched);
+        assert_eq!(counter.name, binding);
+    }
+
     #[test]
     fn generic_files_share_counts_and_retain_unicode_without_model_names() {
         let modern = TokenCounter::for_model("openai/gpt-4o");

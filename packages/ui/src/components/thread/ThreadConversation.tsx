@@ -51,6 +51,7 @@ import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadReques
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { ThreadComposer } from './ThreadComposer';
+import { useThreadNextStep } from './useThreadNextStep';
 import { ThreadAgentControls } from './ThreadAgentControls';
 import { useThreadWorkFocus } from './useThreadWorkFocus';
 import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
@@ -345,6 +346,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     await projection.current?.refresh();
   } });
   const pending = actionPending || recovery.blocked || draft.firstSend?.status === 'sending';
+  const nextStep = useThreadNextStep(api, identity, { owner: `${host}:${draftKey}`, runId: run?.id, headId: branch?.head,
+    eligible: Boolean(!readOnly && snapshot && !active && !snapshot.thread.parent_thread_id && !snapshot.thread.bot_id
+      && run && ['completed', 'failed', 'cancelled'].includes(run.state) && !pending && !draft.pendingInput && !draft.firstSend) });
   const forkFrom = async (headId: string) => {
     const generation = identityGeneration.current;
     let key = forkKeys.current.get(headId);
@@ -371,10 +375,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
   const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
-  const sendDisabled = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
+  const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
-    || (!text.trim() && !images.length && !materials.length && !inlineDrafts.length && !editorContext.length)
     || (!active && (delegated ? !api.collaboration || !run : !providerId || !modelId))));
+  const hasComposerInput = Boolean(text.trim() || images.length || materials.length || inlineDrafts.length || editorContext.length);
+  const sendDisabled = sendBlocked || (!draft.pendingInput && !hasComposerInput);
   const overviewKey = draftKey;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const contentOwner = `${host}:${draftKey}`;
@@ -597,9 +602,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('context'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}
+        suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionConsumed={nextStep.consume}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
-        imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
+        imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : nextStep.text && text.length === 0 && !hasComposerInput ? sendBlocked : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
         delivery={inputMode} onDeliveryChange={setInputMode} allowNextRun={!delegated}
         onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
         goalArmed={draft.goalArmed} onGoal={() => {
@@ -607,7 +613,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           else if (!draft.pendingInput) useThreadDraftStore.getState().patch(draftKey, { goalArmed: !draft.goalArmed });
         }} onStop={active && branch?.active_run_id ? () => void act(() => api.cancelRun(branch.active_run_id!), true) : undefined}
         attachmentNames={[...images.map(() => ''), ...materials.map(material => material.filename)]}
-        hasInput={Boolean(text.trim() || images.length || materials.length || inlineDrafts.length || editorContext.length)}
+        hasInput={hasComposerInput}
         onWorkspace={() => showOverview('sources')} workspaceLabel={preparedSource ? formatDirectoryName(preparedSource.path) : launch?.selection.source?.live_root ? formatDirectoryName(launch.selection.source.live_root.canonicalRoot) : launch?.selection.source ? t('harness.overview.sources') : draft.workspacePath ? formatDirectoryName(draft.workspacePath) : t('thread.composer.chatOnly')}
         workspacePath={preparedSource?.source.resourceOwner.kind === 'local' ? preparedSource.path
           : launch?.selection.source?.resource_owner.kind === 'local' && launch.selection.source.mode === 'live_root' ? launch.selection.source.live_root?.canonicalRoot

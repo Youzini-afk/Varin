@@ -55,6 +55,13 @@ history item's original source through the Host before opening Documents; the se
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports
 remain attached to their original execution. Context summary history is read through its parent-owned job.
 
+`useThreadNextStep` observes one Host-owned suggestion for a settled user turn. The hook fences results by
+Host, branch, Run and history head, while settings changes invalidate the displayed receipt. Ghost text is a
+CodeMirror placeholder, not draft text. `ThreadComposer` accepts it through the editor's normal insertion
+transaction (including selection and undo); Enter/button submission first synchronously materializes that
+draft before using the existing form. Typing hides the ghost but retains cursor insertion with Tab. Autocomplete,
+IME and Shift+Tab keep precedence. The Host owns background generation, original request reuse and cancellation.
+
 Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
 commands use native user Operations and the existing Integration journal. Preview refresh reads those
 records; it does not repeat writes. Dirty editor buffers keep their Documents revision checks.
@@ -132,7 +139,15 @@ figures retain the chat column's full width. The same selectors handle flat fall
 streaming renderer's `display:contents` block wrappers. Tool/reasoning and collaboration feeds keep
 their compact reading scales.
 
-The default light/dark palettes use blue accents over warm paper and neutral charcoal surfaces.
+Built-in palettes keep neutral large surfaces; their accents and syntax carry the color. The default
+dark palette raises the shell above its reading plane, then the composer and floating surfaces in
+successive gray levels. Its light counterpart uses neutral off-white, a light-gray shell and white
+inputs. Blue remains the default accent. Initial CSS uses the same default palette before hydration.
+The picker groups similar accents and displays three swatches: reading background, body ink and accent.
+The larger preview scopes the production CSS generator's resolved variables to itself, including
+component fallbacks, selected rows and syntax; picking an inactive light/dark scheme previews that
+selection without changing the application's color mode. Named syntax choices and custom palettes
+retain their IDs and selections.
 Built-in themes derive Markdown links, inline-code ink/background, quote borders and text selection
 from the live primary CSS variables. Existing messages follow theme changes without re-rendering;
 reading ink mixes toward the theme's foreground as needed for 4.5:1 contrast on prose and tinted

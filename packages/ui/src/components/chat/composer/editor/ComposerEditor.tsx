@@ -49,6 +49,7 @@ interface ComposerEditorProps {
   onPaste?(event: ClipboardEvent): void;
   languageContext: ComposerLanguageContext;
   placeholder?: string;
+  suggestion?: string;
   editable?: boolean;
   fillContainer?: boolean;
   maxLines?: number;
@@ -93,6 +94,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       value,
       languageContext,
       placeholder,
+      suggestion,
       editable = true,
       fillContainer = false,
       maxLines = 8,
@@ -129,7 +131,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
             keymap.of([...standardKeymap, ...historyKeymap]),
             composerLanguage(handlersRef.current.languageContext),
             editableCompartment.of(EditorView.editable.of(handlersRef.current.editable ?? true)),
-            placeholderCompartment.of(placeholderExtension(handlersRef.current.placeholder ?? '')),
+            placeholderCompartment.of(placeholderExtension(handlersRef.current.suggestion ?? handlersRef.current.placeholder ?? '')),
             composerEditorTheme,
             EditorView.updateListener.of((update) => {
               const handlers = handlersRef.current;
@@ -204,9 +206,9 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
 
     React.useEffect(() => {
       viewRef.current?.dispatch({
-        effects: placeholderCompartment.reconfigure(placeholderExtension(placeholder ?? '')),
+        effects: placeholderCompartment.reconfigure(placeholderExtension(suggestion ?? placeholder ?? '')),
       });
-    }, [placeholder]);
+    }, [placeholder, suggestion]);
 
     React.useEffect(() => {
       const view = viewRef.current;
@@ -286,6 +288,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       <div
         ref={hostRef}
         data-chat-input="true"
+        data-composer-suggestion={suggestion ? 'true' : undefined}
         onMouseDown={(event) => handleComposerHostMouseDown(viewRef.current, event)}
         className={cn(
           'composer-editor w-full [&_.cm-editor]:h-full',

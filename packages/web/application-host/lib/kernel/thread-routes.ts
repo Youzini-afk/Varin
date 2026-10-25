@@ -78,6 +78,7 @@ const inputBeforeAdmission = <T>(decode: () => T): T => {
 export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requireAuth: RequestHandler, research?: ThreadResearchAPI, computer?: ThreadComputerAPI, materials?: ThreadMaterialsAPI,
   integrations?: Pick<ReturnType<typeof import('./thread-integrations.js').createThreadIntegrations>, 'submit'>): void {
   const fields: Record<string, readonly string[]> = {
+    'next-step': ['runtime', 'threadId', 'branchId', 'runId', 'headId'],
     'child/integration': ['runtime', 'threadId', 'branchId', 'key', 'executionId', 'publicationId', 'action', 'sourceOwner', 'expectedBindingFingerprint', 'resolutions', 'operationId', 'sourceRunId'],
     'materials/upload': ['runtime', 'threadId', 'branchId', 'request'],
     'materials/read': ['runtime', 'threadId', 'branchId', 'request'],
@@ -510,6 +511,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
   post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
   post('snapshot', body => adapter.snapshot(identity(body)));
+  post('next-step', (body, signal) => adapter.nextStep(identity(body), text(body.runId), text(body.headId), signal));
   post('context/inspect', (body, signal) => adapter.contextInspection(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));
   post('enqueue', async body => {

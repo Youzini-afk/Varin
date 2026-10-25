@@ -113,8 +113,11 @@ public downloads, gzip cache preparation and collection; Rust decompresses/hashe
 file binding once. Live counters share both file tokenizers and owned tiktoken encodings through weak
 registry entries. A Run compiler retains its lazy counter across tool steps; the last counter releases
 the vocabulary. Missing/unusable files use a labeled reference encoding without stopping the Run.
-OpenAI mappings come from tiktoken; unmatched models use the o200k reference. No model-specific
-vocabularies or model-name branches are bundled. Immutable request fragments cache counts; changed
+OpenAI mappings come from tiktoken. Matching trims/lowercases identifiers for lookup and recognizes
+known model names at channel/deployment/tag boundaries, including suffix paths and fine-tune base IDs.
+Numeric versions stay intact, conflicting encodings remain unmatched, and explicit tokenizer bindings
+take precedence. The original provider request model is unchanged. Unmatched models use the o200k reference.
+No model-specific vocabularies or parallel encoding tables are bundled. Immutable request fragments cache counts; changed
 tokenizer bindings invalidate calibration/reuse identities. Summary input uses its own model tokenizer;
 retained material uses the frozen conversation tokenizer.
 Later input is appended after the frozen cut. Resource/personalization refresh preserves the selection;

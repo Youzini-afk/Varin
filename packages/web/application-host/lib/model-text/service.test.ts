@@ -11,8 +11,10 @@ function fixture() {
   let loseAdmission = false;
   let loseGeneration = false;
   let corruptContent = false;
-  const credentialOwner = { scope: async () => ({ reference:'provider:configured',authority:'host',account:'original',generation:1 }), release: vi.fn() };
-  const resolveModel = vi.fn(async (selection: {providerId: string;modelId: string}) => ({configuration:{providerId:selection.providerId,providerFamily:'openai-responses',model:selection.modelId,endpoint:'https://native.invalid/v1/responses',configurationGeneration:1,allowAnonymous:false,maxOutputTokens:8192},credentialOwner,acceptsImages:false}));
+  const forkRelease = vi.fn();
+  const credentialOwner = { scope: async () => ({ reference:'provider:configured',authority:'host',account:'original',generation:1 }), release: vi.fn(),
+    fork: () => ({ ...credentialOwner, release: forkRelease }) };
+  const resolveModel = vi.fn(async (selection: {providerId: string;modelId: string}) => ({configuration:{providerId:selection.providerId,providerFamily:'openai-responses',model:selection.modelId,endpoint:'https://native.invalid/v1/responses',configurationGeneration:1,allowAnonymous:false,maxOutputTokens:8192,contextWindowTokens:16000},credentialOwner,acceptsImages:false}));
   const status = (work: ModelTextView | undefined) => {
     if (!work) return null;
     const op=work.inference;const state=op?.result?.kind==='control'?op.result.value as Record<string,unknown>:{};
@@ -26,6 +28,9 @@ function fixture() {
     registerCredentialOwner: vi.fn(async () => { trace.push('registered'); }),
     unregisterCredentialOwner: vi.fn(() => { trace.push('released'); }),
     agentRuntimeRequest: vi.fn(async (method:string,p:Record<string,unknown>) => {
+      if (method === 'runtime.tokenizers.open') return { leaseId: 'original-tokenizer' };
+      if (method === 'runtime.tokenizers.count') return { counts: (p.texts as string[]).map(text => [...text].length), tokenizer: 'fixture tokenizer' };
+      if (method === 'runtime.tokenizers.close') { trace.push('tokenizer-released'); return {}; }
       if (method === 'runtime.model_text.status') return structuredClone(status(records.get(p.requestId as string)));
       if (method === 'runtime.model_text.read') { trace.push('read'); if(corruptContent) throw new Error('Original content is unreadable'); return structuredClone(records.get(p.requestId as string) ?? null); }
       if (method === 'runtime.model_text.admit') {
@@ -59,11 +64,38 @@ function fixture() {
     op.result={kind:'control',value:{dispatched:true,receipt:{localExecutorStopped:stopped,providerCompleted:outcome==='succeeded',usage:{measurement:'actual',inputTokens:7,outputTokens:4}},response:{text:'Original native text',providerOutput:{finishReason:'stop'}}}};
     work.retryAllowed=outcome!=='succeeded'&&stopped;trace.push('settled');notify();
   };
-  return {service,kernel,records,trace,input,settle,resolveModel,models,credentialOwner,notify,setSettings:(value:unknown)=>{settings=value;},loseReplies:()=>{loseAdmission=true;loseGeneration=true;},corruptContent:()=>{corruptContent=true;}};
+  return {service,kernel,records,trace,input,settle,resolveModel,models,credentialOwner,forkRelease,notify,setSettings:(value:unknown)=>{settings=value;},loseReplies:()=>{loseAdmission=true;loseGeneration=true;},corruptContent:()=>{corruptContent=true;}};
 }
 const until = async (condition:()=>boolean) => { for(let i=0;i<100&&!condition();i++) await new Promise(resolve=>setTimeout(resolve,1)); expect(condition()).toBe(true); };
 
 describe('native standalone text owner',()=>{
+  it('releases the captured tokenizer and model if preparation is cancelled before dispatch', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    f.kernel.agentRuntimeRequest.mockImplementationOnce(async method => {
+      expect(method).toBe('runtime.tokenizers.open'); controller.abort(); return { leaseId: 'cancelled-tokenizer' };
+    });
+    await expect(f.service.prepareBudget({ model: { providerId: 'chosen', modelId: 'original' }, signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    expect(f.credentialOwner.release).toHaveBeenCalledOnce(); expect(f.trace).toContain('tokenizer-released'); expect(f.trace).not.toContain('generated');
+    await f.service.close();
+  });
+  it('counts and dispatches with the same captured model after settings change, releasing both leases', async () => {
+    const f = fixture();
+    const budget = await f.service.prepareBudget({ model: { providerId: 'chosen', modelId: 'vendor/GPT-4O:free' } });
+    expect((await budget.count(['你好😀'])).counts).toEqual([3]);
+    const opened = f.kernel.agentRuntimeRequest.mock.calls.find(([method]) => method === 'runtime.tokenizers.open')![1].configuration;
+    f.resolveModel.mockRejectedValue(new Error('The model setting changed'));
+    const work = budget.generate({ ...f.input, purpose: 'text' });
+    await until(() => f.trace.includes('generated'));
+    expect(f.records.get('model-text:original')!.generation.configuration).toEqual(opened);
+    expect(f.resolveModel).toHaveBeenCalledOnce();
+    f.settle(); await work;
+    expect(f.forkRelease).toHaveBeenCalledOnce(); expect(f.credentialOwner.release).not.toHaveBeenCalled();
+    await budget.release(); await budget.release();
+    expect(f.credentialOwner.release).toHaveBeenCalledOnce(); expect(f.trace.filter(value => value === 'tokenizer-released')).toHaveLength(1);
+    await expect(budget.count(['late'])).rejects.toMatchObject({ code: 'model-text-preparation-closed' });
+    await f.service.close();
+  });
   it('an unsaved model test uses the supplied captured binding and the ordinary inference receipt', async () => {
     const f = fixture();
     const binding = await f.resolveModel({ providerId: 'draft', modelId: 'draft-model' });

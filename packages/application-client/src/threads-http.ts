@@ -37,6 +37,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     return result;
   };
   return {
+    nextStep: (identity, cut, signal) => post('next-step', { ...identity, ...cut }, signal),
     materials: {
       collection: (identity, request, signal) => post('materials/collection', { ...identity, request }, signal),
       upload: (identity, request, signal) => post('materials/upload', { ...identity, request }, signal),

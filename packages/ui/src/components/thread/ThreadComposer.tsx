@@ -28,9 +28,10 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
-  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange,
+  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange, suggestion, suggestionError, onSuggestionConsumed,
   allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
+  suggestion?: string; suggestionError?: string; onSuggestionConsumed?(): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void;
@@ -84,13 +85,29 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const loading = false;
   const busy = active;
   const aborting = false;
-  const canSend = hasInput;
+  const availableSuggestion = !active && !pending && !retrying ? suggestion : undefined;
+  const ghostSuggestion = !hasInput && value.length === 0 ? availableSuggestion : undefined;
+  const canSend = hasInput || Boolean(ghostSuggestion);
   const composerActions = { primary: active && !hasInput && !retrying ? 'stop' : 'send', showSecondaryStop: active && hasInput && Boolean(onStop) };
   const primaryBusy = loading || (composerActions.primary === 'stop' ? aborting : sending);
   const primaryIcon = { name: primaryBusy ? 'loader-4' : composerActions.primary === 'stop' ? 'stop' : 'arrow-up', spin: primaryBusy } as const;
   const footerIconButtonClass = 'flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground disabled:cursor-not-allowed disabled:opacity-35';
   const handleAbort = () => onStop?.();
-  const submit = () => { if (sendDisabled) return; if (value.trim() === '/tree' && onOpenHistory) { setAutocomplete(null); onOpenHistory(); onChange(''); return; } if (value.trim() === '/compact' && onCompact) { setAutocomplete(null); onCompact(); onChange(''); return; } messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit(); };
+  const acceptSuggestion = () => {
+    if (!availableSuggestion || !inputRef.current) return;
+    inputRef.current.insertText(availableSuggestion);
+    onSuggestionConsumed?.();
+    setAutocomplete(null);
+  };
+  const submit = () => {
+    if (sendDisabled) return;
+    if (ghostSuggestion) flushSync(acceptSuggestion);
+    else {
+      if (value.trim() === '/tree' && onOpenHistory) { setAutocomplete(null); onOpenHistory(); onChange(''); return; }
+      if (value.trim() === '/compact' && onCompact) { setAutocomplete(null); onCompact(); onChange(''); return; }
+    }
+    messageHistory.reset(); frameRef.current?.closest('form')?.requestSubmit();
+  };
   const insertTranscript = (text: string) => { onChange([value.trimEnd(), text.trim()].filter(Boolean).join('\n')); requestAnimationFrame(() => inputRef.current?.focus()); };
   const submitText = (text: string) => { flushSync(() => insertTranscript(text)); frameRef.current?.closest('form')?.requestSubmit(); };
   const selected = models.find(model => model.providerId === providerId && model.modelId === modelId);
@@ -253,6 +270,10 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
         }
       }
     }
+    if (availableSuggestion && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+      if (event.key === 'Tab') { acceptSuggestion(); return true; }
+      if (event.key === 'Escape') { onSuggestionConsumed?.(); return true; }
+    }
     if (eventMatchesShortcut(event, getEffectiveShortcutCombo('submit_message', shortcuts)) && !isIMECompositionEvent(event)) { submit(); return true; }
     if (
       event.key !== 'Enter'
@@ -338,6 +359,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             aria-label={t('chat.chatInput.placeholder.task')}
             languageContext={languageContext}
             placeholder={t('chat.chatInput.placeholder.task')}
+            suggestion={ghostSuggestion}
             className={cn(
               'min-h-[48px] w-full px-3 pb-1 pt-3 typography-markdown text-foreground md:typography-ui-label',
               isExpandedInput ? 'min-h-[40vh]' : 'max-h-[40vh]',
@@ -345,9 +367,14 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             maxLines={isExpandedInput ? 24 : 9}
           />
 
-          <div className="conversation-composer-hints" data-empty={!value.trim()}>
-            <p className="min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground">
-              {t('chat.composer.hint')}
+          <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
+            <p className="min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground" aria-live="polite">
+              {availableSuggestion ? <button type="button" className="text-muted-foreground/65 transition-colors hover:text-muted-foreground"
+                title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
+                onMouseDown={event => event.preventDefault()} onClick={() => { acceptSuggestion(); inputRef.current?.focus(); }}>
+                {isMobile ? t('chat.suggestion.applyAria') : t(ghostSuggestion ? 'chat.suggestion.acceptAndSendHint' : 'chat.suggestion.insertHint')}
+              </button> : suggestionError ? <span title={suggestionError} className="text-muted-foreground/65">{t(suggestionError === 'next-step-model-unconfigured' ? 'chat.suggestion.configureModel' : 'chat.suggestion.unavailable')}</span>
+                : t('chat.composer.hint')}
             </p>
           </div>
 

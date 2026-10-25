@@ -12,6 +12,7 @@ import { createResourceManagement } from './lib/agent-resources/management.js';
 import { registerResourceManagementRoutes } from './lib/agent-resources/management-routes.js';
 import { createModelTextService } from './lib/model-text/service.js';
 import { createThreadTitleService } from './lib/model-text/thread-titles.js';
+import { createNextStepService } from './lib/model-text/next-step.js';
 import { createSourceGitInventory } from './lib/kernel/source-git-inventory.js';
 import { createThreadNotificationRuntime } from './lib/notifications/thread-runtime.js';
 import { createContentMaintenance } from './lib/kernel/content-maintenance.js';
@@ -2067,6 +2068,12 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const sourceDirectory = createThreadSourceDirectory({ documents: documentsAuthority, remote: managedSourceConsumers.threads });
   threads.bindTitles(threadTitles);
   void threadTitles.recover();
+  const nextSteps = createNextStepService({ runtime: agentRuntime, modelText,
+    readSettings: () => modelsService.readGlobalInferenceSettings(),
+    onError: code => console.error('[NextStep] Auxiliary suggestion unavailable:', code),
+  });
+  const unsubscribeNextStepSettings = modelsService.settings.subscribe(scope => { if (scope === 'global') void nextSteps.settingsChanged(); });
+  threads.bindNextSteps(nextSteps);
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
@@ -2902,6 +2909,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       // The organizer is a semantic-inference consumer; fence it before closing that owner.
       const inferenceShutdownErrors: unknown[] = [];
       await shutdown.run('memoryOrganizer.dispose', () => memoryOrganizer.dispose().catch((error: unknown) => { inferenceShutdownErrors.push(error); }));
+      unsubscribeNextStepSettings();
+      await shutdown.run('nextSteps.close', () => nextSteps.close());
       for (const result of await Promise.allSettled([threadTitles.close(), modelText.close()])) {
         if (result.status === 'rejected') inferenceShutdownErrors.push(result.reason);
       }

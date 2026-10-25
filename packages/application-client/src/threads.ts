@@ -85,6 +85,11 @@ export interface ThreadHistoryPage {
   previous: string | null;
   items: ThreadHistoryItem[];
 }
+/** An optional draft for one committed turn. It is never automatically submitted. */
+export type ThreadNextStep =
+  | { status: 'ready'; runId: string; headId: string; text: string }
+  | { status: 'disabled' | 'empty' | 'stale' }
+  | { status: 'unavailable'; code: string };
 /** Internal retrieval is observed through its original parent Operation. */
 export interface ThreadRetrievalTrace {
   operationId: string;
@@ -394,6 +399,7 @@ export type ThreadDelete = ThreadCatalogIdentity & import('@varin/protocol').Thr
 export type ThreadRead = ThreadCatalogIdentity & import('@varin/protocol').ThreadReadPositionParams;
 
 export interface ThreadsAPI {
+  nextStep?(identity: ThreadIdentity, cut: { runId: string; headId: string }, signal?: AbortSignal): Promise<ThreadNextStep>;
   materials: ThreadMaterialsAPI;
   computer: ThreadComputerAPI;
   research?: import('./research.js').ThreadResearchAPI;

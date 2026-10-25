@@ -5,6 +5,7 @@ import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelClient } from '../kernel/kernel-client.js';
 import type { createModelAuthority } from '../kernel/model-authority.js';
 import type { ExecutorOwner, ModelTextView, ModelTextStatus, Operation } from '../kernel/protocol.generated.js';
+import { acquireTokenCounter } from '../models/token-count.js';
 
 export type ModelTextPurpose = 'git-commit' | 'review' | 'title' | 'text';
 export interface ModelTextSelection { providerId: string; modelId: string }
@@ -20,6 +21,10 @@ export interface ModelTextInput {
   signal?: AbortSignal | undefined;
 }
 export interface ModelTextResult { requestId: string; text: string; providerId: string; modelId: string }
+/** Shared by request budgeting and the actual inference serializer. */
+export function modelTextSystem(input: Pick<ModelTextInput, 'system' | 'responseSchema'>): string {
+  return `${input.system?.trim() || 'Complete the requested text task. Return only the requested answer.'}${input.responseSchema === undefined ? '' : `\nReturn JSON conforming to this schema:\n${JSON.stringify(input.responseSchema)}`}`;
+}
 /** Trusted callers can supply a captured draft through the same inference owner. */
 export interface PreparedTextModel {
   identity: string;
@@ -29,6 +34,14 @@ export interface ModelTextDescription {
   providerID: string; modelID: string; source: 'request' | 'utility' | 'default';
   inputCharBudget: number; contextTokens: number; contextKnown: boolean;
   outputTokens: number | null; outputTokenLimit: number | null; structuredOutput: boolean | null; hasLogin?: boolean;
+}
+/** A trusted caller retains one model/tokenizer selection while assembling its request. */
+export interface ModelTextBudget {
+  contextTokens: number;
+  outputTokens: number | null;
+  count(texts: readonly string[]): Promise<{ counts: number[]; tokenizer: string }>;
+  generate(input: Omit<ModelTextInput, 'model'>): Promise<ModelTextResult>;
+  release(): Promise<void>;
 }
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const fail = (code: string, message: string, statusCode = 409, requestId?: string): never => { throw Object.assign(new Error(message), { code, statusCode, ...(requestId ? { requestId } : {}) }); };
@@ -162,7 +175,7 @@ export function createModelTextService(options: {
       const configuration = { ...model.configuration };
       if (input.maxOutputTokens !== undefined) configuration.maxOutputTokens = configuration.maxOutputTokens ? Math.min(configuration.maxOutputTokens, input.maxOutputTokens) : input.maxOutputTokens;
       const credentialScope = await model.credentialOwner.scope();
-      const systemPrompt = `${input.system?.trim() || 'Complete the requested text task. Return only the requested answer.'}${input.responseSchema === undefined ? '' : `\nReturn JSON conforming to this schema:\n${JSON.stringify(input.responseSchema)}`}`;
+      const systemPrompt = modelTextSystem(input);
       const generation = { parentOperationId: requestId, callerOwner: owner, ordinal: 1, configuration, credentialScope,
         purpose: input.purpose, systemPrompt, user: input.prompt.trim() };
       signal.throwIfAborted();
@@ -236,6 +249,55 @@ export function createModelTextService(options: {
     return promise;
   };
   return {
+    async prepareBudget(input: { model: ModelTextSelection; signal?: AbortSignal }): Promise<ModelTextBudget> {
+      if (closed) return fail('model-text-closed', 'Text generation is shutting down.', 503);
+      input.signal?.throwIfAborted();
+      const chosen = parseModelTextSelection(input.model);
+      const model = await options.models.resolveModel(chosen);
+      let counter: Awaited<ReturnType<typeof acquireTokenCounter>> | undefined;
+      try {
+        input.signal?.throwIfAborted();
+        if (closed) return fail('model-text-closed', 'Text generation is shutting down.', 503);
+        const configuration = structuredClone(model.configuration);
+        const contextTokens = configuration.contextWindowTokens ?? 0;
+        if (!Number.isSafeInteger(contextTokens) || contextTokens <= 0) return fail('model-context-capacity-unknown', 'Configure the selected model context capacity.');
+        counter = await acquireTokenCounter(options.kernel, configuration);
+        input.signal?.throwIfAborted();
+        if (closed) return fail('model-text-closed', 'Text generation is shutting down.', 503);
+        const capturedCounter = counter;
+        let released = false;
+        const assertActive = () => {
+          input.signal?.throwIfAborted();
+          if (released || closed) fail('model-text-preparation-closed', 'The prepared text request has been released.');
+        };
+        const prepared: PreparedTextModel = {
+          identity: createHash('sha256').update(JSON.stringify(configuration)).digest('hex'),
+          resolve: async () => { assertActive(); return { ...model, configuration: structuredClone(configuration), credentialOwner: model.credentialOwner.fork() }; },
+        };
+        return {
+          contextTokens, outputTokens: configuration.maxOutputTokens ?? null,
+          async count(texts) {
+            assertActive();
+            const result = await capturedCounter.count(texts);
+            assertActive();
+            return result;
+          },
+          generate(request) {
+            assertActive();
+            const signal = request.signal && input.signal ? AbortSignal.any([request.signal, input.signal]) : request.signal ?? input.signal;
+            return generate({ ...request, model: chosen, signal }, prepared);
+          },
+          async release() {
+            if (released) return;
+            released = true;
+            try { await capturedCounter.release(); } finally { model.credentialOwner.release(); }
+          },
+        };
+      } catch (error) {
+        try { await counter?.release(); } finally { model.credentialOwner.release(); }
+        throw error;
+      }
+    },
     async original(key: string, signal?: AbortSignal) {
       const work = await read(`model-text:${key}`, true, signal);
       return work ? { purpose: work.generation.purpose, prompt: work.generation.user } : null;

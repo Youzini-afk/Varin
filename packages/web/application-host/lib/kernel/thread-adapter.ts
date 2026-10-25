@@ -69,6 +69,13 @@ export class ThreadAdapter {
   bindContentMaintenance(request: () => void): void { this.requestContentMaintenance = request; }
   private titles?: import('../model-text/thread-titles.js').ThreadTitleService;
   bindTitles(owner: import('../model-text/thread-titles.js').ThreadTitleService): void { this.titles = owner; }
+  private nextSteps?: import('../model-text/next-step.js').NextStepService;
+  bindNextSteps(owner: import('../model-text/next-step.js').NextStepService): void { this.nextSteps = owner; }
+  async nextStep(identity: ThreadIdentity, runId: string, headId: string, signal?: AbortSignal): Promise<import('@varin/application-client').ThreadNextStep> {
+    await this.requireIdentity(identity, signal);
+    // An observer disconnect does not cancel the shared auxiliary request.
+    return this.nextSteps?.read(identity, runId, headId) ?? { status: 'disabled' };
+  }
   private agentProfiles?: AgentProfilesAPI;
   bindAgentProfiles(owner: AgentProfilesAPI): void { this.agentProfiles = owner; }
   private async prepareAgent(choice: ThreadAgentChoice) {
