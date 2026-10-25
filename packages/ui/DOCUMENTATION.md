@@ -117,6 +117,14 @@ the value. The DOM decorator preserves source text, skips code blocks, links and
 pseudo-elements with a border and transparency checkerboard. Both streamed and final blocks use it;
 copying text/Markdown or exporting a table retains the original values without decorative characters.
 
+`WorkOverviewControl` retains full and compact reading surfaces inside one animated card.
+`workOverviewMotion.ts` carries frame size, reserved space and content handoff on the shared glide
+springs; reversing changes their targets without replacing the card, editor or scroll viewport.
+During horizontal motion, the conversation takes its final reading width once and moves with the
+reserved space; narrow layouts reserve height above it. Content/viewport resize retargets the same
+motion. Departing controls become inert immediately and are hidden only after the fade. Dragging
+the resize handle follows the pointer directly; motion preferences keep their existing semantics.
+
 Ordinary Markdown reading styles live in `styles/markdown.css`: body text and emphasis have separate
 theme colors, inline code keeps word boundaries, and links remain visibly actionable. Prose in chat
 has an 800px measure at the default text size, scaling with the text preference; code, tables and

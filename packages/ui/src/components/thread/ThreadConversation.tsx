@@ -445,7 +445,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     messageInput.current?.focus();
   }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <div className="thread-conversation-main relative min-h-0 min-w-0 flex-1">
+    <div className="thread-conversation-content flex h-full min-h-0 min-w-0 flex-col">
     {run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
       <p>{t('harness.threads.state.failed')}</p>
       {runFailure && <p className="break-words">{runFailureMessage(runFailure, t)}</p>}
@@ -643,6 +644,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       }} /></Departure>
     </div>}
     {empty && <div className="min-h-6 flex-1" />}
+    </div>
     </div>
     {overview}
     </div>
