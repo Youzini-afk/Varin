@@ -1,11 +1,8 @@
 import {
-  SPLASH_EXIT_ATTRIBUTE,
   SPLASH_EXIT_DURATION_MS,
   SPLASH_HANDOFF_ATTRIBUTE,
   SPLASH_REDUCED_EXIT_DURATION_MS,
-  SPLASH_WARM_EXIT_DURATION_MS,
-  SPLASH_WARM_FADE_DELAY_MS,
-  SPLASH_WARM_START_WINDOW_MS,
+  splashTilePlaybackTiming,
 } from '@/components/ui/varin-splash-lattice';
 import { playStartupEntrance } from '@/lib/motion/startupEntrance';
 
@@ -80,19 +77,17 @@ export const dismissInitialSplash = (): void => {
       ? ownerWindow.setTimeout(callback, delayMs)
       : setTimeout(callback, delayMs)
   );
-  // Reduced motion is one short fade of the cover. Otherwise a splash that has barely been on screen
-  // (the page's own clock) takes the warm exit; a host without a clock keeps the full one.
+  // Canvas, cube and cover retirement share the complete authored timeline.
+  // A fast backend does not shorten the camera/press/scatter choreography.
   const reduced = ownerWindow?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  const shownMs = ownerWindow?.performance?.now();
-  const warm = !reduced && shownMs !== undefined && shownMs < SPLASH_WARM_START_WINDOW_MS;
   const exitMs = reduced
     ? SPLASH_REDUCED_EXIT_DURATION_MS
-    : warm ? SPLASH_WARM_EXIT_DURATION_MS : SPLASH_EXIT_DURATION_MS;
+    : SPLASH_EXIT_DURATION_MS;
   documentElement?.setAttribute(SPLASH_HANDOFF_ATTRIBUTE, 'true');
-  if (warm) element.setAttribute(SPLASH_EXIT_ATTRIBUTE, 'warm');
   element.setAttribute(LEAVING_ATTRIBUTE, 'true');
-  // The interface assembles itself as the cover dissolves; the full exit is its own entrance.
-  if (warm) playStartupEntrance(documentElement, SPLASH_WARM_FADE_DELAY_MS, scheduleTimeout);
+  // Assemble the interface as the first floor cells uncover it, preserving the
+  // entrance rhythm without making the scene disappear before the cube presses.
+  if (!reduced) playStartupEntrance(documentElement, splashTilePlaybackTiming('standard').releaseMs, scheduleTimeout);
   removalTimer = scheduleTimeout(() => {
     // Retire the entire compositor layer before detaching its Canvas. The terminal tile frame alone
     // does not retire that layer: DOM removal and GPU resource cleanup used to happen in the same turn.

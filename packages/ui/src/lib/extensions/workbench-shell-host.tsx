@@ -54,7 +54,8 @@ const WorkspaceResolutionFailure: React.FC<{ errorMessage: string; retry(): void
 
 export const WorkbenchShellHost: React.FC<{
   fallback?: React.ReactNode;
-}> = ({ fallback = LOADING_SHELL }) => {
+  onReadyChange?(ready: boolean): void;
+}> = ({ fallback = LOADING_SHELL, onReadyChange }) => {
   const catalog = useVarinExtensionCatalog();
   const surfaceSnapshot = useSurfaceRegistrySnapshot();
   const workspace = useWorkbenchWorkspace();
@@ -109,6 +110,28 @@ export const WorkbenchShellHost: React.FC<{
   const renderShellFailure = React.useCallback((_error: unknown, retry: () => void) => (
     <WorkbenchShellRenderFailure retry={retry} />
   ), []);
+
+  const shellReady = workspace.status !== 'loading' && workspace.status !== 'error'
+    && view === 'ready' && Boolean(resolvedShellContributionId)
+    && mountedShell?.contributionId === resolvedShellContributionId
+    && mountedShell?.contributionInstanceKey === selectedShellInstanceKey;
+  const recoveryReady = workspace.status === 'error' || view === 'recovery';
+  React.useEffect(() => {
+    if (!onReadyChange) return;
+    onReadyChange(false);
+    if (!shellReady && !recoveryReady) return;
+    // A selected descriptor does not mean its lazy component has mounted. Wait
+    // for the real subtree (or recovery UI) and a paint before uncovering it.
+    let second: number | null = null;
+    const first = window.requestAnimationFrame(() => {
+      second = window.requestAnimationFrame(() => onReadyChange(true));
+    });
+    return () => {
+      window.cancelAnimationFrame(first);
+      if (second !== null) window.cancelAnimationFrame(second);
+      onReadyChange(false);
+    };
+  }, [onReadyChange, shellReady, recoveryReady, owner, selectedShellInstanceKey]);
 
   React.useEffect(() => {
     if (transition.phase !== 'covered') return;

@@ -2,12 +2,12 @@ import React from 'react';
 import { splashCubeMarkup } from '@/components/ui/varin-splash-cube';
 import { VARIN_SPLASH_COLORS, splashPlaneCss } from '@/components/ui/varin-splash-lattice';
 import { dismissInitialSplash } from '@/lib/splash';
+import { createSplashCanvasMountOptions, mountSplashTileCanvas, resolveSplashCanvasPlayback } from '@/components/ui/varin-splash-canvas';
 
 /**
- * Startup scene: the pre-paint splash (its generated stylesheet and markup, without the floor Canvas,
- * whose opaque fallback keeps the cover) over stand-ins for the parts the entrance stages.
- * `window.__startup.dismiss(shownMs)` tells the splash to leave as `App` does, as if it had been on
- * screen for `shownMs`; frames record the cover and every part's opacity and offset.
+ * Startup scene: the real pre-paint Canvas and generated stylesheet/markup over
+ * stand-ins for the staged interface. Record the actual camera and cube too:
+ * an opaque fallback alone cannot catch a missing press/scatter sequence.
  */
 
 const installSplash = (): void => {
@@ -28,7 +28,9 @@ const PARTS = ['sidebar', 'header', 'hero', 'composer', 'rail'] as const;
 interface StartupSample {
   t: number;
   splash: number | null;
-  exit: string | null;
+  cameraTilt: number | null;
+  cubeDepth: number | null;
+  renderer: string | null;
   entrance: boolean;
   parts: Record<string, { opacity: number; x: number; y: number }>;
   starters: number[];
@@ -43,6 +45,17 @@ const offset = (element: Element) => {
 export function StartupLab() {
   React.useState(installSplash);
   React.useEffect(() => {
+    const splash = document.getElementById('initial-loading')!;
+    const canvas = splash.querySelector<HTMLCanvasElement>('canvas')!;
+    const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const playback = (leaving: boolean) => resolveSplashCanvasPlayback({ mode: 'boot', leaving, reducedMotion, tempo: 'standard' });
+    const controller = mountSplashTileCanvas(canvas, createSplashCanvasMountOptions({
+      mode: 'boot', direction: 'forward', breathe: !reducedMotion, playback: playback(false),
+    }));
+    const observer = new MutationObserver(() => {
+      if (splash.dataset.leaving === 'true') { observer.disconnect(); controller.setPlayback(playback(true)); }
+    });
+    observer.observe(splash, { attributes: true, attributeFilter: ['data-leaving'] });
     let recording: StartupSample[] | null = null;
     let frame = 0;
     const sample = () => {
@@ -51,7 +64,9 @@ export function StartupLab() {
         recording.push({
           t: performance.now(),
           splash: splash ? Number(getComputedStyle(splash).opacity) : null,
-          exit: splash?.getAttribute('data-exit') ?? null,
+          cameraTilt: splash ? Number.parseFloat(splash.querySelector<HTMLElement>('.varin-splash-camera')!.style.getPropertyValue('--varin-splash-camera-tilt')) : null,
+          cubeDepth: splash ? new DOMMatrixReadOnly(getComputedStyle(splash.querySelector('.varin-splash-mark')!).transform).m43 : null,
+          renderer: canvas.getAttribute('data-varin-splash-renderer'),
           entrance: document.documentElement.hasAttribute('data-startup-entrance'),
           parts: Object.fromEntries(PARTS.map((part) => {
             const element = document.querySelector(`[data-startup-part="${part}"]`)!;
@@ -66,16 +81,13 @@ export function StartupLab() {
     const lab = {
       record() { recording = []; },
       stopRecording() { const result = recording ?? []; recording = null; return result; },
-      dismiss(shownMs: number) {
-        // The splash reads how long it has been up from the page clock, once, synchronously.
-        const clock = performance.now;
-        performance.now = () => shownMs;
-        try { dismissInitialSplash(); } finally { performance.now = clock; }
+      dismiss() {
+        dismissInitialSplash();
         return performance.now();
       },
     };
     (window as unknown as { __startup: typeof lab }).__startup = lab;
-    return () => cancelAnimationFrame(frame);
+    return () => { cancelAnimationFrame(frame); observer.disconnect(); controller.dispose(); splash.remove(); };
   }, []);
 
   return <div className="flex h-full flex-col bg-background text-foreground">

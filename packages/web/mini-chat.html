@@ -246,17 +246,6 @@ background: none;
 }
 
 
-
-/* Warm start: the whole cover dissolves while the cube sinks into its footprint. */
-@media (prefers-reduced-motion: no-preference) {
-.varin-splash:not([data-mode='switch'])[data-leaving='true'][data-exit='warm'] {
-animation: varin-splash-warm-out 360ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-@keyframes varin-splash-warm-out {
-to { opacity: 0; }
-}
-}
-
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {

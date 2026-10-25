@@ -216,6 +216,7 @@ function App({ apis }: AppProps) {
   const isSwitchingDirectory = useDirectoryStore((state) => state.isSwitchingDirectory);
   const refreshGitHubAuthStatus = useGitHubAuthStore((state) => state.refreshStatus);
   const [isEmbeddedVisible, setIsEmbeddedVisible] = React.useState(true);
+  const [workbenchReady, setWorkbenchReady] = React.useState(false);
   const chatContentWidth = useUIStore((state) => state.chatContentWidth);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
   const isDesktopRuntime = React.useMemo(() => isDesktopShell(), []);
@@ -294,11 +295,16 @@ function App({ apis }: AppProps) {
   const runtimeReady = isDesktopRuntime
     ? desktopWorkspaceIsOperable(desktopWorkspaceView ?? 'loading', isSwitchingDirectory)
     : catalogLoaded;
+  const needsWorkbench = !embeddedSessionChat
+    && !(isDesktopRuntime && bootView && bootView.screen !== 'main')
+    && desktopWorkspaceView !== 'catalog-recovery'
+    && !(!isDesktopRuntime && !catalogLoaded && catalogError);
 
   // Splash dismissal: use the authoritative loading gate from desktopBoot.
   // Desktop shells strictly require a valid boot outcome before dismissing.
   // Non-main outcomes (chooser/recovery) can dismiss without waiting for init.
   React.useEffect(() => {
+    if (needsWorkbench && !workbenchReady) return;
     if (!canDismissInitialLoading({
       isDesktopShell: isDesktopRuntime,
       runtimeReady: runtimeReady || desktopWorkspaceView === 'catalog-recovery',
@@ -313,7 +319,7 @@ function App({ apis }: AppProps) {
     const timer = setTimeout(dismissInitialSplash, 150);
 
     return () => clearTimeout(timer);
-  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady]);
+  }, [bootOutcomeKnown, bootViewIsMain, desktopWorkspaceView, isDesktopRuntime, runtimeReady, needsWorkbench, workbenchReady]);
 
   // Deterministic malformed handling: name the failure on the splash so the user sees something
   // specific, but do NOT dismiss it. Only a valid boot outcome dismisses.
@@ -490,12 +496,13 @@ function App({ apis }: AppProps) {
     const bootSurfaceReady =
       bootView?.screen === 'chooser' || bootView?.screen === 'recovery';
     if (!runtimeReady && !bootSurfaceReady) return;
+    if (needsWorkbench && !workbenchReady) return;
     if (isSwitchingDirectory) return;
     if (appReadyDispatchedRef.current) return;
     appReadyDispatchedRef.current = true;
     (window as unknown as { __varinAppReady?: boolean }).__varinAppReady = true;
     window.dispatchEvent(new Event('varin:app-ready'));
-  }, [bootView, desktopWorkspaceView, isDesktopRuntime, isSwitchingDirectory, runtimeReady]);
+  }, [bootView, desktopWorkspaceView, isDesktopRuntime, isSwitchingDirectory, runtimeReady, needsWorkbench, workbenchReady]);
 
   // Session attention now handled by notification-store via SSE events (session.idle/session.error)
 
@@ -683,7 +690,7 @@ function App({ apis }: AppProps) {
               <AgentEditorCoordinator />
               <RunDebugCoordinator />
               <WorkbenchProfileBridge />
-              <WorkbenchShellHost />
+              <WorkbenchShellHost onReadyChange={setWorkbenchReady} />
               <Toaster />
               <WorkspaceEditReviewDialog />
               {!isBootShell && (

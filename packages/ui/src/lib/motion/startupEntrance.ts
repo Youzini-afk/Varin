@@ -4,7 +4,7 @@ import { springSettleMs } from './tokens';
 /**
  * Startup entrance (docs/design/motion-and-interaction.md §3.13).
  *
- * After a warm start's short splash exit the interface assembles itself: the sidebar, the title bar,
+ * As the splash's floor cells begin to open, the interface assembles itself: the sidebar, the title bar,
  * the home title, the composer and the rail arrive 40ms apart, and the starter suggestions follow one
  * by one. Parts opt in with `data-startup-part`; styles/motion.css plays them while the root carries
  * `data-startup-entrance`, counting from `--startup-entrance-delay`. Anything that mounts inside that
