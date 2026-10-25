@@ -80,7 +80,7 @@ import { resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
-import { useEdgeSwipeSessionSwitch } from './useEdgeSwipeSessionSwitch';
+import { useEdgeSwipeSessionChat } from './useEdgeSwipeSessionSwitch';
 import { useNativePushRegistration } from './useNativePushRegistration';
 
 const MOBILE_SETTINGS_PAGES = [
@@ -1960,35 +1960,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   );
   useDeepLinkHandlers(deepLinkHandlers);
 
-  // Edge swipe (left/right screen edge → centre) switches between sessions, with a directional
-  // slide+fade on the chat content so it's obvious the session changed.
+  // Edge swipe (left/right screen edge → centre) switches between sessions. The chat content follows
+  // the finger and leaves the way it was thrown; the next session comes in from the side the finger
+  // started on once it has rendered.
   const chatMainRef = React.useRef<HTMLElement>(null);
   const chatAnimRef = React.useRef<HTMLDivElement>(null);
-  const swipeDirectionRef = React.useRef<'prev' | 'next' | null>(null);
-  // Record the swipe direction; the animation itself runs in the layout effect below, once the
-  // new session's content has committed — running it inline in the swipe callback raced the
-  // re-render and dropped the animation on roughly every other switch.
-  const recordSwipeDirection = React.useCallback((direction: 'prev' | 'next') => {
-    swipeDirectionRef.current = direction;
-  }, []);
-  useEdgeSwipeSessionSwitch(chatMainRef, { onSwitch: recordSwipeDirection });
-
-  React.useLayoutEffect(() => {
-    const direction = swipeDirectionRef.current;
-    swipeDirectionRef.current = null;
-    if (!direction) return; // only animate swipe-driven switches
-    const element = chatAnimRef.current;
-    if (!element || typeof element.animate !== 'function') return;
-    element.getAnimations().forEach((animation) => animation.cancel());
-    const fromX = direction === 'prev' ? -70 : 70;
-    element.animate(
-      [
-        { opacity: 0.1, transform: `translateX(${fromX}px)` },
-        { opacity: 1, transform: 'translateX(0)' },
-      ],
-      { duration: 300, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' },
-    );
-  }, [currentThreadId]);
+  useEdgeSwipeSessionChat(chatMainRef, chatAnimRef, currentThreadId);
 
   const handleNativeBack = React.useCallback(() => {
     if (overflowOpen) {

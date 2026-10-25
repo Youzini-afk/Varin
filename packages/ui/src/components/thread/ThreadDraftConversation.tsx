@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import type { MessageHandoff } from '@/components/conversation/messageHandoff';
 import { usePrefersReducedMotion } from '@/hooks/usePrefersReducedMotion';
 import { Departure } from '@/components/motion/Departure';
+import { tapHaptic } from '@/lib/motion/haptics';
 
 /** Local composition has no execution identity. The first explicit send creates one. */
 export function ThreadDraftConversation({ api, draftKey, handoff }: { api: ThreadsAPI; draftKey: string; handoff: MessageHandoff }) {
@@ -141,6 +142,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           editorContext, inlineContext,
           ...(draft.goalArmed && draft.text.trim() ? { goalObjective: draft.text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}),
         };
+        tapHaptic();
         handoff.submit(request.key, draftKey, handoff.captureDraft());
         void sendThreadDraft(api, draftKey, request).then(inputId => {
           if (inputId && generation === getRuntimeEndpointGeneration()) handoff.accepted(request.key, inputId);

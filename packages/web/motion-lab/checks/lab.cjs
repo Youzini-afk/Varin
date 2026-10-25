@@ -7,9 +7,9 @@ const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'playwright');
 // `query` opens another scene (`?scene=send`); `ready` is a page predicate for it.
 const timelineReady = () => window.__lab && document.querySelector('[data-conversation-timeline-end-space]');
 
-exports.openLab = async ({ width = 1280, height = 820, reducedMotion = 'no-preference', query = '', ready = timelineReady } = {}) => {
+exports.openLab = async ({ width = 1280, height = 820, reducedMotion = 'no-preference', query = '', ready = timelineReady, hasTouch = false } = {}) => {
   const browser = await chromium.launch({ executablePath: process.env.LAB_BROWSER || undefined });
-  const page = await browser.newPage({ viewport: { width, height }, reducedMotion });
+  const page = await browser.newPage({ viewport: { width, height }, reducedMotion, hasTouch });
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   // Failed requests are judged by URL below; the console line carries none.

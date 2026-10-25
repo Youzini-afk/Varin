@@ -46,6 +46,7 @@ import { useI18n } from '@/lib/i18n';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
 import { subscribeVarinEvents } from '@/lib/varinEvents';
 import React from 'react';
+import { tapHaptic } from '@/lib/motion/haptics';
 import { createModelConnectionsHttpAPI, threadSourceFailureMessage, ThreadRequestError, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged } from '@varin/application-client';
 import type { ThreadIdentity, ThreadModel, ThreadModelInfo, ThreadThinkingLevel, ThreadSnapshot, ThreadsAPI, ThreadPreparedSource } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
@@ -197,6 +198,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     ...(samplingConfiguration.modelOptions?.temperature === undefined ? {} : { temperature: samplingConfiguration.modelOptions.temperature }),
   } : undefined;
   const active = Boolean(branch?.active_run_id);
+  // A run that finishes in the conversation on screen taps once (§3.14); a failed one says so instead.
+  const finishedRun = React.useRef<{ key: string; active: boolean } | null>(null);
+  const runKey = `${identity.threadId}\0${identity.branchId}`;
+  React.useEffect(() => {
+    const previous = finishedRun.current;
+    finishedRun.current = { key: runKey, active };
+    if (previous?.key !== runKey || !previous.active || active || runFailure) return;
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') tapHaptic();
+  }, [runKey, active, runFailure]);
   const computer = useComputerAutomation(identity, api.computer, branch?.active_run_id);
   const hasComputer = Boolean(computer.error || computer.state?.active || computer.state && computer.state.status !== 'enabled' || computer.state?.cleanups.length || computer.state?.leases.length || computer.state?.requests.length || computer.activities.length);
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
@@ -494,6 +504,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           images: requestImages, pdfs: draft.pdfs ?? [], model: { providerId, modelId, thinkingLevel, ...(temperature === undefined ? {} : { temperature }) }, ...(!snapshot?.thread.bot_id && !delegated ? { agent } : {}), workspacePath: draft.workspacePath,
           sourceSelection: draft.sourceSelection, editorContext, inlineContext,
           ...(draft.goalArmed && text.trim() ? { goalObjective: text.trim(), ...(settings.sessionGoalDefaultBudgetEnabled ? { goalBudget: settings.sessionGoalDefaultBudget } : {}) } : {}) };
+        tapHaptic();
         handoff.submit(request.key, draftKey, handoff.captureDraft());
         void sendThreadDraft(api, draftKey, request).then(inputId => {
           if (inputId && host === getRuntimeEndpointGeneration()) handoff.accepted(request.key, inputId);
@@ -501,6 +512,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         return;
       }
       if (sendDisabled || fileRead.current) return;
+      tapHaptic();
       const generation = identityGeneration.current;
       const sourceRect = handoff.captureDraft();
       void act(async () => {

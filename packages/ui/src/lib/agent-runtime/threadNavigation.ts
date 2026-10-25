@@ -56,9 +56,13 @@ export async function createThreadForSubmission(target: { directory?: string | n
   const draftKey = await startThreadFromNavigation(target);
   return useThreadStore.getState().materializeDraft(draftKey);
 }
+const navigableThreads = () => useThreadStore.getState().threads
+  .filter(thread => !thread.bot_id && !thread.archived && thread.deleted_at_ms === null);
+/** How many Threads relative navigation steps through; below two there is nowhere to go. */
+export const navigableThreadCount = (): number => navigableThreads().length;
 export async function switchRelativeThread(offset: number): Promise<void> {
-  const { threads, selectedIdentity } = useThreadStore.getState();
-  const visible = threads.filter(thread => !thread.bot_id && !thread.archived && thread.deleted_at_ms === null)
+  const { selectedIdentity } = useThreadStore.getState();
+  const visible = navigableThreads()
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updated_at_ms - a.updated_at_ms);
   if (!visible.length || !Number.isFinite(offset)) return;
   const index = visible.findIndex(thread => thread.thread_id === selectedIdentity?.threadId);
