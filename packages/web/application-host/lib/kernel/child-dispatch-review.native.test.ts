@@ -1924,6 +1924,18 @@ function childSourcePins(root: string) {
   finally { database.close(); }
 }
 
+// Exercise the installed package against the actual native schema admission, before waiting
+// on child context. A rejected policy call never enters that context barrier.
+async function expectPolicyChildAdmission(runtime: AgentRuntimeClient, runId: string, errors: unknown[]) {
+  await expect.poll(async () => ({
+    runState: (await runtime.run(runId)).state,
+    errors: errors.map(String),
+    children: (await runtime.children()).filter(child => child.parent_run_id === runId)
+      .map(child => ({ origin: child.origin })),
+  }), { timeout: 10_000, message: 'The installed policy must admit exactly one real child before context preparation' })
+    .toMatchObject({ children: [{ origin: { kind: 'policy_action' } }] });
+}
+
 it('installed collaboration policy accepts a child and reads before any parent ModelStep, then waits for one genuine report', async () => {
   const entered = gate(); const release = gate();
   let parentSteps = 0; let childSteps = 0;
@@ -1949,6 +1961,7 @@ it('installed collaboration policy accepts a child and reads before any parent M
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate, independently inspect, then answer from the report', model, source: prepared.source });
+    await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
     await entered.promise;
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
     expect(parentSteps).toBe(0); expect(childSteps).toBe(0);
@@ -2004,6 +2017,7 @@ it('installed collaboration policy reopens its pending Wait without duplicating 
   const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   prepared.source.tools = ['file_read'];
   const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Await the delegated report', model, source: prepared.source });
+  await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
   const originalWait = (await h.runtime.run(receipt.run_id)).waiting_on;
   const children = await h.runtime.children(); expect(children).toHaveLength(1);
@@ -2058,6 +2072,7 @@ it('cancelling a policy child observation resumes from the real cancellation fac
     const prepared = await h.api.prepareSource({ ...identity, key: 'fixed', resourceOwner: { kind: 'local' as const }, workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
     prepared.source.tools = ['file_read'];
     const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Delegate and observe', model, source: prepared.source });
+    await expectPolicyChildAdmission(h.runtime, receipt.run_id, h.errors);
     await entered.promise;
     await expect.poll(async () => (await h.runtime.run(receipt.run_id)).waiting_on, { timeout: 10_000 }).toMatch(/^child-wait:/);
     const waitId = (await h.runtime.run(receipt.run_id)).waiting_on!;
