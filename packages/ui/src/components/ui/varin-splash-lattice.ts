@@ -181,6 +181,21 @@ export const SPLASH_EXIT_DURATION_MS = Math.max(
 export const SPLASH_REDUCED_EXIT_DURATION_MS = 260;
 
 /**
+ * Warm start (docs/design/motion-and-interaction.md §3.13). The app was ready almost as soon as the
+ * splash painted, so the 1.9s ceremony would be most of the startup. Instead the cube sinks into its
+ * footprint while the whole cover dissolves, and the interface assembles itself underneath
+ * (lib/motion/startupEntrance.ts). A splash that stayed up longer keeps the full exit.
+ */
+export const SPLASH_WARM_START_WINDOW_MS = 1_800;
+/** Marks the splash for the warm exit, set together with the leaving flag. */
+export const SPLASH_EXIT_ATTRIBUTE = 'data-exit';
+/** The cover starts to dissolve this long after the exit begins; the entrance starts with it. */
+export const SPLASH_WARM_FADE_DELAY_MS = 80;
+const WARM_FADE_MS = 360;
+const WARM_MARK_SINK_MS = 260;
+export const SPLASH_WARM_EXIT_DURATION_MS = SPLASH_WARM_FADE_DELAY_MS + WARM_FADE_MS;
+
+/**
  * The reveal's own timings.
  *
  * The hole opens roughly as fast as the tile wave travels, so a tile has usually gone by the time the
@@ -567,6 +582,34 @@ to { opacity: 0; transform: translateY(5px); }
 }`
     : '';
 
+  const warm = `.varin-splash:not([data-mode='switch'])[data-leaving='true'][${SPLASH_EXIT_ATTRIBUTE}='warm']`;
+  const warmMarkRules = options.withMark
+    ? `
+${warm} .varin-splash-mark {
+animation: varin-splash-mark-sink ${WARM_MARK_SINK_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+${warm} .varin-splash-cube-face {
+animation: varin-splash-mark-out ${WARM_MARK_SINK_MS - 60}ms 60ms ease both;
+}
+${warm} .varin-splash-ground::after {
+animation: varin-splash-contact-press ${WARM_MARK_SINK_MS}ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+@keyframes varin-splash-mark-sink {
+to { transform: translateZ(${-CUBE_EDGE_PX / 2}px); }
+}`
+    : '';
+  // Motion only: under reduced motion the one fade below already is the exit.
+  const warmRules = `
+/* Warm start: the whole cover dissolves while the cube sinks into its footprint. */
+@media (prefers-reduced-motion: no-preference) {
+${warm} {
+animation: varin-splash-warm-out ${WARM_FADE_MS}ms ${SPLASH_WARM_FADE_DELAY_MS}ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes varin-splash-warm-out {
+to { opacity: 0; }
+}${warmMarkRules}
+}`;
+
   const reducedMarkRules = options.withMark
     ? `,
 .varin-splash[data-leaving='true'] .varin-splash-mark,
@@ -810,6 +853,7 @@ opacity: 0.5;
 animation: none;
 }
 ${workbenchPhaseRules}` : ''}
+${warmRules}
 
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */

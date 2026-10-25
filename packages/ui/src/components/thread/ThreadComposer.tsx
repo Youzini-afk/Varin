@@ -278,6 +278,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             sending && 'opacity-80',
           )}
           data-conversation-composer-input-frame="true"
+          data-startup-part="composer"
           onDragOver={(event) => {
             if ([...event.dataTransfer.items].some((item) => item.kind === 'file')) event.preventDefault();
           }}

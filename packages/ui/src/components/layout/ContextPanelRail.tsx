@@ -181,6 +181,7 @@ export const ContextPanelRail: React.FC = () => {
     <nav
       ref={navRef}
       id="context-panel-rail"
+      data-startup-part="rail"
       aria-label={t('contextRail.aria.rail')}
       className="workbench-resource-rail relative flex h-full w-11 shrink-0 flex-col items-center gap-1 overflow-y-auto py-2"
     >

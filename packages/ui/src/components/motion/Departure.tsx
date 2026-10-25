@@ -1,5 +1,6 @@
 import React from 'react';
 import { documentMotionLevel } from '@/lib/motion/preference';
+import type { StartupPart } from '@/lib/motion/startupEntrance';
 import { EASE_EXIT, staggerDelay, TWEENS } from '@/lib/motion/tokens';
 
 type Exit = 'rise' | 'sink';
@@ -14,6 +15,8 @@ interface DepartureProps {
   /** False removes the content at once, for departures that are not the user's doing. */
   animated?: boolean;
   className?: string;
+  /** Marks the wrapper as a part of the startup entrance (lib/motion/startupEntrance.ts). */
+  startupPart?: StartupPart;
   children?: React.ReactNode;
 }
 
@@ -104,7 +107,7 @@ export class Departure extends React.Component<DepartureProps> {
   }
 
   render(): React.ReactNode {
-    const { present, className, children } = this.props;
-    return present ? <div ref={this.setNode} className={className}>{children}</div> : null;
+    const { present, className, startupPart, children } = this.props;
+    return present ? <div ref={this.setNode} className={className} data-startup-part={startupPart}>{children}</div> : null;
   }
 }

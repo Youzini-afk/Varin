@@ -417,3 +417,32 @@
   opacity: 1;
   transition: opacity 240ms var(--motion-ease-out);
 }
+
+/*
+ * Startup entrance (lib/motion/startupEntrance.ts): after a warm start the
+ * parts arrive 40ms apart from where they sit, the starters 20ms apart after
+ * them. `translate` composes with any transform a part already has.
+ */
+:root[data-startup-entrance] [data-startup-part],
+:root[data-startup-entrance] .oc-draft-starters > * {
+  animation: startup-part-in var(--motion-dur-glide) var(--motion-ease-glide) backwards;
+  animation-delay: calc(var(--startup-entrance-delay, 0ms) + var(--startup-order, 0) * 40ms);
+}
+[data-startup-part="sidebar"] { --startup-order: 0; --startup-from: -12px 0; }
+[data-startup-part="header"] { --startup-order: 1; --startup-from: 0 -4px; }
+[data-startup-part="hero"] { --startup-order: 2; --startup-from: 0 8px; }
+[data-startup-part="composer"] { --startup-order: 3; --startup-from: 0 10px; }
+[data-startup-part="rail"] { --startup-order: 4; --startup-from: 8px 0; }
+.oc-draft-starters > * { --startup-order: 5; --startup-from: 0 6px; }
+.oc-draft-starters > :nth-child(2) { --startup-order: 5.5; }
+.oc-draft-starters > :nth-child(3) { --startup-order: 6; }
+.oc-draft-starters > :nth-child(4) { --startup-order: 6.5; }
+.oc-draft-starters > :nth-child(5) { --startup-order: 7; }
+.oc-draft-starters > :nth-child(n + 6) { --startup-order: 7.5; }
+@keyframes startup-part-in {
+  from { opacity: 0; translate: var(--startup-from, 0 6px); }
+}
+/* A departing copy (components/motion/Departure.tsx) only leaves; it never arrives again. */
+:root[data-startup-entrance] [data-departing][data-startup-part],
+:root[data-startup-entrance] [data-departing] [data-startup-part],
+:root[data-startup-entrance] [data-departing] .oc-draft-starters > * { animation: none; }

@@ -126,6 +126,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, isMobile, children, cl
     return (
         <aside
             ref={sidebarRef}
+            data-startup-part="sidebar"
             className={cn(
                 'relative flex h-full overflow-hidden border-r border-border will-change-[width] motion-reduce:transition-none',
                 'workbench-sidebar bg-sidebar varin-vibrancy-surface',

@@ -18,6 +18,7 @@ import { RailLab } from './rail';
 import { SwitchLab } from './switch';
 import { SettingsLab } from './settings';
 import { WorkbenchLab } from './workbench';
+import { StartupLab } from './startup';
 import type {
   ChatAssistantContent,
   ChatAssistantMessage,
@@ -497,7 +498,7 @@ createRoot(document.getElementById('root')!).render(
         <MotionProvider>
           <ThemeControl />
           <TooltipProvider>
-            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : scene === 'settings' ? <SettingsLab /> : scene === 'workbench' ? <WorkbenchLab /> : <Lab />}
+            {scene === 'send' ? <SendLab /> : scene === 'sidebar' ? <SidebarLab /> : scene === 'rail' ? <RailLab /> : scene === 'switch' ? <SwitchLab /> : scene === 'settings' ? <SettingsLab /> : scene === 'workbench' ? <WorkbenchLab /> : scene === 'startup' ? <StartupLab /> : <Lab />}
           </TooltipProvider>
         </MotionProvider>
       </ThemeProvider>

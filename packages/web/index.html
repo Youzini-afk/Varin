@@ -926,6 +926,28 @@ animation: varin-splash-status-out 180ms 1720ms ease reverse both;
 animation: varin-splash-status-out 180ms ease both;
 }
 
+/* Warm start: the whole cover dissolves while the cube sinks into its footprint. */
+@media (prefers-reduced-motion: no-preference) {
+.varin-splash:not([data-mode='switch'])[data-leaving='true'][data-exit='warm'] {
+animation: varin-splash-warm-out 360ms 80ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes varin-splash-warm-out {
+to { opacity: 0; }
+}
+.varin-splash:not([data-mode='switch'])[data-leaving='true'][data-exit='warm'] .varin-splash-mark {
+animation: varin-splash-mark-sink 260ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+.varin-splash:not([data-mode='switch'])[data-leaving='true'][data-exit='warm'] .varin-splash-cube-face {
+animation: varin-splash-mark-out 200ms 60ms ease both;
+}
+.varin-splash:not([data-mode='switch'])[data-leaving='true'][data-exit='warm'] .varin-splash-ground::after {
+animation: varin-splash-contact-press 260ms cubic-bezier(0.3, 0, 0.2, 1) both;
+}
+@keyframes varin-splash-mark-sink {
+to { transform: translateZ(-48px); }
+}
+}
+
 /* Reduced motion drops the staged animation for one fade of the whole cover. It must still show the
    cover: hiding it would put the unpainted first frame back. */
 @media (prefers-reduced-motion: reduce) {

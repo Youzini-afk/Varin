@@ -704,6 +704,7 @@ export const IdeWorkbenchShell: React.FC<Record<string, unknown>> = () => {
         />
 
         <header
+          data-startup-part="header"
           className={cn('workbench-titlebar app-region-drag flex h-11 shrink-0 items-center gap-2 pl-2',
             usesFramelessChrome && windowControlsSide === 'right' ? 'pr-0' : 'pr-2')}
           onMouseDown={(event) => {

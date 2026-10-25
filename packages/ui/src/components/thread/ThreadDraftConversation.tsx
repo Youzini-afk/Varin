@@ -128,7 +128,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
     </div></div> : <div className="min-h-6 flex-1" />}
     <div className="shrink-0 space-y-5 pb-4">
       {/* On send the title rises away and the starters sink, while the composer docks. */}
-      <Departure present={!firstMessage.message} exit="rise" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
+      <Departure present={!firstMessage.message} exit="rise" startupPart="hero" className="chat-input-column flex flex-col items-center gap-5 pb-1 text-center">
         <VarinLogo width={24} height={24} decorative className="text-muted-foreground" />
         <h1 className="text-2xl font-medium tracking-tight text-foreground md:text-3xl">{sourcePath ? t('chat.emptyState.draftTitleWithProject', { project: formatDirectoryName(sourcePath) }) : t('chat.emptyState.draftTitle')}</h1>
       </Departure>

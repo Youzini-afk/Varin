@@ -1188,6 +1188,7 @@ export const Header: React.FC<HeaderProps> = ({
     <>
       <header
         ref={headerRef}
+        data-startup-part="header"
         className={headerClassName}
         style={{ ['--padding-scale' as string]: '1' } as React.CSSProperties}
       >
