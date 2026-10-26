@@ -161,6 +161,17 @@ function fakeBridge(
 }
 
 describe("settings service catalog search", () => {
+  it("finds translated UI labels and keeps empty searches scoped", async () => {
+    const { service } = fixture();
+    for (const query of ["字体", "字體"]) {
+      const result = await service.search(caller, { query });
+      assert.ok(result.items.some(item => item.id === "appearance.interface-font-size"));
+    }
+    const absent = await service.search(caller, { query: "此项不存在-r7", category: "appearance" });
+    assert.equal(absent.total, 0);
+    assert.deepEqual(absent.items, []);
+    assert.deepEqual(absent.categories, []);
+  });
   it("matches free text against ids, paths, and keywords", async () => {
     const { service } = fixture();
     const result = await service.search(caller, { query: "theme dark" });

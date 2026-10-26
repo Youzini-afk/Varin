@@ -2,6 +2,11 @@
 
 Framework-neutral Varin application client boundary.
 
+`src/settings-locales` owns the static settings dictionaries shared by UI labels and Host tool
+discovery. Edit translations there; UI message modules re-export the same data. The
+`settingsSearchTranslations` loader builds a cached search index only when needed, without React
+or UI state dependencies. `querySettingsCatalog` accepts that index alongside stable IDs and fields.
+
 ## Purpose
 
 This package owns the `RuntimeAPIs` aggregate interface and the API interfaces (Terminal, Git,

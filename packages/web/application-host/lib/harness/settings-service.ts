@@ -18,6 +18,7 @@ import {
   getSettingsCatalogEntry,
   listSettingsCategories,
   querySettingsCatalog,
+  settingsSearchTranslations,
   type AgentSettingsSnapshot,
   type SettingsCatalogEntry,
   type SettingsFieldSpec,
@@ -328,19 +329,20 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     caller: SettingsServiceCaller,
     params: SettingsSearchParams,
   ): Promise<SettingsSearchResult> => {
+    const translations = params.query?.trim() && !params.id ? await settingsSearchTranslations() : undefined;
     const matches = querySettingsCatalog({
       ...(params.query !== undefined ? { query: params.query } : {}),
       ...(params.category !== undefined ? { category: params.category as never } : {}),
       ...(params.owner !== undefined ? { owner: params.owner } : {}),
       ...(params.id !== undefined ? { id: params.id } : {}),
-    });
+    }, translations);
     const offset = Math.max(0, params.offset ?? 0);
     const limit = Math.max(1, Math.min(params.limit ?? 20, 100));
     const terms = [...new Set((params.query ?? '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean))];
     const relatedScores = new Map<SettingsCatalogEntry, number>();
     if (!matches.length && !params.id && terms.length > 1) {
       for (const term of terms) {
-        for (const entry of querySettingsCatalog({ query: term, ...(params.category ? { category: params.category as never } : {}), ...(params.owner ? { owner: params.owner } : {}) })) {
+        for (const entry of querySettingsCatalog({ query: term, ...(params.category ? { category: params.category as never } : {}), ...(params.owner ? { owner: params.owner } : {}) }, translations)) {
           relatedScores.set(entry, (relatedScores.get(entry) ?? 0) + 1);
         }
       }
@@ -348,7 +350,7 @@ export function createSettingsService(deps: SettingsServiceDeps): SettingsServic
     const related = [...relatedScores].sort((a, b) => b[1] - a[1] || a[0].id.localeCompare(b[0].id))
       .slice(0, limit).map(([entry]) => toSearchItem(entry));
     const categories = new Map<string, number>();
-    for (const entry of matches.length ? matches : querySettingsCatalog(params.owner ? { owner: params.owner } : {})) {
+    for (const entry of matches) {
       categories.set(entry.category, (categories.get(entry.category) ?? 0) + 1);
     }
     const page = matches.slice(offset, offset + limit);
