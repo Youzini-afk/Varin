@@ -408,6 +408,7 @@ const useFileReferenceInteractions = ({
       candidate.removeAttribute('data-varin-file-link');
       candidate.removeAttribute('data-varin-file-ref');
       candidate.removeAttribute('data-varin-file-path');
+      candidate.removeAttribute('data-varin-file-directory');
       if (candidate.getAttribute('title') === 'Open file') {
         candidate.removeAttribute('title');
       }
@@ -493,6 +494,7 @@ const useFileReferenceInteractions = ({
           candidate.setAttribute('data-varin-file-link', 'true');
           candidate.setAttribute('data-varin-file-ref', latestRawCandidate);
           candidate.setAttribute('data-varin-file-path', latestResolved.resolvedPath);
+          candidate.setAttribute('data-varin-file-directory', getContextDirectory(effectiveDirectory, latestResolved.resolvedPath));
           candidate.setAttribute('title', 'Open file');
           if (candidate.tagName.toLowerCase() !== 'a') {
             candidate.setAttribute('role', 'button');

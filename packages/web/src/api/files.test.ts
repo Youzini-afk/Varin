@@ -1,13 +1,16 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isFilesystemError, type RuntimeUrlQuery, type RuntimeUrlResolver } from '@varin/application-client';
 
-const { runtimeFetchMock } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn() }));
+const { runtimeFetchMock, generation } = vi.hoisted(() => ({ runtimeFetchMock: vi.fn(), generation: { value: 0 } }));
 
 vi.mock('@varin/application-client', async (importOriginal) => ({
   ...await importOriginal<typeof import('@varin/application-client')>(),
   runtimeFetch: runtimeFetchMock,
+  getRuntimeEndpointGeneration: () => generation.value,
 }));
+
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 const toUrl = (path: string, query?: RuntimeUrlQuery): string => {
   const params = query instanceof URLSearchParams ? query : new URLSearchParams();
@@ -123,5 +126,33 @@ describe('createWebFilesAPI', () => {
       query: { path: '/current-workspace/file.txt', download: true },
       headers: { 'x-varin-directory': '/current-workspace' },
     });
+  });
+
+  it('downloads original binary bytes from the captured directory and drops a stale Host response', async () => {
+    const { createWebFilesAPI } = await import('./files');
+    const api = createWebFilesAPI({ urls, getDirectory: () => '/unrelated-project' });
+    vi.useFakeTimers();
+    const anchor = { href: '', download: '', click: vi.fn() };
+    vi.stubGlobal('document', { createElement: () => anchor, body: { appendChild: vi.fn(), removeChild: vi.fn() } });
+    const createUrl = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download');
+    const revokeUrl = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+    const bytes = new Uint8Array([0, 255, 0x50, 0x4b, 128, 13, 10]);
+    runtimeFetchMock.mockResolvedValueOnce(new Response(bytes));
+    await api.downloadFile?.('/retained-source/report.xlsx', { directory: '/retained-source' });
+    expect(runtimeFetchMock).toHaveBeenLastCalledWith('/api/fs/raw', {
+      query: { path: '/retained-source/report.xlsx', download: true },
+      headers: { 'x-varin-directory': '/retained-source' },
+    });
+    expect(new Uint8Array(await (createUrl.mock.calls[0]![0] as Blob).arrayBuffer())).toEqual(bytes);
+    expect(anchor.download).toBe('report.xlsx'); expect(anchor.click).toHaveBeenCalledOnce();
+    await vi.runAllTimersAsync(); expect(revokeUrl).toHaveBeenCalledWith('blob:download');
+
+    let finishResponse!: (response: Response) => void;
+    runtimeFetchMock.mockReturnValueOnce(new Promise<Response>(resolve => { finishResponse = resolve; }));
+    const download = api.downloadFile!('/retained-source/report.xlsx', { directory: '/retained-source' });
+    generation.value++;
+    finishResponse(new Response(bytes));
+    await expect(download).rejects.toMatchObject({ name: 'AbortError' });
+    expect(anchor.click).toHaveBeenCalledOnce();
   });
 });

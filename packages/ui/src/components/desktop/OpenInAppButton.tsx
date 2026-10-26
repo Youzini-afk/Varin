@@ -31,7 +31,7 @@ const withFallbackIcon = (app: OpenInAppOption): OpenInAppOptionWithFallback => 
     : undefined,
 });
 
-const AppIcon = ({
+export const AppIcon = ({
   label,
   iconDataUrl,
   fallbackIconDataUrl,
