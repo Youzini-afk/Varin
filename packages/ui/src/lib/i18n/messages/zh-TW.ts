@@ -7,6 +7,13 @@ import { toolMessagesZhTW } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  "contextManager.resourceVersion": "固定資源版本：{version}",
+  "contextManager.checkpointVersion": "上下文檢查點：{id} · 修訂 {revision}",
+  "contextManager.hiddenSkill": "不向模型自動披露",
+  "contextManager.invalidSkillName": "技能指令的名稱不能包含空格。請重新命名後使用。",
+  "contextManager.addSkillCommand": "將 /skill:{name} 加入草稿",
+  "contextManager.resourceDiagnostics": "資源診斷",
+
   "contextManager.policyUnavailable": "暫時無法讀取上下文閾值",
   "contextManager.recordPending": "正在讀取壓縮記錄",
   "contextManager.recordPendingHint": "等待目前對話中的這筆記錄同步，可以返回目前上下文。",

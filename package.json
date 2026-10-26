@@ -1,6 +1,6 @@
 {
   "name": "varin-monorepo",
-  "version": "0.9.32",
+  "version": "0.9.33",
   "description": "The open-source agent harness, ready out of the box: tools, context, durable execution, permissions and recovery for code, research and office work.",
   "private": true,
   "type": "module",

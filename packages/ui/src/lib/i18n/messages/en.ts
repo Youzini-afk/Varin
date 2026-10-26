@@ -8,6 +8,13 @@ import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
+  "contextManager.resourceVersion": "Frozen resource version: {version}",
+  "contextManager.checkpointVersion": "Context checkpoint: {id} · revision {revision}",
+  "contextManager.hiddenSkill": "Hidden from automatic model discovery",
+  "contextManager.invalidSkillName": "Skill commands need a name without spaces. Rename this skill to use its command.",
+  "contextManager.addSkillCommand": "Add /skill:{name} to draft",
+  "contextManager.resourceDiagnostics": "Resource diagnostics",
+
   "contextManager.policyUnavailable": "Context thresholds are unavailable",
   "contextManager.recordPending": "Loading compaction record",
   "contextManager.recordPendingHint": "Waiting for the selected record to appear in this conversation. You can return to the current context.",

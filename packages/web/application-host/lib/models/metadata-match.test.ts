@@ -40,7 +40,15 @@ test('uses the actual upstream ID and preserves routing, explicit values and exp
   expect(resolved).toMatchObject({ ...model, maxOutputTokens: 390000, thinking: { mode: 'levels', levels: ['low', 'high'] }, compat: { thinkingFormat: 'deepseek' } });
   expect(resolved.protocol).toBeUndefined();
   expect(resolved.catalog?.overrides).toContain('contextWindow');
-  expect(applyModelDirectoryDefaults({ ...resolved, maxOutputTokens: undefined, catalog: { overrides: [...resolved.catalog!.overrides, 'maxOutputTokens'] } }, defaults).maxOutputTokens).toBeUndefined();
+  const cleared = { ...resolved, catalog: { overrides: [...resolved.catalog!.overrides, 'maxOutputTokens' as const] } };
+  // Saved configuration omits a cleared optional value but keeps its explicit override.
+  delete cleared.maxOutputTokens;
+  const clearedResult = applyModelDirectoryDefaults(cleared, defaults);
+  expect(clearedResult.maxOutputTokens).toBeUndefined();
+  expect(Object.hasOwn(clearedResult, 'maxOutputTokens')).toBe(false);
+  // A JavaScript caller can still supply an own undefined value before JSON serialization.
+  Object.defineProperty(cleared, 'maxOutputTokens', { value: undefined, enumerable: true });
+  expect(applyModelDirectoryDefaults(cleared, defaults).maxOutputTokens).toBeUndefined();
   expect(modelDirectoryDefaults(index, generic, { id: 'gpt-4.1', requestModelId: 'opaque-deployment' }, [])).toBeUndefined();
   const changed = applyModelDirectoryDefaults({ ...resolved, requestModelId: 'unknown-deployment' });
   expect(changed.contextWindow).toBe(222);

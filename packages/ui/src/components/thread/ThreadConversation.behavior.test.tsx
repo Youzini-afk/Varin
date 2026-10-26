@@ -12,6 +12,8 @@ import { ThreadRequestError } from '@varin/application-client';
 import type { ContextCheckpoint, ThreadIdentity, ThreadSnapshot, ThreadSubmit, ThreadsAPI } from '@varin/application-client';
 import type { ChildTask, DelegatedExecution, StoredMedia, McpInteractionView, FetchResult } from '@varin/protocol';
 import { ThreadConversation } from './ThreadConversation';
+import { ContextPanelContent } from '@/components/layout/ContextSidebarTab';
+import { dict as en } from '@/lib/i18n/messages/en';
 import { toast } from '@/components/ui';
 import { ChildTaskMenu } from '../conversation/ChildTaskMenu';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
@@ -187,7 +189,7 @@ function fixture(active = false) {
     view.activeRun = null; view.thread.branches[0]!.active_run_id = null; view.thread.branches[0]!.latest_run = run;
     return run;
   });
-  let listener: Parameters<ThreadsAPI['observe']>[1] | undefined;
+  const listeners = new Set<Parameters<ThreadsAPI['observe']>[1]>();
   const unused = async (): Promise<never> => { throw new Error('unused fixture API'); };
   const api: ThreadsAPI = { historyRuns: async (_identity, { headId }) => ({ head: headId, runs: [] }), historyRunPreview: async () => '', historyUsage: async () => [], contextHistory: unused, fileTarget: unused, usage: unused, update: unused, delete: unused, markRead: unused, materials: { upload: vi.fn(unused), readSource: vi.fn(unused), read: vi.fn(unused), readArtifact: vi.fn(unused) }, computer: { state: vi.fn<ThreadsAPI['computer']['state']>(async target => ({ state: { work: target, rootWork: target, currentExecution: null, currentRootExecution: null, active: false, status: 'enabled', leases: [], requests: [], cleanups: [] }, activities: [] })), stop: vi.fn(unused), decide: vi.fn(unused) }, goals: { start: vi.fn(unused), update: unused, control: unused, list: async () => view.goals }, resources: { refresh: unused }, followups: { jobSources: async () => [], register: unused, list: unused, get: unused, occurrence: unused, occurrences: unused, control: unused, pendingRegistrations: async () => [], cancelRegistration: unused }, listModels: async () => [{ providerId: 'fixture-provider', modelId: 'fixture-model' }], list: async () => [view.thread], create: async () => identity,
     mediaRead: vi.fn(async input => ({ media: storedImage, partIndex: input.partIndex, chunkIndex: 0, chunkCount: 1, totalBytes: Buffer.from(imageData, 'base64').length, bytesBase64: imageData })),
@@ -199,9 +201,9 @@ function fixture(active = false) {
       resolve: async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await getRegisteredRuntimeAPIs()!.documents.resolveWorkspace({ path: request.path })).workspaceId }) },
     recoverySource: unused, prepareNavigation: unused, navigate: unused, navigationReceipt: unused,
     inspectTools: unused, inspectPolicy: unused, restartPolicy: unused, cancelPolicyUpdate: unused, selectModel: unused, decidePermission: unused, answerQuestion: unused, prepareSource: unused, fork: unused, compact: unused, publishContext: unused, cancelContext: unused, resumeContext: unused, historyPage: unused, run: unused, toolCalls: async () => [], operation: unused, cancelOperation: unused, retrievalTrace: unused, retrievalFileTarget: unused, resume: unused, retryPreparation: unused, events: async () => [],
-    observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { listener = onEvent; if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }); }),
+    observe: async (_cursor, onEvent, { signal }) => new Promise<void>(resolve => { if (signal.aborted) { resolve(); return; } listeners.add(onEvent); signal.addEventListener('abort', () => { listeners.delete(onEvent); resolve(); }, { once: true }); }),
   };
-  return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => listener?.(event) };
+  return { api, view, submit, enqueue, editInput, cancelInput, cancelRun, emit: (event: Parameters<ThreadsAPI['observe']>[1] extends (value: infer T) => void ? T : never) => { for (const listener of listeners) listener(event); } };
 }
 let root: Root;
 let container: HTMLDivElement;
@@ -221,7 +223,7 @@ beforeEach(() => {
   recoveryService.api = undefined;
   // Recovery assertions count individual messages independently of the default
   // dialogue grouping. Presentation-specific cases choose their mode below.
-  useUIStore.setState({ recoveryPreference: 'conversation', chatRenderMode: 'live' });
+  useUIStore.setState({ recoveryPreference: 'conversation', chatRenderMode: 'live', contextPanelByDirectory: {} });
   runtimeState.api = undefined; vi.mocked(attachProcessTerminal).mockClear();
   const documents: Pick<DocumentsAPI, 'resolveWorkspace'> = { resolveWorkspace: async () => ({ workspaceId: 'canonical-source-workspace', hostId: 'fixture-host', epoch: 1 }) };
   registerRuntimeAPIs({ documents } as RuntimeAPIs);
@@ -250,7 +252,7 @@ const submitForm = async (form: HTMLFormElement) => { await act(async () => { fo
 const button = (text: string) => {
   const labels: Record<string, string> = { 'Resume run': 'chat.run.resume', 'Retry preparation': 'chat.run.retryPreparation', 'Save queued input': 'settings.common.actions.saveChanges', 'Read report': 'chat.children.report', 'Read execution report': 'chat.children.report', 'Stop child subtree': 'harness.threads.stop', 'Cancel queued input': 'chat.queuedMessage.removeAria', 'Restore before this message': 'chat.messageBody.actions.revertAria', 'Restore through this message': 'chat.messageBody.actions.revertAria', 'Branch conversation only': 'chat.messageBody.actions.forkAria', 'Generate context summary': 'thread.message.summarize', 'View image': 'chat.media.view', 'Stop task and children': 'harness.threads.stopAll' };
   return [...document.querySelectorAll<HTMLButtonElement>('button')].find(value => {
-    if (value.textContent === text || value.textContent === labels[text] || text === 'Continue child' && value.textContent === 'Send') return true;
+    if (value.textContent === text || value.getAttribute('aria-label') === text || value.textContent === labels[text] || text === 'Continue child' && value.textContent === 'Send') return true;
     if (!labels[text] || value.getAttribute('aria-label') !== labels[text]) return false;
     if (text.startsWith('Restore ')) return value.closest('[data-conversation-message-role]')?.getAttribute('data-conversation-message-role') === (text.startsWith('Restore before') ? 'user' : 'assistant');
     return true;
@@ -284,6 +286,27 @@ const openOverview = async (section: string) => {
   expect(item, `Overview detail ${section}`).toBeDefined();
   await act(async () => item!.click());
 };
+
+// Exercise the real shared sidebar selected by the overview/composer, without the
+// desktop shell's unrelated geometry, editor or terminal surfaces.
+function ConversationWithContext({ api }: { api: ThreadsAPI }) {
+  const panel = useUIStore(state => state.contextPanelByDirectory['/workspace/project']);
+  const tab = panel?.tabs.find(tab => tab.id === panel.activeTabId);
+  return <><ThreadConversation api={api} identity={identity} preferredModel={null} />
+    {panel?.isOpen && tab?.mode === 'context' && <aside aria-label="Context sidebar"><ContextPanelContent identity={tab.thread} jobRunId={tab.targetPath ?? undefined} readOnly={tab.readOnly} /></aside>}</>;
+}
+const renderWithContext = async (api: ThreadsAPI) => {
+  runtimeState.api = api;
+  Object.assign(translations.dictionary, Object.fromEntries(Object.entries(en).filter(([key]) => key.startsWith('contextManager.'))));
+  await act(async () => root.render(<ConversationWithContext api={api} />));
+};
+const openResources = async () => {
+  await openOverview('context');
+  const toggle = [...container.querySelectorAll<HTMLButtonElement>('aside button')].find(value => value.textContent?.startsWith('Instructions and skills'))!;
+  expect(toggle).toBeDefined();
+  await act(async () => toggle.click());
+};
+
 const openOperation = async (id: string) => {
   await openOverview('operations');
   await act(async () => container.querySelector<HTMLButtonElement>(`[data-operation-id="${id}"]`)!.click());
@@ -1264,7 +1287,9 @@ it('adds a hidden skill command and retains the draft and image through a resour
   const refresh = vi.fn<ThreadsAPI['resources']['refresh']>(async input => {
     const next = structuredClone(f.view.context.checkpoint!);
     next.id = 'context:retry'; next.revision = input.expectedRevision + 1; next.resources!.snapshot.id = 'resources:retry';
-    f.view.context.checkpoint = next; return next;
+    f.view.context.checkpoint = next;
+    f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: next.revision, kind: 'context.committed', data: {} });
+    return next;
   });
   f.api.resources.refresh = refresh;
   const checkpoint = resourceCheckpoint();
@@ -1273,8 +1298,8 @@ it('adds a hidden skill command and retains the draft and image through a resour
   checkpoint.resources!.snapshot.skills.push({ ...skill, id: 'skill:spaced-name', name: `${skill.name} extra`,
     reference: { ...skill.reference, canonicalId: 'resource:spaced-name', path: '.pi/skills/spaced/SKILL.md' } });
   f.view.context.checkpoint = checkpoint;
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await openOverview('context');
+  await renderWithContext(f.api);
+  await openResources();
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   expect(container.textContent).toContain('Hidden from automatic model discovery');
   expect(button('Add /skill:review-code extra to draft').disabled).toBe(true);
@@ -1311,6 +1336,10 @@ it('adds a hidden skill command and retains the draft and image through a resour
   expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
   expect(button('Send').disabled).toBe(false);
   expect(button('Add /skill:review-code to draft').disabled).toBe(false);
+  // An unrelated context publication with the same frozen resources cannot clear the error.
+  f.view.context.checkpoint = { ...f.view.context.checkpoint!, id: 'context:same-resources' };
+  await act(async () => f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 3, kind: 'context.committed', data: {} }));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('has changed. Refresh instructions and skills');
   await act(async () => button('Refresh instructions and skills').click());
   expect(refresh).toHaveBeenCalledExactlyOnceWith({ ...identity, expectedRevision: 3 });
   expect(composer().value).toBe(text);
@@ -1323,6 +1352,21 @@ it('adds a hidden skill command and retains the draft and image through a resour
   expect(second).toEqual({ ...first, key: second!.key, clientTime: second!.clientTime });
   expect(composer().value).toBe('');
   expect(composer().closest('form')?.querySelector('img')).toBeNull();
+});
+
+it('keeps an unrelated request failure when the resource snapshot changes', async () => {
+  const f = fixture();
+  f.view.context.checkpoint = resourceCheckpoint();
+  f.submit.mockRejectedValueOnce(new Error('delivery unavailable'));
+  await renderWithContext(f.api);
+  await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
+  await edit('[aria-label="Message thread"]', 'Keep this draft');
+  await submitForm(composerForm());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('delivery unavailable');
+  f.view.context.checkpoint.resources!.snapshot.id = 'resources:updated';
+  await act(async () => f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 4, kind: 'context.committed', data: {} }));
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('delivery unavailable');
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')?.value).toBe('Keep this draft');
 });
 
 it('projects frozen skill metadata separately from original history and editable queued input', async () => {
@@ -1389,8 +1433,8 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
     .mockImplementation(() => new Promise(resolve => { completeRefresh = resolve; }));
   f.api.resources.refresh = refresh;
   const snapshot = vi.fn(f.api.snapshot); f.api.snapshot = snapshot;
-  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await openOverview('context');
+  await renderWithContext(f.api);
+  await openResources();
   const resources = () => container.querySelector('[aria-label="Instructions and skills"]')!;
   expect(resources().textContent).toContain('resources:original');
   expect(resources().textContent).toContain('review-code');
@@ -1399,7 +1443,9 @@ it('keeps frozen resource metadata on conflict and refreshes once with the curre
   expect(resources().querySelector('[aria-label="Resource diagnostics"]')?.textContent).toContain('Optional resource is missing');
   expect(container.textContent).not.toContain('Private instruction body');
   expect(container.textContent).not.toContain('Private skill body');
-  expect(container.textContent).not.toContain('Private composed prompt');
+  expect(resources().textContent).not.toContain('Private composed prompt');
+  const systemInstructions = [...container.querySelectorAll('aside button')].find(value => value.textContent === 'System instructions')!;
+  expect(systemInstructions.getAttribute('aria-expanded')).toBe('false');
   // Another context update has committed without changing the frozen resources.
   f.view.context.checkpoint = { ...checkpoint, id: 'context:other-update', revision: 4 };
   const snapshotsBefore = snapshot.mock.calls.length;
@@ -1440,6 +1486,7 @@ it('retries summary generation without duplicating the job and applies its compl
   const compact = vi.fn<ThreadsAPI['compact']>().mockRejectedValueOnce(new Error('uncertain summary acceptance')).mockImplementation(async input => {
     const job = { compaction: { producer: { kind: 'builtin' as const, name: 'fold' as const, version: '1' as const }, kind: 'model_plan' as const, sourceCutHash: 'fixture-cut', planHash: 'fixture-plan' }, request: { compaction: null, summary_recipe: { strategy: { kind: 'builtin' as const, name: 'manual', version: '1' }, mode: 'manual' as const, configurationIdentity: null, additionalInstructions: null }, key: input.key, branch_id: input.branchId, through_id: input.throughId, expected_revision: input.expectedRevision, effective_system_prompt: '', instruction_sources: [], memory_checkpoint: null }, receipt: { thread_id: 'context-job-thread:fixture', branch_id: 'context-job-branch:fixture', run_id: run.id, input_id: 'summary-input', cursor: 2 } };
     f.view.context.jobs = [{ job, run }];
+    f.emit({ cursor: ++f.view.eventCursor, subject: identity.branchId, revision: 1, kind: 'context.job.changed', data: {} });
     return job;
   });
   f.api.compact = compact;
@@ -1450,19 +1497,20 @@ it('retries summary generation without duplicating the job and applies its compl
     return checkpoint;
   });
   f.api.publishContext = publish;
-  await act(async () => { root.render(<ThreadConversation api={f.api} identity={identity} />); });
+  f.api.contextHistory = async () => ({ head: null, previous: null, items: [] });
+  await renderWithContext(f.api);
   expect(button('Generate context summary').disabled).toBe(true);
   await edit('[aria-label="Registered model"]', JSON.stringify(['fixture-provider', 'fixture-model']), 'change');
   await act(async () => { button('Generate context summary').click(); });
-  expect(button('Apply context summary')).toBeUndefined();
+  expect(button('Apply early')).toBeUndefined();
   await act(async () => { button('Generate context summary').click(); });
   expect(compact.mock.calls[1]![0]).toEqual(compact.mock.calls[0]![0]);
   expect(compact.mock.calls[0]![0]).toMatchObject({ ...identity, throughId: 'summary-cut', expectedRevision: 0 });
-  await act(async () => { button('Apply context summary').click(); });
+  await act(async () => { button('Apply early').click(); });
   expect(publish).toHaveBeenCalledExactlyOnceWith(identity, run.id);
-  expect(container.querySelector('[aria-label="Active context summary"]')?.textContent).toContain('continuation summary');
+  expect(container.querySelector('[aria-label="Active summary"]')?.textContent).toContain('continuation summary');
   expect(container.textContent).toContain('original full message');
-  expect(button('Apply context summary')).toBeUndefined();
+  expect(button('Apply early')).toBeUndefined();
 });
 
 it('prepares a real source selection, preserves it and the draft on uncertain send, then omits it for continuation', async () => {

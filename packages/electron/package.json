@@ -1,6 +1,6 @@
 {
   "name": "@varin/electron",
-  "version": "0.9.32",
+  "version": "0.9.33",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Varin desktop runtime",
@@ -95,7 +95,13 @@
       {
         "from": "resources/tools",
         "to": "tools",
-        "filter": ["rg", "rg.exe", "ripgrep-LICENSE", "ripgrep-MIT-LICENSE.txt", "pcre2-LICENSE.txt"]
+        "filter": [
+          "rg",
+          "rg.exe",
+          "ripgrep-LICENSE",
+          "ripgrep-MIT-LICENSE.txt",
+          "pcre2-LICENSE.txt"
+        ]
       },
       {
         "from": "resources/web-dist",

@@ -1,6 +1,6 @@
 import React from 'react';
 import { THINKING_LEVELS, type ThinkingLevel } from '@varin/protocol';
-import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
+import { ThreadRequestError, getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
@@ -21,8 +21,8 @@ import { readableContextSummary, useContextJobHistory } from './useContextJobHis
 import { contextMessageKinds } from './contextMessages';
 import './context-manager.css';
 
-export function ContextInspector({ api, identity, snapshot, active, jobRunId, error, readOnly }: {
-  api: ThreadsAPI; identity: ThreadIdentity; snapshot: ThreadSnapshot; active: boolean; jobRunId?: string; error?: string; readOnly?: boolean;
+export function ContextInspector({ api, identity, snapshot, active, jobRunId, error, readOnly, refresh }: {
+  api: ThreadsAPI; identity: ThreadIdentity; snapshot: ThreadSnapshot; active: boolean; jobRunId?: string; error?: string; readOnly?: boolean; refresh(): Promise<void>;
 }) {
   const { t } = useI18n();
   const [selected, setSelected] = React.useState<string | null>(jobRunId ?? null);
@@ -38,8 +38,15 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
   const [messageFilter, setMessageFilter] = React.useState('all'), [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [messagesOpen, setMessagesOpen] = React.useState(false);
   const host = getRuntimeEndpointGeneration(), lifetime = React.useRef(0);
+  const pendingAction = React.useRef<object | null>(null);
   const preparationKeys = React.useRef(new Map<string, string>());
-  React.useEffect(() => { const current = ++lifetime.current; return () => { lifetime.current = current + 1; }; }, [identity, host]);
+  React.useEffect(() => {
+    const current = ++lifetime.current;
+    pendingAction.current = null; setPending(false); setActionError(undefined); preparationKeys.current.clear();
+    return () => { lifetime.current = current + 1; pendingAction.current = null; };
+  }, [identity.runtime, identity.threadId, identity.branchId, host, api]);
+  const draftKey = threadComposerKey(threadHostKey(), identity);
+  const inputPending = useThreadDraftStore(state => Boolean(state.drafts[draftKey]?.pendingInput || state.drafts[draftKey]?.firstSend?.status === 'sending'));
   const view = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]);
   const inspection = view?.inspection, request = inspection?.latestRequest, model = threadContextModel(snapshot);
   const channel = useModelCatalogStore(state => state.channels.find(channel => channel.id === model?.providerId));
@@ -80,10 +87,22 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
   React.useEffect(() => { if (copied) { const timer = setTimeout(() => setCopied(undefined), 2000); return () => clearTimeout(timer); } }, [copied]);
   const copy = async (id: string, content: string) => { const result = await copyTextToClipboard(content); if (result.ok) setCopied(id); else setActionError(result.error); };
   const act = async (action: () => Promise<unknown>) => {
-    const current = lifetime.current; setPending(true); setActionError(undefined);
-    try { await action(); }
-    catch (error) { if (current === lifetime.current && host === getRuntimeEndpointGeneration()) setActionError(error instanceof Error ? error.message : String(error)); }
-    finally { if (current === lifetime.current && host === getRuntimeEndpointGeneration()) setPending(false); }
+    if (readOnly || pendingAction.current || host !== getRuntimeEndpointGeneration()) return;
+    const token = {}; pendingAction.current = token;
+    const generation = lifetime.current;
+    const current = () => generation === lifetime.current && host === getRuntimeEndpointGeneration() && pendingAction.current === token;
+    setPending(true); setActionError(undefined);
+    try { await action(); if (current()) await refresh(); }
+    catch (error) {
+      if (!current()) return;
+      let message = error instanceof Error ? error.message : String(error);
+      if (error instanceof ThreadRequestError && error.status === 409) {
+        try { await refresh(); }
+        catch (failure) { message += `; ${failure instanceof Error ? failure.message : String(failure)}`; }
+      }
+      if (current()) setActionError(message);
+    }
+    finally { if (current()) { pendingAction.current = null; setPending(false); } }
   };
   const prepare = () => act(async () => {
     if (!model?.providerId || !model.model || !snapshot.historyPage.head) return;
@@ -121,7 +140,7 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
         {(!row && !selected || phase === 'failed' || phase === 'cancelled' || phase === 'superseded') && <button type="button" disabled={pending || !model?.providerId || !snapshot.historyPage.head} onClick={() => void prepare()}>{t(row ? 'contextManager.prepareAgain' : 'contextManager.prepareNow')}</button>}
       </div>}
     </section>
-    <section className="context-summary-section">
+    <section className="context-summary-section" aria-label={t(historical ? 'contextManager.historicalSummary' : phase === 'ready' ? 'contextManager.candidateSummary' : 'contextManager.activeSummary')}>
       <div className="context-summary-heading"><h3>{t(historical ? 'contextManager.historicalSummary' : phase === 'ready' ? 'contextManager.candidateSummary' : 'contextManager.activeSummary')}</h3>
         {summary && <button type="button" aria-label={t('contextManager.copySummary')} onClick={() => void copy('summary', summary)}><Icon name={copied === 'summary' ? 'check' : 'file-copy'} className="size-3.5" /></button>}</div>
       {phase === 'ready' && <p className="context-section-caption">{t('contextManager.candidateHint')}</p>}
@@ -146,18 +165,28 @@ export function ContextInspector({ api, identity, snapshot, active, jobRunId, er
     </ContextDisclosure>}
     {rawPrompt && <ContextDisclosure title={t('contextManager.systemInstructions')}><div className="context-instructions"><MarkdownRenderer content={rawPrompt} messageId={`context-instructions:${snapshot.context.checkpoint?.id}`} /></div></ContextDisclosure>}
     {resources && <ContextDisclosure title={t('contextManager.resources')} hint={resources.skills.length}>
-      <div className="context-resources">
-        {resources.instructions.map(instruction => <p key={instruction.reference.canonicalId}>{instruction.reference.path}</p>)}
-        {resources.instructionScopes.map(scope => <div key={scope.directory}><p>{scope.directory}</p>{scope.instructions.map(instruction => <p key={instruction.reference.canonicalId}>{instruction.reference.path}</p>)}</div>)}
-        {resources.skills.map(skill => <div key={skill.id} className="context-resource-skill"><span title={skill.reference.path}>{skill.name}</span>
-          {!readOnly && !skill.name.includes(' ') && <button type="button" onClick={() => {
-            if (host !== getRuntimeEndpointGeneration()) return;
-            const key = threadComposerKey(threadHostKey(), identity), command = `/skill:${skill.name}`;
-            useThreadDraftStore.getState().patch(key, draft => draft.pendingInput ? {} : { text: draft.text === command || draft.text.startsWith(command + ' ') ? draft.text : `${command} ${draft.text}` });
+      <div className="context-resources" aria-label={t('contextManager.resources')}>
+        <p>{t('contextManager.resourceVersion', { version: resources.id })}</p>
+        <p>{t('contextManager.checkpointVersion', { id: resourceCheckpoint!.id, revision: resourceCheckpoint!.revision })}</p>
+        <p>{resources.scope.cwd}{resources.scope.sourceIdentity ? ` · ${resources.scope.sourceIdentity}` : ''}</p>
+        {resourceCheckpoint!.resources!.source && <p>{[resourceCheckpoint!.resources!.source.mode, resourceCheckpoint!.resources!.source.workspace_id, resourceCheckpoint!.resources!.source.branch_id, resourceCheckpoint!.resources!.source.revision].filter(value => value !== null).join(' · ')}</p>}
+        {[resources.system, resources.appendSystem].filter(instruction => instruction !== null).map((instruction, index) => <p key={index}>{instruction!.origin} · {instruction!.reference.path} · {instruction!.reference.domainId} · {instruction!.reference.viewId} · {instruction!.reference.version}</p>)}
+        {resources.instructions.map(instruction => <p key={instruction.reference.canonicalId}>{instruction.origin}{instruction.appliesTo ? ` · ${instruction.appliesTo}` : ''} · {instruction.reference.path} · {instruction.reference.domainId} · {instruction.reference.viewId} · {instruction.reference.version}</p>)}
+        {resources.instructionScopes.map(scope => <div key={scope.directory}><p>{scope.directory}</p>{scope.instructions.map(instruction => <p key={instruction.reference.canonicalId}>{instruction.origin}{instruction.appliesTo ? ` · ${instruction.appliesTo}` : ''} · {instruction.reference.path} · {instruction.reference.domainId} · {instruction.reference.viewId} · {instruction.reference.version}</p>)}</div>)}
+        {resources.skills.map(skill => <div key={skill.id} className="context-resource-skill"><div><span title={skill.reference.path}>{skill.name}</span>
+          <p>{skill.origin} · {skill.reference.path} · {skill.reference.domainId} · {skill.reference.viewId} · {skill.reference.version}</p>
+          {skill.disableModelInvocation && <p>{t('contextManager.hiddenSkill')}</p>}
+          {skill.name.includes(' ') && <p>{t('contextManager.invalidSkillName')}</p>}</div>
+          {!readOnly && <button type="button" aria-label={t('contextManager.addSkillCommand', { name: skill.name })} disabled={pending || inputPending || skill.name.includes(' ')} onClick={() => {
+            if (pendingAction.current || skill.name.includes(' ') || host !== getRuntimeEndpointGeneration()) return;
+            const store = useThreadDraftStore.getState(), draft = store.drafts[draftKey];
+            if (draft?.pendingInput || draft?.firstSend?.status === 'sending') return;
+            const command = `/skill:${skill.name}`;
+            store.patch(draftKey, current => ({ text: current.text === command || current.text.startsWith(command + ' ') ? current.text : `${command} ${current.text}` }));
             setCopied(`skill:${skill.id}`);
           }}>{t(copied === `skill:${skill.id}` ? 'contextManager.addedSkill' : 'contextManager.addSkill')}</button>}
         </div>)}
-        {resources.diagnostics.map((diagnostic, index) => <p key={index} className="context-error">{diagnostic.message}</p>)}
+        {resources.diagnostics.length > 0 && <div aria-label={t('contextManager.resourceDiagnostics')}>{resources.diagnostics.map((diagnostic, index) => <div key={index} className="context-error"><p>{diagnostic.kind}{diagnostic.status ? ` · ${diagnostic.status}` : ''}: {diagnostic.message}</p><p>{diagnostic.location.path} · {diagnostic.location.domainId} · {diagnostic.location.viewId}</p></div>)}</div>}
         {!readOnly && !historical && resourceCheckpoint && <button type="button" className="context-text-button" disabled={pending} onClick={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: resourceCheckpoint.revision }))}>{t('contextManager.refreshResources')}</button>}
       </div>
     </ContextDisclosure>}

@@ -8,6 +8,13 @@ import { toolMessagesZhCN } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  "contextManager.resourceVersion": "固定资源版本：{version}",
+  "contextManager.checkpointVersion": "上下文检查点：{id} · 修订 {revision}",
+  "contextManager.hiddenSkill": "不向模型自动披露",
+  "contextManager.invalidSkillName": "技能命令的名称不能包含空格。请重命名后使用。",
+  "contextManager.addSkillCommand": "将 /skill:{name} 加入草稿",
+  "contextManager.resourceDiagnostics": "资源诊断",
+
   "contextManager.policyUnavailable": "暂时无法读取上下文阈值",
   "contextManager.recordPending": "正在读取压缩记录",
   "contextManager.recordPendingHint": "等待当前会话中的这条记录同步，可以返回当前上下文。",

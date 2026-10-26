@@ -158,6 +158,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { active = false; unsubscribe(); };
   }, [api, host, t]);
   const [error, setError] = React.useState<string>();
+  const resourceFailure = React.useRef<{ snapshotId: string | null; message: string } | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
@@ -165,7 +166,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   React.useEffect(() => {
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
-    pendingAction.current = null; setPending(false); setError(undefined);
+    pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools, setToolProgress);
@@ -173,6 +174,13 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
   }, [api, identity, host, handoff, historyWindow]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
+  React.useEffect(() => {
+    const failure = resourceFailure.current, resourceId = snapshot?.context.checkpoint?.resources?.snapshot.id;
+    if (failure && resourceId && resourceId !== failure.snapshotId) {
+      resourceFailure.current = null;
+      setError(current => current === failure.message ? undefined : current);
+    }
+  }, [snapshot, error]);
   React.useEffect(() => {
     if (!snapshot || scrollMode !== 'following-end' || history.connecting || typeof document === 'undefined') return;
     const acknowledge = () => {
@@ -266,13 +274,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const action = {}; pendingAction.current = action;
     const generation = identityGeneration.current;
     const current = () => generation === identityGeneration.current && host === getRuntimeEndpointGeneration() && pendingAction.current === action;
-    setPending(true); setError(undefined); useThreadDraftStore.getState().patch(draftKey, { sendError: undefined });
+    resourceFailure.current = null; setPending(true); setError(undefined); useThreadDraftStore.getState().patch(draftKey, { sendError: undefined });
     try { await work(); if (current()) await projection.current?.refresh(); }
     catch (value) {
       if (!current()) return;
       if (value instanceof ThreadRequestError && value.status === 409) await projection.current?.refresh();
       if (!current()) return;
       const resourceError = value instanceof ThreadRequestError ? threadSourceFailureMessage(value.code) ?? resourceErrorMessages.get(value.code) : undefined;
+      if (value instanceof ThreadRequestError && value.code === 'resource-stale' && resourceError) {
+        resourceFailure.current = { snapshotId: snapshot?.context.checkpoint?.resources?.snapshot.id ?? null, message: resourceError };
+      }
       setError(resourceError ?? (value instanceof ThreadRequestError && ['kernel-frame-too-large', 'http-body-too-large'].includes(value.code)
         ? 'These images exceed the current transport request size. Remove or resize an image and retry; your attachments are still here.'
         : value instanceof ThreadRequestError && value.code === 'model-images-unsupported' ? 'The selected model does not accept images. Choose an image-capable model or remove the images.'

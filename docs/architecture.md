@@ -49,7 +49,7 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 77；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 78；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准，不按名称相似混用或自动迁移。
 
 ## 受理、执行与观察
