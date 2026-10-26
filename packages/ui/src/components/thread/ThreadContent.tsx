@@ -12,7 +12,7 @@ export function ThreadContent({ api, identity, holder, parts, messageId }: {
   return <>{parts.map((part, index) => {
     switch (part.kind) {
       case 'text': return <MarkdownRenderer key={index} messageId={`${messageId}:${index}`} content={part.text} />;
-      case 'media': return <ThreadMedia key={index} api={api} identity={identity} holder={holder} media={part.media} partIndex={part.partIndex} />;
+      case 'media': return <ThreadMedia key={index} api={api} identity={identity} holder={holder} media={part.media} partIndex={part.partIndex} imageReference={part.imageReference} />;
       case 'output': return <ThreadOutput key={index} api={api} identity={identity} holder={holder} output={part.output} messageId={messageId} />;
       case 'data': return <details key={index} className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('chat.toolPart.showRawJson')}</summary><pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all pt-2">{JSON.stringify(part.data, null, 2)}</pre></details>;
       case 'status': return <p key={index} role="status">{part.text}</p>;

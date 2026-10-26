@@ -237,6 +237,9 @@ impl InputEditPreparation {
                     stored = json!({"text":stored});
                 }
                 stored["attachments"] = attachments.clone();
+                if let Some(references) = previous.content.get("imageReferences") {
+                    stored["imageReferences"] = references.clone();
+                }
             }
         }
         let reference = self.content.save_stored_user_history(&stored)?;

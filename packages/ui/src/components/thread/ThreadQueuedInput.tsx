@@ -3,7 +3,7 @@ import type { ImageAttachment, QueuedInput } from '@varin/protocol';
 import type { ThreadIdentity, ThreadsAPI } from '@varin/application-client';
 import { inputParts, inputText } from '@/lib/agent-runtime/thread-content';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
-import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { fileToImageAttachment, removeImageReference } from '@/components/chat/composer/imageAttachments';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { ThreadContent } from './ThreadContent';
@@ -25,6 +25,7 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   const [error, setError] = React.useState<string>();
   const generation = React.useRef(0);
   const saving = React.useRef(false);
+  const textarea = React.useRef<HTMLTextAreaElement>(null);
   React.useEffect(() => () => { generation.current += 1; }, []);
   const changeImages = (next: ImageAttachment[] | undefined) => { generation.current += 1; setReading(false); setImages(next); setError(undefined); };
   const close = () => { generation.current += 1; setReading(false); setEditing(null); setImages(undefined); setError(undefined); };
@@ -36,7 +37,12 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
     const current = ++generation.current; setReading(true); setError(undefined);
     try {
       if (files.some(file => !file.type.startsWith('image/'))) throw new Error('Choose image files to replace the queued images.');
-      const next = await Promise.all(files.map(fileToImageAttachment));
+      const originals = inputParts(editing!.input.content).flatMap(part => part.kind === 'media' ? [part.imageReference ?? part.partIndex + 1] : []);
+      let reference = Math.max(0, ...originals);
+      const next = await Promise.all(files.map((file, index) => {
+        const number = originals[index] ?? ++reference;
+        return fileToImageAttachment(file).then(image => ({ ...image, reference: number }));
+      }));
       if (generation.current === current) setImages(next);
     } catch (value) { if (generation.current === current) setError(value instanceof Error ? value.message : 'Could not read these images.'); }
     finally { if (generation.current === current) setReading(false); }
@@ -44,15 +50,25 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   const save = async () => {
     if (!editing || pending || reading || saving.current || !editIsCurrent) return;
     const current = generation.current; saving.current = true;
-    try { if (await onSave(editing.input, editing.text, images) && current === generation.current) close(); }
+    const text = images === undefined ? editing.text : inputParts(editing.input.content).reduce((text, part) =>
+      part.kind === 'media' && part.imageReference !== undefined && !images.some(image => image.reference === part.imageReference)
+        ? removeImageReference(text, part.imageReference) : text, editing.text);
+    try { if (await onSave(editing.input, text, images) && current === generation.current) close(); }
     finally { saving.current = false; }
   };
   const editor = editing && <form className="mt-2 space-y-2" onSubmit={event => { event.preventDefault(); void save(); }}>
     <label className="text-xs text-muted-foreground">{t(editing.input.mode === 'next_run' ? 'thread.composer.afterRun' : editing.input.mode === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</label>
     {images === undefined ? <ThreadContent api={api} identity={identity} holder={{ kind: 'input', inputId: editing.input.id, expectedRevision: editing.input.revision }}
-      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text')} /> : <ImageAttachmentStrip images={images} />}
+      messageId={editing.input.id} parts={inputParts(editing.input.content).filter(part => part.kind !== 'text')} /> : <ImageAttachmentStrip images={images}
+        onReference={pending || !editIsCurrent ? undefined : number => {
+          const input = textarea.current; if (!input) return;
+          const token = t('chat.imageReference.token', { number });
+          const position = input.selectionStart ?? editing.text.length, end = input.selectionEnd ?? position;
+          setEditing({ ...editing, text: editing.text.slice(0, position) + token + editing.text.slice(end) });
+          requestAnimationFrame(() => { input.focus(); input.setSelectionRange(position + token.length, position + token.length); });
+        }} />}
     <ThreadSkillMaterials content={editing.input.content} />
-    <Textarea name="text" aria-label={t('chat.queuedMessage.edit')} value={editing.text} disabled={pending} autoFocus
+    <Textarea ref={textarea} name="text" aria-label={t('chat.queuedMessage.edit')} value={editing.text} disabled={pending} autoFocus
       onChange={event => setEditing({ ...editing, text: event.target.value })}
       onKeyDown={event => {
         if (isIMECompositionEvent(event.nativeEvent)) return;

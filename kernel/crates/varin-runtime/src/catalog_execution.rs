@@ -2303,7 +2303,7 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
         })?;
         if object
             .keys()
-            .any(|key| key != "text" && key != "attachments" && key != "skillInvocations" && key != "sentTime")
+            .any(|key| key != "text" && key != "attachments" && key != "imageReferences" && key != "skillInvocations" && key != "sentTime")
         {
             return Err(RuntimeError::Invalid(
                 "unsupported user input field; content was not accepted".into(),
@@ -2319,13 +2319,19 @@ pub(super) fn user_input_items(id: &str, input: &Value) -> Result<crate::executi
                     .into(),
             });
         }
+        let image_references = crate::output::image_references(input)?;
         if let Some(attachments) = object.get("attachments") {
-            for attachment in attachments
+            for (index, attachment) in attachments
                 .as_array()
                 .ok_or_else(|| RuntimeError::Invalid("attachments must be an array".into()))?
+                .iter().enumerate()
             {
                 let media: crate::output::ResolvedMedia =
                     serde_json::from_value(attachment.clone())?;
+                if let Some(references) = &image_references {
+                    let number = references[index];
+                    parts.push(Content::Text { text: format!("Image {number}: [Image {number}] / [图片{number}] / [圖片{number}] refers to the following image in this user message.") });
+                }
                 parts.push(Content::Media { media });
             }
         }

@@ -4124,6 +4124,8 @@ export const dict: Record<I18nKey, string> = {
   "chat.media.saving": "保存中…",
   "chat.media.saved": "已保存到 {path}",
   "chat.media.image": "对话图片",
+  'chat.imageReference.token': '[圖片{number}]',
+  'chat.imageReference.insert': '引用圖片 {number}',
   "chat.timeline.tools.waiting": "等待回答",
   "chat.question.cancel": "取消问题",
   "chat.plan.title": "计划",

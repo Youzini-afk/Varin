@@ -455,11 +455,25 @@ impl crate::content::ContentStore {
     }
 }
 
+/// Image references belong to this input, independent of media storage and tool output.
+pub(crate) fn image_references(input: &Value) -> Result<Option<Vec<u64>>, crate::catalog::RuntimeError> {
+    let Some(value) = input.get("imageReferences") else { return Ok(None); };
+    let references: Vec<u64> = serde_json::from_value(value.clone())?;
+    let attachments = input.get("attachments").and_then(Value::as_array);
+    let mut seen = std::collections::HashSet::new();
+    if attachments.is_none_or(|items| items.len() != references.len())
+        || references.iter().any(|number| *number == 0 || !seen.insert(*number)) {
+        return Err(crate::catalog::RuntimeError::Invalid("image references must uniquely identify each attachment".into()));
+    }
+    Ok(Some(references))
+}
+
 /// Admission validates only the explicitly typed user attachment field.
 pub(crate) fn admit_user_input(
     input_id: &str,
     input: &Value,
 ) -> Result<Value, crate::catalog::RuntimeError> {
+    image_references(input)?;
     let mut value = input.clone();
     if let Some(attachments) = value.get_mut("attachments") {
         let media: Vec<IncomingMedia> = serde_json::from_value(attachments.take())?;

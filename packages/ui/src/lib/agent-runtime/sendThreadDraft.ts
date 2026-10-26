@@ -90,6 +90,7 @@ export function sendThreadDraft(api: ThreadsAPI, draftKey: string, request: Thre
         firstMessageReceipt: acceptedInputId ? { key: request.key, text: original.input.text, images: request.images, inputId: acceptedInputId } : undefined,
         ...(original.goalObjective ? { goalArmed: false } : {}),
         text: current.text === original.editorText ? '' : current.text,
+        ...(current.text === original.editorText ? { imageReferenceSequence: 0 } : {}),
         images: current.images.filter(image => !request.images.includes(image)),
         materials: current.materials.filter(material => !original.input.materials?.some(item => item.snapshotId === material.snapshotId)),
       }));

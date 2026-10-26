@@ -27,6 +27,7 @@ export interface ChatImageContent {
   data: string;
   mimeType: string;
   type: "image";
+  reference?: number;
 }
 
 export interface ChatThinkingContent {

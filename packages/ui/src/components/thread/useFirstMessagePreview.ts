@@ -10,7 +10,7 @@ export function useFirstMessagePreview(draftKey: string, hasHistory: boolean, ha
   const key = request?.key, text = request?.text, images = request?.images;
   const message = React.useMemo<ChatUserMessage | undefined>(() => key ? {
     role: 'user', timestamp: Date.now(),
-    content: [{ type: 'text', text: text ?? '' }, ...(images ?? []).map(image => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType }))],
+    content: [{ type: 'text', text: text ?? '' }, ...(images ?? []).map(image => ({ type: 'image' as const, ...image }))],
   } : undefined, [key, text, images]);
   React.useLayoutEffect(() => {
     if (!hasHistory && key && message) handoff.preview(key, message.timestamp);

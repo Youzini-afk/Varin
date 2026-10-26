@@ -53,6 +53,16 @@ and does not submit the message again.
 The native picker, clipboard and drop target accept images and PDFs. Images remain explicit inline
 image inputs and require an image-capable model.
 
+Images keep stable message-local reference numbers. Thumbnails remain above the editor with a muted
+number button; clicking the thumbnail previews it, and clicking the number inserts a plain-text
+reference at the caret. Picker, paste and drop insert the reference at a tracked editor destination,
+so asynchronous decoding does not move it behind later typing. Removing a textual reference keeps the
+image; removing an image removes its references without renumbering other images or reusing its number
+in that draft. A confirmed send resets the draft's numbering. History recovery retains original numbers.
+The Host separates these numbers into `imageReferences` alongside native attachments; the Catalog retains
+them with the input and projects a numbered label immediately before each actual image for the model.
+Text-only queue edits preserve both attachments and their reference numbers.
+
 PDFs use `ThreadsAPI.materials.upload(identity, { filename, mimeType: 'application/pdf', data })`.
 The client encodes the original bytes as base64; the authenticated Host's document reader and
 MaterialStore retain them and return a fixed PDF snapshot. The composer keeps its `snapshotId`, filename

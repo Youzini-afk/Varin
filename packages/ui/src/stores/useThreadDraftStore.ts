@@ -54,6 +54,8 @@ export interface ThreadFirstSend {
 export interface ThreadDraft {
   text: string;
   images: ImageAttachment[];
+  /** High-water mark retained after removing an image, reset after sending the draft. */
+  imageReferenceSequence?: number;
   materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
   workFocus?: import('@varin/protocol').WorkFocusId;
@@ -88,7 +90,14 @@ export const useThreadDraftStore = create<{
   patch: (key, patch) => set(state => {
     const draft = state.drafts[key] ?? { ...EMPTY_THREAD_DRAFT,
       inputMode: useMessageQueueStore.getState().followUpBehavior === 'queue' ? 'next_run' as const : 'boundary' as const };
-    return { drafts: { ...state.drafts, [key]: { ...draft, ...(typeof patch === 'function' ? patch(draft) : patch) } } };
+    const change = typeof patch === 'function' ? patch(draft) : patch;
+    const next = { ...draft, ...change };
+    if (change.images) {
+      let reference = Math.max(next.imageReferenceSequence ?? 0, ...change.images.map(image => image.reference ?? 0));
+      next.images = change.images.map(image => image.reference === undefined ? { ...image, reference: ++reference } : image);
+      next.imageReferenceSequence = reference;
+    }
+    return { drafts: { ...state.drafts, [key]: next } };
   }),
   remove: key => set(state => { const drafts = { ...state.drafts }; delete drafts[key]; return { drafts }; }),
 }));

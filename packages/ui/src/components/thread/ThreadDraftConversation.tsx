@@ -12,7 +12,7 @@ import { DraftPresetChips } from '@/components/chat/DraftPresetChips';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
-import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { beginImageInsertion, fileToImageAttachment, removeDraftImage } from '@/components/chat/composer/imageAttachments';
 import { ActiveEditorSuggestion } from '@/components/conversation/ActiveEditorSuggestion';
 import { EditorContextAttachmentChips } from '@/components/workbench/EditorContextAttachmentChips';
 import { getEditorContextAttachmentsRevision, listEditorContextAttachments, subscribeEditorContextAttachments } from '@/lib/agent-editor/attachments';
@@ -47,12 +47,15 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const editor = React.useRef<ComposerEditorHandle | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
   const pdfInput = React.useRef<HTMLInputElement>(null);
-  const reading = React.useRef(false);
+  const reading = React.useRef<object | null>(null);
   const [readingFiles, setReadingFiles] = React.useState(false);
   const generation = getRuntimeEndpointGeneration();
   const reducedMotion = usePrefersReducedMotion();
   React.useLayoutEffect(() => { handoff.select(String(generation), draftKey, true, reducedMotion); }, [handoff, generation, draftKey, reducedMotion]);
   const mounted = React.useRef(true);
+  const currentDraft = React.useRef(draftKey);
+  currentDraft.current = draftKey;
+  React.useEffect(() => { reading.current = null; setReadingFiles(false); }, [draftKey, generation]);
   React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   React.useEffect(() => {
     let active = true; let request = 0;
@@ -100,8 +103,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
     if (!files.length || reading.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
-    const current = () => mounted.current && generation === getRuntimeEndpointGeneration();
-    reading.current = true; setReadingFiles(true); setError(undefined);
+    const token = {};
+    const current = () => mounted.current && currentDraft.current === draftKey && generation === getRuntimeEndpointGeneration() && reading.current === token;
+    const insertion = beginImageInsertion(draftKey, editor.current, number => t('chat.imageReference.token', { number }));
+    reading.current = token; setReadingFiles(true); setError(undefined);
     try {
       for (const file of files) {
         const mimeType = documentMimeType(file.name, file.type);
@@ -111,11 +116,11 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         } else if (file.type.startsWith('image/')) {
           if (acceptsImages === false) throw new Error(t('chat.model.imagesUnsupported'));
           const image = await fileToImageAttachment(file); if (!current()) return;
-          patch(value => ({ images: [...value.images, image] }));
+          insertion.append(image);
         } else throw new Error(t('chat.fileAttachment.unsupportedType'));
       }
     } catch (cause) { if (current()) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { reading.current = false; if (current()) setReadingFiles(false); }
+    finally { insertion.dispose(); if (current()) { reading.current = null; setReadingFiles(false); } }
   };
   const sourceChanged = React.useCallback((sourceSelection: DraftSourceSelection) => patch({ sourceSelection,
     workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined }), [patch]);
@@ -169,7 +174,9 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
             <EditorContextAttachmentChips threadKey={draftKey} />
             {inlineDrafts.map(item => <Button key={item.id} type="button" size="sm" variant="outline" disabled={locked}
               onClick={() => { for (const bucket of inlineContext) useInlineCommentDraftStore.getState().acknowledgeDrafts(bucket.key, [item]); }}>{item.fileLabel} · {item.startLine}–{item.endLine} ×</Button>)}
-            <ImageAttachmentStrip images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')} onRemove={index => { if (!locked) patch({ images: draft.images.filter((_, i) => i !== index) }); }} />
+            <ImageAttachmentStrip images={draft.images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
+              onReference={locked ? undefined : number => { editor.current?.insertText(t('chat.imageReference.token', { number })); editor.current?.focus(); }}
+              onRemove={locked ? undefined : index => removeDraftImage(draftKey, index)} />
             {draft.pdfs?.map(pdf => <Button key={pdf.id} type="button" variant="outline" size="sm" disabled={locked} aria-label={t('chat.fileAttachment.actions.removeNamed', { name: pdf.filename })}
               onClick={() => patch({ pdfs: draft.pdfs?.filter(item => item.id !== pdf.id) })}>{pdf.filename} ×</Button>)}
             {readingFiles && <p role="status">{t('chat.fileAttachment.uploading')}</p>}

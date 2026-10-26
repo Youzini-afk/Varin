@@ -27,6 +27,8 @@ export interface ComposerChange {
 }
 
 export interface ComposerEditorHandle {
+  /** A paste destination that follows edits while attachment bytes are being read. */
+  captureInsertion(): { insertText(text: string): void; dispose(): void };
   blur(): void;
   caretCoords(position?: number): { top: number; bottom: number; left: number } | null;
   focus(options?: { preventScroll?: boolean }): void;
@@ -103,6 +105,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
     } = props;
     const hostRef = React.useRef<HTMLDivElement | null>(null);
     const viewRef = React.useRef<EditorView | null>(null);
+    const insertions = React.useRef(new Set<{ from: number; to: number }>());
     const handlersRef = React.useRef(props);
     const lastRealEnterShiftRef = React.useRef(false);
     handlersRef.current = props;
@@ -110,6 +113,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
     React.useLayoutEffect(() => {
       const host = hostRef.current;
       if (!host) return;
+      const pendingInsertions = insertions.current;
 
       const interceptKeys: KeyBinding[] = [{
         any: (_view, event) => {
@@ -137,6 +141,18 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
               const handlers = handlersRef.current;
               const selection = readSelection(update.state);
               if (update.docChanged) {
+                for (const insertion of pendingInsertions) {
+                  const collapsed = insertion.from === insertion.to;
+                  // Once the user edits the selected text, the delayed paste must not
+                  // replace that new work. Keep only an insertion point after it.
+                  if (!collapsed && update.changes.touchesRange(insertion.from, insertion.to)) {
+                    insertion.from = insertion.to = update.changes.mapPos(insertion.to, 1);
+                    continue;
+                  }
+                  const from = update.changes.mapPos(insertion.from, collapsed ? -1 : 1);
+                  insertion.to = Math.max(from, update.changes.mapPos(insertion.to, -1));
+                  insertion.from = from;
+                }
                 handlers.onChange({
                   value: update.state.doc.toString(),
                   selection,
@@ -174,6 +190,7 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
       return () => {
         view.contentDOM.removeEventListener('keydown', trackRealEnterShift);
         viewRef.current = null;
+        pendingInsertions.clear();
         view.destroy();
       };
     }, []);
@@ -237,6 +254,24 @@ export const ComposerEditor = React.forwardRef<ComposerEditorHandle, ComposerEdi
     }, [spellCheck]);
 
     React.useImperativeHandle(ref, (): ComposerEditorHandle => ({
+      captureInsertion() {
+        const view = viewRef.current;
+        const range = view?.state.selection.main;
+        const insertion = { from: range?.from ?? 0, to: range?.to ?? 0 };
+        insertions.current.add(insertion);
+        return {
+          dispose: () => { insertions.current.delete(insertion); },
+          insertText(text) {
+            if (!view || viewRef.current !== view || !insertions.current.has(insertion) || !text) return;
+            const { from, to } = insertion;
+            const selection = view.state.selection.main;
+            const follows = selection.from === from && selection.to === to;
+            view.dispatch({ changes: { from, to, insert: text },
+              ...(follows ? { selection: { anchor: from + text.length } } : {}), userEvent: 'input.paste' });
+            insertion.from = insertion.to = from + text.length;
+          },
+        };
+      },
       blur: () => viewRef.current?.contentDOM.blur(),
       caretCoords(position) {
         const view = viewRef.current;
