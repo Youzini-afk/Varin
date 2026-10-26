@@ -500,6 +500,7 @@ impl KernelResourceClient {
                     "records":if args.format.as_deref()==Some("windows") {merge_windows(records)} else {records},
                     "queryErrors":query_errors,"scannedFiles":page["scannedFiles"],
                     "scope":{"paths":args.paths.clone().unwrap_or_else(||vec![String::new()]),"globs":args.globs,
+                        "recursive":args.recursive_scope(),
                         "includeHidden":args.include_hidden.unwrap_or(true),"respectGitignore":args.respect_gitignore.unwrap_or(args.recursive.unwrap_or(args.search)),
                         "excludeDirectories":args.query_params(binding)["excludeDirectories"]},
                     "format":args.format.as_deref().unwrap_or("lines"),
@@ -511,6 +512,31 @@ impl KernelResourceClient {
                         else {page["message"].clone()}
                 });
                 let mut output = output;
+                if !args.search {
+                    let paths = args.paths.clone().unwrap_or_else(|| vec![String::new()]);
+                    if paths.len() > 1 {
+                        let records = output["records"].as_array().expect("query records");
+                        output["groups"] = json!(paths.iter().map(|path| {
+                            let indices = records.iter().enumerate().filter_map(|(index, record)| {
+                                let found = record["path"].as_str()?;
+                                (path.is_empty() || found == path || found.strip_prefix(path).is_some_and(|tail| tail.starts_with('/'))).then_some(index)
+                            }).collect::<Vec<_>>();
+                            let errors = indices.iter().any(|index| records[*index]["kind"] == "error");
+                            let count = indices.iter().filter(|index| records[**index]["kind"] == "entry").count();
+                            json!({"path":path,"returnedEntries":count,"recordIndices":indices,
+                                "status":if errors {"error"} else if count > 0 {"entries"}
+                                    else if output["scanComplete"] == true && continuation.is_none() {"empty"} else {"no_entries_on_this_page"}})
+                        }).collect::<Vec<_>>());
+                        output["groupNote"] = json!("Groups refer to records by zero-based recordIndices. Counts describe this page. A group with no entries on this page may be outside this page or filtered; continue nextCursor or query that path alone. Only empty proves a completed initial query found no entries in that scope.");
+                    }
+                    output["scope"]["policy"] = json!(if args.recursive_scope() && args.respect_gitignore == Some(false) {
+                        "Recursive discovery has gitignore filtering disabled. The other filters shown here still apply."
+                    } else if args.recursive_scope() {
+                        "Recursive discovery follows the filters shown here. Explicit paths remain reachable through parent ignore rules; rules inside the selected directory still apply."
+                    } else {
+                        "Immediate directory browsing includes hidden and ignored entries unless filters are requested. Recursive discovery defaults to respecting gitignore."
+                    });
+                }
                 if next.is_none() && output["records"].as_array().is_some_and(Vec::is_empty) && output["queryErrors"].as_array().is_some_and(Vec::is_empty) {
                     output["emptyResult"] = empty_result_explanation(&args, &output["scope"]);
                     output["message"] = output["emptyResult"]["meaning"].clone();

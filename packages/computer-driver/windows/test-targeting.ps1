@@ -142,4 +142,11 @@ $candidates = Get-AppWindows @(
     [pscustomobject]@{ handle = 74; visible = $true; bounds = @{ width = 800; height = 600 }; title = "Files" }
 )
 if (@($candidates).Count -ne 1 -or $candidates.handle -ne 74) { throw "Placeholder window remained an automatic target" }
+$windows = @(
+    [pscustomobject]@{ handle = 73; visible = $false; bounds = @{ width = 800; height = 600 }; title = "Selected hidden window" },
+    [pscustomobject]@{ handle = 74; visible = $true; bounds = @{ width = 800; height = 600 }; title = "Files" },
+    [pscustomobject]@{ handle = 75; visible = $false; bounds = @{ width = 800; height = 600 }; title = "Background helper" }
+)
+$observed = @(Get-AppWindows $windows 73)
+if ($observed.Count -ne 2 -or $observed.handle -notcontains 73 -or $observed.handle -contains 75) { throw "Observation must retain its explicit target without unrelated hidden windows" }
 Write-Output "Windows targeting checks passed (fake controls/input; no desktop access)."

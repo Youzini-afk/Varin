@@ -49,8 +49,10 @@ fn build_schemas() -> Vec<ToolSchema> {
         .collect::<Vec<_>>()
         .join("; ");
     [
-        (DESCRIBE, format!("查询工具的用途、参数和版本。可按分组或工具名称查询；省略参数时列出可用分组。查询只返回文档，不会新增模型函数：未在本次 tools 中声明的工具必须经 tool_invoke 调用，不能直接把目标名称用作函数名。按返回的 invocation 填写调用参数。分组索引：{index}。"),
-         json!({"type":"object","additionalProperties":false,"properties":{"namespace":{"type":"string","minLength":1},"name":{"type":"string","minLength":1}}})),
+        (DESCRIBE, format!("查询工具的用途、参数和版本。已知名称用 name，多个名称用 names 一次取得完整说明；不知道名称可用 query 搜索名称与用途，直接返回匹配工具的参数和调用模板。namespace 按分组浏览，detail: full 可一次读取该组完整说明；省略参数列出分组。查询不会新增模型函数：未在本次 tools 中声明的目标经 tool_invoke 调用。分组索引：{index}。"),
+         json!({"type":"object","additionalProperties":false,"properties":{"namespace":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},
+             "names":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1}},
+             "query":{"type":"string","minLength":1},"detail":{"type":"string","enum":["summary","full"]}}})),
         (INVOKE, "使用工具的 reference（名称和版本）及符合其参数定义的 arguments 调用当前目录中的能力。reference 可从 tool_describe 取得并在有效时复用。未在本次 tools 中单独声明的工具通过本入口调用；可用范围与原工具权限保持一致。".into(),
          json!({"type":"object","additionalProperties":false,"required":["reference","arguments"],"properties":{
              "reference":{"type":"object","additionalProperties":false,"required":["name","version"],"properties":{"name":{"type":"string","minLength":1},"version":{"type":"string","minLength":1}}},

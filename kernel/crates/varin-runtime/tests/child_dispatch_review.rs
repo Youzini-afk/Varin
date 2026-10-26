@@ -15,6 +15,27 @@ mod fixture;
 use fixture::Fixture;
 
 #[test]
+fn media_history_allows_independent_inherited_and_retrieval_children_after_reopen() {
+    for (inherit, retrieval) in [(false, false), (true, false), (false, true)] {
+        let mut f = Fixture::new_with_media(inherit, retrieval);
+        let child = f.accept();
+        let root = f.root.clone();
+        drop(f.db);
+        f.db = Catalog::open(&root).unwrap();
+        assert_eq!(f.accept(), child);
+        assert_eq!(child.inherited_context.is_some(), inherit);
+        let (source, proposal, basis) = child_context(&child);
+        let child = f.db.prepare_child(&child.operation_id, source, proposal, basis).unwrap();
+        let receipt = child.receipt.as_ref().unwrap();
+        let history = f.db.prepare_context_read(&receipt.run_id, f.db.epoch(), Some(&receipt.input_id))
+            .unwrap().unwrap().load().unwrap().history;
+        assert_eq!(history.iter().any(|item| matches!(&item.content, Content::Media { media } if media.data_base64 == "b3JpZ2luYWwgbWVkaWE=")), inherit);
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn inherited_background_is_fixed_portable_and_retained_through_preparation_and_reopen() {
     for policy in [false, true] {
         for inherit in [false, true] {
