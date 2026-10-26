@@ -8,6 +8,8 @@ import type { ChatToolCall, ChatUserMessage, ChatSessionSubmissionStatus } from 
 import { getUiSession } from '@/lib/interactive-ui/sessions';
 import { projectUiWork } from '@/lib/interactive-ui/work-projection';
 import { HistoryPresentation, assistant } from './historyPresentation';
+import { contextTimelineEntries } from '@/lib/contextPresentation';
+import { openThreadContext } from '@/lib/openThreadContext';
 import { useTimelineViewStore } from './timelineViewStore';
 import { threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
 import { ThreadContent } from '../thread/ThreadContent';
@@ -42,6 +44,8 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   const timelineKey = viewId ? `${key}:${viewId}` : key;
   const projector = React.useMemo(() => new HistoryPresentation(key), [key]);
   const view = React.useMemo(() => projector.project(history, snapshot, runUsage, toolProgress), [history, snapshot, runUsage, toolProgress, projector]);
+  const entries = React.useMemo(() => contextTimelineEntries(view.entries, snapshot), [view.entries, snapshot]);
+  const openContext = React.useCallback((runId?: string) => openThreadContext(identity, cwd, runId, readOnly), [identity, cwd, readOnly]);
   const head = history.at(-1)?.id ?? null;
   const sourceView = React.useRef(view);
   React.useLayoutEffect(() => { sourceView.current = view; }, [view]);
@@ -152,13 +156,13 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
     } catch (error) { if (alive.current && host === getRuntimeEndpointGeneration() && !(error instanceof DOMException && error.name === 'AbortError'))
       toast.error(error instanceof Error ? error.message : String(error)); }
   }, [fileTarget, identity]);
-  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
-    [api, identity, head, readOnly, onQuote, onQuestion, openFile, fileTarget, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
+  const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
+    [api, identity, head, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
   return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     onScrollContainerChange={onScrollContainerChange}
-    entries={view.entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
+    entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
-    assistantWaiting={working ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
+    assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
     onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />
   </ConversationContext.Provider>;
 }

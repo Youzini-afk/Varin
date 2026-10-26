@@ -107,7 +107,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             varin_runtime::composition::tools::ToolDirectory::assemble(generation.declarations())
                 .unwrap(),
         );
-        let binding = RequestBinding { execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -540,7 +540,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .admit_submission(preparation.load(None, false).unwrap())
         .unwrap();
     let run = submitted.run_id.clone();
-    let binding = RequestBinding { execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

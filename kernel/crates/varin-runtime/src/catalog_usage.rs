@@ -30,6 +30,7 @@ struct SnapshotMetadata { view: ViewMetadata }
 struct ViewMetadata { origin: RequestOrigin, binding: BindingMetadata }
 #[derive(Deserialize)]
 struct BindingMetadata {
+    #[serde(default)] mcp_tools: Vec<String>,
     #[serde(default)] provider_id: Option<String>,
     #[serde(default)] connection_identity: String,
     provider_family: String, model: String,
@@ -46,10 +47,14 @@ impl BindingMetadata {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ModelPresentationParams { pub request_ids: Vec<String> }
+pub struct ModelPresentationParams { pub request_ids: Vec<String>, pub include_context: Option<bool> }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPresentation {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_tools: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context: Option<crate::context_composition::ModelContextComposition>,
     pub request_id: String,
     pub provider_family: String,
     pub model_id: String,
@@ -58,25 +63,28 @@ pub struct ModelPresentation {
     pub usage: crate::catalog::inference::InferenceUsage,
 }
 pub struct ModelPresentationRead {
+    include_context: bool,
     steps: Vec<ModelStep>, content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
 impl Catalog {
     /// The trusted history reader supplies IDs obtained from admitted assistant items.
-    pub fn capture_model_presentations(&self, ids: &[String]) -> Result<ModelPresentationRead> {
+    pub fn capture_model_presentations(&self, ids: &[String], include_context: bool) -> Result<ModelPresentationRead> {
         let steps = ids.iter().map(|id| record(&self.db, "model_steps", id)).collect::<Result<Vec<ModelStep>>>()?;
-        Ok(ModelPresentationRead { steps, content: self.content.clone(), _publication: self.content.begin_publication() })
+        Ok(ModelPresentationRead { steps, include_context, content: self.content.clone(), _publication: self.content.begin_publication() })
     }
 }
 impl ModelPresentationRead {
     pub fn load(self, cancelled: &dyn Fn() -> bool) -> Result<Vec<ModelPresentation>> {
         self.steps.into_iter().map(|step| {
             if cancelled() { return Err(RuntimeError::DispatchCancelled); }
-            let metadata: SnapshotMetadata = serde_json::from_slice(&self.content.load_bytes(&step.request, cancelled)?)?;
+            let bytes = self.content.load_bytes(&step.request, cancelled)?;
+            let context = if self.include_context { Some(crate::context_composition::inspect(&serde_json::from_slice(&bytes)?, cancelled)?) } else { None };
+            let metadata: SnapshotMetadata = serde_json::from_slice(&bytes)?;
             let usage: UsageReceipt = step.usage.map(serde_json::from_value).transpose()?.unwrap_or_default();
             let context_tokens = crate::providers::reported_context_tokens(&metadata.view.binding.provider_family, &usage);
             let complete_input_tokens = crate::providers::reported_input_tokens(&metadata.view.binding.provider_family, &usage);
-            Ok(ModelPresentation { request_id: step.id, provider_family: metadata.view.binding.provider_family,
+            Ok(ModelPresentation { context, mcp_tools: metadata.view.binding.mcp_tools, request_id: step.id, provider_family: metadata.view.binding.provider_family,
                 model_id: metadata.view.binding.model, context_tokens, complete_input_tokens, usage: crate::catalog::inference::InferenceUsage {
                     measurement: usage.measurement, input_tokens: usage.input_tokens, output_tokens: usage.output_tokens,
                     cached_input_tokens: usage.cached_input_tokens, cache_write_tokens: usage.cache_write_tokens,

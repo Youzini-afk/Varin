@@ -22,6 +22,8 @@ import { WorkOverviewControl, type OverviewPeekSection } from './WorkOverviewCon
 import { ThreadOperationDetails } from './ThreadOperationDetails';
 import { canCancelOperation } from './threadOperations';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
+import { openThreadContext } from '@/lib/openThreadContext';
+import { contextPhaseLabels } from '@/lib/contextPresentation';
 import { useThreadProducts, type ThreadProduct } from './useThreadProducts';
 
 type Section = OverviewPeekSection;
@@ -56,6 +58,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const compact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const usage = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]?.usage);
+  const contextPhase = useThreadContextUsageStore(state => state.views[contextUsageKey(identity)]?.phase);
   const [detail, setDetail] = React.useState<Section>();
   const [visited, setVisited] = React.useState<Set<Section>>(() => new Set());
   const [operationId, setOperationId] = React.useState<string>();
@@ -92,10 +95,11 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     || (failedChildren.length ? failedChildren.map(row => row.child.name || row.child.input.name || row.task).join(' · ')
       : plan.items.find(item => item.status === 'in_progress')?.text || goal?.objective);
   const show = React.useCallback((section: Section) => {
+    if (section === 'context') { openThreadContext(identity, workspacePath, undefined, readOnly); return; }
     setDetail(section); setProduct(undefined); setOperationId(undefined); if (section === 'threads') setChildId(undefined); setProductError(undefined);
     setVisited(previous => previous.has(section) ? previous : new Set([...previous, section]));
     disclosure(sessionKey, 'overview', true);
-  }, [disclosure, sessionKey]);
+  }, [disclosure, sessionKey, identity, workspacePath, readOnly]);
   React.useEffect(() => { if (request) show(request.section); }, [request, show]);
   const inspectOperation = (id: string) => { show('operations'); setOperationId(id); };
   const inspectProduct = (value: ThreadProduct) => {
@@ -164,7 +168,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
       </section>}
       <footer className="mt-6 flex flex-wrap gap-x-3 gap-y-2 border-t border-border/50 pt-3 typography-micro text-muted-foreground">
         <button type="button" onClick={() => show('sources')} className="flex min-w-0 items-center gap-1 rounded hover:text-foreground"><Icon name="folder" className="size-3.5" /><span className="truncate">{workspacePath ? formatDirectoryName(workspacePath) : t('harness.overview.chatOnly')}</span></button>
-        <button type="button" onClick={() => show('context')} className="flex items-center gap-1 rounded hover:text-foreground"><Icon name="donut-chart-fill" className="size-3.5" />{t('harness.overview.context')}{usage ? ` · ${Math.round(usage.percentage)}%` : ''}</button>
+        <button type="button" onClick={() => show('context')} title={contextPhase ? t(contextPhaseLabels[contextPhase]) : undefined} className="flex items-center gap-1 rounded hover:text-foreground"><Icon name={contextPhase === 'preparing' || contextPhase === 'waiting' ? 'loader-4' : 'donut-chart-fill'} className={contextPhase === 'preparing' || contextPhase === 'waiting' ? 'size-3.5 animate-spin' : 'size-3.5'} />{t('harness.overview.context')}{usage ? ` · ${Math.round(usage.percentage)}%` : ''}</button>
         {details.memory && <button type="button" onClick={() => show('memory')} className="flex items-center gap-1 rounded hover:text-foreground"><Icon name="book-open" className="size-3.5" />{t('harness.overview.memory')}</button>}
       </footer>
     </div>
@@ -183,10 +187,6 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
     {detail === 'operations' && <div className="thread-overview-detail">{selectedOperation ? <><div className="mb-3 flex items-center justify-between gap-3 typography-meta"><span className="break-words">{operationLabel(selectedOperation)}</span><ChildState state={selectedOperation.phase === 'terminal' ? selectedOperation.outcome === 'succeeded' ? 'completed' : selectedOperation.outcome ?? 'unknown' : selectedOperation.phase} /></div><ThreadOperationDetails api={api} identity={identity} operation={selectedOperation} readOnly={readOnly} pending={pending} waitingOn={run?.waiting_on} onCancel={() => void act(() => api.cancelOperation(selectedOperation.id))} onOpenTerminal={() => void act(() => openProcess(selectedOperation.id))} /></>
       : operations.map(operation => <button type="button" data-operation-id={operation.id} key={operation.id} className="thread-overview-action typography-meta" onClick={() => setOperationId(operation.id)}><span className="min-w-0 flex-1 truncate">{operationLabel(operation)}</span><ChildState state={operation.phase === 'terminal' ? operation.outcome === 'succeeded' ? 'completed' : operation.outcome ?? 'unknown' : operation.phase} /></button>)}</div>}
     {[...visited].filter(section => section !== 'plan' && section !== 'outputs' && section !== 'threads' && section !== 'operations').map(section => <div key={section} hidden={detail !== section} className="thread-overview-detail">
-      {section === 'context' && <div className="mb-5 space-y-2">
-        {usage && <><div className="flex justify-between gap-3 typography-meta"><span>{t('harness.overview.context')}</span><span className="tabular-nums text-muted-foreground">{usage.totalTokens.toLocaleString()} / {usage.contextLimit.toLocaleString()}</span></div><div className="h-1 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary" style={{ width: `${Math.min(100, Math.max(0, usage.percentage))}%` }} /></div></>}
-        <button type="button" className="thread-overview-action typography-meta" onClick={() => useUIStore.getState().openContextPanelTab(workspacePath ?? '', { mode: 'context', thread: identity })}>{t('harness.overview.contextDetails')}<Icon name="external-link" className="size-3.5" /></button>
-      </div>}
       {section === 'sources' && <p className="mb-3 break-all typography-meta">{workspacePath ?? t('harness.overview.chatOnly')}</p>}
       {details[section]}
     </div>)}

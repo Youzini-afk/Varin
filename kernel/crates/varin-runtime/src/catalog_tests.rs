@@ -439,7 +439,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                     leaf_id: Some(receipt.input_id.clone()),
                 },
             },
-            binding: RequestBinding { execution_environment: None, direct_tools: None,
+            binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,

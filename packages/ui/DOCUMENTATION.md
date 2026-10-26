@@ -390,7 +390,8 @@ step and a link to the full plan. The plan detail switches its content area betw
 and editing, grows the editor with its text, and keeps save/cancel controls in view. Concurrent
 plan changes retain the draft and offer the latest revision for comparison before rebasing.
 Workspace, goal, follow-up, memory, research and recovery editors mount on first inspection and retain
-their drafts across panel navigation. Context resources and compression jobs share the context detail.
+their drafts across panel navigation. Context opens the shared context sidebar, retaining the original
+Thread/branch identity even when opened from a historical job or embedded conversation.
 The plan reader stays subscribed to its existing branch events, while tool/operation bodies are read
 only in their detail view. Full execution controls remain available from the overview menu.
 
@@ -456,6 +457,19 @@ counts immutable ancestry metadata and reads the latest original model receipt b
 tool-result bursts cannot erase usage just by pushing that request out of the loaded tail. Inspection
 runs alongside snapshot/progress rendering. Compaction clears the old footprint until a new request
 reports usage. Sidebar message bodies remain paginated, and unavailable billing stays unknown.
+`components/context` owns the sidebar presentation. The scale uses the full model window with the
+observed preparation baseline and reserve/replacement boundary. Rust attributes the frozen provider
+request using its original tokenizer and MCP declaration names; category/part totals are estimates,
+separate from provider-reported usage and cache accounting. Media and opaque content remain explicitly
+unmeasured. A new checkpoint invalidates the previous footprint without fabricating a history message.
+`contextPresentation` maps native jobs to preparing, ready, waiting, applied, failed, cancelled and
+superseded states. Only the exact native `context-wait` is blocking. Chat notices stay visible outside
+ordinary activity folds, wait at the current execution edge, and use the publication event's history
+anchor after replacement. `useContextJobHistory` reads the parent-authorized job, reconciles persisted
+items with frame-coalesced public deltas, and reconnects without admitting an auxiliary Thread.
+Manual actions use the original context APIs and only disable their own buttons. Retry creates a new
+manual preparation; it does not claim to resume a terminal parent Run. Disclosure, summary and process
+viewports preserve the existing motion preferences, wrapping and bounded scrolling.
 `timelineViewStore` owns scroll positions only. Message handoff animation targets the history ID from
 the accepted input receipt. A retained outgoing scene is inert during conversation switching.
 

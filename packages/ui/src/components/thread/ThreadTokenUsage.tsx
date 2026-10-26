@@ -5,6 +5,7 @@ import {
   subscribeRuntimeEndpointChanged,
 } from "@varin/application-client";
 import type { ThreadUsage } from "@varin/protocol";
+import type { ThreadIdentity } from "@varin/application-client";
 import { useRuntimeAPIs } from "@/hooks/useRuntimeAPIs";
 import { useThreadStore } from "@/stores/useThreadStore";
 import { Button } from "@/components/ui/button";
@@ -16,13 +17,16 @@ import { ThreadUsageView } from "./ThreadUsageView";
 export function ThreadTokenUsage({
   active = true,
   hostLabel,
+  identity: requestedIdentity,
 }: {
   active?: boolean;
   hostLabel?: string;
+  identity?: ThreadIdentity;
 }) {
   const { t } = useI18n();
   const api = useRuntimeAPIs().threads;
-  const identity = useThreadStore((state) => state.selectedIdentity);
+  const selectedIdentity = useThreadStore((state) => state.selectedIdentity);
+  const identity = requestedIdentity ?? selectedIdentity;
   const generation = React.useSyncExternalStore(
     subscribeRuntimeEndpointChanged,
     getRuntimeEndpointGeneration,

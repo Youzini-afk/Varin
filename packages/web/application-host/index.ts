@@ -2074,6 +2074,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const unsubscribeNextStepSettings = modelsService.settings.subscribe(scope => { if (scope === 'global') void nextSteps.settingsChanged(); });
   threads.bindNextSteps(nextSteps);
+  threads.bindContextPolicy(run => contextService.presentation(run));
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,

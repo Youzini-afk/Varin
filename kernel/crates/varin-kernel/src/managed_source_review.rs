@@ -991,7 +991,7 @@ fn begin_package_call(db: &mut Catalog, params: Value) -> Result<Value, KernelEr
         output_schema: None,
         metadata: None,
     };
-    let binding = RequestBinding { execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -1155,7 +1155,7 @@ fn coordinator_read(
         )?;
         let schemas = crate::tools::KernelToolExecutor::selected_schemas(&binding.enabled_tools);
         let read_schema = schemas[0].clone();
-        let mut request = RequestBinding { execution_environment: None, direct_tools: None,
+        let mut request = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -2052,7 +2052,7 @@ fn environment_forward_canonical_acceptance_survives_unknown_and_terminal_host_r
     let submitted = db.admit_submission(submitted).unwrap();
     let run = submitted.run_id;
     let schema:ToolSchema=serde_json::from_value(json!({"name":"environment_forward","version":"1","description":"Forward a selected service","schema":{"type":"object"},"metadata":{"service_id":"environment.forward","service_version":1,"completion":"job","operation":"effect","lifetime":"thread"}})).unwrap();
-    let binding = RequestBinding { execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -2299,7 +2299,7 @@ fn native_file_followup(
         json!({"resourceOwner":source.resource_owner,"grantId":remote["authorityId"],"runId":run,"threadId":"thread:managed-review","workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"rootId":remote["physicalRoot"]["rootId"],"sourceMode":"live_root","liveRoot":source.live_root,"enabledTools":["file_read","file_write","file_search","process_spawn","process_read","process_inspect"],"remoteAuthority":{"authorityId":remote["authorityId"],"resourceEpoch":remote["resourceEpoch"],"executionOwner":remote["executionOwner"]}}),
     )?;
     let schema = crate::followup_tools::schema();
-    let request = RequestBinding { execution_environment: None, direct_tools: None,
+    let request = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

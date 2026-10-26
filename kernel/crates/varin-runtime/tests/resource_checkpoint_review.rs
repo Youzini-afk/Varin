@@ -74,7 +74,7 @@ fn proposal(text: &str) -> ContextProposal {
     }
 }
 fn binding(branch: &str, head: Option<String>) -> RequestBinding {
-    RequestBinding { execution_environment: None, direct_tools: None,
+    RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

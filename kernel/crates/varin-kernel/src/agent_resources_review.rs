@@ -256,7 +256,7 @@ fn resource_builtin_uses_frozen_checkpoint_and_current_cancellation_without_oper
             ancestor_id: None,
             leaf_id: Some(receipt.input_id.clone()),
         };
-        let binding = RequestBinding { execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

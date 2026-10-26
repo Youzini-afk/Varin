@@ -318,6 +318,12 @@ impl Catalog {
     pub fn capture_active_checkpoint(&self, branch_id: &str) -> Result<Option<CheckpointRead>> {
         self.capture_checkpoint("SELECT c.id,c.revision,c.body,c.scope FROM active_contexts a JOIN context_checkpoints c ON c.id=a.checkpoint_id WHERE a.branch_id=?1",branch_id)
     }
+    pub fn capture_context_checkpoint(&self, branch_id: &str, id: &str) -> Result<Option<CheckpointRead>> {
+        self.head(branch_id)?;
+        let owner: Option<String> = self.db.query_row("SELECT branch_id FROM context_checkpoints WHERE id=?1", [id], |row| row.get(0)).optional()?;
+        if owner.as_deref() != Some(branch_id) { return Err(RuntimeError::Invalid("Checkpoint does not belong to this branch".into())); }
+        self.capture_checkpoint("SELECT id,revision,body,scope FROM context_checkpoints WHERE id=?1", id)
+    }
     pub fn capture_admitted_checkpoint(&self, run_id: &str) -> Result<Option<CheckpointRead>> {
         self.capture_checkpoint("SELECT c.id,c.revision,c.body,c.scope FROM runs r JOIN context_checkpoints c ON c.id=r.context_checkpoint_id WHERE r.id=?1",run_id)
     }
@@ -558,12 +564,13 @@ pub(super) fn publish_metadata(
     // It is not an independently editable project/configuration store.
     tx.execute("INSERT INTO context_checkpoints(id,branch_id,revision,through_id,body,project_id,scope) VALUES(?1,?2,?3,?4,?5,?6,?7)",params![checkpoint.id,checkpoint.branch_id,sql_number(checkpoint.revision)?,checkpoint.through_id,encode(reference)?,checkpoint.scope.as_ref().and_then(|scope|scope.project_id.as_deref()),checkpoint.scope.as_ref().map(encode).transpose()?])?;
     tx.execute("INSERT INTO active_contexts(branch_id,checkpoint_id) VALUES(?1,?2) ON CONFLICT(branch_id) DO UPDATE SET checkpoint_id=excluded.checkpoint_id",params![checkpoint.branch_id,checkpoint.id])?;
+    let history_anchor: Option<String> = tx.query_row("SELECT head FROM branches WHERE id=?1", [&checkpoint.branch_id], |row| row.get(0))?;
     event(
         tx,
         &checkpoint.branch_id,
         checkpoint.revision,
         "context.published",
-        json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.through_id}),
+        json!({"checkpoint_id":checkpoint.id,"through_id":checkpoint.through_id,"history_anchor":history_anchor}),
     )?;
     Ok(())
 }

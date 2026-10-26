@@ -1,4 +1,6 @@
 import { ChatViewedImages } from './ChatViewedImages';
+import { ChatContextNotice } from './ChatContextNotice';
+import type { ContextPhase } from '@/lib/contextPresentation';
 import { ViewedImageDetailsContext } from './toolDisclosureContext';
 import { viewedImages } from './viewedImages';
 import { ChatAssistantUsageFooter } from './ChatAssistantUsageFooter';
@@ -1231,6 +1233,10 @@ export const ChatTimelineEntryList: React.FC<Omit<
           }
 
           if (entry.type === 'custom_message') {
+            if (entry.customType === 'context-compaction') {
+              const details = entry.details as { jobRunId: string; phase: ContextPhase; blocking: boolean };
+              return <ChatContextNotice key={entry.id} {...details} />;
+            }
             if (entry.customType === 'retrieval-result') return <ToolDisclosure key={entry.id} id={'retrieval-result:' + entry.id}>
               <summary><Icon name="binoculars" className="size-3.5" />{t('chat.explore.title')}<Icon name="arrow-right-s" className="tool-disclosure-chevron size-3.5" /></summary>
               <div><ChatUserContentView content={entry.content} messageId={entry.id} /></div>

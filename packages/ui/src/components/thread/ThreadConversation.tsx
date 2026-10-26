@@ -1,5 +1,6 @@
 import { THINKING_LEVELS, documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
-import { ContextHistoryDialog } from '../conversation/ContextHistoryDialog';
+import { openThreadContext } from '@/lib/openThreadContext';
+import { toast } from '@/components/ui';
 import { ActiveEditorSuggestion } from '../conversation/ActiveEditorSuggestion';
 import { MessageHandoff } from '../conversation/messageHandoff';
 import { useTimelineViewStore } from '../conversation/timelineViewStore';
@@ -30,7 +31,6 @@ import { ThreadFollowups } from './ThreadFollowups';
 import { ThreadResearch } from './ThreadResearch';
 import { ThreadMemory } from './ThreadMemory';
 import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
-import { ThreadResources } from './ThreadResources';
 import { ThreadPermission } from './ThreadPermission';
 import { ThreadQuestions } from './ThreadQuestions';
 import { ThreadWorkStrips } from './ThreadWorkStrips';
@@ -64,7 +64,6 @@ import { ConversationScrollbar } from '../conversation/ConversationScrollbar';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { ThreadProjection, type StreamingTextPart } from '@/lib/agent-runtime/thread-projection';
 import { threadHistoryWindow } from '@/lib/agent-runtime/thread-history';
 import { ThreadInputQueue } from './ThreadQueuedInput';
@@ -160,7 +159,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   }, [api, host, t]);
   const [error, setError] = React.useState<string>();
   const [historyOpen, setHistoryOpen] = React.useState(false);
-  const [contextRunId, setContextRunId] = React.useState<string>();
   const [actionPending, setPending] = React.useState(false);
   const pendingAction = React.useRef<object | null>(null);
   const projection = React.useRef<ThreadProjection | undefined>(undefined);
@@ -168,7 +166,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     identityGeneration.current += 1; forkKeys.current.clear(); compactionKeys.current.clear();
     setPreparingSource(false);
     pendingAction.current = null; setPending(false); setError(undefined);
-    setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setContextRunId(undefined); setReadingFiles(false); fileReadGeneration.current += 1;
+    setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
     const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
@@ -331,12 +329,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       void act(()=>api.selectModel({...identity,runId:run.id,key:crypto.randomUUID(),model:{providerId:provider,modelId:model,thinkingLevel:thinking}}));
     } else {setProviderId(provider);setModelId(model);setThinkingLevel(thinking);}
   };
-  const addSkill = (name: string) => {
-    if (pendingAction.current || name.includes(' ')) return;
-    const command = `/skill:${name}`;
-    setText(current => current === command || current.startsWith(`${command} `) ? current : `${command} ${current}`);
-    messageInput.current?.focus();
-  };
   const returnToLatest = () => {
     const store = useTimelineViewStore.getState();
     store.completeTimelineReturn(draftKey, store.requestTimelineReturn(draftKey));
@@ -367,10 +359,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     const fingerprint = JSON.stringify([throughId, expectedRevision, providerId, modelId, thinkingLevel]);
     let key = compactionKeys.current.get(fingerprint);
     if (!key) { key = crypto.randomUUID(); compactionKeys.current.set(fingerprint, key); }
-    await act(async () => {
+    try {
       await api.compact({ ...identity, key, throughId, expectedRevision, model: { providerId, modelId, thinkingLevel } });
       if (generation === identityGeneration.current) compactionKeys.current.delete(fingerprint);
-    });
+    } catch (error) { if (generation === identityGeneration.current) toast.error(error instanceof Error ? error.message : String(error)); }
   };
   const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
@@ -400,10 +392,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const [questionOperation, setQuestionOperation] = React.useState<string>();
   const permissions = React.useRef<HTMLDivElement>(null);
   const showOverview = (section: OverviewPeekSection) => {
+    if (section === 'context') { openThreadContext(identity, initialWorkspacePath, undefined, readOnly); return; }
     setFocusedOverview({ owner: contentOwner, section });
     disclosure(overviewKey, 'overview', true);
   };
-  const hasSummaries = Boolean(snapshot?.context.checkpoint?.proposal.summary.trim() || snapshot?.context.jobs.length);
   const empty = Boolean(snapshot && !visibleHistory.length && !progress.length && !active && !firstMessage.message && !pending && !draft.pendingInput);
   // The empty home animates away only when this view is sending; arriving history or a switch replaces it at once.
   const sendDeparts = Boolean(snapshot && (pending || draft.pendingInput || draft.firstSend || firstMessage.message));
@@ -423,27 +415,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       sources: <>{!readOnly && !delegated && <ThreadSourcePicker key={identity.branchId} api={api} identity={identity} initialPath={draft.workspacePath ?? initialWorkspacePath}
       onUseChatOnly={() => { useThreadDraftStore.getState().patch(draftKey, { workspacePath: undefined, preparedSource: null, sourceSelection: undefined }); }}
       active={active || pending} launch={snapshot?.launch ?? null} prepared={preparedSource} onPrepared={setPreparedSource} onPreparingChange={setPreparingSource} />}</>,
-      context: <>{!readOnly && snapshot?.context.checkpoint && <ThreadResources checkpoint={snapshot.context.checkpoint} pending={pending}
-      onAddSkill={addSkill}
-      onRefresh={() => void act(() => api.resources.refresh({ ...identity, expectedRevision: snapshot.context.checkpoint!.revision }))} />}
-{snapshot && hasSummaries && <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
-      <summary className="cursor-pointer">Context summaries · checkpoint {snapshot.context.checkpoint?.revision ?? 0} · {snapshot.context.jobs.length} jobs</summary>
-      {snapshot.context.checkpoint?.proposal.through_id && <div className="my-2" aria-label="Active context summary">
-        <MarkdownRenderer messageId={snapshot.context.checkpoint.id} content={snapshot.context.checkpoint.proposal.summary} />
-      </div>}
-      {snapshot.context.jobs.map(({ job, run: jobRun }) => {
-        const published = snapshot.context.checkpoint?.id === job.request.key;
-        const superseded = (snapshot.context.checkpoint?.revision ?? 0) > job.request.expected_revision;
-        const terminal = ['completed', 'cancelled', 'failed'].includes(jobRun.state);
-        return <div key={jobRun.id} className="my-2 rounded border p-2">
-          <Button variant="ghost" size="sm" onClick={() => setContextRunId(jobRun.id)}>{t('chat.context.summaryProcess')}</Button>
-          <p>Summary through {job.request.through_id.slice(-8)} · {published ? 'Applied' : jobRun.state}{!published && superseded ? ' · Checkpoint has changed' : ''}</p>
-          {!readOnly && jobRun.state === 'completed' && !published && !superseded && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.publishContext(identity, jobRun.id))}>Apply context summary</Button>}
-          {!readOnly && !terminal && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.cancelContext(identity, jobRun.id))}>Cancel summary</Button>}
-          {!readOnly && !terminal && ['accepted', 'preparing', 'runnable', 'waiting', 'recovering'].includes(jobRun.state) && <Button variant="ghost" size="sm" disabled={pending} onClick={() => void act(() => api.resumeContext(identity, jobRun.id))}>Resume summary preparation</Button>}
-        </div>;
-      })}
-    </details>}</>,
+      context: <button type="button" onClick={() => openThreadContext(identity, initialWorkspacePath, undefined, readOnly)}>{t('harness.overview.contextDetails')}</button>,
       memory: snapshot && (snapshot.thread.bot_id || snapshot.context.checkpoint?.personalization) ? <ThreadMemory key={identity.threadId} identity={identity} botId={snapshot.thread.bot_id} basis={snapshot.context.checkpoint?.personalization} /> : undefined,
       research: <>{!readOnly && api.research && <ThreadResearch key={`research:${host}:${identity.threadId}:${identity.branchId}`} api={api.research} materials={api.materials} identity={identity} sourceRunId={run?.id} />}</>,
       followups: <>{!readOnly && snapshot && <ThreadFollowups key={`${host}:${identity.threadId}:${identity.branchId}`} api={api.followups} family={api.family} mediaRead={api.mediaRead} research={api.research} identity={identity}
@@ -469,7 +441,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       {runFailure && <p className="break-words">{runFailureMessage(runFailure, t)}</p>}
     </div>}
     {run?.state === 'cancelled' && <p role="status" aria-label="Run cancelled" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-muted-foreground">{t('harness.threads.state.cancelled')}</p>}
-    {contextRunId && <ContextHistoryDialog key={`${draftKey}:${contextRunId}`} api={api} identity={identity} runId={contextRunId} onClose={() => setContextRunId(undefined)} />}
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
       onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('recovery'); void recovery.recover(entry.id); }} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>

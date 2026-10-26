@@ -17,6 +17,7 @@ import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { I18nProvider } from '@/lib/i18n';
+import { dict } from '@/lib/i18n/messages/en';
 
 const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:context', branchId: 'branch:context' };
 let root: Root; let container: HTMLElement;
@@ -37,6 +38,8 @@ function HeaderUsage() {
 
 it('restores context cards and raw JSON while header usage stays independent of the visible history page', async () => {
   const request: ModelPresentation = { requestId: 'request:older', providerFamily: 'openai-completions', modelId: 'fixture-model', contextTokens: 26000,
+    context: { checkpointId: null, summaryId: null, totalTokens: 26000, categories: { system: 4000, user: 2000, assistant: 5000, tools: 10000, mcp: 5000 },
+      parts: { mcp: { definitions: 1000, calls: 1000, results: 3000 } }, method: 'fixture tokenizer', unmeasuredMedia: 0, unmeasuredProviderItems: 0 },
     usage: { measurement: 'actual', inputTokens: 25000, outputTokens: 1000, cachedInputTokens: 20000, reasoningTokens: 200 } };
   const run: Run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, epoch: 1, revision: 1,
     state: 'executing', waiting_on: null, cancel_requested: false,
@@ -47,7 +50,7 @@ it('restores context cards and raw JSON while header usage stays independent of 
     activeRun: run, history: Array.from({ length: 20 }, (_, i) => ({ id: `tool:${i + 20}`, thread_id: identity.threadId, parent: `tool:${i + 19}`, source: 'tool', run_id: 'run', provider: null, content: { text: `result ${i + 20}` } })),
     historyPage: { head: 'tool:39', previous: 'tool:20' }, inputs: [], operations: [], followups: [], goals: [], launch: null,
     modelSelection: { desired: null, active: null },
-    policySelection: null, context: { checkpoint: null, jobs: [] } };
+    policySelection: null, context: { checkpoint: null, jobs: [], policy: { enabled: true, backgroundPreparation: true, reserveTokens: 15000, preparationWaterline: .75, capacityTokens: 100000 } } };
   const inspection: ThreadContextInspection = { head: 'tool:39', counts: { total: 40, user: 1, assistant: 1, tool: 38 }, latestRequest: request, contextRequest: request };
   let resolve!: (value: ThreadContextInspection) => void;
   const inspect = vi.fn<ThreadsAPI['contextInspection']>().mockImplementationOnce(() => new Promise(yes => { resolve = yes; })).mockImplementation(async () => structuredClone(inspection));
@@ -63,15 +66,23 @@ it('restores context cards and raw JSON while header usage stays independent of 
   const context = container.querySelector('section[aria-label="Context"]')!;
   expect(context.textContent).toContain('26,000 / 100,000');
   expect(container.textContent).toContain('26.0%');
-  const stats = [...container.querySelectorAll('div')].find(node => node.textContent === 'Messages' && node.children.length === 0)!;
-  expect(stats.nextElementSibling?.textContent).toBe('40');
-  expect(container.querySelector('section[aria-label="Last Assistant Message"]')?.textContent).toContain('20,000');
-  const raw = container.querySelector<HTMLButtonElement>('button[aria-expanded]')!;
+  expect(container.querySelector('[aria-label^="Preparation baseline: 63.75%"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label^="Replacement / reserve boundary: 85.00%"]')).not.toBeNull();
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="MCP: 5,000"]')!.click());
+  expect(container.textContent).toContain('MCP · 5,000 tokens');
+  expect(container.textContent).toContain('Definitions, calls and results attributed');
+  const historyToggle = [...container.querySelectorAll('button')].find(button => button.textContent?.includes(dict['contextSidebar.section.rawMessages']))!;
+  expect(historyToggle.textContent).toContain('40');
+  const requestToggle = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Request usage'))!;
+  await act(async () => requestToggle.click());
+  expect(container.textContent).toContain('20,000');
+  await act(async () => historyToggle.click());
+  const raw = container.querySelector<HTMLButtonElement>('.context-message > button')!;
   await act(async () => raw.click());
   expect(container.querySelector('pre')?.textContent).toContain('tool:39');
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Copy JSON"]')!.click());
   expect(JSON.parse(copy.mock.calls[0]![0] as string).id).toBe('tool:39');
-  request.contextTokens = 31000; inspection.contextRequest = request;
+  request.contextTokens = 31000; request.context!.totalTokens = 31000; request.context!.categories.tools = 15000; inspection.contextRequest = request;
   view.eventCursor = 11;
   await act(async () => listener({ cursor: 11, subject: 'run', revision: 2, kind: 'model.settled', data: {} }));
   expect(container.querySelector('svg[role=progressbar]')?.getAttribute('aria-valuenow')).toBe('31');
@@ -86,6 +97,21 @@ it('restores context cards and raw JSON while header usage stays independent of 
   inspection.contextRequest = null; view.eventCursor = 13;
   await act(async () => listener({ cursor: 13, subject: 'run', revision: 4, kind: 'context.committed', data: {} }));
   expect(container.querySelector('svg[role=progressbar]')).toBeNull();
+  const job = { job: { request: { key: 'summary', owner_run_id: 'run', branch_id: identity.branchId, through_id: 'tool:20', expected_revision: 0, summary_recipe: { mode: 'background' } }, receipt: { run_id: 'summary-run', branch_id: 'summary-branch' } }, run: { ...run, id: 'summary-run' } } as ThreadSnapshot['context']['jobs'][number];
+  const cancel = vi.fn(async () => {}), publish = vi.fn(async () => ({}));
+  Object.assign(runtime.api!, { cancelContext: cancel, publishContext: publish, contextHistory: async () => ({ head: null, previous: null, items: [] }) });
+  view.context.jobs = [job]; view.activeRun = { ...run, state: 'waiting', waiting_on: 'context-wait:run:summary-run' }; view.eventCursor = 14;
+  await act(async () => listener({ cursor: 14, subject: 'run', revision: 5, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('h3')?.textContent).toContain(dict['contextManager.waiting']);
+  const stop = [...container.querySelectorAll('button')].find(button => button.textContent === dict['contextManager.stopPreparation'])!;
+  await act(async () => stop.click());
+  expect(cancel).toHaveBeenCalledWith(identity, 'summary-run');
+  view.activeRun.waiting_on = null; job.run.state = 'completed'; view.eventCursor = 15;
+  await act(async () => listener({ cursor: 15, subject: 'run', revision: 6, kind: 'run.changed', data: {} }));
+  expect(container.querySelector('h3')?.textContent).toContain(dict['contextManager.ready']);
+  const apply = [...container.querySelectorAll('button')].find(button => button.textContent === dict['contextManager.replaceNow'])!;
+  await act(async () => apply.click());
+  expect(publish).toHaveBeenCalledWith(identity, 'summary-run');
   const signal = inspect.mock.calls.at(-1)![2]!;
   await act(async () => root.render(<I18nProvider><ContextPanelContent active={false} /></I18nProvider>));
   expect(signal.aborted).toBe(true);

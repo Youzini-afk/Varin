@@ -765,9 +765,12 @@ export interface KnowledgeInferenceView {
 
 export interface ModelPresentationParams {
   requestIds: string[];
+  includeContext?: boolean;
 }
 
-export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; }
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; context?: ModelContextComposition; mcpTools?: string[]; }
+
+export interface ModelContextComposition { checkpointId: string | null; summaryId: string | null; totalTokens: number; categories: Record<string, number>; parts: Record<string, Record<string, number>>; method: string; unmeasuredMedia: number; unmeasuredProviderItems: number; }
 
 export interface ThreadUsageParams {
   threadId: string;
@@ -3478,6 +3481,11 @@ export interface OperationParams {
 
 export interface HistoryParams {
   branchId: string;
+}
+
+export interface ContextInspectParams {
+  branchId: string;
+  checkpointId?: string;
 }
 
 export interface EventsParams {
@@ -6206,7 +6214,7 @@ export type KernelMethodParams = {
   "runtime.context_job.list": HistoryParams;
   "runtime.context_job.publish": RunParams;
   "runtime.context_job.resume": RunParams;
-  "runtime.context.inspect": HistoryParams;
+  "runtime.context.inspect": ContextInspectParams;
   "runtime.context.refresh": ContextRefreshParams;
   "runtime.memory.reconcile": RunParams;
   "runtime.plan.reconcile": RunParams;
@@ -7683,7 +7691,7 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "runtime.context.inspect";
-      params: HistoryParams;
+      params: ContextInspectParams;
       epoch?: string;
       grantId?: string;
     }

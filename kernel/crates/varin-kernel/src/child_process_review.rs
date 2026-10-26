@@ -139,7 +139,7 @@ impl Harness {
             .unwrap()
             .bind_child_dispatch(&run.id, prepared)
             .unwrap();
-        let binding = RequestBinding { execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

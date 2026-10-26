@@ -247,6 +247,7 @@ impl Catalog {
         prepared: PreparedContextJob,
     ) -> Result<ContextJob> {
         let PreparedContextJob {
+            history_anchor,
             request,
             launch,
             configuration,
@@ -284,6 +285,8 @@ impl Catalog {
                 ));
             }
             return Ok(ContextJob {
+                history_anchor: self.context_job_published_anchor(&request.branch_id, &request.key)?.or(history_anchor),
+                published_revision: self.context_job_publication(&request.key)?,
                 request,
                 receipt,
                 compaction,
@@ -327,6 +330,8 @@ impl Catalog {
         }
         let receipt = self.submit_admission(submission, Some(&admission))?;
         Ok(ContextJob {
+            published_revision: None,
+            history_anchor,
             request,
             receipt,
             compaction,
@@ -637,11 +642,20 @@ impl Catalog {
             ));
         }
         Ok(ContextJobRead {
+            published_revision: self.context_job_publication(&metadata.key)?,
+            published_anchor: self.context_job_published_anchor(&metadata.branch_id, &metadata.key)?,
             metadata,
             receipt,
             content: self.content.clone(),
             _publication: self.content.begin_publication(),
         })
+    }
+    fn context_job_publication(&self, key: &str) -> Result<Option<u64>> {
+        Ok(self.db.query_row("SELECT revision FROM context_checkpoints WHERE id=?1", [key], |row| read_number(row, 0)).optional()?)
+    }
+    fn context_job_published_anchor(&self, branch: &str, key: &str) -> Result<Option<String>> {
+        Ok(self.db.query_row("SELECT json_extract(data,'$.history_anchor') FROM events WHERE subject=?1 AND kind='context.published' AND json_extract(data,'$.checkpoint_id')=?2 ORDER BY cursor LIMIT 1",
+            params![branch, key], |row| row.get::<_, Option<String>>(0)).optional()?.flatten())
     }
 
     /// Synchronous fixture convenience; production uses capture/prepare, unlocked I/O, then commit.
@@ -773,6 +787,8 @@ pub(super) fn context_job_parent(db: &Connection, run_id: &str) -> Result<Option
 
 /// Capture under Catalog, hydrate after releasing it. The publication lease protects the recipe.
 pub struct ContextJobRead {
+    published_revision: Option<u64>,
+    published_anchor: Option<String>,
     metadata: ContextJobAdmission,
     receipt: Receipt,
     content: crate::content::ContentStore,
@@ -811,6 +827,8 @@ impl ContextJobRead {
     pub fn load(self) -> Result<ContextJob> {
         let recipe = self.recipe()?;
         Ok(ContextJob {
+            published_revision: self.published_revision,
+            history_anchor: self.published_anchor.or_else(|| recipe.source.recent_head.clone()),
             compaction: recipe.metadata(),
             request: recipe.request,
             receipt: self.receipt,
@@ -1023,6 +1041,7 @@ pub struct ContextJobPreparation {
     source: SummarySource,
 }
 pub struct PreparedContextJob {
+    history_anchor: Option<String>,
     request: ContextJobRequest,
     launch: launch_content::LaunchSelectionMetadata,
     configuration: Value,
@@ -1370,6 +1389,7 @@ impl ContextJobPreparation {
             .clone()
             .ok_or_else(|| RuntimeError::Invalid("context job launch is missing".into()))?;
         Ok(PreparedContextJob {
+            history_anchor: recipe.source.recent_head.clone(),
             submission,
             request: self.request,
             launch,

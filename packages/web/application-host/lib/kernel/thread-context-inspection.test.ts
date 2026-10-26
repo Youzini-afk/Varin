@@ -15,7 +15,8 @@ it('keeps context outside the visible page, refreshes late usage and respects co
   });
   const historyItem = vi.fn(async (reference: HistoryReference) => ({ ...reference, provider: null, content: { id: 'model-item:7:requestanswer' } }));
   let contextTokens: number | null = null;
-  const modelPresentations = vi.fn(async (): Promise<ModelPresentation[]> => [{ requestId: 'request', providerFamily: 'openai-completions', modelId: 'model', contextTokens,
+  const modelPresentations = vi.fn(async (_ids: string[], _signal?: AbortSignal, includeContext?: boolean): Promise<ModelPresentation[]> => [{ requestId: 'request', providerFamily: 'openai-completions', modelId: 'model', contextTokens,
+    ...(includeContext ? { context: { checkpointId: null, summaryId: null, categories: { user: 12 }, parts: { user: { messages: 12 } }, totalTokens: 12, method: 'fixture', unmeasuredMedia: 0, unmeasuredProviderItems: 0 } } : {}),
     usage: { measurement: contextTokens === null ? 'missing' : 'actual', inputTokens: 40000, outputTokens: 1000, cachedInputTokens: 35000 } }]);
   const reader = new ThreadContextReader({ historyPage, historyItem, modelPresentations });
   const first = await reader.read('branch', '449');
@@ -25,6 +26,7 @@ it('keeps context outside the visible page, refreshes late usage and respects co
   expect(historyPage).toHaveBeenCalledTimes(2);
   contextTokens = 41000;
   expect((await reader.read('branch', '449')).contextRequest?.contextTokens).toBe(41000);
+  expect(modelPresentations.mock.calls.map(call => call[2])).toEqual([true, false]);
   expect(historyPage).toHaveBeenCalledTimes(3);
   references.push({ ...references[0]!, id: '450', parent: '449', source: 'compaction' }); currentHead = 450;
   const compacted = await reader.read('branch', '450');
@@ -35,5 +37,6 @@ it('keeps context outside the visible page, refreshes late usage and respects co
   expect((await reader.read('branch', '451')).contextRequest?.contextTokens).toBe(41000);
   currentHead = 1;
   expect((await reader.read('branch', '1')).counts).toEqual({ total: 2, user: 1, assistant: 1, tool: 0 });
+  expect((await reader.read('branch', '0')).contextRequest).toBeNull();
   await expect(reader.read('branch', '451')).rejects.toThrow('no longer on this branch');
 });

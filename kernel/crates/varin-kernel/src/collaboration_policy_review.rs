@@ -304,7 +304,7 @@ fn execution_input(db: &Mutex<Catalog>, run: &str, policy: PolicyIdentity) -> Ex
     let owner = db.lock().unwrap();
     let launch = owner.launch_intent(run).unwrap().unwrap().selection;
     let run_record = owner.run(run).unwrap();
-    let binding = RequestBinding { execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
