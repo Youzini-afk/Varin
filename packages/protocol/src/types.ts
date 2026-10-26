@@ -108,6 +108,8 @@ export function parseAgentInputContext(value: unknown): AgentInputContext | null
 export interface ImageAttachment {
   data: string;
   mimeType: string;
+  /** Stable, message-local number used by textual image references. */
+  reference?: number;
 }
 
 export type RecoveryPreference = "conversation" | "both" | "ask";

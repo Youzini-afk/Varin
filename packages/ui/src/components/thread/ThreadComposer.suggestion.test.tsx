@@ -28,6 +28,7 @@ vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocom
 vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEditor: React.forwardRef<ComposerEditorHandle, NonNullable<typeof editor.props>>((props, ref) => {
   editor.props = props;
   React.useImperativeHandle(ref, () => ({
+    captureInsertion: () => ({ insertText: () => {}, dispose: () => {} }),
     getValue: () => props.value, getSelection: () => editor.selection,
     insertText: text => {
       const next = props.value.slice(0, editor.selection.start) + text + props.value.slice(editor.selection.end);

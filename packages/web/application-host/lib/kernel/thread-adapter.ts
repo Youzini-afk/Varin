@@ -530,6 +530,7 @@ export class ThreadAdapter {
     if (reference.source !== 'user') return selection;
     const selected = await this.runtime.historyItem(reference, signal);
     const attachments = (selected.content as { attachments?: import('@varin/protocol').StoredMedia[] }).attachments;
+    const imageReferences = (selected.content as { imageReferences?: number[] }).imageReferences;
     if (!attachments?.length) return { ...selection, editorImages: [] as ImageAttachment[] };
     const editorImages: ImageAttachment[] = [];
     for (const [partIndex, media] of attachments.entries()) {
@@ -544,7 +545,7 @@ export class ThreadAdapter {
       }
       const bytes = Buffer.concat(chunks);
       if (bytes.length !== total) throw new Error('Original input media is incomplete');
-      editorImages.push({ mimeType: media.media_type, data: bytes.toString('base64') });
+      editorImages.push({ mimeType: media.media_type, data: bytes.toString('base64'), ...(imageReferences ? { reference: imageReferences[partIndex] } : {}) });
     }
     return { ...selection, editorImages };
   }

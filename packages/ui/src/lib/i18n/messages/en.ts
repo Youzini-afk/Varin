@@ -4183,6 +4183,8 @@ export const dict = {
   "chat.media.saving": "Saving…",
   "chat.media.saved": "Saved to {path}",
   "chat.media.image": "Conversation image",
+  'chat.imageReference.token': '[Image {number}]',
+  'chat.imageReference.insert': 'Insert reference to image {number}',
   "chat.timeline.tools.waiting": "Waiting for answer",
   "chat.question.cancel": "Cancel question",
   "chat.plan.title": "Plan",

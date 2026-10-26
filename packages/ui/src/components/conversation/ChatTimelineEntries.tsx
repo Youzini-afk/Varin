@@ -181,13 +181,14 @@ const ChatUserContentView: React.FC<{
             href={imageUrl(part)}
             target="_blank"
             rel="noreferrer"
-            className="mt-2 block w-fit max-w-full overflow-hidden rounded-lg border border-border/70 bg-background"
+            className="relative mt-2 block w-fit max-w-full overflow-hidden rounded-lg border border-border/70 bg-background"
           >
             <img
               src={imageUrl(part)}
               alt={part.mimeType}
               className="max-h-[32rem] max-w-full object-contain"
             />
+            {part.reference !== undefined && <span className="absolute bottom-1 left-1 rounded bg-background/85 px-1.5 py-0.5 typography-micro tabular-nums text-muted-foreground">{part.reference}</span>}
           </a>
         )
       ))}

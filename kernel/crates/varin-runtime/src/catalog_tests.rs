@@ -608,7 +608,7 @@ fn structured_user_attachment_cannot_silently_disappear_from_execution_history()
     let mut db = f.open();
     db.create_thread("thread", "main").unwrap();
     let mut input = command();
-    input.input = json!({"text":"inspect this image","attachments":[{"media_type":"image/png","data_base64":"Y29udGVudDpleGFtcGxl"}]});
+    input.input = json!({"text":"Compare [图片1] with [图片3]","imageReferences":[1,3],"attachments":[{"media_type":"image/png","data_base64":"Y29udGVudDpleGFtcGxl"},{"media_type":"image/png","data_base64":"c2Vjb25k"}]});
     let receipt = db.submit(&input).unwrap();
     let items = db.execution_history("main").unwrap();
     let media = items
@@ -619,6 +619,12 @@ fn structured_user_attachment_cannot_silently_disappear_from_execution_history()
         })
         .expect("accepted attachment remains typed before request compilation");
     assert_eq!(media.data_base64, "Y29udGVudDpleGFtcGxl");
+    for (number, bytes) in [(1, "Y29udGVudDpleGFtcGxl"), (3, "c2Vjb25k")] {
+        assert!(items.windows(2).any(|pair| matches!((&pair[0].content, &pair[1].content),
+            (crate::execution::Content::Text { text }, crate::execution::Content::Media { media })
+                if text.contains(&format!("[图片{number}]")) && media.data_base64 == bytes)));
+    }
+    let original = serde_json::to_value(&items).unwrap();
     assert_eq!(
         media.source,
         crate::output::OutputSource::Conversation {
@@ -627,6 +633,9 @@ fn structured_user_attachment_cannot_silently_disappear_from_execution_history()
             }
         }
     );
+    drop(db);
+    let db = f.open();
+    assert_eq!(serde_json::to_value(db.execution_history("main").unwrap()).unwrap(), original);
 }
 
 #[test]
@@ -3811,8 +3820,9 @@ fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_r
     let f = Fixture::new();
     let mut db = f.open();
     submit(&mut db);
-    let queued=db.enqueue_input(&inputs::EnqueueInput{key:"queued-media".into(),thread_id:"thread".into(),branch_id:"main".into(),mode:InputMode::Boundary,input:json!({"text":"first","attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}]}),configuration:None}).unwrap();
+    let queued=db.enqueue_input(&inputs::EnqueueInput{key:"queued-media".into(),thread_id:"thread".into(),branch_id:"main".into(),mode:InputMode::Boundary,input:json!({"text":"first [图片3]","imageReferences":[3],"attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}]}),configuration:None}).unwrap();
     let before = db.queued_input(&queued.input_id).unwrap();
+    assert_eq!(before.content["imageReferences"], json!([3]));
     let media: StoredMedia =
         serde_json::from_value(before.content["attachments"][0].clone()).unwrap();
     assert_eq!(
@@ -3864,6 +3874,7 @@ fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_r
         },
         ..request
     };
+    assert_eq!(db.queued_input(&queued.input_id).unwrap().content["imageReferences"], json!([3]));
     assert!(matches!(
         db.capture_media_read(&current).unwrap().chunk(&|| true),
         Err(RuntimeError::DispatchCancelled)
@@ -3913,6 +3924,7 @@ fn queued_typed_media_text_edit_preserves_exact_owner_bytes_and_ref_ingress_is_r
             json!({"text":"removed","attachments":[]}),
         )
         .unwrap();
+    assert!(cleared.content.get("imageReferences").is_none());
     assert_eq!(
         db.queued_input(&queued.input_id).unwrap().content["attachments"],
         json!([])

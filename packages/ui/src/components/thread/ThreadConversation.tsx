@@ -40,7 +40,7 @@ import { useThreadRecovery } from './useThreadRecovery';
 import { ThreadRecovery } from './ThreadRecovery';
 import type { ImageAttachment } from '@varin/protocol';
 import { ImageAttachmentStrip } from '@/components/chat/composer/ImageAttachmentStrip';
-import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { beginImageInsertion, fileToImageAttachment, removeDraftImage } from '@/components/chat/composer/imageAttachments';
 import { fileToBase64 } from '@/components/chat/composer/fileAttachments';
 import { useI18n } from '@/lib/i18n';
 import { runFailureMessage } from '@/lib/agent-runtime/runFailure';
@@ -297,6 +297,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     // input keeps its exact retained snapshots, so selecting again cannot retransmit them.
     if (!files.length || readOnly || fileRead.current || pendingAction.current || pendingInput.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
     const generation = fileReadGeneration.current;
+    const insertion = beginImageInsertion(draftKey, messageInput.current, number => t('chat.imageReference.token', { number }));
     const controller = new AbortController(); fileRead.current = controller;
     const current = () => !controller.signal.aborted && generation === fileReadGeneration.current
       && host === getRuntimeEndpointGeneration() && fileRead.current === controller;
@@ -319,11 +320,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         } else {
           const image = await fileToImageAttachment(file);
           if (!current()) return;
-          setImages(previous => [...previous, image]);
+          insertion.append(image);
         }
       }
     } catch (value) { if (current()) setError(value instanceof Error ? value.message : t('chat.fileAttachment.toast.attachFailed')); }
-    finally { if (current()) { fileRead.current = null; setReadingFiles(false); } }
+    finally { insertion.dispose(); if (current()) { fileRead.current = null; setReadingFiles(false); } }
   };
   const selectModel = (provider: string, model: string, thinking: ThreadThinkingLevel) => {
     if (active && run) {
@@ -570,6 +571,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           pendingInput: undefined, preparedSource: current.preparedSource === original.preparedSource ? null : current.preparedSource,
           ...(original.goalObjective ? { goalArmed: false } : {}),
           text: current.text === original.editorText ? '' : current.text,
+          ...(current.text === original.editorText ? { imageReferenceSequence: 0 } : {}),
           images: current.images.filter(image => !(original.input.images ?? []).includes(image)),
           materials: current.materials.filter(material => !(original.input.materials ?? []).some(item => item.snapshotId === material.snapshotId)),
         } : {});
@@ -639,7 +641,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         </Button>))}
       </div>}
       <ImageAttachmentStrip images={images} removeLabel={t('chat.fileAttachment.actions.removeImage')}
-        onRemove={index => setImages(current => current.filter((_, candidate) => candidate !== index))} />
+        onReference={pending || draft.pendingInput || draft.firstSend ? undefined : number => {
+          messageInput.current?.insertText(t('chat.imageReference.token', { number })); messageInput.current?.focus();
+        }}
+        onRemove={pending || draft.pendingInput || draft.firstSend ? undefined : index => removeDraftImage(draftKey, index)} />
       <ThreadMaterialAttachments materials={materials} locked={pending || Boolean(draft.firstSend || draft.pendingInput)}
         onRemove={snapshotId => { if (!pendingAction.current && !pendingInput.current) setMaterials(current => current.filter(material => material.snapshotId !== snapshotId)); }} />
       {draft.pdfs?.map(pdf => <span key={pdf.id} className="inline-flex rounded border px-2 py-1 text-sm">{pdf.filename}</span>)}

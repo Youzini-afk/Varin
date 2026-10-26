@@ -15,12 +15,12 @@ type Reader = Pick<ThreadsAPI, 'mediaRead'>;
 type Scope = { api: Reader; identity: ThreadIdentity; holder: OutputMediaHolder };
 
 /** Only an explicit typed part reaches the byte reader. The holder supplies authority. */
-export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: number; thumbnail?: boolean }) {
+export function ThreadMedia(props: Scope & { media: StoredMedia; partIndex: number; thumbnail?: boolean; imageReference?: number }) {
   const host = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const key = JSON.stringify([host, props.identity, props.holder, props.partIndex, props.media]);
   return <MediaView key={key} {...props} host={host} />;
 }
-function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = false }: Scope & { media: StoredMedia; partIndex: number; host: number; thumbnail?: boolean }) {
+function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = false, imageReference }: Scope & { media: StoredMedia; partIndex: number; host: number; thumbnail?: boolean; imageReference?: number }) {
   const { t } = useI18n();
   const figure = React.useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = React.useState(false);
@@ -113,6 +113,7 @@ function MediaView({ api, identity, holder, media, partIndex, host, thumbnail = 
     </details>}
   </>;
   return <figure ref={figure} className={thumbnail ? "tool-viewed-image-media" : "my-2 max-w-full space-y-2"} aria-label="Stored media">
+    {imageReference !== undefined && <figcaption className="typography-micro text-muted-foreground">{t('chat.imageReference.token', { number: imageReference })}</figcaption>}
     {!image && <figcaption className="typography-meta text-muted-foreground">{media.media_type}</figcaption>}
     {error && <p role="alert" className={thumbnail ? "sr-only" : "typography-meta text-destructive"}>{error}</p>}
     {url && image && !displayFailed && <button type="button" className={thumbnail ? "tool-viewed-image" : "block max-w-full overflow-hidden rounded-lg border border-border/70 bg-background"} onClick={() => setExpanded(true)} aria-label={t('chat.media.view')}>

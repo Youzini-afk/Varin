@@ -3,7 +3,7 @@ import type { OutputBody, StoredMedia } from '@varin/protocol';
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 export type ThreadContentPart =
   | { kind: 'text'; text: string }
-  | { kind: 'media'; media: StoredMedia; partIndex: number }
+  | { kind: 'media'; media: StoredMedia; partIndex: number; imageReference?: number }
   | { kind: 'output'; output: OutputBody }
   | { kind: 'data'; data: unknown }
   | { kind: 'status'; text: string };
@@ -37,7 +37,8 @@ export function inputParts(content: unknown): ThreadContentPart[] {
   if (typeof value.text === 'string') parts.push({ kind: 'text', text: value.text });
   if (value.attachments !== undefined) {
     if (!Array.isArray(value.attachments)) parts.push({ kind: 'status', text: 'Input media is invalid. Refresh this conversation.' });
-    else value.attachments.forEach((media, partIndex) => parts.push(isMedia(media) ? { kind: 'media', media, partIndex }
+    else value.attachments.forEach((media, partIndex) => parts.push(isMedia(media) ? { kind: 'media', media, partIndex,
+      ...(Array.isArray(value.imageReferences) ? { imageReference: value.imageReferences[partIndex] as number } : {}) }
       : { kind: 'status', text: 'Input media is unavailable. Refresh this conversation.' }));
   }
   return parts;

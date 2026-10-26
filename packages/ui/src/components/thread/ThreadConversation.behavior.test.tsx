@@ -63,7 +63,7 @@ vi.mock('@/lib/extensions/surface-runtime', () => ({ varinSurfaceRuntime: { surf
 vi.mock('@/lib/extensions/workbench-registry', async original => ({ ...await original<typeof import('@/lib/extensions/workbench-registry')>(), useWorkbenchMatchRenderers: () => [], renderFirstWorkbenchMatch: () => undefined }));
 
 vi.mock('@/lib/i18n', () => {
-  const t = (key: string, values: Record<string, unknown> = {}) => (translations.dictionary[key] ?? key)
+  const t = (key: string, values: Record<string, unknown> = {}) => (translations.dictionary[key] ?? ({ 'chat.imageReference.token': '[Image {number}]', 'chat.imageReference.insert': 'Insert reference to image {number}' } as Record<string, string>)[key] ?? key)
     .replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] === undefined ? placeholder : String(values[name]));
   return { useI18n: () => ({ t }) };
 });
@@ -85,7 +85,20 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   <select aria-label="Input delivery" value={props.delivery} onChange={event => props.onDeliveryChange(event.currentTarget.value as typeof props.delivery)}>
     <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option>{props.allowNextRun && <option value="next_run">After current run</option>}
   </select>
-  <textarea aria-label="Message thread" ref={props.editorRef as React.Ref<HTMLTextAreaElement>} value={props.value} onInput={event => props.onChange(event.currentTarget.value)}
+  <textarea aria-label="Message thread" ref={element => {
+    const insertAt = (from: number, to: number, text: string) => {
+      if (element) props.onChange(element.value.slice(0, from) + text + element.value.slice(to));
+    };
+    const handle = element && Object.assign(element, {
+      captureInsertion: () => {
+        let from = element.selectionStart ?? element.value.length, to = element.selectionEnd ?? from;
+        return { insertText: (text: string) => { insertAt(from, to, text); from += text.length; to = from; }, dispose() {} };
+      },
+      insertText: (text: string) => insertAt(element.selectionStart ?? element.value.length, element.selectionEnd ?? element.value.length, text),
+    });
+    if (typeof props.editorRef === 'function') props.editorRef(handle as unknown as import('@/components/chat/composer/editor/ComposerEditor').ComposerEditorHandle | null);
+    else if (props.editorRef) props.editorRef.current = handle as unknown as import('@/components/chat/composer/editor/ComposerEditor').ComposerEditorHandle | null;
+  }} value={props.value} onInput={event => props.onChange(event.currentTarget.value)}
     onPaste={event => { const files = [...event.clipboardData.files]; if (files.length) { event.preventDefault(); props.onFiles(files); } }} />
   <button type="button" disabled={props.attachmentDisabled || props.imageDisabled} onClick={props.onAttachImages}>Attach images</button>
   <button type="button" disabled={props.attachmentDisabled} onClick={props.onAttachPdfs}>chat.fileAttachment.actions.attachPdfs</button>
@@ -911,7 +924,7 @@ it('shared file picker previews image-only input, retains bytes/key on failure, 
   expect(container.querySelector('img')).not.toBeNull();
   await submitForm(container.querySelector('form')!);
   expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
-  expect(f.submit.mock.calls[0]![0]).toMatchObject({ text: '', images: [{ mimeType: 'image/png', data }] });
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ text: '[Image 1]', images: [{ mimeType: 'image/png', data, reference: 1 }] });
   expect(container.querySelector('form img')).toBeNull();
   expect(container.querySelector('article img')).toBeNull();
   await act(async () => button('View image').click());
@@ -1284,7 +1297,7 @@ it('adds a hidden skill command and retains the draft and image through a resour
     await new Promise(resolve => setTimeout(resolve, 0));
   });
   await act(async () => { button('Add /skill:review-code to draft').click(); button('Add /skill:review-code to draft').click(); });
-  const text = `/skill:review-code ${draft}`;
+  const text = `/skill:review-code ${draft}[Image 1]`;
   expect(composer().value).toBe(text);
   expect(composer().closest('form')?.querySelector('img')?.getAttribute('src')).toBe(`data:image/png;base64,${data}`);
   expect(f.submit).not.toHaveBeenCalled();
@@ -2821,7 +2834,7 @@ it('keeps stored images for a text edit, explicitly removes them with [], and re
   });
   expect(form().querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,AQID');
   await submitForm(form());
-  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [{ mimeType: 'image/png', data: 'AQID' }]);
+  expect(editInput).toHaveBeenLastCalledWith('image-queue', 1, 'changed text', [{ mimeType: 'image/png', data: 'AQID', reference: 1 }]);
   expect(JSON.stringify(editInput.mock.calls)).not.toContain(storedImage.content_ref.content_object);
   await act(async () => button('Keep original images').click());
   await submitForm(form());
