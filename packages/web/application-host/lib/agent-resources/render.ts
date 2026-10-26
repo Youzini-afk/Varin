@@ -29,10 +29,12 @@ export function resourceSections(snapshot: PromptResources, runtimePreamble: str
 
 /** Shared by ordinary execution and the current settings preview. */
 export function agentSystemSections(resources: PromptResources): Record<string, string> {
+  const { preamble, ...sections } = resourceSections(resources, 'You are Varin, a personal assistant working in a conversation.', 'resource_read');
   return {
+    preamble: preamble!,
     communication: 'Choose how to present information based on the user’s intent and the needs of the conversation, helping them understand, express ideas, and participate. '
       + 'When available in-chat HTML or interactive capabilities would make communication clearer, more intuitive, or more effective, you can use them proactively without waiting for an explicit request. '
       + 'Combine text and interactive content naturally, using each where it helps. Use your judgment to decide the form and extent.',
-    ...resourceSections(resources, 'You are Varin, a personal assistant working in a conversation.', 'resource_read'),
+    ...sections,
   };
 }

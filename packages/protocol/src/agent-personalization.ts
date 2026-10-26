@@ -80,8 +80,9 @@ export function splitAgentSystemPrompt(content: string): Record<string, string> 
 
 /** Prompt sections retain an untagged preamble followed by named XML sections. */
 export function renderAgentSystemPrompt(sections: Record<string, string>): string {
-  return Object.entries(sections).filter(([, value]) => value.length > 0)
-    .map(([key, value]) => key === "preamble" ? value : `<${key}>\n${value}\n</${key}>`).join("\n\n");
+  const { preamble = "", ...named } = sections;
+  return [preamble, ...Object.entries(named).filter(([, value]) => value.length > 0)
+    .map(([key, value]) => `<${key}>\n${value}\n</${key}>`)].filter(value => value.length > 0).join("\n\n");
 }
 
 export function personalizeAgentSystemPrompt(original: Record<string, string>, context: Pick<AgentPersonalizationContext, 'mode' | 'revision' | 'profiles' | 'memories'> & Partial<AgentPersonalizationContext>): Record<string, string> {
