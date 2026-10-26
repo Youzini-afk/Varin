@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Varin · 上下文整理交互设计</title>
+  <title>Varin · 上下文管理交互设计 · 02</title>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./context.css">
 </head>
 <body>
   <!-- Review prototype only. All messages, usage and job states are synthetic.
@@ -40,7 +41,7 @@
   </defs></svg>
 
   <header class="review-head">
-    <div class="review-title"><span class="review-mark">V</span><h1>上下文整理 <span>交互设计稿</span></h1></div>
+    <div class="review-title"><span class="review-mark">V</span><h1>上下文管理 <span>交互设计稿 · 02</span></h1></div>
     <div class="review-actions">
       <button id="fullscreen" class="review-button">全屏预览</button>
       <button id="play" class="review-button"><svg><use href="#i-play"/></svg><span>播放一次</span></button>
@@ -49,27 +50,28 @@
   </header>
   <nav class="review-controls" aria-label="设计稿场景">
     <div class="scene-picker"><label for="scene">场景</label><select id="scene">
-      <option value="normal">正常对话</option><option value="background">后台准备</option><option value="ready">摘要就绪</option>
-      <option value="waiting" selected>等待压缩</option><option value="manual">手动整理</option><option value="applying">正在应用</option><option value="applied">已应用 · 待计量</option>
+      <option value="normal">正常对话</option><option value="background" selected>触发准备 · 任务继续</option><option value="ready">压缩就绪 · 尚未到线</option>
+      <option value="waiting">已到替换线 · 尚未就绪</option><option value="manual">手动准备</option><option value="applying">到线 · 直接替换</option><option value="applied">替换完成 · 待计量</option>
       <option value="continued">后续请求已计量</option><option value="softFailure">后台准备失败</option><option value="failure">压缩失败 · 暂停</option><option value="stopped">已停止整理</option>
     </select></div>
     <div class="segmented" aria-label="聊天展示方式">
       <button data-mode="dialogue" aria-pressed="true">对话优先</button><button data-mode="live" aria-pressed="false">时间顺序</button><button data-mode="sorted" aria-pressed="false">分类展示</button>
     </div>
-    <div class="review-hint">点击上下文入口，查看同一份详情</div>
+    <div class="playback-path"><label for="play-path">播放路径</label><select id="play-path"><option value="on-time">到线前已准备好</option><option value="late">到线时仍在准备</option></select></div>
     <button class="review-button" id="design-notes" aria-expanded="false">设计说明 <svg><use href="#i-down"/></svg></button>
   </nav>
   <div class="notes fold" id="notes"><div><div class="notes-body">
-    <p><strong>阅读顺序：</strong>主任务 → 整理状态 → 生效摘要 → 过程与历史。后台整理只在上下文入口提示；真正等待或主动触发时进入聊天。</p>
-    <p><strong>数据口径：</strong>本稿全部为示例数据。准备水位为可用输入的 75%，预留为总窗口的 15%，因此比例条中的准备位置是总窗口的 63.75%。应用后先等待新的请求计量。</p>
-    <p><strong>实现边界：</strong>主任务等待可以从原生等待状态识别。聊天中的整理记录需接入真实发布事件；过程实时更新和历史定位需要补齐相应 UI 投影。操作按钮在本稿中仅演示状态。</p>
+    <p><strong>时序：</strong>触发准备后，聊天出现“上下文压缩正在准备”，消息与工具继续推进；达到替换条件，已就绪便直接替换。只有到线仍未就绪，当前模型请求才进入等待。</p>
+    <p><strong>占用条：</strong>以完整模型窗口为分母，色段显示系统提示词、用户、助手、内置工具、MCP、历史摘要及附件与其他。工具项不含 MCP，避免重复计数。内容分类按实际请求分词，缓存属于另一统计维度。</p>
+    <p><strong>刻度：</strong>本稿沿用准备水位为可用输入 75%、总窗口预留 15% 的示例设置：准备刻度在总窗口的 63.75%，替换刻度在 85%。本页只读展示刻度，修改仍由设置页负责。</p>
+    <p><strong>实现边界：</strong>保留现有上下文侧边栏的会话、模型、摘要、请求用量和消息查看能力。分类计量、发布记录和实时过程需要接入对应数据；所有数值、内容与操作均为设计演示。</p>
   </div></div></div>
 
   <div class="app" id="app" data-detail="true" data-overview="full">
     <header class="titlebar">
       <div class="shell-controls"><svg><use href="#i-panel"/></svg><span>工作台</span><svg class="small"><use href="#i-down"/></svg><span class="shell-focus">编程</span></div>
       <div class="thread-name">聊天文件操作<span>D:/project/opencr</span></div>
-      <button class="context-entry" id="context-entry" aria-controls="context-panel" aria-expanded="true"><span class="usage-ring" id="usage-ring"></span><span id="header-usage">86.1%</span><span class="entry-separator"></span><span id="header-status">整理中</span></button>
+      <button class="context-entry" id="context-entry" aria-controls="context-panel" aria-expanded="true"><span class="usage-ring" id="usage-ring"></span><span id="header-usage">78.0%</span><span class="entry-separator"></span><span id="header-status">准备中</span></button>
       <span class="host"><svg><use href="#i-stack"/></svg>Local</span><span class="profile">Y</span>
     </header>
     <div class="app-body">
@@ -108,11 +110,25 @@
         <aside class="context-slot" id="context-slot"><section class="context-panel" id="context-panel" aria-label="上下文详情">
           <header class="panel-heading"><button class="icon-button" data-action="history-back" id="history-back" aria-label="返回当前上下文" hidden><svg><use href="#i-back"/></svg></button><svg><use href="#i-stack"/></svg><strong id="panel-title">上下文</strong><span class="grow"></span><button class="icon-button" data-action="close-context" aria-label="关闭上下文详情"><svg><use href="#i-close"/></svg></button></header>
           <div class="panel-scroll" id="panel-scroll">
-            <section class="current-state"><div class="eyebrow"><span id="detail-kicker">本次整理</span><span id="detail-badge" class="quiet-badge">等待</span></div><h2 id="detail-title">正在整理上下文<span class="state-motion" id="state-motion"><i></i><i></i><i></i></span></h2><p id="detail-description">当前请求正在等待摘要。完成后，Agent 会接着当前任务继续。</p><div class="state-actions" id="state-actions"></div></section>
-            <section class="budget" id="budget"><div class="budget-heading"><span id="budget-label">最近一次请求</span><span><strong id="budget-tokens">110,208</strong><span class="muted"> / 128,000</span></span></div><div class="budget-track" aria-label="上下文占用及准备、替换边界"><div class="reserve-zone"></div><div class="budget-fill" id="budget-fill"></div><i class="budget-tick prepare" title="开始准备：可用输入的75%，对应总窗口63.75%"></i><i class="budget-tick replace" title="触发替换：总窗口85%，预留15%"></i></div><div class="budget-labels"><span class="budget-percent" id="budget-percent">86.1%</span><span class="prepare" title="总窗口的63.75%">准备</span><span class="replace" title="总窗口的85%">替换</span><span class="limit">128K</span></div><p class="budget-note" id="budget-note">准备：可用输入的 75% · 预留：总窗口的 15%</p></section>
+            <header class="context-session" id="context-session"><h2>聊天文件操作</h2><p><span class="session-model-dot"></span>DeepSeek V4.1 Flash <span>· Local</span></p><div>今天 10:34 更新 <span>当前分支</span></div></header>
+            <section class="budget" id="budget">
+              <div class="budget-heading"><span id="budget-label">当前上下文占用</span><span class="measurement-label" title="内容构成根据实际请求分词；示例数值仅用于预览">内容分类估算</span></div>
+              <div class="budget-total"><strong id="budget-percent">78.0<small>%</small></strong><span><b id="budget-tokens">99,840</b> / 128,000 <small>token</small></span></div>
+              <div class="budget-scale"><span>0</span><span>25%</span><span>50%</span><span>75%</span><span>100%</span></div>
+              <div class="budget-track" id="budget-track" aria-label="上下文构成，准备线63.75%，替换线85%"><div class="reserve-zone" title="预留15%"></div><div class="budget-segments" id="budget-segments"></div><i class="budget-tick prepare" title="开始准备：可用输入的75%，对应总窗口63.75%"></i><i class="budget-tick replace" title="替换／预留线：总窗口85%，预留15%"></i><div class="bar-tooltip" id="bar-tooltip" role="status" hidden></div></div>
+              <div class="budget-boundaries"><span class="prepare">准备 <b>63.75%</b></span><span class="replace">替换 <b>85%</b></span></div>
+              <div class="budget-status"><span id="budget-distance">距替换线还有 7.0%</span><span>预留 15%</span></div>
+              <p class="budget-note" id="budget-note" hidden>上下文已替换，新请求占用待计量。</p>
+              <div class="composition-heading"><span>内容构成</span><span>占整个窗口</span></div>
+              <div class="composition-legend" id="composition-legend"></div>
+              <div class="fold category-fold" id="category-fold" inert><div><div class="category-detail"><div class="category-heading"><strong id="category-title"></strong><button class="icon-button" data-action="close-category" aria-label="收起构成明细"><svg><use href="#i-close"/></svg></button></div><p id="category-description"></p><div id="category-parts"></div></div></div></div>
+            </section>
+            <section class="current-state"><div class="eyebrow"><span id="detail-kicker">上下文压缩</span><span id="detail-badge" class="quiet-badge">后台</span></div><h2 id="detail-title">正在准备<span class="state-motion" id="state-motion"><i></i><i></i><i></i></span></h2><p id="detail-description">已触发后台准备，消息与工具操作照常进行。</p><div class="state-actions" id="state-actions"></div></section>
             <section class="summary-section"><div class="section-heading"><h3 id="summary-title">当前生效的摘要</h3><button class="icon-button" data-action="copy-summary" aria-label="复制摘要" title="复制摘要"><svg><use href="#i-copy"/></svg></button></div><div class="summary-meta" id="summary-meta">上次整理 · 10:08</div><div class="summary-preview" id="summary-preview"><div class="prose" id="summary-body"></div></div><button class="text-button summary-more" data-action="expand-summary" id="summary-more" aria-expanded="false">展开摘要 <svg><use href="#i-down"/></svg></button></section>
             <section class="process-section"><button class="disclosure" data-action="process" id="process-trigger" aria-expanded="false" aria-controls="process-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>整理过程</span><span class="disclosure-side" id="process-status">生成摘要中</span></button><div class="fold" id="process-fold" inert><div><div class="process-body"><div class="process-meta"><span>DeepSeek V4.1 Flash</span><span id="process-time">正在生成</span></div><button class="thinking-heading" data-action="thinking" id="thinking-trigger" aria-expanded="false" aria-controls="thinking-fold"><svg><use href="#i-brain"/></svg><span>思考</span><span class="thinking-preview">需要保留用户的界面偏好、文件来源约束，以及尚未完成的操作。</span><svg class="chevron"><use href="#i-arrow"/></svg></button><div class="fold" id="thinking-fold" inert><div><div class="thinking-window"><p>这段对话已经确认了文件菜单的范围。要保留正文与工具结果的区别，以及远程 Host 的路径不能用于本机打开操作。</p><p>实现已完成入口定位与编辑器选择。下一步是下载原始文件和通过 Documents 读取文本。当前上下文中的工具输出只需要保留关键文件位置和结论。</p><p>用户希望沿用现有设计语言，所有文件操作必须保留原始来源。尚未完成的验证要明确留下，避免继续执行时重复探索。</p></div></div></div><div class="process-answer"><span class="output-label">摘要输出</span><p id="process-output">目标：补齐聊天文件菜单。已确认 ToolFileLink 持有所属任务的来源；正文文件链接已有解析路径。接下来接入原始文件下载与文本复制。</p><span class="stream-caret" id="stream-caret"></span></div><p class="process-footnote">显示辅助模型实际提供的思考与输出</p></div></div></div></section>
             <section class="history-section"><button class="disclosure" data-action="history" id="history-trigger" aria-expanded="false" aria-controls="history-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>之前的整理</span><span class="disclosure-side">2 次</span></button><div class="fold" id="history-fold" inert><div><div class="history-list"><button data-history="recent"><span class="history-point"></span><span><strong>10:08</strong><small>文件入口与来源约束</small></span><span class="history-receipt">已应用</span><svg><use href="#i-arrow"/></svg></button><button data-history="older"><span class="history-point"></span><span><strong>09:32</strong><small>菜单范围与交互要求</small></span><span class="history-receipt">已应用</span><svg><use href="#i-arrow"/></svg></button></div></div></div></section>
+            <section class="request-section" id="request-section"><button class="disclosure" data-action="request-usage" id="request-usage-trigger" aria-expanded="false" aria-controls="request-usage-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>本次请求用量</span><span class="disclosure-side">缓存率 82.4%</span></button><div class="fold" id="request-usage-fold" inert><div><div class="request-usage" id="request-usage"></div><p class="usage-explanation">缓存反映请求的计费与复用，不重复计入上方内容构成。</p></div></div></section>
+            <section class="messages-section" id="messages-section"><button class="disclosure" data-action="messages" id="messages-trigger" aria-expanded="false" aria-controls="messages-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>会话消息</span><span class="disclosure-side">112 条</span></button><div class="fold" id="messages-fold" inert><div><div class="messages-filters" role="group" aria-label="消息分类"><button data-filter="all" aria-pressed="true">全部</button><button data-filter="user" aria-pressed="false">用户</button><button data-filter="assistant" aria-pressed="false">助手</button><button data-filter="tools" aria-pressed="false">工具</button><button data-filter="mcp" aria-pressed="false">MCP</button></div><p class="messages-caption">完整会话记录，包含压缩前的消息</p><div id="message-list"></div></div></div></section>
             <button class="text-button return-current" data-action="history-back" id="return-current" hidden><svg><use href="#i-back"/></svg>返回当前上下文</button>
           </div>
           <footer class="panel-footer"><svg><use href="#i-history"/></svg>整理后，仍可在聊天中查看完整历史</footer>
@@ -122,7 +138,7 @@
     </div>
     <div class="toast" id="toast" role="status"></div>
   </div>
-  <footer class="review-footer"><span id="scene-note">主任务等待时，在当前执行位置明确说明原因。输入框仍可编辑。</span><span>示例内容 · 无真实请求</span></footer>
+  <footer class="review-footer"><span id="scene-note">准备期间照常推进。到线已就绪就直接替换，未就绪才等待。</span><span>示例内容 · 无真实请求</span></footer>
   <script src="./demo.js"></script>
 </body>
 </html>
