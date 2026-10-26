@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Varin · 上下文整理交互设计</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <!-- Review prototype only. All messages, usage and job states are synthetic.
+       No model calls, Host access, filesystem operations or app settings changes. -->
+  <svg class="symbols" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+    <symbol id="i-stack" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5M3 16l9 5 9-5"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="m5 9 7 7 7-7"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H4m7-7-7 7 7 7"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></symbol>
+    <symbol id="i-chat" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4V4Z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 6h7l2 2h9v12H3V6Z"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6V3Zm8 0v5h4M9 12h6m-6 4h6"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><path d="m4 6 6 6-6 6m9 0h7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="13" rx="2"/><path d="M16 8V3H3v13h5"/></symbol>
+    <symbol id="i-history" viewBox="0 0 24 24"><path d="M3 9a9 9 0 1 1 0 6M3 3v6h6m3-2v6l4 2"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></symbol>
+    <symbol id="i-warning" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Zm0 6v5m0 3v.1"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Zm-4 9 3 3 5-6"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3H9Z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 1v3m0 16v3M1 12h3m16 0h3M4 4l2 2m12 12 2 2M4 20l2-2M18 6l2-2"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 15A9 9 0 0 1 9 4a9 9 0 1 0 11 11Z"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8V4Z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 20V4m-6 6 6-6 6 6"/></symbol>
+    <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5c-3-5-8-1-6 3-5 1-4 7 0 7-2 4 4 7 6 3V5Zm0 0c3-5 8-1 6 3 5 1 4 7 0 7 2 4-4 7-6 3M6 8l2 2m-2 5 3-2m9-5-2 2m2 5-3-2"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 5c-4-3-9-1-9-1v15s5-2 9 1c4-3 9-1 9-1V4s-5-2-9 1Zm0 0v15"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 12h.1m6.9 0h.1m6.9 0h.1" stroke-width="3"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-command" viewBox="0 0 24 24"><path d="M8 8H5a3 3 0 1 1 3-3v14a3 3 0 1 1-3-3h14a3 3 0 1 1-3 3V5a3 3 0 1 1 3 3H8Z"/></symbol>
+  </defs></svg>
+
+  <header class="review-head">
+    <div class="review-title"><span class="review-mark">V</span><h1>上下文整理 <span>交互设计稿</span></h1></div>
+    <div class="review-actions">
+      <button id="fullscreen" class="review-button">全屏预览</button>
+      <button id="play" class="review-button"><svg><use href="#i-play"/></svg><span>播放一次</span></button>
+      <button id="theme" class="review-button" aria-label="切换亮暗主题"><svg><use href="#i-sun"/></svg><span>亮色</span></button>
+    </div>
+  </header>
+  <nav class="review-controls" aria-label="设计稿场景">
+    <div class="scene-picker"><label for="scene">场景</label><select id="scene">
+      <option value="normal">正常对话</option><option value="background">后台准备</option><option value="ready">摘要就绪</option>
+      <option value="waiting" selected>等待压缩</option><option value="manual">手动整理</option><option value="applying">正在应用</option><option value="applied">已应用 · 待计量</option>
+      <option value="continued">后续请求已计量</option><option value="softFailure">后台准备失败</option><option value="failure">压缩失败 · 暂停</option><option value="stopped">已停止整理</option>
+    </select></div>
+    <div class="segmented" aria-label="聊天展示方式">
+      <button data-mode="dialogue" aria-pressed="true">对话优先</button><button data-mode="live" aria-pressed="false">时间顺序</button><button data-mode="sorted" aria-pressed="false">分类展示</button>
+    </div>
+    <div class="review-hint">点击上下文入口，查看同一份详情</div>
+    <button class="review-button" id="design-notes" aria-expanded="false">设计说明 <svg><use href="#i-down"/></svg></button>
+  </nav>
+  <div class="notes fold" id="notes"><div><div class="notes-body">
+    <p><strong>阅读顺序：</strong>主任务 → 整理状态 → 生效摘要 → 过程与历史。后台整理只在上下文入口提示；真正等待或主动触发时进入聊天。</p>
+    <p><strong>数据口径：</strong>本稿全部为示例数据。准备水位为可用输入的 75%，预留为总窗口的 15%，因此比例条中的准备位置是总窗口的 63.75%。应用后先等待新的请求计量。</p>
+    <p><strong>实现边界：</strong>主任务等待可以从原生等待状态识别。聊天中的整理记录需接入真实发布事件；过程实时更新和历史定位需要补齐相应 UI 投影。操作按钮在本稿中仅演示状态。</p>
+  </div></div></div>
+
+  <div class="app" id="app" data-detail="true" data-overview="full">
+    <header class="titlebar">
+      <div class="shell-controls"><svg><use href="#i-panel"/></svg><span>工作台</span><svg class="small"><use href="#i-down"/></svg><span class="shell-focus">编程</span></div>
+      <div class="thread-name">聊天文件操作<span>D:/project/opencr</span></div>
+      <button class="context-entry" id="context-entry" aria-controls="context-panel" aria-expanded="true"><span class="usage-ring" id="usage-ring"></span><span id="header-usage">86.1%</span><span class="entry-separator"></span><span id="header-status">整理中</span></button>
+      <span class="host"><svg><use href="#i-stack"/></svg>Local</span><span class="profile">Y</span>
+    </header>
+    <div class="app-body">
+      <aside class="project-nav">
+        <div class="nav-action"><svg><use href="#i-chat"/></svg>新会话</div><div class="nav-action"><svg><use href="#i-history"/></svg>定时与接续</div>
+        <div class="nav-section">项目 <svg><use href="#i-plus"/></svg></div>
+        <div class="tree-project"><svg class="small"><use href="#i-down"/></svg><svg><use href="#i-folder"/></svg>opencr</div>
+        <div class="thread selected"><svg><use href="#i-chat"/></svg><span>聊天文件操作</span><span class="thread-dot"></span></div>
+        <div class="thread"><svg><use href="#i-chat"/></svg><span>模型信息匹配</span></div><div class="thread"><svg><use href="#i-chat"/></svg><span>输入框图片引用</span></div>
+        <div class="nav-bottom"><svg><use href="#i-settings"/></svg><svg><use href="#i-command"/></svg><span class="info-icon">i</span></div>
+      </aside>
+      <main class="workspace">
+        <div class="conversation">
+          <div class="conversation-top"><span>普通对话</span><div class="overview-launcher"><button class="icon-button" data-action="overview-full" aria-label="展开工作概览"><svg><use href="#i-stack"/></svg></button><button class="icon-button small-button" data-action="overview-compact" aria-label="显示小工作概览"><svg><use href="#i-down"/></svg></button></div></div>
+          <div class="chat-layout">
+            <div class="chat-main">
+              <div class="chat-scroll" id="chat-scroll"><div class="transcript" id="transcript"></div></div>
+              <div class="composer-wrap">
+                <div class="queued" id="queued" hidden><span id="queued-text"></span><button data-action="remove-queue" class="icon-button" aria-label="移除排队消息"><svg><use href="#i-close"/></svg></button></div>
+                <form class="composer" id="composer"><textarea id="draft" aria-label="消息输入框" placeholder="描述你想做的事…" rows="2"></textarea><div class="composer-hint">@ 引用文件或智能体；/ 使用命令和技能</div>
+                  <div class="composer-tools"><span class="composer-left"><svg><use href="#i-plus"/></svg><svg class="accent"><use href="#i-shield"/></svg><span class="workspace-label"><svg><use href="#i-folder"/></svg>opencr</span></span><span class="composer-model"><svg><use href="#i-brain"/></svg><span>高</span><b>DeepSeek V4.1 Flash</b><span>Varin</span></span><button class="send" type="submit" aria-label="发送消息"><svg><use href="#i-send"/></svg></button></div>
+                </form><p class="composer-caption" id="composer-caption"></p>
+              </div>
+            </div>
+            <aside class="overview-slot" id="overview-slot"><div class="overview">
+              <header><span>工作概览</span><button class="icon-button" data-action="overview-compact" aria-label="切换工作概览大小"><svg><use href="#i-down"/></svg></button><button class="icon-button" data-action="overview-close" aria-label="关闭工作概览"><svg><use href="#i-close"/></svg></button></header>
+              <div class="overview-body"><div class="overview-status"><span class="dot" id="overview-dot"></span><strong id="overview-status">等待上下文整理</strong></div><p class="overview-task">补齐聊天文件的打开方式与内容操作</p>
+                <section class="overview-plan"><div class="section-caption">计划 <span>2 / 4</span></div><div class="plan-item"><svg><use href="#i-check"/></svg><span>确认正文与工具文件入口</span></div><div class="plan-item"><svg><use href="#i-check"/></svg><span>接入现有编辑器与系统应用</span></div><div class="plan-item"><span class="plan-current"></span><span>接入另存为、复制内容，保留文件所属 Host 与目录</span></div><div class="plan-tail">还有 1 项 <svg><use href="#i-arrow"/></svg></div></section>
+                <section class="overview-output"><div class="section-caption">产出与变更</div><div class="overview-row"><svg><use href="#i-file"/></svg><span>本轮修改了 3 个文件</span><svg><use href="#i-arrow"/></svg></div></section>
+                <button class="overview-context" data-action="open-context"><span class="mini-ring"></span><span>上下文</span><span id="overview-context-status">整理中</span><svg><use href="#i-arrow"/></svg></button>
+                <div class="overview-footer"><span><svg><use href="#i-folder"/></svg>opencr</span><span><svg><use href="#i-book"/></svg>记忆与决定</span></div>
+              </div><button class="overview-expand" data-action="overview-full">展开工作概览 <svg><use href="#i-arrow"/></svg></button>
+            </div></aside>
+          </div>
+        </div>
+        <aside class="context-slot" id="context-slot"><section class="context-panel" id="context-panel" aria-label="上下文详情">
+          <header class="panel-heading"><button class="icon-button" data-action="history-back" id="history-back" aria-label="返回当前上下文" hidden><svg><use href="#i-back"/></svg></button><svg><use href="#i-stack"/></svg><strong id="panel-title">上下文</strong><span class="grow"></span><button class="icon-button" data-action="close-context" aria-label="关闭上下文详情"><svg><use href="#i-close"/></svg></button></header>
+          <div class="panel-scroll" id="panel-scroll">
+            <section class="current-state"><div class="eyebrow"><span id="detail-kicker">本次整理</span><span id="detail-badge" class="quiet-badge">等待</span></div><h2 id="detail-title">正在整理上下文<span class="state-motion" id="state-motion"><i></i><i></i><i></i></span></h2><p id="detail-description">当前请求正在等待摘要。完成后，Agent 会接着当前任务继续。</p><div class="state-actions" id="state-actions"></div></section>
+            <section class="budget" id="budget"><div class="budget-heading"><span id="budget-label">最近一次请求</span><span><strong id="budget-tokens">110,208</strong><span class="muted"> / 128,000</span></span></div><div class="budget-track" aria-label="上下文占用及准备、替换边界"><div class="reserve-zone"></div><div class="budget-fill" id="budget-fill"></div><i class="budget-tick prepare" title="开始准备：可用输入的75%，对应总窗口63.75%"></i><i class="budget-tick replace" title="触发替换：总窗口85%，预留15%"></i></div><div class="budget-labels"><span class="budget-percent" id="budget-percent">86.1%</span><span class="prepare" title="总窗口的63.75%">准备</span><span class="replace" title="总窗口的85%">替换</span><span class="limit">128K</span></div><p class="budget-note" id="budget-note">准备：可用输入的 75% · 预留：总窗口的 15%</p></section>
+            <section class="summary-section"><div class="section-heading"><h3 id="summary-title">当前生效的摘要</h3><button class="icon-button" data-action="copy-summary" aria-label="复制摘要" title="复制摘要"><svg><use href="#i-copy"/></svg></button></div><div class="summary-meta" id="summary-meta">上次整理 · 10:08</div><div class="summary-preview" id="summary-preview"><div class="prose" id="summary-body"></div></div><button class="text-button summary-more" data-action="expand-summary" id="summary-more" aria-expanded="false">展开摘要 <svg><use href="#i-down"/></svg></button></section>
+            <section class="process-section"><button class="disclosure" data-action="process" id="process-trigger" aria-expanded="false" aria-controls="process-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>整理过程</span><span class="disclosure-side" id="process-status">生成摘要中</span></button><div class="fold" id="process-fold" inert><div><div class="process-body"><div class="process-meta"><span>DeepSeek V4.1 Flash</span><span id="process-time">正在生成</span></div><button class="thinking-heading" data-action="thinking" id="thinking-trigger" aria-expanded="false" aria-controls="thinking-fold"><svg><use href="#i-brain"/></svg><span>思考</span><span class="thinking-preview">需要保留用户的界面偏好、文件来源约束，以及尚未完成的操作。</span><svg class="chevron"><use href="#i-arrow"/></svg></button><div class="fold" id="thinking-fold" inert><div><div class="thinking-window"><p>这段对话已经确认了文件菜单的范围。要保留正文与工具结果的区别，以及远程 Host 的路径不能用于本机打开操作。</p><p>实现已完成入口定位与编辑器选择。下一步是下载原始文件和通过 Documents 读取文本。当前上下文中的工具输出只需要保留关键文件位置和结论。</p><p>用户希望沿用现有设计语言，所有文件操作必须保留原始来源。尚未完成的验证要明确留下，避免继续执行时重复探索。</p></div></div></div><div class="process-answer"><span class="output-label">摘要输出</span><p id="process-output">目标：补齐聊天文件菜单。已确认 ToolFileLink 持有所属任务的来源；正文文件链接已有解析路径。接下来接入原始文件下载与文本复制。</p><span class="stream-caret" id="stream-caret"></span></div><p class="process-footnote">显示辅助模型实际提供的思考与输出</p></div></div></div></section>
+            <section class="history-section"><button class="disclosure" data-action="history" id="history-trigger" aria-expanded="false" aria-controls="history-fold"><svg class="chevron"><use href="#i-arrow"/></svg><span>之前的整理</span><span class="disclosure-side">2 次</span></button><div class="fold" id="history-fold" inert><div><div class="history-list"><button data-history="recent"><span class="history-point"></span><span><strong>10:08</strong><small>文件入口与来源约束</small></span><span class="history-receipt">已应用</span><svg><use href="#i-arrow"/></svg></button><button data-history="older"><span class="history-point"></span><span><strong>09:32</strong><small>菜单范围与交互要求</small></span><span class="history-receipt">已应用</span><svg><use href="#i-arrow"/></svg></button></div></div></div></section>
+            <button class="text-button return-current" data-action="history-back" id="return-current" hidden><svg><use href="#i-back"/></svg>返回当前上下文</button>
+          </div>
+          <footer class="panel-footer"><svg><use href="#i-history"/></svg>整理后，仍可在聊天中查看完整历史</footer>
+        </section></aside>
+        <nav class="resource-rail" aria-label="资源面板"><button class="icon-button" data-action="close-context" aria-label="返回聊天"><svg><use href="#i-chat"/></svg></button><button class="icon-button active" data-action="open-context" aria-label="上下文"><svg><use href="#i-stack"/></svg></button><span class="rail-spacer"></span><svg><use href="#i-history"/></svg><svg><use href="#i-file"/></svg><svg><use href="#i-terminal"/></svg><svg><use href="#i-book"/></svg></nav>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+  <footer class="review-footer"><span id="scene-note">主任务等待时，在当前执行位置明确说明原因。输入框仍可编辑。</span><span>示例内容 · 无真实请求</span></footer>
+  <script src="./demo.js"></script>
+</body>
+</html>
