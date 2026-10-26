@@ -3064,6 +3064,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.draftStarters.sectionSkills': 'Skills',
   'chat.draftStarters.remove': 'Remove',
   'chat.scrollToBottom.aria': '滚动到底部',
+  'chat.scrollbar.aria': '聊天滚动位置',
   'chat.history.unavailable': '更早的消息暂时读取失败',
   'chat.history.retry': '重试',
   'chat.promptNavigator.noPreview': '本轮 Agent 暂无文本内容',

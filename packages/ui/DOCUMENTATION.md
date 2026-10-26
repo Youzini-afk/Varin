@@ -60,7 +60,16 @@ Host, branch, Run and history head, while settings changes invalidate the displa
 CodeMirror placeholder, not draft text. `ThreadComposer` accepts it through the editor's normal insertion
 transaction (including selection and undo); Enter/button submission first synchronously materializes that
 draft before using the existing form. Typing hides the ghost but retains cursor insertion with Tab. Autocomplete,
-IME and Shift+Tab keep precedence. The Host owns background generation, original request reuse and cancellation.
+IME and Shift+Tab keep precedence. Insertion retains the original suggestion: clearing the draft makes it
+available again, while Escape explicitly dismisses it for this history cut. The reference/command hint stays
+beside the suggestion hint and wraps on narrow screens; an open completion menu owns Tab and hides the
+suggestion action hint. The Host owns background generation, original request reuse and cancellation.
+
+The chat scrollbar uses the timeline's original LegendList viewport and an external track on the
+right edge of the complete conversation layout, outside the full/compact work overview. It fades after
+idle and remains visible during hover, focus or dragging. Pointer/keyboard scrolling releases the
+timeline's follow spring through its existing scroll-intent event; changing conversation/history cuts
+rebinds the viewport without letting a departing scene clear the new binding.
 
 Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
 commands use native user Operations and the existing Integration journal. Preview refresh reads those

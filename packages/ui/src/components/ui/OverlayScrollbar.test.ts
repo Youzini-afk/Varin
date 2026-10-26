@@ -26,4 +26,11 @@ describe('calculateOverlayThumbMetrics', () => {
       minThumbSize: 32,
     })).toEqual({ length: 0, offset: 0 });
   });
+  it('keeps short tracks and overscroll inside their available range', () => {
+    expect(calculateOverlayThumbMetrics({ viewportLength: 100, contentLength: 1000,
+      scrollOffset: -20, trackLength: 24, minThumbSize: 32 })).toEqual({ length: 8, offset: 0 });
+    const end = calculateOverlayThumbMetrics({ viewportLength: 100, contentLength: 1000,
+      scrollOffset: 1100, trackLength: 200, minThumbSize: 32 });
+    expect(end.offset + end.length).toBe(184);
+  });
 });

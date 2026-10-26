@@ -60,6 +60,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import type { ComposerEditorHandle } from '@/components/chat/composer/editor/ComposerEditor';
 import type { OverviewPeekSection } from './WorkOverviewControl';
 import { ThreadOverview } from './ThreadOverview';
+import { ConversationScrollbar } from '../conversation/ConversationScrollbar';
 import { useWorkOverviewStore } from '@/stores/useWorkOverviewStore';
 import { VarinLogo } from '@/components/ui/VarinLogo';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -383,6 +384,16 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const overviewKey = draftKey;
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
   const contentOwner = `${host}:${draftKey}`;
+  const scrollbarOwner = `${contentOwner}:${history.reset}`;
+  const currentScrollbarOwner = React.useRef(scrollbarOwner);
+  currentScrollbarOwner.current = scrollbarOwner;
+  const scrollbarTrack = React.useRef<HTMLDivElement>(null);
+  const [scrollViewport, setScrollViewport] = React.useState<{ owner: string; element: HTMLElement } | null>(null);
+  const bindScrollViewport = React.useCallback((element: HTMLElement | null) => {
+    if (currentScrollbarOwner.current !== scrollbarOwner) return;
+    setScrollViewport(previous => previous?.owner === scrollbarOwner && previous.element === element ? previous
+      : element ? { owner: scrollbarOwner, element } : null);
+  }, [scrollbarOwner]);
   const [focusedOverview, setFocusedOverview] = React.useState<{ owner: string; section: OverviewPeekSection }>();
   const [questionReveal, setQuestionReveal] = React.useState(0);
   const [questionOperation, setQuestionOperation] = React.useState<string>();
@@ -449,7 +460,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       source: { kind: 'document', snapshotId: region.snapshotId, sourceHash: region.sourceHash, page: region.page, region: region.region } });
     messageInput.current?.focus();
   }}><ReferenceNavigationContext.Provider value={referenceNavigation}><section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Thread conversation" data-thread-conversation="true">
-    <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
+    <div ref={scrollbarTrack} className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-main relative min-h-0 min-w-0 flex-1">
     <div className="thread-conversation-content flex h-full min-h-0 min-w-0 flex-col">
     {run?.state === 'failed' && <div role="alert" aria-label="Run failed" className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-destructive">
@@ -463,6 +474,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
     <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
     <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
+      onScrollContainerChange={bindScrollViewport}
       runUsage={history.usage} historyReset={history.reset} historyReady={history.ready}
       navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
       earlierHistory={{ available: Boolean(history.previous), loading: history.loading, error: history.error, latencyMs: history.latencyMs, load: historyWindow.loadEarlier }}
@@ -602,7 +614,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         messageHistory={visibleHistory.filter(item => item.source === 'user').slice().reverse().map(item => typeof item.content === 'string' ? item.content : typeof (item.content as { text?: unknown })?.text === 'string' ? (item.content as { text: string }).text : '')}
         onCompact={branch?.head && !active && providerId && modelId ? () => { showOverview('context'); void compactThrough(branch.head!); } : undefined}
         editorRef={messageInput} value={text} onChange={setText} models={models}
-        suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionConsumed={nextStep.consume}
+        suggestion={nextStep.text} suggestionError={nextStep.error} onSuggestionDismiss={nextStep.dismiss}
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
         imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : nextStep.text && text.length === 0 && !hasComposerInput ? sendBlocked : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
@@ -653,6 +665,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     </div>
     </div>
     {overview}
+    {!empty && scrollViewport?.owner === scrollbarOwner && <ConversationScrollbar key={scrollbarOwner} viewport={scrollViewport.element} trackRef={scrollbarTrack} />}
     </div>
   </section></ReferenceNavigationContext.Provider></ThreadMaterials>;
 }
