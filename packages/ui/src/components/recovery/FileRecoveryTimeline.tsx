@@ -218,7 +218,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
       {page === 'storage' && sourceRunId && <RecoveryStorage key={`${sourceRunId}:${revision}`} sourceRunId={sourceRunId} source={source} read={call} />}
       {page === 'history' && <div className="space-y-5 px-1">
         <h3 className="typography-ui-header">{t('contextPanel.recovery.files.history')}</h3>
-        {operations.length === 0 && <p className="typography-meta text-muted-foreground">{t(historyLoading ? 'contextPanel.recovery.files.loading' : 'contextPanel.recovery.files.noFileOperations')}</p>}
+        {operations.length === 0 && (historyLoading || !error) && <p className="typography-meta text-muted-foreground">{t(historyLoading ? 'contextPanel.recovery.files.loading' : 'contextPanel.recovery.files.noFileOperations')}</p>}
         {operations.map(operation => <div key={operation.operationId} className="border-b border-border/50 pb-3">
           <div className="flex items-center justify-between gap-2"><span className="typography-ui-label">{operation.undoOf ? t('contextPanel.recovery.files.undoDone') : statusText(operation.status)}</span>{resultActions(operation)}</div>
           <p className="typography-micro text-muted-foreground">{operation.createdAt ? new Date(operation.createdAt).toLocaleString() : ''} · {t('contextPanel.recovery.files.pathCount', { count: operation.appliedPaths.length })}</p>
@@ -228,7 +228,7 @@ export function FileRecoveryTimeline({ conversation, refreshKey, onChanged, hist
         {historyContent}
       </div>}
       {page === 'timeline' && <>
-        {points.length === 0 && <div className="flex flex-col items-center gap-3 px-4 py-16 text-center typography-meta text-muted-foreground">
+        {points.length === 0 && (loading || !error) && <div className="flex flex-col items-center gap-3 px-4 py-16 text-center typography-meta text-muted-foreground">
           <Icon name={loading ? 'loader-4' : 'history'} className={cn('size-6 opacity-50', loading && 'animate-spin')} />
           {t(loading ? 'contextPanel.recovery.files.loading' : 'contextPanel.recovery.files.empty')}
         </div>}
