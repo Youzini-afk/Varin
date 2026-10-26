@@ -304,6 +304,94 @@ fn parent_final_does_not_cancel_an_already_handed_off_preparing_child() {
 }
 
 #[test]
+fn delivered_retrieval_wait_remains_discoverable_after_its_ready_event_was_consumed() {
+    for cancel_wait in [false, true] {
+        let mut f = Fixture::new_internal_retrieval();
+        let child = f.accept();
+        f.settle_exchange();
+        let wait = f.admit_retrieval_wait("rediscovery");
+        let operation_id = wait.id.strip_prefix("child-wait:").unwrap();
+        assert_eq!(
+            f.db.operation(operation_id).unwrap().executor.as_deref(),
+            Some("retrieval_control")
+        );
+        assert_eq!(
+            f.db.run(&f.context.run_id).unwrap().state,
+            RunState::Waiting
+        );
+        assert!(f.db.pending_observation_continuations().unwrap().is_empty());
+        if cancel_wait {
+            f.db.cancel_child_wait(&wait.id).unwrap();
+        } else {
+            f.db.fail_child_preparation(
+                &child.operation_id,
+                "original retrieval stopped before launch",
+            )
+            .unwrap();
+            f.db.mark_child_resources_released(&child.execution_id).unwrap();
+            let owner = std::sync::Mutex::new(f.db);
+            varin_runtime::catalog::child_delivery::deliver_waits(&owner).unwrap();
+            f.db = owner.into_inner().unwrap();
+        }
+        assert_eq!(
+            f.db.run(&f.context.run_id).unwrap().state,
+            RunState::Runnable
+        );
+        assert!(
+            f.db.launch_metadata(&f.context.run_id)
+                .unwrap()
+                .unwrap()
+                .requires_rebind
+        );
+        let operation = f.db.operation(operation_id).unwrap();
+        assert_eq!(operation.phase, OperationPhase::Terminal);
+        let original = f.db.operation(&child.operation_id).unwrap();
+        let history = f.db.history("branch:parent").unwrap();
+        let cursor = f.db.event_cursor().unwrap();
+        assert!(
+            f.db.events_after(0, 1000)
+                .unwrap()
+                .iter()
+                .any(|event| event.kind == "observation.run_ready"
+                    && event.subject == f.context.run_id)
+        );
+        // The ready event may already have been consumed while its worker still owned
+        // the Run. The post-drain wake must rediscover the same launch without replay.
+        for _ in 0..2 {
+            assert_eq!(
+                f.db.pending_observation_continuations().unwrap(),
+                vec![f.context.run_id.clone()]
+            );
+            assert_eq!(f.db.operation(operation_id).unwrap(), operation);
+            assert_eq!(f.db.operation(&child.operation_id).unwrap(), original);
+            assert_eq!(f.db.history("branch:parent").unwrap(), history);
+            assert_eq!(f.db.event_cursor().unwrap(), cursor);
+        }
+        if cancel_wait {
+            f.db.request_cancel_run(&f.context.run_id).unwrap();
+            assert!(
+                f.db.pending_observation_continuations().unwrap().is_empty(),
+                "rediscovery must not revive cancelled parents"
+            );
+        } else {
+            let selection =
+                f.db.launch_intent(&f.context.run_id)
+                    .unwrap()
+                    .unwrap()
+                    .selection;
+            f.db.bind_launch(&f.context.run_id, selection).unwrap();
+            assert!(
+                f.db.pending_observation_continuations().unwrap().is_empty(),
+                "an already rebound launch must not be rediscovered"
+            );
+        }
+        let root = f.root.clone();
+        drop(f);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
 fn report_and_wait_registration_in_either_order_deliver_once_with_real_child_provenance() {
     for report_first in [true, false] {
         let mut f = Fixture::new();

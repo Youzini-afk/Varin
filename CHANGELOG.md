@@ -32,6 +32,7 @@ Varin 0.9.33 expands the shared agent harness for general, coding, research and 
 - Introduce shared motion preferences and coordinated transitions for streaming text and code, scrolling, tool activity, sending, sessions, workbenches, sidebars, menus, settings and themes. Mobile session swipes follow the finger; drag-and-drop and work overviews receive matching visual feedback.
 - Reduce unnecessary animation and rendering work: pause hidden loops, batch splash drawing, reuse prepared workbench instances, and wait for the destination shell to paint before revealing it. Refine neutral themes, accent colors, reading styles and theme previews.
 - Repair file-recovery requests across the Host/native authorization boundary, including conversation source discovery, preview, restore and undo. Preserve authored HTML background/text palettes and root styles in embedded interactive work, and soften the default light theme.
+- Restore parent continuation when background retrieval completes or is stopped while its original worker is draining, without replaying the retrieval or its effects.
 - Repair Windows PowerShell 5.1 terminal control sequences and close Electron windows before stopping the embedded Host. Improve media dispatch, tool diagnostics and identity-prompt ordering.
 - Update vulnerable dependency paths for URI parsing, uploads, script serialization and image-size parsing, with checks through actual installed consumers. Preserve lint and security gates, native runtime acceptance and production-layout verification.
 
@@ -70,6 +71,7 @@ Varin 0.9.33 扩展了通用、编程、科研与办公共用的 Agent 能力，
 - 加入统一动效偏好，协调流式文字与代码、滚动、工具活动、发送、会话切换、工作台、侧栏、菜单、设置和主题过渡。移动端会话滑动跟随手势，文件拖放和工作概览也获得一致的反馈。
 - 减少不必要的动画和渲染：暂停不可见的循环动画，批量绘制启动画面，复用准备好的工作台实例，并等待目标界面实际绘制后再揭示。完善中性主题、强调色、阅读样式和主题预览。
 - 修复 Host 与原生授权边界之间的文件恢复请求，覆盖对话来源发现、预览、恢复与撤销；嵌入交互作品保留作者成套设置的 HTML 背景、文字与根节点样式，并柔化默认浅色主题。
+- 修复后台检索完成或停止时与原执行线程收尾交错、导致父任务未能继续的问题，不重放检索或已发生的效果。
 - 修复 Windows PowerShell 5.1 终端控制序列；Electron 退出时先关闭窗口，再停止内嵌 Host。改进媒体派发、工具错误信息和身份提示词顺序。
 - 更新 URI 解析、上传、脚本序列化与图片尺寸解析的易受攻击依赖路径，通过实际安装的消费者验证；保留 lint、安全审计、原生运行时验收与生产布局检查。
 

@@ -1461,11 +1461,17 @@ fn text_plan_is_pure_preview_then_original_zero_model_run_with_tail_and_cas() {
             .is_err(),
         "text Run has no fake ModelStep"
     );
+    let published_job = ContextJob {
+        history_anchor: db.head("main").unwrap(),
+        published_revision: Some(output.revision),
+        ..job
+    };
     assert_eq!(
         db.create_context_job(request, launch, json!({})).unwrap(),
-        job,
-        "original request remains idempotent after publication"
+        published_job,
+        "replay preserves the original request, receipt and plan while reporting its durable publication"
     );
+    assert_eq!(db.context_jobs("main").unwrap().len(), 1);
 }
 struct TreeProvider(Arc<Mutex<Vec<RequestView>>>);
 impl ModelProvider for TreeProvider {

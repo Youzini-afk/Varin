@@ -149,7 +149,9 @@ impl Catalog {
         next(&self.db, run)
     }
     pub fn pending_observation_continuations(&self) -> Result<Vec<String>> {
-        let mut q=self.db.prepare("SELECT DISTINCT r.id FROM runs r JOIN operations o ON o.run_id=r.id JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 AND ((json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','wait_process','send','follow_up')) OR json_extract(o.body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(o.body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(o.body,'$.waiting_on') IS NOT NULL AND json_extract(o.body,'$.phase')='terminal' ORDER BY r.rowid")?;
+        // Keep the same native observers as operations(): their first ready event can
+        // be consumed before the original worker drains, so later wakes must rediscover them.
+        let mut q=self.db.prepare("SELECT DISTINCT r.id FROM runs r JOIN operations o ON o.run_id=r.id JOIN run_launches l ON l.id=r.id WHERE json_extract(r.body,'$.state')='runnable' AND json_extract(r.body,'$.cancel_requested')=0 AND json_extract(l.body,'$.requires_rebind')=1 AND ((json_extract(o.body,'$.execution_owner.kind')='kernel' AND json_extract(o.body,'$.executor') IN ('wait_child','retrieval_control','wait_process','send','follow_up')) OR json_extract(o.body,'$.waiting_on') GLOB 'computer-request-wait:*' OR json_extract(o.body,'$.waiting_on') GLOB 'host-job-wait:*') AND json_extract(o.body,'$.waiting_on') IS NOT NULL AND json_extract(o.body,'$.phase')='terminal' ORDER BY r.rowid")?;
         let rows = q
             .query_map([], |r| r.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;

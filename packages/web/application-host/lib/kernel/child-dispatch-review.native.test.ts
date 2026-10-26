@@ -733,7 +733,7 @@ it.each([false, true])('delivers a background retrieval once after its original 
   expect(parentSteps).toBe(cancelWait ? 4 : 3); expect(childSteps).toBe(1); expect(h.errors).toEqual([]);
 });
 
-it('observes the real assistant message and read action, then stops the same background retrieval', async () => {
+it.each([false, true])('observes the real assistant message and read action, then stops the same background retrieval (defer ready launch=%s)', async (deferReadyLaunch) => {
   const investigating = gate();
   let parentSteps = 0, childSteps = 0, operationId = '';
   const f = await fixture(async ({ body, response }) => {
@@ -765,9 +765,41 @@ it('observes the real assistant message and read action, then stops the same bac
   });
   const h = await f.openHost();
   const identity = await h.api.create('quick-background-stop');
+  const continueLaunch = h.adapter.continueLaunch.bind(h.adapter);
+  let deferContinuation = deferReadyLaunch, declinedContinuation = false;
+  h.adapter.continueLaunch = async (runId, options) => {
+    if (deferContinuation && parentSteps === 4) {
+      const run = await h.runtime.run(runId);
+      const launch = await h.runtime.launch(runId);
+      if (run.thread_id === identity.threadId && run.state === 'runnable' && launch?.requires_rebind) {
+        // Model the first ready read arriving before the original worker has drained.
+        // Consume that notification, rather than retaining or replaying it for the Host.
+        declinedContinuation = true;
+        return;
+      }
+    }
+    return continueLaunch(runId, options);
+  };
   const prepared = await h.api.prepareSource({ ...identity, key: 'source', resourceOwner: { kind: 'local' },
     workspaceId: (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'fixed_branch' });
   const receipt = await h.api.submit({ ...identity, key: 'input', expectedHead: null, text: 'Inspect and stop.', model, source: prepared.source });
+  if (deferReadyLaunch) {
+    await expect.poll(() => declinedContinuation).toBe(true);
+    expect((await h.runtime.run(receipt.run_id)).state).toBe('runnable');
+    const operation = await h.runtime.operation(operationId);
+    const history = (await h.api.snapshot(identity)).history;
+    const cursor = (await h.runtime.status()).eventCursor;
+    // Later post-drain reads must rediscover the original continuation even though
+    // the durable ready cursor was already consumed; no new operation is admitted.
+    for (let check = 0; check < 2; check++) {
+      expect(await h.runtime.reconcileObservations()).toContain(receipt.run_id);
+      expect(await h.runtime.operation(operationId)).toEqual(operation);
+      expect((await h.api.snapshot(identity)).history).toEqual(history);
+      expect((await h.runtime.status()).eventCursor).toBe(cursor);
+    }
+    deferContinuation = false;
+    await h.collaboration!.recover();
+  }
   await expect.poll(async () => (await h.runtime.run(receipt.run_id)).state, { timeout: 15_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.report?.outcome).toBe('cancelled'); expect(child.resources_released).toBe(true);

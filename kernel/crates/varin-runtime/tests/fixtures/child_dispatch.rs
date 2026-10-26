@@ -56,8 +56,11 @@ impl Fixture {
         Self::new_parent_custom(7, read, ToolSchema {
             requirements:None,description:String::new(),output_schema:None,metadata:None,
             name:"code_retrieval".into(),version:"1".into(),schema:json!({"type":"object"}),
-        },false,false,false,|input,_| {
+        },false,false,false,|input,launch| {
             *input=DispatchInput::from_tool_call("code_retrieval",&json!({"question":"Read the fixed file and report"})).unwrap();
+            let mut control = launch.tools.iter().find(|tool| tool.name == WAIT_TOOL).unwrap().clone();
+            control.name = varin_runtime::catalog::retrieval::CONTROL_TOOL.into();
+            launch.tools.push(control);
         })
     }
     pub(crate) fn new_with_schemas(revision: i64, read: ToolSchema, dispatch: ToolSchema) -> Self {
@@ -684,6 +687,12 @@ impl Fixture {
         self.admit_waits(suffix, 1).remove(0)
     }
     pub(crate) fn admit_waits(&mut self, suffix: &str, count: usize) -> Vec<Wait> {
+        self.admit_observation_waits(suffix, count, WAIT_TOOL)
+    }
+    pub(crate) fn admit_retrieval_wait(&mut self, suffix: &str) -> Wait {
+        self.admit_observation_waits(suffix, 1, varin_runtime::catalog::retrieval::CONTROL_TOOL).remove(0)
+    }
+    fn admit_observation_waits(&mut self, suffix: &str, count: usize, tool: &str) -> Vec<Wait> {
         let request_id = format!("wait-request-{suffix}");
         let epoch = self.db.epoch();
         let branch = self.db.run(&self.context.run_id).unwrap().branch_id;
@@ -756,9 +765,11 @@ impl Fixture {
         let calls = (0..count)
             .map(|index| ToolCall {
                 call_id: format!("wait-call-{suffix}-{index}"),
-                name: WAIT_TOOL.into(),
+                name: tool.into(),
                 schema_version: "1".into(),
-                arguments: json!({"operationId":self.context.operation_id}),
+                arguments: if tool == varin_runtime::catalog::retrieval::CONTROL_TOOL {
+                    json!({"operationId":self.context.operation_id,"action":"wait"})
+                } else { json!({"operationId":self.context.operation_id}) },
             })
             .collect::<Vec<_>>();
         self.db
@@ -802,7 +813,7 @@ impl Fixture {
                         tool: AdmittedTool {
                             call: call.clone(),
                             contract: ToolContract {
-                                name: WAIT_TOOL.into(),
+                                name: tool.into(),
                                 schema_version: "1".into(),
                                 read_only: true,
                                 completion: CompletionKind::Job,
