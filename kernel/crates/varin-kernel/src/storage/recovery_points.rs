@@ -73,7 +73,9 @@ impl Storage {
         input: &Value,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
-        let params: KernelFileRecoveryParams = serde_json::from_value(input.clone())?;
+        // Authorization has already attached private scope metadata. Decode
+        // only the public file parameters; path checks still use the grant.
+        let params: KernelFileRecoveryParams = super::file_resources::parse_file_params(input)?;
         let args = serde_json::to_value(&params.arguments)?;
         let journal = input
             .get("journal")
