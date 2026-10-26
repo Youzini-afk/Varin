@@ -1,4 +1,5 @@
 import { dict as enDict, type I18nKey } from './en';
+import { externalAgentZh } from './external-agents';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
@@ -8,6 +9,7 @@ import { toolMessagesZhCN } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...externalAgentZh,
   "contextManager.policyUnavailable": "暂时无法读取上下文阈值",
   "contextManager.recordPending": "正在读取压缩记录",
   "contextManager.recordPendingHint": "等待当前会话中的这条记录同步，可以返回当前上下文。",

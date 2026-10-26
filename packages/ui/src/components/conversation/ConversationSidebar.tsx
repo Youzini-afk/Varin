@@ -46,7 +46,8 @@ import {
   invokeDesktop,
   isDesktopLocalOriginActive,
 } from '@/lib/desktop';
-import { openThreadFromNavigation, startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { startThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { openConversationFromNavigation as openThreadFromNavigation, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { WorkbenchProfileSwitcher } from '@/components/layout/WorkbenchProfileSwitcher';
 import { cn, formatDirectoryName, getRevealLabelKey } from '@/lib/utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -236,7 +237,7 @@ const ConversationSessionRow: React.FC<SessionRowProps> = (props) => {
         <Icon name={pinned ? 'unpin' : 'pushpin'} className="size-4" />
         {t(pinned ? 'sessions.sidebar.session.menu.unpin' : 'sessions.sidebar.session.menu.pin')}
       </Item>
-      {canUseElectronDesktopIPC() ? <Item onClick={() => props.onOpenMiniChat(session)}>
+      {canUseElectronDesktopIPC() && !session.harness ? <Item onClick={() => props.onOpenMiniChat(session)}>
         <Icon name="chat-new" className="size-4" />
         {t('sessions.sidebar.session.menu.openMiniChatWindow')}
       </Item> : null}
@@ -446,7 +447,9 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const { files } = useRuntimeAPIs();
   const { summaries, attentionBySession, activeSessions } = useSidebarCatalog();
   const allSummaries = summaries;
-  const currentSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const nativeSessionId = useThreadStore(state => state.selectedIdentity?.threadId ?? null);
+  const externalSessionId = useExternalAgentStore(state => state.selectedId);
+  const currentSessionId = externalSessionId ?? nativeSessionId;
   const listRef = React.useRef<HTMLDivElement | null>(null);
   useSelectionGlide(listRef, currentSessionId);
   useHoverPill(listRef);
@@ -455,8 +458,10 @@ export const ConversationSidebar: React.FC<ConversationSessionSidebarProps> = ({
   const lastError = useThreadStore(state => state.catalogError);
   const runtimeKey = useThreadStore(state => state.hostKey);
   const loadCatalog = useThreadStore(state => state.loadCatalog);
-  const updateThread = useThreadStore(state => state.updateThread);
-  const deleteSession = useThreadStore(state => state.deleteThread);
+  const updateNativeThread = useThreadStore(state => state.updateThread);
+  const deleteNativeSession = useThreadStore(state => state.deleteThread);
+  const updateThread = React.useCallback((id: string, patch: { title?: string; pinned?: boolean; archived?: boolean }) => useExternalAgentStore.getState().conversations.some(v => v.id === id) ? useExternalAgentStore.getState().update(id, patch) : updateNativeThread(id, patch), [updateNativeThread]);
+  const deleteSession = React.useCallback((id: string) => useExternalAgentStore.getState().conversations.some(v => v.id === id) ? useExternalAgentStore.getState().update(id, { deleted: true }) : deleteNativeSession(id), [deleteNativeSession]);
   const renameSession = React.useCallback((id: string, title: string) => updateThread(id, { title }), [updateThread]);
   const archiveSession = React.useCallback((id: string) => updateThread(id, { archived: true }), [updateThread]);
   const pendingDialogCountBySession: Record<string, number> = {};

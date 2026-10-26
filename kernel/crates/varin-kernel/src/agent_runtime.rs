@@ -25,6 +25,8 @@ use varin_runtime::{model_session, supervisor::RunSupervisor, Catalog, SubmitInp
 
 #[path = "agent_computer.rs"]
 mod computer_commands;
+#[path = "agent_external.rs"]
+mod external_commands;
 #[path = "agent_host_jobs.rs"]
 mod host_job_commands;
 #[path = "agent_context_observations.rs"]
@@ -108,6 +110,14 @@ impl AgentControl {
         let catalog = catalog
             .lock()
             .map_err(|_| KernelError::Storage("Catalog owner failed".into()))?;
+        if let Some(child) = catalog.external_child(id).map_err(domain)? {
+            let handoff = child.handoff.ok_or_else(|| KernelError::Authorization("external delegate has no file source".into()))?;
+            if child.resources_released || child.conversation_id != p.child_thread_id
+                || format!("external-source:{id}") != p.child_branch_id || handoff.operation_id != p.handoff_operation_id {
+                return Err(KernelError::Authorization("source claim does not identify the original external delegate".into()));
+            }
+            return Ok(handoff);
+        }
         let child = catalog.child_task(id).map_err(domain)?;
         if child.resources_released {
             return Err(KernelError::Authorization(
@@ -833,6 +843,24 @@ pub(crate) fn spawn(
                                     return Ok(Value::Null);
                                 }
                             }
+                        }
+                        if method == "runtime.external.command" {
+                            let runtime = runtime.clone();
+                            let response_id = id.clone();
+                            let response_sender = responses.clone();
+                            let done = finished.clone();
+                            let cancelled = cancellation.clone();
+                            thread::spawn(move || {
+                                let result = external_commands::execute(runtime, params, &cancelled);
+                                let response = match result {
+                                    Ok(value) => response_ok(&response_id, value),
+                                    Err(error) => response_error(&response_id, &error),
+                                };
+                                done(&response_id);
+                                let _ = response_sender.send(response);
+                            });
+                            deferred = true;
+                            return Ok(Value::Null);
                         }
                         if method.starts_with("runtime.calendar.") {
                             if matches!(

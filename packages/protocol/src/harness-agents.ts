@@ -28,9 +28,18 @@ export interface HarnessAgentModelSettings {
   temperature?: number;
   thinkingLevel?: ThinkingLevel;
 }
+export interface HarnessExternalAgent { configurationId: string; model?: string }
+function parseExternalAgent(value: unknown): HarnessExternalAgent {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new HarnessSettingsValidationError('External Agent binding must be an object');
+  const v = value as Record<string, unknown>;
+  if (Object.keys(v).some(key => !['configurationId', 'model'].includes(key)) || typeof v.configurationId !== 'string' || !v.configurationId.trim()
+    || v.model !== undefined && (typeof v.model !== 'string' || !v.model.trim())) throw new HarnessSettingsValidationError('Invalid external Agent binding');
+  return { configurationId: v.configurationId, ...(v.model === undefined ? {} : { model: v.model as string }) };
+}
 
 /** User overrides of a built-in profile; unset fields keep the shipped definition. */
 export interface HarnessAgentOverrides {
+  external?: HarnessExternalAgent;
   avatar?: AgentAvatarId;
   name?: string;
   description?: string;
@@ -62,7 +71,7 @@ export function parseHarnessAgentModelSettings(value: unknown): HarnessAgentMode
 export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverrides {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new HarnessSettingsValidationError("Agent overrides must be an object");
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).some(key => !["name", "description", "instructions", "tools", RETIRED_WORKTREE, "modelSettings", "avatar"].includes(key))
+  if (Object.keys(v).some(key => !["external", "name", "description", "instructions", "tools", RETIRED_WORKTREE, "modelSettings", "avatar"].includes(key))
     || (v.avatar !== undefined && !isAgentAvatarId(v.avatar))
     || (v.name !== undefined && (typeof v.name !== "string" || !v.name.trim()))
     || (v.description !== undefined && typeof v.description !== "string")
@@ -71,6 +80,7 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
     throw new HarnessSettingsValidationError("Invalid built-in agent overrides");
   }
   return {
+    ...(v.external === undefined ? {} : { external: parseExternalAgent(v.external) }),
     ...(isAgentAvatarId(v.avatar) ? { avatar: v.avatar } : {}),
     ...(v.name === undefined ? {} : { name: (v.name as string).trim() }),
     ...(v.description === undefined ? {} : { description: v.description as string }),
@@ -82,8 +92,9 @@ export function parseHarnessAgentOverrides(value: unknown): HarnessAgentOverride
 
 export function customizeHarnessAgent<T extends { tools: string[]; systemPromptFragment: string }>(
   definition: T, overrides?: HarnessAgentOverrides, runtime: AgentRuntime = "agent",
-): T & { name?: string; description?: string; avatar?: AgentAvatarId; modelSettings?: HarnessAgentModelSettings } {
+): T & { name?: string; description?: string; avatar?: AgentAvatarId; modelSettings?: HarnessAgentModelSettings; external?: HarnessExternalAgent } {
   return { ...definition,
+    ...(overrides?.external === undefined ? {} : { external: overrides.external }),
     ...(overrides?.avatar === undefined ? {} : { avatar: overrides.avatar }),
     ...(overrides?.name === undefined ? {} : { name: overrides.name }),
     ...(overrides?.description === undefined ? {} : { description: overrides.description }),
@@ -94,6 +105,7 @@ export function customizeHarnessAgent<T extends { tools: string[]; systemPromptF
 }
 
 export interface HarnessCustomAgent {
+  external?: HarnessExternalAgent;
   avatar?: AgentAvatarId;
   name: string;
   description: string;
@@ -111,7 +123,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
   const fail = (): never => { throw new HarnessSettingsValidationError("Invalid agent definition: name, description, instructions, enabled and workFocus are required; model and tools are optional"); };
   if (!value || typeof value !== "object" || Array.isArray(value)) return fail();
   const v = value as Record<string, unknown>;
-  if (Object.keys(v).some(key => !["name", "description", "instructions", "enabled", "model", "modelSettings", "tools", RETIRED_WORKTREE, "workFocus", "avatar"].includes(key))
+  if (Object.keys(v).some(key => !["external", "name", "description", "instructions", "enabled", "model", "modelSettings", "tools", RETIRED_WORKTREE, "workFocus", "avatar"].includes(key))
     || (v.avatar !== undefined && !isAgentAvatarId(v.avatar))
     || typeof v.name !== "string" || !v.name.trim()
     || typeof v.description !== "string" || typeof v.instructions !== "string"
@@ -127,6 +139,7 @@ export function parseHarnessAgent(value: unknown): HarnessCustomAgent {
     model = { providerId: binding.providerId, modelId: binding.modelId };
   }
   return { name: v.name.trim(), description: v.description, instructions: v.instructions,
+    ...(v.external === undefined ? {} : { external: parseExternalAgent(v.external) }),
     ...(isAgentAvatarId(v.avatar) ? { avatar: v.avatar } : {}),
     enabled: v.enabled, ...(v.tools === undefined ? {} : { tools: parseAgentToolSelection(v.tools) }),
     workFocus: [...new Set(v.workFocus as WorkFocusId[])], ...(model ? { model } : {}),

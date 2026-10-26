@@ -3,9 +3,10 @@ import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useThreadStore } from '@/stores/useThreadStore';
-import { openThreadFromNavigation } from '@/lib/agent-runtime/threadNavigation';
+import { openConversationFromNavigation as openThreadFromNavigation, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { useToolDisclosureChoices } from './toolDisclosureContext';
 import { agentMessagePreview } from './agentMessagePresentation';
+import { toast } from '@/components/ui';
 
 /** The same folded message surface for received messages, reports and native send calls. */
 export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, targetThreadId, targetBranchId,
@@ -24,21 +25,23 @@ export function ChatAgentMessageBubble({ id, senderThreadId, senderBranchId, tar
   const [visited, setVisited] = React.useState(expanded);
   const regionId = React.useId();
   const threads = useThreadStore(state => state.threads);
+  const external = useExternalAgentStore(state => state.conversations);
+  const delegates = useExternalAgentStore(state => state.children);
   const member = (id?: string) => threads.find(thread => thread.thread_id === id || (id && thread.agent_code === id.toUpperCase()));
   const source = member(senderThreadId), target = member(targetThreadId);
   const name = (id?: string) => {
     const thread = member(id);
-    return thread?.title || thread?.agent_code || id || t('chat.agentMessage.agent');
+    return thread?.title || thread?.agent_code || external.find(v => v.id === id)?.title || delegates.find(v => v.conversationId === id)?.name || id || t('chat.agentMessage.agent');
   };
   const openMember = (id?: string, branchId?: string) => {
-    if (id) void openThreadFromNavigation({ threadId: member(id)?.thread_id ?? id, ...(branchId ? { branchId } : {}) });
+    if (id) void openThreadFromNavigation({ threadId: member(id)?.thread_id ?? id, ...(branchId ? { branchId } : {}) }).catch(error => toast.error(String(error)));
   };
   const label = t(kind === 'report' ? 'collaboration.report' : kind === 'task' ? 'collaboration.dispatch' : 'chat.agentMessage.message');
   const preview = agentMessagePreview(text);
   return <article className="chat-agent-message" data-outgoing={outgoing} data-kind={kind} data-arrive={arrives || undefined}>
     <button type="button" className="chat-agent-message-avatar" disabled={!senderThreadId}
       aria-label={t('collaboration.viewMember', { name: name(senderThreadId) })} onClick={() => openMember(senderThreadId, senderBranchId)}>
-      <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar} size={26} />
+      <AgentAvatar identity={source?.thread_id ?? senderThreadId ?? id} avatar={source?.avatar ?? delegates.find(v => v.conversationId === senderThreadId)?.avatar} size={26} />
     </button>
     <div className="chat-agent-message-column">
       <div className="chat-agent-message-route">

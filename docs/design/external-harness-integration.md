@@ -1,6 +1,8 @@
 # 外部 Harness 接入与跨 Agent 协作设计
 
-状态：设计提案，尚未实施。日期：2026-10-26。Varin 源码基线：`b3c4773f6`。工作分支：`design/external-harness-integration`。
+状态：核心会话接入、首批后端、外部预设与派发协作已接入。日期：2026-10-26。设计基线：`b3c4773f6`。工作分支：`design/external-harness-integration`。
+
+当前实现与支持边界见[外部 Agent](../external-agents.md)。按用户本轮决定，D/E 的 CLI、Skills、MCP 能力共享暂缓；F 的恢复增强、外部已有历史导入和未声明的 ACP 文件/终端回调留待后续。下文保留完整目标，不能作为这些后续能力已经可用的说明。
 
 本文整理已讨论的产品方向、架构边界、界面交互和实现顺序。接口名称及示例是目标语义，正式实现时以公共 API、私有 schema 和实际后端协议为准。
 现行机制仍见[架构](../architecture.md)、[运行时](../runtime.md)、[Agent 协作](../collaboration.md)、[资源](../resources.md)与[工作台](../workbench.md)。

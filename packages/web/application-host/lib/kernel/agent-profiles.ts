@@ -138,6 +138,7 @@ export function createAgentProfilesAPI(owners: {
       if (builtin?.automation && input.tools !== undefined) {
         invalid('Context organization uses its runtime-owned read tools and conversation source.');
       }
+      if (builtin?.automation && config.kind === 'builtin' && config.binding.agent?.external) invalid('Context organization uses the native context runtime.');
       if (config.kind === 'custom' && profileId !== undefined && profileId !== `varin:custom:${config.key}`) invalid('The selected agent identity changed. Reload agent settings.');
       signal?.throwIfAborted();
       // The callback sees the current document protected by the original revision CAS.

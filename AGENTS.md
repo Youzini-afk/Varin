@@ -15,7 +15,9 @@ documents. Git preserves their history.
 - Varin is an independent workspace and harness. All changes happen in this repository; other
   projects' checkouts beside it are read-only references.
 - The Rust Agent runtime is the conversation execution owner, using native Thread/branch identities
-  and Catalog. Pi runtime packages, worker transport and product adapters are retired. Do not reintroduce
+  and Catalog for Varin execution. External harnesses own their native loops; their product bindings,
+  admissions and observations remain in the same Rust Catalog, without synthetic native Runs.
+  Embedded Pi runtime packages and the former worker transport are retired. Do not reintroduce
   a parallel conversation owner or automatically migrate user assets.
 - Preserve existing provider/auth, remote/pairing/relay, allowed-directory, external-access audit,
   session/history/queue and platform capabilities when changing their owner. Preserve LICENSE and

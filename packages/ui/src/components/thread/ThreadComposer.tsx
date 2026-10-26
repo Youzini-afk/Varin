@@ -29,7 +29,7 @@ import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
   modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange, suggestion, suggestionError, onSuggestionDismiss,
-  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
+  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
   suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
@@ -45,6 +45,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   permissionWorkspacePath?: string;
   children?: React.ReactNode; attachmentNames: string[]; skills: string[];
   agentControls?: React.ReactNode;
+  backendControls?: React.ReactNode;
 }) {
   const { t } = useI18n();
   const reducedMotion = usePrefersReducedMotion();
@@ -120,6 +121,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const languageContext = React.useMemo(() => ({ inputMode: 'normal' as const, knownAgentNames, confirmedMentions,
     knownSlashNames: new Set([...skills.map(name => `skill:${name}`), ...varinCommands.map(command => command.name)]), attachmentFilenames: attachmentNames }), [knownAgentNames, confirmedMentions, skills, varinCommands, attachmentNames]);
   const modelControls = <div className="conversation-composer-configuration flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5">
+        {backendControls ?? <>
         {(selected?.thinkingLevels?.length ?? 0) > 1 && <DropdownMenu><DropdownMenuTrigger asChild>
           <button type="button" disabled={modelDisabled} className="flex items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover" aria-label={t('chat.modelControls.thinking')}>
             <Icon name="brain" className="size-3.5" /><SwapText text={t(`settings.agents.thinking.${thinkingLevel}`)} hold={0} resize />
@@ -136,6 +138,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             onModelChange(provider, model, levels.includes(thinkingLevel) ? thinkingLevel : levels[0] ?? 'off');
           }} />
         {agentControls}
+        </>}
   </div>;
   const updateAutocomplete = React.useCallback((
     value: string,
@@ -143,6 +146,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     inputSource: FileMentionAutocompleteInputSource = 'manual',
     insertedText?: string,
   ) => {
+    if (backendControls !== undefined) { setAutocomplete(null); return; }
     const trigger = resolveAutocompleteTrigger(value, cursorPosition, {
       inputMode: 'normal',
       inputSource,
@@ -153,7 +157,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
       return;
     }
     setAutocomplete(null);
-  }, []);
+  }, [backendControls]);
 
   const handleCommandSelect = React.useCallback((command: CommandInfo) => {
     const value = `/${command.name} `;
@@ -374,7 +378,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
 
           <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
             <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground">
-              <p className="text-muted-foreground/65">{t('chat.composer.hint')}</p>
+              <p className="text-muted-foreground/65">{backendControls === undefined ? t('chat.composer.hint') : t('external.inputHint')}</p>
               <p aria-live="polite">
               {availableSuggestion && !autocomplete ? <button type="button" className="text-muted-foreground/65 transition-colors hover:text-muted-foreground"
                 title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
@@ -448,8 +452,8 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />
-              {goalEnabled && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
+              {backendControls === undefined && <ThreadPermissionControl workspacePath={permissionWorkspacePath} className={footerIconButtonClass} />}
+              {backendControls === undefined && goalEnabled && <button type="button" className={cn(footerIconButtonClass, goalArmed && 'text-primary bg-primary/10')} onClick={onGoal} aria-pressed={Boolean(goalArmed)} aria-label={t('chat.draftPresets.craftGoal.label')}><Icon name="target" className="size-4" /></button>}
               <button type="button" onClick={onWorkspace} className="flex min-w-0 items-center gap-1 rounded-md px-1 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover" title={workspaceLabel}><Icon name="folder" className="size-3.5" /><span className="max-w-28 truncate">{workspaceLabel}</span></button>
               <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.leading" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
             </div>

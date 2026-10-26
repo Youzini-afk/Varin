@@ -407,6 +407,7 @@ impl Fixture {
             identity: "fixture-catalog".into(),
             normal_unavailable: None,
             presets: if internal { vec![varin_runtime::catalog::dispatch::ChildPreset {
+                external: None,
                 description: None,
                 id:"code_retrieval".into(),name:"Quick retrieval".into(),avatar:None,
                 tools_source:varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,

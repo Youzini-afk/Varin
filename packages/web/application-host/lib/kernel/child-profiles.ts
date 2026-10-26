@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { HarnessSettingsValidationError, agentPresetTools, resolveAgentTools, mergeHarnessSettings, observePresets, observeQuickRetrieval, requiresRetrievalModelSelection, type HarnessSettingsInput, type WorkFocusId } from '@varin/protocol';
 import type { ExistingHostCredentialOwner } from './credential-owner.js';
 import type { ThreadModelAuthority } from './thread-adapter.js';
-import type { ThreadThinkingLevel } from '@varin/application-client';
+import type { ThreadThinkingLevel, ExternalAgentSettings } from '@varin/application-client';
 import type { ChildCapabilityDescriptor, ChildCapabilityFailure, ChildDispatchCatalog, ChildModelBinding, ChildPreset } from './protocol.generated.js';
 import { waitWithSignal } from '../cancellation.js';
 import { waitForModelBinding } from './model-binding-lifetime.js';
@@ -32,6 +32,7 @@ export function createChildProfilePreparer(owners: {
   projectWorkFocus?(projectId: string): Promise<WorkFocusId | undefined>;
   capabilities(signal?: AbortSignal): Promise<ChildCapabilityDescriptor[]>;
   models: ThreadModelAuthority;
+  externalAgents?(): Promise<ExternalAgentSettings>;
 }): ChildProfilePreparer {
   return async (input, signal) => {
     signal?.throwIfAborted();
@@ -57,6 +58,7 @@ export function createChildProfilePreparer(owners: {
     const defaults = agentPresetTools(descriptors);
     const observations = [...observePresets(settings.models, main, settings.agents, focus, 'agent', defaults),
       observeQuickRetrieval(settings.models, main, defaults.retrieval)];
+    const externalSettings = owners.externalAgents ? await waitWithSignal(owners.externalAgents(), signal) : undefined;
     const presets = await Promise.all(observations.map(async (entry): Promise<ChildPreset> => {
       const definition = entry.definition;
       const toolsSource = definition.slot
@@ -68,6 +70,13 @@ export function createChildProfilePreparer(owners: {
         model_source: entry.modelSource, model: null, inherit_base: null, unavailable: null };
       if (entry.id === 'code_retrieval' && legacyQuickBinding) { profile.unavailable = unavailable('retrieval-model-selection-required'); return profile; }
       if (entry.availability !== 'available') { profile.unavailable = unavailable(`child-profile-${entry.availability}`); return profile; }
+      if (definition.external) {
+        const agent = externalSettings?.agents.find(agent => agent.id === definition.external!.configurationId);
+        profile.tools = []; profile.model_source = 'inherit';
+        if (!agent?.enabled) profile.unavailable = unavailable(agent ? 'external-agent-disabled' : 'external-agent-unavailable');
+        if (agent) profile.external = { configuration_id: agent.id, harness: agent.harness, launch: { command: agent.command, args: [...agent.args] }, ...(definition.external.model ? { model: definition.external.model } : {}) };
+        return profile;
+      }
       // Host service capabilities are resolved only against the actual frozen Run directory.
       const overrides = definition.modelSettings;
       if (entry.modelSource === 'inherit' && (overrides?.temperature === undefined && overrides?.thinkingLevel === undefined)) return profile;

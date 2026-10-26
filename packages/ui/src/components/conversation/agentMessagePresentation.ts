@@ -22,6 +22,12 @@ export function receivedAgentMessage(input: {
   const { entryId, nativeId, text, senderThreadId, targetThreadId } = input;
   const base: ReceivedAgentMessage = { kind: 'message', text, senderThreadId, targetThreadId };
   if (!nativeId || !senderThreadId) return base;
+  if (nativeId === entryId && entryId.startsWith('external-child-report:')) {
+    try {
+      const payload = record(JSON.parse(text.slice(text.indexOf('\n') + 1))), report = record(payload.report), page = record(payload.page);
+      if (report.conversationId === senderThreadId) return { ...base, kind: 'report', text: [typeof page.text === 'string' ? page.text : '', typeof report.detail === 'string' ? report.detail : ''].filter(Boolean).join('\n\n'), outcome: typeof report.status === 'string' ? report.status : undefined };
+    } catch { /* An unrecognized body remains visible verbatim. */ }
+  }
   if (nativeId.startsWith('message:')) {
     const envelope = /^Task message ([^\n]+)\nSender: ([^\n]+) \/ ([^\n]+)\nTarget: ([^\n]+) \/ ([^\n]+)\nActor: ([^\n]+)\nKind: (?:request|inform)\nReply to: [^\n]+\n\n([\s\S]*)$/.exec(text);
     if (envelope?.[1] === nativeId && envelope[2] === senderThreadId && envelope[4] === targetThreadId)

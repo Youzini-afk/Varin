@@ -54,8 +54,11 @@ pub(crate) fn reconcile(
     let (operation, original_receipt) = read.load_with_external_receipt().map_err(error)?;
     let invocation: ToolInvocation = serde_json::from_value(operation.intent.clone())?;
     let exchange=matches!(invocation.call.name.as_str(),"submit_code"|"update");
-    if (!exchange && (invocation.call.name != "integrate_child" || invocation.call.schema_version != "2"))
-        || (exchange && invocation.call.schema_version!="1")
+    // Host tool versions are fingerprints of the frozen declaration, not the
+    // service's numeric version. Compare the original admitted contract.
+    if (!exchange && invocation.call.name != "integrate_child")
+        || invocation.contract.name != invocation.call.name
+        || invocation.contract.schema_version != invocation.call.schema_version
         || invocation.origin.operation_id(&invocation.call.call_id) != operation.id
     {
         return Err(KernelError::Authorization(
@@ -71,6 +74,32 @@ pub(crate) fn reconcile(
     let mut expected=if exchange {
         let saved=&data["operationBinding"];
         let db=owner.lock().map_err(error)?;
+        if saved["kind"]=="external_code_exchange" {
+            let child=db.external_message_target(&run.id,saved["externalOperationId"].as_str().ok_or_else(||error("external exchange source missing"))?).map_err(error)?
+                .ok_or_else(||error("external exchange belongs to an unavailable Agent"))?;
+            let original=child.handoff.as_ref().ok_or_else(||error("external exchange has no retained source"))?;
+            let physical=child.source.as_ref().ok_or_else(||error("external file source is unprepared"))?;
+            let receiving=invocation.call.name=="update";
+            let peer=invocation.call.arguments[if receiving{"source"}else{"target"}].as_str();
+            let target:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(saved["target"].clone())?;
+            let valid_target=if receiving{target==source}else{
+                let mut original_target:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(physical["baseline"]["source"].clone())?;
+                original_target.mode=varin_runtime::SourceMode::Materialized;
+                original_target.environment_run_id=Some(child.conversation_id.clone());
+                target==original_target && target.mode==varin_runtime::SourceMode::Materialized
+            };
+            if saved["operationId"]!=operation.id || saved["parentRunId"]!=run.id || saved["parentThreadId"]!=run.thread_id || saved["parentBranchId"]!=run.branch_id
+                || saved["callId"]!=invocation.call.call_id || saved["origin"]!=serde_json::to_value(&invocation.origin)?
+                || saved["direction"]!=if receiving{"receive"}else{"send"} || !valid_target
+                || saved["childThreadId"]!=if receiving{child.conversation_id.as_str()}else{run.thread_id.as_str()}
+                || saved["targetThreadId"]!=if receiving{run.thread_id.as_str()}else{child.conversation_id.as_str()}
+                || saved["result"]["workspaceId"]!=source.workspace_id
+                || !peer.is_some_and(|id|id==child.conversation_id||id==child.operation_id)
+                || original.source.workspace_id!=source.workspace_id || original.source.resource_owner!=source.resource_owner {
+                return Err(KernelError::Authorization("external exchange journal differs from its original invocation or source".into()));
+            }
+            saved.clone()
+        } else {
         let source_run=db.run(saved["sourceRunId"].as_str().ok_or_else(||error("exchange source Run missing"))?).map_err(error)?;
         let target_run=db.run(saved["targetRunId"].as_str().ok_or_else(||error("exchange target Run missing"))?).map_err(error)?;
         for related in [&source_run,&target_run] {
@@ -88,6 +117,7 @@ pub(crate) fn reconcile(
             return Err(KernelError::Authorization("exchange journal differs from its original invocation or family".into()));
         }
         saved.clone()
+        }
     } else {
     let child_id = invocation.call.arguments["childOperationId"]
         .as_str()
@@ -298,7 +328,7 @@ pub(crate) fn reconcile(
         None
     };
     let execution_owner = operation.execution_owner.as_ref().unwrap();
-    if exchange && terminal {
+    if exchange && terminal && expected["kind"]!="external_code_exchange" {
         use varin_runtime::catalog::messages::MessageInput;
         let preparation = {
             let catalog = owner.lock().map_err(error)?;

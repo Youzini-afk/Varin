@@ -353,6 +353,7 @@ impl Catalog {
             {
                 continue;
             }
+            if self.external_child(&wait.subject)?.is_some() { continue; }
             let child = self.require_child_parent(&run.id, &wait.subject)?;
             if !wait.cancelled && (child.report.is_none() || !child.code_result.settled()) {
                 continue;
@@ -558,6 +559,7 @@ pub fn deliver_waits(catalog: &std::sync::Mutex<Catalog>) -> Result<Vec<String>>
             .map_err(|_| RuntimeError::Invalid("catalog owner failed".into()))
     };
     let mut failure = reconcile_reports(catalog).err();
+    if let Err(error) = super::external_children::deliver_waits(catalog) { failure.get_or_insert(error); }
     let progress = (|| {
         let preparations = lock()?.capture_child_waits()?;
         for preparation in preparations {

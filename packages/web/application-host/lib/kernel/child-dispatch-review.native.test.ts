@@ -45,6 +45,16 @@ import { createSourceQueryOwner } from './source-query.js';
 import { createLanguageOwner } from './language-owner.js';
 import { createStructureSource } from '../structure/source.js';
 import { createTreeSitterStructureProvider } from '../structure/tree-sitter-provider.js';
+import { ExternalAgentsService } from '../external-agents/service.js';
+import { createExternalSourceOwner } from '../external-agents/source.js';
+import { createKernelProcessService } from './process-service.js';
+import { createExtensionTools, extensionToolSchema } from './extension-tool-owner.js';
+import { CODE_EXCHANGE_TOOL_DECLARATIONS } from '@varin/extension-builtins';
+import { createCodeExchangeOwner, CODE_EXCHANGE_CAPABILITY } from './code-exchange.js';
+import { IntegrationCoordinator } from '../harness/working-state/integration-coordinator.js';
+import { createWorkspaceRecoveryEngine } from '../recovery/journal-engine.js';
+import { KernelFileResourceBackend } from './file-resource-backend.js';
+import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from './kernel-recovery-store.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const { build } = createRequire(path.join(repository, 'packages/extension-builtins/package.json'))('esbuild');
@@ -86,6 +96,8 @@ function complete(response: ServerResponse, output: unknown[]) {
 }
 function tool(name: string, args: unknown, id: string) {
   const versions: Record<string, string> = { dispatch: '4', wait_child: '1', child_status: '2', child_cancel: '1', child_report: '3', threads: '1', read_thread: '2', send: '4', memory: '1' };
+  const exchange = CODE_EXCHANGE_TOOL_DECLARATIONS.find(d => d.tool?.name === name);
+  if (exchange) versions[name] = extensionToolSchema(exchange).version;
   if (versions[name]) { args = { reference: { name, version: versions[name] }, arguments: args }; name = 'tool_invoke'; }
   return { id: `item-${id}`, type: 'function_call', call_id: id, name, arguments: JSON.stringify(args) };
 }
@@ -139,7 +151,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
   // A separately selected child model is a distinct execution binding on the same account.
   const retrievalConfiguration = { ...configuration, model: retrievalModel.modelId, configurationGeneration: 2 };
   let projectId = 'child-review-project'; let trusted = true;
-  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean; structure?:boolean; freshModelOwners?: boolean } = {}) {
+  async function openHost(options: { context?: (original: ContextPreparer) => ContextPreparer; collaboration?: boolean; sourceGrantScopes?: string[]; policyExample?: boolean; plans?: boolean; structure?:boolean; freshModelOwners?: boolean; external?: boolean } = {}) {
     let kernelProcess: ChildProcess | undefined;
     const kernel = createKernelClient({ hostId: 'child-review-host', storageRoot: root, buildVersion,
       kernelPath, allowCargoDevRunner: false, spawnProcess: ((command, args, options) => { kernelProcess = spawn(command, args ?? [], options ?? {}); return kernelProcess; }) as typeof spawn });
@@ -155,7 +167,20 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       isAllowedRoot: async () => true, isTrusted: async () => trusted });
     const storage = new KernelStorageAdapter({ client: kernel, hostId: 'child-review-host', storageRoot: root,
       resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
-    const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
+    let workingStates = createKernelWorkspaceWorkingStateAccess(storage);
+    let recovery: ReturnType<typeof createKernelRecoveryDirectFacade> | undefined;
+    let metadata: KernelRecoveryStore | undefined;
+    if (options.external) {
+      const backend = new KernelFileResourceBackend(storage, { authorityPurpose: 'recovery-maintenance', authorityCapabilities: ['recovery.maintenance'], resolveExecutionRoot: async directory => {
+        const { workspaceId } = await documents.resolveWorkspace({ path: directory }); return { workspaceId, canonicalRoot: (await documents.inspectWorkspace(workspaceId)).root };
+      } });
+      storage.bindFileResources(backend); const content = new KernelRecoveryContentStore(storage, backend); storage.bindFileStore(content);
+      metadata = new KernelRecoveryStore(storage, content);
+      recovery = createKernelRecoveryDirectFacade(createWorkspaceRecoveryEngine({ authorityId: 'child-review-host', dataDir: root, documents, durableRecoveryStore: metadata, fileStore: content,
+        sessionNavigation: { prepare: async () => ({ expectedLeafId: null, targetLeafId: null, removedEntryIds: [] }), prepareLeaf: async () => ({ expectedLeafId: null, targetLeafId: null }), commit: async () => ({}), commitLeaf: async () => ({}) },
+      }), metadata);
+      workingStates = createKernelWorkspaceWorkingStateAccess(storage, recovery, metadata);
+    }
     const liveSources = createLiveSourceOwner({ documents, kernel });
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
@@ -190,12 +215,12 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     // The product model authority returns a separately releasable owner for every resolution.
     const resolvedOwner = (selected: typeof configuration = configuration) => options.freshModelOwners || selected !== configuration
       ? createCredentialOwner(selected) : credentialOwner;
-    const extensions = options.policyExample ? await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
+    const extensions = options.policyExample || options.external ? await ApplicationExtensionRuntime.create({ dataDir: path.join(root, 'extensions'), varinVersion: buildVersion,
       brokerScript: path.join(repository, 'packages/extension-host/broker/broker-child.mjs') }) : undefined;
     if (extensions) {
       await extensions.start();
       cleanup.push(() => extensions.stop());
-      if (!(await extensions.state()).catalog.extensions.some(entry => entry.manifest.id === 'example.collaboration-policy')) {
+      if (options.policyExample && !(await extensions.state()).catalog.extensions.some(entry => entry.manifest.id === 'example.collaboration-policy')) {
         const folder = path.join(root, 'collaboration-policy'); await fs.mkdir(folder);
         for (const file of ['package.json', 'varin.extension.json']) await fs.copyFile(path.join(repository, 'examples/extensions/collaboration-policy', file), path.join(folder, file));
         await build({ entryPoints: [path.join(repository, 'examples/extensions/collaboration-policy/host.ts')], bundle: true, platform: 'node', format: 'cjs',
@@ -203,7 +228,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
         await extensions.installOrStage({ expectedRevision: (await extensions.state()).catalog.revision,
           source: { kind: 'local', display: 'Collaboration policy example', specifier: folder } });
       }
-      await extensions.setEnabled('example.collaboration-policy', true, (await extensions.state()).catalog.revision);
+      if (options.policyExample) await extensions.setEnabled('example.collaboration-policy', true, (await extensions.state()).catalog.revision);
     }
     const selectParentPolicy = async (threadId: string) => {
       if (!extensions) throw new Error('Policy example is not installed');
@@ -218,7 +243,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
         policyDecisions.push(structuredClone(input));
         return lease.decide(input, signal);
       } };
-    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, liveSources.validate, undefined, (id, signal) => documents.admitWorkspaceRegistration(id, signal));
+    }, observe: ({threadId}, changed, signal) => createAgentPolicy(extensions).observe({threadId,projectId}, changed, signal) } : undefined, undefined, liveSources.validate,
+    options.external && extensions ? createExtensionTools({ runtime: extensions, kernel, currentPolicy: async () => ({ mode: 'normal', rules: CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => ({tool:d.tool!.name,decision:'allow' as const})) }) }) : undefined,
+    (id, signal) => documents.admitWorkspaceRegistration(id, signal));
     const knowledge = options.plans ? await openUserKnowledgeStore({ dataDir: root, hostId: 'child-review-host', embedding: null }) : undefined;
     const compute=options.structure?createKernelComputeService({client:kernel,resolveIdentity:async cwd=>{const selected=await documents.resolveWorkspace({path:cwd});return {workspaceId:selected.workspaceId,executionWorkspaceId:selected.workspaceId,canonicalRoot:(await documents.inspectWorkspace(selected.workspaceId)).root};}}):undefined;
     const sources=compute?createSourceQueryOwner({kernel,documents,validateLiveSource:liveSources.validate}):undefined;
@@ -229,6 +256,8 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const plans = knowledge ? new PlanService(runtime, async () => knowledge) : undefined;
     if (knowledge) kernel.setPlanOwner(createPlanOwner(async () => knowledge, runtime));
     const errors: unknown[] = [];
+    if (options.external && extensions && recovery && metadata) extensions.capabilities.register(CODE_EXCHANGE_CAPABILITY, createCodeExchangeOwner({ kernel, runtime, storage,
+      recovery, metadataReader: metadata, documents, resolveLiveSource: liveSources.validate, coordinator: new IntegrationCoordinator({ workingStates }), onCleanupError: (_id, error) => errors.push(error) }));
     const models = { resolveModel: async (selection: typeof model) => {
       if (selection.providerId !== model.providerId || ![model.modelId, retrievalModel.modelId].includes(selection.modelId)) throw new Error('Unknown fixture model');
       const selected = selection.modelId === retrievalModel.modelId ? retrievalConfiguration : configuration;
@@ -238,9 +267,28 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       return resolvedOwner(selected.model === retrievalConfiguration.model ? retrievalConfiguration : configuration);
     } };
     const settings = new AgentSettingsService(agentDir, () => false);
+    const externalProcesses = options.external ? createKernelProcessService({ client: kernel, resolveIdentity: async cwd => {
+      const { workspaceId } = await documents.resolveWorkspace({ path: cwd }); return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot: cwd };
+    } }) : undefined;
+    const external = externalProcesses ? new ExternalAgentsService({ kernel, spawn: externalProcesses.spawn, spawnAdmitted: externalProcesses.spawnAdmitted, directory: path.join(root, 'external'),
+      onError: (_operationId, error) => errors.push(error),
+      resolveWorkspace: async cwd => { const { workspaceId } = await documents.resolveWorkspace({ path: cwd }); return { workspaceId, root: cwd }; } }) : undefined;
+    if (external) {
+      const executable = path.join(root, 'external-fixture.mjs');
+      await fs.writeFile(executable, `import {createInterface} from 'node:readline';import {writeFileSync} from 'node:fs';
+const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
+createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);const reply=result=>send({jsonrpc:'2.0',id:m.id,result});
+if(m.method==='initialize')reply({});if(m.method==='thread/start'||m.method==='thread/resume')reply({thread:{id:'external-native-session'}});
+if(m.method==='model/list')reply({data:[]});if(m.method==='turn/start'){reply({turn:{id:'external-native-turn'}});writeFileSync('external-result.txt','External harness wrote this');
+send({method:'item/completed',params:{threadId:'external-native-session',item:{id:'external-answer',type:'agentMessage',text:'EXTERNAL_HARNESS_RESULT'}}});
+send({method:'turn/completed',params:{threadId:'external-native-session',turn:{id:'external-native-turn',status:'completed'}}});}});`);
+      const configuration = await external.settings();
+      await external.configure({ defaultAgent: null, agents: [{ id: 'fixture', name: 'External fixture', harness: 'codex', enabled: true, command: process.execPath, args: [executable] }] }, configuration.revision, 'external-fixture');
+      external.startChildren(createExternalSourceOwner({ kernel, storage, capture: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => ({ kind: 'directory' }) } }));
+    }
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
     const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
-      createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models }));
+      createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models, ...(external ? { externalAgents: () => external.settings() } : {}) }));
     const prepareSource = adapter.prepareSource.bind(adapter);
     adapter.prepareSource = async (...args) => {
       try { return await prepareSource(...args); }
@@ -263,8 +311,9 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     let closed = false; let crashed = false;
     const close = async () => {
       if (closed) return; closed = true;
-      collaboration?.stop(); await host.close(); await extensions?.stop(); await knowledge?.close();
+      collaboration?.stop(); await external?.close(); await externalProcesses?.dispose(); await host.close(); await extensions?.stop(); await knowledge?.close();
       await sources?.dispose();await compute?.dispose();
+      await recovery?.dispose();
       try { await storage.dispose(); } catch (error) { if (!crashed || !String(error).includes('Kernel client is closed')) throw error; }
       finally { await documents.dispose(); await kernel.close(); }
     };
@@ -277,7 +326,7 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       if (!kernelProcess.kill('SIGKILL')) throw new Error('Could not kill this fixture kernel');
       await exited; await kernel.close();
     };
-    return { kernel, grants, crash, runtime, adapter, collaboration, models, credentials, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
+    return { kernel, grants, crash, runtime, adapter, collaboration, external, models, credentials, prepareContext, workingStates, personalization, documents, memoryQueries, memoryControl, policyDecisions,
       errors, close, selectParentPolicy, api: createThreadsHttpAPI(), profiles: createAgentProfilesHttpAPI(), hostUrl: host.url };
   }
   return { root, workspace, requests, openHost, setProject(value: string) { projectId = value; }, setTrusted(value: boolean) { trusted = value; } };
@@ -310,6 +359,68 @@ const job = (body: Record<string, unknown>) => {
   expect(typeof receipt?.operation_id).toBe('string');
   return String(receipt!.operation_id);
 };
+
+it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses its real %s source, returns its report and resumes the parent without a synthetic child Run', async workMode => {
+  let operationId = ''; let step = 0; let preset = '';
+  const f = await fixture(({ body, response }) => {
+    assertPairing(body);
+    if (++step === 1) complete(response, [tool('dispatch', { preset, task: 'Write a result and report', workMode }, 'external-dispatch')]);
+    else if (step === 2) { operationId = job(body); complete(response, [tool('wait_child', { operationId }, 'external-wait')]); }
+    else if (step === 3) { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [tool('send', { targetThreadId: `external:child:${operationId}`, kind: 'inform', text: 'PASSIVE_EXTERNAL_NOTE' }, 'external-inform')]); }
+    else if (step === 4) { expect(JSON.stringify(result(body, 'send'))).toContain('next_input'); complete(response, [tool('send', { targetThreadId: `external:child:${operationId}`, kind: 'request', text: 'CONTINUE_EXTERNAL_TASK', wait: {} }, 'external-request')]); }
+    else if (step === 5) complete(response, [tool('update', { source: `external:child:${operationId}`, files: ['external-result.txt'] }, 'external-update')]);
+    else if (step === 6) {
+      expect(JSON.stringify(result(body, 'update'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied');
+      fs.writeFile(path.join(f.workspace, 'parent-result.txt'), 'Parent result for external peer').then(() => complete(response, [tool('submit_code', { target: `external:child:${operationId}`, files: ['parent-result.txt'] }, 'external-submit')]), error => { throw error; });
+    }
+    else if (step === 7) { expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
+    else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
+  });
+  const h = await f.openHost({ external: true });
+  const profiles = await h.profiles.read({ runtime: 'agent' });
+  const saved = await h.profiles.save({ runtime: 'agent', expectedRevision: profiles.revision, config: { kind: 'custom', key: '', agent: {
+    name: 'External fixture', description: 'External worker', instructions: '', enabled: true, workFocus: [], external: { configurationId: 'fixture' },
+  } }, tools: [] });
+  const profile = saved.snapshot.profiles.find(profile => profile.id === saved.profileId)!;
+  if (profile.config.kind !== 'custom') throw new Error('Expected an external custom preset');
+  preset = `custom:${profile.config.key}`;
+  const identity = await h.api.create(`external-${workMode}`);
+  const workspaceId = (await h.documents.resolveWorkspace({ path: f.workspace })).workspaceId;
+  const prepared = await h.api.prepareSource({ ...identity, key: 'external-source', resourceOwner: { kind: 'local' }, workspaceId, content: { mode: 'saved-files' }, captureScopes: [], mode: 'live_root' });
+  const parent = await h.api.submit({ ...identity, key: 'external-parent', expectedHead: null, text: 'Delegate this task to the external fixture and wait', model, source: prepared.source });
+  await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 30_000 }).toBe('completed').catch(async error => { console.error('External dispatch state', await h.external!.children(), h.errors); throw error; });
+  const child = (await h.external!.children()).find(child => child.operation_id === operationId)!;
+  expect(child.state).toBe('completed'); expect(child.resources_released).toBe(true);
+  expect(await h.runtime.childExecutions()).toHaveLength(0);
+  const view = await h.external!.read(child.conversation_id);
+  expect(view.turns).toHaveLength(2);
+  const followup = (await h.external!.children()).find(value => value.message_kind === 'request')!;
+  expect(followup.report).toBeTruthy(); expect(followup.turn_id).not.toBe(child.turn_id);
+  const conversation = view.conversation;
+  expect(conversation.sessionId).toBe('external-native-session');
+  expect(await fs.readFile(path.join(conversation.cwd, 'external-result.txt'), 'utf8')).toBe('External harness wrote this');
+  if (workMode === 'shared') expect(conversation.cwd).toBe(f.workspace);
+  else { expect(conversation.cwd).not.toBe(f.workspace); expect(await fs.readFile(path.join(f.workspace, 'external-result.txt'), 'utf8')).toBe('External harness wrote this'); }
+  expect(await fs.readFile(path.join(conversation.cwd, 'parent-result.txt'), 'utf8')).toBe('Parent result for external peer');
+  if (workMode === 'isolated_write') {
+    const db = new DatabaseSync(path.join(f.root, 'agent-runtime', 'conversation.sqlite'), { readOnly: true });
+    try {
+      const operations = db.prepare("SELECT body FROM operations WHERE json_extract(body,'$.executor') IN ('update','submit_code')").all() as Array<{ body: string }>;
+      expect(operations).toHaveLength(2);
+      for (const row of operations) {
+        const op = JSON.parse(row.body) as import('./protocol.generated.js').Operation;
+        expect(op.outcome).toBe('succeeded');
+        await h.runtime.reconcileHostTool({ operationId: op.id, executionOwner: op.execution_owner! });
+        expect((await h.runtime.operation(op.id)).outcome).toBe('succeeded');
+      }
+    } finally { db.close(); }
+  }
+  expect(h.errors).toEqual([]);
+  await h.external!.update(conversation.id, conversation.revision, { deleted: true });
+  expect((await h.external!.list()).some(c => c.id === conversation.id)).toBe(false);
+  if (workMode === 'isolated_write') await expect(fs.access(conversation.cwd)).rejects.toThrow();
+  else expect(await fs.readFile(path.join(f.workspace, 'external-result.txt'), 'utf8')).toBe('External harness wrote this');
+});
 function blockChild(original: ContextPreparer, entered: ReturnType<typeof gate>, release: ReturnType<typeof gate>): ContextPreparer {
   const prepare: ContextPreparer = Object.assign(async (...args: Parameters<ContextPreparer>) => {
     if (args[2].threadRole === 'worker') { entered.release(); await release.promise; }

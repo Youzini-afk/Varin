@@ -119,6 +119,9 @@ import { createThreadProcesses } from './lib/kernel/thread-processes.js';
 import { createResearchRuntime, createResearchSourceAuthority, RESEARCH_CAPABILITY } from './lib/kernel/research-runtime.js';
 import { ThreadAdapter } from './lib/kernel/thread-adapter.js';
 import { registerThreadRoutes } from './lib/kernel/thread-routes.js';
+import { ExternalAgentsService } from './lib/external-agents/service.js';
+import { createExternalSourceOwner } from './lib/external-agents/source.js';
+import { registerExternalAgentRoutes } from './lib/external-agents/routes.js';
 import { createSettingsToolOwner, SETTINGS_CAPABILITY } from './lib/kernel/settings-tool-owner.js';
 import { createEnvironmentForwardRuntime } from './lib/harness/environment-forwards.js';
 import { createAgentProfilesAPI } from './lib/kernel/agent-profiles.js';
@@ -1065,6 +1068,28 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   }
   extensionRuntime.workbench.setWorkspaceScopeResolver((scopeId: unknown) => documentsAuthority.resolveScopeId(scopeId));
   const kernelProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: createKernelProcessIdentityResolver({ documents: documentsAuthority }), onError: error => console.error('[VarinProcess]', error.message) });
+  const externalAgentDirectory = path.join(VARIN_DATA_DIR, 'external-agents');
+  const externalAgentIdentity = createKernelProcessIdentityResolver({ documents: documentsAuthority });
+  const externalAgentProcesses = createKernelProcessService({ client: kernelClient, resolveIdentity: async cwd => {
+    const canonicalRoot = await canonicalizePathIdentity(externalAgentDirectory);
+    const canonicalCwd = await canonicalizePathIdentity(cwd);
+    if (isPathWithinRoot(canonicalCwd, canonicalRoot)) {
+      const workspaceId = `external-agents:${extensionRuntime.services.hostId}`;
+      return { workspaceId, executionWorkspaceId: workspaceId, canonicalRoot };
+    }
+    return externalAgentIdentity(cwd);
+  } });
+  const externalAgents = new ExternalAgentsService({ kernel: kernelClient, spawn: externalAgentProcesses.spawn, spawnAdmitted: externalAgentProcesses.spawnAdmitted, directory: externalAgentDirectory,
+    onError: operationId => console.error('[ExternalAgents] Execution or resource cleanup needs reconciliation:', operationId),
+    resolveWorkspace: async cwd => {
+      const canonicalRoot = await canonicalizePathIdentity(externalAgentDirectory);
+      const canonicalCwd = await canonicalizePathIdentity(cwd);
+      if (isPathWithinRoot(canonicalCwd, canonicalRoot)) return { workspaceId: `external-agents:${extensionRuntime.services.hostId}`, root: canonicalCwd };
+      const identity = await externalAgentIdentity(cwd);
+      return { workspaceId: identity.workspaceId, root: identity.canonicalRoot };
+    },
+  });
+  registerExternalAgentRoutes(app, externalAgents, uiAuthController.requireAuth);
   // Installation programs are Host-owned tooling. They receive only this
   // private resource root; editor/agent LSP processes still use their workspace.
   const languageToolProcesses = createKernelProcessService({
@@ -2058,6 +2083,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       terminal: () => terminalRuntime, resolveLiveSource: liveSources.validate,
       onError: () => console.error('[Thread] Original process terminal requires attention'),
     }), createChildProfilePreparer({ models: modelAuthority,
+      externalAgents: () => externalAgents.settings(),
       settings: () => modelsService.readGlobalInferenceSettings(),
       projectWorkFocus: async projectId => {
         const focus = (sanitizeProjects((await readSettingsFromDisk()).projects) ?? []).find(project => project.id === projectId)?.defaultWorkFocus;
@@ -2077,6 +2103,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindContextPolicy(run => contextService.presentation(run));
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindContentMaintenance(contentMaintenance.request);
+  externalAgents.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
     documents: documentsAuthority, validateLiveSource: liveSources.validate }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
@@ -2210,6 +2237,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     onError: (operationId, _error) => console.error('[Collaboration] Preparation or delivery requires attention:', operationId ?? 'discovery'),
   });
   collaborationOwner.current = collaboration;
+  externalAgents.startChildren(createExternalSourceOwner({ kernel: kernelClient, storage: kernelStorageAdapter,
+    capture: { documents: documentsAuthority, prepareResources: threadResources.prepareSourceCapture, inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal) } }));
   void collaboration.recover();
   const refreshThreadPersonalization = () => threads.refreshPersonalization();
   void refreshThreadPersonalization().catch(() => console.error('[Thread] Personalization refresh requires attention'));
@@ -2936,6 +2965,8 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('languageToolProcesses.dispose', () => languageToolProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
       await shutdown.run('documentProcesses.dispose', () => documentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
       await shutdown.run('kernelProcesses.dispose', () => kernelProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
+      await shutdown.run('externalAgents.close', () => externalAgents.close().catch((error: unknown) => { processShutdownErrors.push(error); }));
+      await shutdown.run('externalAgentProcesses.dispose', () => externalAgentProcesses.dispose().catch((error: unknown) => { processShutdownErrors.push(error); }));
       for (const error of processShutdownErrors) console.error('[VarinKernel] Native process shutdown incomplete:', errorMessage(error));
       await shutdown.run('unsubscribeModelSettings', () => unsubscribeModelSettings());
       await shutdown.run('unsubscribeModels', () => unsubscribeModels());

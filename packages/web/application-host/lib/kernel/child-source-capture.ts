@@ -5,26 +5,36 @@ import { captureStableSourceBaseline, type StableSourcePreparationOwners } from 
 import { waitWithSignal } from '../cancellation.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storage-adapter.js';
 import type { KernelClient, KernelGrantHandle } from './kernel-client.js';
-import type { ChildPreparationProgress, ChildSourceProvenance, DelegatedExecution } from './protocol.generated.js';
+import type { ChildPreparationProgress, ChildSourceProvenance, DelegatedExecution, ChildSourceHandoff } from './protocol.generated.js';
 
 export type ChildPhysicalCapture = (input: { child: DelegatedExecution; directory: string; rootId: string;
   captureWorkspaceId: string; signal: AbortSignal; onProgress?: ((value: ChildPreparationProgress) => void) | undefined }) => Promise<ChildSourceProvenance>;
 
 export function createChildPhysicalCapture(kernel: KernelClient, storage: KernelStorageAdapter, owners: StableSourcePreparationOwners): ChildPhysicalCapture {
+  const capture = createPhysicalSourceCapture(kernel, storage, owners);
+  return input => {
+    const source = input.child.source;
+    const handoff = source && source.kind !== 'absent' ? source.handoff : null;
+    if (!handoff) return Promise.reject(new Error('Physical capture requires its admitted source handoff'));
+    const { child, ...rest } = input;
+    return capture({ ...rest, handoff, ownerId: child.child_thread_id, executionId: child.execution_id, selectionIdentity: child.launch });
+  };
+}
+
+/** Coalesces the actual file-source observation independently of the Agent execution backend. */
+export function createPhysicalSourceCapture(kernel: KernelClient, storage: KernelStorageAdapter, owners: StableSourcePreparationOwners) {
   type Job = { controller: AbortController; users: Set<(progress: ChildPreparationProgress) => void>;
     consumers: Set<Promise<unknown>>;
     progress?: ChildPreparationProgress; grant?: KernelGrantHandle; store?: KernelWorkingStateRootStore;
     branchId: string; work: Promise<Awaited<ReturnType<typeof captureStableSourceBaseline>>>; cleanup?: Promise<void> };
   const active = new Map<string, Job>();
-  return async input => {
-    const source = input.child.source;
-    const handoff = source && source.kind !== 'absent' ? source.handoff : null;
-    if (!handoff) throw new Error('Physical capture requires its admitted source handoff');
+  return async (input: Omit<Parameters<ChildPhysicalCapture>[0], 'child'> & { handoff: ChildSourceHandoff; ownerId: string; executionId: string; selectionIdentity: unknown }) => {
+    const handoff = input.handoff;
     const token = await owners.documents.beginCapture(input.captureWorkspaceId, {}, input.signal);
     // beginCapture flushes original Documents observations. Include the exact
     // frozen resource selection; a later write/observer generation cannot join.
     const key = JSON.stringify([handoff.source.resource_owner, input.rootId, input.directory,
-      handoff.source.workspace_id, handoff.source.execution_workspace_id, input.child.launch,
+      handoff.source.workspace_id, handoff.source.execution_workspace_id, input.selectionIdentity,
       token.epoch, token.mutationRevision, token.writerRevision, token.watchRevision, token.watch]);
     if (input.signal.aborted) { owners.documents.discardCapture(token); input.signal.throwIfAborted(); }
     let job = active.get(key);
@@ -34,7 +44,7 @@ export function createChildPhysicalCapture(kernel: KernelClient, storage: Kernel
       const current = job;
       active.set(key, current);
       current.work = (async () => {
-        const grant = await kernel.issueGrant({ grantId: current.branchId, threadId: input.child.child_thread_id,
+        const grant = await kernel.issueGrant({ grantId: current.branchId, threadId: input.ownerId,
           owningWorkspace: handoff.source.workspace_id, executionWorkspace: handoff.source.execution_workspace_id,
           capabilities: ['storage.read', 'storage.write'], pathScopes: [''] }, controller.signal);
         current.grant = grant;
@@ -79,7 +89,7 @@ export function createChildPhysicalCapture(kernel: KernelClient, storage: Kernel
       const consume = (async () => {
         const pin = await current.store!.pinBranch(current.branchId, { revision: 0, signal: input.signal });
         try {
-          await current.store!.createBranchFromPin(handoff.source.workspace_id, `child-source:${input.child.execution_id}`, pin,
+          await current.store!.createBranchFromPin(handoff.source.workspace_id, `child-source:${input.executionId}`, pin,
             pin.root, undefined, [], { sourceProvenance: captured.provenance });
         } finally { await pin.release(); }
       })();

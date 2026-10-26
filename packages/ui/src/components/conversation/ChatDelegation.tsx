@@ -14,12 +14,17 @@ import { ThreadIntegrationPanel } from '../thread/ThreadIntegrationPanel';
 import { canCancelOperation } from '../thread/threadOperations';
 import { invocationOperationId, toolRecord, toolText } from './toolInvocation';
 import type { ToolViewProps } from './toolViewTypes';
+import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { ExternalDelegationMessage } from '../thread/ExternalDelegates';
 
 export function ChatDelegation({ call, execution, result, status, generating, cwd, output, details }: ToolViewProps) {
   const { t } = useI18n();
   const conversation = useOptionalConversationPresentation();
   const args = toolRecord(call.arguments), receipt = toolRecord(result?.details ?? execution?.result);
   const operationId = invocationOperationId(call, execution);
+  useExternalAgents();
+  const externalChildren = useExternalAgentStore(state => state.children);
+  const external = externalChildren.find(child => child.operationId === operationId);
   const original = execution?.child?.execution;
   const [expanded, setExpanded] = React.useState(false);
   const [loaded, setLoaded] = React.useState<{ id: string; execution?: DelegatedExecution }>();
@@ -41,7 +46,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   const [arrives] = React.useState(() => Boolean(generating) || status === 'running'
     || ['queued', 'preparing', 'starting', 'running'].includes(childState ?? ''));
   React.useEffect(() => {
-    if (!expanded || !operationId || !conversation?.api.collaboration || original || result?.notDispatched
+    if (external || !expanded || !operationId || !conversation?.api.collaboration || original || result?.notDispatched
       || generating || result?.status !== 'background' && !execution?.child) return;
     const controller = new AbortController(); setError(undefined);
     void conversation.api.collaboration.executions(conversation.identity, operationId, controller.signal).then(rows => {
@@ -49,7 +54,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
         setLoaded({ id: owner, execution: rows.find(row => row.execution_id === operationId) });
     }, failure => { if (!controller.signal.aborted) setError(String(failure)); });
     return () => controller.abort();
-  }, [expanded, conversation?.api, conversation?.identity, operationId, original, owner, host, retry, result?.notDispatched, result?.status, generating, execution?.child]);
+  }, [expanded, conversation?.api, conversation?.identity, operationId, original, owner, host, retry, result?.notDispatched, result?.status, generating, execution?.child, external]);
   const open = () => {
     if (!conversation || !threadId || !branchId) return;
     useUIStore.getState().openContextPanelTab(cwd, { mode: 'threads', thread: conversation.identity,
@@ -61,6 +66,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
     try { await conversation.api.cancelOperation(operationId); }
     catch (failure) { if (host === getRuntimeEndpointGeneration()) { setStopping(false); setError(String(failure)); } }
   };
+  if (external) return <ExternalDelegationMessage child={external} />;
   return <ToolDisclosure id={'tool:' + call.id} className="tool-delegation group" onExpanded={setExpanded}>
     <summary className="tool-member-line" data-arrive={arrives || undefined}>
       {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar} size={23} />

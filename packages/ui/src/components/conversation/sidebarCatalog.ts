@@ -1,10 +1,13 @@
 import React from 'react';
 import type { ThreadBranch } from '@varin/protocol';
+import { projectContainsPath, type ExternalHarness } from '@varin/application-client';
 import { useThreadStore, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
 
 export interface SidebarConversation {
+  harness?: ExternalHarness;
   avatar?: string;
   id: string;
   name: string;
@@ -25,6 +28,8 @@ export interface ConversationSessionAttentionState { kind: 'complete' | 'error';
 
 /** Catalog-derived display data; pinning, retention and navigation use ThreadsAPI. */
 export function useSidebarCatalog() {
+  useExternalAgents();
+  const external = useExternalAgentStore(state => state.conversations);
   const threads = useThreadStore(state => state.threads);
   const host = useThreadStore(state => state.hostKey);
   const projects = useProjectsStore(state => state.projects);
@@ -45,6 +50,10 @@ export function useSidebarCatalog() {
         ...(thread.parent_thread_id ? { parentId: thread.parent_thread_id } : {}),
         busy, unread: thread.unread, pinned: thread.pinned, projectIds, branchId: thread.main_branch_id, branches: thread.branches };
     });
+    for (const c of external) summaries.push({ id: c.id, harness: c.harness, name: c.title, firstMessage: c.title, cwd: c.cwd,
+      createdAt: new Date(c.createdAt).toISOString(), updatedAt: new Date(c.updatedAt).toISOString(),
+      ...(c.archived ? { archivedAt: new Date(c.updatedAt).toISOString() } : {}), ...(c.parent ? { parentId: c.parent.threadId } : {}),
+      pinned: c.pinned, busy: Boolean(c.activeTurn), unread: false, projectIds: projects.filter(p => projectContainsPath(p, c.cwd)).map(p => p.id), branchId: '', branches: [] });
     return { summaries, activeSessions: summaries.filter(summary => !summary.archivedAt), attentionBySession };
-  }, [threads, host, projects, drafts]);
+  }, [threads, host, projects, drafts, external]);
 }

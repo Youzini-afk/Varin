@@ -30,6 +30,16 @@ export async function prepareChildSourceStore(
 ): Promise<ChildSourcePreparation> {
   if (child.trigger.kind !== 'dispatch') return child.source_basis?.kind === 'refreshed'
     ? prepareRefreshedContinuationSourceStore(child, owners.store, signal) : prepareContinuationSourceStore(child, owners.store, signal);
+  const { capturePhysical, ...shared } = owners;
+  return prepareDispatchSourceStore(child, { ...shared, ...(capturePhysical ? { capturePhysical: args => capturePhysical({ ...args, child }) } : {}) }, signal);
+}
+
+/** Source preparation is also used by independent harnesses; it does not require a native child Run. */
+export async function prepareDispatchSourceStore(
+  child: Pick<DelegatedExecution, 'execution_id' | 'source'> & { selected_profile: Pick<DelegatedExecution['selected_profile'], 'work_mode'> },
+  owners: Omit<ChildSourceStoreOwners, 'capturePhysical'> & { capturePhysical?: (args: Omit<Parameters<ChildPhysicalCapture>[0], 'child'>) => ReturnType<ChildPhysicalCapture> },
+  signal: AbortSignal,
+): Promise<ChildSourcePreparation> {
   const handoff = child.source?.kind === 'pending' || child.source?.kind === 'ready' ? child.source.handoff : null;
   if (!handoff) throw new Error('Dispatch source handoff is unavailable');
   const sourceBranch = `child-source:${child.execution_id}`;
@@ -61,7 +71,7 @@ export async function prepareChildSourceStore(
       }
       store = await owners.physical(physical);
       if (owners.capturePhysical) {
-        provenance = await owners.capturePhysical({ child, directory, rootId: physical.rootId,
+        provenance = await owners.capturePhysical({ directory, rootId: physical.rootId,
           captureWorkspaceId: resolved.workspaceId, signal, onProgress: owners.onProgress });
       } else {
       let phase: ChildPreparationProgress['phase'] = 'inventory';

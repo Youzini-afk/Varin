@@ -18,6 +18,7 @@ import { agentProfileLabels, agentProfileDefaultLabels } from './agent-profile-p
 import { agentProfileDrafts, agentProfileSaveRequest, makeAgentProfileDraft, type AgentProfileDraft } from './agent-profile-draft';
 import { ContextAgentDetails } from './ContextAgentDetails';
 import { AgentAvatarPicker } from './AgentAvatarPicker';
+import { HarnessSelector } from '@/components/thread/HarnessSelector';
 
 interface Props {
   profile?: AgentProfileView;
@@ -99,8 +100,10 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
         <Switch id="agent-enabled" checked={draft.enabled} disabled={busy} onCheckedChange={enabled => update({ enabled })} /></div>
       <SettingsStackedField label={t('settings.agents.name')}><Input aria-label={t('settings.agents.name')} required value={draft.name} disabled={busy} onChange={event => update({ name: event.target.value })} /></SettingsStackedField>
       <SettingsStackedField label={t('settings.agents.description')}><Input aria-label={t('settings.agents.description')} value={draft.description} disabled={busy} onChange={event => update({ description: event.target.value })} /></SettingsStackedField>
+      {!profile?.automation && <SettingsStackedField label={t('external.choose')}><HarnessSelector value={draft.externalAgent || null} disabled={busy} onChange={value => update({ externalAgent: value ?? '' })} /></SettingsStackedField>}
     </SettingsSection>
     <SettingsSection title={t('settings.agents.page.section.modelParameters')} contentClassName="space-y-5">
+      {draft.externalAgent ? <SettingsStackedField label={t('external.model')} info={t('external.inherit')}><Input value={draft.externalModel} placeholder={t('external.inherit')} disabled={busy} onChange={event => update({ externalModel: event.target.value })} /></SettingsStackedField> : <>
       <SettingsStackedField label={t('settings.varin.agents.detail.model')}>
         <ModelSelector cwd={cwd} providerId={draft.providerId} modelId={draft.modelId} allowNone disabled={busy} placeholder={emptyModelLabel} defaultSelectionLabel={emptyModelLabel} className="w-full max-w-none" onChange={(providerId, modelId) => update({ providerId, modelId, thinkingLevel: 'inherit' })} />
       </SettingsStackedField>
@@ -114,10 +117,11 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
             {thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
           </SelectContent></Select></SettingsStackedField>
       </SettingsTwoColumn>
+      </>}
     </SettingsSection>
     <SettingsSection title={t('settings.agents.instructions')}><Textarea aria-label={t('settings.agents.instructions')} rows={12} className="min-h-64 resize-y font-mono typography-meta leading-relaxed" value={draft.instructions} disabled={busy} onChange={event => update({ instructions: event.target.value })} /></SettingsSection>
     {profile?.automation ? <ContextAgentDetails definition={profile.automation} instructions={draft.instructions} /> : <>
-    <SettingsSection title={t('settings.agents.tools')} info={t('settings.agents.runtimeTools')} contentClassName="space-y-3">
+    {!draft.externalAgent && <SettingsSection title={t('settings.agents.tools')} info={t('settings.agents.runtimeTools')} contentClassName="space-y-3">
       <p className="typography-meta" data-tools-source={source}>{t(`settings.agents.toolsSource.${source}`)}</p>
       {snapshot.capabilities !== null ? <>
         <Input value={toolQuery} onChange={event => setToolQuery(event.target.value)} aria-label={t('settings.experience.searchTools')} placeholder={t('settings.experience.searchTools')} />
@@ -136,7 +140,7 @@ export function AgentProfileEditor({ profile, snapshot, host, cwd, onSave, onCan
         {profile && <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={resetTools}>{t('settings.agents.resetTools')}</Button>}</div>
       {source === 'unconfigured' && <p className="typography-meta text-[var(--status-warning)]">{t('settings.agents.toolsUnconfigured')}</p>}
       {notBuiltin.length > 0 && <p role="status" className="typography-meta text-[var(--status-warning)]">{t('settings.agents.toolsOutsideDirectory', { tools: notBuiltin.join(', ') })}</p>}
-    </SettingsSection>
+    </SettingsSection>}
     <SettingsSection contentClassName="space-y-3">
       <fieldset className="space-y-2"><legend className="typography-meta">{t('settings.agents.focus')}{builtin ? ` · ${t('settings.agents.builtinFocus')}` : ''}</legend><div className="flex gap-4">
         {WORK_FOCUS_IDS.map(focus => <label key={focus} className="flex items-center gap-2 typography-meta"><input type="checkbox" checked={draft.workFocus.includes(focus)} disabled={busy || builtin}

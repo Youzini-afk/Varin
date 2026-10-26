@@ -156,6 +156,19 @@ impl CollaborationTools {
             .map_err(error)
             .map_err(staged("selection"))?;
         let selected = read.load().map_err(error).map_err(staged("selection"))?;
+        if selected.external_preset(input).map_err(error)?.is_some() {
+            self.require_source_binding(&selected)?;
+            if let Some(binding) = &self.binding {
+                let delegation = varin_runtime::catalog::dispatch::ChildSourceDelegation {
+                    source_path: input.source_path.clone().filter(|p| p != "."),
+                    agent_source: self.catalog.lock().map_err(error)?.dispatch_agent_source(&c.run_id,input).map_err(error)?,
+                    work_mode: input.work_mode.unwrap_or(varin_runtime::catalog::dispatch::ChildWorkMode::Shared),
+                    process: true, configured_preset: true, selection_ref: selected.reference.clone(),
+                };
+                self.resources.child_source_handoff(binding,c,&delegation,true,cancel)?;
+            } else if input.source_path.is_some() || input.source_agent.is_some() { return Err(error("This dispatch has no admitted file source")); }
+            return Ok(());
+        }
         let (resolved, _) = resolve_selection(&selected, input).map_err(staged("selection"))?;
         self.require_source_binding(&selected).map_err(staged("selection"))?;
         let mut delegation = resolved.source_delegation();
@@ -233,7 +246,7 @@ impl ToolExecutor for CollaborationTools {
                 .map_err(error)?
                 .capture_child_dispatch(reference);
             let selected = read.load().map_err(error)?;
-            resolve_selection(&selected, &input)?;
+            if selected.external_preset(&input).map_err(error)?.is_none() { resolve_selection(&selected, &input)?; }
         } else {
             let handle: ChildHandle =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
@@ -308,6 +321,7 @@ impl ToolExecutor for CollaborationTools {
         } else {
             let handle: ChildHandle =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
+            if self.catalog.lock().map_err(error)?.require_external_child_parent(&c.run_id,&handle.operation_id).map_err(error)?.is_some() { return Ok(()); }
             self.catalog
                 .lock()
                 .map_err(error)?
@@ -329,6 +343,7 @@ impl ToolExecutor for CollaborationTools {
             }
             if matches!(call.name.as_str(), collaboration::DISPATCH_TOOL | "code_retrieval") {
                 let input = DispatchInput::from_tool_call(&call.name, &call.arguments).map_err(error)?;
+                if self.catalog.lock().map_err(error)?.require_external_child_parent(&c.run_id,&c.operation_id).map_err(error)?.is_some() { return Ok(accepted(c,"preparing_external_agent")); }
                 // A replay after durable admission does not touch a now-retired source permit.
                 let existing = self
                     .catalog
@@ -362,6 +377,32 @@ impl ToolExecutor for CollaborationTools {
                     .map_err(error)
                     .map_err(staged("selection"))?;
                 let selected = selection_read.load().map_err(error).map_err(staged("selection"))?;
+                if let Some(preset) = selected.external_preset(&input).map_err(error)? {
+                    self.require_source_binding(&selected)?;
+                    let delegation = varin_runtime::catalog::dispatch::ChildSourceDelegation {
+                        source_path: input.source_path.clone().filter(|p| p != "."),
+                        agent_source: self.catalog.lock().map_err(error)?.dispatch_agent_source(&c.run_id,&input).map_err(error)?,
+                        work_mode: input.work_mode.unwrap_or(varin_runtime::catalog::dispatch::ChildWorkMode::Shared),
+                        process: true, configured_preset: true, selection_ref: selected.reference.clone(),
+                    };
+                    let handoff = self.binding.as_ref().map(|binding| self.resources.child_source_handoff(binding,c,&delegation,false,cancel)
+                        .and_then(|v| serde_json::from_value(v).map_err(error))).transpose()?;
+                    let admission=(|| {
+                        let p = self.catalog.lock().map_err(error)?.prepare_external_child(c,&input,&selected,&preset,handoff).map_err(error)?;
+                        let p = p.load().map_err(error)?;
+                        if cancel.is_cancelled(){return Err(error("External dispatch cancelled before acceptance"));}
+                        self.catalog.lock().map_err(error)?.accept_external_child(p).map_err(error)
+                    })();
+                    if let Err(mut failure)=admission {
+                        if let Some(binding)=self.binding.as_ref().filter(|b|b.source_mode!=varin_runtime::SourceMode::LiveRoot) {
+                            if let Err(cleanup)=self.resources.collaboration_pin(binding,c,true,false,&CancellationToken::default()) {
+                                failure.details=Some(json!({"cleanup":{"resource":"source_pin","state":"pending","message":cleanup.message}}));
+                            }
+                        }
+                        return Err(failure);
+                    }
+                    return Ok(accepted(c,"preparing_external_agent"));
+                }
                 let (resolved, schemas) = resolve_selection(&selected, &input).map_err(staged("selection"))?;
                 self.require_source_binding(&selected).map_err(staged("selection"))?;
                 if input.source_path.is_some() && self.binding.is_none() {
@@ -487,6 +528,19 @@ impl ToolExecutor for CollaborationTools {
             let mut handle: ChildHandle =
                 serde_json::from_value(call.arguments.clone()).map_err(error)?;
             let db = self.catalog.lock().map_err(error)?;
+            if let Some(child) = db.require_external_child_parent(&c.run_id,&handle.operation_id).map_err(error)? {
+                if handle.execution_id.as_ref().is_some_and(|id| child.turn_id.as_ref()!=Some(id)) { return Err(error("External executionId must identify this dispatch's actual turn")); }
+                drop(db);
+                if call.name == collaboration::WAIT_TOOL {
+                    self.catalog.lock().map_err(error)?.register_external_child_wait(c,&handle.operation_id).map_err(error)?;
+                    return Ok(accepted(c,"awaiting_external_agent"));
+                }
+                let read=self.catalog.lock().map_err(error)?.capture_external_child(&c.run_id,&handle.operation_id).map_err(error)?.ok_or_else(||error("External report disappeared"))?;
+                if handle.media.is_some() {return Err(error("This external report is text; open the external conversation to inspect its media"));}
+                return Ok(ToolCompletion::Result{outcome:Outcome::Succeeded,effect:Effect::None,
+                    content: if call.name==collaboration::REPORT_TOOL { read.report(handle.item_id.as_deref(),handle.offset.unwrap_or(0),handle.max_bytes.unwrap_or(65536)).map_err(error)?.into() }
+                    else { read.status().map_err(error)?.into() }});
+            }
             let child = db
                 .require_child_parent(&c.run_id, &handle.operation_id)
                 .map_err(error)?;
