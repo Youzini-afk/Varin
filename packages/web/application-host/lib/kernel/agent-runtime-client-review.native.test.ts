@@ -13,6 +13,12 @@ import { TransportFixture } from './tests/transport-fixture.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { KERNEL_PROTOCOL_VERSION, KERNEL_REQUEST_WINDOW } from './protocol.generated.js';
+import { KernelStorageAdapter } from './storage-adapter.js';
+import { KernelFileResourceBackend } from './file-resource-backend.js';
+import { KernelRecoveryContentStore, KernelRecoveryStore } from './kernel-recovery-store.js';
+import { originalMaterializationLocation } from './source-launch.js';
+import { createFileRecoveryService } from '../recovery/file-recovery-service.js';
+import { createCheckpointLifecycle } from '../recovery/checkpoint-lifecycle.js';
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repository, 'kernel/target/release', process.platform === 'win32' ? 'varin-kernel.exe' : 'varin-kernel');
@@ -682,7 +688,7 @@ it('queued source launch survives kernel loss and rebinds fresh authority to the
   } finally { await restarted.close(); }
 }, 30_000);
 
-it('file write and edit return real applied receipts while a stale read version cannot overwrite later text', async () => {
+it('file write and edit preserve conflict receipts and round-trip through the recovery panel', async () => {
   const f = await fixture();
   const revision = await publishSource(f.host, 'mutation-source', 'original text\n');
   const receipts: Array<{ outcome?: string; effect?: string; content?: { readVersion?: string; status?: string; content?: { text?: string } } }> = [];
@@ -739,4 +745,62 @@ it('file write and edit return real applied receipts while a stale read version 
   expect(sources).toMatchObject([{ runId: next.run_id, source: { workspace_id: 'source-workspace', mode: 'materialized' } }]);
   expect(await f.runtimeClient.recoveryWorkspaces(conversation)).toContainEqual(sources[0]!.source);
   await expect(f.runtimeClient.recoverySources({ ...conversation, threadId: 'another-thread' })).rejects.toThrow(/recovery branch owner differs/);
+
+  // Exercise the panel's full Host -> authorized Storage path, not just source
+  // discovery or direct journal helpers (which bypass private grant metadata).
+  const source = sources[0]!.source;
+  const workspace = (await originalMaterializationLocation(f.root, source.workspace_id, source.environment_run_id ?? next.run_id)).targetPath;
+  const storage = new KernelStorageAdapter({ client: f.host, hostId: f.options.hostId, storageRoot: f.root,
+    resolveWorkspaceRoot: async () => workspace });
+  cleanups.push(() => storage.dispose());
+  const files = new KernelFileResourceBackend(storage, { authorityPurpose: 'recovery-maintenance', authorityCapabilities: ['recovery.maintenance'],
+    resolveExecutionRoot: async () => ({ workspaceId: source.execution_workspace_id, canonicalRoot: workspace }) });
+  storage.bindFileResources(files);
+  const content = new KernelRecoveryContentStore(storage, files);
+  storage.bindFileStore(content);
+  const store = new KernelRecoveryStore(storage, content);
+  const lifecycle = createCheckpointLifecycle({ runtime: f.runtimeClient, store,
+    workspaces: async () => [{ workspaceId: source.workspace_id }], onError: (_runId, error) => { throw error; } });
+  store.bindCheckpointRefresh(lifecycle.refresh);
+  const service = createFileRecoveryService({ runtime: f.runtimeClient, kernel: f.host, storage, store, resolveFiles: async () => files,
+    // This materialized worktree has no registered/open editor surface.
+    documents: { listWorkspaceRegistrations: async () => [],
+      beginDirtyStateBarrier: async () => { throw new Error('Unexpected editor barrier'); }, inspectDirtyBuffers: async () => [] } });
+  const listed = await service({ conversation, action: 'list' });
+  expect(listed.failures).toBeUndefined();
+  expect(listed.points).toMatchObject([{ runId: run.run_id, state: 'ready', paths: ['source.txt'] }]);
+  const point = listed.points![0]!;
+  const selected = { conversation, sourceRunId: point.sourceRunId, point: point.before };
+  expect((await service({ ...selected, action: 'inspect' })).files).toMatchObject([{ path: 'source.txt' }]);
+  expect((await service({ ...selected, action: 'preview', path: 'source.txt' })).preview).toMatchObject({
+    current: { text: 'alpha\ngamma\n' }, target: { text: 'original text\n' } });
+  const restored = await service({ ...selected, action: 'restore', requestId: 'panel-restore' });
+  expect(restored.operation).toMatchObject({ status: 'applied', appliedPaths: ['source.txt'] });
+  expect(await fs.readFile(path.join(workspace, 'source.txt'), 'utf8')).toBe('original text\n');
+  expect((await service({ conversation, sourceRunId: point.sourceRunId, action: 'operation', operationId: 'panel-restore' })).operation).toMatchObject({ status: 'applied' });
+  expect((await service({ conversation, sourceRunId: point.sourceRunId, action: 'undo', operationId: 'panel-restore', requestId: 'panel-undo' })).operation).toMatchObject({ status: 'applied' });
+  expect(await fs.readFile(path.join(workspace, 'source.txt'), 'utf8')).toBe('alpha\ngamma\n');
+  const restoredHistory = await service({ conversation, action: 'history' });
+  expect(restoredHistory.failures).toBeUndefined();
+  expect(restoredHistory.operations?.map(item => item.operationId)).toEqual(['panel-undo', 'panel-restore']);
+  const named = await service({ conversation, sourceRunId: point.sourceRunId, action: 'name', name: 'Reviewed edits', requestId: 'panel-named' });
+  expect(named.points).toMatchObject([{ label: 'Reviewed edits', paths: ['source.txt'] }]);
+  const namedPoint = named.points![0]!;
+  expect((await service({ conversation, sourceRunId: point.sourceRunId, action: 'preview', point: namedPoint.id, path: 'source.txt' })).preview?.target).toMatchObject({ text: 'alpha\ngamma\n' });
+  await service({ conversation, sourceRunId: point.sourceRunId, action: 'release', point: namedPoint.id, requestId: 'panel-release' });
+  const afterRelease = await service({ conversation, action: 'list' });
+  expect(afterRelease.failures).toBeUndefined();
+  expect(afterRelease.points?.some(item => item.id === namedPoint.id)).toBe(false);
+  expect((await service({ conversation, sourceRunId: point.sourceRunId, action: 'storage' })).storage?.byteLength).toBeGreaterThan(0);
+
+  const restrictedGrant = await f.host.issueGrant({ grantId: 'restricted-recovery', threadId: conversation.threadId, runId: next.run_id,
+    owningWorkspace: source.workspace_id, executionWorkspace: source.execution_workspace_id,
+    capabilities: ['storage.read', 'storage.write', 'recovery'], pathScopes: ['unrelated.txt'] });
+  const restricted = f.host.scoped(restrictedGrant);
+  const { rootId } = await restricted.fileRootRegister({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, canonicalRoot: workspace });
+  const scope = { workspaceId: source.workspace_id, rootId, threadId: conversation.threadId, sourceRunId: point.sourceRunId };
+  expect((await restricted.recoveryFiles('recovery.points', { ...scope, arguments: {} })).points).toEqual([]);
+  await expect(restricted.recoveryFiles('recovery.files.restore', { ...scope, operationId: 'restricted-restore',
+    arguments: { point: point.before, paths: ['source.txt'] } })).rejects.toThrow(/path|scope/i);
+  expect(await fs.readFile(path.join(workspace, 'source.txt'), 'utf8')).toBe('alpha\ngamma\n');
 }, 30_000);
