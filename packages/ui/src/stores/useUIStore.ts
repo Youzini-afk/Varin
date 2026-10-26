@@ -21,6 +21,7 @@ import {
   type FileEditorSettingsPatch,
 } from '@/lib/file-editor-settings';
 import { isMotionPreference, type MotionPreference } from '@/lib/motion/preference';
+import { captureDialogOrigin } from '@/lib/motion/dialogOrigin';
 
 export type { MotionPreference } from '@/lib/motion/preference';
 export type MainTab = 'chat' | 'plan' | 'git' | 'diff' | 'terminal' | 'files' | 'context' | 'diagram';
@@ -689,7 +690,7 @@ interface UIStore {
   toggleCommandPalette: () => void;
   setCommandPaletteOpen: (open: boolean) => void;
   toggleHelpDialog: () => void;
-  setHelpDialogOpen: (open: boolean) => void;
+  setHelpDialogOpen: (open: boolean, origin?: HTMLElement) => void;
   setAboutDialogOpen: (open: boolean) => void;
   setVarinDiagnosticsDialogOpen: (open: boolean) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
@@ -698,7 +699,7 @@ interface UIStore {
   setWorktreesPageProjectId: (projectId: string | null) => void;
   /** Close every full-page surface (Scheduled, Archive, Worktrees, Multi-run). */
   closeMainSurfaces: () => void;
-  setSettingsDialogOpen: (open: boolean) => void;
+  setSettingsDialogOpen: (open: boolean, origin?: HTMLElement) => void;
   setNewWorktreeDialogOpen: (open: boolean) => void;
   setModelSelectorOpen: (open: boolean) => void;
   applyTheme: () => void;
@@ -1521,10 +1522,11 @@ export const useUIStore = create<UIStore>()(
         },
 
         toggleHelpDialog: () => {
-          set((state) => ({ isHelpDialogOpen: !state.isHelpDialogOpen }));
+          get().setHelpDialogOpen(!get().isHelpDialogOpen);
         },
 
-        setHelpDialogOpen: (open) => {
+        setHelpDialogOpen: (open, origin) => {
+          if (open && !get().isHelpDialogOpen) captureDialogOrigin('help', origin);
           set({ isHelpDialogOpen: open });
         },
 
@@ -1572,7 +1574,8 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setSettingsDialogOpen: (open) => {
+        setSettingsDialogOpen: (open, origin) => {
+          if (open && !get().isSettingsDialogOpen) captureDialogOrigin('settings', origin);
           set((state) => {
             if (!open) {
               return { isSettingsDialogOpen: false };

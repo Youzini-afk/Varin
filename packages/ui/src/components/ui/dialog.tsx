@@ -74,19 +74,21 @@ DialogOverlay.displayName = "DialogOverlay";
 type DialogContentProps = Omit<React.ComponentProps<typeof BaseDialog.Popup>, "children"> & {
   showCloseButton?: boolean
   children?: React.ReactNode
+  backdropClassName?: string
 }
 
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  backdropClassName,
   ...props
 }: DialogContentProps) {
   const { t } = useI18n()
 
   return (
     <DialogPortal>
-      <DialogOverlay className="rounded-none" />
+      <DialogOverlay className={cn("rounded-none", backdropClassName)} />
       <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none p-4">
         <BaseDialog.Popup
           data-slot="dialog-content"

@@ -229,6 +229,37 @@
   transition-timing-function: var(--motion-ease-exit);
 }
 
+/* Launcher flights use a composited outer surface. Layout and inner page animations stay intact. */
+.motion-dialog[data-dialog-flight] {
+  scale: 1;
+  transform-origin: center;
+  transform: translate3d(0, 0, 0) scale(1);
+  transition-property: transform, opacity, filter;
+}
+.motion-dialog[data-dialog-flight="button"] {
+  transition-duration: var(--motion-dur-travel), var(--motion-dur-fade), var(--motion-dur-glide);
+  transition-timing-function: var(--motion-ease-travel), var(--motion-ease-out), var(--motion-ease-glide);
+}
+.motion-dialog[data-dialog-flight]:is([data-starting-style], [data-ending-style]) {
+  scale: 1;
+  transform: translate3d(var(--dialog-flight-x, 0px), var(--dialog-flight-y, 0px), 0) scale(var(--dialog-flight-scale, .985));
+}
+.motion-dialog[data-dialog-flight="button"][data-ending-style] {
+  transition-duration: calc(var(--motion-dur-travel) * .5), calc(var(--motion-dur-travel) * .5), var(--motion-dur-exit);
+  transition-timing-function: var(--motion-ease-exit), cubic-bezier(.65, 0, 1, 1), var(--motion-ease-exit);
+}
+.motion-dialog-flight-backdrop[data-ending-style] {
+  transition-duration: calc(var(--motion-dur-travel) * .5);
+  transition-timing-function: var(--motion-ease-out);
+}
+:root:is([data-motion="reduced"], [data-motion="off"]) .motion-dialog[data-dialog-flight] {
+  transform: none;
+  transition-duration: var(--motion-dur-fade);
+}
+:root:is([data-motion="reduced"], [data-motion="off"]) .motion-dialog-flight-backdrop[data-ending-style] {
+  transition-duration: var(--motion-dur-fade);
+}
+
 /*
  * The highlight in a menu (components/ui/MenuHighlight.tsx) slides between
  * items on snap instead of jumping; items stop painting their own.
