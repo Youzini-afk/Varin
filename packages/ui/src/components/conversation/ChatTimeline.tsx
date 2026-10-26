@@ -133,6 +133,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const isMobile = useUIStore((state) => state.isMobile);
   const onScrollContainerChange = props.onScrollContainerChange;
   const listRef = React.useRef<LegendListRef>(null);
+  const scrollbarDraggingRef = React.useRef(false);
   const surfaceRef = React.useRef<HTMLDivElement>(null);
   const turnNavigatorRef = React.useRef<ChatTurnNavigatorHandle>(null);
   const endSpaceRef = React.useRef<HTMLDivElement>(null);
@@ -659,7 +660,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (atEndRef.current && props.leafId !== undefined) {
       observedLeafIdRef.current = props.leafId;
     }
-    if (atEndRef.current && !navigationRequestRef.current) {
+    if (atEndRef.current && !navigationRequestRef.current && !scrollbarDraggingRef.current) {
       const current = useTimelineViewStore.getState().views[props.sessionId];
       if (current?.scrollMode === 'free-scrolling' && current.pendingReturnToken === undefined) {
         const token = requestTimelineReturn(props.sessionId);
@@ -809,10 +810,21 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     const receive = (event: Event) => {
       const intent = (event as CustomEvent).detail;
       if (intent === 'away-from-end' || intent === 'toward-end') releaseAutomationForIntent(intent);
+      else if (intent && typeof intent.dragging === 'boolean') {
+        scrollbarDraggingRef.current = intent.dragging;
+        if (intent.dragging) takeManualOwnership();
+        else if (atEndRef.current && !navigationRequestRef.current) {
+          const current = useTimelineViewStore.getState().views[props.sessionId];
+          if (current?.scrollMode === 'free-scrolling' && current.pendingReturnToken === undefined) {
+            const token = requestTimelineReturn(props.sessionId);
+            if (token > 0) completeTimelineReturn(props.sessionId, token);
+          }
+        }
+      }
     };
     surface?.addEventListener(CHAT_TIMELINE_SCROLL_INTENT_EVENT, receive);
     return () => surface?.removeEventListener(CHAT_TIMELINE_SCROLL_INTENT_EVENT, receive);
-  }, [releaseAutomationForIntent]);
+  }, [completeTimelineReturn, props.sessionId, releaseAutomationForIntent, requestTimelineReturn, takeManualOwnership]);
 
   const selectRun = React.useCallback(async (target: ThreadHistoryRun) => {
     takeManualOwnership();

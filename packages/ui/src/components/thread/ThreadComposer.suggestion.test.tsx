@@ -23,7 +23,7 @@ vi.mock('@/components/ui/tooltip', () => ({ Tooltip: ({ children }: React.PropsW
 vi.mock('@/components/ui/dropdown-menu', () => ({ DropdownMenu: ({ children }: React.PropsWithChildren) => children, DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => children, DropdownMenuContent: () => null, DropdownMenuItem: () => null }));
 vi.mock('@/components/chat/CommandAutocomplete', () => ({ CommandAutocomplete: React.forwardRef((_props, ref) => { React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return null; }) }));
 vi.mock('@/components/chat/SkillAutocomplete', () => ({ SkillAutocomplete: () => null }));
-vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocomplete: () => null }));
+vi.mock('@/components/chat/FileMentionAutocomplete', () => ({ FileMentionAutocomplete: React.forwardRef((_props, ref) => { React.useImperativeHandle(ref, () => ({ handleKeyDown: editor.menuKey })); return null; }) }));
 // Exercise the real composer keyboard/form routing through the existing editor port.
 vi.mock('@/components/chat/composer/editor/ComposerEditor', () => ({ ComposerEditor: React.forwardRef<ComposerEditorHandle, NonNullable<typeof editor.props>>((props, ref) => {
   editor.props = props;
@@ -57,7 +57,7 @@ function Harness({ initial = '' }: { initial?: string }) {
   const [suggestion, setSuggestion] = React.useState<string | undefined>('好，继续完善吧');
   return <form ref={form => { if (form) form.requestSubmit = () => { form.dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true })); }; }}
     onSubmit={event => { event.preventDefault(); sent.push(value); }}>
-    <ThreadComposer editorRef={null} value={value} onChange={setValue} suggestion={suggestion} onSuggestionConsumed={() => setSuggestion(undefined)}
+    <ThreadComposer editorRef={null} value={value} onChange={setValue} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
       modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={false} retrying={false}
       delivery="boundary" onDeliveryChange={() => {}} allowNextRun onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
@@ -75,6 +75,14 @@ it('keeps the suggestion out of the draft until Tab accepts it', async () => {
   expect(editor.props!.value).toBe(''); expect(editor.props!.suggestion).toBe('好，继续完善吧');
   expect(await key('Tab')).toBe(true);
   expect(editor.props!.value).toBe('好，继续完善吧'); expect(editor.props!.suggestion).toBeUndefined(); expect(sent).toEqual([]);
+  expect(await key('Tab')).toBe(false);
+  await act(async () => {
+    editor.selection = { start: 0, end: 0 };
+    editor.props!.onChange({ value: '', selection: editor.selection, fromPaste: false, insertedText: '' });
+  });
+  expect(editor.props!.suggestion).toBe('好，继续完善吧');
+  expect(await key('Tab')).toBe(true);
+  expect(editor.props!.value).toBe('好，继续完善吧');
 });
 
 it('hides ghost text while typing and inserts the retained suggestion at the cursor', async () => {
@@ -100,8 +108,18 @@ it('preserves IME confirmation, Shift+Tab focus navigation, and normal draft sub
   expect(sent).toEqual(['我自己写的']);
 });
 
-it('lets command completion consume Tab before the next-step suggestion', async () => {
+it.each(['/tre', '@file'])('preserves both hints and gives the %s menu Tab priority', async value => {
   await act(async () => root.render(<Harness />));
-  await act(async () => editor.props!.onChange({ value: '/tre', selection: { start: 4, end: 4 }, fromPaste: false, insertedText: '/tre' }));
-  await key('Tab'); expect(editor.menuKey).toHaveBeenCalledWith('Tab'); expect(editor.props!.value).toBe('/tre');
+  expect(container.textContent).toContain('chat.composer.hint');
+  expect(container.textContent).toContain('chat.suggestion.acceptAndSendHint');
+  await act(async () => editor.props!.onChange({ value, selection: { start: value.length, end: value.length }, fromPaste: false, insertedText: value }));
+  expect(container.textContent).not.toContain('chat.suggestion.insertHint');
+  await key('Tab'); expect(editor.menuKey).toHaveBeenCalledWith('Tab'); expect(editor.props!.value).toBe(value);
+});
+
+it('keeps an explicitly dismissed suggestion closed', async () => {
+  await act(async () => root.render(<Harness />));
+  expect(await key('Escape')).toBe(true);
+  expect(editor.props!.suggestion).toBeUndefined();
+  expect(await key('Tab')).toBe(false);
 });

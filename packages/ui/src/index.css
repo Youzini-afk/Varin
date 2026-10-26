@@ -706,7 +706,20 @@ html:not(.dark) .chat-scroll {
   opacity: 0.8;
   transition: background-color var(--motion-dur-fade) var(--motion-ease-out), opacity var(--motion-dur-fade) var(--motion-ease-out);
   will-change: transform, height;
+  touch-action: none;
+  user-select: none;
 }
+
+.overlay-scrollbar__track--vertical {
+  position: absolute;
+  inset-block: 0;
+  right: 0;
+  width: 14px;
+  pointer-events: auto;
+  touch-action: none;
+}
+.overlay-scrollbar__track--vertical:focus-visible { outline: none; }
+.overlay-scrollbar__track--vertical:focus-visible .overlay-scrollbar__thumb { background: var(--primary-base); opacity: 1; }
 
 .overlay-scrollbar__thumb:hover,
 .overlay-scrollbar__thumb:active {

@@ -34,13 +34,13 @@ it('discards a late result after a Host or history cut changes', async () => {
   expect(current.text).toBe('新结果');
 });
 
-it('retains a ready suggestion across draft renders, consumes it once, and hides it during another Run', async () => {
+it('retains a ready suggestion across draft renders, honors dismissal, and hides it during another Run', async () => {
   const nextStep = vi.fn<NonNullable<ThreadsAPI['nextStep']>>(async () => ({ status: 'ready', runId: 'run:one', headId: 'head:one', text: '继续吧' }));
   const api = { nextStep } as unknown as ThreadsAPI;
   await act(async () => root.render(<Harness api={api} />));
   await act(async () => root.render(<Harness api={api} />));
   expect(nextStep).toHaveBeenCalledOnce(); expect(current.text).toBe('继续吧');
-  await act(async () => current.consume()); expect(current.text).toBeUndefined();
+  await act(async () => current.dismiss()); expect(current.text).toBeUndefined();
   await act(async () => root.render(<Harness api={api} eligible={false} />));
   await act(async () => root.render(<Harness api={api} />));
   expect(nextStep).toHaveBeenCalledOnce(); expect(current.text).toBeUndefined();

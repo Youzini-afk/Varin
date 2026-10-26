@@ -28,10 +28,10 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
-  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange, suggestion, suggestionError, onSuggestionConsumed,
+  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange, suggestion, suggestionError, onSuggestionDismiss,
   allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
-  suggestion?: string; suggestionError?: string; onSuggestionConsumed?(): void;
+  suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void;
@@ -85,7 +85,12 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const loading = false;
   const busy = active;
   const aborting = false;
-  const availableSuggestion = !active && !pending && !retrying ? suggestion : undefined;
+  const [insertedSuggestion, setInsertedSuggestion] = React.useState<{ text: string; identity?: string }>();
+  React.useEffect(() => {
+    if (insertedSuggestion && (!value.length || insertedSuggestion.text !== suggestion || insertedSuggestion.identity !== identityKey)) setInsertedSuggestion(undefined);
+  }, [insertedSuggestion, value, suggestion, identityKey]);
+  const alreadyInserted = value.length > 0 && insertedSuggestion?.text === suggestion && insertedSuggestion?.identity === identityKey;
+  const availableSuggestion = !active && !pending && !retrying && !alreadyInserted ? suggestion : undefined;
   const ghostSuggestion = !hasInput && value.length === 0 ? availableSuggestion : undefined;
   const canSend = hasInput || Boolean(ghostSuggestion);
   const composerActions = { primary: active && !hasInput && !retrying ? 'stop' : 'send', showSecondaryStop: active && hasInput && Boolean(onStop) };
@@ -96,7 +101,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   const acceptSuggestion = () => {
     if (!availableSuggestion || !inputRef.current) return;
     inputRef.current.insertText(availableSuggestion);
-    onSuggestionConsumed?.();
+    setInsertedSuggestion({ text: availableSuggestion, identity: identityKey });
     setAutocomplete(null);
   };
   const submit = () => {
@@ -272,7 +277,7 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
     }
     if (availableSuggestion && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
       if (event.key === 'Tab') { acceptSuggestion(); return true; }
-      if (event.key === 'Escape') { onSuggestionConsumed?.(); return true; }
+      if (event.key === 'Escape') { onSuggestionDismiss?.(); return true; }
     }
     if (eventMatchesShortcut(event, getEffectiveShortcutCombo('submit_message', shortcuts)) && !isIMECompositionEvent(event)) { submit(); return true; }
     if (
@@ -368,14 +373,16 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
           />
 
           <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
-            <p className="min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground" aria-live="polite">
-              {availableSuggestion ? <button type="button" className="text-muted-foreground/65 transition-colors hover:text-muted-foreground"
+            <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground">
+              <p className="text-muted-foreground/65">{t('chat.composer.hint')}</p>
+              <p aria-live="polite">
+              {availableSuggestion && !autocomplete ? <button type="button" className="text-muted-foreground/65 transition-colors hover:text-muted-foreground"
                 title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
                 onMouseDown={event => event.preventDefault()} onClick={() => { acceptSuggestion(); inputRef.current?.focus(); }}>
                 {isMobile ? t('chat.suggestion.applyAria') : t(ghostSuggestion ? 'chat.suggestion.acceptAndSendHint' : 'chat.suggestion.insertHint')}
-              </button> : suggestionError ? <span title={suggestionError} className="text-muted-foreground/65">{t(suggestionError === 'next-step-model-unconfigured' ? 'chat.suggestion.configureModel' : 'chat.suggestion.unavailable')}</span>
-                : t('chat.composer.hint')}
-            </p>
+              </button> : suggestionError ? <span title={suggestionError} className="text-muted-foreground/65">{t(suggestionError === 'next-step-model-unconfigured' ? 'chat.suggestion.configureModel' : 'chat.suggestion.unavailable')}</span> : null}
+              </p>
+            </div>
           </div>
 
           {autocomplete?.kind === 'command' ? (
