@@ -459,9 +459,12 @@ fn file_write_creates_without_a_read_and_keeps_existing_content_on_an_unversione
         ToolCompletion::Result { outcome:Outcome::Succeeded,.. }));
     assert!(matches!(f.call("file_write",json!({"path":"new.txt","content":"overwritten"})),ToolCompletion::NotDispatched {..}));
     assert_eq!(fs::read_to_string(f.root.join("work/new.txt")).unwrap(),"中文🙂");
+    let ToolCompletion::NotDispatched { error:Some(error), .. } = f.call("file_write",json!({"path":"new.txt","content":"overwritten","mode":"create"})) else { panic!("create must reject an existing file") };
+    assert_eq!(error.code, "file_exists");
+    assert!(error.details.unwrap().get("read").is_none());
     let missing = f.read(json!({"path":"missing.txt"}));
-    assert!(matches!(f.call("file_write",json!({"path":"missing.txt","content":"unexpected","mode":"replace","readVersion":missing["readVersion"]})),
-        ToolCompletion::NotDispatched { .. }));
+    let ToolCompletion::NotDispatched { error:Some(error), .. } = f.call("file_write",json!({"path":"missing.txt","content":"unexpected","mode":"replace","readVersion":missing["readVersion"]})) else { panic!("replace requires a file") };
+    assert_eq!(error.code, "file_missing");
     assert!(!f.root.join("work/missing.txt").exists());
     fs::write(f.root.join("work/missing.txt"), "created concurrently").unwrap();
     assert!(matches!(f.call("file_write",json!({"path":"missing.txt","content":"unexpected","readVersion":missing["readVersion"]})),
@@ -751,4 +754,28 @@ fn explicit_paths_reach_dependencies_worktrees_and_ignored_files_without_filter_
         [".git/config", ".worktrees/copy/source.txt", "build/output.txt", "debug.log", "node_modules/pkg/index.js"]);
     assert_eq!(query("file_search",json!({"query":"needle","paths":["","node_modules/pkg"]})), ["node_modules/pkg/index.js", "source.txt"]);
     assert_eq!(query("file_list",json!({"paths":["node_modules/pkg"]})), ["node_modules/pkg/index.js", "node_modules/pkg/node_modules"]);
+}
+
+#[test]
+fn multiple_listing_scopes_report_page_membership_without_claiming_unseen_roots_are_empty() {
+    let mut f = Fixture::new();
+    for dir in ["a", "empty", "z"] { fs::create_dir_all(f.root.join("work").join(dir)).unwrap(); }
+    for name in ["a/one", "a/two", "z/last"] { fs::write(f.root.join("work").join(name), "content").unwrap(); }
+    let read = |f: &mut Fixture, args| {
+        let ToolCompletion::Result { outcome:Outcome::Succeeded, content, .. } = f.call("file_list", args) else { panic!("listing failed") };
+        content.data
+    };
+    let page = read(&mut f, json!({"paths":["a","empty","z"],"maxResults":1}));
+    assert!(page["nextCursor"].is_string());
+    assert_eq!(page["groups"][0]["returnedEntries"], 1);
+    assert_eq!(page["groups"][1]["status"], "no_entries_on_this_page");
+    assert_eq!(page["groups"][2]["status"], "no_entries_on_this_page");
+    let all = read(&mut f, json!({"paths":["a","empty","z"]}));
+    assert_eq!(all["groups"][1]["status"], "empty");
+    assert_eq!(all["groups"][2]["returnedEntries"], 1);
+    for group in all["groups"].as_array().unwrap() {
+        for index in group["recordIndices"].as_array().unwrap() {
+            assert!(all["records"][index.as_u64().unwrap() as usize]["path"].as_str().unwrap().starts_with(group["path"].as_str().unwrap()));
+        }
+    }
 }

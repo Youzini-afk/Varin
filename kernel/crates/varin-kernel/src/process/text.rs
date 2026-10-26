@@ -91,7 +91,16 @@ pub(crate) fn output_state(value: &Value) -> Option<Value> {
 
 pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     if let Some(state) = output_state(value) { value["outputState"] = state; }
+    if let (Some(next), Some(end), Some(chunks)) = (value["nextCursor"].as_u64(), value["endCursor"].as_u64(), value["chunks"].as_array()) {
+        let returned: u64 = chunks.iter().filter_map(|chunk| chunk["byteLength"].as_u64()).sum();
+        let unread = end.saturating_sub(next);
+        value["outputSummary"] = json!({"returnedBytes":returned,"retainedBytes":end,
+            "unreadBytes":unread,"nextCursor":next,
+            "message":format!("Read a {returned}-byte page; {end} bytes retained at this observation, {unread} bytes remain after cursor {next}. {}",
+                if unread > 0 {"Continue with process_read using nextCursor."} else if value["outputComplete"] == true {"Output is complete."} else {"The output may still grow."})});
+    }
     let process = &value["process"];
+    let process_id = process["processId"].as_str().or_else(|| value["processId"].as_str()).map(str::to_owned);
     let page = process["outputCodePage"].as_u64().and_then(|v| u32::try_from(v).ok());
     let pty = process["mode"] == "pty";
     let explicit = label.filter(|label| *label != "auto").and_then(|label| Encoding::for_label(label.as_bytes()));
@@ -122,7 +131,13 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
             fields.remove("bytesBase64"); fields.remove("encodingReason");
         } else {
             fields.remove("text");
-            fields.insert("encodingReason".into(), json!("No lossless text decoding was established for this byte page. For known text, repeat process_read at this cursor with encoding (for example gbk or utf-16le). mode: raw always returns exact bytes."));
+            fields.remove("bytesBase64");
+            fields.insert("rawAvailable".into(), json!(true));
+            fields.insert("encodingReason".into(), json!("This output page could not be decoded losslessly (mixed encodings, binary data, or a split character). Original bytes remain in the process output. Read this page with mode: raw to obtain base64, or specify encoding if the page uses one known encoding."));
+            if let Some(id) = &process_id {
+                fields.insert("rawRead".into(), json!({"tool":"process_read","arguments":{
+                    "processId":id,"cursor":fields.get("offset"),"maxBytes":bytes.len(),"mode":"raw"}}));
+            }
         }
     }
 }
@@ -159,5 +174,21 @@ mod tests {
         assert_eq!(value["chunks"][0]["encodingSource"],"requested");
         let mut utf16=output(&[0xff,0xfe,0x2d,0x4e,0x87,0x65]);project(&mut utf16,&Mode::Text,None);assert_eq!(utf16["chunks"][0]["text"],"中文");
         let mut automatic=output(&bytes); project(&mut automatic,&Mode::Text,None);assert_eq!(automatic["chunks"][0]["text"],"中文错误");
+    }
+    #[test]
+    fn unread_bytes_and_undecodable_output_have_actionable_summaries() {
+        let mut value = output(b"\0\x01\xff");
+        value["process"]["processId"] = json!("original-process");
+        value["chunks"][0]["byteLength"] = json!(3);
+        value["endCursor"] = json!(100);
+        let raw = value.clone();
+        project(&mut value, &Mode::Text, None);
+        assert_eq!(value["outputSummary"]["unreadBytes"], 97);
+        assert_eq!(value["outputSummary"]["returnedBytes"], 3);
+        assert!(value["chunks"][0].get("bytesBase64").is_none());
+        assert_eq!(value["chunks"][0]["rawRead"]["arguments"], json!({"processId":"original-process","cursor":0,"maxBytes":3,"mode":"raw"}));
+        let mut exact = raw;
+        project(&mut exact, &Mode::Raw, None);
+        assert_eq!(BASE64.decode(exact["chunks"][0]["bytesBase64"].as_str().unwrap()).unwrap(), b"\0\x01\xff");
     }
 }

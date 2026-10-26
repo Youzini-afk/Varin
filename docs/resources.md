@@ -86,6 +86,7 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 目录读取返回 `not_a_file`，目录内容通过 `file_list` 获取。
 `file_write` 创建新文件时可省略 `readVersion`；替换已有文件与文本编辑使用读取所得版本。
 `mode: create` 明确要求目标不存在，`mode: replace` 要求目标存在且提供版本；省略 mode 时按观察到的状态写入。
+创建撞名返回 `file_exists`，替换缺失目标返回 `file_missing`；真实版本过期仍为 `file_version_conflict`，带原读取入口。
 缺失版本仍校验“目标不存在”，其他写入者先创建文件后，旧缺失版本发生冲突。文本修改准备在一次读取中
 取得正文和版本状态，提交时沿原 `file.apply` 校验当前文件，工具回执直接提供结构化 `state`；响应帧大小只约束发往调用方的正文。
 正常模型回执省略内部 `reconciled` 字段；是否应用由实际写入状态表达，原恢复 journal 继续保存协调事实。
@@ -93,6 +94,8 @@ Agent `file_read` 的默认字节页为 64 KiB，与已有工具续读页面一�
 `recursive` 展开后代，`nextCursor` 配合相同过滤条件继续读取。物理目录页按路径顺序读取
 当前状态；游标绑定来源及生效过滤条件，拒绝格式错误或换查询续读，页面大小可调整。实时目录变化后仍按路径继续，非固定快照。
 `includeRevisions` 显式请求正文版本，普通目录列表省略未计算的哈希。
+多路径列举附带 `groups`：逐路径返回本页条目数、对应 `records` 的零基索引和状态。`no_entries_on_this_page`
+提示继续原游标或单独查询该路径；只有完整的初始查询才能将零条目组标为 `empty`。分组不复制文件正文或改变分页顺序。
 显式指定但不存在的路径返回读取失败及路径。`maxBytes` 是分页目标，首条记录可以超过该目标，以便小预算仍能推进游标。
 正向 `globs` 同时筛选文件和目录结果；未匹配的目录仍可作为递归路径进入，以找到匹配的后代文件。
 普通目录列表显示包括依赖、Git、worktree 和被忽略文件在内的入口。递归发现默认略过 `.git`、`node_modules`、`.worktrees`
@@ -116,7 +119,9 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 底层输出块保留精确的 `bytesBase64` 和字节游标，终端及 LSP/DAP 等协议消费者继续读原始字节。
 Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 控制序列；`mode: raw` 返回原始字节。
 自动解码先看 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；`encodingSource` 标明依据，不把代码页默认值伪称为检测结果。
-已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页保留字节并提示处理方式。
+已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页在模型文本视图中
+返回原因、`rawAvailable` 与原位置的 `rawRead` 调用，不内联大段 base64；原进程保留精确字节，`mode: raw` 可读取。
+`outputSummary` 给出本页原始字节数、观察时保留的总字节数、尚未读取量和续读游标；运行中的总量仍可能增长。
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
 `process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
@@ -209,6 +214,7 @@ Service forward 有自己的 listener/bridge、原操作和清理。选择 Compu
 
 ComputerService 拥有发现、driver、物理输入 lane、assignment、人工控制和远端路由；执行绑定保留真实 Thread/Run。
 一个物理桌面同时只有一个 controller，可有多个 observer；不同窗口不是独立桌面。
+Windows 观察默认列出目标应用的可见实际窗口，过滤后台、cloaked 和辅助小窗口；显式选定的窗口始终保留在观察结果中。
 
 assignment 在资源 Host 预留成功后才发布 grant。输入使用原 assignment/epoch，handback 后需新观察；远端重启不会悄悄续旧 token。
 Browser/Office 读取与效果有不同工具合同，任意 JS evaluate 仍属效果，不因 caller 称其只读而变权限。

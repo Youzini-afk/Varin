@@ -12,6 +12,9 @@ use varin_runtime::{
 struct Describe {
     namespace: Option<String>,
     name: Option<String>,
+    names: Option<Vec<String>>,
+    query: Option<String>,
+    detail: Option<String>,
 }
 #[derive(Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -74,14 +77,18 @@ fn parse(call: &ToolCall, frozen: &FrozenToolContext) -> Result<Request, Executi
     match call.name.as_str() {
         disclosure::DESCRIBE => {
             let args: Describe = serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            if args.namespace.is_some() && args.name.is_some()
+            if (args.name.is_some() || args.names.is_some()) && (args.namespace.is_some() || args.query.is_some())
+                || args.name.is_some() && args.names.is_some()
                 || args.name.as_ref().is_some_and(|v| v.trim().is_empty())
+                || args.names.as_ref().is_some_and(|names| names.is_empty() || names.iter().any(|name| name.trim().is_empty()))
+                || args.query.as_ref().is_some_and(|v| v.trim().is_empty())
+                || args.detail.as_deref().is_some_and(|value| !matches!(value, "summary" | "full"))
                 || args
                     .namespace
                     .as_ref()
                     .is_some_and(|v| !disclosure::GROUPS.iter().any(|(id, _)| id == v))
             {
-                return Err(error("choose one exact namespace or tool name"));
+                return Err(error("Choose name, names, or a namespace/query filter. detail is summary or full."));
             }
             Ok(Request::Describe(args))
         }
@@ -202,18 +209,37 @@ impl Call {
                 None => json!({"status":"unavailable","name":name,"message":"This tool is not available to the current request. Check the selected tools or query an available namespace; tool_invoke does not bypass selection or permissions."}),
             });
         }
-        if let Some(group) = &args.namespace {
+        if let Some(names) = &args.names {
+            let mut seen = std::collections::HashSet::new();
+            let descriptions = names.iter().filter(|name| seen.insert(*name)).map(|name|
+                self.describe(&Describe { name:Some(name.clone()), namespace:None, names:None, query:None, detail:None }))
+                .collect::<Result<Vec<_>, _>>()?;
+            return Ok(json!({"tools":descriptions}));
+        }
+        if args.namespace.is_some() || args.query.is_some() {
+            let terms = args.query.as_deref().unwrap_or("").split_whitespace().map(str::to_lowercase).collect::<Vec<_>>();
             let selected = tools
                 .iter()
-                .filter(|tool| disclosure::namespace(&tool.name) == Some(group.as_str()))
-                .map(|tool| json!({"name":tool.name,"description":tool.description,
+                .filter(|tool| args.namespace.as_deref().is_none_or(|group| disclosure::namespace(&tool.name) == Some(group)))
+                .filter(|tool| {
+                    let group = disclosure::namespace(&tool.name).unwrap_or("");
+                    let purpose = disclosure::GROUPS.iter().find(|(id,_)| *id == group).map_or("", |(_,purpose)| *purpose);
+                    let text = format!("{} {} {group} {purpose}",tool.name,tool.description).to_lowercase();
+                    terms.iter().all(|term| text.contains(term))
+                })
+                .map(|tool| {
+                    if args.detail.as_deref() == Some("full") || args.query.is_some() && args.detail.as_deref() != Some("summary") {
+                        return self.describe(&Describe { name:Some(tool.name.clone()), namespace:None, names:None, query:None, detail:None });
+                    }
+                    Ok(json!({"name":tool.name,"description":tool.description,
                     "reference":{"name":tool.name,"version":tool.version},"requirements":tool.requirements,
                     "directlyCallable":disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()),
                     "describe":{"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name}},
                     "related":self.related(&tool.name).iter().map(|related| related["name"].clone()).collect::<Vec<_>>()}))
-                .collect::<Vec<_>>();
+                })
+                .collect::<Result<Vec<_>, _>>()?;
             return Ok(
-                json!({"namespace":group,"status":if selected.is_empty(){"unavailable"}else{"available"},
+                json!({"namespace":args.namespace,"query":args.query,"status":if selected.is_empty(){if args.query.is_some(){"no_matches"}else{"unavailable"}}else{"available"},
                 "tools":selected}),
             );
         }

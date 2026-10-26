@@ -505,9 +505,10 @@ function Get-WindowDpiScale([IntPtr]$hwnd) {
     return $null
 }
 
-function Get-AppWindows($windows) {
+function Get-AppWindows($windows, $SelectedHandle = $null) {
     @($windows | Where-Object {
-        $_.visible -and -not $_.cloaked -and -not $_.auxiliary -and $_.bounds.width -gt 1 -and $_.bounds.height -gt 1
+        ($null -ne $SelectedHandle -and $_.handle -eq $SelectedHandle) -or
+        ($_.visible -and -not $_.cloaked -and -not $_.auxiliary -and $_.bounds.width -gt 1 -and $_.bounds.height -gt 1)
     } | Sort-Object @{ Expression = { $_.handle -eq [int64][VarinWin32]::GetForegroundWindow() }; Descending = $true },
         @{ Expression = { -not $_.minimized }; Descending = $true },
         @{ Expression = { -not [string]::IsNullOrWhiteSpace($_.title) }; Descending = $true },
@@ -1038,7 +1039,7 @@ function Build-Snapshot([string]$query, $TextLimit = $script:DefaultTextLimit, [
     Assert-NotCancelled "resolved the target window"
     $rendered = Render-Tree $element $bounds $TextLimit $MaxTreeNodes $MaxTreeDepth
     Assert-NotCancelled "rendered the accessibility tree"
-    $windows = ConvertTo-ObjectArray $script:ProcessWindows[[int]$process.Id]
+    $windows = @(Get-AppWindows (ConvertTo-ObjectArray $script:ProcessWindows[[int]$process.Id]) ([int64]$hwnd))
     $selectedTitle = ""
     foreach ($window in $windows) {
         $window | Add-Member -NotePropertyName "main" -NotePropertyValue ($window.handle -eq [int64]$process.MainWindowHandle) -Force

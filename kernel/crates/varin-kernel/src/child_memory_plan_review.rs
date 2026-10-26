@@ -42,6 +42,7 @@ fn bot_plan_fixture() -> Fixture {
         },
         None,
         Some("plan-bot"),
+        Vec::new(),
     );
     f.launch.tools.retain(|tool| tool.name == "todo");
     f.launch.policy = crate::observations::default_policy_identity();

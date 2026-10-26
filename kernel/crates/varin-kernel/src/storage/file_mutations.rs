@@ -225,7 +225,8 @@ impl Storage {
         let result = (|| {
             if mutation.read_version().is_empty() {
                 match fs::symlink_metadata(&resource.absolute) {
-                    Ok(_) => return Ok(json!({"path":resource.path,"status":"conflict"})),
+                    Ok(_) => return Ok(json!({"path":resource.path,"status":"conflict",
+                        "reason":if matches!(mutation, TextMutation::Write(args) if args.mode == Some(FileWriteMode::Create)) {"create_target_exists"} else {"read_version_required"}})),
                     Err(error) if error.kind() == io::ErrorKind::NotFound => {},
                     Err(error) => return Err(error.into()),
                 }

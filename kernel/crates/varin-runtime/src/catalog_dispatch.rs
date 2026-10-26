@@ -743,11 +743,10 @@ pub struct ChildInvocationRead {
 impl ChildInvocationRead {
     pub fn load(self) -> Result<ChildDispatchSelection> {
         use crate::execution::{RequestSnapshot, ToolOrigin};
-        let value = self.content.load(&self.body)?;
         let mut history = None;
         let reference = match &self.context.origin {
             ToolOrigin::ModelStep { request_id } => {
-                let snapshot: RequestSnapshot = serde_json::from_value(value)?;
+                let snapshot: RequestSnapshot = self.content.load_snapshot(&self.body)?;
                 if snapshot.view.request_id != *request_id
                     || snapshot.view.run_id != self.context.run_id
                 {
@@ -759,7 +758,7 @@ impl ChildInvocationRead {
                 snapshot.view.binding.child_dispatch
             }
             ToolOrigin::PolicyAction { action_id, node_id } => {
-                let body: super::policy_body::PolicyGraphBody = serde_json::from_value(value)?;
+                let body: super::policy_body::PolicyGraphBody = serde_json::from_value(self.content.load(&self.body)?)?;
                 if body.action_id != *action_id {
                     return Err(RuntimeError::Invalid(
                         "dispatch graph belongs to another origin".into(),

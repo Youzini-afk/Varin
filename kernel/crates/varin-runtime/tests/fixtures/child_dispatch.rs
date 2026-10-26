@@ -284,6 +284,7 @@ impl Fixture {
             customize,
             None,
             None,
+            Vec::new(),
         )
     }
     pub(crate) fn new_in_project() -> Self {
@@ -308,6 +309,7 @@ impl Fixture {
             |input, _| { input.inherit_context = inherit; },
             Some("project-A"),
             None,
+            Vec::new(),
         );
         if policy {
             fixture.context = fixture.admit_policy_call(ToolCall {
@@ -318,7 +320,17 @@ impl Fixture {
         fixture
     }
     pub(crate) fn new_in_bot(bot: &str) -> Self {
-        Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot))
+        Self::new_parent_scoped(7, read_schema(), ToolSchema { requirements:None, description:String::new(), output_schema:None, metadata:None, name:DISPATCH_TOOL.into(), version:"1".into(), schema:json!({"type":"object"}) }, false, false, false, |_,_|{}, None, Some(bot), Vec::new())
+    }
+    pub(crate) fn new_with_media(inherit: bool, retrieval: bool) -> Self {
+        Self::new_parent_scoped(7, read_schema(), ToolSchema {
+            requirements: None, description: String::new(), output_schema: None, metadata: None,
+            name: if retrieval { "code_retrieval" } else { DISPATCH_TOOL }.into(),
+            version: "1".into(), schema: json!({"type":"object"}),
+        }, false, false, false, |input, _| {
+            if retrieval { *input = DispatchInput::from_tool_call("code_retrieval", &json!({"question":"Inspect the document"})).unwrap(); }
+            input.inherit_context = inherit;
+        }, None, None, vec![json!({"media_type":"image/png","data_base64":"b3JpZ2luYWwgbWVkaWE="})])
     }
     pub(crate) fn new_parent_scoped(
         revision: i64,
@@ -330,6 +342,7 @@ impl Fixture {
         customize: impl FnOnce(&mut DispatchInput, &mut LaunchSelection),
         project: Option<&str>,
         bot: Option<&str>,
+        attachments: Vec<serde_json::Value>,
     ) -> Self {
         let dispatch_name = dispatch.name.clone();
         let internal = dispatch_name == "code_retrieval";
@@ -417,7 +430,7 @@ impl Fixture {
                     thread_id: "thread:parent".into(),
                     branch_id: "branch:parent".into(),
                     expected_head: None,
-                    input: json!(if input.inherit_context { "Delegate a read\nAttached documents:\n[{\"snapshotId\":\"snapshot-original\",\"sourceSnapshotId\":\"snapshot-original\"}]" } else { "Delegate a read" }),
+                    input: json!({"text":if input.inherit_context { "Delegate a read\nAttached documents:\n[{\"snapshotId\":\"snapshot-original\",\"sourceSnapshotId\":\"snapshot-original\"}]" } else { "Delegate a read" }, "attachments":attachments}),
                     configuration,
                 },
                 Some(launch.clone()), false,

@@ -2523,8 +2523,16 @@ impl KernelToolExecutor {
             // Use the explicit no-dispatch receipt; generic mutating Result(None)
             // is deliberately normalized to unknown by the runtime.
             Ok(result) if mutation && result["status"] == "conflict" => {
-                ToolCompletion::not_dispatched(ExecutionError::new("file_version_conflict", "File version conflict; read the current file to obtain its readVersion before retrying.")
-                    .with_details(json!({"path":result["path"],"read":{"tool":"file_read","arguments":{"path":result["path"]}}})))
+                let (code, message) = match result["reason"].as_str() {
+                    Some("create_target_exists") => ("file_exists", "The create target already exists. Choose another path, or read it and explicitly replace/edit it if that is intended."),
+                    Some("replace_target_missing") => ("file_missing", "The replace target does not exist. Use mode: create if a new file is intended."),
+                    _ => ("file_version_conflict", "File version conflict; read the current file to obtain its readVersion before retrying."),
+                };
+                let mut details = json!({"path":result["path"],"reason":result["reason"]});
+                if code == "file_version_conflict" {
+                    details["read"] = json!({"tool":"file_read","arguments":{"path":result["path"]}});
+                }
+                ToolCompletion::not_dispatched(ExecutionError::new(code, message).with_details(details))
             }
             Ok(result) if restore && result["status"] == "failed" => ToolCompletion::NotDispatched { reason: result.to_string(), error: None, },
             Ok(result) if restore => ToolCompletion::Result {

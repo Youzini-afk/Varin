@@ -45,6 +45,19 @@ impl ModelProvider for Provider {
             } }).unwrap();
         }
         let content = match step {
+            0 if self.mode == "success" => {
+                for (id, arguments) in [
+                    ("batch-describe", json!({"names":["fixture_effect","ask_user","missing"]})),
+                    ("search-describe", json!({"query":"FIXTURE_EFFECT"})),
+                    ("full-group", json!({"namespace":"extensions","detail":"full"})),
+                ] {
+                    emit(ProviderEvent::ItemCompleted { item: ProviderItem {
+                        id: format!("item-{id}"), opaque: None,
+                        content: Content::ToolCall { call: ToolCall { call_id:id.into(), name:disclosure::DESCRIBE.into(), schema_version:"1".into(), arguments } },
+                    } }).unwrap();
+                }
+                Content::ToolCall { call: ToolCall { call_id:"describe".into(), name:disclosure::DESCRIBE.into(), schema_version:"1".into(), arguments:json!({"namespace":"extensions"}) } }
+            }
             0 => Content::ToolCall {
                 call: ToolCall {
                     call_id: "describe".into(),
@@ -54,6 +67,19 @@ impl ModelProvider for Provider {
                 },
             },
             1 => {
+                if self.mode == "success" {
+                    for id in ["batch-describe", "search-describe", "full-group"] {
+                        let data = request.view.history.iter().find_map(|item| match &item.content {
+                            Content::ToolResult { result } if result.call_id == id => match &result.completion {
+                                ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
+                            }, _ => None,
+                        }).unwrap();
+                        let target = data["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "fixture_effect").unwrap();
+                        assert_eq!(target["parameters"]["required"], json!(["mode"]));
+                        assert_eq!(target["invocation"]["tool"], disclosure::INVOKE);
+                        assert_eq!(target["directlyCallable"], false);
+                    }
+                }
                 let index = request.view.history.iter().find_map(|item| match &item.content {
                     Content::ToolResult { result } if result.call_id == "index" => match &result.completion {
                         ToolCompletion::Result { content, .. } => Some(&content.data), _ => None,
