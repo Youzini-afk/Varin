@@ -32,6 +32,7 @@ import {
   formatShortcutForDisplay,
 } from "@/lib/shortcuts";
 import { useI18n, type I18nKey } from "@/lib/i18n";
+import { useDialogOriginMotion } from '@/hooks/useDialogOriginMotion';
 
 type ShortcutIcon = React.ComponentType<{ className?: string }>;
 
@@ -56,6 +57,7 @@ export const HelpDialog: React.FC = () => {
   const { t } = useI18n();
   const isHelpDialogOpen = useUIStore((state) => state.isHelpDialogOpen);
   const setHelpDialogOpen = useUIStore((state) => state.setHelpDialogOpen);
+  const flight = useDialogOriginMotion('help', isHelpDialogOpen);
   const shortcutOverrides = useUIStore((state) => state.shortcutOverrides);
   const mod = getModifierLabel();
 
@@ -219,8 +221,8 @@ export const HelpDialog: React.FC = () => {
   ];
 
   return (
-      <Dialog open={isHelpDialogOpen} onOpenChange={setHelpDialogOpen}>
-      <DialogContent className="max-w-2xl w-[min(42rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
+      <Dialog open={isHelpDialogOpen} onOpenChange={next => setHelpDialogOpen(next)}>
+      <DialogContent {...flight.popupProps} backdropClassName={flight.backdropClassName} className="max-w-2xl w-[min(42rem,calc(100vw-1.5rem))] max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RiSettings3Line className="h-5 w-5" />

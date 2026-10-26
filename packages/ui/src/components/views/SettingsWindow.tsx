@@ -4,6 +4,7 @@ import { Dialog } from '@base-ui/react/dialog';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { SettingsView } from './SettingsView';
+import { useDialogOriginMotion } from '@/hooks/useDialogOriginMotion';
 
 interface SettingsWindowProps {
   open: boolean;
@@ -17,6 +18,7 @@ interface SettingsWindowProps {
 export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChange }) => {
   const { t } = useI18n();
   const descriptionId = React.useId();
+  const flight = useDialogOriginMotion('settings', open);
 
   const hasOpenFloatingMenu = React.useCallback(() => {
     if (typeof document === 'undefined') {
@@ -42,17 +44,19 @@ export const SettingsWindow: React.FC<SettingsWindowProps> = ({ open, onOpenChan
           className={cn(
             'fixed inset-0 z-50 bg-black/50 dark:bg-black/75',
             'motion-dialog-backdrop',
+            flight.backdropClassName,
           )}
         />
         <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
           <Dialog.Popup
+            {...flight.popupProps}
             aria-describedby={descriptionId}
             className={cn(
               'relative pointer-events-auto',
               'w-[94vw] max-w-[1440px] h-[90vh] max-h-[1000px]',
               'rounded-xl border shadow-none overflow-hidden origin-center',
               'bg-background',
-              // Settles from 98.5% on glide; leaves on the exit tween.
+              // The outer surface flies from/to its launcher; inner page motion is retained.
               'motion-dialog',
               // Dim this window when a nested dialog (e.g. "Add a device") opens
               // on top of it, mirroring how the page behind a dialog is dimmed.

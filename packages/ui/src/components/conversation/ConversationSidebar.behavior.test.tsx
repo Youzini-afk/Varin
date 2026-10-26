@@ -7,6 +7,8 @@ import { ConversationSidebar } from './ConversationSidebar';
 import { useThreadStore } from '@/stores/useThreadStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useUIStore } from '@/stores/useUIStore';
+import { captureDialogOrigin, dialogOrigin } from '@/lib/motion/dialogOrigin';
 
 const mocks = vi.hoisted(() => ({
   update: vi.fn(),
@@ -159,6 +161,21 @@ beforeEach(async () => {
   await act(async () => { root.render(<ConversationSidebar />); });
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
+
+it.each([
+  ['settings', 'settings'], ['shortcuts', 'help'], ['aboutVarin', 'settings'],
+] as const)('opens the %s footer surface from its own button', async (action, key) => {
+  useUIStore.setState({ isSettingsDialogOpen: false, isHelpDialogOpen: false });
+  captureDialogOrigin('settings'); captureDialogOrigin('help');
+  const button = container.querySelector<HTMLButtonElement>(`[aria-label="sessions.sidebar.footer.actions.${action}"]`)!;
+  expect(button).not.toBeNull();
+  Object.assign(button, { getBoundingClientRect: () => ({ left: 24, top: 720, width: 36, height: 36 }) });
+  await act(async () => button.click());
+  expect(dialogOrigin(key)?.element.deref()).toBe(button);
+  expect(useUIStore.getState()[key === 'settings' ? 'isSettingsDialogOpen' : 'isHelpDialogOpen']).toBe(true);
+  if (action === 'aboutVarin') expect(useUIStore.getState().settingsPage).toBe('about');
+  await act(async () => { useUIStore.getState().setSettingsDialogOpen(false); useUIStore.getState().setHelpDialogOpen(false); });
+});
 
 it.each(['completed', 'failed'] as const)('keeps unread %s child tasks quiet while retaining the parent reminder', async state => {
   await act(async () => {
