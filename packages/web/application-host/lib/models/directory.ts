@@ -1,7 +1,7 @@
 /** Derived directory cache. Each remote source refreshes independently of execution and other sources. */
 import { join } from 'node:path';
 import { createSettingsFileStore } from '@varin/settings-store';
-import type { ChannelModel, ModelDirectoryStatus } from '@varin/application-client';
+import type { ChannelModel, ModelDirectoryStatus, ModelMetadataRequest } from '@varin/application-client';
 import type { EgressFetch } from '../harness/egress.js';
 import { object, revisionOf } from './configuration.js';
 import { directoryModels } from './directory-models.js';
@@ -9,6 +9,7 @@ import { enrichModel } from './discovery.js';
 import type { ChannelTypes } from './channel-types.js';
 import { DIRECTORY_SNAPSHOT, OFFICIAL_DIRECTORY_SNAPSHOT } from './directory-snapshot.js';
 import { CHANNEL_DIRECTORY_URL, BUNDLED_CHANNEL_DIRECTORY, parseChannelDirectory } from './channel-directory.js';
+import { ModelMetadataIndex, modelDirectoryDefaults } from './metadata-match.js';
 
 const METADATA_URL = 'https://models.dev/api.json';
 // Freshness is a background refresh policy, never an execution/admission deadline.
@@ -24,6 +25,8 @@ export class ModelDirectory {
   readonly #jobs = new Map<string, Promise<void>>();
   readonly #failures = new Set<string>();
   readonly #defaults: Map<string, ChannelModel[]>;
+  #metadata!: ModelMetadataIndex;
+  #metadataRevision = '';
   readonly ready: Promise<void>;
   #revision = 'bundled';
   #updatedAt: number | undefined;
@@ -75,9 +78,17 @@ export class ModelDirectory {
       if (models) candidate.set(type.id, models);
     }
     if (!candidate.size) throw new Error('The model directory contains no supported providers');
-    return candidate;
+    return { candidate, metadata: new ModelMetadataIndex(body, this.types), revision: revisionOf(body) };
   }
-  #commitMetadata(candidate: Map<string, ChannelModel[]>) { for (const [id, models] of candidate) this.types.setCatalog(id, models); }
+  #commitMetadata({ candidate, metadata, revision }: { candidate: Map<string, ChannelModel[]>; metadata: ModelMetadataIndex; revision: string }) {
+    for (const [id, models] of candidate) this.types.setCatalog(id, models);
+    this.#metadata = metadata;
+    this.#metadataRevision = revision;
+  }
+  defaults(typeId: string, request: ModelMetadataRequest, models: readonly ChannelModel[] = []): ChannelModel | undefined {
+    const type = this.types.get(typeId);
+    return type ? modelDirectoryDefaults(this.#metadata, type, request, models) : undefined;
+  }
   #applyOfficial() {
     for (const type of this.types.entries()) {
       if (!type.publicDirectory || !type.parseDiscovery) continue;
@@ -88,7 +99,7 @@ export class ModelDirectory {
         enabled: presets.get(model.id)?.enabled ?? false, operations: model.operations ?? presets.get(model.id)?.operations ?? ['chat'], catalog: { overrides: [] } } as ChannelModel));
       this.types.setCatalog(type.id, models);
     }
-    this.#revision = revisionOf([this.types.list(), this.types.entries().map(type => [type.id, type.catalog]), [...this.#connections].map(([id, value]) => [id, value.key, value.scope, value.models])]);
+    this.#revision = revisionOf([this.#metadataRevision, this.types.list(), this.types.entries().map(type => [type.id, type.catalog]), [...this.#connections].map(([id, value]) => [id, value.key, value.scope, value.models])]);
   }
   status(): ModelDirectoryStatus {
     const issue = this.#failures.has(METADATA_URL) ? 'refresh-failed' : this.#failures.size ? 'partial-refresh' : this.#issue;

@@ -179,11 +179,26 @@ connection fingerprint and credential scope. User overrides win over service fac
 models.dev provider metadata and explicitly identified canonical-model metadata. Display-name guessing
 is not used. Directory membership does not establish account entitlement.
 
+Metadata lookup uses `requestModelId` when supplied, otherwise the saved model ID. It normalizes case
+and separators, recognizes complete ID segments inside channel prefixes and suffixes, and prefers the
+most specific known variant. Numeric dots remain version boundaries, and fine-tune IDs use their base
+model rather than organization/job labels. Ambiguous multi-model names do not receive inferred defaults.
+The index is built per directory generation and lookup results are cached; lookup never fetches the network.
+Custom/compatible channels use the same path. Their exact account facts take precedence; cross-provider
+matches prefer the canonical model owner's metadata and otherwise inherit only agreeing facts. Lookup
+does not change the request ID, endpoint, authentication, protocol or enabled operations. Model-specific
+wire hints transfer only between matching protocols.
+
 New starter/candidate models follow directory defaults through `model.catalog`. Its `overrides` list
 marks explicit field choices, including clearing a field. The settings editor can restore each field
 or the whole model to the current defaults. Service-discovered models retain their service snapshot
-until a matching account directory is available. Older manually configured models stay manual until
-the user chooses to follow the directory. Refreshing never rewrites `models.json`, enables newly
+until a matching account directory is available. Existing manual fields remain explicit while missing
+metadata can be filled from a unique match. The shared `applyModelDirectoryDefaults` merge is used by
+Host capture and settings draft previews; the latter request metadata for unsaved IDs without sending
+credentials. `catalog.match` records the upstream ID/protocol behind inferred fields. Changing that
+identity clears inherited facts until the new identity matches, while explicit overrides survive.
+Account caches retain only service-supplied facts, so inferred defaults can follow future refreshes.
+Refreshing never rewrites `models.json`, enables newly
 discovered models, removes configured references or changes purpose selections. Captured execution
 bindings retain their original configuration. A model missing from a later directory keeps its saved
 metadata. Model catalogs and user configuration have independent revisions.

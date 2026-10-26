@@ -162,7 +162,35 @@ test('contributed catalog candidates are available without discovery and retain 
   snapshot.types[0]!.catalog = [{ ...candidate, operations: [...candidate.operations], input: [...candidate.input] }];
   await open(); await click('settings.models.addModel'); await click('Catalog'); await click('settings.models.addSelected · 1');
   expect(fixtures.api.save).not.toHaveBeenCalled(); expect(fixtures.api.discoverDraft).not.toHaveBeenCalled();
-  await click('settings.models.save'); expect(fixtures.api.save.mock.calls[0]?.[0].models).toEqual([{ ...candidate, catalog: { overrides: [] } }]);
+  await click('settings.models.save'); expect(fixtures.api.save.mock.calls[0]?.[0].models).toEqual([{ ...candidate, catalog: { overrides: [], match: { requestModelId: 'catalog' } } }]);
+});
+
+test('manual model metadata fills asynchronously, preserves edits made while loading, and follows a changed upstream ID', async () => {
+  let complete!: (value: unknown) => void;
+  fixtures.api.directory.mockImplementation(async (_type, _signal, _channel, requests = []) => {
+    if (!requests.length) return { models: [], status: { revision: 'directory', refreshing: false } };
+    const request = requests[0];
+    if (!request.requestModelId) return new Promise(resolve => { complete = resolve; });
+    return { models: [{ ...request, name: request.id, enabled: false, contextWindow: 200000, maxOutputTokens: 8000, reasoning: false, catalog: { overrides: [] } }], status: { revision: 'directory', refreshing: false } };
+  });
+  await open(); await click('settings.models.addModel');
+  await edit('settings.models.modelId', 'team/DEEPSEEK-FLASH-fast');
+  const add = container.querySelector('[aria-label="settings.models.modelId"]')!.parentElement!.querySelector('button')!;
+  await act(async () => add.click());
+  await click('team/DEEPSEEK-FLASH-fast');
+  await edit('settings.models.context', '123456');
+  await act(async () => complete({ models: [{ id: 'team/DEEPSEEK-FLASH-fast', name: 'Matched', enabled: false, operations: ['chat'],
+    contextWindow: 1000000, maxOutputTokens: 32000, reasoning: true, thinking: { mode: 'levels', levels: ['low', 'high'], allowOff: true }, catalog: { overrides: [] } }], status: { revision: 'directory', refreshing: false } }));
+  expect((container.querySelector('[aria-label="settings.models.context"]') as HTMLInputElement).value).toBe('123456');
+  expect((container.querySelector('[aria-label="settings.models.output"]') as HTMLInputElement).value).toBe('32000');
+  await configureOpenedModel();
+  await edit('settings.models.requestModelId', 'new/GPT-4.1-mini');
+  await click('settings.models.save');
+  const saved = fixtures.api.save.mock.calls[0]![0].models[0];
+  expect(saved).toMatchObject({ id: 'team/DEEPSEEK-FLASH-fast', name: 'team/DEEPSEEK-FLASH-fast', requestModelId: 'new/GPT-4.1-mini',
+    contextWindow: 123456, maxOutputTokens: 8000, reasoning: false });
+  expect(saved.catalog.overrides).toContain('contextWindow');
+  expect(saved.thinking).toBeUndefined();
 });
 
 test('a late save failure from the previous Host cannot poison the new editor', async () => {

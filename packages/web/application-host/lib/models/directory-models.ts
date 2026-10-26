@@ -1,6 +1,6 @@
 import { discoveredTokenizer } from './tokenizer-metadata.js';
 /** models.dev is metadata. SDK labels select installed codecs; they never load packages. */
-import type { ChannelModel, DiscoveredModel, ModelCatalogField } from '@varin/application-client';
+import type { ChannelModel, DiscoveredModel } from '@varin/application-client';
 import { MODEL_CATALOG_FIELDS } from '@varin/application-client';
 import { MODEL_THINKING_EFFORTS } from '@varin/protocol';
 import { object } from './configuration.js';
@@ -14,9 +14,10 @@ const codecs: Record<string, string> = {
 const positive = (v: unknown): v is number => typeof v === 'number' && Number.isSafeInteger(v) && v > 0;
 const sourceIds: Record<string, string> = { gemini: 'google', vertex: 'google-vertex', bedrock: 'amazon-bedrock', zai: 'zai-coding-plan',
   'zai-coding-cn': 'zhipuai-coding-plan', 'qwen-token-plan': 'alibaba-token-plan', 'qwen-token-plan-cn': 'alibaba-token-plan-cn', 'kimi-coding': 'kimi-code-plan-cn' };
+export const metadataProviderId = (type: ChannelType) => type.metadataId ?? sourceIds[type.id] ?? type.id;
 
 export function directoryModels(data: Record<string, unknown>, type: ChannelType): ChannelModel[] | undefined {
-  const provider = data[type.metadataId ?? sourceIds[type.id] ?? type.id];
+  const provider = data[metadataProviderId(type)];
   if (!object(provider) || !object(provider.models)) return undefined;
   const presets = new Map(type.catalog?.map(model => [model.id, model]));
   const models: ChannelModel[] = [];
@@ -87,18 +88,12 @@ export function directoryModels(data: Record<string, unknown>, type: ChannelType
 }
 
 /** Saved values are also the offline fallback when a model leaves its directory. */
-export function followDirectory(model: ChannelModel, defaults?: ChannelModel): ChannelModel {
-  if (!model.catalog || !defaults) return model;
-  if (model.catalog.source === 'service' && defaults.catalog?.source !== 'service') return model;
-  const merged = { ...defaults, id: model.id, enabled: model.enabled, catalog: model.catalog };
-  for (const field of model.catalog.overrides) {
-    if (Object.hasOwn(model, field)) Object.assign(merged, { [field]: structuredClone(model[field]) });
-    else delete merged[field];
-  }
-  return merged;
-}
+export { applyModelDirectoryDefaults as followDirectory } from '@varin/application-client';
 
-export function validCatalogOverrides(value: unknown): value is { overrides: ModelCatalogField[] } {
-  return object(value) && Object.keys(value).every(key => key === 'overrides' || key === 'source') && (value.source === undefined || value.source === 'service') && Array.isArray(value.overrides)
+export function validCatalogOverrides(value: unknown): value is NonNullable<ChannelModel['catalog']> {
+  return object(value) && Object.keys(value).every(key => key === 'overrides' || key === 'source' || key === 'match')
+    && (value.match === undefined || object(value.match) && Object.keys(value.match).every(key => key === 'requestModelId' || key === 'protocol')
+      && typeof value.match.requestModelId === 'string' && value.match.requestModelId.trim().length > 0 && (value.match.protocol === undefined || typeof value.match.protocol === 'string'))
+    && (value.source === undefined || value.source === 'service') && Array.isArray(value.overrides)
     && new Set(value.overrides).size === value.overrides.length && value.overrides.every(field => MODEL_CATALOG_FIELDS.includes(field));
 }

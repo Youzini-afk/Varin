@@ -191,14 +191,20 @@ export class ModelsService {
     if (this.#contributionIssue) issues.push({ code: 'model-contributions-unavailable', message: this.#contributionIssue });
     return { revision: snapshot.revision, channels, types: this.types.list(), directory: this.modelDirectory.status(), ...(issues.length ? { issues } : {}) };
   }
-  async directorySnapshot(typeId: string, channelId?: string) {
+  async directorySnapshot(typeId: string, channelId?: string, requests?: import('@varin/application-client').ModelMetadataRequest[]) {
     await this.modelDirectory.ready;
     const type = this.types.get(typeId);
     if (!type) return fail('channel-type-unavailable', 'Channel type is unavailable');
     this.modelDirectory.activate(typeId);
     const channel = channelId ? (await this.file.read()).document.channels.find(channel => channel.id === channelId && channel.type === typeId) : undefined;
     const models = channel ? await this.#directoryModels(channel) : type.catalog ?? [];
-    return { models: structuredClone(models), status: this.modelDirectory.status() };
+    const resolved = new Map(models.map(model => [model.id, model]));
+    for (const request of requests ?? []) {
+      const defaults = this.modelDirectory.defaults(typeId, request, models);
+      if (defaults) resolved.set(request.id, defaults);
+      else resolved.delete(request.id);
+    }
+    return { models: structuredClone([...resolved.values()]), status: this.modelDirectory.status() };
   }
   #directoryKey(channel: ModelChannel) { return revisionOf([channel.type, channel.baseUrl, channel.connection, channel.authentication, channel.parameters]); }
   async #directoryModels(channel: ModelChannel): Promise<ChannelModel[]> {
@@ -208,8 +214,7 @@ export class ModelsService {
     try {
       if (revisionOf(await this.#scope(channel)) !== connection.scope) return defaults;
       this.validate({ ...channel, models: connection.models });
-      const byId = new Map(defaults.map(model => [model.id, model]));
-      return connection.models.map(model => ({ ...enrichModel(byId.get(model.id), model), enabled: false, operations: model.operations, catalog: { source: 'service', overrides: [] } }));
+      return connection.models.map(model => ({ ...enrichModel(this.modelDirectory.defaults(channel.type, model, defaults), model), enabled: false, operations: model.operations, catalog: { source: 'service', overrides: [] } }));
     } catch { return defaults; }
   }
   startDirectory(fetchImpl: EgressFetch) {
@@ -251,8 +256,8 @@ export class ModelsService {
         const previous = this.#acceptedChannels.get(candidate.id);
         if (previous?.authentication.kind === 'anthropic-federation'
           && (revisionOf(previous.authentication) !== revisionOf(candidate.authentication) || previous.baseUrl !== candidate.baseUrl || previous.enabled !== candidate.enabled)) this.#anthropic.forget(candidate.id);
-        const defaults = candidate.models.some(model => model.catalog) ? new Map((await this.#directoryModels(candidate)).map(model => [model.id, model])) : new Map<string, ChannelModel>();
-        const resolved = { ...candidate, models: candidate.models.map(model => followDirectory(model, defaults.get(model.id))) };
+        const defaults = await this.#directoryModels(candidate);
+        const resolved = { ...candidate, models: candidate.models.map(model => followDirectory(model, this.modelDirectory.defaults(candidate.type, model, defaults))) };
         this.validate(resolved);
         for (const model of resolved.models) {
           const issue = model.tokenizer && this.tokenizers.issue(model.tokenizer);
@@ -465,8 +470,8 @@ export class ModelsService {
   async #captureDraft(input: ModelConnectionDraft) {
     await this.modelDirectory.ready;
     const channel = structuredClone(input.channel);
-    const defaults = new Map((input.secret ? this.types.get(channel.type)?.catalog ?? [] : await this.#directoryModels(channel)).map(model => [model.id, model]));
-    channel.models = channel.models.map(model => followDirectory(model, defaults.get(model.id)));
+    const defaults = input.secret ? this.types.get(channel.type)?.catalog ?? [] : await this.#directoryModels(channel);
+    channel.models = channel.models.map(model => followDirectory(model, this.modelDirectory.defaults(channel.type, model, defaults)));
     if (input.secret !== undefined && (!nonempty(input.secret) || channel.authentication.kind !== 'credential')) return fail('credential-invalid', 'Enter an API key for API key authentication');
     if (input.secret) channel.authentication = { kind: 'credential', reference: `draft:${randomUUID()}` };
     this.validate(channel);
@@ -596,18 +601,20 @@ export class ModelsService {
     const result = await this.#discover(channel, type, () => this.#auth(channel), () => this.currentScope(id), fetchImpl, signal);
     signal?.throwIfAborted();
     if (!sameScope(scope, await this.currentScope(id))) return fail('credential-scope-changed', 'The account changed during model discovery');
-    const models = result.models.map(model => ({ ...model, enabled: false, operations: model.operations ?? ['chat'], catalog: { source: 'service', overrides: [] } } as ChannelModel));
+    const models = (result.facts ?? result.models).map(model => ({ ...model, enabled: false, operations: model.operations ?? ['chat'], catalog: { source: 'service', overrides: [] } } as ChannelModel));
     await this.modelDirectory.remember(channel.id, this.#directoryKey(channel), revisionOf(scope), models);
-    return result;
+    return { models: result.models };
   }
   async discoverDraft(input: ModelConnectionDraft, fetchImpl: EgressFetch, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const captured = await this.#captureDraft(input);
-    try { return await this.#discover(captured.channel, captured.type, () => captured.getAuth(captured.channel.id),
-      captured.currentScope, fetchImpl, signal); }
+    try {
+      const result = await this.#discover(captured.channel, captured.type, () => captured.getAuth(captured.channel.id), captured.currentScope, fetchImpl, signal);
+      return { models: result.models };
+    }
     finally { captured.release(); }
   }
-  async #discover(channel: ModelChannel, type: ChannelType, getAuth: () => Promise<ResolvedCredential>, currentScope: () => Promise<CredentialScope>, fetchImpl: EgressFetch, signal?: AbortSignal) {
+  async #discover(channel: ModelChannel, type: ChannelType, getAuth: () => Promise<ResolvedCredential>, currentScope: () => Promise<CredentialScope>, fetchImpl: EgressFetch, signal?: AbortSignal): Promise<{ models: DiscoveredModel[]; facts?: DiscoveredModel[] }> {
     if (!type.discovery || !type.discoveryRequest || !type.parseDiscovery) {
       if (type.catalog) return { models: structuredClone(type.catalog) };
       return fail('model-discovery-unavailable', 'Add models manually for this channel type');
@@ -631,7 +638,7 @@ export class ModelsService {
       if (!response.ok) return fail('model-discovery-failed', `Model discovery failed (${response.status})`);
       const page: unknown = await response.json();
       signal?.throwIfAborted();
-      for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, { ...enrichModel(type.catalog?.find(preset => preset.id === model.id), model), catalog: { source: 'service', overrides: [] } });
+      for (const model of type.parseDiscovery(page)) if (!models.has(model.id)) models.set(model.id, model);
       if (!sameScope(expected, await currentScope())) return fail('credential-scope-changed', 'The account changed during model discovery');
       cursor = type.discoveryCursor?.(page);
       if (cursor !== undefined) {
@@ -639,6 +646,7 @@ export class ModelsService {
         cursors.add(cursor);
       }
     } while (cursor !== undefined);
-    return { models: [...models.values()] };
+    const facts = [...models.values()];
+    return { facts, models: facts.map(model => ({ ...enrichModel(this.modelDirectory.defaults(type.id, model, type.catalog), model), catalog: { source: 'service', overrides: [] } })) };
   }
 }

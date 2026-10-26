@@ -47,12 +47,39 @@ export interface ChannelModel {
   image?: { api?: 'openai-images' | 'openrouter-images'; paths?: Partial<Record<'generation' | 'editing', string>>; mask?: boolean; parameters?: Record<string, JsonValue> };
   decision?: { api?: 'typesafe-system-one' | 'cloudflare-workers-ai-system-one' | 'llama-cpp-classify'; paths?: ModelDecisionPaths };
   /** Directory defaults follow updates; listed fields remain explicit user choices. */
-  catalog?: { source?: 'service'; overrides: ModelCatalogField[] };
+  catalog?: { source?: 'service'; overrides: ModelCatalogField[]; match?: { requestModelId: string; protocol?: string } };
 }
 export type ModelCatalogField = Exclude<keyof ChannelModel, 'id' | 'enabled' | 'catalog'>;
 export const MODEL_CATALOG_FIELDS: readonly ModelCatalogField[] = ['name', 'protocol', 'requestModelId', 'operations', 'input', 'contextWindow', 'maxOutputTokens', 'reasoning', 'thinking', 'thinkingLevelMap', 'parameters', 'compat', 'image', 'decision', 'tokenizer'];
 export interface ModelDirectoryStatus { revision: string; updatedAt?: number; refreshing: boolean; issue?: 'cache-unavailable' | 'refresh-failed' | 'partial-refresh' | 'cache-write-failed' }
 export interface ModelDirectorySnapshot { models: ChannelModel[]; status: ModelDirectoryStatus }
+/** Resolve metadata for these model identities without exposing channel credentials. */
+export type ModelMetadataRequest = Pick<ChannelModel, 'id'> & Partial<Pick<ChannelModel, 'requestModelId' | 'protocol' | 'operations'>>;
+const inferredModelFields = ['contextWindow', 'maxOutputTokens', 'input', 'reasoning', 'thinking', 'thinkingLevelMap', 'tokenizer', 'compat'] as const;
+
+export function applyModelDirectoryDefaults(model: ChannelModel, defaults?: ChannelModel): ChannelModel {
+  const match = { requestModelId: model.requestModelId ?? model.id, ...(model.protocol ? { protocol: model.protocol } : {}) };
+  const previous = model.catalog?.match;
+  const changed = previous && (previous.requestModelId !== match.requestModelId || previous.protocol !== match.protocol);
+  if (changed) {
+    const { source: _source, ...catalog } = model.catalog!;
+    model = { ...model, catalog: { ...catalog, match } };
+    for (const field of inferredModelFields) if (!model.catalog!.overrides.includes(field)) delete model[field];
+  }
+  if (!defaults || model.catalog?.source === 'service' && defaults.catalog?.source !== 'service') return model;
+  const catalog = model.catalog ?? { overrides: MODEL_CATALOG_FIELDS.filter(field => Object.hasOwn(model, field)) };
+  const merged = { ...defaults, id: model.id, enabled: model.enabled, catalog: { ...catalog, match } };
+  for (const field of catalog.overrides) {
+    if (Object.hasOwn(model, field)) Object.assign(merged, { [field]: structuredClone(model[field]) });
+    else delete merged[field];
+  }
+  if (merged.reasoning === false) {
+    if (!catalog.overrides.includes('thinking')) delete merged.thinking;
+    if (!catalog.overrides.includes('thinkingLevelMap')) delete merged.thinkingLevelMap;
+  }
+  merged.catalog.match = { requestModelId: merged.requestModelId ?? merged.id, ...(merged.protocol ? { protocol: merged.protocol } : {}) };
+  return merged;
+}
 export interface ModelChannel {
   id: string;
   name: string;
@@ -112,7 +139,7 @@ export function createModelConnectionsHttpAPI(generation = getRuntimeEndpointGen
   };
   return {
     read: (signal?: AbortSignal) => post<ModelConnectionsSnapshot>('read', {}, signal),
-    directory: (type: string, signal?: AbortSignal, channelId?: string) => post<ModelDirectorySnapshot>('directory', { type, channelId }, signal),
+    directory: (type: string, signal?: AbortSignal, channelId?: string, models?: ModelMetadataRequest[]) => post<ModelDirectorySnapshot>('directory', { type, channelId, ...(models?.length ? { models } : {}) }, signal),
     refreshDirectory: (signal?: AbortSignal) => post<ModelDirectoryStatus>('directory/refresh', {}, signal),
     save: (channel: ModelChannel, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('save', { channel, expectedRevision }, signal),
     remove: (id: string, expectedRevision: string, signal?: AbortSignal) => post<ModelConnectionsSnapshot>('remove', { id, expectedRevision }, signal),

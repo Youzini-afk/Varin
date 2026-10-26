@@ -31,7 +31,7 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
   };
   const actions = {
     read: () => models.read(),
-    directory: (input: Record<string, unknown>) => models.directorySnapshot(input.type as string, input.channelId as string | undefined),
+    directory: (input: Record<string, unknown>) => models.directorySnapshot(input.type as string, input.channelId as string | undefined, input.models as import('@varin/application-client').ModelMetadataRequest[] | undefined),
     'directory/refresh': () => { void models.modelDirectory.refresh(true); return models.modelDirectory.status(); },
     save: (input: Record<string, unknown>) => models.save(input.channel as Parameters<ModelsService['save']>[0], input.expectedRevision as string),
     remove: (input: Record<string, unknown>) => models.remove(input.id as string, input.expectedRevision as string),
@@ -57,7 +57,12 @@ export function registerModelRoutes(app: Express, models: ModelsService, require
     try {
       const input: unknown = request.body;
       if (!object(input) || input.cwd !== undefined && typeof input.cwd !== 'string'
-        || name === 'directory' && (typeof input.type !== 'string' || input.channelId !== undefined && typeof input.channelId !== 'string')
+        || name === 'directory' && (typeof input.type !== 'string' || input.channelId !== undefined && typeof input.channelId !== 'string'
+          || input.models !== undefined && (!Array.isArray(input.models) || input.models.some(model => !object(model)
+            || typeof model.id !== 'string' || !model.id.trim()
+            || model.requestModelId !== undefined && (typeof model.requestModelId !== 'string' || !model.requestModelId.trim())
+            || model.protocol !== undefined && typeof model.protocol !== 'string'
+            || model.operations !== undefined && (!Array.isArray(model.operations) || model.operations.some(operation => !['chat', 'embedding', 'rerank', 'decision', 'image-generation', 'image-editing'].includes(String(operation)))))))
         || name === 'discover-draft' && (!object(input.channel) || input.secret !== undefined && typeof input.secret !== 'string')
         || ['save', 'remove'].includes(name) && typeof input.expectedRevision !== 'string'
         || ['remove', 'discover'].includes(name) && typeof input.id !== 'string'
