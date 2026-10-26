@@ -37,6 +37,7 @@
 - [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
 
 ## 正在评审的设计
+- [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：Codex、Claude Code、Pi 与 ACP 的会话接入、新会话选择和外部 Agent 设置、异步派发、可选 CLI / Skills / MCP 能力共享及文件恢复；设计提案，尚未实施。
 - [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：本轮体检修复、检索真实启动、默认共享与按次隔离、基线复用/延迟物化及资源回收；设计提案，尚未实施。
 - [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。
 - [科研模式与 Agent 协作](design/research-agent-harness.md)：科研搭档、共享 Worker 与调研，工具披露、预制用途及可选历史继承；不注入模式提示词，设计稿尚未实施。
