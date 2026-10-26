@@ -104,22 +104,39 @@ it('deleting a completed HTTP conversation automatically releases its native his
   const f = await fixture();
   const errors: unknown[] = [];
   let removedObjects = 0;
+  let releaseCollection!: () => void;
+  const deletionCommitted = new Promise<void>(resolve => { releaseCollection = resolve; });
   const maintenance = createContentMaintenance({ runtime: {
     onEvent: f.runtime.onEvent.bind(f.runtime),
     onReady: f.runtime.onReady.bind(f.runtime), onExit: f.runtime.onExit.bind(f.runtime),
-    collectContent: async signal => { const result = await f.runtime.collectContent(signal); removedObjects += result.removedObjects; return result; },
+    collectContent: async signal => {
+      // Startup/onReady may request collection before Delete. Hold only fixture admission,
+      // so the real automatic owner cannot count unrelated startup cleanup as deletion proof.
+      await deletionCommitted;
+      signal?.throwIfAborted();
+      const result = await f.runtime.collectContent(signal);
+      removedObjects += result.removedObjects;
+      return result;
+    },
   }, onError: error => errors.push(error) });
   f.adapter.bindContentMaintenance(maintenance.request);
-  cleanups.push(() => maintenance.dispose());
+  cleanups.push(async () => { releaseCollection(); await maintenance.dispose(); });
   const identity = await f.api.create('content-retirement');
   const receipt = await f.api.submit({ ...identity, key: 'content-retirement-input', expectedHead: null,
     text: 'conversation body '.repeat(8000), model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await expect.poll(async () => (await f.api.run(receipt.run_id)).state, { timeout: 10_000 }).toBe('completed');
   const thread = (await f.runtime.threads()).find(thread => thread.thread_id === identity.threadId)!;
   await f.api.delete({ runtime: identity.runtime, threadId: identity.threadId, key: 'content-retirement-delete', expectedRevision: thread.revision });
+  expect(removedObjects).toBe(0);
+  expect((await f.runtime.historyPage({ branchId: identity.branchId, limit: 1 })).items).not.toHaveLength(0);
+  releaseCollection();
+  // Delete commits a tombstone; retirement is asynchronous. Wait for this branch's
+  // atomic metadata retirement before hydrating history bodies through separate RPCs.
+  await expect.poll(() => f.runtime.historyPage({ branchId: identity.branchId, limit: 1 }),
+    { timeout: 10_000 }).toEqual({ head: null, items: [], previous: null });
   await expect.poll(() => removedObjects, { timeout: 10_000 }).toBeGreaterThan(0);
   expect(await f.runtime.history(identity.branchId)).toEqual([]);
-  await expect(f.api.run(receipt.run_id)).rejects.toThrow();
+  await expect(f.api.run(receipt.run_id)).rejects.toMatchObject({ status: 404, code: 'not-found' });
   expect(errors).toEqual([]);
 }, 30_000);
 

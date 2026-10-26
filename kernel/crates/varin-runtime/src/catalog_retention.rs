@@ -49,11 +49,19 @@ mod tests {
         let survivor = submit(&mut db, "survivor", &text);
         finish(&mut db, &removed.run_id); finish(&mut db, &survivor.run_id);
         let before = db.history("survivor-main").unwrap();
+        let reference = db.history_page("removed-main", None, None, 1).unwrap().items.remove(0);
         let command = delete(&mut db, "removed");
+        // A tombstone hides discovery, but leaves the original holder readable until retirement.
+        assert!(db.history_body_reader(&reference.id).unwrap().chunk(0).is_ok());
         let receipt = db.delete_thread(&command).unwrap();
         let (retired, pending) = retire(&mut db).unwrap();
         assert!(retired > 0); assert_eq!(pending, 0);
         assert!(db.history("removed-main").unwrap().is_empty());
+        let retired_page = db.history_page("removed-main", None, None, 1).unwrap();
+        assert!(retired_page.head.is_none() && retired_page.items.is_empty() && retired_page.previous.is_none());
+        // A page reference is not a lease across RPCs. The same stale body lookup that
+        // can race retirement must reject, even while shared bytes survive for another Thread.
+        assert!(matches!(db.history_body_reader(&reference.id), Err(RuntimeError::NotFound(_))));
         assert!(matches!(db.run(&removed.run_id), Err(RuntimeError::NotFound(_))));
         let collected = db.prepare_content_collection(Default::default()).run();
         assert_eq!(collected.status, ContentCollectionStatus::Completed, "{collected:?}");
