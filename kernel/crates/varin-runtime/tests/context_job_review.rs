@@ -140,7 +140,7 @@ impl ModelProvider for Provider {
     }
 }
 fn binding() -> RequestBinding {
-    RequestBinding { execution_environment: None, direct_tools: None,
+    RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -363,6 +363,10 @@ fn exercise(mode: Mode) {
             "Unpublished preview cannot change history or memory"
         );
         let checkpoint = db.publish_prepared_context_job(prepared).unwrap();
+        assert_eq!(db.context_job(&job.receipt.run_id).unwrap().published_revision, Some(checkpoint.revision));
+        assert_eq!(db.context_job(&job.receipt.run_id).unwrap().history_anchor, head);
+        assert_eq!(db.capture_context_checkpoint("main", &checkpoint.id).unwrap().unwrap().load().unwrap(), checkpoint);
+        assert!(db.capture_context_checkpoint("another-branch", &checkpoint.id).is_err());
         assert_eq!(checkpoint.proposal.through_id, Some(source.input_id));
         assert_eq!(
             checkpoint.proposal.summary,

@@ -1104,6 +1104,13 @@ pub(crate) struct HistoryParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ContextInspectParams {
+    pub(crate) branch_id: String,
+    pub(crate) checkpoint_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContextRefreshParams {
     pub(crate) branch_id: String,
     pub(crate) expected_revision: i64,
@@ -1168,6 +1175,7 @@ pub(crate) struct ThreadUsageParams {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ModelPresentationParams {
     pub(crate) request_ids: Vec<String>,
+    pub(crate) include_context: Option<bool>,
 }
 
 pub(crate) type ThreadCatalogQuery = varin_runtime::catalog::threads::ThreadListQuery;
@@ -4048,7 +4056,7 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "runtime.context_job.resume" => serde_json::from_value::<RunParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
-        "runtime.context.inspect" => serde_json::from_value::<HistoryParams>(params.clone())
+        "runtime.context.inspect" => serde_json::from_value::<ContextInspectParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.context.refresh" => serde_json::from_value::<ContextRefreshParams>(params.clone())

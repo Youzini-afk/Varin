@@ -13,6 +13,7 @@ const empty = (): Summary => ({ counts: { total: 0, user: 0, assistant: 0, tool:
 /** Cache immutable ancestry metadata; read the latest receipt again so late usage can arrive. */
 export class ThreadContextReader {
   private branches = new Map<string, Map<string, Summary>>();
+  private composition = new Map<string, { requestId: string; value: import('@varin/protocol').ModelContextComposition }>();
   constructor(private runtime: Pick<AgentRuntimeClient, 'historyPage' | 'historyItem' | 'modelPresentations'>) {}
 
   async read(branchId: string, headId: string | null, signal?: AbortSignal): Promise<ThreadContextInspection> {
@@ -48,7 +49,13 @@ export class ThreadContextReader {
     }
     const item = summary.latest ? await this.runtime.historyItem(summary.latest, signal) : null;
     const requestId = item ? historyModelRequestId(item) : undefined;
-    const latestRequest = requestId ? (await this.runtime.modelPresentations([requestId], signal))[0] ?? null : null;
+    const cachedComposition = this.composition.get(branchId);
+    const knownComposition = cachedComposition && cachedComposition.requestId === requestId ? cachedComposition.value : undefined;
+    const latestRequest = requestId ? (await this.runtime.modelPresentations([requestId], signal, !knownComposition))[0] ?? null : null;
+    if (latestRequest && requestId) {
+      if (knownComposition) latestRequest.context = knownComposition;
+      else if (latestRequest.context) this.composition.set(branchId, { requestId, value: latestRequest.context });
+    }
     return { head: headId, counts: summary.counts, latestRequest,
       contextRequest: summary.context?.id === summary.latest?.id ? latestRequest : null };
   }

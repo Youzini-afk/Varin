@@ -530,6 +530,7 @@ impl ToolExecutor for ScopedTools {
             .freeze(&schemas)?
             .ok_or_else(|| failed("tool directory did not retain its endpoints"))?;
         Ok(Some(SelectedTools {
+            mcp_tools: active._mcp.iter().flat_map(|mcp| mcp.declarations.iter().map(|tool| tool.schema.name.clone())).collect(),
             direct_tools: varin_runtime::tool_disclosure::direct_tools(&schemas, &self.work_focus),
             generation: active.generation,
             schemas,

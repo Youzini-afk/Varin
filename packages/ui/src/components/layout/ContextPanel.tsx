@@ -840,7 +840,7 @@ export const ContextPanel: React.FC = () => {
   }), [activeModeTabs, effectiveDirectory, sessionTitleById, t]);
 
   const activeNonChatContent = activeTab?.mode === 'context'
-        ? <ContextPanelContent active={isOpen} />
+        ? <ContextPanelContent active={isOpen} identity={activeTab?.thread} jobRunId={activeTab?.targetPath ?? undefined} readOnly={activeTab?.readOnly} />
         : activeTab?.mode === 'threads'
             ? <ThreadFamilyPanel active={isOpen} identity={activeTab.thread} member={activeTab.member} navigationKey={activeTab.touchedAt} />
         : activeTab?.mode === 'ui' && activeTab.targetPath

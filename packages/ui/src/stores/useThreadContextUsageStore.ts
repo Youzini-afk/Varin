@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { subscribeRuntimeEndpointWillChange } from '@varin/application-client';
 import type { ThreadContextInspection, ThreadIdentity, ThreadSnapshot } from '@varin/application-client';
 import type { ModelPresentation, ModelSessionConfiguration } from '@varin/protocol';
+import { contextJobPhase, latestContextJob, type ContextPhase } from '@/lib/contextPresentation';
 
 export interface ThreadContextUsage {
   totalTokens: number;
@@ -31,6 +32,9 @@ export function threadContextUsage(snapshot: ThreadSnapshot, inspection?: Thread
       contextLimit: limit, outputLimit: model.maxOutputTokens ?? undefined };
   };
   if (inspection) return present(inspection.contextRequest);
+  // Publishing a checkpoint does not append a history item. Until inspection
+  // identifies the request's checkpoint, the previous measurement is stale.
+  if (snapshot.context.checkpoint) return null;
   for (let index = snapshot.history.length - 1; index >= 0; index -= 1) {
     const item = snapshot.history[index]!;
     // A new summary changes the prompt; the pre-compaction measurement no longer describes it.
@@ -42,7 +46,7 @@ export function threadContextUsage(snapshot: ThreadSnapshot, inspection?: Thread
 }
 
 interface ContextUsageState {
-  views: Record<string, { cursor: number; head: string | null; usage: ThreadContextUsage | null; inspection?: ThreadContextInspection; error?: string }>;
+  views: Record<string, { cursor: number; head: string | null; usage: ThreadContextUsage | null; inspection?: ThreadContextInspection; error?: string; phase?: ContextPhase; jobRunId?: string }>;
   observe: (snapshot: ThreadSnapshot, inspection?: ThreadContextInspection, error?: string) => void;
 }
 
@@ -53,11 +57,14 @@ export const useThreadContextUsageStore = create<ContextUsageState>()(set => ({
     const key = contextUsageKey(snapshot.identity);
     const previous = state.views[key];
     if (previous && previous.cursor > snapshot.eventCursor) return state;
-    if (!inspection && error && previous?.head === snapshot.historyPage.head) inspection = previous.inspection;
+    if (inspection?.checkpointId !== undefined && inspection.checkpointId !== (snapshot.context.checkpoint?.id ?? null)) return state;
+    if (!inspection && error && previous?.head === snapshot.historyPage.head
+      && previous.inspection?.checkpointId === (snapshot.context.checkpoint?.id ?? null)) inspection = previous.inspection;
     const usage = threadContextUsage(snapshot, inspection);
     const unchanged = JSON.stringify(previous?.usage) === JSON.stringify(usage);
+    const latest = latestContextJob(snapshot);
     return { views: { ...state.views, [key]: { cursor: snapshot.eventCursor, head: snapshot.historyPage.head,
-      usage: unchanged ? previous!.usage : usage, inspection, error } } };
+      usage: unchanged ? previous!.usage : usage, inspection, error, phase: latest ? contextJobPhase(latest, snapshot) : undefined, jobRunId: latest?.run.id } } };
   }),
 }));
 

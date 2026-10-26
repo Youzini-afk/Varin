@@ -128,9 +128,12 @@ export interface ThreadContextInspection {
   latestRequest: import('@varin/protocol').ModelPresentation | null;
   /** Cleared by a compaction until the next model request reports its footprint. */
   contextRequest: import('@varin/protocol').ModelPresentation | null;
+  checkpointId?: string | null;
 }
 /** Durable context records projected by the Host; original conversation history stays intact. */
 export interface ContextJob {
+  history_anchor?: string;
+  published_revision?: number;
   compaction: { producer: ContextCompactionProducer; kind: 'text' | 'model_plan'; sourceCutHash: string; planHash: string };
   request: { compaction: ContextCompactionCandidate | null; summary_recipe: ContextSummaryRecipe; owner_run_id?: string; personalization?: ContextPersonalization; key: string; branch_id: string; through_id: string; expected_revision: number;
     effective_system_prompt: string; instruction_sources: string[]; memory_checkpoint: string | null };
@@ -150,7 +153,10 @@ export interface ContextCheckpoint {
 export interface ThreadContextState {
   checkpoint: ContextCheckpoint | null;
   jobs: Array<{ job: ContextJob; run: Run }>;
+  policy?: { enabled: boolean; backgroundPreparation: boolean; reserveTokens: number; preparationWaterline: number; capacityTokens: number | null };
+  policyError?: string;
 }
+export interface ThreadContextHistory extends ThreadHistoryPage { checkpoint?: ContextCheckpoint | null }
 export interface ThreadCompact extends ThreadIdentity {
   key: string;
   throughId: string;
@@ -432,7 +438,7 @@ export interface ThreadsAPI {
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;
   compact(input: ThreadCompact): Promise<ContextJob>;
   publishContext(identity: ThreadIdentity, runId: string): Promise<ContextCheckpoint>;
-  contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<ThreadHistoryPage>;
+  contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<ThreadContextHistory>;
   cancelContext(identity: ThreadIdentity, runId: string): Promise<RunCancellationReceipt>;
   resumeContext(identity: ThreadIdentity, runId: string): Promise<void>;
   submit(input: ThreadSubmit): Promise<InputSubmitReceipt>;

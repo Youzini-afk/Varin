@@ -27,6 +27,15 @@ interface Job {
 type CompactQuery = Extract<ContextQuery,{action:'compact'}>;
 /** Credentials remain with the existing model authority; Rust owns each summary Run and CAS. */
 export class ContextService implements ContextOwner {
+  private readonly observedPolicies = new Map<string, { runId: string; policy: ContextPolicySnapshot }>();
+  async presentation(run: Run): Promise<NonNullable<import('@varin/application-client').ThreadContextState['policy']>> {
+    const observed = this.observedPolicies.get(run.branch_id);
+    const policy = observed?.runId === run.id ? observed.policy
+      : (await this.readPolicy(run, await this.runtime.launch(run.id), this.lifetime.signal)).policy;
+    const capacityTokens = (run.configuration as { contextWindowTokens?: number }).contextWindowTokens ?? null;
+    return { enabled: policy.enabled, backgroundPreparation: policy.backgroundPreparation, reserveTokens: policy.reserveTokens,
+      preparationWaterline: policy.preparationWaterline, capacityTokens };
+  }
   private readonly jobs=new Map<string,Job>();
   private readonly timing:ContextPreparationTiming;
   // close() ends the current kernel epoch, while the Host owner can be rebound.
@@ -43,7 +52,7 @@ export class ContextService implements ContextOwner {
     private readonly readPolicy:(run:Run,launch:LaunchIntent|null,signal:AbortSignal)=>Promise<ContextPolicyPreparation>,
     private readonly continueRun:(runId:string,signal?:AbortSignal,credentialOwner?:ExistingHostCredentialOwner)=>Promise<void>,
     private readonly budget:ContextBudgetOwner | null, now?:()=>number) { this.timing=new ContextPreparationTiming(now); }
-  close():void {this.lifetime.abort();this.lifetime=new AbortController();for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();this.timing.clear();this.observations.clear();}
+  close():void {this.lifetime.abort();this.lifetime=new AbortController();for(const job of this.jobs.values()) job.controller.abort();this.jobs.clear();this.timing.clear();this.observations.clear();this.observedPolicies.clear();}
   async query(query:ContextQuery,signal:AbortSignal):Promise<ContextResult> {
     signal=AbortSignal.any([signal,this.lifetime.signal]);
     signal.throwIfAborted();
@@ -56,6 +65,7 @@ export class ContextService implements ContextOwner {
     if (query.action === 'execution_environment') return { status: 'ready', environment: await this.runtime.executionEnvironmentForSource(launch?.selection.source, signal) };
     if(query.action==='prepare' || query.action==='decide') {
       const {policy,scope}=await this.readPolicy(run,launch,signal);
+      this.observedPolicies.set(run.branch_id, { runId: run.id, policy });
       signal.throwIfAborted();
       let timing;
       if (query.action==='prepare' && query.observation) {

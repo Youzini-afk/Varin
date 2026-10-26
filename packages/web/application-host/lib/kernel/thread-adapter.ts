@@ -104,6 +104,8 @@ export class ThreadAdapter {
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
   private contextAgent?: ContextAgentOwner;
   bindContextAgent(owner: ContextAgentOwner): void { this.contextAgent = owner; }
+  private readContextPolicy?: (run: import('@varin/protocol').Run) => Promise<NonNullable<ThreadContextState['policy']>>;
+  bindContextPolicy(reader: (run: import('@varin/protocol').Run) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
@@ -659,9 +661,11 @@ export class ThreadAdapter {
     return this.runtime.publishContextJob(runId);
   }
 
-  async contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<ThreadHistoryPage> {
+  async contextHistory(identity: ThreadIdentity, runId: string, cursor?: { headId: string; beforeId: string }): Promise<import('@varin/application-client').ThreadContextHistory> {
     const job = await this.requireContextJob(identity, runId);
-    return this.readHistoryPage(job.receipt.branch_id, cursor);
+    const [page, checkpoint] = await Promise.all([this.readHistoryPage(job.receipt.branch_id, cursor),
+      job.published_revision === undefined ? null : this.runtime.context(identity.branchId, undefined, job.request.key)]);
+    return { ...page, checkpoint };
   }
 
   async cancelContext(identity: ThreadIdentity, runId: string) {
@@ -1015,7 +1019,14 @@ export class ThreadAdapter {
   private contextReader?: ThreadContextReader;
   async contextInspection(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal) {
     await this.requireIdentity(identity);
-    return (this.contextReader ??= new ThreadContextReader(this.runtime)).read(identity.branchId, cursor.headId, signal);
+    const [inspection, checkpoint] = await Promise.all([
+      (this.contextReader ??= new ThreadContextReader(this.runtime)).read(identity.branchId, cursor.headId, signal),
+      this.runtime.context(identity.branchId, signal),
+    ]);
+    // Publication replaces the prompt without appending fake conversation messages.
+    const requestCheckpoint = inspection.contextRequest?.context?.checkpointId;
+    if (requestCheckpoint !== undefined && requestCheckpoint !== (checkpoint?.id ?? null)) inspection.contextRequest = null;
+    return { ...inspection, checkpointId: checkpoint?.id ?? null };
   }
 
   private async readHistoryPage(branchId: string, cursor?: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage> {
@@ -1047,6 +1058,10 @@ export class ThreadAdapter {
       this.currentChildren(identity),
       this.childExecutions(identity),
     ]);
+    if (branch.latest_run && this.readContextPolicy) {
+      try { context.policy = await this.readContextPolicy(branch.latest_run); }
+      catch (error) { context.policyError = error instanceof Error ? error.message : String(error); }
+    }
     const childActivity: NonNullable<ThreadSnapshot['childActivity']> = {};
     const latestExecutions = new Map(childState.executions.map(execution => [execution.child_operation_id, execution]));
     await Promise.all([...latestExecutions.values()].filter(execution => execution.state === 'ready' && execution.receipt).map(async execution => {

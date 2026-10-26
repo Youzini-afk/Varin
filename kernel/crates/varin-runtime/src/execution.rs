@@ -378,6 +378,9 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    /// Tool origin from this exact admitted selection, retained with the immutable request.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcp_tools: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_environment: Option<Value>,
     /// Direct model functions selected for this request; None retains earlier frozen requests.
@@ -1153,6 +1156,7 @@ impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
 }
 
 pub struct SelectedTools {
+    pub mcp_tools: Vec<String>,
     pub direct_tools: Option<Vec<String>>,
     pub generation: u64,
     pub schemas: Vec<ToolSchema>,
@@ -2416,6 +2420,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected {
+                        input.binding.mcp_tools = selected.mcp_tools.clone();
                         input.binding.direct_tools = selected.direct_tools.clone();
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;
@@ -2531,6 +2536,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_tools {
+                        input.binding.mcp_tools = selected.mcp_tools.clone();
                         input.binding.direct_tools = selected.direct_tools.clone();
                         input.binding.tools = selected.schemas.clone();
                         input.binding.tool_schema_generation = selected.generation;

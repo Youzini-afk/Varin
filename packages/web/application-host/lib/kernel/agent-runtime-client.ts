@@ -1034,10 +1034,11 @@ export class AgentRuntimeClient {
   context(
     branchId: string,
     signal?: AbortSignal,
+    checkpointId?: string,
   ): Promise<ContextCheckpoint | null> {
     return this.kernel.agentRuntimeRequest(
       'runtime.context.inspect',
-      { branchId },
+      { branchId, ...(checkpointId ? { checkpointId } : {}) },
       signal,
     );
   }
@@ -1968,8 +1969,8 @@ export class AgentRuntimeClient {
       signal,
     );
   }
-  modelPresentations(requestIds: string[], signal?: AbortSignal): Promise<import('./protocol.generated.js').ModelPresentation[]> {
-    return this.kernel.agentRuntimeRequest('runtime.model.presentations', { requestIds }, signal);
+  modelPresentations(requestIds: string[], signal?: AbortSignal, includeContext = false): Promise<import('./protocol.generated.js').ModelPresentation[]> {
+    return this.kernel.agentRuntimeRequest('runtime.model.presentations', { requestIds, ...(includeContext ? { includeContext } : {}) }, signal);
   }
   historyPage(
     params: HistoryPageParams,

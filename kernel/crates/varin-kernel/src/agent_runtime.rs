@@ -1914,14 +1914,15 @@ pub(crate) fn spawn(
                                 None
                             };
                             let read = if refresh.is_none() {
-                                let p: HistoryParams = serde_json::from_value(params)?;
+                                let p: ContextInspectParams = serde_json::from_value(params)?;
                                 let owner = catalog.lock().map_err(|_| {
                                     KernelError::Storage("catalog owner failed".into())
                                 })?;
                                 owner.head(&p.branch_id).map_err(domain)?;
-                                owner
-                                    .capture_active_checkpoint(&p.branch_id)
-                                    .map_err(domain)?
+                                match p.checkpoint_id {
+                                    Some(id) => owner.capture_context_checkpoint(&p.branch_id, &id),
+                                    None => owner.capture_active_checkpoint(&p.branch_id),
+                                }.map_err(domain)?
                             } else {
                                 None
                             };

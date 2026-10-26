@@ -82,7 +82,7 @@ export function projectChatDialogue(entries: readonly ChatTimelineEntry[], live?
     }
     if (entry.type === 'message' && entry.message.role === 'system') continue;
     const item: DialogueActivity & { kind: 'entry' } = { id: `entry:${entry.id}`, kind: 'entry', entry, sourceId: entry.id, streaming: false };
-    const standalone = customIds.has(entry.id) || entry.type === 'custom_message' && ['thread-message', 'question-answer'].includes(entry.customType)
+    const standalone = customIds.has(entry.id) || entry.type === 'custom_message' && ['thread-message', 'question-answer', 'context-compaction'].includes(entry.customType)
       || entry.type === 'message' && (entry.message.role === 'user'
         || entry.message.role === 'custom' && ['thread-message', 'media'].includes(entry.message.customType));
     if (standalone) { seal(); items.push(item); } else append(item);

@@ -22,6 +22,8 @@ import { useSelectedThreadWorkspace } from '@/hooks/useSelectedThreadWorkspace';
 import { ThreadTokenUsage } from '@/components/thread/ThreadTokenUsage';
 import { ContextUsageDisplay } from '@/components/ui/ContextUsageDisplay';
 import { contextUsageKey, useThreadContextUsageStore } from '@/stores/useThreadContextUsageStore';
+import { contextPhaseLabels } from '@/lib/contextPresentation';
+import { openThreadContext } from '@/lib/openThreadContext';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
@@ -108,7 +110,6 @@ export const Header: React.FC<HeaderProps> = ({
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
   const toggleSidebar = useUIStore((state) => state.toggleSidebar);
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
-  const openContextOverview = useUIStore(state => state.openContextOverview);
   const openContextPlan = useUIStore((state) => state.openContextPlan);
   const closeContextPanel = useUIStore((state) => state.closeContextPanel);
   const activeMainTab = useUIStore((state) => state.activeMainTab);
@@ -119,6 +120,7 @@ export const Header: React.FC<HeaderProps> = ({
   const { threads: threadAPI } = useRuntimeAPIs();
   const identity = useThreadStore(state => state.selectedIdentity);
   const contextUsage = useThreadContextUsageStore(state => identity ? state.views[contextUsageKey(identity)]?.usage : null);
+  const contextPhase = useThreadContextUsageStore(state => identity ? state.views[contextUsageKey(identity)]?.phase : undefined);
   const currentSessionId = identity?.threadId ?? null;
   // A draft that has just become a thread: its title arrives rather than appearing.
   const [titleArrives, setTitleArrives] = React.useState(false);
@@ -940,12 +942,18 @@ export const Header: React.FC<HeaderProps> = ({
             onClick={() => {
               if (!openDirectory) return;
               if (activeContextMode === 'context') closeContextPanel(openDirectory);
-              else openContextOverview(openDirectory);
+              else if (identity) openThreadContext(identity, openDirectory);
             }}
             className="mr-1.5"
             valueClassName="typography-ui-label font-medium leading-none text-foreground"
             percentIconClassName="h-4.5 w-4.5"
           />}
+          {activeMainTab === 'chat' && identity && contextPhase && contextPhase !== 'superseded' && <button type="button"
+            className="mr-2 inline-flex items-center gap-1.5 rounded px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground"
+            onClick={() => openThreadContext(identity, openDirectory ?? undefined)} title={t(contextPhaseLabels[contextPhase])}>
+            {(contextPhase === 'preparing' || contextPhase === 'waiting') && <Icon name="loader-4" className="size-3 animate-spin" />}
+            <span className="max-w-40 truncate">{t(contextPhaseLabels[contextPhase])}</span>
+          </button>}
           <OpenInAppButton directory={actionDirectory} className="mr-1" />
           <WorkbenchServices />
           <ContextPanelControls />

@@ -88,9 +88,12 @@ export interface InferenceSessionStatus {
 
 export interface ModelPresentationParams {
   requestIds: string[];
+  includeContext?: boolean;
 }
 
-export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; }
+export interface ModelPresentation { requestId: string; providerFamily: string; modelId: string; contextTokens?: number | null; completeInputTokens?: number | null; usage: InferenceUsage; context?: ModelContextComposition; mcpTools?: string[]; }
+
+export interface ModelContextComposition { checkpointId: string | null; summaryId: string | null; totalTokens: number; categories: Record<string, number>; parts: Record<string, Record<string, number>>; method: string; unmeasuredMedia: number; unmeasuredProviderItems: number; }
 
 export interface ThreadUsageParams {
   threadId: string;

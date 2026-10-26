@@ -15,6 +15,7 @@ export interface ConversationPresentation {
   outputDurationsMs?: Record<string, number>;
   quote(text: string): void;
   revealQuestion?(operationId: string): void;
+  openContext?(jobRunId?: string): void;
   openFile(callId: string, path: string, line?: number): Promise<void>;
   fileTarget(callId: string, path: string): Promise<Extract<ThreadFileTarget, { kind: 'document' }>>;
   memory?: ThreadMemoryAPI;
