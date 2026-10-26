@@ -96,7 +96,8 @@ export default defineConfig({
   ],
   resolve: {
     alias: [
-      { find: '@varin/application-client', replacement: path.resolve(__dirname, '../application-client/src/index.ts') },
+      { find: /^@varin\/application-client$/, replacement: path.resolve(__dirname, '../application-client/src/index.ts') },
+      { find: '@varin/application-client/settings-locales', replacement: path.resolve(__dirname, '../application-client/src/settings-locales') },
       { find: '@varin/extension-contract', replacement: path.resolve(__dirname, '../extension-contract/src/index.ts') },
       { find: '@varin/extension-loader', replacement: path.resolve(__dirname, '../extension-loader/src/index.ts') },
       { find: '@varin/extension-sdk', replacement: path.resolve(__dirname, '../extension-sdk/src/index.ts') },
