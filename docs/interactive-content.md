@@ -62,6 +62,9 @@ window.varinUI.setContext({ selectedPlan: "A", monthlyPayment: 2100 });
 该宿主操作只添加输入框引用，不自动发消息。页面没有模型请求、文件系统或 Host 凭据接口。
 
 HTML 在不共享主页面 origin 的 `allow-scripts` 沙盒运行。主题使用 Varin 的实际颜色、字体和减少动态效果偏好。
+`--background`、`--foreground`、`--muted`、`--muted-foreground`、`--primary`、`--primary-foreground`、
+`--border`、`--card`、`--card-foreground` 随应用主题更新，可用于同时适配亮色与暗色。
+透明底色是正文的默认值；作品明确设置的背景、文字、根节点样式和类名成套保留，避免只去掉暗色背景却留下浅色文字。
 相对样式、脚本、数据和静态模块导入解析到作品文件；字面量动态导入也支持，计算生成的模块路径不经过打包转换。
 `media:<resourceId>` 使用当前会话已有图片资源，保存时固定其字节。模块名 `d3`、`chart.js/auto` 分别映射到固定的
 7.9.0、4.4.8 网络版本，按需加载；其他外部资源仍需要网络。下载生成包含本地文件、媒体和状态的 HTML，保留外部依赖。

@@ -2,9 +2,9 @@
   "metadata": {
     "id": "varin-light",
     "name": "Varin",
-    "description": "Neutral off-white surfaces with clear elevation, blue accents and Vitesse syntax",
+    "description": "Soft neutral surfaces, graphite text, muted blue accents and Vitesse syntax",
     "author": "Varin",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "variant": "light",
     "tags": [
       "light",
@@ -16,34 +16,34 @@
   },
   "colors": {
     "primary": {
-      "base": "#2563eb",
-      "hover": "#1d4ed8",
-      "active": "#1e40af",
-      "foreground": "#ffffff",
-      "muted": "#2563eb66",
-      "emphasis": "#1d4ed8"
+      "base": "#4b6fac",
+      "hover": "#4266a5",
+      "active": "#38588e",
+      "foreground": "#fafafa",
+      "muted": "#4b6fac66",
+      "emphasis": "#4266a5"
     },
     "surface": {
-      "background": "#fafafa",
-      "foreground": "#242424",
-      "muted": "#ffffff",
-      "mutedForeground": "#666666",
-      "elevated": "#ffffff",
-      "elevatedForeground": "#242424",
+      "background": "#f3f3f3",
+      "foreground": "#383838",
+      "muted": "#f7f7f7",
+      "mutedForeground": "#686868",
+      "elevated": "#fafafa",
+      "elevatedForeground": "#383838",
       "overlay": "#00000033",
-      "subtle": "#eaeaea"
+      "subtle": "#e5e5e5"
     },
     "interactive": {
-      "border": "#dedede",
-      "borderHover": "#bcbcbc",
-      "borderFocus": "#2563eb88",
-      "selection": "#2563eb26",
-      "selectionForeground": "#242424",
-      "focus": "#2563eb",
-      "focusRing": "#2563eb40",
-      "cursor": "#242424",
-      "hover": "#ebebeb",
-      "active": "#e3e3e3"
+      "border": "#d8d8d8",
+      "borderHover": "#b6b6b6",
+      "borderFocus": "#4b6fac88",
+      "selection": "#4b6fac26",
+      "selectionForeground": "#383838",
+      "focus": "#4b6fac",
+      "focusRing": "#4b6fac40",
+      "cursor": "#383838",
+      "hover": "#e9e9e9",
+      "active": "#dfdfdf"
     },
     "status": {
       "error": "#b7493f",
@@ -131,19 +131,19 @@
       }
     },
     "markdown": {
-      "body": "#383838",
-      "secondary": "#666666",
-      "heading1": "#242424",
-      "heading2": "#242424",
-      "heading3": "#242424",
-      "heading4": "#242424",
-      "bold": "#292929",
-      "italic": "#383838",
+      "body": "#414141",
+      "secondary": "#686868",
+      "heading1": "#303030",
+      "heading2": "#303030",
+      "heading3": "#303030",
+      "heading4": "#303030",
+      "bold": "#353535",
+      "italic": "#414141",
       "blockquote": "#555555",
       "listMarker": "#737373",
-      "hr": "#dedede",
-      "codeBackground": "#f3f3f3",
-      "codeBorder": "#dedede",
+      "hr": "#d8d8d8",
+      "codeBackground": "#ededed",
+      "codeBorder": "#d8d8d8",
       "codeForeground": "#383838",
       "codeComment": "#707070",
       "codeKeyword": "#805c83",
@@ -154,37 +154,37 @@
       "codeProperty": "#383838",
       "codeType": "#65527f",
       "codeOperator": "#666666",
-      "tableHeader": "#ffffff",
-      "tableBorder": "#dedede"
+      "tableHeader": "#eaeaea",
+      "tableBorder": "#d8d8d8"
     },
     "chat": {
-      "userMessage": "#242424",
-      "userMessageBackground": "#eeeeee",
-      "assistantMessage": "#383838",
-      "assistantMessageBackground": "#fafafa",
-      "timestamp": "#666666",
-      "divider": "#dedede"
+      "userMessage": "#383838",
+      "userMessageBackground": "#e8e8e8",
+      "assistantMessage": "#414141",
+      "assistantMessageBackground": "#f3f3f3",
+      "timestamp": "#686868",
+      "divider": "#d8d8d8"
     },
     "tools": {
-      "background": "#ffffff",
-      "border": "#dedede",
-      "headerHover": "#ebebeb",
-      "icon": "#666666",
-      "title": "#242424",
-      "description": "#666666",
+      "background": "#f7f7f7",
+      "border": "#d8d8d8",
+      "headerHover": "#e9e9e9",
+      "icon": "#686868",
+      "title": "#383838",
+      "description": "#686868",
       "edit": {
         "added": "#2c751e",
         "addedBackground": "#2c751e25",
         "removed": "#ab5959",
         "removedBackground": "#ab595925",
-        "lineNumber": "#666666"
+        "lineNumber": "#686868"
       }
     },
     "header": {
-      "background": "#f2f2f2"
+      "background": "#eaeaea"
     },
     "sidebar": {
-      "background": "#f2f2f2"
+      "background": "#eaeaea"
     }
   },
   "config": {
