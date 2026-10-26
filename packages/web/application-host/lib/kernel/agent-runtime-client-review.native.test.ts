@@ -733,4 +733,10 @@ it('file write and edit return real applied receipts while a stale read version 
   await f.runtimeClient.continueFromLaunch(run.run_id, next.run_id);
   await expect.poll(async () => (await f.runtimeClient.run(next.run_id)).state, { timeout: 10_000 }).toBe('completed');
   expect(successorRead).toContain('alpha\\ngamma\\n');
+  // The recovery panel supplies the public, tagged conversation identity.
+  const conversation = { kind: 'thread' as const, threadId: 'mutation-thread', branchId: 'mutation-conversation' };
+  const sources = await f.runtimeClient.recoverySources(conversation);
+  expect(sources).toMatchObject([{ runId: next.run_id, source: { workspace_id: 'source-workspace', mode: 'materialized' } }]);
+  expect(await f.runtimeClient.recoveryWorkspaces(conversation)).toContainEqual(sources[0]!.source);
+  await expect(f.runtimeClient.recoverySources({ ...conversation, threadId: 'another-thread' })).rejects.toThrow(/recovery branch owner differs/);
 }, 30_000);

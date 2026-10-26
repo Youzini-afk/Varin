@@ -939,10 +939,10 @@ export class AgentRuntimeClient {
     return this.kernel.agentRuntimeRequest('runtime.operation.recovery.anchor', { operationId }, signal);
   }
   recoveryWorkspaces(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<import('./protocol.generated.js').LaunchSource[]> {
-    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.workspaces', input, signal);
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.workspaces', { threadId: input.threadId, branchId: input.branchId }, signal);
   }
   recoverySources(input: { threadId: string; branchId: string }, signal?: AbortSignal): Promise<Array<{ runId: string; source: import('./protocol.generated.js').LaunchSource }>> {
-    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.sources', input, signal);
+    return this.kernel.agentRuntimeRequest('runtime.branch.recovery.sources', { threadId: input.threadId, branchId: input.branchId }, signal);
   }
   recoveryRange(input: import('./protocol.generated.js').NavigationSelectParams, signal?: AbortSignal): Promise<import('./protocol.generated.js').RecoveryRangeTurn[]> {
     return this.kernel.agentRuntimeRequest('runtime.branch.recovery.range', input, signal);
