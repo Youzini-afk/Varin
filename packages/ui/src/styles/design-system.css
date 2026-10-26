@@ -27,41 +27,41 @@
     --text-settings-page-title: 1.125rem;
 
     /* Initial light palette; matches the built-in Varin theme before hydration. */
-    --background: #fafafa;
-    --foreground: #242424;
-    --card: #ffffff;
-    --card-foreground: #242424;
-    --popover: #ffffff;
-    --popover-foreground: #242424;
-    --primary: #2563eb;
+    --background: #f3f3f3;
+    --foreground: #383838;
+    --card: #fafafa;
+    --card-foreground: #383838;
+    --popover: #fafafa;
+    --popover-foreground: #383838;
+    --primary: #4b6fac;
     --primary-base: var(--primary);
-    --primary-hover: #1d4ed8;
-    --primary-foreground: #ffffff;
-    --secondary: #ffffff;
-    --secondary-foreground: #242424;
-    --muted: #ffffff;
-    --muted-foreground: #666666;
-    --accent: #eaeaea;
-    --accent-foreground: #242424;
+    --primary-hover: #4266a5;
+    --primary-foreground: #fafafa;
+    --secondary: #f7f7f7;
+    --secondary-foreground: #383838;
+    --muted: #f7f7f7;
+    --muted-foreground: #686868;
+    --accent: #e5e5e5;
+    --accent-foreground: #383838;
     --destructive: #b7493f;
     --destructive-foreground: #ffffff;
-    --border: #dedede;
-    --input: #dedede;
-    --ring: #2563eb40;
+    --border: #d8d8d8;
+    --input: #d8d8d8;
+    --ring: #4b6fac40;
     --radius: 0.4375rem;
     --chart-1: #2d72c4;
     --chart-2: #5f8d3d;
     --chart-3: #b35017;
     --chart-4: #b7493f;
     --chart-5: #8d6c15;
-    --sidebar: #f2f2f2;
-    --sidebar-foreground: #242424;
-    --sidebar-primary: #2563eb;
-    --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #eaeaea;
-    --sidebar-accent-foreground: #242424;
-    --sidebar-border: #dedede;
-    --sidebar-ring: #2563eb40;
+    --sidebar: #eaeaea;
+    --sidebar-foreground: #383838;
+    --sidebar-primary: #4b6fac;
+    --sidebar-primary-foreground: #fafafa;
+    --sidebar-accent: #e5e5e5;
+    --sidebar-accent-foreground: #383838;
+    --sidebar-border: #d8d8d8;
+    --sidebar-ring: #4b6fac40;
   }
 
   .dark {

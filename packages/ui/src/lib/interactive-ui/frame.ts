@@ -135,6 +135,10 @@ function frameRuntime() {
     parsed.querySelectorAll('link[href],img[src],source[src],audio[src],video[src]').forEach(element => {
       const attr = element.hasAttribute('href') ? 'href' : 'src'; element.setAttribute(attr, resolve(message.entry, element.getAttribute(attr)!));
     });
+    // Root classes/variables are part of the authored palette too. Keep the
+    // private frame channel while replacing the work's own document attributes.
+    for (const attribute of [...document.documentElement.attributes]) if (attribute.name !== 'data-channel' && !parsed.documentElement.hasAttribute(attribute.name)) document.documentElement.removeAttribute(attribute.name);
+    for (const attribute of [...parsed.documentElement.attributes]) if (attribute.name !== 'data-channel' && document.documentElement.getAttribute(attribute.name) !== attribute.value) document.documentElement.setAttribute(attribute.name, attribute.value);
     for (const attribute of [...document.body.attributes]) if (!parsed.body.hasAttribute(attribute.name)) document.body.removeAttribute(attribute.name);
     for (const attribute of [...parsed.body.attributes]) document.body.setAttribute(attribute.name, attribute.value);
     const incoming = document.createElement('div'); incoming.id = 'work';
@@ -233,7 +237,10 @@ function frameRuntime() {
 }
 export function uiFrameDocument(channel: string, inline = false) {
   const layout = inline ? `
-    html,body{width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important;background:transparent!important}
+    html,body{width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important}
+    /* Transparency is a default, not a palette override. An authored dark
+       surface must stay paired with its light text when the host is light. */
+    :where(html,body){background:transparent}
     body{display:block!important}
     #work{display:flow-root;min-width:0;max-width:100%;overflow-wrap:anywhere}
     #work :where(*){min-width:0}
@@ -251,5 +258,5 @@ export function uiThemeCss(element: Element = document.body) {
   const computed = getComputedStyle(document.documentElement);
   const vars = ['background', 'foreground', 'muted', 'muted-foreground', 'primary', 'primary-foreground', 'border', 'card', 'card-foreground'].map(name => `--${name}:${computed.getPropertyValue(`--${name}`)};`).join('');
   const typography = getComputedStyle(element);
-  return `:root{${vars}color-scheme:${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}}body{background:var(--background);color:var(--foreground);font-family:${typography.fontFamily};font-size:${typography.fontSize};line-height:${typography.lineHeight}}`;
+  return `:root{${vars}color-scheme:${document.documentElement.classList.contains('dark') ? 'dark' : 'light'}}:where(html){background:var(--background);color:var(--foreground)}:where(body){font-family:${typography.fontFamily};font-size:${typography.fontSize};line-height:${typography.lineHeight}}`;
 }
