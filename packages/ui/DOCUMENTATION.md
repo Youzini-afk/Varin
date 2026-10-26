@@ -55,6 +55,12 @@ history item's original source through the Host before opening Documents; the se
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports
 remain attached to their original execution. Context summary history is read through its parent-owned job.
 
+Chat file menus capture their link's path and source when opened. Tool links register their own
+conversation resolver, including links in nested retrieval traces; Markdown links retain their resolved
+directory. Copy contents reads saved text through Documents, while Save as downloads original bytes
+through Files with that directory. Installed-editor choices reuse the desktop app registry without
+changing its default. Native open/reveal actions are available only for the local desktop Host.
+
 `useThreadNextStep` observes one Host-owned suggestion for a settled user turn. The hook fences results by
 Host, branch, Run and history head, while settings changes invalidate the displayed receipt. Ghost text is a
 CodeMirror placeholder, not draft text. `ThreadComposer` accepts it through the editor's normal insertion

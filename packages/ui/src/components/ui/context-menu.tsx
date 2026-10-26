@@ -6,8 +6,10 @@ import {
   dropdownMenuItemClass,
   dropdownMenuPopupClass,
   dropdownMenuSeparatorClass,
+  dropdownMenuSubTriggerClass,
 } from "./dropdown-menu.styles";
 import { MenuHighlight } from "./MenuHighlight";
+import { Icon } from '@/components/icon/Icon';
 
 const ContextMenuPortalContext = React.createContext<HTMLElement | null>(null);
 
@@ -72,10 +74,36 @@ function ContextMenuSeparator({ className, ...props }: React.ComponentProps<type
   return <BaseContextMenu.Separator className={cn(dropdownMenuSeparatorClass, className)} {...props} />;
 }
 
+function ContextMenuSub(props: React.ComponentProps<typeof BaseContextMenu.SubmenuRoot>) {
+  return <BaseContextMenu.SubmenuRoot {...props} />;
+}
+
+function ContextMenuSubTrigger({ className, children, ...props }: React.ComponentProps<typeof BaseContextMenu.SubmenuTrigger>) {
+  return <BaseContextMenu.SubmenuTrigger className={cn(dropdownMenuSubTriggerClass, className)} {...props}>
+    {children}<Icon name="arrow-right-s" className="ml-auto size-3.5" />
+  </BaseContextMenu.SubmenuTrigger>;
+}
+
+function ContextMenuSubContent({ className, children, ...props }: React.ComponentProps<typeof BaseContextMenu.Popup>) {
+  const container = React.useContext(ContextMenuPortalContext);
+  return <BaseContextMenu.Portal container={container || undefined}>
+    <BaseContextMenu.Positioner className="app-region-no-drag z-50">
+      <BaseContextMenu.Popup data-slot="dropdown-menu-sub-content"
+        style={{ backgroundColor: 'var(--surface-elevated)', color: 'var(--surface-elevated-foreground)' }}
+        className={cn(dropdownMenuPopupClass, 'overflow-y-auto', className)} {...props}>
+        <MenuHighlight />{children}
+      </BaseContextMenu.Popup>
+    </BaseContextMenu.Positioner>
+  </BaseContextMenu.Portal>;
+}
+
 export {
   ContextMenu,
   ContextMenuTrigger,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubTrigger,
+  ContextMenuSubContent,
 };

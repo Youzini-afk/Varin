@@ -11,6 +11,9 @@ import { toast } from '@/components/ui';
 import { toolValueLabel } from './toolLabels';
 import { ToolHeadingText } from './ToolHeadingText';
 import { toolSubject, subjectJoin } from './toolSubject';
+import { getRuntimeKey } from '@varin/application-client';
+import { useChatFileTarget, type ChatFileTarget } from './chatFileTargets';
+import { workspacePathFromResourceId } from '@/lib/documents/path';
 
 const values = (value: unknown) => Array.isArray(value) ? value : [];
 const position = (value: unknown, zeroBased = false): number | undefined =>
@@ -32,7 +35,17 @@ function SymbolChildren({ items, callId, path, prefix }: { items: unknown[]; cal
 
 export function ToolFileLink({ callId, path, line, label }: { callId: string; path: string; line?: number; label?: string }) {
   const conversation = useOptionalConversationPresentation();
-  return <button type="button" className="tool-file-link" title={path} disabled={!conversation || !path}
+  const target = React.useMemo<ChatFileTarget | null>(() => conversation ? {
+    path, runtimeKey: getRuntimeKey(), open: () => conversation.openFile(callId, path, line),
+    resolve: async () => {
+      const resolved = await conversation.fileTarget(callId, path);
+      return { path: workspacePathFromResourceId(resolved.root, resolved.resourceId), directory: resolved.root,
+        resource: { workspaceId: resolved.workspaceId, resourceId: resolved.resourceId } };
+    },
+  } : null, [conversation, callId, path, line]);
+  const ref = useChatFileTarget(target);
+  return <button ref={ref} type="button" className="tool-file-link" title={path} disabled={!conversation || !path}
+    data-varin-file-link={target && path ? 'true' : undefined} data-varin-file-path={path}
     onClick={() => void conversation?.openFile(callId, path, line).catch(error => toast.error(String(error)))}>
     <FileTypeIcon filePath={path} className="size-3.5 shrink-0" />
     <span className="truncate">{label || path}</span>{line !== undefined && <span className="shrink-0 font-mono typography-micro">L{line}</span>}

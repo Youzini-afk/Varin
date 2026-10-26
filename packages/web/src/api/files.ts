@@ -8,7 +8,7 @@ import {
   FilesystemError,
   parseFilesystemErrorReason,
 } from '@varin/application-client';
-import { runtimeFetch } from '@varin/application-client';
+import { runtimeFetch, getRuntimeEndpointGeneration } from '@varin/application-client';
 
 const normalizePath = (path: string): string => path.replace(/\\/g, '/');
 
@@ -265,17 +265,21 @@ export const createWebFilesAPI = ({ getDirectory }: WebFilesAPIOptions): FilesAP
     return { success: Boolean((result as { success?: boolean }).success) };
   },
 
-  async downloadFile(path: string): Promise<void> {
+  async downloadFile(path: string, options): Promise<void> {
+    const generation = getRuntimeEndpointGeneration();
     const target = normalizePath(path);
     const response = await runtimeFetch('/api/fs/raw', {
-      query: { path: target, download: true },
-      headers: directoryHeaders(getDirectory),
+      query: { path: target, download: true, ...(options?.outsideFileGrant ? { outsideFileGrant: options.outsideFileGrant } : {}) },
+      headers: directoryHeaders(getDirectory, options?.directory),
+      ...(options?.signal ? { signal: options.signal } : {}),
     });
     if (!response.ok) {
       throw new Error(`Download failed (${response.status})`);
     }
 
     const blob = await response.blob();
+    options?.signal?.throwIfAborted();
+    if (generation !== getRuntimeEndpointGeneration()) throw new DOMException('Host changed', 'AbortError');
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;

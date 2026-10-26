@@ -18,6 +18,8 @@ import { chatContentText } from './extensionPresentation';
 import { addContentReference } from '@/lib/agent-editor/attachments';
 import { ReferenceNavigationContext } from './ReferenceNavigation';
 import { fileToImageAttachment } from '@/components/chat/composer/imageAttachments';
+import { ChatFileMenu } from './ChatFileMenu';
+import { ChatFileTargetsContext, type ChatFileTarget } from './chatFileTargets';
 
 const SOURCE_LINK = '#varin-chat-source:';
 export const CHAT_QUOTE_EVENT = 'varin:chat-quote';
@@ -58,6 +60,7 @@ interface MenuTarget {
   passages?: ChatMemoryPassage[];
   complete?: boolean;
   runtimeKey: string;
+  file?: ChatFileTarget;
 }
 
 export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
@@ -73,6 +76,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
   }, [navigation, props.onRevealEntry]);
   const root = React.useRef<HTMLDivElement>(null);
   const [sources] = React.useState(() => new Map<HTMLElement, ChatSourceData>());
+  const [fileTargets] = React.useState(() => new Map<HTMLElement, ChatFileTarget>());
   const [open, setOpen] = React.useState(false);
   const [target, setTarget] = React.useState<MenuTarget | null>(null);
   const targetRef = React.useRef<MenuTarget | null>(null);
@@ -92,9 +96,10 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
 
   const capture = (node: EventTarget | null): MenuTarget | null => {
     const element = node instanceof Element ? node : null;
+    const file = element?.closest<HTMLElement>('[data-varin-file-link="true"]');
     if (!element || !root.current?.contains(element)
       || element.closest('input,textarea,[contenteditable="true"]')
-      || (element.closest('button') && !element.closest('[data-chat-more]'))) return null;
+      || (element.closest('button') && !file && !element.closest('[data-chat-more]'))) return null;
     const runtimeKey = getRuntimeKey();
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
@@ -116,10 +121,19 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       }
     }
     const image = element.closest<HTMLImageElement>('img');
-    if (image) return { kind: 'image', text: '', href: image.currentSrc || image.src, element: image.closest('a') ?? image,
+    if (image && file?.tagName !== 'BUTTON') return { kind: 'image', text: '', href: image.currentSrc || image.src, element: image.closest('a') ?? image,
       sourceEntryId: image.closest<HTMLElement>('[data-conversation-entry-id]')?.dataset.conversationEntryId, runtimeKey };
-    const file = element.closest<HTMLElement>('[data-varin-file-link="true"]');
-    if (file) return { kind: 'file', text: file.getAttribute('data-varin-file-path') || file.textContent || '', element: file, runtimeKey };
+    if (file) {
+      const path = file.getAttribute('data-varin-file-path') || file.textContent || '';
+      const captured = fileTargets.get(file) ?? {
+        path, directory: file.getAttribute('data-varin-file-directory') || undefined, runtimeKey,
+        open: () => {
+          if (!file.isConnected || file.getAttribute('data-varin-file-path') !== path) throw new Error(t('chat.context.sourceUnavailable'));
+          file.click();
+        },
+      };
+      return { kind: 'file', text: captured.path, element: file, runtimeKey, file: captured };
+    }
     const link = element.closest<HTMLAnchorElement>('a[href]');
     if (link) return { kind: 'link', text: link.getAttribute('href') || '', href: link.href, element: link, runtimeKey };
     const source = [...sources].find(([sourceElement]) => sourceElement.contains(element))?.[1];
@@ -197,7 +211,7 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
       } else await navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
     }
   };
-  return <ChatActionsContext.Provider value={context}>
+  return <ChatActionsContext.Provider value={context}><ChatFileTargetsContext.Provider value={fileTargets}>
     <ContextMenu open={open} onOpenChange={(next, details) => {
       if (next && !freeze(details.event.target)) { details.cancel(); return; }
       setOpen(next);
@@ -227,9 +241,9 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
           <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'copy'))}>{t('chat.context.copyImage')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform((value) => imageAction(value, 'save'))}>{t('chat.context.saveImage')}</ContextMenuItem>
-        </> : target?.kind === 'link' || target?.kind === 'file' ? <>
-          <ContextMenuItem onClick={() => perform(openTarget)}>{t(target.kind === 'file' ? 'chat.context.openFile' : 'chat.context.openLink')}</ContextMenuItem>
-          <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t(target.kind === 'file' ? 'chat.context.copyPath' : 'chat.context.copyLink')}</ContextMenuItem>
+        </> : target?.kind === 'file' && target.file ? <ChatFileMenu target={target.file} /> : target?.kind === 'link' ? <>
+          <ContextMenuItem onClick={() => perform(openTarget)}>{t('chat.context.openLink')}</ContextMenuItem>
+          <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t('chat.context.copyLink')}</ContextMenuItem>
         </> : target ? <>
           <ContextMenuItem onClick={() => perform((value) => copy(value.text))}>{t(target.kind === 'turn' ? 'chat.context.copyTurn' : target.kind === 'code' ? 'chat.context.copyCode' : 'chat.context.copy')}</ContextMenuItem>
           <ContextMenuItem onClick={() => perform(quote)}>{t('chat.context.quote')}</ContextMenuItem>
@@ -256,5 +270,5 @@ export const ChatContextMenu: React.FC<Pick<ChatTimelineProps,
         <img src={imagePreview} alt={t('chat.context.openImage')} className="max-h-[75dvh] w-full object-contain" />
       </DialogContent>
     </Dialog> : null}
-  </ChatActionsContext.Provider>;
+  </ChatFileTargetsContext.Provider></ChatActionsContext.Provider>;
 };
