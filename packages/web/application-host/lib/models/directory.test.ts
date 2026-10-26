@@ -87,3 +87,42 @@ test('account discovery stays scoped to its actual connection and account withou
   await models.storeCredential('account-two', reference);
   expect((await models.directorySnapshot(channel.type, channel.id)).models).toEqual([]);
 });
+
+test('custom channels fill metadata for decorated upstream IDs without changing user fields or the request route', async () => {
+  const models = await fixture();
+  const preset = (await models.directorySnapshot('deepseek')).models.find(model => model.id === 'deepseek-flash')!;
+  const model = { id: 'local-alias', requestModelId: 'team/DEEPSEEK-FLASH-fast', name: 'My model', enabled: true, operations: ['chat' as const], contextWindow: 22222 };
+  const channel: ModelChannel = { id: 'custom', name: 'Custom', type: 'openai-compatible', enabled: true, baseUrl: 'https://relay.example/v1',
+    authentication: { kind: 'none' }, parameters: {}, models: [model] };
+  await models.save(channel, (await models.read()).revision);
+  const captured = await models.captureModel(channel.id, model.id);
+  try {
+    expect(captured.model).toMatchObject({ requestModelId: model.requestModelId, contextWindow: 22222, maxTokens: preset.maxOutputTokens,
+      api: 'openai-completions', baseUrl: channel.baseUrl, thinking: preset.thinking });
+  } finally { captured.release(); }
+  const lookup = await models.directorySnapshot(channel.type, channel.id, [model]);
+  expect(lookup.models.find(value => value.id === model.id)).toMatchObject({ id: model.id, requestModelId: model.requestModelId, contextWindow: preset.contextWindow });
+  const stored = JSON.parse(await readFile(join(models.directory, 'models.json'), 'utf8'));
+  expect(stored.channels[0].models[0]).toEqual(model);
+});
+
+test('discovered IDs inherit refreshed metadata while the account cache retains only facts the service actually supplied', async () => {
+  const models = await fixture();
+  const id = 'relay/DEEPSEEK-FLASH-fast';
+  const channel: ModelChannel = { id: 'custom', name: 'Custom', type: 'openai-compatible', enabled: true, baseUrl: 'https://relay.example/v1',
+    authentication: { kind: 'none' }, parameters: {}, models: [] };
+  await models.save(channel, (await models.read()).revision);
+  const discovered = await models.discover(channel.id, async () => Response.json({ data: [{ id }] }));
+  expect(discovered.models[0]?.contextWindow).toBeGreaterThan(0);
+  channel.models = [{ ...discovered.models[0]!, enabled: true, operations: ['chat'] }];
+  await models.save(channel, (await models.read()).revision);
+  const stop = models.modelDirectory.start(async url => String(url) === CHANNEL_DIRECTORY_URL ? new Response(null, { status: 503 }) : Response.json({ deepseek: { npm: '@ai-sdk/openai-compatible', models: {
+    'deepseek-flash': { modalities: { input: ['text'], output: ['text'] }, limit: { context: 345678, output: 45678 }, reasoning: false },
+  } } }));
+  try { await models.modelDirectory.refresh(); } finally { stop(); }
+  const updated = (await models.read()).channels[0]!.models[0]!;
+  expect(updated).toMatchObject({ id, contextWindow: 345678, maxOutputTokens: 45678, reasoning: false });
+  expect(updated.thinking).toBeUndefined();
+  const cache = JSON.parse(await readFile(join(models.directory, 'model-directory.json'), 'utf8'));
+  expect(cache.connections.custom.models[0].contextWindow).toBeUndefined();
+});

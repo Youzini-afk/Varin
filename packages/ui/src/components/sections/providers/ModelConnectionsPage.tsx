@@ -1,5 +1,5 @@
 import React from 'react';
-import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, MODEL_CATALOG_FIELDS, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
+import { applyModelDirectoryDefaults, createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, registerRuntimeEndpointSwitchBlocker, MODEL_CATALOG_FIELDS, type ModelMetadataRequest, type ChannelModel, type ModelChannel, type ModelConnectionOptions, type ModelConnectionsSnapshot, type DiscoveredModel, type ConnectionAuthentication, type AuthorizationState } from '@varin/application-client';
 import { SettingsPageLayout } from '../shared/SettingsPageLayout';
 import { ConnectionSettings } from './ConnectionSettings';
 import { ModelConfiguration } from './ModelConfiguration';
@@ -83,12 +83,27 @@ function ModelConnectionsEditor({ host }: { host: number }) {
   const catalogKey = draft ? `${draft.id}:${accountDirectory ? 'account' : 'public'}` : '';
   const type = typeInfo ? { ...typeInfo, catalog: catalogs[catalogKey] ?? [] } : undefined;
   const selectedType = draft?.type;
+  const metadataRequests = JSON.stringify(draft?.models.map(({ id, requestModelId, protocol, operations }) => ({ id, requestModelId, protocol, operations })) ?? []);
   React.useEffect(() => {
     if (!selectedType) return;
     const controller = new AbortController();
-    void api.directory(selectedType, controller.signal, accountDirectory ? draft?.id : undefined).then(value => { if (!controller.signal.aborted) setCatalogs(previous => ({ ...previous, [catalogKey]: value.models })); }, error => { if (!controller.signal.aborted) setError(String(error)); });
+    const requests: ModelMetadataRequest[] = JSON.parse(metadataRequests);
+    void api.directory(selectedType, controller.signal, accountDirectory ? draft?.id : undefined, requests).then(value => {
+      if (controller.signal.aborted) return;
+      setCatalogs(previous => ({ ...previous, [catalogKey]: value.models }));
+      const defaults = new Map(value.models.map(model => [model.id, model]));
+      setDraft(current => {
+        if (!current || current.id !== draft?.id || current.type !== selectedType) return current;
+        const models = current.models.map(model => {
+          const request = requests.find(request => request.id === model.id);
+          if (!request || request.requestModelId !== model.requestModelId || request.protocol !== model.protocol) return model;
+          return applyModelDirectoryDefaults(model, defaults.get(model.id));
+        });
+        return JSON.stringify(models) === JSON.stringify(current.models) ? current : { ...current, models };
+      });
+    }, error => { if (!controller.signal.aborted) setError(String(error)); });
     return () => controller.abort();
-  }, [api, selectedType, draft?.id, accountDirectory, catalogKey, snapshot?.directory?.revision]);
+  }, [api, selectedType, draft?.id, accountDirectory, catalogKey, snapshot?.directory?.revision, metadataRequests]);
   const dirty = Boolean(draft && (!savedChannel || secret || invalidFields.size || JSON.stringify(draft) !== baseDraft));
   React.useEffect(() => {
     if (!dirty && savedChannel) { setDraft(structuredClone(savedChannel)); setBaseDraft(JSON.stringify(savedChannel)); setBaseRevision(snapshot!.revision); }
@@ -106,7 +121,9 @@ function ModelConnectionsEditor({ host }: { host: number }) {
         catalog: { ...model.catalog, overrides: model.catalog.overrides.filter(field => field !== 'tokenizer') } };
     }
     const changed = MODEL_CATALOG_FIELDS.filter(field => JSON.stringify(previous[field]) !== JSON.stringify(model[field]));
-    return { ...model, catalog: { ...model.catalog, overrides: [...new Set([...model.catalog.overrides, ...changed])] } };
+    return applyModelDirectoryDefaults({ ...model, catalog: { ...model.catalog,
+      match: model.catalog.match ?? { requestModelId: previous.requestModelId ?? previous.id, ...(previous.protocol ? { protocol: previous.protocol } : {}) },
+      overrides: [...new Set([...model.catalog.overrides, ...changed])] } });
   }) });
   const editConnection = (patch: Partial<ModelConnectionOptions>) => {
     if (!draft) return;
