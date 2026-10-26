@@ -1445,10 +1445,10 @@ const normalizeText = (value: string): string => value.trim().toLocaleLowerCase(
 
 /**
  * AND-matching over id + category + keywords + title/description keys. The UI
- * additionally matches against translated titles; the host-side directory
- * matches on the same base fields so both consumers agree on membership.
+ * additionally matches against translated titles. Host discovery supplies the
+ * shared translations so a user's visible setting label is also searchable.
  */
-export function querySettingsCatalog(query: SettingsCatalogQuery): SettingsCatalogEntry[] {
+export function querySettingsCatalog(query: SettingsCatalogQuery, translations?: ReadonlyMap<string, string>): SettingsCatalogEntry[] {
   if (query.id) {
     const hit = getSettingsCatalogEntry(query.id);
     return hit ? [hit] : [];
@@ -1466,6 +1466,7 @@ export function querySettingsCatalog(query: SettingsCatalogQuery): SettingsCatal
       ...(entry.ui.keywords ?? []),
       entry.field?.path ?? '',
       ...(entry.fields?.map((field) => field.path) ?? []),
+      translations?.get(entry.id) ?? '',
     ].join(' '));
     return terms.every((term) => haystack.includes(term));
   });

@@ -18,6 +18,10 @@
     "./desktop": {
       "types": "./dist/desktop.d.ts",
       "import": "./dist/desktop.js"
+    },
+    "./settings-locales/*": {
+      "types": "./dist/settings-locales/*.d.ts",
+      "import": "./dist/settings-locales/*.js"
     }
   },
   "scripts": {

@@ -275,6 +275,8 @@ owner 保存。Thread PDF 和 typed media 使用当前 Thread 的 material/holde
 ## 设置与呈现状态
 
 共享[设置目录](../packages/application-client/src/settings-catalog.ts) 定义稳定 ID、字段、scope、发现和动作。
+设置翻译静态数据位于 application-client 的 `settings-locales`；UI 按语言加载，Host 文本搜索按需复用同一份标题与描述，
+支持中文及其他已有界面语言。无命中时返回空条目和空匹配分类；省略关键词可按原分类浏览，不把全分类伪装成搜索命中。
 [Host settings service](../packages/web/application-host/lib/harness/settings-service.ts) 路由到 app settings、
 原生 Agent settings、绑定客户端或原领域 action owner。查询目录不安装软件、不启动推理，也不证明能力已接线。
 Owner/channel 缺失、平台不支持、只读和真实可执行动作分别表达。
