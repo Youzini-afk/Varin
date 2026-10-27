@@ -2,6 +2,8 @@
 
 状态：设计提案，尚未实施。日期：2026-10-26。源码基线：`3da1bd863`，当前 main；故障证据来自 0.9.33 发布版。
 
+平台范围：Windows、macOS、Linux 从首轮共同设计和验证；故障发生在 Windows 不决定平台优先级。平台可以使用不同文件接口和 CoW 原语，工作区版本、隔离、恢复与交付语义保持一致。
+
 本文综合隔离派发体检、共享基线与 CoW/VFS 调研，以及主工作区同样虚拟化的讨论。已确定的产品语义、推荐技术路线、待验证的平台实现分别标明；示意类型不是已经存在的协议。
 
 当前实现见[资源](../resources.md)、[运行时](../runtime.md)、[协作](../collaboration.md)与[外部 Agent](../external-agents.md)。本方案替代[上一轮隔离设计](retrieval-isolation-and-tool-reliability.md)中首次全量捕获、首次写入物化的长期路线；旧文仍记录当时已实现的机制，不能把本文目标视为已交付。
@@ -28,7 +30,7 @@
 | 内容权威 | Rust Storage 保留树、正文、版本、租约、恢复、整合与回收职责 |
 | 对话权威 | 原生执行与外部产品记录仍归 Catalog，外部 Harness 保留自己的执行循环 |
 | Git | 支持原生 Git 工作方式；Git 不是所有项目、文件版本或合并的必要前提 |
-| 平台 | Windows 普通 NTFS 场景进入首轮验证；Linux/macOS 按实际能力接入同一语义 |
+| 平台 | Windows、macOS、Linux 均为核心目标；首轮确定三端文件访问、版本切分和部署路线，不将任何一端留到架构完成后补适配 |
 | 创建成本 | 已管理工作区分叉不全树枚举、不全量哈希、不复制整库；首次接入成本单独表达 |
 | 写入成本 | 修改一个文件不触发全工作区物化；数据复制粒度独立设计和度量 |
 | 文件可见性 | 主工作区的修改在同一项目视图立即可见，不要求每次导出后才能编辑或运行 |
@@ -249,34 +251,75 @@ Shell、Python、Node、编译器、测试和 Git 继续由原 ProcessManager／
 
 挂载可以准确观察文件效果，但进程身份不总能精确对应某个工具调用。guardian 派生进程可关联其运行；用户外部编辑器或共享后台服务记录真实来源，无法归属时明确 unknown/external。不得为了填满 UI，把所有挂载写入算到当前最后一次工具调用。
 
-## 9. 平台后端选择
+## 9. 跨平台文件访问与 CoW 后端
 
-### 9.1 统一合同，分别实现
+### 9.1 共同语义与两层能力
 
-后端必须提供普通路径访问、文件身份、读写与缓存一致性、版本切分、持久化、可取消挂载、实际卸载与恢复事实。仅能投影只读文件或返回一个空目录，不能声明完整 writable workspace 能力。
+Windows、macOS、Linux 同时参与合同制定、原型和验收。现有 Windows 故障是回归场景，不能据此让共用接口只描述 WinFsp，再让其他平台模仿 Windows。
 
-| 路线 | 采用意见 | 关键验证 |
-| --- | --- | --- |
-| Windows WinFsp 类完整用户态文件系统接口 | 主／子统一可写虚拟化的首选技术验证方向 | Rust 集成、普通程序／mmap／锁、吞吐、安装与重启生命周期 |
-| Windows ProjFS | 保留候选，尤其稳定来源投影；不直接视为完整工作区引擎 | 读取落盘放大、full file 的后续写入、并发切分与持久修改捕获 |
-| Linux FUSE／实际可用原生 CoW | 复用相同 Storage 语义或适配稳定快照 | 小文件查询、权限、缓存与进程寿命 |
-| Linux OverlayFS | 只在 lower 真正固定且 upper 的版本切分可证明时采用 | 活动 lower 禁止作为固定版本、dirty upper 快照与文件语义 |
-| macOS APFS clone／可用挂载接口 | 原生 clone 可作后端，深度虚拟化依实际挂载能力 | 首次来源、目录元数据成本、真实挂载部署与普通工具 |
-| 明确物理导出／旧复制路径 | 保留可辨识的独立能力，不算 CoW 虚拟化成功 | 实际成本、可取消、结果一致与回收 |
+分开设计两类能力：**文件访问后端**负责把 Workspace 呈现给普通程序并接纳实际操作；**数据／快照后端**负责稳定版本、内容共享和写时复制。APFS clone、Linux reflink 等可以减少文件数据复制，但不单独提供所有命令共享的虚拟命名空间。二者可以组合，不强制所有平台使用同一种挂载库或相同数据布局。
 
-主工作区也虚拟化后，选择重点从“能懒加载”转为“能协调全部实际写入并固定版本”。据此调整此前优先 ProjFS 的建议：先验证完整写入接口，ProjFS 的适用范围由其 full-file 与通知语义决定。
+共用合同包含普通路径访问、文件身份、缓存一致性、版本切分、持久化、可取消挂载、实际卸载与恢复事实。平台返回具体能力与依赖；不能因调用了 clone 或 mount 就声明整个 Workspace 已稳定可写。
 
-Microsoft 文档说明 ProjFS 会将读取内容缓存落盘，写入后成为 full file；通知包含前置／后置事件。由此不能直接推导出 provider 可对每次后续写入建立本设计的 CoW 边界。[缓存状态](https://learn.microsoft.com/en-us/windows/win32/projfs/cache-state)、[操作通知](https://learn.microsoft.com/en-us/windows/win32/projfs/file-system-operation-notifications)。
+| 平台 | 文件访问路线 | 数据与固定版本路线 | 首轮必须查明 |
+| --- | --- | --- | --- |
+| Windows | WinFsp 类完整用户态文件接口为首选验证；ProjFS 为按合同评估的候选 | Storage 增量内容；支持的卷可利用原生克隆 | 普通 NTFS、缓存／mmap、共享句柄与删除、安装／退出 |
+| macOS | 评估原生 FSKit 扩展；macFUSE 按其 FSKit／kernel 后端分别评估 | APFS clone 用于稳定文件版本和可写 backing，Storage 保留逻辑根与引用 | 现有最低系统版本、APFS 大小写模式、缓存失效、开发工具与扩展部署 |
+| Linux | FUSE 为直接服务受管树的主要验证路线；OverlayFS 用于满足固定 lower／upper 边界的组合 | Storage 增量内容；实际支持的 reflink／快照可加速 backing | 普通桌面与无桌面 Host、缓存写回、挂载权限、实际文件系统能力 |
 
-WinFsp 提供用户态文件系统接口及 Windows 缓存、映射、锁等接入点；Varin 仍需实现自身版本和耐久协议，而非仅接库即可获得快照。[设计资料](https://winfsp.dev/doc/WinFsp-Design/)。Linux OverlayFS 的 underlying trees 在挂载期间不能任意外改，故不能把活动主目录直接作为固定 lower。[官方说明](https://docs.kernel.org/filesystems/overlayfs.html)。
+明确物理导出／旧复制路径继续是可辨识的独立能力，不作为某个平台的隐性“兼容实现”。不支持 CoW 的卷要记录真实情况；用户选择后端之后也不能悄悄改变已受理操作的隔离或耐久语义。
 
-### 9.2 安装、能力和失败
+### 9.2 macOS：APFS 与系统文件接口共同设计
+
+**APFS 数据层。** 利用同卷克隆保留共享数据块，父／子后续写入分别分配变化内容，适合稳定文件版本与私有 backing。克隆目标的命名空间、版本发布和引用仍由 Storage 管理。目录克隆的实际元数据成本、dirty 文件切分和并发写入需要核对，不能把单文件快速 clone 当作任意活动目录的瞬时一致快照。首次导入、跨卷、非 APFS 外置盘和网络来源分别处理，不以“运行在 Mac”判断 clone 一定成功。[Apple APFS 说明](https://developer.apple.com/documentation/foundation/about-apple-file-system)。
+
+**原生 FSKit 访问层。** 将其作为系统支持范围内的重要候选，评估与 Rust 文件服务连接的 app extension，覆盖目录、打开／关闭、读写、同步和需要的元数据操作。Apple 的 passthrough 示例可以帮助确定扩展装配，但其直接访问源目录的行为不能直接用于私有分支。[FSKit](https://developer.apple.com/documentation/fskit/)、[官方示例](https://developer.apple.com/documentation/fskit/building-a-passthrough-file-system)。
+
+**系统版本不可混用。** 当前 [Electron 配置](../../packages/electron/package.json) 声明 macOS 最低 13.0；所查 macFUSE 文档将 FSKit 后端入口标为 macOS 15.4+，Apple 当前 passthrough 示例又标注 macOS 26+。框架可用、某个资源类型可用和示例可运行不是同一条件。按实际调用的 API 标注版本，不自动提高 Varin 整体最低系统版本，也不从最新示例反推所有旧系统都可接入。
+
+**macFUSE 候选。** 分别评估 FSKit 和 kernel 两种后端，不只记录一个“已安装 macFUSE”。当前官方说明列出了 FSKit 后端通知 API、部分 mount 选项和性能差异；这些直接影响工具直写后的缓存更新、watch 与交互延迟。kernel 路线涉及系统扩展启用及 Apple Silicon 上的安全配置操作，不作为用户必须接受的默认前提。[后端说明](https://github.com/macfuse/macfuse/wiki/FUSE-Backends)、[安装说明](https://github.com/macfuse/macfuse/wiki/Getting-Started)。
+
+**部署与日常使用。** 沿现有签名、公证与应用更新链路打包扩展／helper。核对文件系统 entitlement、扩展启用、用户目录访问、Host 与扩展的连接和卸载恢复；扩展仍是原 Storage 的执行者，不自己打开第二份可写数据库。Apple Silicon 和仍在发行范围内的 Intel 架构分别准备产物；现有 Intel 条件发行策略不在本设计中改变。
+
+Mac 代表性行为包括 Finder／编辑器的替换保存、Git、Node／Python 与实际项目构建、文件监控、可执行位、ACL／扩展属性、大小写与 Unicode 名称、可写映射、睡眠唤醒和外置卷断开。应用关闭、扩展退出或系统重启后，已确认保存的版本继续可恢复；内存中的句柄和进程状态仍按原生命周期处理。
+
+推荐目标是 Rust 工作区引擎＋APFS 数据共享＋可用的文件访问后端。旧系统后端与依赖选择在首轮原型中定下，不能将“先不支持旧 Mac”藏在实现里；若确实需要调整产品支持范围，另列清楚影响供用户决定。
+
+### 9.3 Linux：FUSE、缓存与原生文件系统能力
+
+FUSE 路线直接呈现受管树，目录、文件身份和变化继续由原 Storage 提供。内核页缓存、用户态共享对象缓存和持久文件版本分开管理；`write` 返回、dirty page 写回、fsync 和 snapshot 发布有明确顺序。
+
+Linux FUSE 的 cached/write-through、writeback-cache 与 direct-io 行为不同，涉及 shared mmap、后台写回和数据可见性。不能仅为简化版本切分就全局关闭缓存或 mmap，也不能启用 writeback 后忽略尚在内核中的写入。依据实际内核能力选择并核对 snapshot fence；直接文件工具修改需完成相同缓存协议。[内核 FUSE I/O 文档](https://docs.kernel.org/filesystems/fuse/fuse-io.html)。
+
+reflink／稳定文件系统快照用于数据层加速，依据源／目标卷和实际支持探测。OverlayFS 仅用于已固定 lower；父 Workspace 不能作为仍会变化的 lower 直接挂进去，upper 也必须有准确的封存与后续写入分离机制。[OverlayFS 文档](https://docs.kernel.org/filesystems/overlayfs.html)。
+
+部署覆盖普通桌面与无桌面 Host，核对 FUSE 设备／挂载 helper、用户权限和实际容器环境。不能为了运行文件后端默认给容器 privileged 或提升整台 Host 权限。已有 Shared、远程文件访问与不需要本地 mount 的能力继续按原合同工作。
+
+原型覆盖 inode／hardlink、rename-overwrite、open-unlink、可执行位、锁／mmap、watch、后台进程及 daemon 重启。测试正常发行环境中的 ext4 等普通文件系统，以及实际使用的 CoW 文件系统，不能只在具有快照能力的特制卷上验收。Linux 的行为不替代 macOS 或 Windows 验收。
+
+### 9.4 Windows：完整写入路径与普通 NTFS
+
+WinFsp 为 Windows 首选验证方向，核对 Rust 集成、OS 缓存／映射／锁、文件共享模式和删除时机。它提供文件系统接入点，Varin 仍需建立自己的版本与耐久协议。[设计资料](https://winfsp.dev/doc/WinFsp-Design/)。
+
+ProjFS 保留候选：它会缓存读取内容，写入后成为 full file，通知有前置／后置之分。重点检查后续实际写入能否进入所需版本切分，以及多 Agent 扫描后的缓存重复占用；不把只读投影或首次懒加载当作完整 writable workspace。[缓存状态](https://learn.microsoft.com/en-us/windows/win32/projfs/cache-state)、[操作通知](https://learn.microsoft.com/en-us/windows/win32/projfs/file-system-operation-notifications)。
+
+普通 NTFS 是代表性环境，具备克隆能力的其他卷可提供数据层优化。保留 PowerShell／Git Bash／CMD、路径别名、长路径、大小写规则、原生进程 Job 与文件占用回执。安装系统组件、升级和卸载沿现有安装器与用户授权，不能通过移除句柄保护来换取“清理成功”。
+
+### 9.5 共用引擎与各平台缓存边界
+
+普通程序通过 mount 写入时，工具直达 Storage 的读取要看到相同已可见状态；工具直接修改时，程序的目录项／属性／页缓存也必须更新。对缺少所需失效接口的后端，采用经同一 mount 入口提交写入等能保持一致的路径，或者明确能力未满足；不能绕过缓存更新后靠 watcher 最终追平。是否可用直达快路由属于后端能力，耐久权威仍然只有 Storage。
+
+跨平台共用测试验证版本、隔离、冲突、持久化和回收；平台测试验证其原生名称、权限、句柄及缓存语义。不强行把所有系统变成大小写不敏感，不全局改写 Unicode 文件名，也不丢弃对目标工具有意义的 mode／扩展属性。跨 Host 导入出现名称碰撞或不支持的元数据时，明确涉及路径并保留原成果。
+
+挂载回调和文件 I/O 在原生资源执行通道处理，不经 renderer、每文件 HTTP 或模型工具 JSON。若采用辅助进程／app extension，它是 Storage 的文件服务执行者，不另建 Catalog／Storage writer；大正文与阻塞 I/O 在短提交段之外，避免每个 syscall 争抢全局会话控制锁。
+
+### 9.6 安装、能力和失败
 
 平台后端的依赖、许可与分发方式在引入代码时核对，沿现有第三方声明和安装器处理。用户同意安装系统组件后才启用需要它的后端；文档提案本身不授权修改操作系统。缺少组件不禁用 Shared 或原有正常文件工作。
 
-配置与诊断返回实际 backend、source stabilization、mount state、copy granularity 与失败原因。用户无需理解每次文件读取的内部机制；显式隔离无法满足时给可操作状态，不静默降为 Shared。后端失败不能在同一已受理 operation 下切换成全量复制重新执行。
+配置与诊断返回实际 backend、source stabilization、mount state、copy granularity 与失败原因；系统版本、卷能力和后端版本参与能力判定。用户无需理解每次文件读取的内部机制；显式隔离无法满足时给可操作状态，不静默降为 Shared。后端失败不能在同一已受理 operation 下切换成全量复制重新执行。
 
-挂载回调和文件 I/O 在原生资源执行通道处理，不经 renderer、每文件 HTTP 或模型工具 JSON。若采用辅助进程，它是 Storage 的文件服务执行者，不另建 Catalog／Storage writer；大正文与阻塞 I/O 在短提交段之外，避免每个 syscall 争抢全局会话控制锁。
+远程客户端按实际资源 Host 的平台选择后端。Windows 客户端连接 Mac Host 时使用 Mac 文件系统，反之亦然；移动客户端无需安装桌面文件系统组件。不能用协调端 `process.platform` 代替资源 owner 的实际能力。
 
 ## 10. Git 与工作文件
 
@@ -394,11 +437,13 @@ UI 保留现有项目、工作概览、子 Agent 和协作设计，只在需要�
 
 完成条件：来源准备不会拖住整个应用；新旧来源行为能明确区分，错误和取消不丢失原清理责任。
 
-### B. Windows 完整读写路径验证
+### B. 三端共同验证完整读写路径
 
-在真实普通 NTFS 场景验证所选挂载接口，用 Varin 原 Storage 原型连接主／子两个可写视图。完成普通命令、编辑器替换保存、文件锁／mmap、父持续写入时的版本切分、退出和重启。比较 ProjFS 的落盘与写入限制，只在它满足目标合同的范围使用。
+在 Windows 普通 NTFS、macOS APFS 和 Linux 代表性文件系统上，用同一 Rust Storage 原型连接主／子两个可写视图。三端分别验证第 9 节推荐后端、缓存协议和实际安装路径；结果共同决定共用接口。实现可按可用开发环境推进，但不能先冻结一端专用合同再把其他平台放入后续兼容层。
 
-完成条件：主工作区在子任务运行期间持续写入，子版本稳定；两种访问入口读写一致；挂载断开／恢复不会丢失已经确认保存的内容。这个结果决定平台后端，不以 Linux demo 代替 Windows 结论。
+共同场景为普通命令、编辑器替换保存、文件锁／mmap、父持续写入时的版本切分、退出和重启；平台追加各自名称、权限、挂载和睡眠／断连场景。macOS 同时核对当前最低系统版本与新 FSKit API 的可用范围，Linux 覆盖无桌面 Host，Windows 保留这次原故障回归。
+
+完成条件：三端主工作区在子任务运行期间持续写入，子版本稳定；两种访问入口读写一致；挂载断开／恢复不会丢失已经确认保存的内容。缺少某端实机证据时记录未验证并继续对应工作，不能宣称跨平台核心已经验收。
 
 ### C. 稳定来源和私有修改层
 
@@ -412,17 +457,19 @@ UI 保留现有项目、工作概览、子 Agent 和协作设计，只在需要�
 
 完成条件：真实任务可以从派发、运行、补充消息、阶段交换到结束，父任务同时推进；用户看到当前主工作区修改；Git／非 Git 项目都能交付和恢复。
 
-### E. 持久化、回收与其余平台
+### E. 三端持久化、回收与发行接线
 
-完成进程／句柄／mount／成果引用回收和实际重启恢复；接入 Linux/macOS 合适后端并核对各自语义。重新核对原测试与文档，淘汰已退役复制路径假设，明确保留的导出能力。
+完成三端进程／句柄／mount／成果引用回收和实际重启恢复，打通各平台依赖、签名／公证、安装、更新与卸载。延续 B 阶段的平台接入完成整体交付，不把 Linux/macOS 接入推迟到本阶段才开始。重新核对原测试与文档，淘汰已退役复制路径假设，明确保留的导出能力。
 
 完成条件：资源释放后实际回收生效，活跃引用不被误删；平台能力和失败真实；没有隐藏全量复制回退。依赖安装、打包和发布使用各平台现有流程。
 
-阶段用于组织实现，不意味着先把只读原型当完整版本发布。用户可以在未启用受管视图时继续现有 Shared 工作；新隔离后端按验证完成的实际平台开放。
+阶段用于组织实现，不意味着先把只读原型当完整版本发布。用户可以在未启用受管视图时继续现有 Shared 工作。阶段性交付按实际验证情况说明平台能力，整体完成以三端共同合同及各自系统行为均验收为准。
 
 ## 17. 验收与成本口径
 
 复用现有 owner 的测试，只补能证明新增关键行为的场景。先覆盖发生问题的普通父目录、一个真实 Git 项目，以及少量能区分版本／文件语义的样例，再按发现的问题扩大；不建设常驻评测系统。
+
+共用场景在三端采用等价数据和操作，系统特有行为单独验证。macOS 纳入当前发行的 Apple Silicon 与条件支持的 Intel，具体 OS 版本覆盖实际后端 API 边界；Linux 包含普通无特权 Host，Windows 使用普通 NTFS。CI 编译通过与真实挂载／普通工具验收分别记录，不能拿 mock 后端代替某一平台。
 
 | 必须证明 | 场景与观察 |
 | --- | --- |
@@ -437,6 +484,10 @@ UI 保留现有项目、工作概览、子 Agent 和协作设计，只在需要�
 | 结果整合 | 父继续修改后，B/S/T 合并保留双方；冲突、undo 与 sourcePath 映射正确 |
 | 取消／重启／卸载 | 原执行停止、已确认修改保留、重复请求不重做副作用、回收失败可继续处理 |
 | 多任务资源复用 | 同来源并行任务共享基线，某一取消不释放其他引用，完成后无多份完整副本残留 |
+| macOS 系统集成 | APFS clone 的实际共享、FSKit／macFUSE 的能力与 OS 版本、Finder／编辑器保存、扩展启停和睡眠唤醒 |
+| Linux 系统集成 | FUSE 缓存写回、普通用户挂载／无桌面 Host、权限／锁／open-unlink、daemon 重启 |
+| Windows 系统集成 | NTFS 路径与共享句柄、映射写入、后端安装／退出、原准备挂起场景 |
+| 资源 Host 选择 | 不同平台客户端连接同一 Host 时访问同一 Workspace，不借用客户端的路径或后端 |
 
 计量至少区分 `首次接入`、`分叉返回`、`目录可用`、`首次 status/search/build`、`成果发布` 和 `资源实际释放`。不能用预热后的分叉对比旧方案冷启动，也不能把所有成本推到第一次命令后再声称启动完成。
 
@@ -447,6 +498,9 @@ UI 保留现有项目、工作概览、子 Agent 和协作设计，只在需要�
 | 尚未定下 | 当前推荐 | 依据／改选条件 |
 | --- | --- | --- |
 | Windows 后端 | 优先验证 WinFsp 类完整写接口 | 安装、许可、mmap、吞吐与版本边界；ProjFS 只有满足同一合同才承接对应场景 |
+| macOS 后端 | APFS 作为数据共享路径，FSKit 与 macFUSE 分后端评估文件访问 | 最低 macOS 13、具体 API 可用版本、缓存失效、部署与实际开发工具；不默认要求用户降低系统安全设置 |
+| Linux 后端 | FUSE 直接呈现受管树，实际原生 CoW 能力加速数据层 | 缓存写回与 snapshot fence、普通用户部署、实际文件系统；OverlayFS 必须具有固定 lower／upper 边界 |
+| 三端接口收敛 | 共用语义、平台原生操作与数据能力分层 | 三端首轮原型共同决定接口，不能以单端成功冻结平台特有假设 |
 | 主目录路径接入 | 首版明确独立挂载路径，统一所有消费者 | 原路径透明接管需额外文件系统与占用交接证据，不自动实施 |
 | 普通目录首次稳定化 | 已有快照优先，否则明确一次接入捕获 | 来源无稳定版本且持续外改时保留为 LiveRoot，不能谎报固定隔离已就绪 |
 | 内容写入粒度 | 持久树＋可共享内容版本，允许 extent 引用 | 现有整文件对象可过渡；大文件放大与后端真实能力决定下一步 |
