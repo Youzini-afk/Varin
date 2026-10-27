@@ -351,7 +351,7 @@
     }
   }
 ],
-  "runtimeExports": ["ExecutionError","MaterialRetention", "MaterialRetentionParams", "CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
+  "runtimeExports": ["ExecutionError","MaterialRetention", "MaterialRetentionParams", "SourceRetirementParams", "SourcePreparationRetentionParams", "CodeRetrievalDiagnostic", "CodeRetrievalSource", "CodeRetrievalCoverage", "CodeRetrievalCompletion", "ThreadUsageParams",
   "ModelPresentationParams",
   "ModelPresentation","ModelContextComposition","UsageTokenCount","ThreadUsageRow","ThreadUsage","ModelHttpConfiguration",
  "FileObservationAuthority",
@@ -867,7 +867,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 69,
+  "protocolVersion": 71,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -896,7 +896,8 @@
     "SourceMode": [
       "FixedBranch",
       "Materialized",
-      "LiveRoot"
+      "LiveRoot",
+      "NativeWorkspace"
     ],
     "RunState": [
       "Accepted",
@@ -1363,6 +1364,8 @@
     "runtime.model.inspect": "RunParams",
     "runtime.status": "KernelEmptyParams",
     "runtime.material.retention": "MaterialRetentionParams",
+    "runtime.source.retirement": "SourceRetirementParams",
+    "runtime.source.preparation": "SourcePreparationRetentionParams",
     "runtime.content.collect": "KernelEmptyParams",
     "runtime.tokenizers.open": "KernelTokenizerOpenParams",
     "runtime.retry.evaluate": "ModelRetryEvaluateParams",
@@ -1470,11 +1473,13 @@
     "branch.rename": "KernelBranchRenameParams",
     "branch.fork": "KernelBranchForkParams",
     "workspace.adopt": "KernelWorkspaceAdoptParams",
+    "workspace.backend.inspect": "KernelEmptyParams",
     "workspace.open": "KernelWorkspaceOpenParams",
     "workspace.inspect": "KernelWorkspaceAddress",
     "workspace.acquire": "KernelWorkspaceLeaseParams",
     "workspace.release": "KernelWorkspaceLeaseParams",
     "workspace.mount": "KernelWorkspaceAddress",
+    "workspace.bind": "KernelWorkspaceBindParams",
     "workspace.fork": "KernelWorkspaceForkParams",
     "workspace.result.prepare": "KernelWorkspaceResultPrepareParams",
     "workspace.close": "KernelWorkspaceAddress",
@@ -1598,7 +1603,7 @@
 "source.file.receipt": "SourceEffectReceiptParams",
 "source.resource.release": "SourceResourceControlParams"
   },
-  "dto": {"MaterialRetentionParams":{"fields": {"childThreadId": {"type": "string", "optional": true}}},"MaterialRetention":{"fields": {"threads": {"type": "Array<{threadId: string; rootThreadId: string; release: boolean}>"}, "inheritances": {"type": "Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>"}}},
+  "dto": {"SourcePreparationRetentionParams":{"fields":{"threadId":{"type":"string"},"source":{"type":"LaunchSource"},"release":{"type":"boolean","optional":true}}},"SourceRetirementParams":{"fields":{"defer":{"type":"boolean","optional":true},"cleanupId":{"type":"string"},"complete":{"type":"boolean","optional":true}}},"MaterialRetentionParams":{"fields": {"childThreadId": {"type": "string", "optional": true}}},"MaterialRetention":{"fields": {"sources":{"type":"Array<{cleanupId: string; source: LaunchSource}>"},"threads": {"type": "Array<{threadId: string; rootThreadId: string; release: boolean}>"}, "inheritances": {"type": "Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>"}}},
     "CodeRetrievalDiagnostic": { "serialize": true, "fields": { "kind": { "type": "string" }, "path": { "type": "string", "optional": true }, "message": { "type": "string" } } },
     "CodeRetrievalSource": { "serialize": true, "fields": { "id": { "type": "string" }, "family": { "type": "string" }, "status": { "type": "string" }, "targets": { "type": "string[]", "optional": true } } },
     "CodeRetrievalCoverage": { "serialize": true, "fields": { "sources": { "type": "CodeRetrievalSource[]" }, "semantic": { "type": "string" }, "unexamined": { "type": "number" } } },
@@ -2091,12 +2096,12 @@
     "ThreadReadPositionParams": {"raw":"export interface ThreadReadPositionParams { threadId: string; key: string; throughCursor: number; }", "rustType":"varin_runtime::catalog::threads::ThreadRead"},
     "ThreadSummary": {"fields":{"agent_code":{"type":"string","optional":true},"parent_thread_id":{"type":"string | null"},"main_branch_id":{"type":"string"},"title":{"type":"string"},"revision":{"type":"number"},"created_at_ms":{"type":"number"},"updated_at_ms":{"type":"number"},"pinned":{"type":"boolean"},"archived":{"type":"boolean"},"deleted_at_ms":{"type":"number | null"},"activity_cursor":{"type":"number"},"read_cursor":{"type":"number"},"unread":{"type":"boolean"},"bot_id":{"type":"string | null"},"thread_id":{"type":"string"},"branches":{"type":"ThreadBranch[]"},"observer_project_ids":{"type":"Array<string | null>"},"avatar":{"type":"string","optional":true}}},
     "AgentRuntimeStreamEvent": {"raw":"export type AgentRuntimeStreamEvent = {v: $protocolVersion; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});"},
-    "SourceMode": {"raw":"export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';"},
+    "SourceMode": {"raw":"export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';"},
     "LiveRoot": {"fields":{"hostId":{"type":"string"},"canonicalRoot":{"type":"string"},"rootId":{"type":"string"}}},
     "SourceToolsParams": {"fields":{"mode":{"type":"SourceMode"}}},
-    "LaunchSourceParams": {"fields":{"environmentRunId":{"type":"string","optional":true},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"branchId":{"type":"string | null"},"revision":{"type":"number | null"},"mode":{"type":"SourceMode"},"liveRoot":{"type":"LiveRoot | null","optional":true},"resourceOwner":{"type":"SourceResourceOwner"}}},
+    "LaunchSourceParams": {"fields":{"nativeScope":{"type":"string","optional":true},"environmentRunId":{"type":"string","optional":true},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"branchId":{"type":"string | null"},"revision":{"type":"number | null"},"mode":{"type":"SourceMode"},"liveRoot":{"type":"LiveRoot | null","optional":true},"resourceOwner":{"type":"SourceResourceOwner"}}},
     "LaunchSelectParams": {"fields":{"runId":{"type":"string"},"source":{"type":"LaunchSourceParams | null"},"enabledTools":{"type":"string[]"},"credentialScope":{"type":"CredentialScope","optional":true},"childDispatch":{"type":"ChildDispatchCatalog","optional":true}}},
-    "LaunchSource": {"fields":{"environment_run_id":{"type":"string | null","optional":true},"workspace_id":{"type":"string"},"execution_workspace_id":{"type":"string"},"branch_id":{"type":"string | null"},"revision":{"type":"number | null"},"mode":{"type":"SourceMode"},"live_root":{"type":"LiveRoot | null"},"resource_owner":{"type":"SourceResourceOwner"}}},
+    "LaunchSource": {"fields":{"native_scope":{"type":"string","optional":true},"environment_run_id":{"type":"string | null","optional":true},"workspace_id":{"type":"string"},"execution_workspace_id":{"type":"string"},"branch_id":{"type":"string | null"},"revision":{"type":"number | null"},"mode":{"type":"SourceMode"},"live_root":{"type":"LiveRoot | null"},"resource_owner":{"type":"SourceResourceOwner"}}},
     "ToolMetadata": {"raw":"export interface ToolMetadata { always_declared?: boolean; service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }","rustType":"varin_runtime::execution::ToolMetadata"},
     "NestedToolInspectParams": {"fields":{"parentOperationId":{"type":"string"},"executorOwner":{"type":"ExecutorOwner"},"name":{"type":"string","optional":true}}},
     "NestedToolSummary": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"description":{"type":"string"}}},
@@ -2310,15 +2315,17 @@
     }},
     "KernelHealthParams": {"fields": {"deep": {"type": "boolean", "optional": true}, "gcPreview": {"type": "boolean", "optional": true}}},
     "KernelWorkspaceAdoptParams": {"fields":{"branchId":{"type":"string"},"rootId":{"type":"string"},"operationId":{"type":"string"},"gitRootIds":{"type":"string[]","optional":true}}},
+    "KernelWorkspaceBackend": {"fields":{"backend":{"type":"'winfsp'|'macfuse'|'fuse'"},"dependenciesReady":{"type":"boolean"},"mountCompiled":{"type":"boolean"},"detail":{"type":"string | null"},"helpUrl":{"type":"string"}}},
     "KernelWorkspaceOpenParams": {"fields":{"branchId":{"type":"string"}}},
     "KernelWorkspaceAddress": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"}}},
+    "KernelWorkspaceBindParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"sourcePath":{"type":"string","optional":true}}},
     "KernelWorkspaceLeaseParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"leaseId":{"type":"string"}}},
     "KernelWorkspaceForkParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"targetBranchId":{"type":"string"},"operationId":{"type":"string"},"sourcePath":{"type":"string","optional":true}}},
     "KernelWorkspaceResultPrepareParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"publicationId":{"type":"string"}}},
     "KernelWorkspaceBinding": {"fields":{"branchId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"generation":{"type":"string"},"ownerGrantId":{"type":"string"}}},
     "KernelWorkspaceLeaseReceipt": {"fields":{"binding":{"type":"KernelWorkspaceBinding"},"leaseId":{"type":"string"},"released":{"type":"boolean"}}},
     "KernelWorkspaceClosed": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"closed":{"type":"boolean"}}},
-    "KernelWorkspaceInspection": {"fields":{"binding":{"type":"KernelWorkspaceBinding"},"leases":{"type":"number"},"mount":{"type":"{ mountId:string; path:string|null; backend:'winfsp'|'macfuse'|'fuse'; state:'starting'|'ready'|'failed'|'cleanup_pending'; error?:string } | null"},"capabilities":{"type":"{ nativeFiles:boolean; mountCompiled:boolean; hardlinks:boolean; symlinks:boolean; xattrs:boolean; losslessNativeNames:boolean; activeWritableMappingFork:boolean }"}}},
+    "KernelWorkspaceInspection": {"fields":{"binding":{"type":"KernelWorkspaceBinding"},"leases":{"type":"number"},"rootId":{"type":"string | null"},"mount":{"type":"{ mountId:string; path:string|null; backend:'winfsp'|'macfuse'|'fuse'; state:'starting'|'ready'|'failed'|'cleanup_pending'; error?:string } | null"},"capabilities":{"type":"{ nativeFiles:boolean; mountCompiled:boolean; hardlinks:boolean; symlinks:boolean; xattrs:boolean; losslessNativeNames:boolean; activeWritableMappingFork:boolean }"}}},
     "KernelSourceHandoffClaimParams": {"fields":{"handoffOperationId":{"type":"string"},"grantId":{"type":"string"},"childThreadId":{"type":"string"},"childBranchId":{"type":"string"}}},
     "KernelGrantIssueParams": {"fields": {
       "grantId": {"type": "string"},
@@ -2501,7 +2508,7 @@
     }},
     "KernelCreateBranchFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}}},
     "KernelCreateBranchAbortParams": {"fields": {"builderId": {"type": "string"}}},
-    "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRef": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
+    "KernelCreateEntry": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "nativeJson":{"type":"string","optional":true},"ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRef": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
     "KernelBranchReadParams": {"fields": {
       "branchId": {"type": "string"}, "revision": {"type": "number", "optional": true}, "paths": {"type": "string[]", "optional": true}, "roots": {"type": "string[]", "optional": true}, "includeEntries": {"type": "boolean", "optional": true}, "cursor": {"type": "number", "optional": true}, "pageSize": {"type": "number", "optional": true}
     }},
@@ -2537,7 +2544,7 @@
     "KernelBranchWriteAppendParams": {"fields": {"builderId": {"type": "string"}, "sequence": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}}},
     "KernelBranchWriteFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}, "baseRef": {"type": "string", "optional": true}, "parentRef": {"type": "string", "optional": true}}},
     "KernelBranchWriteAbortParams": {"fields": {"builderId": {"type": "string"}}},
-    "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRef": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
+    "KernelBranchChange": {"fields": {"path": {"type": "string"}, "state": {"type": "KernelBranchState"}, "nativeJson":{"type":"string","optional":true}, "ownerId": {"type": "string", "optional": true}, "sourcePath": {"type": "string", "optional": true}, "sourceRef": {"type": "string", "optional": true}, "sourceRecordId": {"type": "string", "optional": true}, "sourceSlot": {"type": "string", "optional": true}}},
     "KernelBranchPublishParams": {"fields": {
       "operationId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}, "expectedRoot": {"type": "string"}
     }},
@@ -2597,6 +2604,12 @@
         "details": {"type": "unknown", "optional": true}
       }
     },
+    "KernelWorkspaceIdle": {
+      "fields": {
+        "v": {"type": "protocolVersion"}, "kind": {"type": "\"workspace-idle\""},
+        "kernelEpoch": {"type": "string"}
+      }
+    },
     "KernelRequestCreditReleased": {
       "fields": {
         "v": {"type": "protocolVersion"}, "kind": {"type": "\"request-credit-released\""},
@@ -2635,7 +2648,8 @@
     "KernelEntry": {
       "fields": {
         "path": {"type": "string"},
-        "state": {"type": "KernelBranchState"}
+        "state": {"type": "KernelBranchState"},
+        "nativeJson": {"type": "string", "optional": true}
       }
     },
     "KernelBranchReadResult": {
@@ -2723,10 +2737,10 @@
     "UnacceptedChildDependencies": {"fields":{"operation_id":{"type":"string"},"parent_thread_id":{"type":"string"},"parent_run_id":{"type":"string"},"execution_owner":{"type":"ExecutorOwner"},"execution_epoch":{"type":"number"},"source_pin":{"type":"UnacceptedChildSourcePin | null"},"mcp_binding":{"type":"McpBinding | null"}}},
     "AgentSourceSelection": {"fields":{"run_id":{"type":"string"},"source":{"type":"LaunchSource"}},"rustType":"varin_runtime::catalog::dispatch::AgentSourceSelection"},
     "ChildSourceHandoff": {"fields":{"retention_pin":{"type":"ChildSourcePin","optional":true},"source_path":{"type":"string","optional":true},"refresh":{"type":"AgentSourceSelection","optional":true},"source_run_id":{"type":"string","optional":true},"operation_id":{"type":"string"},"source":{"type":"LaunchSource"},"root":{"type":"ChildSourceRoot"},"resource_authority":{"type":"ChildSourceAuthority | null"}}},
-    "ChildSourceRoot": {"raw":"export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot } | { kind: 'derived'; pin: ChildSourcePin; root: LiveRoot; view_id: string };"},
+    "ChildSourceRoot": {"raw":"export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot } | { kind: 'derived'; pin: ChildSourcePin; root: LiveRoot; view_id: string } | { kind: 'native'; pin: ChildSourcePin };"},
     "SourceDraftResource": {"rustType":"varin_runtime::catalog::collaboration::SourceDraftResource","raw":"export interface SourceDraftResource { workspaceId: string; resourceId: string; baseRevision: string | null; localEditRevision: number; revision: string; encoding: string; bom: boolean; coordinationId?: string; documentInstanceId?: string; bufferHash?: string; lineEnding?: 'lf' | 'crlf' | 'cr'; }"},
     "SourceDraftProvenance": {"rustType":"varin_runtime::catalog::collaboration::SourceDraftProvenance","raw":"export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }"},
-    "ChildSourceProvenance": {"rustType":"varin_runtime::catalog::collaboration::ChildSourceProvenance","raw":"export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };"},
+    "ChildSourceProvenance": {"rustType":"varin_runtime::catalog::collaboration::ChildSourceProvenance","raw":"export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };"},
     "ChildSource": {"raw":"export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };"},
     "ChildWorkingResultRef": {"fields":{"publication_id":{"type":"string"},"workspace_id":{"type":"string"},"branch_id":{"type":"string"},"result_revision":{"type":"number"},"root":{"type":"string"},"base_root":{"type":"string"},"record_id":{"type":"string"}}},
     "ChildCodeResult": {"raw":"export type ChildCodeResult = { kind: 'not_applicable' } | { kind: 'shared_source' } | { kind: 'pending' } | { kind: 'settling'; publication_id: string } | { kind: 'candidate'; candidate: KernelWorkingResultCandidate } | { kind: 'published'; result: ChildWorkingResultRef; effect: Effect } | { kind: 'no_changes' } | { kind: 'unavailable'; code: string; effect: Effect };"},
@@ -3046,7 +3060,7 @@
 "ExecutionError": {"raw":"export interface ExecutionError {code:string;message:string;tool_name?:string;details?:unknown;}","rustType":"varin_runtime::execution::ExecutionError"},
 "ExecutionShell": {"raw":"export interface ExecutionShell {id:string;name:string;executable:string;path?:string[];}","rustType":"crate::shell_environment::ExecutionShell"},
 "ExecutionEnvironment": {"raw":"export interface ExecutionEnvironment {searchPath?:string;platform:string;defaultShell:string|null;shells:ExecutionShell[];}","rustType":"crate::shell_environment::ExecutionEnvironment"},
-"SourceToolBinding": {"raw":"export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }","rustType":"crate::tools::ToolBinding"},
+"SourceToolBinding": {"raw":"export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }","rustType":"crate::tools::ToolBinding"},
 "SourceAuthorityResult": {"raw":"export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }","rustType":"crate::source_resources::SourceAuthorityResult"},
 "SourceAuthorityScopeReleaseParams": {"raw":"export interface SourceAuthorityScopeReleaseParams {principalId:string;coordinatorHostId:string;threadId:string;runId:string;mode:'retire'|'revoke';}","rustType":"crate::source_resources::SourceAuthorityScopeReleaseParams"},
 "SourceResourceOwner": {"raw":"export type SourceResourceOwner = {kind: 'local'} | {kind: 'managed_host'; hostId: string; connectionId: string; endpointIdentity: string};","rustType":"varin_runtime::catalog::launches::SourceResourceOwner"},
@@ -3233,6 +3247,8 @@
     "runtime.followup.list": "Read durable same-thread follow-up definitions and occurrences",
     "runtime.followup.control": "Pause, resume or cancel an unconsumed follow-up authorization",
     "runtime.material.retention": "Read frozen child material references and drained deleted Thread owners",
+    "runtime.source.retirement": "Claim and finish an original deleted conversation source cleanup",
+    "runtime.source.preparation": "Retain an original source preparation for its actual Thread",
     "runtime.content.collect": "Collect unreferenced runtime content on an independent maintenance worker",
     "runtime.tokenizers.open": "Lease the native tokenizer for a frozen model configuration",
     "runtime.retry.evaluate": "Evaluate retry settings without issuing a provider request",
@@ -3337,11 +3353,13 @@
     "branch.rename": "atomically move an immutable subtree within the current branch",
     "branch.fork": "fork a retained pin or current branch root without enumerating its contents",
     "workspace.adopt": "Stabilize an explicitly admitted source once, retaining native metadata and private Git administration",
+    "workspace.backend.inspect": "Inspect the resource Host's filesystem dependencies before importing a project; never installs components",
     "workspace.open": "Open a native workspace under its explicit project lifetime authority",
     "workspace.inspect": "Inspect the original native workspace and mount lifetime",
     "workspace.acquire": "Retain a native workspace for the exact original execution authority",
     "workspace.release": "Release the original stopped execution's workspace lease",
     "workspace.mount": "Start and retain the original workspace's native filesystem off the Storage owner",
+    "workspace.bind": "Bind an original execution authority to the current native mount and retain its actual lifetime",
     "workspace.fork": "Fork the current native file generation after the actual mount cache fence",
     "workspace.result.prepare": "Retain the native file generation directly for existing WorkingResult publication without recapturing a mount",
     "workspace.close": "Drain the original native mount before closing its file session",

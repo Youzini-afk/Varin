@@ -385,9 +385,7 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
     (projectId: string, projectPath: string) => {
       close();
       useProjectsStore.getState().setActiveProjectIdOnly(projectId);
-      void startThreadFromNavigation({
-        directory: projectPath,
-      }).catch((error) => {
+      void projectExecutionPath({id:projectId,path:projectPath}).then(directory=>startThreadFromNavigation({directory})).catch((error) => {
         toast.error('Failed to create conversation', {
           description: error instanceof Error ? error.message : String(error),
         });
@@ -529,3 +527,4 @@ export const CommandPalette: React.FC<{ fileOpenTarget?: 'context' | 'editor' }>
     </Dialog>
   );
 };
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

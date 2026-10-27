@@ -273,6 +273,7 @@ impl Task {
                     match fs::symlink_metadata(&resource.absolute) {
                         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
                             FileState::Directory {
+                                native: None,
                                 mode: Some(super::file_resources::file_mode(&meta)),
                             }
                         }

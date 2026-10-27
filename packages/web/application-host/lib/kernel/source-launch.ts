@@ -43,6 +43,7 @@ export type SourceLaunch = Omit<ThreadSource, 'mode' | 'branchId' | 'revision' |
 } & (
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; environmentRunId?: string; liveRoot?: never }
   | { mode: 'live_root'; liveRoot: import('./protocol.generated.js').LiveRoot; branchId?: never; revision?: never; environmentRunId?: never }
+  | { mode: 'native_workspace'; branchId:string; nativeScope?:string; revision?:never; liveRoot?:never; environmentRunId?:never }
 );
 
 /** Project only source-owned declarations from the same frozen launch directory. */
@@ -71,6 +72,8 @@ export async function startRunFromSource(
     if (!selection.liveRoot || ![selection.liveRoot.hostId, selection.liveRoot.rootId, selection.liveRoot.canonicalRoot].every(value => typeof value === 'string' && value.length > 0)
       || selection.branchId !== undefined || selection.revision !== undefined || selection.environmentRunId !== undefined) throw new Error('Live source identity is incomplete');
     await options.resolveLiveSource(selection, signal);
+  } else if(selection.mode==='native_workspace'){
+    if(!selection.branchId||selection.revision!==undefined||selection.liveRoot||selection.environmentRunId)throw new Error('Native source requires its logical workspace branch');
   } else if (selection.mode !== 'live_root' && ((selection.mode !== 'fixed_branch' && selection.mode !== 'materialized')
     || typeof selection.branchId !== 'string' || !selection.branchId || !Number.isSafeInteger(selection.revision) || selection.revision < 0)) {
     throw new Error('Fixed source requires a complete branch revision');
@@ -84,6 +87,7 @@ export async function startRunFromSource(
     if (!source || !isDeepStrictEqual(source.resource_owner, selection.resourceOwner) || source.workspace_id !== selection.workspaceId || source.execution_workspace_id !== selection.executionWorkspaceId
       || source.branch_id !== (selection.branchId ?? null) || source.revision !== (selection.revision ?? null)
       || source.mode !== selection.mode
+      || source.native_scope !== (selection.mode==='native_workspace'?selection.nativeScope:undefined)
       || source.live_root?.hostId !== selection.liveRoot?.hostId || source.live_root?.canonicalRoot !== selection.liveRoot?.canonicalRoot || source.live_root?.rootId !== selection.liveRoot?.rootId
       || (source.environment_run_id ?? undefined) !== selection.environmentRunId) throw new SourceAdmissionError('source_changed');
     const selectedNames = [...tools].sort();
@@ -91,7 +95,7 @@ export async function startRunFromSource(
   }
   const credentialScope = options.credentialOwner ? await options.credentialOwner.scope() : undefined;
   if (!saved) await runtime.selectLaunch({ runId: run.id,
-    source: { resourceOwner: selection.resourceOwner, mode: selection.mode, liveRoot: selection.liveRoot ?? null, workspaceId: selection.workspaceId,
+    source: { ...(selection.mode==='native_workspace'&&selection.nativeScope?{nativeScope:selection.nativeScope}:{}),resourceOwner: selection.resourceOwner, mode: selection.mode, liveRoot: selection.liveRoot ?? null, workspaceId: selection.workspaceId,
       executionWorkspaceId: selection.executionWorkspaceId, branchId: selection.branchId ?? null, revision: selection.revision ?? null,
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}) },
     enabledTools: tools, ...(credentialScope ? { credentialScope } : {}),
@@ -128,6 +132,7 @@ export async function admitRunSourceAuthority(
   if (!sourceSelection || !isDeepStrictEqual(sourceSelection.resource_owner, selection.resourceOwner) || sourceSelection.workspace_id !== selection.workspaceId
     || sourceSelection.execution_workspace_id !== selection.executionWorkspaceId
     || sourceSelection.mode !== selection.mode
+    || sourceSelection.native_scope !== (selection.mode==='native_workspace'?selection.nativeScope:undefined)
     || sourceSelection.branch_id !== (selection.branchId ?? null)
     || sourceSelection.revision !== (selection.revision ?? null)
     || (sourceSelection.environment_run_id ?? undefined) !== selection.environmentRunId
@@ -184,6 +189,7 @@ export async function admitRunSourceAuthority(
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed } : selection.mode === 'materialized'
         ? { ...(binding.physicalRoot ? { rootId: binding.physicalRoot.rootId } : {}), materializedSource: fixed }
+        : selection.mode==='native_workspace'?{nativeWorkspace:{branchId:selection.branchId,...(selection.nativeScope?{sourcePath:selection.nativeScope}:{})},...(binding.physicalRoot?{rootId:binding.physicalRoot.rootId,liveRoot:binding.physicalRoot}:{})}
         : { ...(binding.physicalRoot ? { rootId: binding.physicalRoot.rootId } : {}), liveRoot: selection.liveRoot! }),
     };
     if ((options.purpose ?? 'source') === 'source' && (options.retention ?? 'run') === 'run') runtime.retainManagedSourceBinding(run.id, binding, service);
@@ -192,7 +198,7 @@ export async function admitRunSourceAuthority(
         resourceEpoch: binding.resourceEpoch, mode: 'retire' });
     } };
   }
-  if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
+  if (selection.mode !== 'live_root' && selection.mode!=='native_workspace') await runtime.admitSourceRegistration(selection, signal);
   // Do not use old grants from the durable selection. Each Host lifetime issues its own permit.
   const grant = await kernel.issueGrant({
     grantId: `source:${randomUUID()}`,
@@ -211,7 +217,13 @@ export async function admitRunSourceAuthority(
   try {
     let rootId: string | undefined;
     let executionCwd: string | undefined;
-    const source = selection.mode === 'live_root' ? undefined : await actor.readBranch({ branchId: selection.branchId, revision: selection.revision, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
+    let native:Awaited<ReturnType<NonNullable<KernelClient['nativeWorkspaces']>['acquire']>>|undefined;
+    if(selection.mode==='native_workspace'&&!resultOnly){
+      if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');
+      native=await kernel.nativeWorkspaces.acquire({workspace_id:selection.workspaceId,execution_workspace_id:selection.executionWorkspaceId,branch_id:selection.branchId,...(selection.nativeScope?{native_scope:selection.nativeScope}:{})},grant,signal);
+      rootId=native.rootId;executionCwd=native.path;
+    }
+    const source = selection.mode === 'live_root'||selection.mode==='native_workspace' ? undefined : await actor.readBranch({ branchId: selection.branchId, revision: selection.revision, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
     if (source && (source.workspaceId !== selection.workspaceId || source.branchId !== selection.branchId
       || source.view !== 'revision' || source.revision !== selection.revision)) throw new SourceAdmissionError('source_changed');
     if (!resultOnly && selection.mode === 'live_root') {
@@ -262,9 +274,12 @@ export async function admitRunSourceAuthority(
       executionEnvironment: await runtime.executionEnvironment(),
       ...(selection.environmentRunId ? { environmentRunId: selection.environmentRunId } : {}),
       ...(selection.mode === 'fixed_branch' ? { fileSource: fixed }
-        : selection.mode === 'materialized' ? { ...(rootId ? { rootId } : {}), materializedSource: fixed } : { ...(rootId ? { rootId } : {}), liveRoot: selection.liveRoot! }),
+        : selection.mode === 'materialized' ? { ...(rootId ? { rootId } : {}), materializedSource: fixed }
+        : selection.mode==='native_workspace'?{nativeWorkspace:native?.address??{branchId:selection.branchId,...(selection.nativeScope?{sourcePath:selection.nativeScope}:{})},
+          ...(native?{rootId:native.rootId,liveRoot:{hostId:native.hostId,rootId:native.rootId,canonicalRoot:native.path}}:{})}
+        : { ...(rootId ? { rootId } : {}), liveRoot: selection.liveRoot! }),
     };
-    if (selection.mode !== 'live_root') await runtime.admitSourceRegistration(selection, signal);
+    if (selection.mode !== 'live_root'&&!(resultOnly&&selection.mode==='native_workspace')) await runtime.admitSourceRegistration(selection, signal);
     return { kind: 'local' as const, grant, client: actor, rootId, canonicalRoot: executionCwd, toolBinding,
       release };
   } catch (error) {
@@ -294,6 +309,10 @@ export function savedSourceLaunch(
     )
       throw new Error('Saved live environment is incomplete');
     return { ...base, mode: 'live_root', liveRoot: source.live_root };
+  }
+  if(source.mode==='native_workspace'){
+    if(!source.branch_id||source.revision!==null||source.live_root||source.environment_run_id)throw new Error('Saved native source is incomplete');
+    return {...base,mode:'native_workspace',branchId:source.branch_id,...(source.native_scope?{nativeScope:source.native_scope}:{})};
   }
   if (
     source.branch_id === null ||

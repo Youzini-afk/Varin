@@ -50,10 +50,47 @@ struct Entry {
 pub(crate) struct Workspaces {
     entries: Mutex<BTreeMap<String, Arc<Entry>>>,
     stopping: AtomicBool,
+    waiting_for_idle: AtomicBool,
     adoptions: Mutex<BTreeSet<String>>,
 }
 
 impl Workspaces {
+    pub(crate) fn take_idle_observer(&self)->bool{self.waiting_for_idle.swap(false,Ordering::AcqRel)}
+    pub(crate) fn handoff(&self,task:&crate::workspace_handoffs::Task,port:StoragePort)->Result<Value,KernelError>{
+        let original=task.clone();
+        if let Some(result)=port.call(move|s|s.native_handoff(&original,None))?{return Ok(result);}
+        let branch=task.source.branch_id.as_ref().ok_or_else(||error("workspace_source_missing","Native handoff branch is missing"))?;
+        let entry=locked(&self.entries)?.get(branch).cloned().ok_or_else(||error("workspace_not_open","Original native source is not open"))?;
+        if entry.binding.workspace_id!=task.source.workspace_id||entry.binding.execution_workspace_id!=task.source.execution_workspace_id{
+            return Err(error("workspace_source_changed","Native handoff source identity changed"));
+        }
+        if task.delegation.agent_source.is_none() && task.binding.native_workspace.as_ref().and_then(|native|native.generation.as_deref())!=Some(entry.binding.generation.as_str()){
+            return Err(error("workspace_generation_changed","Original handoff mount generation changed"));
+        }
+        let selected=[task.source.native_scope.as_deref(),task.delegation.source_path.as_deref()].into_iter().flatten().filter(|path|!path.is_empty()).collect::<Vec<_>>().join("/");
+        // Catalog has delegated this exact related source. Its project file
+        // service takes the boundary; the original caller still authorizes and
+        // commits the handoff. No caller execution grant is rewritten.
+        let actor=if task.delegation.agent_source.is_some(){entry.session.owner()}else{task.grant.clone()};
+        let root=if task.delegation.work_mode!=varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite{
+            let actual=self.execute(port.clone(),Arc::new(||{}),"workspace.bind",json!({"branchId":branch,"generation":entry.binding.generation,
+                "sourcePath":if selected.is_empty(){None}else{Some(&selected)}}),actor.clone(),task.cancellation.clone())?;
+            json!({"kind":"physical","root":{"hostId":task.grant.host_id,"rootId":actual["rootId"],"canonicalRoot":actual["mount"]["path"]}})
+        }else{
+            let target=format!("native-handoff:{}",task.context.operation_id);
+            let fork=self.execute(port.clone(),Arc::new(||{}),"workspace.fork",json!({"branchId":branch,"generation":entry.binding.generation,
+                "targetBranchId":target,"operationId":format!("native-handoff-fork:{}",task.context.operation_id),
+                "sourcePath":if selected.is_empty(){None}else{Some(&selected)}}),actor.clone(),task.cancellation.clone())?;
+            let (target,pin_id,actor)=(target,format!("child-pin:{}",task.context.operation_id),task.grant.clone());
+            let pinned=port.call(move|s|s.dispatch("branch.pin",&json!({"operationId":format!("native-handoff-pin:{pin_id}"),"branchId":target,"revision":0,"pinId":pin_id}),Some(&actor.grant_id),&actor))?;
+            let mut source=task.source.clone();source.mode=varin_runtime::SourceMode::FixedBranch;source.native_scope=None;
+            source.branch_id=Some(format!("native-handoff:{}",task.context.operation_id));source.revision=Some(0);
+            let _=fork;
+            json!({"kind":"native","pin":{"pin_id":format!("child-pin:{}",task.context.operation_id),"root":pinned["root"],"source":source}})
+        };
+        let original=task.clone();
+        port.call(move|s|s.native_handoff(&original,Some(root)))?.ok_or_else(||error("workspace_handoff_missing","Native source handoff was not committed"))
+    }
     #[cfg(test)]
     pub(crate) fn session(&self, branch: &str) -> Arc<Session> {
         self.entries
@@ -87,9 +124,13 @@ impl Workspaces {
         Ok(())
     }
     fn inspect(entry: &Entry, grant: &Grant) -> Result<Value, KernelError> {
+        let mut view=locked(&entry.view)?.clone();
+        if entry.session.is_mount_disconnected(){if let Some(view)=&mut view{view["state"]=json!("failed");view["path"]=Value::Null;view["error"]=json!("workspace_mount_disconnected");}}
+        let root=view.as_ref().filter(|view|view["state"]=="ready").map(|_|crate::storage::native_sources::root_id(
+            &entry.binding.workspace_id,&entry.binding.execution_workspace_id,&entry.binding.branch_id,""));
         Ok(
-            json!({"binding":entry.binding, "leases":entry.session.leases(grant, None)?,
-            "mount":locked(&entry.view)?.clone(),
+            json!({"binding":entry.binding, "leases":entry.session.leases(grant, None)?,"rootId":root,
+            "mount":view,
             "capabilities":{"nativeFiles":true,"mountCompiled":cfg!(feature="workspace-mount"),"hardlinks":!cfg!(windows),"symlinks":true,"xattrs":cfg!(unix),"losslessNativeNames":false,"activeWritableMappingFork":false}}),
         )
     }
@@ -117,6 +158,14 @@ impl Workspaces {
     ) -> Result<Value, KernelError> {
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
+        }
+        if method=="workspace.backend.inspect"{
+            #[cfg(feature="workspace-mount")]
+            let readiness=crate::workspace_mount::dependencies();
+            #[cfg(not(feature="workspace-mount"))]
+            let readiness:Result<(),KernelError>=Err(error("workspace_backend_unavailable","This kernel was built without native mount support"));
+            return Ok(json!({"backend":backend(),"mountCompiled":cfg!(feature="workspace-mount"),"dependenciesReady":readiness.is_ok(),
+                "detail":readiness.err().map(|error|error.to_string()),"helpUrl":if cfg!(windows){"https://winfsp.dev/rel/"}else if cfg!(target_os="macos"){"https://macfuse.github.io/"}else{"https://github.com/libfuse/libfuse"}}));
         }
         if method == "workspace.adopt" {
             if self.stopping.load(Ordering::Acquire) {
@@ -203,7 +252,11 @@ impl Workspaces {
         if method == "workspace.close" {
             let _: Address = serde_json::from_value(params)?;
             Self::owner(&entry, &grant)?;
-            return self.close(&address, false);
+            // Arm before checking the resource boundary: a last Close can race
+            // that check, and its only idle wake must not be lost.
+            self.waiting_for_idle.store(true,Ordering::Release);
+            let result=self.close(&address, false);
+            return result;
         }
         if method == "workspace.inspect" {
             let _: Address = serde_json::from_value(params)?;
@@ -276,10 +329,32 @@ impl Workspaces {
                         "The original mount requires cleanup after its failed startup",
                     ));
                 }
+                let path=std::fs::canonicalize(locked(&entry.view)?.as_ref().and_then(|view|view["path"].as_str())
+                    .ok_or_else(||error("workspace_mount_not_ready","The workspace has no admitted mount path"))?)?;
+                let (branch,generation,actor)=(entry.binding.branch_id.clone(),entry.binding.generation.clone(),grant.clone());
+                port.call(move|s|s.register_native_file_root(&branch,&generation,path,"",&actor))?;
                 drop(mounted);
                 Self::inspect(&entry, &grant)
             }
+            "workspace.bind" => {
+                entry.session.check_mounted()?;
+                let args:crate::protocol_generated::KernelWorkspaceBindParams=serde_json::from_value(params)?;
+                let scope=args.source_path.unwrap_or_default();
+                entry.session.admit(&grant,&scope,false)?;
+                let view=locked(&entry.view)?.clone().ok_or_else(||error("workspace_mount_not_ready","Mount this workspace before binding a source"))?;
+                if view["state"]!="ready"{return Err(error("workspace_mount_not_ready","The original workspace mount is unavailable"));}
+                let base=std::fs::canonicalize(view["path"].as_str().ok_or_else(||error("workspace_mount_not_ready","Mount path is missing"))?)?;
+                let canonical=std::fs::canonicalize(scope.split('/').filter(|part|!part.is_empty()).fold(base.clone(),|root,part|root.join(part)))?;
+                if !canonical.starts_with(&base)||!canonical.is_dir(){return Err(error("workspace_scope_invalid","Native scope must name a directory inside the original workspace"));}
+                let path=canonical.clone();
+                let (branch,generation,actor)=(entry.binding.branch_id.clone(),entry.binding.generation.clone(),grant.clone());
+                let id=port.call(move|s|{let id=s.register_native_file_root(&branch,&generation,canonical,&scope,&actor)?;s.retain_native_root(&id,&actor)?;Ok(id)})?;
+                let mut result=Self::inspect(&entry,&grant)?;
+                result["rootId"]=json!(id);result["mount"]["path"]=json!(path);
+                Ok(result)
+            }
             "workspace.fork" => {
+                entry.session.check_mounted()?;
                 let args: Fork = serde_json::from_value(params)?;
                 let selected = args.source_path.as_deref().unwrap_or("");
                 entry.session.admit(&grant, selected, true)?;
@@ -335,9 +410,10 @@ impl Workspaces {
             .lifecycle
             .write()
             .map_err(|_| error("workspace_failed", "Workspace lifecycle lock poisoned"))?;
-        if !shutting_down && entry.session.lease_count()? != 0 {
+        if !shutting_down && entry.session.leases(&entry.session.owner(),None)? != 0 {
             return Err(error("workspace_in_use", "Original execution leases must stop their processes and release before closing this workspace"));
         }
+        entry.session.assert_consumers_idle()?;
         if let Some(view) = locked(&entry.view)?.as_mut() {
             view["state"] = json!("cleanup_pending");
             view["path"] = Value::Null;

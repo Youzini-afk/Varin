@@ -211,6 +211,9 @@ impl Storage {
         paths: &[FileLeaseResource],
     ) -> Result<(), KernelError> {
         let requested = self.canonical_lease_resources(root_id, paths, grant)?;
+        self.assert_file_observation_resources(&requested)
+    }
+    pub(super) fn assert_file_observation_resources(&self,requested:&[CanonicalFileLeaseResource])->Result<(),KernelError>{
         for lease in self.file_leases.values() {
             if self.is_file_observation_read_lease(&lease.lease_id) {
                 continue;

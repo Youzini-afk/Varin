@@ -97,11 +97,13 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
     return { ...selected, ...(selected.tools.some(tool => tool.name === 'process_spawn')
       ? { executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()) } : {}) };
   };
-  const registration = async (source: LaunchSource, signal?: AbortSignal): Promise<void> => {
+  const registration = async (source: LaunchSource, signal?: AbortSignal, metadataOnly=false): Promise<void> => {
     if (source.resource_owner.kind !== 'managed_host' || source.resource_owner.hostId !== options.hostId) {
       throw new SourceAdmissionError('source_changed');
     }
     await documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    if(metadataOnly&&source.mode==='native_workspace')return;
+    if(source.mode==='native_workspace'){if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');await kernel.nativeWorkspaces.open(source,signal);}
     if (source.execution_workspace_id !== source.workspace_id) await documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
     if (source.mode === 'live_root') {
       if (!source.live_root) throw new SourceAdmissionError('source_changed');
@@ -109,7 +111,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         liveRoot: source.live_root }, signal);
     }
   };
-  const selectedSource = (input: ManagedSourceBindRequest): LaunchSource => ({ resource_owner: input.source.resourceOwner,
+  const selectedSource = (input: ManagedSourceBindRequest): LaunchSource => ({ ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{native_scope:input.source.nativeScope}:{}),resource_owner: input.source.resourceOwner,
     mode: input.source.mode, workspace_id: input.source.workspaceId, execution_workspace_id: input.source.executionWorkspaceId,
     branch_id: input.source.branchId ?? null, revision: input.source.revision ?? null, live_root: input.source.liveRoot ?? null,
     ...('environmentRunId' in input.source && typeof input.source.environmentRunId === 'string'
@@ -339,7 +341,7 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         throw new SourceAdmissionError('source_authority_denied');
       if (['script_environment', 'mcp_owner'].includes(input.purpose) && (source.mode === 'fixed_branch'
         || !['terminal:use', 'process:control'].every(capability => principal.capabilities.includes(capability)))) throw new SourceAdmissionError('source_authority_denied');
-      await registration(source, signal);
+      await registration(source, signal,resultOnly);
       const selected = await capabilities(principal, { coordinatorHostId: input.coordinatorHostId, mode: source.mode,
         enabledTools: input.scope.kind === 'source_read' || resultOnly || input.purpose === 'mcp_owner' ? [] : input.source.tools }, signal);
       const integration = input.purpose === 'integration';
@@ -368,9 +370,9 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
         const actor = kernel.scoped(kernel.sourceAuthorityGrant(opened));
         // The native claim verified the exact committed handoff before this
         // target root can be used; a pre-Run read cannot materialize a path.
-        const handedPhysical = input.handoff && input.handoff.root.kind !== 'fixed' ? input.handoff.root.root : null;
+        const handedPhysical = input.handoff && (input.handoff.root.kind === 'physical'||input.handoff.root.kind==='derived') ? input.handoff.root.root : null;
         let physicalRoot = opened.physicalRoot ?? handedPhysical;
-        const branch = source.mode === 'live_root' || handedPhysical ? undefined
+        const branch = source.mode === 'live_root' || source.mode==='native_workspace' || handedPhysical ? undefined
           : await actor.readBranch({ branchId: source.branch_id!, revision: source.revision!, includeEntries: false }, signal).catch(error => { throw sourceReadError(error); });
         if (branch && (branch.workspaceId !== source.workspace_id || branch.branchId !== source.branch_id
           || branch.view !== 'revision' || branch.revision !== source.revision)) throw new SourceAdmissionError('source_changed');
@@ -404,6 +406,12 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           if (opened.physicalRoot && !isDeepStrictEqual(opened.physicalRoot, physicalRoot)) throw new SourceAdmissionError('source_changed');
           } else if (!input.deferMaterialization) throw new SourceAdmissionError('source_environment_unavailable');
         }
+        let native:Awaited<ReturnType<NonNullable<KernelClient['nativeWorkspaces']>['acquire']>>|undefined;
+        if(source.mode==='native_workspace'&&!resultOnly){
+          if(!kernel.nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');
+          native=await kernel.nativeWorkspaces.acquire(source,kernel.sourceAuthorityGrant(opened),signal);
+          physicalRoot={hostId:options.hostId,rootId:native.rootId,canonicalRoot:native.path};
+        }
         const fixed = { branchId: source.branch_id!, revision: source.revision! };
         const toolBinding: SourceToolBinding | null = input.scope.kind === 'source_read' ? null : {
           executionEnvironment: await (options.executionEnvironment?.() ?? defaultExecutionEnvironment.snapshot()),
@@ -412,9 +420,10 @@ export function createManagedSourceService(options: ManagedSourceServiceOptions)
           enabledTools: selected.tools.map(tool => tool.name), ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}),
           ...(source.mode === 'fixed_branch' ? { fileSource: fixed } : source.mode === 'live_root'
             ? { ...(physicalRoot ? { rootId: physicalRoot.rootId } : {}), liveRoot: source.live_root! }
+            : source.mode==='native_workspace'?{nativeWorkspace:native?.address??{branchId:source.branch_id!,...(source.native_scope?{sourcePath:source.native_scope}:{})},...(native?{rootId:native.rootId,liveRoot:physicalRoot!}:{})}
             : { ...(physicalRoot ? { rootId: physicalRoot.rootId } : {}), materializedSource: fixed }),
         };
-        await registration(source, signal);
+        await registration(source, signal,resultOnly);
         const bound = await kernel.sourceRequest<SourceAuthorityResult>('source.authority.bind', {
           ...address(principal, { coordinatorHostId: input.coordinatorHostId, authorityId: opened.authorityId, resourceEpoch: opened.resourceEpoch }),
           toolBinding, physicalRoot,

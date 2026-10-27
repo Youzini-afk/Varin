@@ -17,6 +17,13 @@ pub(crate) use fuse::Mount;
 #[cfg(windows)]
 pub(crate) use windows::Mount;
 
+pub(crate) fn dependencies()->Result<(),KernelError>{
+    #[cfg(windows)] {windows::initialize()}
+    #[cfg(any(target_os="linux",target_os="macos"))] {
+        fuser::mount_dependencies().map_err(|error|unsupported(&format!("Native workspace dependency is unavailable: {error}")))
+    }
+}
+
 fn unsupported(message: &str) -> KernelError {
     KernelError::Execution(varin_runtime::execution::ExecutionError::new(
         "workspace_backend_unsupported",

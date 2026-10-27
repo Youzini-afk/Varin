@@ -30,6 +30,8 @@ import { resetWorkbenchPanelsForRuntimeSwitch } from './panels';
 import { resolveEditorProviderId } from './providers';
 import type { EditorViewState, EditorWorkbenchState } from './types';
 import { closeEmbeddedBrowserPageId } from '@/lib/browser-page';
+import { getRegisteredRuntimeAPIs } from '@/lib/runtime-api/registry';
+import { retainEditorWorkspace } from '@/lib/documents/workspace-retention';
 
 type EditorWorkbenchSession = {
   runtimeKey: string;
@@ -74,6 +76,22 @@ export const listEditorWorkbenches = (): readonly EditorWorkbenchState[] => (
 const persistStructural = (state: EditorWorkbenchState): EditorWorkbenchState => {
   rememberLastGoodEditorWorkbench(state);
   schedulePersistedEditorWorkbench(state.workspaceId);
+  const documents=getRegisteredRuntimeAPIs()?.documents;
+  if(documents){
+    const retained=listOpenResourceIds(state.tree).length>0;
+    const runtimeKey=session.runtimeKey;
+    // Enqueue the durable state before importing anything. A quick close/open
+    // must preserve user order even when the first dynamic import is cold.
+    const retention=retainEditorWorkspace(documents,state.workspaceId,retained);
+    void (async()=>{
+      if(!retained){
+        const documents=await import('@/lib/documents/session');
+        const current=session.byWorkspace.get(state.workspaceId);
+        if(session.runtimeKey===runtimeKey&&(!current||listOpenResourceIds(current.tree).length===0))documents.releaseClosedDocumentWorkspace(state.workspaceId);
+      }
+      await retention;
+    })().catch(error=>console.error('[Documents] Saved editor source retention failed:',error));
+  }
   return state;
 };
 

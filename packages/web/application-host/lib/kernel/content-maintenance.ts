@@ -5,7 +5,7 @@ import type { AgentRuntimeClient } from './agent-runtime-client.js';
 export function createContentMaintenance(options: {
   runtime: Pick<AgentRuntimeClient, 'collectContent' | 'onEvent' | 'onReady' | 'onExit'>;
   onError(error: unknown): void;
-  releaseDeletedResources?(signal: AbortSignal): Promise<void>;
+  releaseDeletedResources?(signal: AbortSignal): Promise<void|{pending:boolean}>;
 }) {
   const lifetime = new AbortController();
   let pending = false;
@@ -24,11 +24,11 @@ export function createContentMaintenance(options: {
       dirty = false;
       const owner = generation;
       running = (async () => {
-        await options.releaseDeletedResources?.(lifetime.signal);
-        return options.runtime.collectContent(lifetime.signal);
+        const resources=await options.releaseDeletedResources?.(lifetime.signal);
+        return {...await options.runtime.collectContent(lifetime.signal),pendingSources:resources?.pending??false};
       })().then(report => {
         if (owner !== generation || lifetime.signal.aborted) return;
-        pending = dirty || report.status !== 'completed' || (report.pendingDeletedThreads ?? 0) > 0;
+        pending = dirty || report.pendingSources || report.status !== 'completed' || (report.pendingDeletedThreads ?? 0) > 0;
         if (report.status === 'failed') options.onError(new Error(report.reason ?? 'Content collection failed'));
         // A short-lived content reader/publication need not emit a durable runtime event.
         // Retry that busy admission after the same quiet period used by storage checkpoints.
@@ -55,6 +55,7 @@ export function createContentMaintenance(options: {
   void initialize();
   return {
     request,
+    resourceIdle(){if(pending)request();},
     async dispose() {
       lifetime.abort(); dirty = false;
       if (scheduled) clearImmediate(scheduled);

@@ -20,6 +20,7 @@ import { getRuntimeEndpointGeneration } from '@varin/application-client';
 import { detectLineEnding, normalizeEditorLineEndings, serializeEditorContent } from './line-ending';
 import { requireWorkspaceEpoch } from './mutation-token';
 import { getDocumentRecoverySessionId } from './recovery-session';
+import { retainEditorWorkspace } from './workspace-retention';
 import {
   documentKey,
   toDocumentMeta,
@@ -487,6 +488,10 @@ export class DocumentRegistry {
   dirtyResourceIds(workspaceId: string): ReadonlySet<string> {
     return this.dirtyIdsByWorkspace.get(workspaceId) ?? EMPTY_RESOURCE_IDS;
   }
+  releaseClosedWorkspace(workspaceId:string):void {
+    if(this.dirtyResourceIds(workspaceId).size)return;
+    this.watches.get(workspaceId)?.close();this.watches.delete(workspaceId);
+  }
 
   surfaceOwner(): { generation: number; ownerId: string } {
     return { generation: this.getGeneration(), ownerId: this.dirtyOwnerId };
@@ -661,6 +666,7 @@ export class DocumentRegistry {
     const key = this.keyFor(identity);
     const generation = this.getGeneration();
     const existing = this.records.get(key);
+    await retainEditorWorkspace(this.documents,identity.workspaceId,true);
     if (
       !options?.reload
       && existing

@@ -66,6 +66,7 @@ export function sameWritableSource(left: Pick<Participant, 'runId' | 'source'>, 
       : [path.relative(leftRoot!, rightRoot!), path.relative(rightRoot!, leftRoot!)]
         .some(relative => relative && !relative.startsWith('..') && !path.isAbsolute(relative));
   }
+  if(a.mode==='native_workspace')return a.branch_id===b.branch_id;
   return (a.environment_run_id ?? left.runId) === (b.environment_run_id ?? right.runId)
     && a.branch_id === b.branch_id && a.revision === b.revision;
 }
@@ -100,6 +101,14 @@ function baselineUnavailable(source: Participant, target: Participant): Error {
   return Object.assign(new Error(`No common file baseline links ${describe(source)} and ${describe(target)}: `
     + 'neither side records the fixed revision both started from, so their changes cannot be merged. '
     + 'Dispatch with an independent copy or a fixed stage source to obtain one, or apply the changes directly.'), { code: 'baseline_unavailable' });
+}
+export async function codeBaseline(runtime:Pick<AgentRuntimeClient,'childExecutionForRun'>,source:CodeParticipant,target:CodeParticipant,signal:AbortSignal):Promise<{source:LaunchSource;participant:CodeParticipant}>{
+  if(source.source.mode!=='native_workspace')return {source:source.source.mode==='live_root'?target.source:source.launch.selection.source!,participant:source.source.mode==='live_root'?target:source};
+  for(const participant of [source,target]){
+    const child=await runtime.childExecutionForRun(participant.runId,signal);
+    if(child?.source?.kind==='ready')return {source:child.source.pin.source,participant};
+  }
+  throw baselineUnavailable(source,target);
 }
 
 async function participant(runtime: AgentRuntimeClient, caller: string, identity: string, signal: AbortSignal,
@@ -189,6 +198,9 @@ function replaceOnce(text: string, before: string, after: string): string {
 export async function captureCodeSelection(input: {
   store: WorkingStateRootStore; operationId: string; workspaceId: string; directory?: string;
   fixedSource?: {branchId:string;revision:number};
+  nativeSource?:LaunchSource;
+  ownerThreadId?:string;
+  nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner;
   baselineBranchId: string; baselineRevision: number; files?: CodeSelection[];
   acknowledged?: Record<string, RecoveryState>; signal: AbortSignal;
   mapping?: SourcePathMap | undefined; baselineMapping?: SourcePathMap | undefined;
@@ -198,6 +210,16 @@ export async function captureCodeSelection(input: {
   const publicationId = `code-exchange:${input.operationId}`;
   const resumed = await store.resumeResultPublication(branchId, publicationId, { signal });
   if (resumed) return resumed;
+  if(input.nativeSource){
+    if(!input.nativeWorkspaces)throw new Error('Native code source is unavailable');
+    const snapshotBranch=`code-snapshot:${input.operationId}`;
+    await input.nativeWorkspaces.snapshot(input.nativeSource,snapshotBranch,`code-snapshot:${input.operationId}`,signal,undefined,input.ownerThreadId?{threadId:input.ownerThreadId}:{});
+    const {nativeSource:_source,nativeWorkspaces:_owner,...remaining}=input;
+    const result=await captureCodeSelection({...remaining,fixedSource:{branchId:snapshotBranch,revision:0}});
+    await store.deleteBranch(snapshotBranch);
+    if(input.ownerThreadId)await input.nativeWorkspaces.retainPrepared({...input.nativeSource,branch_id:snapshotBranch},input.ownerThreadId,true,signal);
+    return result;
+  }
   // Original create/commit/publication identities recover the same captured version after a retry.
   const existing = await store.getBranchRoot(branchId);
   if (existing && existing.writeRevision > 0) return store.publishHeadResult(branchId, { publicationId, signal });
@@ -308,16 +330,18 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         const targetScope = await openExchangeScope(owners, authority, target, context.signal); opened.push(targetScope);
         const sourceScope = source.source.mode==='fixed_branch'?await openFixedCodeSource(owners,authority,source.source,context.signal)
           :await openExchangeScope(owners, authority, source, context.signal); opened.push(sourceScope);
-        const baseline = source.source.mode === 'live_root' ? target.source : source.launch.selection.source!;
+        const {source:baseline,participant:baselineOwner} = await codeBaseline(owners.runtime,source,target,context.signal);
         if (!baseline.branch_id || baseline.revision === null) throw baselineUnavailable(source, target);
         const acknowledged = await acknowledgedCode(sourceScope.store, source.member.threadId, target.member.threadId,
           source.source.mode==='fixed_branch'?await owners.metadataReader.listOperations(source.source.workspace_id,'integration'):undefined);
         result = await captureCodeSelection({ store: sourceScope.store, operationId: authority.operationId,
+          ownerThreadId:source.member.threadId,
           mapping: await sourcePathMap(owners.runtime, source, target, context.signal),
-          baselineMapping: await sourcePathMap(owners.runtime, source.source.mode === 'live_root' ? target : source, source, context.signal),
+          baselineMapping: await sourcePathMap(owners.runtime, baselineOwner, source, context.signal),
           workspaceId: source.source.workspace_id,
           ...('directory' in sourceScope?{directory:sourceScope.directory}:{}),
           ...(source.source.mode==='fixed_branch'?{fixedSource:{branchId:source.source.branch_id!,revision:source.source.revision!}}:{}),
+          ...(source.source.mode==='native_workspace'?{nativeSource:source.source,nativeWorkspaces:owners.kernel.nativeWorkspaces}:{}),
           baselineBranchId: baseline.branch_id, baselineRevision: baseline.revision,
           ...(input.files ? { files: input.files } : {}), acknowledged, signal: context.signal });
         if (!result.root) throw new Error('The source snapshot has no immutable root');

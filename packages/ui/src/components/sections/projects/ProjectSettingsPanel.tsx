@@ -12,6 +12,7 @@ import {
 import { useProjectIdentityAutoSave } from '@/components/sections/projects/useProjectIdentityAutoSave';
 import type { ProjectEntry } from '@varin/application-client';
 import { ProjectFoldersSettings } from './ProjectFoldersEditor';
+import {ProjectWorkspaceSection} from './ProjectWorkspaceSection';
 
 type ProjectSettingsPanelProps = {
   project: ProjectEntry | null;
@@ -64,7 +65,7 @@ export const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
         { value: 'worktrees', label: t('settings.experience.projectWorktrees') },
       ]} /> : null}
       <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'identity'}><ProjectIdentityFields form={form} /></div>
-      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'folders'}><ProjectFoldersSettings project={project} /></div>
+      <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'folders'}><ProjectFoldersSettings project={project} /><ProjectWorkspaceSection project={project}/></div>
       <div className="settings-tab-panel" hidden={showWorktrees && tab !== 'actions'}><ProjectActionsSection projectRef={projectRef} /></div>
       {showWorktrees ? <div className="settings-tab-panel" hidden={tab !== 'worktrees'}><WorktreeSectionContent projectRef={projectRef} /></div> : null}
     </div>

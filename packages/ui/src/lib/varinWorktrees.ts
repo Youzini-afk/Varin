@@ -95,6 +95,7 @@ export const createVarinWorktree = async (
   project: VarinProjectRef,
   options: VarinWorktreeCreateOptions,
 ): Promise<WorktreeMetadata> => {
+  project={...project,path:await projectExecutionPath(project)};
   const host = getRuntimeEndpointGeneration();
   const git = requireGit();
   const mode = options.mode === 'existing' ? 'existing' : 'new';
@@ -162,6 +163,7 @@ export const createVarinWorktree = async (
 export const listVarinWorktrees = async (
   project: VarinProjectRef,
 ): Promise<WorktreeMetadata[]> => {
+  project={...project,path:await projectExecutionPath(project)};
   const git = requireGit();
   const entries = git.worktree?.list
     ? await git.worktree.list(project.path)
@@ -185,6 +187,7 @@ export const removeVarinWorktree = async (
   worktree: Pick<WorktreeMetadata, 'path'>,
   options?: { deleteLocalBranch?: boolean },
 ): Promise<void> => {
+  project={...project,path:await projectExecutionPath(project)};
   const git = requireGit();
   const payload = {
     directory: worktree.path,
@@ -198,3 +201,4 @@ export const removeVarinWorktree = async (
   if (!result?.success) throw new Error('Worktree removal failed');
   clearWorktreeBootstrapState(worktree.path);
 };
+import { projectExecutionPath } from './nativeWorkspace';

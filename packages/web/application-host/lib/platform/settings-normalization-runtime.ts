@@ -1,4 +1,4 @@
-import { projectFolders } from '@varin/application-client';
+import { projectFolders, parseVersionedProjectWorkspace } from '@varin/application-client';
 import { isWorkFocusId } from '@varin/protocol';
 
 export interface SettingsPathModule {
@@ -219,6 +219,8 @@ export const createSettingsNormalizationRuntime = (dependencies: SettingsNormali
         ...(addedAt !== null && addedAt >= 0 ? { addedAt } : {}),
         ...(lastOpenedAt !== null && lastOpenedAt >= 0 ? { lastOpenedAt } : {}),
       };
+      const versionedWorkspace=parseVersionedProjectWorkspace(candidate.versionedWorkspace);
+      if(versionedWorkspace)project.versionedWorkspace=versionedWorkspace;
 
       if (candidate.iconImage === null) {
         project.iconImage = null;

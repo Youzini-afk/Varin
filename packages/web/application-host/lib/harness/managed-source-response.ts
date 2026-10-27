@@ -7,7 +7,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const text = (value: unknown): value is string => typeof value === 'string';
 const strings = (value: unknown): value is string[] => Array.isArray(value) && value.every(text);
 const source = (value: unknown): boolean => record(value) && record(value.resource_owner) && text(value.workspace_id)
-  && text(value.execution_workspace_id) && ['live_root', 'fixed_branch', 'materialized'].includes(String(value.mode));
+  && text(value.execution_workspace_id) && ['live_root', 'fixed_branch', 'materialized','native_workspace'].includes(String(value.mode));
 const pin = (value: unknown): boolean => record(value) && text(value.pin_id) && text(value.root) && source(value.source);
 
 export function decodeManagedSourceCancellation(input: { requestId: string; resourceEpoch: string }, value: unknown): ManagedSourceServiceCancelReceipt {

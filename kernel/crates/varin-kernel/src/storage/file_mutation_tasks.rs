@@ -246,7 +246,11 @@ impl Task {
             if content.contains('\0'){return Err(KernelError::Operation("text mutation content must not contain NUL bytes".into()));}
             let stored=self.upload(owner,&content,"text-content")?;
             let content_owner=string(&stored,"ownerId")?.to_owned();provisional.push(content_owner.clone());
-            let target=FileState::RegularFile{object_hash:string(&stored,"hash")?.into(),byte_length:content.len() as u64,mode};
+            let native=expected.native().map(|metadata|{
+                let mut value=metadata.clone();let now=super::workspace_metadata::Timestamp::now();
+                value.modified=varin_runtime::catalog::followups::FileTimestamp{seconds:now.seconds,nanos:now.nanos};value
+            });
+            let target=FileState::RegularFile{object_hash:string(&stored,"hash")?.into(),byte_length:content.len() as u64,mode,native};
             let turn=self.control(owner,|t,s|{
                 let grant=t.authorize(s)?;
                 t.journal.as_ref().map(|anchor|s.prepare_journal_turn(&t.workspace,&t.root.root_id,anchor,t.source_mode,&grant)).transpose()

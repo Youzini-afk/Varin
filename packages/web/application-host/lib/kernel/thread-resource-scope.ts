@@ -28,7 +28,7 @@ export class ResourceScopeError extends Error {
 export interface ResourceContextScope { mode: 'agent' | 'bot'; threadRole: string; projectId: string | null }
 export interface ResourceSourceReadInput {
   identity: ThreadIdentity;
-  source: Exclude<ThreadSource, { mode: 'live_root' }>;
+  source: Exclude<ThreadSource, { mode: 'live_root'|'native_workspace' }>;
   paths: string[];
   runId?: string;
   signal?: AbortSignal;
@@ -60,13 +60,14 @@ export interface ThreadResourceScopeOwners {
   targetAuthority?: {
     assert(source: ThreadSource, signal?: AbortSignal): Promise<void>;
     withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
-    withLiveSourceRead<T>(source: Extract<ThreadSource, { mode: 'live_root' }>, consume: (store: WorkingStateRootStore) => Promise<T>, signal?: AbortSignal): Promise<T>;
+    withLiveSourceRead<T>(source: Extract<ThreadSource, { mode: 'live_root'|'native_workspace' }>, consume: (store: WorkingStateRootStore) => Promise<T>, signal?: AbortSignal): Promise<T>;
   };
   dataDirectory: string;
   homeDir?: string;
   documents: Pick<DocumentAuthority, 'inspectWorkspace' | 'readSnapshot' | 'admitWorkspaceRegistration'> & Partial<Pick<DocumentAuthority, 'readSnapshots' | 'resolveWorkspace'>>;
   workingStates: WorkspaceWorkingStateRootAccess;
   validateLiveSource: LiveSourceResolver;
+  resolveNativeSource?(source:Extract<ThreadSource,{mode:'native_workspace'}>,signal?:AbortSignal):Promise<import('./protocol.generated.js').LiveRoot>;
   projectTrusted(root: string): boolean | Promise<boolean>;
   /** Existing Git owner resolves linked-worktree identity; no second Git parser. */
   resolvePrimaryWorktreeRoot?(directory: string): Promise<{ root: string }>;
@@ -574,7 +575,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       const unavailable = (target: string) => resourceFailure(declared, target, 'unavailable', 'Resource dependency was not captured in an available original view');
       const access = async <T extends ResourceFileResult | ResourceDirectoryResult>(target: string, action: (reader: ResourceReader) => Promise<T>): Promise<T> => {
         signal?.throwIfAborted();
-        if (declared.consistency !== 'immutable' || !source || source.mode === 'live_root') return unavailable(target) as T;
+        if (declared.consistency !== 'immutable' || !source || source.mode === 'live_root'||source.mode==='native_workspace') return unavailable(target) as T;
         try {
           const paths = requestPaths();
           if (!paths.length) return unavailable(target) as T;
@@ -631,22 +632,24 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
       return result;
     };
     if (!source) return finish();
-    if (source.mode === 'live_root') {
-      await owners.validateLiveSource(source, signal);
-      scope.projectTrusted = await owners.projectTrusted(source.liveRoot.canonicalRoot);
+    if (source.mode === 'live_root'||source.mode==='native_workspace') {
+      const liveRoot=source.mode==='native_workspace'?await owners.resolveNativeSource?.(source,signal):source.liveRoot;
+      if(!liveRoot)throw new Error('Native resource source is unavailable');
+      if(source.mode==='live_root')await owners.validateLiveSource(source, signal);
+      scope.projectTrusted = await owners.projectTrusted(source.mode==='native_workspace'?(await owners.documents.admitWorkspaceRegistration(source.workspaceId,signal)).canonicalPath:liveRoot.canonicalRoot);
       let resourceWorkspaceId = source.workspaceId;
       const owning = await owners.documents.admitWorkspaceRegistration(source.workspaceId, signal);
-      if (normalizePathIdentity(owning.canonicalPath) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) {
+      if (normalizePathIdentity(owning.canonicalPath) !== normalizePathIdentity(liveRoot.canonicalRoot)) {
         if (!owners.documents.resolveWorkspace) throw new Error('Scoped resource registration is unavailable');
-        resourceWorkspaceId = (await owners.documents.resolveWorkspace({ path: source.liveRoot.canonicalRoot })).workspaceId;
+        resourceWorkspaceId = (await owners.documents.resolveWorkspace({ path: liveRoot.canonicalRoot })).workspaceId;
         const selected = await owners.documents.admitWorkspaceRegistration(resourceWorkspaceId, signal);
-        if (normalizePathIdentity(selected.canonicalPath) !== normalizePathIdentity(source.liveRoot.canonicalRoot)) throw new Error('Scoped resource directory changed');
+        if (normalizePathIdentity(selected.canonicalPath) !== normalizePathIdentity(liveRoot.canonicalRoot)) throw new Error('Scoped resource directory changed');
       }
       const consume = async (store: WorkingStateRootStore) => {
-        const root = source.liveRoot.canonicalRoot;
+        const root = liveRoot.canonicalRoot;
         const id = `workspace:${source.workspaceId}`;
         const previous = options.snapshot?.readers.find(reader => reader.domainId === id);
-        const viewId = previous?.viewId ?? `live-resource:${source.liveRoot.rootId}:${randomUUID()}`;
+        const viewId = previous?.viewId ?? `live-resource:${liveRoot.rootId}:${randomUUID()}`;
         let documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents;
         if (owners.documents.readSnapshots && !options.snapshot) {
           // These same candidates are used by source capture and context assembly.
@@ -671,7 +674,7 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         }
         const reader = createDocumentResourceReader({ domainId: id, viewId, workspaceId: resourceWorkspaceId, documents,
           list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
-        scope.sourceIdentity = `workspace:${source.workspaceId}:live:${source.liveRoot.rootId}`;
+        scope.sourceIdentity = `workspace:${source.workspaceId}:live:${liveRoot.rootId}`;
         scope.project = { reader, cwd: '', skillAncestorBoundary: '', displayRoot: root };
         if (!options.snapshot) {
           // Capturing this candidate's external dependencies does not mutate the live source or a prior snapshot.

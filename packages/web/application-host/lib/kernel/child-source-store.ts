@@ -1,3 +1,4 @@
+import {nativeExecutionWorkspaceId} from './native-workspaces.js';
 /** Storage-side child preparation. The caller has already admitted the original source
  * owner; these functions neither create a Catalog Run nor mint a resource grant. */
 import type { DelegatedExecution, ChildSourceProvenance, ChildSourcePin, LaunchSource, ChildPreparationProgress } from './protocol.generated.js';
@@ -19,6 +20,7 @@ export interface ChildSourceStoreOwners {
   capture: StableSourcePreparationOwners;
   onProgress?(progress: ChildPreparationProgress): void;
   capturePhysical?: ChildPhysicalCapture;
+  nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner|undefined;
   /** The original physical handoff, checked by the source owner before opening it. */
   physical(root: { rootId: string; canonicalRoot: string }): Promise<WorkingStateRootStore>;
 }
@@ -46,7 +48,7 @@ export async function prepareDispatchSourceStore(
   const workspace = handoff.source.workspace_id;
   let store = owners.store;
   let provenance: ChildSourceProvenance;
-  if (handoff.root.kind === 'fixed') {
+  if ((handoff.root.kind === 'fixed'||handoff.root.kind==='native')) {
     const fixed = handoff.root.pin;
     if (!fixed.source.branch_id || fixed.source.revision === null) throw new Error('Fixed child source has incomplete identity');
     if (!store.openBranchHandoffPin) throw new Error('Durable source handoff is unavailable');
@@ -54,7 +56,7 @@ export async function prepareDispatchSourceStore(
       { root: fixed.root, revision: fixed.source.revision, writeRevision: fixed.source.revision }, signal);
     const original = await store.readOriginalSource(fixed.source.branch_id, { signal });
     const resources=original?.provenance.resources;
-    provenance = { consistency: 'fixed-root', root: fixed.root, ...(resources ? { resources: handoff.source_path
+    provenance = { consistency: 'fixed-root', root: fixed.root, ...(resources ? { resources: handoff.source_path && handoff.root.kind !== 'native'
       ? await scopeFixedSourceResources(store,{branchId:fixed.source.branch_id,revision:fixed.source.revision},resources,handoff.source_path,signal) : resources } : {}) };
     const branch = await store.createBranchFromPin(workspace, sourceBranch, pin,
       `${fixed.source.branch_id}@${fixed.source.revision}`, undefined, [], { sourceProvenance: provenance });
@@ -88,10 +90,10 @@ export async function prepareDispatchSourceStore(
   const pin = await store.pinBranchHandoff(sourceBranch, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
   signal.throwIfAborted();
   const source: LaunchSource = { resource_owner: handoff.source.resource_owner,
-    mode: child.selected_profile.work_mode === 'isolated_write' ? 'materialized' : 'fixed_branch', live_root: null,
-    workspace_id: workspace, execution_workspace_id: handoff.source.execution_workspace_id,
-    branch_id: sourceBranch, revision: 0 };
-  return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch' } }, provenance };
+    mode: child.selected_profile.work_mode === 'isolated_write' ? 'native_workspace' : 'fixed_branch', live_root: null,
+    workspace_id: workspace, execution_workspace_id: child.selected_profile.work_mode==='isolated_write'?nativeExecutionWorkspaceId(child.execution_id):handoff.source.execution_workspace_id,
+    branch_id: sourceBranch, revision: child.selected_profile.work_mode==='isolated_write'?null:0 };
+  return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance };
 }
 
 export async function prepareContinuationSourceStore(
@@ -114,10 +116,10 @@ export async function prepareContinuationSourceStore(
     const retained = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
     signal.throwIfAborted();
     const source: LaunchSource = { resource_owner: basis.source.resource_owner,
-      mode: child.selected_profile.work_mode === 'isolated_write' ? 'materialized' : 'fixed_branch', live_root: null,
-      workspace_id: basis.source.workspace_id, execution_workspace_id: basis.source.execution_workspace_id,
-      branch_id: branchId, revision: 0 };
-    return { source, pin: { pin_id: retained.pinId, root: retained.root, source: { ...source, mode: 'fixed_branch' } }, provenance: basis.provenance };
+      mode: child.selected_profile.work_mode === 'isolated_write' ? 'native_workspace' : 'fixed_branch', live_root: null,
+      workspace_id: basis.source.workspace_id, execution_workspace_id:child.selected_profile.work_mode==='isolated_write'?nativeExecutionWorkspaceId(child.execution_id):basis.source.execution_workspace_id,
+      branch_id: branchId, revision:child.selected_profile.work_mode==='isolated_write'?null:0 };
+    return { source, pin: { pin_id: retained.pinId, root: retained.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance: basis.provenance };
   } finally { if (!handoffPin) await pin.release(); }
 }
 
@@ -126,6 +128,10 @@ export async function captureContinuationStage(child: DelegatedExecution, owners
   source: LaunchSource, physical: { rootId: string; canonicalRoot: string } | undefined, signal: AbortSignal): Promise<void> {
   const branchId = `child-incoming:${child.execution_id}`;
   if (await owners.store.readSourcePreparation(branchId, { signal })) return;
+  if(source.mode==='native_workspace'){
+    if(!owners.nativeWorkspaces)throw new Error('Native continuation source is unavailable');
+    await owners.nativeWorkspaces.snapshot(source,branchId,`child-incoming-snapshot:${child.execution_id}`,signal);return;
+  }
   if (source.mode === 'fixed_branch' || source.mode === 'materialized' && !physical) {
     if (!source.branch_id || source.revision === null) throw new Error('Incoming source is incomplete');
     const pin = await owners.store.pinBranch(source.branch_id, { revision: source.revision, signal });
@@ -209,9 +215,10 @@ export async function prepareRefreshedContinuationSourceStore(child: DelegatedEx
   }
   if (!prepared) throw new Error('Continuation source was not retained');
   const pin = await store.pinBranchHandoff(branchId, `child-source-pin:${child.execution_id}`, { revision: 0, signal });
-  const source: LaunchSource = { ...basis.source, mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'materialized',
-    live_root: null, environment_run_id: null, branch_id: branchId, revision: 0 };
-  return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch' } }, provenance: prepared.provenance };
+  const source: LaunchSource = { ...basis.source, mode: child.selected_profile.work_mode === 'read_only' ? 'fixed_branch' : 'native_workspace',
+    live_root: null, environment_run_id: null, branch_id: branchId, revision:child.selected_profile.work_mode==='isolated_write'?null:0,
+    execution_workspace_id:child.selected_profile.work_mode==='isolated_write'?nativeExecutionWorkspaceId(child.execution_id):basis.source.execution_workspace_id };
+  return { source, pin: { pin_id: pin.pinId, root: pin.root, source: { ...source, mode: 'fixed_branch',revision:0 } }, provenance: prepared.provenance };
 }
 
 export async function releaseRefreshScratch(child:DelegatedExecution,store:WorkingStateRootStore):Promise<void> {

@@ -13,6 +13,7 @@ export function createThreadFileTargetResolver(options: {
   storageRoot: string;
   documents: Pick<DocumentAuthority, 'resolveWorkspace' | 'admitWorkspaceRegistration'>;
   validateLiveSource: LiveSourceResolver;
+  nativeWorkspaces?:import('./native-workspaces.js').NativeWorkspaceOwner|undefined;
 }): ThreadFileTargetResolver {
   return async (runId, source, file, signal) => {
     signal?.throwIfAborted();
@@ -24,6 +25,10 @@ export function createThreadFileTargetResolver(options: {
       if (!source.live_root) throw new Error('Original workspace is unavailable');
       await options.validateLiveSource({ workspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, liveRoot: source.live_root }, signal);
       root = source.live_root.canonicalRoot;
+    } else if(source.mode==='native_workspace'){
+      if(!options.nativeWorkspaces)throw new Error('The original native source owner is unavailable');
+      const entry=await options.nativeWorkspaces.open(source,signal);
+      root=(await options.nativeWorkspaces.acquire(source,entry.grant,signal)).path;
     } else {
       const location = await originalMaterializationLocation(options.storageRoot, source.workspace_id, source.environment_run_id ?? runId);
       root = await admitMaterializedRoot(location.targetPath, signal);

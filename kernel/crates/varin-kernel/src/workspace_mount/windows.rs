@@ -14,7 +14,7 @@ use winfsp::{
     FspError, U16CStr,
 };
 
-fn initialize() -> Result<(), KernelError> {
+pub(super) fn initialize() -> Result<(), KernelError> {
     static LOADED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     static ADMISSION: Mutex<()> = Mutex::new(());
     let _admission = ADMISSION
@@ -296,6 +296,7 @@ impl Backend {
     }
 }
 impl FileSystemContext for Backend {
+    fn dispatcher_stopped(&self,_normally:bool){self.session.mount_disconnected();}
     type FileContext = Handle;
     fn get_security_by_name(
         &self,
@@ -582,6 +583,7 @@ impl FileSystemContext for Backend {
                 }
                 if creation != 0 {
                     attrs.created = Timestamp::from_filetime(creation);
+                    attrs.creation_exported = true;
                 }
                 if access != 0 {
                     attrs.accessed = Timestamp::from_filetime(access);
@@ -825,6 +827,7 @@ pub(crate) struct Mount {
 impl Mount {
     pub(crate) fn start(session: Arc<Session>, target: &Path) -> Result<Self, KernelError> {
         admit_target(target)?;
+        session.mount_started();
         initialize()?;
         session.lookup("")?;
         let mut params = VolumeParams::new();
@@ -874,7 +877,7 @@ impl Mount {
         })
     }
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
-        self.session.check_open()
+        self.session.check_mounted()
     }
     pub(crate) fn wait_ready_cancelled(
         &self,
@@ -930,12 +933,16 @@ impl Mount {
             self.closing
                 .store(true, std::sync::atomic::Ordering::Release);
             let remaining = self.opens.load(std::sync::atomic::Ordering::Acquire);
-            if remaining != 0 {
+            if remaining != 0&&!self.session.is_mount_disconnected() {
                 return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
             }
         }
         // Waiting callbacks can now take the admission lock and reject new
         // opens. Never hold that lock while joining dispatcher callbacks.
+        // A lost driver has already stopped native dispatch; join the original
+        // dispatcher before draining its saved file state, even if Close could
+        // no longer be delivered for an OS handle.
+        if self.session.is_mount_disconnected(){self.host.stop();}
         self.host.unmount();
         self.host.stop();
         if self.session.revoked() {

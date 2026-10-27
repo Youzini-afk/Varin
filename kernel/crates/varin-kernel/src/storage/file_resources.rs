@@ -14,6 +14,7 @@ pub(super) use varin_runtime::catalog::followups::FileState;
 pub(super) struct ResolvedFileResource {
     pub(super) path: String,
     pub(super) absolute: PathBuf,
+    pub(super) native: Option<super::native_sources::NativeFileRoot>,
 }
 
 /// Pure identity shared by registration and immutable Source receipt verification.
@@ -43,9 +44,13 @@ impl Storage {
                 let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([source.workspace_id, source.environment_run_id.as_deref().unwrap_or(&read.run_id)]))?));
                 self.root.join("managed").join("runs").join(key)
             }
+            varin_runtime::SourceMode::NativeWorkspace => PathBuf::from(target["canonicalRoot"].as_str()
+                .ok_or_else(||KernelError::Authorization("Native receipt has no original mount path".into()))?),
             _ => return Err(KernelError::Authorization("An immutable source has no binary file write".into())),
         };
-        let root_id = file_root_identity(&source.workspace_id, &source.execution_workspace_id, &expected_root);
+        let root_id = if source.mode==varin_runtime::SourceMode::NativeWorkspace {
+            super::native_sources::root_id(&source.workspace_id,&source.execution_workspace_id,source.branch_id.as_deref().ok_or_else(||KernelError::Authorization("Native source branch is missing".into()))?,source.native_scope.as_deref().unwrap_or(""))
+        }else{file_root_identity(&source.workspace_id, &source.execution_workspace_id, &expected_root)};
         if turn["workspaceId"] != source.workspace_id || turn["runId"] != read.run_id || turn["conversation"]["threadId"] != read.thread_id
             || target["threadId"] != read.thread_id || target["runId"] != read.run_id || target["workspaceId"] != source.workspace_id
             || target["executionWorkspaceId"] != source.execution_workspace_id || target["sourceMode"] != serde_json::to_value(source.mode)?
@@ -119,7 +124,7 @@ pub(super) fn file_mode(metadata: &fs::Metadata) -> u32 {
     }
 }
 
-pub(super) fn apply_mode(path: &Path, mode: Option<u32>) -> Result<(), KernelError> {
+pub(crate) fn apply_mode(path: &Path, mode: Option<u32>) -> Result<(), KernelError> {
     let Some(mode) = mode else {
         return Ok(());
     };
@@ -160,7 +165,7 @@ pub(super) fn normalized_relative_path(
     allow_root: bool,
 ) -> Result<(String, PathBuf), KernelError> {
     let normalized = value.replace('\\', "/");
-    if normalized.is_empty() {
+    if normalized.is_empty() || (allow_root && normalized == ".") {
         if allow_root {
             return Ok((String::new(), PathBuf::new()));
         }
@@ -222,6 +227,7 @@ pub(super) fn materialized_expected_state(state: &PathState) -> FileState {
             byte_length,
             mode: _mode,
         } => FileState::RegularFile {
+            native: None,
             object_hash: object_hash.clone(),
             byte_length: *byte_length,
             #[cfg(unix)]
@@ -232,6 +238,7 @@ pub(super) fn materialized_expected_state(state: &PathState) -> FileState {
             mode: None,
         },
         PathState::Directory { mode: _mode } => FileState::Directory {
+            native: None,
             #[cfg(unix)]
             mode: *_mode,
             #[cfg(windows)]
@@ -243,6 +250,7 @@ pub(super) fn materialized_expected_state(state: &PathState) -> FileState {
             symlink_target,
             mode: _mode,
         } => FileState::Symlink {
+            native: None,
             symlink_target: symlink_target.clone(),
             #[cfg(unix)]
             mode: *_mode,
@@ -438,6 +446,17 @@ impl Storage {
         root_id: &str,
         grant: &Grant,
     ) -> Result<FileRoot, KernelError> {
+        if let Some((branch, generation, _)) = self.native_file_roots.get(root_id) {
+            if self.native_closing_roots.contains(&(branch.clone(),generation.clone())) {
+                return Err(KernelError::Authorization("Native file root is closing; new file consumers are not admitted".into()));
+            }
+            let session = self.workspace_sessions.get(branch).and_then(std::sync::Weak::upgrade)
+                .ok_or_else(|| KernelError::Authorization("Native file root is no longer mounted".into()))?;
+            session.check_mounted()?;
+            if session.identity().to_string() != *generation {
+                return Err(KernelError::Authorization("Native file root belongs to a previous mount generation".into()));
+            }
+        }
         let root = self.file_roots.get(root_id).cloned().ok_or_else(|| {
             KernelError::Authorization(
                 "file root is not registered for this kernel epoch".to_string(),
@@ -487,20 +506,23 @@ impl Storage {
 
 
     pub(super) fn file_state_matches(observed: &FileState, expected: &FileState) -> bool {
+        if expected.native().is_some_and(|value| observed.native() != Some(value)) { return false; }
         match (observed, expected) {
             (FileState::Missing, FileState::Missing)
             | (FileState::Unsupported, FileState::Unsupported) => true,
-            (FileState::Directory { mode: observed }, FileState::Directory { mode: expected }) => {
+            (FileState::Directory { mode: observed, .. }, FileState::Directory { mode: expected, .. }) => {
                 expected.is_none() || observed == expected
             }
             (
                 FileState::Symlink {
                     symlink_target: observed_target,
                     mode: observed_mode,
+                    ..
                 },
                 FileState::Symlink {
                     symlink_target: expected_target,
                     mode: expected_mode,
+                    ..
                 },
             ) => {
                 observed_target == expected_target
@@ -511,11 +533,13 @@ impl Storage {
                     object_hash: observed_hash,
                     byte_length: observed_length,
                     mode: observed_mode,
+                    ..
                 },
                 FileState::RegularFile {
                     object_hash: expected_hash,
                     byte_length: expected_length,
                     mode: expected_mode,
+                    ..
                 },
             ) => {
                 observed_hash == expected_hash
@@ -742,9 +766,14 @@ pub(super) fn resolve_admitted_resource(
     grant: &Grant,
     allow_root: bool,
 ) -> Result<ResolvedFileResource, KernelError> {
-    resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| {
+    let session=root.native.as_ref().map(|native|native.session.upgrade().ok_or_else(||KernelError::Authorization("Native source owner is closed".into()))).transpose()?;
+    if let Some(session)=&session{session.check_mounted()?;}
+    let mut resource=resolve_scoped_resource(&root.canonical_root, relative, allow_root, false, |path| {
         path_allowed(grant, path)
-    })
+    })?;
+    resource.native=root.native.clone();
+    if let Some(session)=&session{session.check_mounted()?;}
+    Ok(resource)
 }
 
 /// Shared canonical identity resolution. Reservation inspection reads only existing journal
@@ -829,6 +858,7 @@ pub(super) fn resolve_scoped_resource(
     Ok(ResolvedFileResource {
         path,
         absolute: current,
+        native: None,
     })
 }
 
@@ -908,7 +938,7 @@ pub(super) fn apply_physical_state(storage_root: &Path, resource: &ResolvedFileR
         }
         match state {
             FileState::Missing => remove_existing(&resource.absolute),
-            FileState::Directory { mode } => {
+            FileState::Directory { mode, .. } => {
                 match fs::symlink_metadata(&resource.absolute) {
                     Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
                     Ok(_) => remove_existing(&resource.absolute)?,
@@ -921,6 +951,7 @@ pub(super) fn apply_physical_state(storage_root: &Path, resource: &ResolvedFileR
             FileState::Symlink {
                 symlink_target,
                 mode: _,
+                ..
             } => {
                 remove_existing(&resource.absolute)?;
                 if let Some(parent) = resource.absolute.parent() {
@@ -932,6 +963,7 @@ pub(super) fn apply_physical_state(storage_root: &Path, resource: &ResolvedFileR
                 object_hash,
                 byte_length,
                 mode,
+                ..
             } => {
                 let object = object_path(storage_root, object_hash)?;
                 if let Some(parent) = resource.absolute.parent() {

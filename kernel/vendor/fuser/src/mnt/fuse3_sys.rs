@@ -287,6 +287,7 @@ pub(crate) struct fuse_lowlevel_ops {
         extern "C" fn(req: fuse_req_t, parent: fuse_ino_t, mode: mode_t, fi: *mut fuse_file_info),
     >,
 }
+#[cfg(not(target_os="macos"))]
 unsafe extern "C" {
     // Really this returns *fuse_session, but we don't need to access its fields
     pub(crate) fn fuse_session_new(

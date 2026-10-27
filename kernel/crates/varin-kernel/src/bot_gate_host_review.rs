@@ -593,10 +593,23 @@ fn product_bot_entry_admission_original_history_knowledge_tools_and_actual_model
             .contains("Remember the recovery evidence."),
         "Original typed source read reaches the get tool result"
     );
+    let completed_run = requests[0].view.run_id.clone();
     drop(requests);
     f.host.send(json!({"kind":"fixture-close"}));
     receive(&mut f, EPOCH, "fixture-closed");
     runtime.shutdown().unwrap();
+    // This fixture starts the prepared Run directly. Match RunAssembly's
+    // terminal release before the production bridge shutdown as well.
+    assembly.models.release(&completed_run);
+    assembly.tools.release(&completed_run);
+    assembly.policy.release(&completed_run);
+    assembly.policy.close();
+    assembly.credentials.close();
+    assembly.memory.close();
+    assembly.context.close();
+    assembly.resource.close();
+    assembly.plan.close();
+    assembly.language.close();
     drop(assembly);
     drop(f);
     drop(runtime);

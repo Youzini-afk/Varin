@@ -32,6 +32,24 @@ const fixture = (entries: ReturnType<typeof entry>[] = []) => {
 };
 
 describe('workspace registry lookup and publication', () => {
+  it('persists logical native references without replacing the original directory namespace',async()=>{
+    const original=entry(base),{registry,fs}=fixture([original]);
+    const workspaceId=randomUUID(),reference={workspace_id:original.workspaceId,execution_workspace_id:workspaceId,branch_id:'project-workspace:one'};
+    await registry.registerNative(workspaceId,base,reference);
+    expect((await registry.findExact(base))?.workspaceId).toBe(original.workspaceId);
+    const reopened=createWorkspaceRegistry({hostId,filePath:path.join(base,'registry.json'),fsPromises:fs as unknown as WorkspaceRegistryOptions['fsPromises']});
+    expect((await reopened.get(workspaceId))?.nativeSource).toEqual(reference);
+    await expect(reopened.registerNative(workspaceId,base,{...reference,branch_id:'other'})).rejects.toThrow('registration changed');
+    expect((await reopened.findContaining(path.join(base,'file')))?.workspaceId).toBe(original.workspaceId);
+    await reopened.setNativeRetention(workspaceId,'saved-editor',true);
+    const withEditor=createWorkspaceRegistry({hostId,filePath:path.join(base,'registry.json'),fsPromises:fs as unknown as WorkspaceRegistryOptions['fsPromises']});
+    expect((await withEditor.get(workspaceId))?.nativeRetainers).toEqual(['saved-editor']);
+    await expect(withEditor.forgetNativeSource(reference.workspace_id,reference.branch_id)).rejects.toThrow('Saved editors');
+    await withEditor.setNativeRetention(workspaceId,'saved-editor',false);
+    await withEditor.forgetNativeSource(reference.workspace_id,reference.branch_id);
+    expect(await withEditor.get(workspaceId)).toBeNull();
+    expect((await withEditor.findExact(base))?.workspaceId).toBe(original.workspaceId);
+  });
   it('resolves the nearest directory including filesystem roots without treating file roots as directories', async () => {
     const root = entry(path.parse(base).root);
     const project = entry(base);

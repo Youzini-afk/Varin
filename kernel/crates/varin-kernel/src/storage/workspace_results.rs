@@ -10,7 +10,8 @@ const RESULT_METADATA: &str = "workspace.result-filesystem";
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(super) struct FilesystemRevision {
-    pub session_id: Uuid,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub session_id: Option<Uuid>,
     pub head: Head,
     pub root: String,
     pub pin_id: String,
@@ -196,7 +197,7 @@ impl Storage {
                     params![id,selected_branch,branch.workspace_id,crate::model::SNAPSHOT_PIN_WRITE_REVISION,selected_root,grant.grant_id,now_ms()])?;
             }
             let filesystem = FilesystemRevision {
-                session_id: session,
+                session_id: Some(session),
                 head: head.clone(),
                 root: metadata_root,
                 pin_id: filesystem_pin,
@@ -242,6 +243,7 @@ impl Storage {
         };
         let mut filesystem: FilesystemRevision = serde_json::from_value(value.clone())?;
         self.require_result_filesystem_pin(candidate)?;
+        self.retain_filesystem_revision(&result.branch_id,result.revision,&filesystem,candidate["ownerGrantId"].as_str().ok_or_else(||KernelError::Storage("Filesystem revision owner is missing".into()))?)?;
         filesystem.pin_id = format!("native-result:{}", result.record_id);
         filesystem.base_pin_id = format!("native-result-base:{}", result.record_id);
         for (pin, root) in [

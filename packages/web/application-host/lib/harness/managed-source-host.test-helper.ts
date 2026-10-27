@@ -225,10 +225,15 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
   const signal = new AbortController().signal;
   const preparedChild = await withManagedChildSource(runtime, child, signal, (client, address) =>
     client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: child } }));
-  assert.equal(preparedChild.source.mode, 'materialized'); assert.equal(preparedChild.source.branch_id, `child-source:${dispatch}`);
+  assert.equal(preparedChild.source.mode, 'native_workspace'); assert.equal(preparedChild.source.branch_id, `child-source:${dispatch}`);
   assert.deepEqual(preparedChild.source.resource_owner, owner);
   const childRun = 'run:managed-private-child';
-  const { runId: _run, ...selection } = savedSourceLaunch(childRun, preparedChild.source, childTools);
+  // This fixture qualifies the explicit legacy materialized transport and its
+  // missing-directory recovery without installing a native filesystem driver.
+  // New preparation is asserted above; native mount callbacks are qualified by
+  // the workspace owner tests rather than silently changing the production mode.
+  const legacySource=(source:LaunchSource):LaunchSource=>({...source,mode:'materialized',revision:0,execution_workspace_id:source.workspace_id});
+  const { runId: _run, ...selection } = savedSourceLaunch(childRun, legacySource(preparedChild.source), childTools);
   let privateBinding = await service.bind({ coordinatorHostId: HOST_A, source: { ...selection, tools: [...selection.tools] },
     scope: { kind: 'run', threadId: child.child_thread_id, runId: childRun, epoch: 1 }, purpose: 'source', retention: 'run', deferMaterialization: true });
   const privateAddress = addressOf(privateBinding);
@@ -300,9 +305,9 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
         record_id: `working-result:${candidate.branchId}@${published.resultRevision}` } } };
   await withManagedChildSource(runtime, continuation, signal, async (client, address) => {
     const next = await client.service({ ...address, requestId: randomUUID(), operation: { kind: 'child_prepare', execution: continuation } });
-    assert.equal(next.pin.root, published.root); assert.equal(next.source.mode, 'materialized');
+    assert.equal(next.pin.root, published.root); assert.equal(next.source.mode, 'native_workspace');
     const continuationRun = 'run:managed-private-continuation';
-    const { runId: _nextRun, ...nextSelection } = savedSourceLaunch(continuationRun, next.source, childTools);
+    const { runId: _nextRun, ...nextSelection } = savedSourceLaunch(continuationRun, legacySource(next.source), childTools);
     const nextBinding = await client.bind({ coordinatorHostId: HOST_A, source: { ...nextSelection, tools: [...nextSelection.tools] },
       scope: { kind: 'run', threadId: child.child_thread_id, runId: continuationRun, epoch: 1 }, purpose: 'source', retention: 'run' });
     assert(nextBinding.physicalRoot); assert.notEqual(nextBinding.physicalRoot.canonicalRoot, privateRoot.canonicalRoot);

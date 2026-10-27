@@ -3,6 +3,14 @@ export interface ProjectFolders {
   path: string;
   additionalPaths?: readonly string[];
 }
+export function parseVersionedProjectWorkspace(value:unknown):import('./types.js').VersionedProjectWorkspace|undefined {
+  if(!value||typeof value!=='object'||Array.isArray(value))return undefined;
+  const input=value as Record<string,unknown>;
+  if(!['workspaceId','executionWorkspaceId','branchId','adoptionOperationId'].every(key=>typeof input[key]==='string'&&Boolean((input[key] as string).trim()))
+    || !['preparing','ready','disabled'].includes(String(input.state)))return undefined;
+  return {workspaceId:input.workspaceId as string,executionWorkspaceId:input.executionWorkspaceId as string,
+    branchId:input.branchId as string,adoptionOperationId:input.adoptionOperationId as string,state:input.state as 'preparing'|'ready'|'disabled'};
+}
 
 export function projectPathKey(value: string): string {
   const normalized = value.trim().replace(/\\/g, '/').replace(/\/+$/, '') || '/';

@@ -3,6 +3,14 @@ import { sameWritableSource, sameSharedWritableSource } from './code-exchange.js
 import type { LaunchSource } from './protocol.generated.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { sourcePathMap } from './source-path-map.js';
+import {mapSourcePath}from '../harness/working-state/source-paths.js';
+
+it('maps directory metadata to the selected source root without admitting sibling attributes',()=>{
+  expect(mapSourcePath('.',{from:'',to:'project/src'})).toBe('project/src');
+  expect(mapSourcePath('project/src',{from:'project/src',to:''})).toBe('.');
+  expect(mapSourcePath('.',{from:'project/src',to:''})).toBeNull();
+  expect(mapSourcePath('.',{from:'',to:''})).toBe('.');
+});
 
 const live = (rootId: string, canonicalRoot = 'D:/work'): LaunchSource => ({ workspace_id: 'workspace', execution_workspace_id: 'workspace',
   branch_id: null, revision: null, mode: 'live_root', live_root: { hostId: 'host', rootId, canonicalRoot }, resource_owner: { kind: 'local' } });

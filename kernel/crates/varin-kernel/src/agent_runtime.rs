@@ -782,6 +782,19 @@ pub(crate) fn spawn(
                             deferred = true;
                             return Ok(Value::Null);
                         }
+                        if method == "runtime.source.retirement" {
+                            let p:SourceRetirementParams=serde_json::from_value(params.clone())?;
+                            let catalog=runtime.catalog();
+                            let mut catalog=catalog.lock().map_err(|_|KernelError::Storage("Catalog owner failed".into()))?;
+                            return catalog.source_retirement_action(&p.cleanup_id,p.complete.unwrap_or(false),p.defer.unwrap_or(false)).map_err(|error|KernelError::Operation(error.to_string()));
+                        }
+                        if method == "runtime.source.preparation" {
+                            let p:SourcePreparationRetentionParams=serde_json::from_value(params.clone())?;
+                            let catalog=runtime.catalog();
+                            let mut catalog=catalog.lock().map_err(|_|KernelError::Storage("Catalog owner failed".into()))?;
+                            let source=serde_json::from_value(params["source"].clone())?;
+                            return catalog.source_preparation(&p.thread_id,&source,p.release.unwrap_or(false)).map_err(|error|KernelError::Operation(error.to_string()));
+                        }
                         if method == "runtime.material.retention" {
                             let p: MaterialRetentionParams = serde_json::from_value(params.clone())?;
                             let response_id = id.clone();

@@ -49,7 +49,8 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
   private readonly unsubscribe: () => void;
   constructor(private readonly documents: DocumentAuthority,
     private readonly validateLiveSource: LiveSourceResolver,
-    private readonly changed: (receiptId: string) => void) {
+    private readonly changed: (receiptId: string) => void,
+    private readonly native?:import('./native-workspaces.js').NativeWorkspaceOwner) {
     this.unsubscribe = documents.subscribeMutationState(workspaceId => {
       for (const watch of this.watches.values()) if (watch.target.source.mode === 'live_root'
         && watch.target.source.workspace_id === workspaceId) this.changed(watch.target.receiptId);
@@ -80,6 +81,10 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
         || normalizePathIdentity(original.canonicalRoot) !== normalizePathIdentity(root.canonicalRoot)) failed('root_changed');
       await this.validateLiveSource({ workspaceId: target.source.workspace_id,
         executionWorkspaceId: target.source.execution_workspace_id, liveRoot: root }, signal);
+    } else if(target.source.mode==='native_workspace'){
+      if(!this.native)failed('source_unavailable');
+      const actual=await this.native.retainReference(target.source,`file-observation:${target.receiptId}`,signal);
+      if(actual.rootId!==root.rootId||normalizePathIdentity(actual.path)!==normalizePathIdentity(root.canonicalRoot))failed('root_changed');
     } else if (target.source.mode !== 'materialized') failed('root_changed');
     if (normalizePathIdentity(await canonicalizePathIdentity(root.canonicalRoot)) !== normalizePathIdentity(root.canonicalRoot)) failed('root_changed');
     if (!(await fs.promises.stat(root.canonicalRoot)).isDirectory()) failed('source_unavailable');
@@ -165,6 +170,7 @@ export class DocumentsFileObservationOwner implements FileObservationOwner {
         this.released.add(query.receiptId);
         await Promise.allSettled([...this.opening].filter(open=>open.receiptId===query.receiptId).map(open=>open.work));
         for(const watch of this.watches.values())if(watch.target.receiptId===query.receiptId)this.close(watch);
+        await this.native?.releaseReference(`file-observation:${query.receiptId}`);
         return {ok:true,closed:true};
       }
       if (query.action === 'close') {

@@ -720,7 +720,7 @@ export class ThreadAdapter {
         ownerEpoch: preparation.owner_epoch, configuration: model.configuration, initialContext,
         ...(skill ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}),
         launch: { inheritSource: false, source: { resourceOwner: source.resourceOwner, workspaceId: source.workspaceId, executionWorkspaceId: source.executionWorkspaceId,
-          branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
+          ...(source.mode==='native_workspace'&&source.nativeScope?{nativeScope:source.nativeScope}:{}),branchId: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, liveRoot: source.liveRoot ?? null, ...(source.environmentRunId ? { environmentRunId: source.environmentRunId } : {}) },
           enabledTools: source.tools, credentialScope: await model.credentialOwner.scope(), ...(childDispatch ? { childDispatch } : {}) },
       }, signal);
       // Admission transfers ownership to the Run. Retiring this preparation must not
@@ -743,7 +743,7 @@ export class ThreadAdapter {
           expectedHead: input.expectedHead, input: await this.prepareInput(input), configuration: model.configuration,
           launch: { ...(input.agent ? { agent: { ...input.agent, name: null, tools: null } } : {}), inheritSource: input.source === undefined, source: input.source ? {
             resourceOwner: input.source.resourceOwner, workspaceId: input.source.workspaceId, executionWorkspaceId: input.source.executionWorkspaceId,
-            branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
+            ...(input.source.mode==='native_workspace'&&input.source.nativeScope?{nativeScope:input.source.nativeScope}:{}),branchId: input.source.branchId ?? null, revision: input.source.revision ?? null, mode: input.source.mode, liveRoot: input.source.liveRoot ?? null, ...(input.source.environmentRunId ? { environmentRunId: input.source.environmentRunId } : {}),
           } : null, enabledTools: input.source?.tools ?? [], credentialScope: await model.credentialOwner.scope() },
         };
         let initialContext: InitialContext | undefined;
@@ -777,7 +777,8 @@ export class ThreadAdapter {
                 if (inherited) {
                   const base = { resourceOwner: inherited.resource_owner, workspaceId: inherited.workspace_id, executionWorkspaceId: inherited.execution_workspace_id, tools: [] };
                   if (inherited.mode === 'live_root' && inherited.live_root) source = { ...base, mode: 'live_root', liveRoot: inherited.live_root };
-                  else if (inherited.mode !== 'live_root' && inherited.branch_id && inherited.revision !== null) source = {
+                  else if(inherited.mode==='native_workspace'&&inherited.branch_id)source={...base,mode:'native_workspace',branchId:inherited.branch_id,...(inherited.native_scope?{nativeScope:inherited.native_scope}:{})};
+                  else if (inherited.mode !== 'live_root' && inherited.mode!=='native_workspace' && inherited.branch_id && inherited.revision !== null) source = {
                     ...base, branchId: inherited.branch_id, revision: inherited.revision, mode: inherited.mode, ...(inherited.environment_run_id ? { environmentRunId: inherited.environment_run_id } : {}),
                   };
                 }
@@ -1226,7 +1227,7 @@ export class ThreadAdapter {
           }
         }
         const source = launch.selection.source;
-        if (source && source.mode !== 'live_root' && source.branch_id !== null && source.revision !== null) {
+        if (source && source.mode !== 'live_root' && source.mode!=='native_workspace' && source.branch_id !== null && source.revision !== null) {
           const admission = this.admitSource({ resourceOwner: source.resource_owner, mode: source.mode, workspaceId: source.workspace_id,
             executionWorkspaceId: source.execution_workspace_id, branchId: source.branch_id, revision: source.revision, tools: [], ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) }, identity, run.id, signal);
           await waitWithSignal(admission, signal);

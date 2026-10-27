@@ -49,7 +49,14 @@ export async function exchangeExternalCode(
   try {
     const saved = record(child.source),
       handoff = child.handoff,
-      cwd = text(saved.cwd);
+      recordedCwd = text(saved.cwd);
+    const native=record(saved.nativeSource);
+    let cwd=recordedCwd;
+    if(native.mode==='native_workspace'){
+      const owner=owners.kernel.nativeWorkspaces;if(!owner)throw new Error('Native external source is unavailable');
+      const entry=await owner.open(native as unknown as LaunchSource,signal);
+      cwd=(await owner.acquire(native as unknown as LaunchSource,entry.grant,signal)).path;
+    }
     if (!handoff || !cwd) throw new Error('This external Agent has not prepared a file source');
     if (
       handoff.source.resource_owner.kind !== 'local' ||
@@ -95,7 +102,8 @@ export async function exchangeExternalCode(
           },
         };
     }
-    const baseline = record(record(saved.baseline).source);
+    const preparedBaseline=record(saved.baseline);
+    const baseline = record(native.mode==='native_workspace'?record(preparedBaseline.pin).source:preparedBaseline.source);
     if (typeof baseline.branch_id !== 'string' || typeof baseline.revision !== 'number')
       throw Object.assign(new Error('This external source has no isolated baseline for code exchange'), {
         code: 'baseline_unavailable',
@@ -104,7 +112,7 @@ export async function exchangeExternalCode(
       {
         grantId: `exchange:${randomUUID()}`,
         owningWorkspace: handoff.source.workspace_id,
-        executionWorkspace: handoff.source.execution_workspace_id,
+        executionWorkspace: text(native.execution_workspace_id)||handoff.source.execution_workspace_id,
         threadId: caller.threadId,
         runId: caller.runId,
         operationId: caller.operationId,
@@ -120,7 +128,7 @@ export async function exchangeExternalCode(
         .fileRootRegister(
           {
             workspaceId: handoff.source.workspace_id,
-            executionWorkspaceId: handoff.source.execution_workspace_id,
+            executionWorkspaceId: text(native.execution_workspace_id)||handoff.source.execution_workspace_id,
             canonicalRoot: cwd,
           },
           signal,
@@ -129,7 +137,7 @@ export async function exchangeExternalCode(
     } finally {
       await owners.kernel.retireGrant(grant.grantId);
     }
-    const source: LaunchSource = {
+    const source: LaunchSource = native.mode==='native_workspace'?native as unknown as LaunchSource:{
       workspace_id: handoff.source.workspace_id,
       execution_workspace_id: handoff.source.execution_workspace_id,
       resource_owner: handoff.source.resource_owner,
@@ -154,12 +162,15 @@ export async function exchangeExternalCode(
     const targetId = direction === 'receive' ? caller.threadId : child.conversation_id;
     const acknowledged = await acknowledgedCode(from.store, sourceId, targetId);
     const result = await captureCodeSelection({
+      ownerThreadId:caller.threadId,
       store: from.store,
       operationId: caller.operationId,
       workspaceId: source.workspace_id,
       ...('directory' in from
         ? { directory: from.directory }
         : { fixedSource: { branchId: self.source.branch_id!, revision: self.source.revision! } }),
+      ...(direction==='receive'&&source.mode==='native_workspace'?{nativeSource:source,nativeWorkspaces:owners.kernel.nativeWorkspaces}
+        :direction==='send'&&self.source.mode==='native_workspace'?{nativeSource:self.source,nativeWorkspaces:owners.kernel.nativeWorkspaces}:{}),
       baselineBranchId: baseline.branch_id,
       baselineRevision: baseline.revision,
       mapping,

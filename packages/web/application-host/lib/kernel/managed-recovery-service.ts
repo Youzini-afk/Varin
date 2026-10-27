@@ -19,6 +19,7 @@ import { SourceAdmissionError } from './source-admission-error.js';
 import { admitMaterializedRoot } from './source-launch.js';
 import type { KernelStorageAdapter } from './storage-adapter.js';
 import { restoreFilesWithEditors, type RecoveryEditors } from '../recovery/file-recovery-editors.js';
+import {sameRecoveryFileTarget} from '../recovery/file-target.js';
 
 type PhysicalTarget = Extract<RecoveryFileTarget, { kind: 'physical' }>;
 interface AdmittedTarget { source: LaunchSource; target: PhysicalTarget; canDelete: boolean }
@@ -41,6 +42,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
   };
   const registrations = async (source: LaunchSource, signal?: AbortSignal) => {
     await options.documents.admitWorkspaceRegistration(source.workspace_id, signal);
+    if(source.mode==='native_workspace')await options.kernel.nativeWorkspaces?.open(source,signal);
     if (source.execution_workspace_id !== source.workspace_id) {
       await options.documents.admitWorkspaceRegistration(source.execution_workspace_id, signal);
     }
@@ -54,7 +56,11 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       }
       await options.validateLiveSource({ workspaceId: source.workspace_id,
         executionWorkspaceId: source.execution_workspace_id, liveRoot: source.live_root }, signal);
-    } else {
+    } else if(source.mode==='native_workspace'){
+      const owner=options.kernel.nativeWorkspaces;if(!owner)throw new Error('Native recovery source is unavailable');
+      const entry=await owner.open(source,signal),view=await owner.acquire(source,entry.grant,signal);
+      if(view.rootId!==target.rootId||normalizePathIdentity(view.path)!==normalizePathIdentity(target.canonicalRoot))return denied('Native recovery branch or mount changed');
+    }else {
       const root = await admitMaterializedRoot(target.canonicalRoot, signal);
       if (normalizePathIdentity(root) !== normalizePathIdentity(target.canonicalRoot)) {
         return denied('Original recovery materialization changed');
@@ -77,7 +83,7 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
   const resolveFileResources = async (identity: RecoveryIdentity): Promise<KernelFileResourceBackend | null> => {
     const targets = active.getStore();
     if (!targets) return null;
-    const admitted = targets.find(value => isDeepStrictEqual(value.target, identity.fileTarget));
+    const admitted = targets.find(value => sameRecoveryFileTarget(value.target, identity.fileTarget));
     if (!admitted || identity.workspaceId !== admitted.target.workspaceId
       || normalizePathIdentity(identity.canonicalRoot) !== normalizePathIdentity(admitted.target.canonicalRoot)) {
       return denied('Recovery path is outside the current authenticated file participant');
@@ -123,9 +129,15 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       await registrations(source, signal);
       if (source.mode === 'fixed_branch') { turns.push({ selection }); continue; }
       const roots = matching.flatMap(original => original.physicalRoot ? [original.physicalRoot] : []);
-      const root = roots[0];
-      if (!root || root.hostId !== options.hostId || roots.some(value => !isDeepStrictEqual(value, root))) {
+      let root = roots[0];
+      if (!root || root.hostId !== options.hostId || roots.some(value => source.mode==='native_workspace'?value.rootId!==root!.rootId:!isDeepStrictEqual(value, root))) {
         return denied('Recovery has no unambiguous original physical Source');
+      }
+      if(source.mode==='native_workspace'){
+        const owner=options.kernel.nativeWorkspaces;if(!owner)throw new Error('Native recovery source is unavailable');
+        const entry=await owner.open(source,signal),view=await owner.acquire(source,entry.grant,signal);
+        if(root.rootId!==view.rootId)return denied('Native recovery branch or scope changed');
+        root={hostId:options.hostId,rootId:view.rootId,canonicalRoot:view.path};
       }
       const target: PhysicalTarget = { kind: 'physical', workspaceId: source.workspace_id,
         executionWorkspaceId: source.execution_workspace_id, threadId: anchor.threadId, runId: anchor.runId,
@@ -195,5 +207,6 @@ export function createManagedRecoveryService(options: ManagedRecoveryServiceOpti
       }
     });
   };
-  return { handle, resolveFileResources };
+  const resolveFileTarget=(target:RecoveryFileTarget)=>active.getStore()?.find(value=>sameRecoveryFileTarget(value.target,target))?.target;
+  return { handle, resolveFileResources,resolveFileTarget };
 }

@@ -430,6 +430,7 @@ export class ExternalAgentsService {
     if (!path.isAbsolute(cwd))
       throw new ExternalAgentError('invalid_directory', 'Choose an absolute working directory');
     const source = await this.deps.resolveWorkspace(cwd);
+    const native=await this.deps.kernel.nativeWorkspaces?.resolvePath(cwd);
     const result = await this.command<ExternalConversation>({
       action: 'create',
       ...input,
@@ -438,6 +439,7 @@ export class ExternalAgentsService {
       harness: config.harness,
       cwd,
       workspaceId: source.workspaceId,
+      ...(native?{nativeWorkspace:{...native.reference,resource_owner:{kind:'local'},mode:'native_workspace',revision:null,live_root:null}}:{}),
       privateWorkspace: !input.cwd,
       title: input.title || config.name,
     });
@@ -527,6 +529,7 @@ export class ExternalAgentsService {
       throw new ExternalAgentError('backend_changed', 'This configuration now points to another harness');
     let admittedSource:
       { workspaceId: string; executionWorkspaceId: string; canonicalRoot: string } | undefined;
+    let executionCwd=c.cwd;
     if (c.parent && this.sources && this.deps.spawnAdmitted) {
       const child = (await this.children()).find(
         (child) => child.operation_id === c.parent!.operationId && child.conversation_id === id,
@@ -535,13 +538,18 @@ export class ExternalAgentsService {
       const source = child.handoff
         ? await this.sources.prepare(child, signal)
         : { ...(await this.deps.resolveWorkspace(c.cwd)), cwd: c.cwd };
-      if (source.cwd !== c.cwd) throw new Error('The external conversation source changed');
+      if (source.cwd !== c.cwd && record(record(source).nativeSource).mode!=='native_workspace') throw new Error('The external conversation source changed');
+      executionCwd=source.cwd;
       admittedSource = {
         workspaceId: source.workspaceId,
         executionWorkspaceId: text(record(source).executionWorkspaceId) || source.workspaceId,
         canonicalRoot: source.cwd,
       };
-    } else await this.deps.resolveWorkspace(c.cwd);
+    } else if(c.nativeWorkspace){
+      const owner=this.deps.kernel.nativeWorkspaces;if(!owner||!this.deps.spawnAdmitted)throw new Error('Native external workspace admission is unavailable');
+      const entry=await owner.open(c.nativeWorkspace,signal),view=await owner.acquire(c.nativeWorkspace,entry.grant,signal);
+      executionCwd=view.path;admittedSource={workspaceId:c.nativeWorkspace.workspace_id,executionWorkspaceId:c.nativeWorkspace.execution_workspace_id,canonicalRoot:view.path};
+    }else await this.deps.resolveWorkspace(c.cwd);
     const launch = await this.executable(config);
     const command = config.harness === 'claude' ? process.execPath : launch.command;
     const args =
@@ -557,7 +565,7 @@ export class ExternalAgentsService {
           ];
     signal.throwIfAborted();
     const spawnOptions = {
-      cwd: c.cwd,
+      cwd: executionCwd,
       env: { ...launch.env, ...(config.harness === 'claude' ? { ELECTRON_RUN_AS_NODE: '1' } : {}) },
       stdio: ['pipe', 'pipe', 'pipe'] as ['pipe', 'pipe', 'pipe'],
       windowsHide: true,
@@ -570,12 +578,12 @@ export class ExternalAgentsService {
     try {
       const connection =
         config.harness === 'codex'
-          ? await connectCodex(peer, c.cwd, c.sessionId)
+          ? await connectCodex(peer, executionCwd, c.sessionId)
           : config.harness === 'pi'
             ? await connectPi(peer, c.sessionId)
             : config.harness === 'claude'
-              ? await connectClaude(peer, { command: launch.command, args: launch.args }, c.cwd, c.sessionId)
-              : await connectAcp(peer, c.cwd, c.sessionId);
+              ? await connectClaude(peer, { command: launch.command, args: launch.args }, executionCwd, c.sessionId)
+              : await connectAcp(peer, executionCwd, c.sessionId);
       await this.command({ action: 'bind', id, sessionId: connection.sessionId });
       if (this.stopping) throw new Error('External Agent service stopped during connection');
       const live: Live = { connection, peer, interactions: new Map(), launchKey: launchKey(config) };

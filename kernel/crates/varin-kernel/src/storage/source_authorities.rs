@@ -381,9 +381,9 @@ impl Storage {
         }
         if let Some(root) = &p.physical_root {
             let grant = self.load_grant(&record.result.grant_id)?;
-            let registered = self.registered_file_root(&root.root_id, &grant)?;
+            let registered = self.admitted_file_root(&root.root_id, &grant)?;
+            self.validate_recorded_live_root(root,&grant,host_id)?;
             if root.host_id != host_id
-                || fs::canonicalize(&root.canonical_root)? != registered.canonical_root
                 || registered.execution_workspace_id != record.result.source.execution_workspace_id
             {
                 return Err(denied("Source physical root changed"));
@@ -392,6 +392,13 @@ impl Storage {
                 && record.result.source.live_root.as_ref() != Some(root)
             {
                 return Err(denied("Live source identity changed"));
+            }
+            if record.result.source.mode==varin_runtime::SourceMode::NativeWorkspace{
+                let source=&record.result.source;
+                let expected=super::native_sources::root_id(&source.workspace_id,&source.execution_workspace_id,
+                    source.branch_id.as_deref().ok_or_else(||denied("Native source branch is missing"))?,source.native_scope.as_deref().unwrap_or(""));
+                if root.root_id!=expected{return Err(denied("Native source branch or scope changed"));}
+                if let Some(binding)=&p.tool_binding{self.validate_native_tool_binding(binding)?;}
             }
             if let Some(binding) = &p.tool_binding {
                 if binding.root_id.as_deref() != Some(root.root_id.as_str()) {

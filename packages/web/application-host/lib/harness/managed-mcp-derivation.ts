@@ -112,7 +112,7 @@ export function createManagedMcpDerivations(options: {
     const proof = freeze(structuredClone(begin.proof));
     try {
       stopped(entry);
-      if (entry.scope.scope.kind !== 'run' || entry.scope.source.mode !== 'materialized'
+      if (entry.scope.scope.kind !== 'run' || !['materialized','native_workspace'].includes(entry.scope.source.mode)
         || proof.execution_id !== entry.action.executionId || proof.child_run_id !== entry.scope.scope.runId
         || proof.child_thread_id !== entry.scope.scope.threadId || !isDeepStrictEqual(proof.source, entry.scope.source)
         || !isDeepStrictEqual(proof.physical_root, entry.scope.physicalRoot)

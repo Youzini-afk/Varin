@@ -35,6 +35,7 @@ interface ThreadSourceBase {
 export type ThreadSource = ThreadSourceBase & (
   | { mode: 'fixed_branch' | 'materialized'; branchId: string; revision: number; liveRoot?: never; environmentRunId?: string }
   | { mode: 'live_root'; liveRoot: LiveRoot; branchId?: never; revision?: never; environmentRunId?: never }
+  | { mode: 'native_workspace'; branchId: string; nativeScope?:string; revision?: never; liveRoot?: never; environmentRunId?: never }
 );
 export interface ThreadPrepareSource extends ThreadIdentity {
   resourceOwner: SourceResourceOwner;
@@ -432,7 +433,7 @@ export interface ThreadsAPI {
   prepareSource(input: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource>;
   /** Fork immutable conversation ancestry; live runs and resource grants are not copied. */
   prepareNavigation(input: ThreadIdentity & { entryId: string }): Promise<import("@varin/protocol").NavigationSelection & { editorImages?: ImageAttachment[] }>;
-  recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ resourceOwner: SourceResourceOwner; workspaceId: string; mode: "live_root" | "materialized" | "fixed_branch"; runId: string } | null>;
+  recoverySource(input: ThreadIdentity & { entryId: string }): Promise<{ resourceOwner: SourceResourceOwner; workspaceId: string; mode: ThreadSource['mode']; runId: string } | null>;
   navigate(input: ThreadIdentity & { key: string; expectedHeadId: string | null; targetHeadId: string | null; undoOf?: string }): Promise<import("@varin/protocol").NavigationReceipt>;
   navigationReceipt(input: ThreadIdentity & { key: string }): Promise<import("@varin/protocol").NavigationReceipt | null>;
   fork(input: ThreadIdentity & { key: string; headId: string | null }): Promise<ThreadIdentity>;

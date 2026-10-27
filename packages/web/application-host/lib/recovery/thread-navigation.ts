@@ -1,4 +1,4 @@
-import type { RecoveryConversation } from '@varin/extension-contract';
+import type { RecoveryConversation, RecoveryFileTarget } from '@varin/extension-contract';
 import type { ThreadAdapter } from '../kernel/thread-adapter.js';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { KernelRecoveryStore } from '../kernel/kernel-recovery-store.js';
@@ -102,7 +102,17 @@ export function createThreadRecoveryNavigation(owners: Owners): RecoverySessionN
 }
 /** Read the original launch again and reacquire current, source-scoped authority for each access. */
 export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liveSources }: Owners) {
-    return async (identity: RecoveryIdentity): Promise<KernelFileResourceBackend> => {
+    const resolveTarget=async(target:RecoveryFileTarget):Promise<RecoveryFileTarget>=>{
+        if(target.kind!=='physical'||target.sourceMode!=='native_workspace')return target;
+        const run=await runtime.run(target.runId),source=(await runtime.launch(target.runId))?.selection.source;
+        if(run.thread_id!==target.threadId||!source||source.mode!=='native_workspace'||source.resource_owner.kind!=='local'
+            ||source.workspace_id!==target.workspaceId||source.execution_workspace_id!==target.executionWorkspaceId)throw new Error('Native recovery source differs from its original Run');
+        const owner=kernel.nativeWorkspaces;if(!owner)throw new Error('Native recovery source is unavailable');
+        const entry=await owner.open(source),view=await owner.acquire(source,entry.grant);
+        if(view.rootId!==target.rootId)throw new Error('Native recovery branch or scope changed');
+        return {...target,canonicalRoot:view.path};
+    };
+    const resolveFiles=async (identity: RecoveryIdentity): Promise<KernelFileResourceBackend> => {
         const target = identity.fileTarget;
         if (!target || target.kind !== 'physical')
             throw new RecoveryPrimitiveError('unsupported-metadata', 'This source has no physical file target', { origin: 'storage' });
@@ -122,7 +132,10 @@ export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liv
             if (source.live_root.rootId !== target.rootId)
                 throw new Error('Original live root identity changed');
         }
-        else {
+        else if(source.mode==='native_workspace'){
+            const current=await resolveTarget(target);
+            if(current.kind!=='physical')throw new Error('Native recovery source is unavailable');root=current.canonicalRoot;
+        }else {
             const handshake = kernel.handshake ?? await kernel.start();
             const original = await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? run.id);
             root = await admitMaterializedRoot(original.targetPath);
@@ -136,4 +149,5 @@ export function createThreadRecoveryFileResolver({ runtime, storage, kernel, liv
             throw new Error('Recovery registration differs from its original root');
         return new KernelFileResourceBackend(storage, { authority });
     };
+    return Object.assign(resolveFiles,{resolveTarget});
 }

@@ -98,7 +98,7 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
 
     (async () => {
       try {
-        const repoStatus = await checkIsGitRepository(projectPath);
+        const repoStatus = await checkIsGitRepository(await projectExecutionPath({id:projectRef?.id??'',path:projectPath}));
         if (cancelled) return;
         setIsGitRepoLocal(repoStatus);
       } catch {
@@ -509,3 +509,4 @@ export const WorktreeSectionContent: React.FC<WorktreeSectionContentProps> = ({ 
     </>
   );
 };
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

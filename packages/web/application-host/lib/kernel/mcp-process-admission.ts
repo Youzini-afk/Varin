@@ -26,6 +26,10 @@ export function createMcpSourceProcessAdmission(options: {
     if (source.mode === 'live_root') {
       await options.validateLiveSource(source, signal);
       canonicalRoot = await canonicalizePathIdentity(source.live_root!.canonicalRoot);
+    } else if(source.mode==='native_workspace'){
+      if(!options.kernel.nativeWorkspaces)throw new Error('Native MCP source is unavailable');
+      const entry=await options.kernel.nativeWorkspaces.open(source,signal);
+      canonicalRoot=(await options.kernel.nativeWorkspaces.acquire(source,entry.grant,signal)).path;
     } else {
       const handshake = options.kernel.handshake;
       if (!handshake) throw new Error('MCP process source authority is unavailable');

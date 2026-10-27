@@ -459,6 +459,7 @@ impl Catalog {
                     launch.requires_rebind = true;
                     launch.preparation_failure = None;
                     launch.preparation_failure_detail = None;
+                    super::source_retention::assert_record_available(&tx,"run_launches",&serde_json::to_value(&launch)?)?;
                     tx.execute(
                         "INSERT INTO run_launches(id,body) VALUES(?1,?2)",
                         params![next.id, encode(&launch)?],

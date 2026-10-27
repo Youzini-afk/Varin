@@ -62,6 +62,8 @@ const validSource = (source: unknown): source is LaunchSource => {
   if (resource.kind !== 'local' && !(resource.kind === 'managed_host' && nonempty(resource.hostId) && nonempty(resource.connectionId) && nonempty(resource.endpointIdentity))) return false;
   if (source.mode === 'live_root') return source.branch_id === null && source.revision === null && object(source.live_root)
     && nonempty(source.live_root.hostId) && nonempty(source.live_root.rootId) && nonempty(source.live_root.canonicalRoot);
+  if(source.mode==='native_workspace')return nonempty(source.branch_id)&&source.revision===null&&source.live_root===null
+    && (source.native_scope===undefined||nonempty(source.native_scope)&&source.native_scope.split('/').every(part=>part&&part!=='.'&&part!=='..'&&!part.includes('\\')));
   return ['fixed_branch', 'materialized'].includes(String(source.mode)) && nonempty(source.branch_id)
     && Number.isSafeInteger(source.revision) && Number(source.revision) >= 0 && source.live_root === null;
 };

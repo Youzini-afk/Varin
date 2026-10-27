@@ -526,6 +526,7 @@ export class AgentRuntimeClient {
     // The durable Storage grant owner resolves this Run, including grants from a previous Host.
     await this.kernel.retireRunGrants(runId);
     this.sourceGrants.delete(runId);
+    if(launch?.selection.source?.mode==='native_workspace')await this.kernel.nativeWorkspaces?.releaseSource(launch.selection.source);
   }
   /** Host admission and nested resource assembly share the same Run/epoch cancellation owner. */
   async withRunPreparation<T>(
@@ -878,6 +879,9 @@ export class AgentRuntimeClient {
   }
   materialRetention(childThreadId?: string, signal?: AbortSignal): Promise<import('./protocol.generated.js').MaterialRetention> {
     return this.kernel.agentRuntimeRequest('runtime.material.retention', childThreadId ? { childThreadId } : {}, signal);
+  }
+  sourceRetirement(cleanupId: string, complete = false, signal?: AbortSignal): Promise<{claimed:boolean;completed?:boolean;source?:import('./protocol.generated.js').LaunchSource}> {
+    return this.kernel.agentRuntimeRequest('runtime.source.retirement', {cleanupId,complete}, signal);
   }
   tokenizerReferences(): Promise<import('./protocol.generated.js').TokenizerBinding[]> {
     return this.kernel.agentRuntimeRequest('runtime.tokenizers.references', {});

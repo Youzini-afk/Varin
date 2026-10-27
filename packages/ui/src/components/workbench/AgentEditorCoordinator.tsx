@@ -1,4 +1,6 @@
 import React from 'react';
+import type {VarinWorkspaceIdentity}from '@varin/application-client';
+import {useRuntimeAPIs}from '@/hooks/useRuntimeAPIs';
 import { toast } from '@/components/ui';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useWorkbenchWorkspaceId } from '@/lib/extensions/workbench-workspace';
@@ -38,6 +40,8 @@ const OWNER = 'varin.builtin.workbench';
 export const AgentEditorCoordinator: React.FC = () => {
   const { t } = useI18n();
   const workspaceId = useWorkbenchWorkspaceId();
+  const apis=useRuntimeAPIs();
+  const [nativeWorkspace,setNativeWorkspace]=React.useState<VarinWorkspaceIdentity['nativeSource']>();
   const directory = useDirectoryStore((state) => state.currentDirectory);
   const sessionId = useThreadStore(state => selectedComposerKey(state));
   const runtimeKey = getRuntimeKey();
@@ -53,6 +57,11 @@ export const AgentEditorCoordinator: React.FC = () => {
   tabRef.current = tab;
   const activeEditorFile = useEditorContextStore((state) => state.activeEditorFile);
   const activeOwnerId = tab ? `view:${tab.viewId}` : null;
+  React.useEffect(()=>{
+    let active=true;setNativeWorkspace(undefined);
+    if(workspaceId)void apis.documents.resolveWorkspace({workspaceId}).then(value=>{if(active)setNativeWorkspace(value.nativeSource);}).catch(()=>undefined);
+    return()=>{active=false;};
+  },[apis.documents,workspaceId,directory]);
 
   React.useEffect(() => {
     activateEditorContextOwner(activeOwnerId);
@@ -75,14 +84,18 @@ export const AgentEditorCoordinator: React.FC = () => {
   React.useEffect(() => {
     if (!sessionId || !workspaceId || !directory || !toolExecutions) return;
     const source = snapshot?.launch?.selection.source;
-    if (!source || source.mode !== 'live_root' || source.workspace_id !== workspaceId || source.live_root?.canonicalRoot !== directory) return;
+    if(!source)return;
+    const matches=source.mode==='native_workspace'?nativeWorkspace&&source.resource_owner.kind==='local'&&source.workspace_id===nativeWorkspace.workspaceId
+      &&source.execution_workspace_id===nativeWorkspace.executionWorkspaceId&&source.branch_id===nativeWorkspace.branchId&&(source.native_scope??'')===(nativeWorkspace.scope??'')
+      :source.mode==='live_root'&&source.workspace_id===workspaceId&&source.live_root?.canonicalRoot===directory;
+    if(!matches)return;
     for (const execution of toolExecutions) {
       if (execution.run_id !== snapshot?.activeRun?.id) continue;
       const intent = execution.intent as { call?: { name?: string; arguments?: unknown } } | null;
       if (!intent?.call?.name || execution.outcome !== 'succeeded') continue;
       recordHintsFromToolCall({ runtimeKey, threadKey: sessionId, toolCallId: execution.id, toolName: intent.call.name, args: intent.call.arguments, workspaceId, workspaceRoot: directory });
     }
-  }, [directory, runtimeKey, sessionId, snapshot?.activeRun?.id, snapshot?.launch?.selection.source, toolExecutions, workspaceId]);
+  }, [directory,nativeWorkspace, runtimeKey, sessionId, snapshot?.activeRun?.id, snapshot?.launch?.selection.source, toolExecutions, workspaceId]);
 
   React.useEffect(() => {
     const notify = (status: 'missing-editor' | 'missing-selection' | 'missing-document' | 'wrong-runtime' | 'no-session') => {

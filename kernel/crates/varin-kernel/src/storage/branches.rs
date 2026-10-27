@@ -3,6 +3,17 @@ use super::operations::idempotent;
 use super::*;
 
 impl Storage {
+    /// `.` is the selected directory's own metadata, never a root replacement.
+    pub(super) fn branch_entry_path(entry: &Value) -> Result<Vec<String>, KernelError> {
+        let path = entry["path"].as_str().ok_or_else(|| KernelError::Protocol("entry.path is required".into()))?;
+        if path == "." {
+            if entry["state"]["kind"] != "directory" {
+                return Err(KernelError::Operation("workspace root accepts directory metadata only".into()));
+            }
+            return Ok(vec![]);
+        }
+        Self::validate_path(path)
+    }
     fn branch_entry_sources(
         entry: &Value,
         path: &str,
@@ -92,12 +103,10 @@ impl Storage {
             .and_then(Value::as_array)
             .ok_or_else(|| KernelError::Operation("entries are required".to_string()))?;
         let mut states = Vec::with_capacity(entries.len());
+        let mut attributes=BTreeMap::new();
         for entry in entries {
-            let path = entry
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
-            let segments = Self::validate_path(path)?;
+            let segments = Self::branch_entry_path(entry)?;
+            if let Some(value)=Self::entry_file_metadata(entry)?{attributes.insert(segments.join("/"),serde_json::to_string(&value)?);}
             let state = entry
                 .get("state")
                 .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
@@ -106,7 +115,7 @@ impl Storage {
         Self::validate_batch_paths(&states)?;
         let mut entries = states
             .iter()
-            .map(|(segments, state)| json!({"path": segments.join("/"), "state": state}))
+            .map(|(segments, state)|{let key=segments.join("/");let path=if segments.is_empty(){"."}else{&key};let mut entry=json!({"path":path,"state":state});if let Some(value)=attributes.get(&key){entry["nativeJson"]=json!(value);}entry})
             .collect::<Vec<_>>();
         entries.sort_by(|left, right| {
             left.get("path")
@@ -422,11 +431,8 @@ impl Storage {
         let mut records = BTreeMap::new();
         let mut references = BTreeMap::new();
         for entry in entries {
-            let path = entry
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
-            let segments = Self::validate_path(path)?;
+            Self::entry_file_metadata(entry)?;
+            let segments = Self::branch_entry_path(entry)?;
             let state = entry
                 .get("state")
                 .cloned()
@@ -584,6 +590,9 @@ impl Storage {
         grant_id: &str,
         prepared: Option<(&str, &str)>,
     ) -> Result<Value, KernelError> {
+        self.filesystem_transaction(|s|s.create_branch_prepared_inner(params,grant_id,prepared))
+    }
+    fn create_branch_prepared_inner(&mut self,params:&Value,grant_id:&str,prepared:Option<(&str,&str)>)->Result<Value,KernelError>{
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -644,13 +653,9 @@ impl Storage {
         let mut source_paths = BTreeMap::new();
         let mut source_records = BTreeMap::new();
         let mut source_refs=BTreeMap::new();
-        for entry in entries {
+        for entry in &entries {
             self.check_cancelled()?;
-            let path = entry
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
-            let segments = Self::validate_path(path)?;
+            let segments = Self::branch_entry_path(entry)?;
             let state = entry
                 .get("state")
                 .cloned()
@@ -716,6 +721,7 @@ impl Storage {
             let reference=self.insert_source_provenance(workspace_id,branch_id,&root,provenance)?;
             receipt["sourceProvenance"]=reference;
         }
+        self.import_entry_metadata(branch_id,&entries,grant_id,true)?;
         Ok(receipt)
     }
 
@@ -761,10 +767,10 @@ impl Storage {
                     .collect::<Vec<_>>()
             });
         let mut next_cursor: Option<u64> = None;
-        let entries = if let Some(paths) = requested {
+        let mut entries = if let Some(paths) = requested {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
+                let canonical = if path.is_empty() || path == "." { String::new() } else { Self::validate_path(path)?.join("/") };
                 if let Some(scopes) = scopes.as_ref() {
                     if !path_metadata_allowed_scopes(scopes, &canonical) {
                         return Err(KernelError::Authorization(format!(
@@ -778,7 +784,7 @@ impl Storage {
                         return Err(KernelError::Storage("a branch path points to an index".into()));
                     };
                     let state = state.unwrap_or(PathState::Directory { mode: None });
-                    selected.push(json!({"path": canonical, "state": state}));
+                    selected.push(json!({"path": if path == "." {"."} else {&canonical}, "state": state}));
                 }
             }
             selected
@@ -825,6 +831,7 @@ impl Storage {
         } else {
             Vec::new()
         };
+        self.project_native_entries(branch_id,revision,if requested_revision.is_none(){branch.write_revision}else{-1},&root,None,&mut entries)?;
         let mut response = json!({"branchId": branch_id, "workspaceId": branch.workspace_id, "root": root, "revision": revision, "view": view, "currentRoot": branch.head_root, "headRevision": branch.head_revision, "writeRevision": branch.write_revision, "draftBasePaths": branch.draft_base_paths, "captureScopes": branch.capture_scopes, "createdAt": branch.created_at, "updatedAt": branch.updated_at, "entries": entries, "nextCursor": next_cursor});
         if let Some(parent_ref) = branch.parent_ref {
             response
@@ -921,11 +928,8 @@ impl Storage {
             .and_then(Value::as_array)
             .ok_or_else(|| KernelError::Operation("changes is required".to_string()))?;
         for change in changes {
-            let path = change
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Operation("change.path is required".to_string()))?;
-            Self::validate_path(path)?;
+            Self::entry_file_metadata(change)?;
+            Self::branch_entry_path(change)?;
             let state = change
                 .get("state")
                 .cloned()
@@ -1032,6 +1036,9 @@ impl Storage {
         params: &Value,
         grant_id: &str,
     ) -> Result<Value, KernelError> {
+        self.filesystem_transaction(|s|s.branch_write_inner(params,grant_id))
+    }
+    fn branch_write_inner(&mut self,params:&Value,grant_id:&str)->Result<Value,KernelError>{
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -1080,11 +1087,7 @@ impl Storage {
         let mut source_refs=BTreeMap::new();
         for change in changes {
             self.check_cancelled()?;
-            let path = change
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| KernelError::Operation("change.path is required".to_string()))?;
-            let segments = Self::validate_path(path)?;
+            let segments = Self::branch_entry_path(change)?;
             let state = change
                 .get("state")
                 .cloned()
@@ -1203,10 +1206,15 @@ impl Storage {
         self.record_root_parent(&root, rebase_root.as_ref().unwrap_or(&previous_root))?;
         self.record_root_blob_hashes(&root, changed_blobs.clone())?;
         self.consume_object_owners(&branch.workspace_id, grant_id, &owners_to_consume)?;
+        let grant = self.load_grant(grant_id)?;
+        if let Some(reference) = params.get("baseRef").and_then(Value::as_str) {
+            self.rebase_filesystem(branch_id, reference, &effective_base, &grant)?;
+        }
+        self.sync_entry_metadata(branch_id, rebase_root.as_ref().unwrap_or(&previous_root), changes, &grant)?;
         Ok(json!({"status": "committed", "writeRevision": next, "root": root}))
     }
 
-    pub(super) fn branch_publish(&mut self, params: &Value) -> Result<Value, KernelError> {
+    pub(super) fn branch_publish(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -1233,6 +1241,7 @@ impl Storage {
             "UPDATE branches SET head_revision = ?2, updated_at = ?3 WHERE branch_id = ?1",
             params![branch_id, revision, now_ms()],
         )?;
+        self.publish_current_filesystem(branch_id,revision,grant_id)?;
         Ok(
             json!({"status": "committed", "branchId": branch_id, "revision": revision, "root": branch.head_root, "writeRevision": branch.write_revision}),
         )
@@ -1279,6 +1288,7 @@ impl Storage {
                 "DELETE FROM pins WHERE pin_id = ?1 AND branch_id = ?2",
                 params![pin_id, branch_id],
             )?;
+            self.prune_filesystem_pins()?;
             return Ok(
                 json!({"pinId": pin_id, "branchId": branch_id, "pinned": false, "released": deleted > 0}),
             );
@@ -1353,6 +1363,7 @@ impl Storage {
                 })?;
             (branch.head_revision, -1, root, "revision")
         };
+        let data_root=root.clone();
         let root = if let Some(path) = params.get("subtree").and_then(Value::as_str) {
             self.source_subtree_root(&root, path)?
         } else { root };
@@ -1412,6 +1423,7 @@ impl Storage {
             );
         }
         self.conn.execute("INSERT INTO pins(pin_id, branch_id, workspace_id, revision, write_revision, root_hash, grant_id, ephemeral, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![pin_id, branch_id, branch.workspace_id, revision, write_revision, root, grant_id, ephemeral, now_ms()])?;
+        self.retain_filesystem_pin(&pin_id,branch_id,revision,write_revision,&data_root,params.get("subtree").and_then(Value::as_str),&root,grant_id,ephemeral)?;
         Ok(
             json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": branch.workspace_id, "revision": revision, "writeRevision": write_revision, "view": view, "root": root, "pinned": true, "created": true}),
         )
@@ -1436,6 +1448,7 @@ impl Storage {
             .optional()?;
         let released_records = if let Some(workspace_id) = workspace_id.as_deref() {
             self.release_branch_result_filesystems(workspace_id,branch_id)?;
+            self.release_filesystem_revisions(branch_id,workspace_id)?;
             self.release_workspace_metadata(branch_id, workspace_id)?;
             self.conn.execute(
                 "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND record_type LIKE 'working.%'",
@@ -1501,10 +1514,10 @@ impl Storage {
                     .collect::<Vec<_>>()
             });
         let mut next_cursor: Option<u64> = None;
-        let entries = if let Some(paths) = params.get("paths").and_then(Value::as_array) {
+        let mut entries = if let Some(paths) = params.get("paths").and_then(Value::as_array) {
             let mut selected = Vec::new();
             for path in paths.iter().filter_map(Value::as_str) {
-                let canonical = if path.is_empty() { String::new() } else { Self::validate_path(path)?.join("/") };
+                let canonical = if path.is_empty() || path == "." { String::new() } else { Self::validate_path(path)?.join("/") };
                 if scopes
                     .as_ref()
                     .is_some_and(|scopes| !path_metadata_allowed_scopes(scopes, &canonical))
@@ -1514,7 +1527,7 @@ impl Storage {
                     )));
                 }
                 if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
-                    selected.push(json!({"path": canonical, "state": state}));
+                    selected.push(json!({"path": if path == "." {"."} else {&canonical}, "state": state}));
                 }
             }
             selected
@@ -1561,6 +1574,7 @@ impl Storage {
         } else {
             Vec::new()
         };
+        self.project_native_entries(&branch_id,revision,write_revision,&root,Some(pin_id),&mut entries)?;
         Ok(
             json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": workspace_id,
                 "revision":if write_revision==crate::model::SNAPSHOT_PIN_WRITE_REVISION {Value::Null}else{json!(revision)},

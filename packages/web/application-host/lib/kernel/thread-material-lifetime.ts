@@ -14,6 +14,8 @@ export function createThreadMaterialLifetime(options: {
   storage: WorkspaceWorkingStateRootAccess;
   materials: WebMaterialStore;
   releaseBrowser?(threadId: string): Promise<void>;
+  releaseSource?(source:import('./protocol.generated.js').LaunchSource,cleanupId:string,signal?:AbortSignal):Promise<boolean>;
+  releasePreparations?(threads:readonly string[]):Promise<void>;
 }) {
   const serial = createWorkspaceOpSerializer();
   const actorStorage = (threadId: string): WorkspaceWorkingStateRootAccess => ({
@@ -48,8 +50,14 @@ export function createThreadMaterialLifetime(options: {
       await retain(await options.runtime.materialRetention(threadId, signal), signal);
     }),
     releaseDeleted: (signal?: AbortSignal) => serial.runSerialized('materials', async () => {
-      const plan = await options.runtime.materialRetention(undefined, signal);
+      let plan = await options.runtime.materialRetention(undefined, signal);
+      if(options.releasePreparations){
+        await options.releasePreparations(plan.threads.filter(thread=>thread.release).map(thread=>thread.threadId));
+        plan=await options.runtime.materialRetention(undefined,signal);
+      }
       await retain(plan, signal);
+      let pendingSources=0;
+      for(const item of plan.sources??[]){signal?.throwIfAborted();if(options.releaseSource&&!await options.releaseSource(item.source,item.cleanupId,signal))pendingSources++;}
       const scopes = new Map<string, string[]>();
       for (const thread of plan.threads) if (thread.release) {
         const owners = scopes.get(thread.rootThreadId) ?? [];
@@ -60,6 +68,7 @@ export function createThreadMaterialLifetime(options: {
         await createMaterialLifecycle(actorStorage(deleted[0]!)).releaseThreadMaterials(threadMaterialScope(root), deleted);
         for (const threadId of deleted) await options.releaseBrowser?.(threadId);
       }
+      return {pending:pendingSources>0};
     }),
   };
 }

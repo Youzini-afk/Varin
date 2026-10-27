@@ -167,6 +167,8 @@ export async function openScopedIntegrationTarget(
         canonicalRoot });
       if (authority.rootId !== admitted.rootId) throw new Error('Integration file root changed');
       const bindings = createScopedKernelRecoveryBindings(options.storage, { authority, threadId: invocation.threadId,
+        fileTarget:{kind:'physical',workspaceId:selected.workspaceId,executionWorkspaceId:selected.executionWorkspaceId,threadId:invocation.threadId,
+          runId:invocation.runId,rootId:admitted.rootId,canonicalRoot,sourceMode:selected.mode},
         runId: invocation.runId, storageRoot: options.kernel.handshake!.storageRoot, metadataReader: options.metadataReader });
       const context = await options.storage.contextFromGrant({ grant: admitted.grant,
         owningWorkspaceId: selected.workspaceId, executionWorkspaceId: selected.executionWorkspaceId,
@@ -194,6 +196,10 @@ function physicalSourceLaunch(runId: string, launch: LaunchIntent): SourceLaunch
   if (source.mode === 'live_root') {
     if (!source.live_root) throw new Error('Live source identity is unavailable');
     return { ...common, mode: 'live_root', liveRoot: source.live_root };
+  }
+  if(source.mode==='native_workspace'){
+    if(!source.branch_id)throw new Error('Native source identity is unavailable');
+    return {...common,mode:'native_workspace',branchId:source.branch_id,...(source.native_scope?{nativeScope:source.native_scope}:{})};
   }
   if (source.branch_id === null || source.revision === null) throw new Error('Materialized source identity is unavailable');
   return { ...common, mode: 'materialized', branchId: source.branch_id, revision: source.revision,

@@ -45,6 +45,8 @@ export interface ExternalConversation {
   title: string;
   cwd: string;
   workspaceId?: string;
+  nativeWorkspace?: {resource_owner:{kind:'local'};mode:'native_workspace';workspace_id:string;execution_workspace_id:string;
+    branch_id:string;revision:null;live_root:null;native_scope?:string};
   sessionId?: string;
   revision: number;
   createdAt: number;

@@ -2131,6 +2131,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 WorkerRequest::WorkspaceIdle => {
                     kernel.workspace_idle_pending=true;
+                    if !stopping&&kernel.workspaces.take_idle_observer(){respond!(json!({"v":PROTOCOL_VERSION,"kind":"workspace-idle","kernelEpoch":kernel.epoch}));}
                     if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
                     continue;
                 }
@@ -2185,6 +2186,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(storage) = kernel.storage.as_mut() {
                         storage.recheck_recovered_process_receipts();
                     }
+                    if !stopping&&kernel.workspaces.take_idle_observer(){respond!(json!({"v":PROTOCOL_VERSION,"kind":"workspace-idle","kernelEpoch":kernel.epoch}));}
                     if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
                     continue;
                 }
@@ -2204,6 +2206,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(storage) = kernel.storage.as_mut() {
                         let _ = storage.observe_file_writer_stopped(&id);
                     }
+                    if !stopping&&kernel.workspaces.take_idle_observer(){respond!(json!({"v":PROTOCOL_VERSION,"kind":"workspace-idle","kernelEpoch":kernel.epoch}));}
                     if let Err(error)=kernel.collect_obsolete_materialized_views(&capture_completions) {eprintln!("derived view cleanup pending: {error}");}
                     if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
                     continue;
@@ -2254,6 +2257,16 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(worker)=>kernel.file_workers.push((cancellation,worker)),
                                 Err(_)=>if let Some(key)=key{if let Ok(mut active)=worker_cancellations.lock(){active.remove(&key);}},
                             }
+                            continue;
+                        }
+                        Ok(crate::tools::ResourceWork::NativeHandoff(task)) => {
+                            let (port,completed,workspaces)=(Kernel::workspace_port(&capture_completions),capture_completions.clone(),kernel.workspaces.clone());
+                            let (key,cancellation)=(call.admission_key.clone(),call.cancellation.shared_flag());
+                            let worker=thread::Builder::new().name("native-source-handoff".into()).spawn(move||{
+                                let result=task.run(&workspaces,port).map_err(|error|crate::tools::ResourceFailure{error,dispatched:false});
+                                let _=completed.send(WorkerRequest::ResourceWorkDone{call,result});
+                            });
+                            match worker{Ok(worker)=>kernel.file_workers.push((cancellation,worker)),Err(_)=>if let Some(key)=key{if let Ok(mut active)=worker_cancellations.lock(){active.remove(&key);}}}
                             continue;
                         }
                         Ok(crate::tools::ResourceWork::FileRecovery(task)) => {

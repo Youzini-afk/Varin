@@ -9,6 +9,43 @@ use crate::{
 use std::{collections::BTreeMap, fs, path::Path};
 use uuid::Uuid;
 
+#[path = "native_metadata_apply.rs"]
+mod effects;
+pub(crate) use effects::{apply, validate_apply};
+
+pub(crate) fn recoverable(attributes:&Attributes,native:bool)->varin_runtime::catalog::followups::FileMetadata{
+    let mut value=attributes.file_metadata();
+    // Unix ctime/birthtime may be observable without being settable. Managed
+    // workspaces retain them in their own metadata; ordinary Unix targets don't
+    // advertise a creation-time restore capability they cannot provide.
+    #[cfg(not(any(windows,target_os="macos")))]
+    if !native {value.created=None;}
+    let _=native;
+    value
+}
+
+#[cfg(target_os="macos")]
+fn backup_time(path:&Path)->Result<Option<Timestamp>,KernelError>{
+    use std::{ffi::CString,os::unix::ffi::OsStrExt};
+    let name=CString::new(path.as_os_str().as_bytes()).map_err(|_|KernelError::Operation("NUL in file path".into()))?;
+    let mut attributes=libc::attrlist{bitmapcount:5,reserved:0,commonattr:libc::ATTR_CMN_BKUPTIME,volattr:0,dirattr:0,fileattr:0,forkattr:0};
+    // getattrlist packs common attributes at four-byte alignment.
+    #[repr(C,packed(4))]
+    struct Response{length:u32,time:libc::timespec}
+    let mut result=Response{length:0,time:libc::timespec{tv_sec:0,tv_nsec:0}};
+    if unsafe{libc::getattrlist(name.as_ptr(),(&mut attributes as *mut libc::attrlist).cast(),(&mut result as *mut Response).cast(),std::mem::size_of::<Response>(),libc::FSOPT_NOFOLLOW)}!=0{
+        let error=std::io::Error::last_os_error();
+        if error.raw_os_error()==Some(libc::ENOTSUP){return Ok(None);}
+        return Err(error.into());
+    }
+    if result.length as usize!=std::mem::size_of::<Response>(){return Err(KernelError::Operation("Invalid native backup-time observation".into()));}
+    let time=unsafe{std::ptr::addr_of!(result.time).read_unaligned()};
+    if time.tv_sec==0&&time.tv_nsec==0{return Ok(None);}
+    let value=Timestamp{seconds:time.tv_sec,nanos:time.tv_nsec.try_into().map_err(|_|KernelError::Operation("Invalid native backup timestamp".into()))?};
+    value.time()?;
+    Ok(Some(value))
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
     File,
@@ -71,6 +108,7 @@ pub(crate) fn observe(path: &Path) -> Result<Observation, KernelError> {
         uid: 0,
         gid: 0,
         created,
+        creation_exported: cfg!(windows) || (cfg!(target_os="macos") && meta.created().is_ok()),
         accessed,
         modified,
         changed: modified,
@@ -108,6 +146,7 @@ pub(crate) fn observe(path: &Path) -> Result<Observation, KernelError> {
         {
             use std::os::macos::fs::MetadataExt as _;
             attributes.bsd_flags = meta.st_flags();
+            attributes.backup = backup_time(path)?;
         }
         attributes.xattrs = xattrs(path)?;
     }

@@ -23,9 +23,11 @@ pub struct MaterialInheritance {
 pub struct MaterialRetention {
     pub threads: Vec<MaterialThreadRetention>,
     pub inheritances: Vec<MaterialInheritance>,
+    pub sources: Vec<source_retention::SourceRetirement>,
 }
 pub struct MaterialRetentionRead {
     threads: Vec<MaterialThreadRetention>,
+    sources: Vec<source_retention::SourceRetirement>,
     children: Vec<(delegated::ChildRelation, String)>,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
@@ -59,7 +61,7 @@ impl MaterialRetentionRead {
                     child_thread_id: child.child_thread_id, root_thread_id, snapshot_ids: ids.into_iter().collect() });
             }
         }
-        Ok(MaterialRetention { threads: self.threads, inheritances })
+        Ok(MaterialRetention { threads: self.threads, inheritances, sources: self.sources })
     }
 }
 impl Catalog {
@@ -82,6 +84,7 @@ impl Catalog {
                 children.push((child, root));
             }
         }
-        Ok(MaterialRetentionRead { threads, children, content: self.content.clone(), _publication: publication })
+        let sources=if child_id.is_none(){self.capture_source_retirements(drained_threads)?}else{Vec::new()};
+        Ok(MaterialRetentionRead { threads, sources, children, content: self.content.clone(), _publication: publication })
     }
 }

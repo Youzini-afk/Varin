@@ -23,7 +23,7 @@ function childPreparationSource(child: DelegatedExecution): LaunchSource {
 }
 
 function validateUnacceptedHandoff(source: ChildSourcePinCleanup, handoff: ChildSourceHandoff): void {
-  const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='derived'?handoff.root.pin:null);
+  const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='native'||handoff.root.kind==='derived'?handoff.root.pin:null);
   if (handoff.operation_id !== `child-source-handoff:${source.operation_id}`
     || handoff.source.workspace_id !== source.source.workspace_id || !isDeepStrictEqual(handoff.source.resource_owner,source.source.resource_owner)
     || (pin && (pin.pin_id !== source.pin_id || !pin.source.branch_id))
@@ -91,7 +91,7 @@ export async function releaseManagedUnacceptedSource(runtime: AgentRuntimeClient
     parentThreadId: source.parent_thread_id, source: source.source }, signal);
   if (!handoff) return;
   validateUnacceptedHandoff(source, handoff);
-  if (!handoff.retention_pin && handoff.root.kind !== 'fixed' && handoff.root.kind !== 'derived') return;
+  if (!handoff.retention_pin && handoff.root.kind !== 'fixed' && handoff.root.kind !== 'native' && handoff.root.kind !== 'derived') return;
   // The original parent authority authenticates the receipt; sourceAgent may
   // have selected a different fixed branch within that same resource owner.
   source={...source,source:handoff.source};
@@ -132,7 +132,7 @@ export function createManagedChildSourceService(options: {
       try {
         const store = new KernelWorkingStateRootStore(await options.storage.contextFromBranchGrant({grant,
           owningWorkspaceId:scope.source.workspace_id,executionWorkspaceId:scope.source.execution_workspace_id}));
-        await captureContinuationStage(child, { store, capture: options.capture,
+        await captureContinuationStage(child, { store, capture: options.capture,nativeWorkspaces:options.storage.client.nativeWorkspaces,
           physical: async root => new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({
             grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
             rootId: root.rootId, canonicalRoot: root.canonicalRoot })) }, scope.source, scope.physicalRoot ?? undefined, signal);
@@ -155,7 +155,7 @@ export function createManagedChildSourceService(options: {
       if (!handoff) throw new Error('Original unaccepted child handoff is unavailable');
       validateUnacceptedHandoff(source, handoff);
       const store = new KernelWorkingStateRootStore(await context(scope));
-      const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='derived'?handoff.root.pin:null);
+      const pin=handoff.retention_pin ?? (handoff.root.kind==='fixed'||handoff.root.kind==='native'||handoff.root.kind==='derived'?handoff.root.pin:null);
       if (pin) await store.releaseBranchHandoffPin(pin.source.branch_id!, pin.pin_id);
       return { released: true };
     }
@@ -192,7 +192,7 @@ export function createManagedChildSourceService(options: {
         throw new Error('Result publication differs from its original child Run');
       }
       const branchId = scope.source.branch_id;
-      if (!branchId || !['materialized','fixed_branch'].includes(scope.source.mode)) throw new Error('Child result has no private working source');
+      if (!branchId || !['materialized','fixed_branch','native_workspace'].includes(scope.source.mode)) throw new Error('Child result has no private working source');
       const publicationId = `child-result:${child.execution_id}`;
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (operation.kind === 'child_result_read') return store.readResultCandidate(branchId, publicationId, { signal });
@@ -210,6 +210,12 @@ export function createManagedChildSourceService(options: {
         else if (view) throw new Error('The original child execution view is unavailable');
       }
       if (child.code_result.kind !== 'settling') throw new Error('Child result capture has no settled source');
+      if(scope.source.mode==='native_workspace'){
+        const kernel=options.storage.client;
+        if(!kernel.nativeWorkspaces)throw new Error('Native result owner is unavailable');
+        const entry=await kernel.nativeWorkspaces.open(scope.source,signal);
+        return kernel.scoped(scope.grant).prepareWorkspaceResult({branchId,generation:entry.view.binding.generation,publicationId},signal);
+      }
       if (!executionRoot) return store.prepareResultCandidate({publicationId,branchId,source:{kind:'head'},signal});
       const physical = new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({
         grant: scope.grant, owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
@@ -225,8 +231,9 @@ export function createManagedChildSourceService(options: {
       if (!store.releaseBranchHandoffPin) throw new Error('Durable source pin release is unavailable');
       const handoff = child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
       if (handoff?.retention_pin) await store.releaseBranchHandoffPin(handoff.retention_pin.source.branch_id!,handoff.retention_pin.pin_id);
-      if (child.trigger.kind === 'dispatch' && (handoff?.root.kind === 'fixed' || handoff?.root.kind === 'derived')) {
+      if (child.trigger.kind === 'dispatch' && (handoff?.root.kind === 'fixed' || handoff?.root.kind === 'native' || handoff?.root.kind === 'derived')) {
         await store.releaseBranchHandoffPin(handoff.root.pin.source.branch_id!, handoff.root.pin.pin_id);
+        if(handoff.root.kind==='native')await store.deleteBranch(handoff.root.pin.source.branch_id!);
       }
       if (child.trigger.kind !== 'dispatch' && child.source_basis) {
         await store.releaseBranchHandoffPin(child.source_basis.source.branch_id!, `child-pin:${child.execution_id}`);

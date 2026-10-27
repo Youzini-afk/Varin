@@ -121,12 +121,12 @@ impl Storage {
                 storage.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,0,?8)",
                     params![id,branch_id,branch.workspace_id,revision,write_revision,root,grant_id,now_ms()])?;
             }
-            Ok(
-                json!({"publicationId":publication,"candidateOperationId":operation,
+            let mut candidate=json!({"publicationId":publication,"candidateOperationId":operation,
                 "workspaceId":branch.workspace_id,"branchId":branch_id,"root":branch.head_root,
                 "baseRoot":branch.base_root,"writeRevision":branch.write_revision,"pinId":pin_id,"basePinId":base_pin_id,
-                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null}),
-            )
+                "parentRef":branch.parent_ref,"ownerGrantId":grant.grant_id,"ownerThreadId":grant.thread_id,"ownerSessionId":Value::Null});
+            if let Some(filesystem)=storage.retain_branch_result_filesystem(publication,branch_id,grant_id)?{candidate["filesystem"]=serde_json::to_value(filesystem)?;}
+            Ok(candidate)
         })
     }
     fn require_native_candidate(candidate: &Value) -> Result<(), KernelError> {
@@ -279,6 +279,7 @@ impl Storage {
             } else { storage.branch_publish(
                 &json!({"operationId":task.params["operationId"],"branchId":branch_id,
                 "expectedWriteRevision":branch.write_revision,"expectedRoot":branch.head_root}),
+                grant_id,
             )? };
             if published["revision"] != prepared.revision {
                 return Err(KernelError::Storage("result revision mismatch".into()));
@@ -386,18 +387,44 @@ pub(crate) struct PreparedWorkingResult {
 }
 impl ResultPublicationTask {
     pub(crate) fn run(&self) -> Result<PreparedWorkingResult, KernelError> {
-        let difference = super::tree_diff::compare(&self.database, &self.branch.base_root,
+        let mut difference = super::tree_diff::compare(&self.database, &self.branch.base_root,
             &self.branch.head_root, &self.cancellation)?;
+        let connection = Connection::open_with_flags(&self.database,OpenFlags::SQLITE_OPEN_READ_ONLY|OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+        let reader=super::workspace_metadata::Reader{connection:&connection,cancel:&self.cancellation};
+        let filesystem=self.candidate.get("filesystem").map(|value|serde_json::from_value::<super::workspace_results::FilesystemRevision>(value.clone())).transpose()?;
+        if let Some(fs)=&filesystem{
+            let attrs=super::tree_diff::compare_metadata(&self.database,&fs.base_root,&fs.root,&self.cancellation)?;
+            let mut paths=super::workspace_metadata::changed_paths(&attrs);
+            // Every name of a shared inode has the same attributes. Include
+            // aliases selected by this exact version, never an unscoped graph.
+            for path in paths.clone(){
+                for(root,data)in [(&fs.base_root,&self.branch.base_root),(&fs.root,&self.branch.head_root)]{
+                    let state=reader.state(data,&path)?;
+                    if !matches!(state,PathState::RegularFile{..}){continue;}
+                    let metadata=reader.metadata(&fs.head,root,&path,&state)?;
+                    paths.extend(reader.links(&fs.head,root,metadata.binding.file_id,&path)?);
+                }
+            }
+            for path in paths{
+                let before=reader.state(&self.branch.base_root,&path)?;
+                let after=reader.state(&self.branch.head_root,&path)?;
+                let attrs=|root:&str,state:&PathState|->Result<Option<(u32,varin_runtime::catalog::followups::FileMetadata)>,KernelError>{
+                    if matches!(state,PathState::Missing|PathState::Unsupported){Ok(None)}else{let attributes=reader.metadata(&fs.head,root,&path,state)?.attributes;Ok(Some((attributes.mode,attributes.file_metadata())))}
+                };
+                if before!=after||attrs(&fs.base_root,&before)?!=attrs(&fs.root,&after)?{
+                    difference.paths.insert(path,(Some(before),Some(after)));
+                }
+            }
+        }
+        // The wire result uses an explicit root metadata entry. Empty strings
+        // elsewhere retain their existing meaning of an omitted path/scope.
+        difference.paths = difference.paths.into_iter().map(|(path, states)| (if path.is_empty() {".".into()} else {path}, states)).collect();
         let paths = difference.paths.keys().cloned().collect::<Vec<_>>();
         let (mut base, mut current) = (BTreeMap::new(), BTreeMap::new());
         for (path, (before, after)) in difference.paths {
             if let Some(before) = before { base.insert(path.clone(), before); }
             if let Some(after) = after { current.insert(path, after); }
         }
-        let connection = Connection::open_with_flags(
-            &self.database,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
         let mut base_states = serde_json::Map::new();
         let mut path_states = serde_json::Map::new();
         let mut references = Vec::new();
@@ -422,7 +449,14 @@ impl ResultPublicationTask {
                     }
                     references.push((format!("{prefix}:{path}"), hash.to_string()));
                 }
-                let mut value = serde_json::to_value(state)?;
+                let mut value = serde_json::to_value(&state)?;
+                if let Some(fs)=&filesystem{
+                    if !matches!(state,PathState::Missing|PathState::Unsupported){
+                        let metadata=reader.metadata(&fs.head,if prefix=="base"{&fs.base_root}else{&fs.root},path,&state)?;
+                        value["native"]=serde_json::to_value(metadata.attributes.file_metadata())?;
+                        value["mode"]=json!(metadata.attributes.mode);
+                    }
+                }
                 if value.get("mode").is_some_and(Value::is_null) {
                     value.as_object_mut().unwrap().remove("mode");
                 }

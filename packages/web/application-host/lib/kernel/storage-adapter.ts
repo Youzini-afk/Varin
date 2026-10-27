@@ -141,6 +141,7 @@ const normalize = (value: string): string => {
   return parts.join("/");
 };
 
+const normalizeEntryPath = (value: string): string => !value || value === '.' ? '.' : normalize(value);
 const normalizeCaptureScope = (value: string): string => value === "." ? "." : normalize(value);
 
 const normalizeViewPath = (value: string): string => {
@@ -158,12 +159,9 @@ const toKernelState = (state: RecoveryState): KernelBranchState => {
   return { kind: state.kind };
 };
 
-const fromKernelState = (state: KernelBranchState): RecoveryState => {
-  if (state.kind === "regular-file") return { kind: "regular-file", objectHash: state.objectHash, byteLength: state.byteLength, mode: state.mode };
-  if (state.kind === "directory") return { kind: "directory", ...(state.mode == null ? {} : { mode: state.mode }) };
-  if (state.kind === "symlink") return { kind: "symlink", symlinkTarget: state.symlinkTarget, ...(state.mode == null ? {} : { mode: state.mode }) };
-  return { kind: state.kind };
-};
+const fromKernelState = (state: KernelBranchState, nativeJson?:string): RecoveryState => parseRecoveryState({
+  ...state,...('mode' in state&&state.mode==null?{mode:undefined}:{}),...(nativeJson?{native:JSON.parse(nativeJson)}:{})
+});
 
 const asRecord = (value: unknown): Record<string, unknown> => (
   value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -178,7 +176,19 @@ const parseSourceProvenance = (value: unknown): ChildSourceProvenance => {
   const drafts = source.drafts === undefined ? undefined : parseSourceDraftProvenance(source.drafts);
   if (drafts && source.contentMode !== "fixed-draft-baseline") throw new Error("Working source draft mode is inconsistent");
   if (source.consistency === "fixed-root" && typeof source.root === "string" && source.root) {
-    return { consistency: source.consistency, root: source.root, ...(resources ? { resources } : {}) };
+    let selection:Extract<ChildSourceProvenance,{consistency:'fixed-root'}>['selection'];
+    if(source.selection!==undefined){
+      const raw=asRecord(source.selection);
+      if(Object.keys(raw).some(key=>!['captureIdentity','contentMode','captureScopes','omittedDraftPaths','drafts'].includes(key))
+        ||typeof raw.captureIdentity!=='string'||!/^[0-9a-f]{64}$/.test(raw.captureIdentity)
+        ||!['saved-files','fixed-draft-baseline'].includes(String(raw.contentMode))
+        ||!Array.isArray(raw.captureScopes)||!raw.captureScopes.every(item=>typeof item==='string')
+        ||!Array.isArray(raw.omittedDraftPaths)||!raw.omittedDraftPaths.every(item=>typeof item==='string'))throw new Error('Workspace snapshot selection is malformed');
+      const drafts=raw.drafts===undefined?undefined:parseSourceDraftProvenance(raw.drafts);
+      if(drafts&&raw.contentMode!=='fixed-draft-baseline')throw new Error('Workspace draft snapshot mode is inconsistent');
+      selection={captureIdentity:raw.captureIdentity,contentMode:raw.contentMode as 'saved-files'|'fixed-draft-baseline',captureScopes:raw.captureScopes as string[],omittedDraftPaths:raw.omittedDraftPaths as string[],...(drafts?{drafts}:{})};
+    }
+    return { consistency: source.consistency, root: source.root, ...(selection?{selection}:{}),...(resources ? { resources } : {}) };
   }
   if (source.consistency === 'refreshed-root' && typeof source.root === 'string' && source.root
     && typeof source.previousRoot === 'string' && typeof source.incomingRoot === 'string'
@@ -472,8 +482,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const result: Record<string, RecoveryState> = {};
     for (const entry of read.entries) {
       checkRead(options);
-      const path = normalize(entry.path);
-      const state = fromKernelState(entry.state);
+      const path = normalizeEntryPath(entry.path);
+      const state = fromKernelState(entry.state,entry.nativeJson);
       result[path] = state;
       if (state.kind === "regular-file") {
         this.sourceByHash.set(state.objectHash, options?.pin
@@ -493,12 +503,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       || !Array.isArray(document.changedPaths) || document.changedPaths.some(file => typeof file !== "string")) {
       throw new Error(`Working result ${branchId}@${revision} has malformed provenance`);
     }
-    const changedPaths = document.changedPaths.map(file => normalize(String(file))).sort();
+    const changedPaths = document.changedPaths.map(file => normalizeEntryPath(String(file))).sort();
     if (new Set(changedPaths).size !== changedPaths.length) throw new Error("Working result has duplicate changed paths");
     const storedStates = (key: "baseStates" | "pathStates"): Record<string, RecoveryState> => {
       const raw = document[key];
       if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error(`Working result has no fixed ${key}`);
-      const states = Object.fromEntries(Object.entries(raw).map(([file, state]) => [normalize(file), parseRecoveryState(state)]));
+      const states = Object.fromEntries(Object.entries(raw).map(([file, state]) => [normalizeEntryPath(file), parseRecoveryState(state)]));
       if (JSON.stringify(Object.keys(states).sort()) !== JSON.stringify(changedPaths)) throw new Error(`Working result ${key} does not cover its changed paths`);
       return states;
     };
@@ -509,7 +519,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       || fixed.view !== "revision" || fixed.revision !== revision || fixed.root !== document.root) {
       throw new Error(`Working result ${branchId}@${revision} returned inconsistent provenance`);
     }
-    const byPath = new Map(fixed.entries.map(entry => [normalize(entry.path), fromKernelState(entry.state)]));
+    const byPath = new Map(fixed.entries.map(entry => [normalizeEntryPath(entry.path), fromKernelState(entry.state,entry.nativeJson)]));
     if (changedPaths.some(file => !sameState(pathStates[file]!, byPath.get(file) ?? { kind: "missing" }))) {
       throw new Error(`Working result ${branchId}@${revision} differs from its fixed root`);
     }
@@ -574,9 +584,9 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     ]);
     if (!current) return null;
     if (options?.pin) this.assertPinRead(options.pin, current);
-    const state = path ? fromKernelState(current.entries[0]?.state ?? { kind: "missing" }) : { kind: "directory" as const };
+    const state = path ? fromKernelState(current.entries[0]?.state ?? { kind: "missing" },current.entries[0]?.nativeJson) : { kind: "directory" as const };
     const baseState = base
-      ? path ? fromKernelState(base.entries[0]?.state ?? { kind: "missing" }) : { kind: "directory" as const }
+      ? path ? fromKernelState(base.entries[0]?.state ?? { kind: "missing" },base.entries[0]?.nativeJson) : { kind: "directory" as const }
       : state;
     const origin = this.origin(path, state, baseState, branch);
     return {
@@ -617,7 +627,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       first ??= page;
       if (page.root !== first.root) throw new Error(`Working branch ${branchId} changed while listing paths`);
       for (const entry of page.entries) {
-        const path = normalize(entry.path);
+        const path = normalizeEntryPath(entry.path);
         if (roots.some((root) => !root || path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`))) {
           entries.push({ path, state: entry.state });
         }
@@ -648,7 +658,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       first ??= page;
       if (page.root !== first.root) throw new Error(`Working-state pin ${pin.pinId} changed identity`);
       for (const entry of page.entries) {
-        const path = normalize(entry.path);
+        const path = normalizeEntryPath(entry.path);
         if (roots.some((root) => !root || path === root || path.startsWith(`${root}/`) || root.startsWith(`${path}/`))) {
           entries.push({ path, state: entry.state });
         }
@@ -671,13 +681,13 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     ]);
     if (!current) return null;
     if (options?.pin) this.assertPinRead(options.pin, current.read);
-    const baseByPath = new Map((base?.entries ?? current.entries).map((entry) => [entry.path, fromKernelState(entry.state)]));
+    const baseByPath = new Map((base?.entries ?? current.entries).map((entry) => [entry.path, fromKernelState(entry.state,entry.nativeJson)]));
     return {
       branch,
       root: current.read.root,
       viewRevision: options?.pin?.writeRevision ?? options?.revision ?? current.read.writeRevision,
       entries: current.entries.map((entry) => {
-        const state = fromKernelState(entry.state);
+        const state = fromKernelState(entry.state,entry.nativeJson);
         const origin = this.origin(entry.path, state, baseByPath.get(entry.path) ?? { kind: "missing" }, branch);
         return {
           path: entry.path,
@@ -886,11 +896,12 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     } };
   }
 
-  private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; ownerId?: string; sourceRef?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
+  private kernelEntry(file: string, state: RecoveryState): { path: string; state: KernelBranchState; nativeJson?:string;ownerId?: string; sourceRef?: string; sourcePath?: string; sourceRecordId?: string; sourceSlot?: string } {
     const source = state.kind === "regular-file" ? this.sourceByHash.get(state.objectHash) : undefined;
     return {
-      path: normalize(file),
+      path: normalizeEntryPath(file),
       state: toKernelState(state),
+      ...('native' in state&&state.native?{nativeJson:JSON.stringify(state.native)}:{}),
       ...(state.kind === "regular-file" && this.ownerByHash.has(state.objectHash)
         ? { ownerId: this.ownerByHash.get(state.objectHash)! }
         : state.kind === "regular-file" && source?.root && source.path
@@ -1016,7 +1027,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     }
     try {
       for (const [file, state] of Object.entries(baseState)) if (state.kind === "regular-file") {
-        this.sourceByHash.set(state.objectHash, { branchId, path: normalize(file), revision: 0 });
+        this.sourceByHash.set(state.objectHash, { branchId, path: normalizeEntryPath(file), revision: 0 });
       }
       const branch = await this.getBranchRoot(branchId);
       if (!branch) throw new Error(`Working branch not found after creation: ${branchId}`);
@@ -1184,7 +1195,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       || fixed.view !== "revision" || fixed.revision !== Number(document.revision) || fixed.root !== document.root) {
       throw new Error(`Draft baseline fixed revision has inconsistent provenance: ${id}`);
     }
-    const byPath = new Map(fixed.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    const byPath = new Map(fixed.entries.map((entry) => [normalizeEntryPath(entry.path), fromKernelState(entry.state,entry.nativeJson)]));
     const pathStates: Record<string, RecoveryState> = {};
     for (const file of files) {
       const state = byPath.get(file);
@@ -1200,7 +1211,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async commitVirtualWrites(branchId: string, expectedWriteRevision: number, files: Record<string, RecoveryState>): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
-    const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalize(file), state]));
+    const normalized = Object.fromEntries(Object.entries(files).map(([file, state]) => [normalizeEntryPath(file), state]));
     const releaseInputOwners = async (): Promise<void> => {
       const owned = new Map(Object.values(normalized).flatMap((state) => {
         if (state.kind !== "regular-file") return [];
@@ -1228,8 +1239,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       await releaseInputOwners();
       return { status: "conflict", writeRevision: currentRead.writeRevision, root: currentRead.root };
     }
-    const current = Object.fromEntries(currentRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
-    const base = Object.fromEntries(baseRead.entries.map((entry) => [normalize(entry.path), fromKernelState(entry.state)]));
+    const current = Object.fromEntries(currentRead.entries.map((entry) => [normalizeEntryPath(entry.path), fromKernelState(entry.state,entry.nativeJson)]));
+    const base = Object.fromEntries(baseRead.entries.map((entry) => [normalizeEntryPath(entry.path), fromKernelState(entry.state,entry.nativeJson)]));
     assertVirtualWriteTree(current, normalized);
     const closed = { ...normalized };
     for (const [file, state] of Object.entries(normalized)) {
@@ -1271,7 +1282,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       changes: Record<string, RecoveryState>;
     },
   ): Promise<{ status: "committed"; writeRevision: number; root?: string } | { status: "conflict"; writeRevision: number; root?: string }> {
-    const normalized = Object.fromEntries(Object.entries(rebase.changes).map(([file, state]) => [normalize(file), state]));
+    const normalized = Object.fromEntries(Object.entries(rebase.changes).map(([file, state]) => [normalizeEntryPath(file), state]));
     const releaseInputOwners = async (): Promise<void> => {
       const owned = new Map(Object.values(normalized).flatMap((state) => {
         if (state.kind !== "regular-file") return [];
@@ -1332,7 +1343,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   async captureDirectory(directory: string, relativePaths?: string[], options?: { signal?: AbortSignal; onProgress?: (done: number, total: number) => void; store?: boolean; indexModes?: Map<string, string> | Record<string, string>; verifyCaptured?: Record<string, RecoveryState> }): Promise<Record<string, RecoveryState>> {
     const expected = options?.verifyCaptured ? this.captureStates.get(options.verifyCaptured) : undefined;
     if (options?.verifyCaptured && (!expected || options.store !== false)) throw new Error("Verification requires this store's original capture and store:false");
-    const files = relativePaths?.map(normalize) ?? await this.kernelScanPaths(directory, undefined, options?.signal);
+    const files = relativePaths?.map(normalizeEntryPath) ?? ['.', ...await this.kernelScanPaths(directory, undefined, options?.signal)];
     const root = await this.kernelFileRoot(directory);
     const result: Record<string, RecoveryState> = {};
     const acquired = new Map<string, string>();
@@ -1347,7 +1358,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       for (let offset = 0; offset < uniqueFiles.length; offset += batchSize) {
         options?.signal?.throwIfAborted();
         const batch = uniqueFiles.slice(offset, offset + batchSize);
-        const paths = batch.map(file => root.basePath ? `${root.basePath}/${file}` : file);
+        const paths = batch.map(file => [root.basePath, normalize(file)].filter(Boolean).join('/'));
         if (expected && batch.some(file => !expected[file])) throw new Error("Verification path is absent from the original capture");
         const leaseId = `capture-lease:${randomUUID()}`;
         // Wait and cancellation share the native lease owner. An acquired receipt is
@@ -1462,7 +1473,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         expectedWriteRevision: branch.writeRevision, expectedRoot: branch.root, changes: [] }, signal), branchId, publicationId);
     }
     const source = input.source;
-    const selectedPaths = source.changedPaths ? withAncestorDirectories(source.changedPaths.map(normalize)) : undefined;
+    const selectedPaths = source.changedPaths ? [...(source.changedPaths.some(file => normalizeViewPath(file) === '') ? ['.'] : []), ...withAncestorDirectories(source.changedPaths.map(normalize))] : undefined;
     const options = { ...(signal ? { signal } : {}), ...(source.indexModes ? { indexModes: source.indexModes } : {}) };
     const captured = await this.captureDirectory(source.directory, selectedPaths, options);
     try {
@@ -1473,7 +1484,8 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       }
       if (!selectedPaths) {
         const inventory = (await this.kernelScanPaths(source.directory, undefined, signal)).sort();
-        if (inventory.length !== paths.length || inventory.some((file, index) => file !== paths[index])) {
+        const filePaths=paths.filter(file=>file!=='.');
+        if (inventory.length !== filePaths.length || inventory.some((file, index) => file !== filePaths[index])) {
           throw new Error("Working-state directory inventory changed while it was being captured");
         }
       }
@@ -1489,7 +1501,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         throw new Error(`Working branch changed while preparing result: ${branchId}`);
       }
       const { entries } = current;
-      const currentStates = Object.fromEntries(entries.map(entry => [normalize(entry.path), fromKernelState(entry.state)]));
+      const currentStates = Object.fromEntries(entries.map(entry => [normalizeEntryPath(entry.path), fromKernelState(entry.state,entry.nativeJson)]));
       const candidates = [...new Set([...paths, ...Object.keys(currentStates)])];
       const writes = Object.fromEntries(candidates.filter(file => !sameState(currentStates[file] ?? { kind: "missing" }, captured[file] ?? { kind: "missing" }))
         .map(file => [file, captured[file] ?? { kind: "missing" as const }]));
@@ -1685,6 +1697,7 @@ export interface KernelStorageAdapterOptions {
 
 /** Explicit existing authority and its already-scoped effect ports. No grant is minted. */
 export interface KernelAdmittedStorageContextInput {
+  fileTarget?:RecoveryIdentity['fileTarget'];
   grant: KernelGrantHandle;
   owningWorkspaceId: string;
   executionWorkspaceId: string;
@@ -1888,6 +1901,7 @@ export class KernelStorageAdapter {
     // Preserve the original spelling at the grant boundary. Node's canonical spelling is
     // used only for local path arithmetic (Rust uses the Windows namespace prefix).
     return this.contextUsingGrant(grant, { authorityId: this.options.hostId, canonicalRoot,
+      ...(input.fileTarget?{fileTarget:input.fileTarget}:{}),
       filesystemProfile: process.platform === "win32" ? "windows-local" : `${process.platform}-local`, workspaceId: input.owningWorkspaceId }, { ...input, canonicalRoot });
   }
 

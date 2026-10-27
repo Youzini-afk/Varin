@@ -291,6 +291,7 @@ fn insert_execution(
     execution: &DelegatedExecution,
     key: Option<&str>,
 ) -> Result<()> {
+    super::source_retention::assert_record_available(db,"delegated_executions",&serde_json::to_value(execution)?)?;
     db.execute("INSERT INTO delegated_executions(id,child_operation_id,command_key,run_id,body) VALUES(?1,?2,?3,?4,?5)",
         params![execution.execution_id,execution.child_operation_id,key,execution.receipt.as_ref().map(|r|&r.run_id),encode(execution)?])?;
     Ok(())
@@ -580,7 +581,7 @@ impl ChildContinuationPreparation {
                 let resources = provenance.get("resources").cloned();
                 self.content
                     .save(&serde_json::to_value(
-                        collaboration::ChildSourceProvenance::FixedRoot { root, resources },
+                        collaboration::ChildSourceProvenance::FixedRoot { root, resources, selection:None },
                     )?)
                     .map(Some)
             })
@@ -803,6 +804,7 @@ impl Catalog {
                 ChildCodeResult::Published { result, .. } => {
                     let mut source = selection.clone();
                     source.mode = SourceMode::FixedBranch;
+                    source.native_scope = None;
                     source.branch_id = Some(result.branch_id.clone());
                     source.revision = Some(result.result_revision);
                     source.environment_run_id = None;

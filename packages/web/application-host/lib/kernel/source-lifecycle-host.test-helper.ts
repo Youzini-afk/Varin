@@ -186,7 +186,7 @@ async function initialize(frame: Record<string, unknown>) {
   assert(editorResources.every(resource => resource.content === 'LATER_UNSAVED_DRAFT\n' && resource.localEditRevision === 2));
   surface.close();
   source = { ...prepared.source, tools: ['file_read'] };
-  assert(source.mode !== 'live_root');
+  assert(source.mode !== 'live_root'&&source.mode!=='native_workspace');
   await workingStates.withBranchStore(workspaceId, 'verify-source-draft-root', async store => {
     await store.collectUnreachableObjects();
     const entry = await store.readPath(source.branchId!, 'source.txt', { revision: 0 }); assert(entry);
@@ -230,7 +230,7 @@ async function waitRun(runId: string) {
   assert.equal(failures.length, 0, failures.join('\n'));
 }
 async function rejectedSources() {
-  assert(source.mode !== 'live_root');
+  assert(source.mode !== 'live_root'&&source.mode!=='native_workspace');
   const fixedSource = source;
   for (const [name, code] of [['trust', 'source_authority_denied'], ['registration', 'source_registration_missing'], ['revision', 'source_unavailable']] as const) {
     const target = await api.create(`rejected-${name}`);

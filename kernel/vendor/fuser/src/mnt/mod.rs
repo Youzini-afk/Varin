@@ -10,12 +10,23 @@ mod fuse2_sys;
 mod fuse3;
 #[cfg(fuser_mount_impl = "libfuse3")]
 mod fuse3_sys;
+#[cfg(fuser_mount_impl = "libfuse3")]
+mod fuse3_loader;
 
 #[cfg(fuser_mount_impl = "pure-rust")]
 mod fuse_pure;
 pub(crate) mod mount_options;
 
 use std::io;
+
+pub(crate) fn dependencies()->io::Result<()>{
+    #[cfg(fuser_mount_impl="libfuse3")] {fuse3_loader::Api::load().map(|_|())}
+    #[cfg(fuser_mount_impl="libfuse2")] {Ok(())}
+    #[cfg(fuser_mount_impl="pure-rust")] {
+        std::fs::OpenOptions::new().read(true).write(true).open("/dev/fuse").map(|_|())
+    }
+    #[cfg(fuser_mount_impl="macos-no-mount")] {Err(io::Error::new(io::ErrorKind::Unsupported,"This build does not include a native mount transport"))}
+}
 
 #[cfg(any(test, fuser_mount_impl = "libfuse2", fuser_mount_impl = "libfuse3"))]
 use fuse2_sys::fuse_args;

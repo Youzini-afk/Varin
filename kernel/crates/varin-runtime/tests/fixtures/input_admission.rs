@@ -257,6 +257,7 @@ impl InputAdmission for Catalog {
                     source.clone(),
                     varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
                         root,
+                        selection:None,
                         resources: None,
                     },
                 )?

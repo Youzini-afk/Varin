@@ -21,6 +21,10 @@ use std::path::Path;
 use std::time::Duration;
 use std::time::SystemTime;
 
+/// Check the native mount dependency without mounting or installing anything.
+/// Actual mount permission and readiness are verified by the original session.
+pub fn mount_dependencies()->io::Result<()>{mnt::dependencies()}
+
 use log::warn;
 #[cfg(target_os = "macos")]
 pub use reply::ReplyXTimes;

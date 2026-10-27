@@ -319,6 +319,7 @@ impl Storage {
     }
 
     pub(super) fn gc_selected(&mut self, selected: Option<&BTreeSet<String>>) -> Result<Value, KernelError> {
+        self.prune_filesystem_pins()?;
         // Capture reuse is optional metadata, never a GC root or a second ledger.
         // Once the owner reclaims unused resources, discard these hints as well.
         self.source_capture_cache.clear();

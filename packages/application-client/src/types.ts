@@ -653,12 +653,21 @@ export interface FilesAPI {
   downloadFile?(path: string, options?: FileReadOptions & { signal?: AbortSignal }): Promise<void>;
 }
 
+export interface VersionedProjectWorkspace {
+  workspaceId: string;
+  executionWorkspaceId: string;
+  branchId: string;
+  adoptionOperationId: string;
+  state: 'preparing' | 'ready' | 'disabled';
+}
 export interface ProjectEntry {
   id: string;
   /** Default execution folder. Project membership does not restrict file access. */
   path: string;
   /** Other folders explicitly included in this project and its background index. */
   additionalPaths?: string[];
+  /** Logical source only. Mount paths and generations belong to the current Host. */
+  versionedWorkspace?: VersionedProjectWorkspace;
   label?: string;
   icon?: string | null;
   iconImage?: {
@@ -1571,6 +1580,7 @@ export interface ExtensionsAPI {
 }
 
 export interface VarinWorkspaceIdentity {
+  nativeSource?:{workspaceId:string;executionWorkspaceId:string;branchId:string;scope?:string};
   workspaceId: string;
   hostId: string;
   epoch: number;
@@ -1843,6 +1853,7 @@ export type VarinDocumentRecoveryWriteResult =
   | { status: 'stale-epoch'; currentEpoch: number };
 
 export interface DocumentsAPI extends DocumentsWorkspaceEditAPI {
+  setWorkspaceRetention?(request:{workspaceId:string;ownerId:string;retained:boolean}):Promise<{retained:boolean}>;
   ackDirtyStateBarrier?(request: {
     barrierId: string;
     generation: number;

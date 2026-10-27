@@ -2,6 +2,7 @@ import { isDocumentAuthorityError } from './errors.js';
 import type { Express, Request, RequestHandler, Response } from 'express';
 
 interface DocumentAuthority {
+  setWorkspaceRetention?(request:unknown):Promise<unknown>;
   resolveWorkspace(input: unknown): Promise<unknown>;
   resolveResourceIdentity(resource: unknown, options?: unknown): Promise<unknown>;
   read(resource: unknown): Promise<unknown>;
@@ -73,6 +74,9 @@ export const registerDocumentRoutes = (app: Express, {
     } catch (error) {
       return sendError(res, error);
     }
+  });
+  app.post('/api/documents/workspace/retention',requireAuth,async(req:Request,res:Response)=>{
+    try{return res.json(await documents.setWorkspaceRetention?.(readBody(req)));}catch(error){return sendError(res,error);}
   });
 
   app.post('/api/documents/read', requireAuth, async (req: Request, res: Response) => {

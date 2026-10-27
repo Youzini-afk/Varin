@@ -706,7 +706,11 @@ impl Storage {
                             )
                         })?;
                     let metadata = field == "paths" && matches!(method, "branch.read" | "pin.read");
-                    let canonical = if metadata && path.is_empty() {
+                    let canonical = if matches!(field,"entries"|"changes") && method.starts_with("branch.") {
+                        Self::branch_entry_path(value)?.join("/")
+                    } else if (metadata && (path.is_empty() || path == "."))
+                        || (field == "captureScopes" && path == ".")
+                        || (method == "file.captureBatch" && field == "paths" && matches!(path,""|".")) {
                         String::new()
                     } else {
                         Self::validate_path(path)?.join("/")
@@ -733,7 +737,8 @@ impl Storage {
         }
         if let Some(path) = params.get("path").and_then(Value::as_str) {
             let canonical =
-                if matches!(method, "file.scan" | "file.measure" | "branch.path.inspect") && path.is_empty() {
+                if (matches!(method, "file.scan" | "file.measure" | "file.read" | "file.capture" | "file.apply" | "branch.path.inspect") && matches!(path,""|"."))
+                    || (method.starts_with("recovery.") && path == ".") {
                     String::new()
                 } else {
                     Self::validate_path(path)?.join("/")

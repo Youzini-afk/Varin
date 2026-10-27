@@ -130,6 +130,12 @@ pub(super) fn compare(
     current: &str,
     cancel: &AtomicBool,
 ) -> Result<Difference, KernelError> {
+    compare_trees(database,base,current,cancel,false)
+}
+pub(super) fn compare_metadata(database:&Path,base:&str,current:&str,cancel:&AtomicBool)->Result<Difference,KernelError>{
+    compare_trees(database,base,current,cancel,true)
+}
+fn compare_trees(database:&Path,base:&str,current:&str,cancel:&AtomicBool,structural:bool)->Result<Difference,KernelError>{
     let mut reader = Reader {
         db: Connection::open_with_flags(
             database,
@@ -152,7 +158,7 @@ pub(super) fn compare(
         }
         let (old_state, old_children) = reader.path(before.as_deref())?;
         let (new_state, new_children) = reader.path(after.as_deref())?;
-        if old_state != new_state {
+        if old_state != new_state || structural && before.is_none()!=after.is_none() {
             paths.insert(path.clone(), (old_state, new_state));
         }
         let (mut left, mut right) = (Cursor::new(old_children), Cursor::new(new_children));

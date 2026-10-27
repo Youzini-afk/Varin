@@ -79,6 +79,9 @@ fn optional_record<T: DeserializeOwned>(
     }
 }
 fn put<T: Serialize>(db: &Connection, table: &str, key: &str, v: &T) -> Result<()> {
+    if matches!(table,"run_launches"|"delegated_executions"|"external_conversations"|"external_children") {
+        source_retention::assert_record_available(db,table,&serde_json::to_value(v)?)?;
+    }
     db.execute(
         &format!("UPDATE {table} SET body=?2 WHERE id=?1"),
         params![key, encode(v)?],
@@ -1766,6 +1769,8 @@ pub mod threads;
 mod retention;
 #[path = "catalog_material_retention.rs"]
 pub mod material_retention;
+#[path = "catalog_source_retention.rs"]
+pub mod source_retention;
 
 #[path = "catalog_context.rs"]
 pub mod context;

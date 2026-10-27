@@ -8,6 +8,41 @@ struct Fixture {
 }
 
 #[test]
+fn imported_root_attributes_and_directory_identities_follow_replacement_and_exact_rebase() {
+    let mut f = Fixture::new();
+    let mut attributes = Storage::new_workspace_metadata(&PathState::Directory {mode:Some(0o700)}).attributes.file_metadata();
+    attributes.xattrs.insert("dXNlci52YXJpbg".into(),b"original".to_vec());
+    let encoded = serde_json::to_string(&attributes).unwrap();
+    f.begin("selected",None);
+    f.append("selected",0,json!([
+        {"path":".","state":{"kind":"directory","mode":448},"nativeJson":encoded},
+        {"path":"directory","state":{"kind":"directory"},"nativeJson":encoded},
+        {"path":"directory/child","state":{"kind":"directory"},"nativeJson":encoded}
+    ])).unwrap();
+    f.finish("selected");
+    for (revision, state) in [(0,json!({"kind":"missing"})),(1,json!({"kind":"directory"}))] {
+        f.write_batch(json!({"operationId":format!("replace:{revision}"),"branchId":"selected","expectedWriteRevision":revision,
+            "changes":[{"path":"directory","state":state}]})).unwrap();
+    }
+    let read = f.call("branch.read",json!({"branchId":"selected","paths":[".","directory"]})).unwrap();
+    assert_eq!(read["entries"][0]["state"]["mode"],448);
+    let directory:Value=serde_json::from_str(read["entries"][1]["nativeJson"].as_str().unwrap()).unwrap();
+    assert!(directory["xattrs"].as_object().unwrap().is_empty(),"a recreated directory cannot inherit the deleted directory's attributes");
+    f.begin("replacement",None);
+    attributes.xattrs.clear();
+    attributes.xattrs.insert("dXNlci52YXJpbg".into(),b"replacement".to_vec());
+    f.append("replacement",0,json!([{ "path":".","state":{"kind":"directory","mode":493},"nativeJson":serde_json::to_string(&attributes).unwrap()}])).unwrap();
+    f.finish("replacement");
+    let pin=f.call("branch.pin",json!({"operationId":"pin-rebase","branchId":"replacement","revision":0})).unwrap();
+    f.write_batch(json!({"operationId":"exact-rebase","branchId":"selected","expectedWriteRevision":2,"baseRef":format!("pin:{}",pin["pinId"].as_str().unwrap()),"changes":[]})).unwrap();
+    let read=f.call("branch.read",json!({"branchId":"selected","paths":["."]})).unwrap();
+    let root:Value=serde_json::from_str(read["entries"][0]["nativeJson"].as_str().unwrap()).unwrap();
+    assert_eq!(root["xattrs"]["dXNlci52YXJpbg"],json!(b"replacement".to_vec()));
+    assert!(f.write_batch(json!({"operationId":"delete-root","branchId":"selected","expectedWriteRevision":3,"changes":[{"path":".","state":{"kind":"missing"}}]})).is_err());
+    f.close();
+}
+
+#[test]
 fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_move() {
     use super::workspace_session::{Command, Session, StoragePort};
     let mut fixture = Fixture::new();
@@ -501,6 +536,17 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     fs::remove_dir_all(directory).unwrap();
 }
 impl Fixture {
+    fn write_batch(&mut self, value:Value)->Result<Value,KernelError>{
+        let operation=value["operationId"].as_str().unwrap();
+        self.call("branch.write.begin",json!({"operationId":operation,"builderId":operation,"branchId":value["branchId"],"expectedWriteRevision":value["expectedWriteRevision"]}))?;
+        if let Err(error)=self.call("branch.write.append",json!({"builderId":operation,"sequence":0,"changes":value["changes"]})){
+            self.call("branch.write.abort",json!({"builderId":operation}))?;
+            return Err(error);
+        }
+        let mut finish=json!({"operationId":operation,"builderId":operation});
+        if let Some(base)=value.get("baseRef"){finish["baseRef"]=base.clone();}
+        self.call("branch.write.finish",finish)
+    }
     fn new() -> Self {
         let directory = std::env::temp_dir().join(format!("workspace-tree-{}", Uuid::new_v4()));
         let mut storage = Storage::open(&directory, "host").unwrap();

@@ -20,7 +20,7 @@ function fixture(initial: Record<string, RecoveryState> = { 'file.txt': { kind: 
     captureDirectory: vi.fn(async (_directory: string, paths?: string[], options?: Parameters<WorkingStateRootStore['captureDirectory']>[2]) => {
       hooks.capture?.(++pass);
       options?.onProgress?.(1, (paths ?? Object.keys(disk)).length);
-      return Object.fromEntries((paths ?? Object.keys(disk)).map(file => [file, structuredClone(disk[file] ?? { kind: 'missing' })]));
+      return Object.fromEntries((paths ?? Object.keys(disk)).map(file => [file, structuredClone(file === '.' ? {kind:'directory',mode:0o755} : disk[file] ?? { kind: 'missing' })]));
     }),
     releaseCapturedStates: release,
     createBranch: create,

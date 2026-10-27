@@ -536,7 +536,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
         routeToChat();
 
         let identity: ThreadIdentity;
-        let directory = projectRef.path;
+        let directory = await projectExecutionPath(projectRef);
         if (pendingSendTarget.kind === 'worktree') {
           if (!canCreateWorktree) {
             toast.error(t('rightSidebar.contextNotesTodo.toast.worktreeRequiresGitRepo'));
@@ -550,7 +550,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
           identity = await useThreadStore.getState().materializeDraft(created.draftKey); directory = created.path;
         } else {
           identity = await createThreadForSubmission({
-            directory: projectRef.path,
+            directory,
           });
         }
 
@@ -607,7 +607,7 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
       return;
     }
     const result = await requestFileAccess({
-      defaultPath: projectRef.path,
+        defaultPath: await projectExecutionPath(projectRef),
       filters: [
         { name: 'Plan files', extensions: ['md', 'markdown', 'txt'] },
         { name: 'All files', extensions: ['*'] },
@@ -1010,3 +1010,4 @@ export const ProjectNotesTodoPanel: React.FC<ProjectNotesTodoPanelProps> = ({
     </div>
   );
 };
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

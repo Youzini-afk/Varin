@@ -335,6 +335,7 @@ impl Task {
             let metadata = fs::symlink_metadata(&child.absolute)?;
             let observed = if metadata.file_type().is_symlink() {
                 FileState::Symlink {
+                    native: None,
                     symlink_target: fs::read_link(&child.absolute)?
                         .into_os_string()
                         .into_string()
@@ -345,6 +346,7 @@ impl Task {
                 }
             } else if metadata.is_dir() {
                 FileState::Directory {
+                    native: None,
                     mode: Some(file_mode(&metadata)),
                 }
             } else if metadata.is_file() {
@@ -362,6 +364,7 @@ impl Task {
                     return Ok(false);
                 }
                 FileState::RegularFile {
+                    native: None,
                     object_hash,
                     byte_length,
                     mode: Some(file_mode(&metadata)),

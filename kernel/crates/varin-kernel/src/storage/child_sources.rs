@@ -16,7 +16,7 @@ impl Storage {
         if binding.source_mode == varin_runtime::SourceMode::FixedBranch || binding.root_id.is_none() {
             return Ok(None);
         }
-        let root = self.registered_file_root(
+        let root = self.admitted_file_root(
             binding.root_id.as_deref().ok_or_else(|| {
                 KernelError::Authorization("physical source root is missing".into())
             })?,
@@ -107,9 +107,7 @@ impl Storage {
                     };
                     // Catalog delegated this exact related Run's file view. Keep the
                     // original caller grant; register only the selected execution root.
-                    let mut stage_grant=grant.clone();
-                    stage_grant.execution_workspace=Some(source.execution_workspace_id.clone());
-                    let root=self.file_root_register(&json!({"workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":directory}),&stage_grant)?;
+                    let root=self.selected_file_root_register(&json!({"workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":directory}),grant,&source.execution_workspace_id)?;
                     Some(varin_runtime::catalog::launches::LiveRoot{host_id:host_id.into(),root_id:root["rootId"].as_str().ok_or_else(||KernelError::Storage("stage root missing".into()))?.into(),canonical_root:root["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("stage directory missing".into()))?.into()})
                 }
             }
@@ -127,8 +125,8 @@ impl Storage {
             if !selected.starts_with(&original) || !selected.is_dir() {
                 return Err(KernelError::Operation("sourcePath must select a directory inside the admitted source".into()));
             }
-            let registered = self.file_root_register(&json!({"workspaceId":source.workspace_id,
-                "executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":selected}), grant)?;
+            let parameters=json!({"workspaceId":source.workspace_id,"executionWorkspaceId":source.execution_workspace_id,"canonicalRoot":selected});
+            let registered = if delegation.agent_source.is_some(){self.selected_file_root_register(&parameters,grant,&source.execution_workspace_id)?}else{self.file_root_register(&parameters, grant)?};
             physical = Some(varin_runtime::catalog::launches::LiveRoot { host_id: host_id.into(),
                 root_id: registered["rootId"].as_str().unwrap().into(),
                 canonical_root: registered["canonicalRoot"].as_str().unwrap().into() });
@@ -265,7 +263,7 @@ impl Storage {
             }],
             None,
         )?;
-        let registered = self.registered_file_root(root, grant)?;
+        let registered = self.admitted_file_root(root, grant)?;
         let path = std::path::PathBuf::from(&registered.canonical_root);
         let stopped = self.process_directory_writer(&path)?.is_none();
         Ok(json!({"physical":true,"rootId":root,"canonicalRoot":path,"writerStopped":stopped}))
@@ -401,12 +399,13 @@ impl Storage {
         if let Some(actual) = params.get("branchId").and_then(Value::as_str) {
             if actual != branch {
                 let parent = match &handoff.root {
-                    varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                    varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin }
                         | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => pin,
                     _ => handoff.retention_pin.as_ref().ok_or_else(deny)?,
                 };
                 if actual != parent.source.branch_id.as_deref().unwrap_or("")
                     || !matches!(method, "branch.read" | "branch.unpin" | "storage.getBlob")
+                        && !(method=="branch.delete"&&matches!(handoff.root,varin_runtime::catalog::collaboration::ChildSourceRoot::Native{..}))
                 {
                     return Err(deny());
                 }
@@ -424,7 +423,7 @@ impl Storage {
             {
                 return Err(deny());
             }
-            if let varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } =
+            if let varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin } =
                 &handoff.root
             {
                 if params["baseRef"] != pin.root {
@@ -436,7 +435,7 @@ impl Storage {
         }
         if method == "branch.fork" {
             let parent = match &handoff.root {
-                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin }
                 | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => pin,
                 _ => return Err(deny()),
             };
@@ -447,7 +446,7 @@ impl Storage {
         }
         if let Some(pin) = params.get("pinId").and_then(Value::as_str) {
             let parent = match &handoff.root {
-                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin }
                     | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => {
                     Some(pin.pin_id.as_str())
                 }
@@ -458,7 +457,7 @@ impl Storage {
             }
         }
         let parent_branch = match &handoff.root {
-            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+            varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin }
                 | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => {
                 pin.source.branch_id.as_deref()
             }
@@ -610,6 +609,12 @@ impl Storage {
             ));
         }
         let expected = match source.mode {
+            varin_runtime::SourceMode::NativeWorkspace => {
+                let root=super::native_sources::root_id(&source.workspace_id,&source.execution_workspace_id,
+                    source.branch_id.as_deref().ok_or_else(||KernelError::Authorization("Native Integration branch is missing".into()))?,source.native_scope.as_deref().unwrap_or(""));
+                if data.get("applyRootId").and_then(Value::as_str)!=Some(&root){return Err(KernelError::Authorization("Integration receipt differs from its original native source".into()));}
+                PathBuf::from(data.get("applyCanonicalRoot").and_then(Value::as_str).ok_or_else(||KernelError::Storage("Native Integration has no original mount path".into()))?)
+            }
             varin_runtime::SourceMode::LiveRoot => PathBuf::from(
                 &source
                     .live_root
@@ -922,6 +927,7 @@ mod handoff_tests {
                 revision: 0,
             }),
             source_mode: SourceMode::FixedBranch,
+            native_workspace: None,
             materialized_source: None,
             live_root: None,
             environment_run_id: None,
@@ -1007,7 +1013,7 @@ mod handoff_tests {
                 &good
             )
             .is_ok());
-        let varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } = &handoff.root else { panic!("fixed source expected") };
+        let (varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } | varin_runtime::catalog::collaboration::ChildSourceRoot::Native { pin }) = &handoff.root else { panic!("fixed source expected") };
         let fork = json!({"operationId":"branch-fork:child-source:request:tool:dispatch","workspaceId":"workspace",
             "branchId":"child-source:request:tool:dispatch","sourceBranchId":"fixed","sourcePinId":pin.pin_id,
             "draftBasePaths":[],"captureScopes":[]});

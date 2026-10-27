@@ -242,10 +242,11 @@ export const useMultiRunStore = create<MultiRunStore>((set) => {
           set({ isLoading: true, error: null }); publish(owner);
           const initialSelection = useThreadStore.getState().selectedIdentity;
           if (owner.isolated === undefined) {
-            assertOwner(owner); const git = await checkVarinGitRepository(owner.project.path); assertOwner(owner);
+            assertOwner(owner); const directory=await projectExecutionPath(owner.project);assertOwner(owner);
+            const git = await checkVarinGitRepository(directory); assertOwner(owner);
             owner.isolated = git && owner.params.isolateRuns !== false;
             if (owner.isolated) {
-              owner.trackingRemote = await resolveVarinRootTrackingRemote(owner.project.path); assertOwner(owner);
+              owner.trackingRemote = await resolveVarinRootTrackingRemote(directory); assertOwner(owner);
               owner.waitForSetup = await getWorktreeSetupWaitEnabled(owner.project); assertOwner(owner);
             }
           }
@@ -278,3 +279,4 @@ export const useMultiRunStore = create<MultiRunStore>((set) => {
     },
   };
 });
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

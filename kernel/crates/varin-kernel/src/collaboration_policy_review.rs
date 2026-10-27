@@ -440,6 +440,7 @@ grant_id: "parent".into(),
             revision: 0,
         }),
         source_mode: SourceMode::FixedBranch,
+        native_workspace: None,
         materialized_source: None,
         live_root: None,
         environment_run_id: None,
@@ -512,7 +513,7 @@ grant_id: "parent".into(),
     source.revision = Some(0);
     let source_preparation=db.lock().unwrap().prepare_child_source(&operation,
         varin_runtime::catalog::collaboration::ChildSourcePin {pin_id:format!("child-source-pin:{operation}"),root:child.source.pin().unwrap().root.clone(),source:source.clone()},
-        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone(),resources:None}).unwrap().load().unwrap();
+        source.clone(),varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot{root:child.source.pin().unwrap().root.clone(),resources:None,selection:None}).unwrap().load().unwrap();
     db.lock().unwrap().attach_child_source(source_preparation).unwrap();
     let proposal = ContextProposal {
         key: format!("context:{operation}"),

@@ -455,7 +455,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('source/list', (body, signal) => adapter.listSourceTargets(Object.keys(body).length ? identity(body) : null, signal));
   post('source/resolve', (body, signal) => adapter.resolveSource(identity(body), { resourceOwner: parseSourceResourceOwner(body.resourceOwner), path: text(body.path) }, signal));
   post('source/prepare', (body, signal) => {
-    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root') throw new Error('Invalid source mode');
+    if (body.mode !== 'fixed_branch' && body.mode !== 'materialized' && body.mode !== 'live_root'&&body.mode!=='native_workspace') throw new Error('Invalid source mode');
     return adapter.prepareSource(normalizeThreadSourcePreparation({ ...identity(body), resourceOwner: parseSourceResourceOwner(body.resourceOwner), key: text(body.key), workspaceId: text(body.workspaceId), mode: body.mode,
       content: body.content, captureScopes: body.captureScopes } as import('@varin/application-client').ThreadPrepareSource), signal);
   });
@@ -484,8 +484,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       }
       if (body.source !== undefined) {
         const source = object(body.source);
-        if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId'].includes(key))) throw new Error('Unsupported source selection field');
-        if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root') throw new Error('Invalid source mode');
+        if (Object.keys(source).some(key => !['resourceOwner', 'workspaceId', 'executionWorkspaceId', 'branchId', 'revision', 'mode', 'tools', 'liveRoot', 'environmentRunId','nativeScope'].includes(key))) throw new Error('Unsupported source selection field');
+        if (source.mode !== 'fixed_branch' && source.mode !== 'materialized' && source.mode !== 'live_root'&&source.mode!=='native_workspace') throw new Error('Invalid source mode');
+        if(source.nativeScope!==undefined&&(source.mode!=='native_workspace'||typeof source.nativeScope!=='string'||!source.nativeScope.split('/').every(part=>part&&part!=='.'&&part!=='..'&&!part.includes('\\'))))throw new Error('Invalid native source scope');
         if (source.environmentRunId !== undefined && source.mode !== 'materialized') throw new Error('Only a materialized source has an execution environment');
         // The kernel resolves names against the same tool declarations used for admission.
         if (!Array.isArray(source.tools) || source.tools.some(tool => typeof tool !== 'string' || !tool.length)) throw new Error('Tool names must be non-empty strings');
@@ -496,6 +497,9 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
           const root = object(source.liveRoot);
           if (Object.keys(root).some(key => !['hostId', 'canonicalRoot', 'rootId'].includes(key))) throw new Error('Unsupported live root field');
           input.source = { ...base, mode: 'live_root', liveRoot: { hostId: text(root.hostId), canonicalRoot: text(root.canonicalRoot), rootId: text(root.rootId) } };
+        } else if(source.mode==='native_workspace'){
+          if(source.liveRoot!==undefined||source.revision!==undefined)throw new Error('Native source has no frozen revision or stored mount path');
+          input.source={...base,mode:'native_workspace',branchId:text(source.branchId),...(source.nativeScope===undefined?{}:{nativeScope:source.nativeScope as string})};
         } else {
           if (source.liveRoot !== undefined) throw new Error('Fixed source cannot claim a live root');
           input.source = { ...base, branchId: text(source.branchId), revision: revision(source.revision), mode: source.mode, ...(source.environmentRunId === undefined ? {} : { environmentRunId: text(source.environmentRunId) }) };

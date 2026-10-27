@@ -76,6 +76,11 @@ impl ChildAdmissionPreparation {
                 ));
             }
             match &handoff.root {
+                ChildSourceRoot::Native{pin} if handoff.source.mode==SourceMode::NativeWorkspace
+                    && pin.source.mode==SourceMode::FixedBranch && pin.source.workspace_id==handoff.source.workspace_id
+                    && pin.source.resource_owner==handoff.source.resource_owner
+                    && pin.source.branch_id.as_deref()==Some(&format!("native-handoff:{}",self.context.operation_id))
+                    && pin.source.revision==Some(0) && !pin.root.is_empty() && !pin.pin_id.is_empty()=>{},
                 ChildSourceRoot::Fixed { pin }
                     if handoff.source.mode != SourceMode::LiveRoot
                         && pin.source == handoff.source

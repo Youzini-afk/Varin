@@ -991,6 +991,7 @@ fn repeating_family_job_then_time_uses_real_idle_and_active_child_occurrences() 
                 source.clone(),
                 varin_runtime::catalog::collaboration::ChildSourceProvenance::FixedRoot {
                     root,
+                    selection:None,
                     resources: None,
                 },
             )

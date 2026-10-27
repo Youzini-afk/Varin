@@ -299,6 +299,8 @@ export interface ThreeWayPathPlan {
   childState: RecoveryState;
   mergedText?: string;
   mergedMode?: number;
+  mergedState?: RecoveryState;
+  mergedNative?: import('../../recovery/journal-files.js').NativeFileMetadata;
   conflictMarkers?: string;
   conflictReason?: string;
   isText: boolean;

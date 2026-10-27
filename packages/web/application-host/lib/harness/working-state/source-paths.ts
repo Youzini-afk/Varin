@@ -2,9 +2,10 @@ import type { WorkingResult } from './types.js';
 
 export interface SourcePathMap { from: string; to: string }
 export function mapSourcePath(file: string, mapping: SourcePathMap): string | null {
+  if (file === '.') file = '';
   if (mapping.from && file !== mapping.from && !file.startsWith(`${mapping.from}/`)) return null;
   const relative = mapping.from ? file.slice(mapping.from.length).replace(/^\//, '') : file;
-  return [mapping.to, relative].filter(Boolean).join('/');
+  return [mapping.to, relative].filter(Boolean).join('/') || '.';
 }
 export function mapSourceResult(result: WorkingResult, mapping?: SourcePathMap): WorkingResult {
   if (!mapping || !mapping.from && !mapping.to) return result;

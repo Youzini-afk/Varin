@@ -287,11 +287,12 @@ fn fixed_resource_read(lines: bool) {
     let body = "fixed body\r\n中文🙂\r\nlast".as_bytes();
     fs::write(f.work().join("body"), body).unwrap();
     let captured = f.capture("body", true, "fixed-read");
-    let state: Value = serde_json::from_str(captured["stateJson"].as_str().unwrap()).unwrap();
+    let mut state: Value = serde_json::from_str(captured["stateJson"].as_str().unwrap()).unwrap();
+    let native=state.as_object_mut().unwrap().remove("native").unwrap();
     f.short("branch.create.begin", json!({"builderId":"fixed-builder","operationId":"fixed-create","branchId":"fixed","workspaceId":"workspace","draftBasePaths":[],"captureScopes":[]}), Some("writer"));
     f.short(
         "branch.create.append",
-        json!({"builderId":"fixed-builder","sequence":0,"entries":[{"path":"body","state":state,"ownerId":captured["ownerId"]}]}),
+        json!({"builderId":"fixed-builder","sequence":0,"entries":[{"path":"body","state":state,"nativeJson":native.to_string(),"ownerId":captured["ownerId"]}]}),
         Some("writer"),
     );
     let branch = f.short(

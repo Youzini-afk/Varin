@@ -1832,6 +1832,7 @@ fn successor_environment_selection_reuses_only_its_original_thread_source() {
             version: "1".into(),
         },
         Some(SourceSelection {
+                    native_scope:None,
             resource_owner: crate::catalog::launches::SourceResourceOwner::Local,
             environment_run_id: None,
             mode: crate::SourceMode::Materialized,

@@ -32,6 +32,7 @@ import {
   KERNEL_REQUEST_WINDOW,
   KERNEL_DEFERRED_RESPONSE_METHODS,
   type KernelRequestCreditReleased,
+  type KernelWorkspaceIdle,
   type KernelMaterializedView,
   type KernelBranchReadResult,
   type KernelBranchChange,
@@ -147,6 +148,9 @@ interface InternalGrantHandle extends KernelGrantHandle {
 }
 
 export class KernelScopedClient {
+  inspectWorkspaceBackend(signal?:AbortSignal){
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceBackend>('workspace.backend.inspect',{},this.grant,signal);
+  }
   adoptWorkspace(params: KernelMethodParams['workspace.adopt'], signal?: AbortSignal) {
     return this.owner.workspaceRequest<Record<string, unknown>>('workspace.adopt', params, this.grant, signal);
   }
@@ -164,6 +168,9 @@ export class KernelScopedClient {
   }
   mountWorkspace(params: KernelMethodParams['workspace.mount'], signal?: AbortSignal) {
     return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceInspection>('workspace.mount', params, this.grant, signal);
+  }
+  bindWorkspace(params: KernelMethodParams['workspace.bind'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceInspection>('workspace.bind', params, this.grant, signal);
   }
   forkWorkspace(params: KernelMethodParams['workspace.fork'], signal?: AbortSignal) {
     return this.owner.workspaceRequest<Record<string, unknown>>('workspace.fork', params, this.grant, signal);
@@ -593,8 +600,9 @@ const canonicalStoragePath = (value: string): string => {
 };
 
 export class KernelClient {
+  nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
   private nativeWorkspaceLifetime = false;
-  workspaceRequest<T>(method: 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
+  workspaceRequest<T>(method: 'workspace.backend.inspect' | 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.bind' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
     params: KernelMethodParams[typeof method], grant: KernelGrantHandle, signal?: AbortSignal): Promise<T> {
     // A mount or dirty native file may outlive the HTTP caller. Once this
     // lifetime is used, graceful shutdown must await its actual drain receipt.
@@ -618,6 +626,8 @@ export class KernelClient {
   }
   private readonly processSubscriptions = new Map<string, ProcessSubscriptionEntry>();
   private readonly agentRuntimeListeners = new Set<(event: AgentRuntimeStreamEvent) => void>();
+  private readonly workspaceIdleListeners=new Set<()=>void>();
+  onWorkspaceIdle(listener:()=>void):()=>void{this.workspaceIdleListeners.add(listener);return()=>this.workspaceIdleListeners.delete(listener);}
   onAgentRuntimeEvent(listener: (event: AgentRuntimeStreamEvent) => void): () => void {
     this.agentRuntimeListeners.add(listener);
     return () => this.agentRuntimeListeners.delete(listener);
@@ -1043,7 +1053,12 @@ export class KernelClient {
       this.failAll(new KernelClientError({ code: "kernel-protocol-error", message: "Invalid Rust kernel envelope" }), true);
       return;
     }
-    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent | KernelRequestCreditReleased;
+    const response = value as KernelResponse | KernelProcessStreamEvent | AgentRuntimeStreamEvent | KernelRequestCreditReleased | KernelWorkspaceIdle;
+      if(response.kind==='workspace-idle'){
+        if(response.v!==KERNEL_PROTOCOL_VERSION||response.kernelEpoch!==this.epoch){this.failAll(new KernelClientError({code:'kernel-protocol-error',message:'Invalid workspace idle wake'}),true);return;}
+        for(const listener of this.workspaceIdleListeners){try{listener();}catch{this.workspaceIdleListeners.delete(listener);}}
+        return;
+      }
       if (response.kind === "request-credit-released") {
         const pending = typeof response.id === 'string' ? this.pending.get(response.id) : undefined;
         if (response.v !== KERNEL_PROTOCOL_VERSION || response.kernelEpoch !== this.epoch

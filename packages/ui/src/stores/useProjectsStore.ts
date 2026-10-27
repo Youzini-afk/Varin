@@ -4,12 +4,13 @@ import type { ProjectEntry } from '@varin/application-client';
 import { isWorkFocusId, type WorkFocusId } from '@varin/protocol';
 import type { DesktopSettings } from '@/lib/desktop';
 import { updateDesktopSettings } from '@/lib/persistence';
-import { projectFolders, projectPathKey } from '@varin/application-client';
+import { projectFolders, projectPathKey, parseVersionedProjectWorkspace } from '@varin/application-client';
 import { NO_ACTIVE_PROJECT_STORAGE_VALUE } from '@/lib/projectSelection';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { PROJECT_COLORS } from '@/lib/projectMeta';
+import {projectExecutionPath} from '@/lib/nativeWorkspace';
 import { runtimeFetch } from '@varin/application-client';
 import { getRuntimeApiBaseUrl } from '@varin/application-client';
 
@@ -255,6 +256,8 @@ const sanitizeProjects = (value: unknown): ProjectEntry[] => {
         : [] }).slice(1),
     };
 
+    const versionedWorkspace=parseVersionedProjectWorkspace(candidate.versionedWorkspace);
+    if(versionedWorkspace)project.versionedWorkspace=versionedWorkspace;
     if (typeof candidate.label === 'string' && candidate.label.trim().length > 0) {
       project.label = candidate.label.trim();
     }
@@ -494,7 +497,10 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (nextActiveId) {
         const nextActive = nextProjects.find((project) => project.id === nextActiveId);
         if (nextActive) {
-          useDirectoryStore.getState().setDirectory(nextActive.path, { showOverlay: false });
+          const generation=activeProjectSelectionGeneration;
+          void projectExecutionPath(nextActive).then(directory=>{
+            if(generation===activeProjectSelectionGeneration&&get().activeProjectId===nextActive.id)useDirectoryStore.getState().setDirectory(directory,{showOverlay:false});
+          }).catch(error=>console.warn('[Projects] Workspace selection failed',error));
         }
       } else {
         void useDirectoryStore.getState().goHome();
@@ -523,6 +529,8 @@ export const useProjectsStore = create<ProjectsStore>()(
         return false;
       }
 
+      const executionPath=await projectExecutionPath(target).catch(()=>null);
+      if(!executionPath||selectionGeneration!==activeProjectSelectionGeneration)return false;
       const now = Date.now();
       const nextProjects = projects.map((project) =>
         project.id === id ? { ...project, lastOpenedAt: now } : project
@@ -535,7 +543,7 @@ export const useProjectsStore = create<ProjectsStore>()(
         return false;
       }
       set({ projects: nextProjects, activeProjectId: id });
-      useDirectoryStore.getState().setDirectory(target.path, { showOverlay: false });
+      useDirectoryStore.getState().setDirectory(executionPath, { showOverlay: false });
       return true;
     },
 
@@ -775,7 +783,10 @@ export const useProjectsStore = create<ProjectsStore>()(
       if (incomingActive) {
         const activeProject = incomingProjects.find((project) => project.id === incomingActive);
         if (activeProject) {
-          useDirectoryStore.getState().setDirectory(activeProject.path, { showOverlay: false });
+          const selectedGeneration=activeProjectSelectionGeneration;
+          void projectExecutionPath(activeProject).then(directory=>{
+            if(selectedGeneration===activeProjectSelectionGeneration&&get().activeProjectId===activeProject.id)useDirectoryStore.getState().setDirectory(directory,{showOverlay:false});
+          }).catch(()=>undefined);
         }
       } else if (activeChanged) {
         void useDirectoryStore.getState().goHome();

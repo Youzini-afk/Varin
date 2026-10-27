@@ -332,10 +332,11 @@ impl Harness {
         let mut begin = json!({"operationId":create,"builderId":create,"workspaceId":"workspace","branchId":source_branch,"draftBasePaths":[],"captureScopes":[]});
         let finish = json!({"operationId":create,"builderId":create});
         let provenance = match &child.source.handoff().unwrap().root {
-            ChildSourceRoot::Fixed { pin } => {
+            ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } => {
                 begin["baseRef"] = json!(pin.root);
                 ChildSourceProvenance::FixedRoot {
                     root: pin.root.clone(),
+                    selection:None,
                     resources: None,
                 }
             }
@@ -450,6 +451,7 @@ grant_id: name.into(),
                 root_id: Some(registered["rootId"].as_str().unwrap().into()),
                 source_mode: SourceMode::Materialized,
                 file_source: None,
+                native_workspace: None,
                 materialized_source: Some(FixedFileSource {
                     branch_id: source_branch,
                     revision: 0,
@@ -650,6 +652,7 @@ grant_id: "parent".into(),
             revision: 0,
         }),
         source_mode: SourceMode::FixedBranch,
+        native_workspace: None,
         materialized_source: None,
         live_root: None,
         environment_run_id: None,

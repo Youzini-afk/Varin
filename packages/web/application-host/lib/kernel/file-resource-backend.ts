@@ -329,6 +329,9 @@ export class KernelFileResourceBackend implements RecoveryFileStore {
     const pathId = this.translated(context, resolved.relative);
     const lease = this.leaseFor(context);
     const expected = options.expected ?? lease?.observed.get(pathId);
+    if (normalizeRelative(resolved.relative) === '' && (state.kind !== 'directory' || expected?.kind !== 'directory')) {
+      throw new Error('Workspace root accepts a conditional directory metadata update only');
+    }
     const value = await context.client.fileApply({
       operationId: options.operationId ?? `file-apply:${randomUUID()}`,
       workspaceId: context.owningWorkspaceId,

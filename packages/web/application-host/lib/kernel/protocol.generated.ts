@@ -3,7 +3,7 @@
  * Do not hand-edit the wire shapes; run `node scripts/generate-kernel-protocol.mjs`.
  */
 
-export const KERNEL_PROTOCOL_VERSION = 69 as const;
+export const KERNEL_PROTOCOL_VERSION = 71 as const;
 export const KERNEL_REQUEST_WINDOW = 2 as const;
 export const KERNEL_MAX_FRAME_BYTES = 16777216 as const;
 export const KERNEL_CONTROL_METHODS = ["runtime.context.observations.sources","workspace.inspect","workspace.release","workspace.close","runtime.thread.usage","runtime.operation.calls","runtime.model.presentations","runtime.knowledge_inference.finish","runtime.knowledge_inference.cancel","runtime.knowledge_inference.status","runtime.model_text.cancel","runtime.model_text.status","source.authority.seal","source.mcp.holder","source.mcp.delivery","source.script.control","source.authority.release_scope","source.resource.cancel","source.authority.release","runtime.bot.scope.inspect","runtime.bot.gate.publish","runtime.bot.thread.create","runtime.bot.scope.suspend","runtime.bot.scope.status","runtime.bot.scope.resume","runtime.inference.session","runtime.inference.receipt_pending","runtime.inference.dispatch","runtime.inference.status","runtime.mcp.interaction.inspect","runtime.mcp.interaction.delivery.released","runtime.mcp.interaction.pending","runtime.mcp.interaction.response.begin","runtime.mcp.interaction.response.settle","runtime.mcp.interaction.close","runtime.mcp.interaction.complete","runtime.mcp.interaction.release_source","runtime.computer.event.cancel","runtime.computer.request.cancel","runtime.computer.request.reconcile","runtime.followup.registrations.pending","runtime.followup.registration.cancel","runtime.operation.status","runtime.child.cancel","runtime.child.capabilities","runtime.context_job.definition","runtime.source.tools","runtime.tools.catalog","runtime.tree.cancel","runtime.goal.control","runtime.followup.control","runtime.followup.files","runtime.followup.file.release","runtime.policy.select","runtime.policy.cancel","runtime.policy.fail","runtime.policy.inspect","kernel.handshake","kernel.ping","kernel.shutdown","authority.grant.revoke","authority.grant.retire","runtime.status","runtime.tools.select","runtime.run.inspect","runtime.run.failure","runtime.run.scope","runtime.run.cancel","runtime.run.resume","runtime.operation.inspect","runtime.operation.cancel","runtime.process.access","process.interaction.inspect","runtime.input.cancel","runtime.input.inspect","runtime.admission.inspect","process.inspect","process.kill","process.resize","process.release","process.subscription.ack","process.subscription.unsubscribe","runtime.calendar.occurrence.control","runtime.calendar.calculation.retry"] as const;
@@ -11,7 +11,7 @@ export const KERNEL_CONTROL_RESPONSE_METHODS = ["runtime.context.observations.so
 export const KERNEL_DEFERRED_RESPONSE_METHODS = ["process.write","process.resize","runtime.tools.invoke","file.lease.wait"] as const;
 export const KERNEL_INPUT_ORDER_PARAMS = {"runtime.thread.create":"branchId","runtime.branch.fork":"branchId","runtime.branch.navigate":"branchId","runtime.input.submit":"branchId","runtime.input.enqueue":"branchId","runtime.input.edit":"inputId"} as const;
 export const KERNEL_RUNTIME_DATA_METHODS = ["runtime.context.observations.admit","runtime.knowledge_inference.admit","runtime.knowledge_inference.read","runtime.model_text.admit","runtime.model_text.read","runtime.memory_work.admit","runtime.memory_work.read","runtime.memory_work.status","runtime.memory_work.list","runtime.memory_work.update","runtime.inference.generate","runtime.inference.admit","runtime.inference.settle","runtime.mcp.sampling.review_output","runtime.mcp.sampling.review_request","runtime.mcp.sampling.generate","runtime.mcp.interaction.open","runtime.mcp.interaction.error.open","runtime.mcp.interaction.list","runtime.mcp.interaction.read","runtime.mcp.interaction.respond","runtime.tools.invoke","runtime.history.body","runtime.output.media.read"] as const;
-export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v69" as const;
+export const KERNEL_PROTOCOL_SCHEMA = "varin.kernel.v71" as const;
 
 export type KernelMethod =
   | "runtime.context.observations.sources"
@@ -196,6 +196,8 @@ export type KernelMethod =
   | "runtime.followup.list"
   | "runtime.followup.control"
   | "runtime.material.retention"
+  | "runtime.source.retirement"
+  | "runtime.source.preparation"
   | "runtime.content.collect"
   | "runtime.tokenizers.open"
   | "runtime.retry.evaluate"
@@ -300,11 +302,13 @@ export type KernelMethod =
   | "branch.rename"
   | "branch.fork"
   | "workspace.adopt"
+  | "workspace.backend.inspect"
   | "workspace.open"
   | "workspace.inspect"
   | "workspace.acquire"
   | "workspace.release"
   | "workspace.mount"
+  | "workspace.bind"
   | "workspace.fork"
   | "workspace.result.prepare"
   | "workspace.close"
@@ -431,11 +435,24 @@ export const AGENT_AVATAR_IDS = ["slope-lilac","dome-ivory","taper-sage","pebble
 export type AgentAvatarId = typeof AGENT_AVATAR_IDS[number];
 
 
+export interface SourcePreparationRetentionParams {
+  threadId: string;
+  source: LaunchSource;
+  release?: boolean;
+}
+
+export interface SourceRetirementParams {
+  defer?: boolean;
+  cleanupId: string;
+  complete?: boolean;
+}
+
 export interface MaterialRetentionParams {
   childThreadId?: string;
 }
 
 export interface MaterialRetention {
+  sources: Array<{cleanupId: string; source: LaunchSource}>;
   threads: Array<{threadId: string; rootThreadId: string; release: boolean}>;
   inheritances: Array<{parentThreadId: string; childThreadId: string; rootThreadId: string; snapshotIds: string[]}>;
 }
@@ -2554,9 +2571,9 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 69; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 71; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
-export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
+export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root' | 'native_workspace';
 
 export interface LiveRoot {
   hostId: string;
@@ -2569,6 +2586,7 @@ export interface SourceToolsParams {
 }
 
 export interface LaunchSourceParams {
+  nativeScope?: string;
   environmentRunId?: string;
   workspaceId: string;
   executionWorkspaceId: string;
@@ -2588,6 +2606,7 @@ export interface LaunchSelectParams {
 }
 
 export interface LaunchSource {
+  native_scope?: string;
   environment_run_id?: string | null;
   workspace_id: string;
   execution_workspace_id: string;
@@ -3833,6 +3852,14 @@ export interface KernelWorkspaceAdoptParams {
   gitRootIds?: string[];
 }
 
+export interface KernelWorkspaceBackend {
+  backend: 'winfsp'|'macfuse'|'fuse';
+  dependenciesReady: boolean;
+  mountCompiled: boolean;
+  detail: string | null;
+  helpUrl: string;
+}
+
 export interface KernelWorkspaceOpenParams {
   branchId: string;
 }
@@ -3840,6 +3867,12 @@ export interface KernelWorkspaceOpenParams {
 export interface KernelWorkspaceAddress {
   branchId: string;
   generation: string;
+}
+
+export interface KernelWorkspaceBindParams {
+  branchId: string;
+  generation: string;
+  sourcePath?: string;
 }
 
 export interface KernelWorkspaceLeaseParams {
@@ -3885,6 +3918,7 @@ export interface KernelWorkspaceClosed {
 export interface KernelWorkspaceInspection {
   binding: KernelWorkspaceBinding;
   leases: number;
+  rootId: string | null;
   mount: { mountId:string; path:string|null; backend:'winfsp'|'macfuse'|'fuse'; state:'starting'|'ready'|'failed'|'cleanup_pending'; error?:string } | null;
   capabilities: { nativeFiles:boolean; mountCompiled:boolean; hardlinks:boolean; symlinks:boolean; xattrs:boolean; losslessNativeNames:boolean; activeWritableMappingFork:boolean };
 }
@@ -4480,6 +4514,7 @@ export interface KernelCreateBranchAbortParams {
 export interface KernelCreateEntry {
   path: string;
   state: KernelBranchState;
+  nativeJson?: string;
   ownerId?: string;
   sourcePath?: string;
   sourceRef?: string;
@@ -4584,6 +4619,7 @@ export interface KernelBranchWriteAbortParams {
 export interface KernelBranchChange {
   path: string;
   state: KernelBranchState;
+  nativeJson?: string;
   ownerId?: string;
   sourcePath?: string;
   sourceRef?: string;
@@ -4841,6 +4877,12 @@ export interface KernelError {
   details?: unknown;
 }
 
+export interface KernelWorkspaceIdle {
+  v: typeof KERNEL_PROTOCOL_VERSION;
+  kind: "workspace-idle";
+  kernelEpoch: string;
+}
+
 export interface KernelRequestCreditReleased {
   v: typeof KERNEL_PROTOCOL_VERSION;
   kind: "request-credit-released";
@@ -4884,6 +4926,7 @@ export type KernelBranchState =
 export interface KernelEntry {
   path: string;
   state: KernelBranchState;
+  nativeJson?: string;
 }
 
 export interface KernelBranchReadResult {
@@ -5114,13 +5157,13 @@ export interface ChildSourceHandoff {
   resource_authority: ChildSourceAuthority | null;
 }
 
-export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot } | { kind: 'derived'; pin: ChildSourcePin; root: LiveRoot; view_id: string };
+export type ChildSourceRoot = { kind: 'fixed'; pin: ChildSourcePin } | { kind: 'physical'; root: LiveRoot } | { kind: 'derived'; pin: ChildSourcePin; root: LiveRoot; view_id: string } | { kind: 'native'; pin: ChildSourcePin };
 
 export interface SourceDraftResource { workspaceId: string; resourceId: string; baseRevision: string | null; localEditRevision: number; revision: string; encoding: string; bom: boolean; coordinationId?: string; documentInstanceId?: string; bufferHash?: string; lineEnding?: 'lf' | 'crlf' | 'cr'; }
 
 export interface SourceDraftProvenance { threadId: string; branchId: string; snapshotRef: string; ownerId: string; ownerGeneration: number; resources: SourceDraftResource[]; }
 
-export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
+export type ChildSourceProvenance = { consistency: 'refreshed-root'; root: string; previousRoot: string; incoming: { run_id: string; source: LaunchSource }; incomingRoot: string; conflicts: string[]; resources?: SourceResourceCapture } | { consistency: 'fixed-root'; root: string; selection?: { captureIdentity: string; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; drafts?: SourceDraftProvenance }; resources?: SourceResourceCapture } | { consistency: 'stable-capture' | 'git-base-with-overlay'; contentMode: 'saved-files' | 'fixed-draft-baseline'; captureScopes: string[]; omittedDraftPaths: string[]; captureIdentity?: string; drafts?: SourceDraftProvenance; resources?: SourceResourceCapture };
 
 export type ChildSource = { kind: 'absent' } | { kind: 'pending'; handoff: ChildSourceHandoff } | { kind: 'shared'; handoff: ChildSourceHandoff | null; selection: LaunchSource } | { kind: 'ready'; handoff: ChildSourceHandoff | null; pin: ChildSourcePin; selection: LaunchSource; provenance: ChildSourceProvenance };
 
@@ -5819,7 +5862,7 @@ export interface ExecutionShell {id:string;name:string;executable:string;path?:s
 
 export interface ExecutionEnvironment {searchPath?:string;platform:string;defaultShell:string|null;shells:ExecutionShell[];}
 
-export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
+export interface SourceToolBinding { executionEnvironment?:ExecutionEnvironment; resourceOwner:SourceResourceOwner;grantId:string;runId:string;threadId:string;workspaceId:string;executionWorkspaceId:string;sourceMode:SourceMode;nativeWorkspace?:{branchId:string;generation?:string;sourcePath?:string};rootId?:string;fileSource?:{branchId:string;revision:number};materializedSource?:{branchId:string;revision:number};liveRoot?:LiveRoot;environmentRunId?:string;enabledTools:string[];remoteAuthority?:{authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner}; }
 
 export interface SourceAuthorityResult { authorityId:string;resourceEpoch:string;executionOwner:ExecutorOwner;source:LaunchSource;scope:SourceAuthorityScope;phase:'preparing'|'ready'|'retaining'|'draining'|'retired'|'revoked';purpose:'source'|'read'|'integration'|'result'|'process_view'|'script_environment'|'mcp_owner';operationId:string|null;grantId:string;toolBinding:SourceToolBinding|null;physicalRoot:LiveRoot|null;firstPreparation:boolean;materializationOperationId:string;mcpHolders:SourceMcpHolder[];mcpDeliveries:SourceMcpDeliveryReceipt[];mcpChildren:SourceMcpChildReference[];mcpDerivation:SourceMcpDerivationReference|null; }
 
@@ -6433,6 +6476,8 @@ export type KernelMethodParams = {
   "runtime.model.inspect": RunParams;
   "runtime.status": KernelEmptyParams;
   "runtime.material.retention": MaterialRetentionParams;
+  "runtime.source.retirement": SourceRetirementParams;
+  "runtime.source.preparation": SourcePreparationRetentionParams;
   "runtime.content.collect": KernelEmptyParams;
   "runtime.tokenizers.open": KernelTokenizerOpenParams;
   "runtime.retry.evaluate": ModelRetryEvaluateParams;
@@ -6540,11 +6585,13 @@ export type KernelMethodParams = {
   "branch.rename": KernelBranchRenameParams;
   "branch.fork": KernelBranchForkParams;
   "workspace.adopt": KernelWorkspaceAdoptParams;
+  "workspace.backend.inspect": KernelEmptyParams;
   "workspace.open": KernelWorkspaceOpenParams;
   "workspace.inspect": KernelWorkspaceAddress;
   "workspace.acquire": KernelWorkspaceLeaseParams;
   "workspace.release": KernelWorkspaceLeaseParams;
   "workspace.mount": KernelWorkspaceAddress;
+  "workspace.bind": KernelWorkspaceBindParams;
   "workspace.fork": KernelWorkspaceForkParams;
   "workspace.result.prepare": KernelWorkspaceResultPrepareParams;
   "workspace.close": KernelWorkspaceAddress;
@@ -8276,6 +8323,24 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "runtime.source.retirement";
+      params: SourceRetirementParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.source.preparation";
+      params: SourcePreparationRetentionParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "runtime.content.collect";
       params: KernelEmptyParams;
       epoch?: string;
@@ -9239,6 +9304,15 @@ export type KernelRequest =
       v: typeof KERNEL_PROTOCOL_VERSION;
       kind: "request";
       id: string;
+      method: "workspace.backend.inspect";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
       method: "workspace.open";
       params: KernelWorkspaceOpenParams;
       epoch?: string;
@@ -9277,6 +9351,15 @@ export type KernelRequest =
       id: string;
       method: "workspace.mount";
       params: KernelWorkspaceAddress;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "workspace.bind";
+      params: KernelWorkspaceBindParams;
       epoch?: string;
       grantId?: string;
     }

@@ -50,7 +50,7 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   const [resourceOwner, setResourceOwner] = React.useState<SourceResourceOwner>(draftSelection?.resourceOwner ?? { kind: 'local' });
   const [directoryError, setDirectoryError] = React.useState<string>();
   const [path, setPath] = React.useState(draftSelection?.path ?? initialPath ?? '');
-  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>(draftSelection?.mode ?? (identity ? 'fixed_branch' : 'live_root'));
+  const [mode, setMode] = React.useState<'fixed_branch' | 'materialized' | 'live_root'>(draftSelection?.mode === 'native_workspace' ? 'live_root' : draftSelection?.mode ?? (identity ? 'fixed_branch' : 'live_root'));
   const [contentMode, setContentMode] = React.useState<'saved-files' | 'surface-drafts'>(draftSelection?.contentMode ?? 'saved-files');
   const [scopes, setScopes] = React.useState(draftSelection?.captureScopes.join('\n') ?? '');
   const [preparing, setPreparing] = React.useState(false);
@@ -154,9 +154,9 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
   const ownerLabel = (owner: SourceResourceOwner) => targets.targets.find(target => targetKey(target.resourceOwner) === targetKey(owner))?.label
     ?? (owner.kind === 'local' ? 'This Host' : owner.hostId);
   return <details className="mx-auto max-h-64 w-full max-w-3xl shrink-0 overflow-y-auto px-4 text-xs text-muted-foreground">
-    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
+    <summary className="cursor-pointer">Workspace · {prepared ? 'Prepared for next run' : source ? source.mode==='native_workspace'?'Versioned workspace':source.mode === 'live_root' ? 'Live workspace' : source.mode === 'materialized' ? 'Isolated editable copy' : 'Read-only snapshot' : 'Chat only'}</summary>
     <div className="space-y-2 py-2">
-      {source && <p>Current source: {ownerLabel(source.resource_owner)} · workspace {source.workspace_id}{source.mode !== 'live_root' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
+      {source && <p>Current source: {ownerLabel(source.resource_owner)} · workspace {source.workspace_id}{source.mode !== 'live_root'&&source.mode!=='native_workspace' && ` · revision ${source.revision}`}. {source.mode === 'live_root' ? 'Following runs use this same live workspace. Edits change its actual files.' : source.mode === 'materialized' ? 'Following runs keep this working copy.' : 'Following runs read the same fixed snapshot.'}</p>}
       <label className="block">Source Host
         <select aria-label="Source Host" className="mt-1 w-full rounded border bg-background px-2 py-1 text-sm" disabled={active || !targets.targets.length}
           value={targetKey(resourceOwner)} onChange={event => {
@@ -205,9 +205,9 @@ export function ThreadSourcePicker({ api, identity, initialPath, active, launch,
       {request.current && <Button type="button" variant="ghost" size="sm" onClick={invalidate}>{preparing ? 'Cancel preparation' : 'Discard captured request'}</Button>}
       {error && contentMode === 'surface-drafts' && <Button type="button" variant="ghost" size="sm" disabled={active || preparing} onClick={() => { invalidate(); void prepare(); }}>Capture drafts again</Button>}
       {prepared && <div aria-label="Prepared workspace">
-        <p>{ownerLabel(prepared.source.resourceOwner)} · {prepared.path} · {prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
+        <p>{ownerLabel(prepared.source.resourceOwner)} · {prepared.path} · {prepared.source.mode==='native_workspace'?'Versioned files and commands':prepared.source.mode === 'live_root' ? 'Live files and commands' : prepared.source.mode === 'materialized' ? 'Editable copy and commands' : 'Read-only'} · ready for the next send</p>
         <p>Available source tools: {prepared.source.tools.length ? prepared.source.tools.join(', ') : 'None'}</p>
-        {prepared.source.mode !== 'live_root' && <p>Fixed revision: {prepared.source.revision}</p>}
+        {prepared.source.mode !== 'live_root'&&prepared.source.mode!=='native_workspace' && <p>Fixed revision: {prepared.source.revision}</p>}
         {provenance && <div aria-label="Capture provenance">
           <p>Consistency: {provenance.consistency}</p>
           {'root' in provenance ? <><p>Fixed root: {provenance.root}</p>

@@ -70,6 +70,7 @@ pub enum SourceMode {
     FixedBranch,
     Materialized,
     LiveRoot,
+    NativeWorkspace,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

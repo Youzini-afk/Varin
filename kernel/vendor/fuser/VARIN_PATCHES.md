@@ -17,8 +17,10 @@ Unmount retains the original mount object when the OS returns an error. A borrow
 also joins the remaining workers before returning. These changes avoid dropping
 ownership of a still-live filesystem during a failed detach.
 
-macOS SDK selection prefers libfuse3's public session API, retaining an explicit libfuse2 build
-and a fallback for SDKs that only expose `fuse.pc`. This addresses the disabled compat25 mount
+macOS default builds load the installed libfuse3 public session API at runtime. The loader admits
+absolute installed library paths, validates the five session entry points, serializes loading and
+caches successful loads only; installing the dependency later can be retried. Explicit libfuse2
+and libfuse3 SDK builds remain available. This addresses the disabled compat25 mount
 entry point in modern macFUSE: https://github.com/cberner/fuser/issues/752. The libfuse3 transport
 now destroys its owned session on failed construction and after detach; its duplicated fd remains
 owned by `DevFuse`. Linux helper detach checks the actual exit status before releasing ownership.

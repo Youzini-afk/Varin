@@ -47,8 +47,10 @@ mod source_resources;
 mod tools;
 mod transport;
 mod workspace_resources;
+mod workspace_handoffs;
 mod workspace_adoption;
 mod native_metadata;
+mod native_security;
 mod reparse_data;
 #[cfg(feature = "workspace-mount")]
 mod workspace_mount;

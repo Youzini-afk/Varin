@@ -748,6 +748,7 @@ grant_id: "process".into(),
         root_id: Some(registered["rootId"].as_str().unwrap().into()),
         file_source: None,
         source_mode: SourceMode::LiveRoot,
+        native_workspace: None,
         materialized_source: None,
         live_root: Some(LiveRoot {
             host_id: HOST.into(),

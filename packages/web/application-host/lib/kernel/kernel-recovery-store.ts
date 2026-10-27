@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isDeepStrictEqual } from "node:util";
+import {sameRecoveryFileTarget} from '../recovery/file-target.js';
 import { randomUUID } from "node:crypto";
 import type {
   RecoveryConversation,
@@ -364,7 +365,7 @@ export class KernelRecoveryStore {
     const existing = await context.client.recoveryTurnGet({ workspaceId: input.workspaceId, executionId: input.executionId });
     if (existing) {
       if (!isDeepStrictEqual(existing.conversation, input.conversation) || existing.userEntryId !== input.userEntryId
-        || existing.runId !== input.runId || (input.fileTarget && !isDeepStrictEqual(existing.fileTarget, input.fileTarget)))
+        || existing.runId !== input.runId || (input.fileTarget && !sameRecoveryFileTarget(existing.fileTarget, input.fileTarget)))
         throw new Error("Original recovery checkpoint identity changed");
       return this.turn(existing);
     }
@@ -1009,6 +1010,7 @@ export const createScopedKernelRecoveryBindings = (
   adapter: KernelStorageAdapter,
   input: {
     authority: KernelFileAuthorityContext;
+    fileTarget?:RecoveryIdentity['fileTarget'];
     threadId: string;
     runId?: string;
     storageRoot: string;
@@ -1018,7 +1020,7 @@ export const createScopedKernelRecoveryBindings = (
   },
 ) => {
   if (!input.threadId) throw new Error("Scoped recovery requires its real Thread owner");
-  const identity = recoveryIdentity(input.authority.owningWorkspaceId, input.authority.canonicalRoot);
+  const identity = {...recoveryIdentity(input.authority.owningWorkspaceId, input.authority.canonicalRoot),...(input.fileTarget?{fileTarget:input.fileTarget}:{})};
   const actor: ScopedRecoveryActor = { client: input.authority.client, identity, root: input.storageRoot,
     threadId: input.threadId, ...(input.runId ? { runId: input.runId } : {}),
     ...(input.metadataReader ? { metadataReader: input.metadataReader } : {}) };
@@ -1030,7 +1032,7 @@ export const createScopedKernelRecoveryBindings = (
     ? { run: (resources, operation, options) => input.resourceOperationGate!.run(resources,
       () => kernelGate.run(resources, operation, options), options) }
     : kernelGate;
-  return { fileStore, fileResources, resourceOperationGate, durableRecoveryStore };
+  return { fileStore, fileResources, resourceOperationGate, durableRecoveryStore,...(input.fileTarget?{fileTarget:input.fileTarget}:{}) };
 };
 
 export const createKernelRecoveryDirectFacade = (

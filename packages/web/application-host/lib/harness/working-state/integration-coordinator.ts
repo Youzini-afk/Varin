@@ -167,6 +167,7 @@ const mergeTarget = async (
     }
     return child;
   }
+  if (pathPlan.decision === 'merge-clean' && pathPlan.mergedState) return pathPlan.mergedState;
   if (pathPlan.decision === "merge-clean" && pathPlan.mergedText !== undefined) {
     const bytes = Buffer.from(pathPlan.mergedText, "utf8");
     const object = await store.putObject(bytes);
@@ -175,6 +176,7 @@ const mergeTarget = async (
       objectHash: object.hash,
       byteLength: object.byteLength,
       ...(pathPlan.mergedMode !== undefined ? { mode: pathPlan.mergedMode } : {}),
+      ...(pathPlan.mergedNative ? {native:pathPlan.mergedNative} : {}),
     };
   }
   if (pathPlan.decision === "conflict" && pathPlan.conflictMarkers !== undefined) {
@@ -413,7 +415,8 @@ export class IntegrationCoordinator {
       || !isDeepStrictEqual(operation.operationBinding, input.operationBinding)) {
       throw new Error("Integration receipt belongs to another fixed source or invocation");
     }
-    if (input.parentAuthority?.kind === "directory" && operation.applyCanonicalRoot !== input.parentAuthority.directory) {
+    if (input.parentAuthority?.kind === "directory" && operation.applyCanonicalRoot !== input.parentAuthority.directory
+      && !(input.operationBinding?.target.mode==='native_workspace'&&operation.applyRootId)) {
       throw new Error("Integration receipt belongs to another target directory");
     }
     if (input.parentAuthority?.kind === "branch" && operation.parentBranchId !== input.parentAuthority.branchId) {
@@ -503,6 +506,7 @@ export class IntegrationCoordinator {
             targets: {}, targetKinds: {}, externalBindings: {}, safety: {}, appliedPaths: [], conflictPaths: [], compensatedPaths: [], needsAttentionPaths: [],
             diffStats: result.diffStats, reservedResources: { canonicalRoot, paths: result.changedPaths },
             retryBinding: { branchId: input.branchId, parentStates: {}, childStates: result.pathStates, resultingParentStates: {} },
+            ...(applyContext.identity.fileTarget?.kind==='physical'?{applyRootId:applyContext.identity.fileTarget.rootId}:{}),
             ...(input.parentAuthority?.kind === "directory" ? { applyCanonicalRoot: canonicalRoot,
               applyExecutionWorkspaceId: input.parentAuthority.workspaceId } : {}),
             ...(input.operationBinding ? { operationBinding: input.operationBinding } : {}) };
@@ -590,7 +594,9 @@ export class IntegrationCoordinator {
         if (operation.parentBranchId) continue;
         let applyContext: DurableFileOperationContext = context as DurableFileOperationContext;
         if (parentAuthority.kind === "directory") {
-          if (operation.applyCanonicalRoot !== parentAuthority.directory) continue;
+          if (operation.applyCanonicalRoot !== parentAuthority.directory
+            &&!(context.identity.fileTarget?.kind==='physical'&&context.identity.fileTarget.sourceMode==='native_workspace'
+              &&operation.applyRootId===context.identity.fileTarget.rootId)) continue;
           try {
             applyContext = (await this.directoryApplyContext(context as DurableFileOperationContext, parentAuthority)).context;
           } catch {
@@ -1208,6 +1214,8 @@ export class IntegrationCoordinator {
       const operation = await inspectDurableIntegrationOperation(context, input.operationId);
       if (operation.threadId !== input.threadId) throw new Error(`Integration operation does not belong to thread ${input.threadId}`);
       const undoContext = async (target: { kind: "directory"; directory: string; workspaceId?: string }) => {
+        if(context.identity.fileTarget?.kind==='physical'&&context.identity.fileTarget.sourceMode==='native_workspace'
+          &&operation.applyRootId===context.identity.fileTarget.rootId)target={...target,directory:context.identity.canonicalRoot};
         if (!input.scopedWorkingStates) return this.directoryApplyContext(context, target);
         if (input.parentAuthority?.kind !== "directory" || !input.parentAuthority.workspaceId
           || normalizePathIdentity(target.directory) !== normalizePathIdentity(context.identity.canonicalRoot)

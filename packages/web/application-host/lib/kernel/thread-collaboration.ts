@@ -261,7 +261,7 @@ export class ThreadCollaboration {
           if (handoff.operation_id !== `child-source-handoff:${dependencies.operation_id}`
             || handoff.source.workspace_id !== pin.source.workspace_id
             || !isDeepStrictEqual(handoff.source.resource_owner, pin.source.resource_owner)) throw new Error('Original source handoff owner changed');
-          const retained = handoff.retention_pin ?? (handoff.root.kind === 'fixed' || handoff.root.kind === 'derived' ? handoff.root.pin : null);
+          const retained = handoff.retention_pin ?? (handoff.root.kind === 'fixed' || handoff.root.kind === 'native' || handoff.root.kind === 'derived' ? handoff.root.pin : null);
           if (retained) {
             if (retained.pin_id !== pin.pin_id || !retained.source.branch_id) throw new Error('Original source pin identity changed');
             await store.releaseBranchHandoffPin(retained.source.branch_id, retained.pin_id);
@@ -305,6 +305,8 @@ export class ThreadCollaboration {
       resourceOwner: fixed.resource_owner, mode: fixed.mode, liveRoot: fixed.live_root,
       workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id, tools,
     };
+    if(fixed.mode==='native_workspace'&&fixed.branch_id)return {resourceOwner:fixed.resource_owner,mode:'native_workspace',workspaceId:fixed.workspace_id,
+      executionWorkspaceId:fixed.execution_workspace_id,branchId:fixed.branch_id,...(fixed.native_scope?{nativeScope:fixed.native_scope}:{}),tools};
     if ((fixed.mode !== 'fixed_branch' && fixed.mode !== 'materialized') || !fixed.branch_id || fixed.revision === null) throw new Error('Child source is not fixed');
     return { resourceOwner: fixed.resource_owner, mode: fixed.mode, workspaceId: fixed.workspace_id, executionWorkspaceId: fixed.execution_workspace_id,
       branchId: fixed.branch_id, revision: fixed.revision, tools,
@@ -357,7 +359,7 @@ export class ThreadCollaboration {
       if (basis.kind === 'refreshed' && !await store.readSourcePreparation(`child-source:${child.execution_id}`, { signal })) {
         const incoming = basis.incoming;
         if (incoming.source.mode === 'fixed_branch') {
-          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,
+          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,nativeWorkspaces:this.owners.kernel.nativeWorkspaces,
             physical: async () => { throw new Error('Fixed source has no physical directory'); } }, incoming.source, undefined, signal);
         } else {
         const launch = await this.owners.runtime.launch(incoming.run_id, signal);
@@ -367,7 +369,7 @@ export class ThreadCollaboration {
           { signal, resolveLiveSource: this.owners.resolveLiveSource });
         try {
           if (admitted.kind !== 'local') throw new Error('Selected source changed resource Host');
-          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,
+          await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,nativeWorkspaces:this.owners.kernel.nativeWorkspaces,
             physical: async root => new KernelWorkingStateRootStore(await this.owners.storageAdapter.contextFromSourceGrant({
               grant: admitted.grant, owningWorkspaceId: incoming.source.workspace_id, executionWorkspaceId: incoming.source.execution_workspace_id,
               rootId: root.rootId, canonicalRoot: root.canonicalRoot })) }, incoming.source,
@@ -386,7 +388,7 @@ export class ThreadCollaboration {
     });
   }
   private async settle(child: DelegatedExecution, signal: AbortSignal): Promise<DelegatedExecution> {
-    if (!child.receipt || child.source?.kind !== 'ready' || !['materialized','fixed_branch'].includes(child.source.selection.mode)) return child;
+    if (!child.receipt || child.source?.kind !== 'ready' || !['materialized','fixed_branch','native_workspace'].includes(child.source.selection.mode)) return child;
     const { kernel, runtime, storageAdapter, resolveLiveSource } = this.owners;
     const source = this.childSource(child);
     if (!source || source.mode === 'live_root' || !source.branchId) throw new Error('Child lost its original source');
@@ -435,7 +437,10 @@ export class ThreadCollaboration {
           // A final report does not stop its accepted processes. Only the existing
           // settlement barrier authorizes freezing the private execution directory.
           if (child.code_result.kind !== 'settling') return child;
-          if (!authority.rootId || !authority.canonicalRoot) {
+          if(source.mode==='native_workspace'){
+            const entry=await kernel.nativeWorkspaces!.open({workspace_id:source.workspaceId,execution_workspace_id:source.executionWorkspaceId,branch_id:source.branchId},signal);
+            candidate=await authority.client.prepareWorkspaceResult({branchId:source.branchId,generation:entry.view.binding.generation,publicationId},signal);
+          } else if (!authority.rootId || !authority.canonicalRoot) {
             candidate = await store.prepareResultCandidate({ publicationId, branchId: source.branchId, source: { kind: 'head' }, signal });
           } else {
           store = new KernelWorkingStateRootStore(await storageAdapter.contextFromSourceGrant({ grant: authority.grant,
@@ -466,7 +471,7 @@ export class ThreadCollaboration {
     const { kernel, runtime } = this.owners;
     const originalHandoff = child.trigger.kind === 'dispatch' && child.source && child.source.kind !== 'absent' ? child.source.handoff : null;
     const retained = originalHandoff?.retention_pin
-      ?? (originalHandoff?.root.kind === 'fixed' || originalHandoff?.root.kind === 'derived' ? originalHandoff.root.pin : null);
+      ?? (originalHandoff?.root.kind === 'fixed' || originalHandoff?.root.kind === 'native' || originalHandoff?.root.kind === 'derived' ? originalHandoff.root.pin : null);
     if (retained && child.report && originalHandoff?.source.resource_owner.kind === 'managed_host') {
       await withManagedChildSource(runtime, child, signal, (service,address) => service.service({...address,requestId:randomUUID(),operation:{kind:'child_release',execution:child}},signal));
     }
@@ -537,9 +542,10 @@ export class ThreadCollaboration {
       const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-release:${randomUUID()}`,
         childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
       try {
-        if (handoff.root.kind === 'fixed' || handoff.root.kind === 'derived') {
+        if (handoff.root.kind === 'fixed' || handoff.root.kind === 'native' || handoff.root.kind === 'derived') {
           await kernel.scoped(grant).unpinBranch({ operationId: `child-handoff-release:${child.execution_id}`,
             branchId: handoff.root.pin.source.branch_id!, pinId: handoff.root.pin.pin_id }, signal);
+          if(handoff.root.kind==='native')await kernel.scoped(grant).deleteBranch({operationId:`child-handoff-delete:${child.execution_id}`,branchId:handoff.root.pin.source.branch_id!},signal);
         }
         if (!child.receipt) {
           const branchId = `child-source:${child.execution_id}`;

@@ -4,6 +4,19 @@ Application-host authority for revisioned workspace documents, file watches, and
 
 Text editors and workspace text helpers consume DocumentsAPI. `FilesAPI` remains browse/binary/CRUD, and `WorkspaceAPI` remains project/tree/git/upload. Neither exposes a duplicate text read/write shape.
 
+Native workspace registrations retain the logical owning/execution workspace, branch and optional scope;
+the original trusted directory remains the configuration namespace. Admission resolves the current mount
+generation and actual directory through the original workspace owner. Saved Office readers, tool hints
+and file navigation use that logical identity, so reopening a mount cannot leave them attached to an old path.
+`resolveWorkspace` includes `nativeSource` for consumers that need to compare a saved document with a Run.
+
+Saved editor tabs retain a durable workspace reference through `/api/documents/workspace/retention`.
+Each live watcher additionally holds its own original native grant. Closing the last tab releases the
+saved reference and clean watcher; dirty buffers, crash journals and admitted mutations retain their own
+lifetimes. Conversation deletion may evict an idle inventory cache, but must wait for these actual users.
+Completed source cleanup forgets only that derived source's registrations; original project registration
+and trust remain intact. Corrupt or foreign-host registry files are reported without overwriting them.
+
 ## Entrypoints
 
 - `authority.ts`: `createDocumentAuthority(options)` — workspace identity, revisioned read/write/move/delete, watch, recovery journals, immutable Thread source captures, and authenticated Surface operations for Integration, recovery and workspace edits. Production binds the Rust file-resource backend: write/move/delete and mixed surface/disk operations use its exact/subtree gate and conditional filesystem operations. `inspectWorkspace(workspaceId)` returns `{ workspaceId, hostId, root }` after physical-root admission. `admitWorkspaceRegistration(workspaceId, signal?)` checks the original Host registration and current deployment trust without reopening that directory; its `canonicalPath` identifies a configuration namespace, not a physical capability. Both methods are Host-only collaborators, not renderer DocumentsAPI methods.

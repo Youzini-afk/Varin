@@ -25,7 +25,7 @@ fn paths_from_request(request: &CaptureRequest) -> &[String] {
 /// Conditional mutations use the same observed-state algorithm on their I/O
 /// worker, without creating another object or operation owner.
 pub(super) fn observe_effect(root: &FileRoot, path: &str, grant: &Grant, cancel: &AtomicBool) -> Result<FileState, KernelError> {
-    capture_entry(||resolve_admitted_resource(root, path, grant, false), cancel, &CaptureHooks::default())
+    capture_entry(||resolve_admitted_resource(root, path, grant, true), cancel, &CaptureHooks::default())
         .map(|entry|entry.state).map_err(|error|match error {
             KernelError::SnapshotChanged(message) => KernelError::Operation(message), other => other,
         })
@@ -461,6 +461,11 @@ fn read_entry(
 ) -> Result<HashedEntry, KernelError> {
     check(cancel)?;
     let resource = resolve()?;
+    let native = resource.native.as_ref().map(|owner| owner.attributes(&resource.path)).unwrap_or_else(||crate::native_metadata::observe(&resource.absolute).map(|v|v.attributes)).map(Some);
+    // Missing leaves have no inode. Preserve every other original owner error.
+    let native = match native { Ok(value)=>value, Err(error)=>{
+        if matches!(fs::symlink_metadata(&resource.absolute),Err(ref e) if matches!(e.kind(),io::ErrorKind::NotFound|io::ErrorKind::NotADirectory)){None}else{return Err(error);}
+    }};
     let identity = capture_identity(&resource.absolute);
     let metadata = match fs::symlink_metadata(&resource.absolute) {
         Ok(value) => Some(value),
@@ -473,9 +478,10 @@ fn read_entry(
         }
         Err(error) => return Err(error.into()),
     };
-    let state = match metadata {
+    let mut state = match metadata {
         None => FileState::Missing,
         Some(metadata) if metadata.file_type().is_symlink() => FileState::Symlink {
+            native: None,
             symlink_target: fs::read_link(&resource.absolute)?
                 .into_os_string()
                 .into_string()
@@ -483,6 +489,7 @@ fn read_entry(
             mode: Some(file_mode(&metadata)),
         },
         Some(metadata) if metadata.is_dir() => FileState::Directory {
+            native: None,
             mode: Some(file_mode(&metadata)),
         },
         Some(metadata) if metadata.is_file() => {
@@ -490,6 +497,7 @@ fn read_entry(
             let (hash, length) =
                 digest_reader(&mut source, None, cancel, hooks, CapturePhase::Read)?;
             FileState::RegularFile {
+                native: None,
                 object_hash: hash,
                 byte_length: length,
                 mode: Some(file_mode(&metadata)),
@@ -497,6 +505,13 @@ fn read_entry(
         }
         Some(_) => FileState::Unsupported,
     };
+    if let Some(attributes)=&native {
+        if resource.native.is_some(){match &mut state {FileState::RegularFile{mode,..}|FileState::Directory{mode,..}|FileState::Symlink{mode,..}=>*mode=Some(attributes.mode),_=>()}}
+        let projected=crate::native_metadata::recoverable(attributes,resource.native.is_some());
+        state.set_native(projected.clone());
+        let after=resource.native.as_ref().map(|owner|owner.attributes(&resource.path)).unwrap_or_else(||crate::native_metadata::observe(&resource.absolute).map(|v|v.attributes))?;
+        if projected!=crate::native_metadata::recoverable(&after,resource.native.is_some()){return Err(KernelError::SnapshotChanged(format!("file attributes changed while being captured: {}",resource.path)));}
+    }
     check(cancel)?;
     if resolve()?.absolute != resource.absolute {
         return Err(KernelError::SnapshotChanged(format!(
@@ -527,6 +542,7 @@ fn verify_entry(
         object_hash,
         byte_length,
         mode,
+        ..
     } = &entry.state
     {
         hooks.checkpoint(CapturePhase::VerifySource);

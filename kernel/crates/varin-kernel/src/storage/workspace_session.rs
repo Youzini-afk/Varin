@@ -135,6 +135,7 @@ pub(crate) struct Session {
     root: PathBuf,
     revoked: Arc<AtomicBool>,
     closed: AtomicBool,
+    mount_state: std::sync::atomic::AtomicU8,
     native_idle: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Namespace mutations use the exclusive boundary. A flush owns only its
     /// file publication lock during sealing, and joins the shared boundary for
@@ -164,6 +165,7 @@ pub(crate) struct Checkpoint {
 }
 
 impl Session {
+    pub(crate) fn storage_port(&self)->StoragePort{self.port.clone()}
     pub(crate) fn capacity(&self) -> Result<(u64, u64), KernelError> {
         self.active()?;
         Ok((
@@ -239,6 +241,7 @@ impl Session {
                 revoked,
                 closed: AtomicBool::new(false),
                 native_idle: Mutex::new(None),
+                mount_state:std::sync::atomic::AtomicU8::new(0),
                 boundary: RwLock::new(()),
                 namespace: Mutex::new(Namespace {
                     paths: BTreeMap::from([(String::new(), root_node)]),
@@ -270,7 +273,7 @@ impl Session {
             Ok(session)
         })
     }
-    fn active(&self) -> Result<(), KernelError> {
+    pub(super) fn active(&self) -> Result<(), KernelError> {
         if self.revoked.load(Ordering::Acquire) || self.closed.load(Ordering::Acquire) {
             Err(KernelError::Cancelled)
         } else {
@@ -294,6 +297,14 @@ impl Session {
             .native_idle
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(notify);
+    }
+    pub(crate) fn mount_started(&self){self.mount_state.store(1,Ordering::Release);}
+    pub(crate) fn mount_disconnected(&self){self.mount_state.store(2,Ordering::Release);self.notify_native_idle();}
+    pub(crate) fn is_mount_disconnected(&self)->bool{self.mount_state.load(Ordering::Acquire)==2}
+    pub(crate) fn check_mounted(&self)->Result<(),KernelError>{
+        self.active()?;
+        if self.is_mount_disconnected(){return Err(failure("workspace_mount_disconnected","The original native filesystem dispatcher stopped; reopen its saved workspace"));}
+        Ok(())
     }
     pub(crate) fn notify_native_idle(&self) {
         let notify = self
@@ -326,6 +337,16 @@ impl Session {
     }
     pub(crate) fn identity(&self) -> Uuid {
         self.id
+    }
+    pub(crate) fn owner(&self)->Grant {self.grant.clone()}
+    pub(crate) fn assert_consumers_idle(&self) -> Result<(), KernelError> {
+        let branch = self.branch.clone();
+        let generation = self.id.to_string();
+        self.port.call(move |storage| {
+            storage.assert_native_source_idle(&branch, &generation)?;
+            storage.native_closing_roots.insert((branch,generation));
+            Ok(())
+        })
     }
     pub(crate) fn replayed_fork(
         &self,
@@ -415,10 +436,14 @@ impl Session {
             ));
         }
         let branch = self.branch.clone();
+        let generation=self.id.to_string();
         self.port.call(move |storage| {
             storage
                 .workspace_holders
                 .retain(|_, (selected, _)| selected != &branch);
+            let roots=storage.native_file_roots.iter().filter(|(_, (selected,epoch,_))|selected==&branch&&epoch==&generation).map(|(id,_)|id.clone()).collect::<Vec<_>>();
+            for id in roots{storage.file_roots.remove(&id);storage.native_file_roots.remove(&id);storage.native_readers.lock().map_err(|_|KernelError::Storage("Native reader registry failed".into()))?.remove(&id);}
+            storage.native_closing_roots.remove(&(branch,generation));
             Ok(())
         })
     }
@@ -2242,7 +2267,7 @@ impl Storage {
         }
         Ok(())
     }
-    fn admit_workspace_session(
+    pub(super) fn admit_workspace_session(
         &self,
         branch: &str,
         path: &str,

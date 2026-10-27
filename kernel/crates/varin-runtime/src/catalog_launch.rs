@@ -96,6 +96,8 @@ impl SourceResourceOwner {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SourceSelection {
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub native_scope:Option<String>,
     pub resource_owner: SourceResourceOwner,
     #[serde(default)]
     pub environment_run_id: Option<String>,
@@ -127,7 +129,9 @@ impl SourceSelection {
         let live = self.live_root.as_ref().is_some_and(|root| {
             !root.host_id.is_empty() && !root.root_id.is_empty() && !root.canonical_root.is_empty()
         });
-        if !self.resource_owner.validate()
+        if (self.mode!=crate::SourceMode::NativeWorkspace&&self.native_scope.is_some())
+            || self.native_scope.as_ref().is_some_and(|scope|scope.is_empty()||scope.starts_with('/')||scope.contains('\\')||scope.split('/').any(|part|part.is_empty()||part=="."||part==".."))
+            || !self.resource_owner.validate()
             || self.live_root.as_ref().is_some_and(|root|
                 self.resource_owner.host_id().is_some_and(|host| host != root.host_id))
             || self.workspace_id.is_empty()
@@ -143,6 +147,11 @@ impl SourceSelection {
                     !fixed || self.live_root.is_some() || self.environment_run_id.is_some()
                 }
                 crate::SourceMode::Materialized => !fixed || self.live_root.is_some(),
+                crate::SourceMode::NativeWorkspace => {
+                    self.branch_id.as_deref().is_none_or(str::is_empty)
+                        || self.revision.is_some() || self.live_root.is_some()
+                        || self.environment_run_id.is_some()
+                }
             }
         {
             return Err(RuntimeError::Invalid(
@@ -153,9 +162,16 @@ impl SourceSelection {
         Ok(())
     }
 }
+pub fn native_execution_workspace_id(execution:&str)->String{
+    use sha2::{Digest,Sha256};
+    let digest=Sha256::digest(format!("native-execution\0{execution}"));
+    let mut bytes=[0u8;16];bytes.copy_from_slice(&digest[..16]);bytes[6]=(bytes[6]&15)|64;bytes[8]=(bytes[8]&63)|128;
+    uuid::Uuid::from_bytes(bytes).to_string()
+}
 /// A continuation reuses its original environment. A read-only delegated child may
 /// reuse that same directory through its recorded dispatch source, including worktrees.
 pub(super) fn validate_environment_source(db: &Connection, thread_id: &str, source: &SourceSelection) -> Result<()> {
+    super::source_retention::assert_record_available(db,"run_launches",&json!({"selection":{"source":source}}))?;
     let Some(origin_id) = source.environment_run_id.as_ref() else { return Ok(()); };
     let origin_run: Run = record(db, "runs", origin_id)?;
     let origin: LaunchMetadata = record(db, "run_launches", origin_id)?;

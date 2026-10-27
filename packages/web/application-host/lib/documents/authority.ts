@@ -143,6 +143,7 @@ interface ResolveWorkspaceInput {
 }
 
 export interface ResolveWorkspaceResult {
+  nativeSource?:{workspaceId:string;executionWorkspaceId:string;branchId:string;scope?:string};
   workspaceId: string;
   hostId: string;
   epoch: number;
@@ -156,6 +157,8 @@ interface WatchSubscription {
 }
 
 interface WatcherRecord {
+  nativeKey?:string;
+  nativeRelease?:Promise<void>;
   listeners: Set<(event: WatchEvent) => void>;
   controller: WorkspaceWatcher | null;
   ready: Promise<WorkspaceWatcher | null> | null;
@@ -364,6 +367,13 @@ export interface DocumentAuthorityOptions {
   processLike?: Pick<NodeJS.Process, 'pid' | 'platform' | 'kill'>;
   isTrusted?: (root: string) => Promise<boolean>;
   isAllowedRoot?: (root: string) => Promise<boolean>;
+  nativeWorkspaces?: {
+    retainReference?(source:import('../kernel/native-workspaces.js').NativeDocumentWorkspace['reference'],key:string):Promise<unknown>;
+    releaseReference?(key:string):Promise<void>;
+    resolveId(id:string,signal?:AbortSignal,reference?:import('./workspace-registry.js').NativeWorkspaceReference):Promise<import('../kernel/native-workspaces.js').NativeDocumentWorkspace|undefined>;
+    resolvePath(path:string,containing?:boolean):Promise<import('../kernel/native-workspaces.js').NativeDocumentWorkspace|undefined>;
+  };
+  onSourceRetentionChanged?():void;
   onWorkspaceResolved?: (resolved: ResolveWorkspaceResult) => void;
   onMutation?: (event: DocumentMutationObservation) => void | Promise<void>;
   onIntegrationParentChanged?: (workspaceId: string, resourceIds?: readonly string[]) => void;
@@ -484,6 +494,9 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     pathModule,
     processLike,
   });
+  const releaseMutationRetentionHint = mutations.subscribe(() => {
+    if (!disposed) options.onSourceRetentionChanged?.();
+  });
 
   const publishMutation = (event: DocumentMutationObservation): void => {
     onIntegrationParentChanged(event.workspaceId, [event.resourceId]);
@@ -500,15 +513,22 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
    * This is registration/trust authority only, never a physical root or file capability. */
   const admitWorkspaceRegistration = async (workspaceId: string, signal?: AbortSignal) => {
     signal?.throwIfAborted();
-    const mapping = await waitWithSignal(registry.get(workspaceId), signal);
+    const saved=await registry.get(workspaceId);
+    const native=await options.nativeWorkspaces?.resolveId(workspaceId,signal,saved?.nativeSource);
+    if(saved?.nativeSource&&!native)throw new DocumentWorkspaceUnavailableError('Native workspace owner is unavailable');
+    const mapping = native?{workspaceId,canonicalPath:native.root,hostId:native.hostId,kind:'directory' as const,nativeSource:native.reference}:await waitWithSignal(registry.get(workspaceId), signal);
     if (!mapping || mapping.hostId !== hostId) throw new DocumentWorkspaceUnregisteredError();
-    if (!await waitWithSignal(isTrusted(mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
+    if (!await waitWithSignal(isTrusted(native?.originalPath??mapping.canonicalPath), signal)) throw new DocumentUntrustedError();
+    if(native&&!saved)await registry.registerNative(workspaceId,native.originalPath,native.reference);
     signal?.throwIfAborted();
     return mapping;
   };
 
   const loadWorkspace = async (workspaceId: string): Promise<LoadedWorkspace> => {
-    const mapping = await registry.get(workspaceId);
+    const saved=await registry.get(workspaceId);
+    const native=await options.nativeWorkspaces?.resolveId(workspaceId,undefined,saved?.nativeSource);
+    if(saved?.nativeSource&&!native)throw new DocumentWorkspaceUnavailableError('Native workspace owner is unavailable');
+    const mapping = native?{workspaceId,canonicalPath:native.root,hostId:native.hostId,kind:'directory' as const}:await registry.get(workspaceId);
     if (!mapping) {
       throw new DocumentWorkspaceUnregisteredError();
     }
@@ -531,7 +551,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     ) {
       throw new DocumentUntrustedError('Workspace root identity changed');
     }
-    if (!await isTrusted(root)) {
+    if (!await isTrusted(native?.originalPath??root)) {
       throw new DocumentUntrustedError();
     }
     return { ...mapping, root };
@@ -847,6 +867,10 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   /** Read the existing namespace without registering a workspace or publishing an epoch. */
   const lookupWorkspacePath = async (value: unknown): Promise<{ canonicalPath: string; workspaceId: string | null }> => {
     try {
+      if(typeof value==='string'){
+        const native=await options.nativeWorkspaces?.resolvePath(value);
+        if(native){await admitWorkspaceRegistration(native.workspaceId);return {canonicalPath:native.root,workspaceId:native.workspaceId};}
+      }
       const canonicalPath = await admitWorkspaceDirectory(value);
       if (!await isTrusted(canonicalPath)) throw new DocumentUntrustedError();
       const mapping = await registry.findExact(canonicalPath, 'directory');
@@ -859,7 +883,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const resolveWorkspace = async (input: ResolveWorkspaceInput = {}): Promise<ResolveWorkspaceResult> => {
     try {
       if (input.workspaceId) {
-        const mapping = await registry.get(input.workspaceId);
+        const mapping = await admitWorkspaceRegistration(input.workspaceId);
         if (!mapping) {
           throw new DocumentAuthorityError('Workspace is not registered on this application host', {
             code: 'failed',
@@ -867,7 +891,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
           });
         }
         const mutation = await mutations.inspect(mapping.workspaceId);
-        return { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch };
+        const ref=mapping.nativeSource;
+        return { workspaceId: mapping.workspaceId, hostId, epoch: mutation.epoch,...(ref?{nativeSource:{workspaceId:ref.workspace_id,executionWorkspaceId:ref.execution_workspace_id,branchId:ref.branch_id!,...(ref.native_scope?{scope:ref.native_scope}:{})}}:{}) };
+      }
+      if(typeof input.path==='string'){
+        const native=await options.nativeWorkspaces?.resolvePath(input.path);
+        if(native){await admitWorkspaceRegistration(native.workspaceId);const mutation=await mutations.inspect(native.workspaceId);const ref=native.reference;return {workspaceId:native.workspaceId,hostId,epoch:mutation.epoch,nativeSource:{workspaceId:ref.workspace_id,executionWorkspaceId:ref.execution_workspace_id,branchId:ref.branch_id!,...(ref.native_scope?{scope:ref.native_scope}:{})}};}
       }
       const canonicalPath = await admitWorkspaceDirectory(input.path);
       const mapping = await registry.resolve({ canonicalPath, create: true });
@@ -886,10 +915,12 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
 
   const resolveScopeId = async (scopeId: unknown): Promise<string | null> => {
     if (looksLikeCanonicalWorkspaceId(scopeId)) {
-      const mapping = await registry.get(scopeId);
+      const mapping = await admitWorkspaceRegistration(scopeId).catch(()=>null);
       return mapping ? mapping.workspaceId : null;
     }
     if (!looksLikeFilesystemWorkspaceScopeId(scopeId)) return null;
+    const native=await options.nativeWorkspaces?.resolvePath(scopeId as string,true);
+    if(native){await admitWorkspaceRegistration(native.workspaceId);return native.workspaceId;}
     try {
       const canonicalPath = await canonicalizePathIdentity(scopeId as string, {
         allowMissing: true,
@@ -915,19 +946,25 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
    * classification role. Registration observes the explicit Host deployment
    * boundary; local project/navigation settings do not decide file access.
    */
-  const findContainingResourceRoot = async (canonicalPath: string): Promise<WorkspaceMapping | null> => (
-    registry.findContaining(canonicalPath)
-  );
+  const findContainingResourceRoot = async (canonicalPath: string): Promise<WorkspaceMapping | null> => {
+    const native=await options.nativeWorkspaces?.resolvePath(canonicalPath,true);
+    return native?admitWorkspaceRegistration(native.workspaceId):registry.findContaining(canonicalPath);
+  };
 
   const findExactResourceRoot = async (
     canonicalPath: string,
     kind?: 'directory' | 'file',
-  ): Promise<WorkspaceMapping | null> => registry.findExact(canonicalPath, kind);
+  ): Promise<WorkspaceMapping | null> => {
+    const native=kind==='file'?undefined:await options.nativeWorkspaces?.resolvePath(canonicalPath);
+    return native?admitWorkspaceRegistration(native.workspaceId):registry.findExact(canonicalPath,kind);
+  };
 
   const ensureResourceRoot = async (
     canonicalPath: string,
     kind: 'directory' | 'file',
   ): Promise<WorkspaceMapping> => {
+    const native=kind==='file'?undefined:await options.nativeWorkspaces?.resolvePath(canonicalPath);
+    if(native)return admitWorkspaceRegistration(native.workspaceId);
     if (!await isAllowedRoot(canonicalPath)) {
       throw new DocumentPathError(`Resource path is outside the Host deployment boundary: ${canonicalPath}`);
     }
@@ -1310,6 +1347,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     }
   });
 
+  const releaseWatcherNative=(record:WatcherRecord):Promise<void>=>record.nativeRelease??=(async()=>{
+    await record.ready;
+    if(record.nativeKey)await options.nativeWorkspaces?.releaseReference?.(record.nativeKey);
+    options.onSourceRetentionChanged?.();
+  })();
   const watch = (workspaceId: string, listener: (event: WatchEvent) => void): WatchSubscription => {
     if (disposed) {
       throw new DocumentAuthorityError('Document authority is disposed', {
@@ -1323,6 +1365,11 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         inventory: createCaptureInventory(), inventoryRetained: false };
       watchers.set(workspaceId, newRecord);
       newRecord.ready = Promise.all([loadWorkspace(workspaceId), mutations.inspect(workspaceId)]).then(async ([workspace]) => {
+        const registration=await registry.get(workspaceId);
+        if(registration?.nativeSource){
+          newRecord.nativeKey=`document-watch:${randomUUID()}`;
+          await options.nativeWorkspaces?.retainReference?.(registration.nativeSource,newRecord.nativeKey);
+        }
         const controller = createWorkspaceWatcher({
           workspaceId,
           rootPath: workspace.root,
@@ -1346,6 +1393,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       }).catch(() => {
         newRecord.controller?.close();
         if (watchers.get(workspaceId) === newRecord) watchers.delete(workspaceId);
+        void releaseWatcherNative(newRecord).catch(()=>undefined);
         return null;
       });
       record = newRecord;
@@ -1361,6 +1409,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (rec.listeners.size === 0 && !rec.inventoryRetained) {
           rec.controller?.close();
           if (watchers.get(workspaceId) === rec) watchers.delete(workspaceId);
+          void releaseWatcherNative(rec).catch(()=>undefined);
         }
       },
     };
@@ -1627,6 +1676,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
         if (dirtySurfaces.get(key)?.registrationId !== record.registrationId) return;
         dirtySurfaces.delete(key);
         dirtyBuffersByOwner.delete(key);
+        options.onSourceRetentionChanged?.();
         onIntegrationParentChanged(request.workspaceId);
         rejectSurfaceOperationsForRegistration(record.registrationId, 'Document surface disconnected during an operation');
         surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
@@ -1795,6 +1845,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
       workspaceId: request.workspaceId,
     };
     dirtyBuffersByOwner.set(key, record);
+    if(existing?.resources.length&&resources.length===0)options.onSourceRetentionChanged?.();
     if (!existing || existing.generation !== request.generation || !sameDirtyResources(existing.resources, resources)) {
       const previousPaths = new Set(existing?.resources.map((resource) => resource.resource.resourceId) ?? []);
       const currentPaths = resources.map((resource) => resource.resource.resourceId);
@@ -1820,6 +1871,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     const cleared = dirtyBuffersByOwner.delete(key);
     if (cleared) {
       onIntegrationParentChanged(request.workspaceId, existing?.resources.map((resource) => resource.resource.resourceId));
+      options.onSourceRetentionChanged?.();
     }
     surfaceSnapshots.dropPendingOwner(request.ownerId, request.workspaceId);
     return { cleared };
@@ -2251,6 +2303,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
   const dispose = (): Promise<void> => {
     if (disposePromise) return disposePromise;
     disposed = true;
+    releaseMutationRetentionHint();
     const workspaceEditDisposal = workspaceEdits.dispose();
     const records = [...watchers.values()];
     watchers.clear();
@@ -2279,6 +2332,7 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     disposePromise = (async () => {
       await workspaceEditDisposal;
       await Promise.allSettled(records.map((record) => record.ready));
+      await Promise.allSettled(records.map(releaseWatcherNative));
       await mutations.dispose();
     })();
     return disposePromise;
@@ -2359,6 +2413,36 @@ export const createDocumentAuthority = (options: DocumentAuthorityOptions) => {
     getWorkspace: (workspaceId: string, signal?: AbortSignal) => waitWithSignal(loadWorkspace(workspaceId), signal),
     resolveResourceIdentity,
     listWorkspaceRegistrations: () => registry.list(),
+    setWorkspaceRetention: async (value:unknown) => {
+      const input=value as {workspaceId?:unknown;ownerId?:unknown;retained?:unknown};
+      if(!input||typeof input.workspaceId!=='string'||typeof input.ownerId!=='string'||!input.ownerId||typeof input.retained!=='boolean')throw new DocumentPathError('Workspace retention identity is incomplete',400);
+      const saved=await registry.get(input.workspaceId);
+      if(!saved)throw new DocumentWorkspaceUnregisteredError();
+      if(!saved.nativeSource)return {retained:false};
+      const key=`editor:${input.ownerId}:${input.workspaceId}`;
+      if(input.retained){
+        await loadWorkspace(input.workspaceId);
+        await options.nativeWorkspaces?.retainReference?.(saved.nativeSource,key);
+      }
+      await registry.setNativeRetention(input.workspaceId,input.ownerId,input.retained);
+      if(!input.retained)await options.nativeWorkspaces?.releaseReference?.(key);
+      options.onSourceRetentionChanged?.();
+      return {retained:input.retained};
+    },
+    canReleaseNativeSource: async (source:{workspace_id:string;branch_id:string|null}) => {
+      for(const entry of await registry.list())if(entry.nativeSource?.workspace_id===source.workspace_id&&entry.nativeSource.branch_id===source.branch_id){
+        const watch=watchers.get(entry.workspaceId);
+        if(watch?.listeners.size)return false;
+        if(watch){watch.controller?.close();watchers.delete(entry.workspaceId);await releaseWatcherNative(watch);}
+        if(entry.nativeRetainers?.length)return false;
+        if([...dirtyBuffersByOwner.values()].some(value=>value.workspaceId===entry.workspaceId&&value.resources.length>0))return false;
+        if((await journals.list({workspaceId:entry.workspaceId})).length)return false;
+        const state=await mutations.inspect(entry.workspaceId);
+        if(state.activeWriters.length)return false;
+      }
+      return true;
+    },
+    forgetNativeSource: (source:{workspace_id:string;branch_id:string|null})=>source.branch_id?registry.forgetNativeSource(source.workspace_id,source.branch_id):Promise.resolve(),
     admitWorkspaceRegistration,
     inspectWorkspace: async (workspaceId: string, options: { signal?: AbortSignal; reportPhase?: (phase: string) => void } = {}) => {
       try {

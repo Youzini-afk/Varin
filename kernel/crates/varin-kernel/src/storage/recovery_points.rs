@@ -762,8 +762,8 @@ impl Storage {
             .flatten()
             .chain(args.overwrite_paths.iter().flatten())
         {
-            super::file_resources::normalized_relative_path(path,false)?;
-            if !path_allowed(grant,path){return Err(KernelError::Authorization("Restore path is outside grant scope".into()));}
+            let canonical=super::file_resources::normalized_relative_path(path,true)?.0;
+            if !path_allowed(grant,&canonical){return Err(KernelError::Authorization("Restore path is outside grant scope".into()));}
         }
         let original = self.recovery_operation_get(
             &json!({"workspaceId":workspace,"operationId":operation}),

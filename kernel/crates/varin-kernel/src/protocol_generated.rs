@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 69;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 71;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -1350,6 +1350,22 @@ pub(crate) struct MaterialRetentionParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourceRetirementParams {
+    pub(crate) defer: Option<bool>,
+    pub(crate) cleanup_id: String,
+    pub(crate) complete: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct SourcePreparationRetentionParams {
+    pub(crate) thread_id: String,
+    pub(crate) source: LaunchSource,
+    pub(crate) release: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelTokenizerOpenParams {
     pub(crate) configuration: Value,
 }
@@ -2228,6 +2244,14 @@ pub(crate) struct KernelWorkspaceLeaseParams {
     pub(crate) branch_id: String,
     pub(crate) generation: String,
     pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceBindParams {
+    pub(crate) branch_id: String,
+    pub(crate) generation: String,
+    pub(crate) source_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3181,6 +3205,7 @@ pub(crate) struct ContextPersonalization {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct LaunchSourceParams {
+    pub(crate) native_scope: Option<String>,
     pub(crate) environment_run_id: Option<String>,
     pub(crate) workspace_id: String,
     pub(crate) execution_workspace_id: String,
@@ -3245,6 +3270,27 @@ pub(crate) struct AgentPolicyBinding {
     pub(crate) reference: String,
     pub(crate) generation: i64,
     pub(crate) artifact: varin_runtime::catalog::policy_switch::AgentPolicyArtifactBinding,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct LaunchSource {
+    #[serde(rename = "native_scope")]
+    pub(crate) native_scope: Option<String>,
+    #[serde(rename = "environment_run_id")]
+    pub(crate) environment_run_id: Option<RequiredNullable<String>>,
+    #[serde(rename = "workspace_id")]
+    pub(crate) workspace_id: String,
+    #[serde(rename = "execution_workspace_id")]
+    pub(crate) execution_workspace_id: String,
+    #[serde(rename = "branch_id")]
+    pub(crate) branch_id: RequiredNullable<String>,
+    pub(crate) revision: RequiredNullable<i64>,
+    pub(crate) mode: varin_runtime::SourceMode,
+    #[serde(rename = "live_root")]
+    pub(crate) live_root: RequiredNullable<LiveRoot>,
+    #[serde(rename = "resource_owner")]
+    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -3345,6 +3391,7 @@ pub(crate) struct KernelSourceProvenanceReference {
 pub(crate) struct KernelCreateEntry {
     pub(crate) path: String,
     pub(crate) state: PathState,
+    pub(crate) native_json: Option<String>,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
     pub(crate) source_ref: Option<String>,
@@ -3371,6 +3418,7 @@ pub(crate) struct KernelBranchPathChange {
 pub(crate) struct KernelBranchChange {
     pub(crate) path: String,
     pub(crate) state: PathState,
+    pub(crate) native_json: Option<String>,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
     pub(crate) source_ref: Option<String>,
@@ -3477,25 +3525,6 @@ pub(crate) struct KernelReviewFinding {
     pub(crate) file: Option<String>,
     pub(crate) line: Option<i64>,
     pub(crate) message: String,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LaunchSource {
-    #[serde(rename = "environment_run_id")]
-    pub(crate) environment_run_id: Option<RequiredNullable<String>>,
-    #[serde(rename = "workspace_id")]
-    pub(crate) workspace_id: String,
-    #[serde(rename = "execution_workspace_id")]
-    pub(crate) execution_workspace_id: String,
-    #[serde(rename = "branch_id")]
-    pub(crate) branch_id: RequiredNullable<String>,
-    pub(crate) revision: RequiredNullable<i64>,
-    pub(crate) mode: varin_runtime::SourceMode,
-    #[serde(rename = "live_root")]
-    pub(crate) live_root: RequiredNullable<LiveRoot>,
-    #[serde(rename = "resource_owner")]
-    pub(crate) resource_owner: varin_runtime::catalog::launches::SourceResourceOwner,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4335,6 +4364,16 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         }
+        "runtime.source.retirement" => {
+            serde_json::from_value::<SourceRetirementParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "runtime.source.preparation" => {
+            serde_json::from_value::<SourcePreparationRetentionParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
         "runtime.content.collect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -4770,6 +4809,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "workspace.adopt" => serde_json::from_value::<KernelWorkspaceAdoptParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "workspace.backend.inspect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "workspace.open" => serde_json::from_value::<KernelWorkspaceOpenParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
@@ -4783,6 +4825,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "workspace.mount" => serde_json::from_value::<KernelWorkspaceAddress>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.bind" => serde_json::from_value::<KernelWorkspaceBindParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "workspace.fork" => serde_json::from_value::<KernelWorkspaceForkParams>(params.clone())

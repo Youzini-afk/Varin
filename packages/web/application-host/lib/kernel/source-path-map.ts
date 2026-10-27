@@ -35,7 +35,7 @@ export async function sourcePathMap(runtime: Pick<AgentRuntimeClient, 'launch' |
           if (!launch?.selection.source) throw new Error('Original continuation source is unavailable');
           source = launch.selection.source;
         }
-      } else return { source, runId: source.environment_run_id ?? runId, prefix };
+      } else return { source, runId: source.environment_run_id ?? runId, prefix:join(source.native_scope??'',prefix) };
     }
   };
   const [a, b] = await Promise.all([origin(sender), origin(receiver)]);
@@ -45,7 +45,7 @@ export async function sourcePathMap(runtime: Pick<AgentRuntimeClient, 'launch' |
     && (a.source.mode === 'live_root' && b.source.mode === 'live_root'
       ? isDeepStrictEqual(a.source.live_root, b.source.live_root)
       : a.source.mode === b.source.mode && a.source.branch_id === b.source.branch_id
-        && a.source.revision === b.source.revision && (a.source.mode === 'fixed_branch' || a.runId === b.runId));
+        && a.source.revision === b.source.revision && (a.source.mode === 'fixed_branch' || a.source.mode === 'native_workspace' || a.runId === b.runId));
   if (!sameRoot) throw Object.assign(new Error('These Agents have no common source coordinate root'), { code: 'baseline_unavailable' });
   for (const prefix of [a.prefix, b.prefix]) if (prefix) normalizeResourceId(prefix);
   if (a.prefix === b.prefix) return { from: '', to: '' };

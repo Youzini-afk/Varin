@@ -87,6 +87,24 @@ describe("three-way-merge", () => {
   });
 
   describe("planThreeWayPath", () => {
+    it('merges independent xattrs and a child binary change without reading bodies',async()=>{
+      const native={uid:0,gid:0,created:null,modified:{seconds:1,nanos:0},backup:null,windowsAttributes:0,bsdFlags:0,security:null,reparseData:null,xattrs:{}};
+      const base={kind:'regular-file' as const,objectHash:'base',byteLength:2,mode:0o644,native};
+      const parent={...base,native:{...native,xattrs:{dXNlci5w:[1]}}};
+      const child={...base,objectHash:'child',native:{...native,modified:{seconds:2,nanos:0},xattrs:{dXNlci5j:[2]}}};
+      let reads=0;
+      const plan=await planThreeWayPath({path:'binary',baseState:base,parentState:parent,childState:child,readContent:async()=>{reads++;return Buffer.from([0,1]);}});
+      expect(plan.decision).toBe('merge-clean');expect(reads).toBe(0);
+      expect(plan.mergedState).toEqual({...child,native:{...child.native,xattrs:{dXNlci5w:[1],dXNlci5j:[2]}}});
+    });
+    it('retains an attribute conflict even when both bodies are identical',async()=>{
+      const native={uid:0,gid:0,created:null,modified:{seconds:1,nanos:0},backup:null,windowsAttributes:0,bsdFlags:0,security:null,reparseData:null,xattrs:{dXNlcg:[0]}};
+      const base={kind:'directory' as const,mode:0o755,native};
+      const parent={...base,native:{...native,xattrs:{dXNlcg:[1]}}};
+      const child={...base,native:{...native,xattrs:{dXNlcg:[2]}}};
+      const plan=await planThreeWayPath({path:'directory',baseState:base,parentState:parent,childState:child,readContent:async()=>null});
+      expect(plan.decision).toBe('conflict');expect(plan.conflictReason).toContain('attributes');
+    });
     const fileState = (hash: string, mode = 0o644): RecoveryState => ({
       kind: "regular-file",
       objectHash: hash,

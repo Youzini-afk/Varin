@@ -49,6 +49,11 @@ export function reviewSource(snapshot: ThreadSnapshot): ThreadSource {
     if (!source.live_root) throw new Error('The original live workspace identity is unavailable.');
     return { ...base, mode: 'live_root', liveRoot: source.live_root };
   }
+  if (source.mode === 'native_workspace') {
+    if (!source.branch_id) throw new Error('The original workspace branch is unavailable.');
+    return { ...base, mode: 'native_workspace', branchId: source.branch_id,
+      ...(source.native_scope ? { nativeScope: source.native_scope } : {}) };
+  }
   if (!source.branch_id || source.revision === null) throw new Error('The original source revision is unavailable.');
   return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision,
     ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) };

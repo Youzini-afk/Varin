@@ -1,6 +1,7 @@
 //! File condition progress is part of the original definition. The resource owner owns
 //! authorization and snapshots; the Catalog stores only its receipt and observed facts.
 use super::*;
+use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -26,17 +27,63 @@ pub enum FileState {
         #[serde(rename = "byteLength")]
         byte_length: u64,
         mode: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native: Option<FileMetadata>,
     },
     Directory {
         mode: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native: Option<FileMetadata>,
     },
     Symlink {
         #[serde(rename = "symlinkTarget")]
         symlink_target: String,
         mode: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        native: Option<FileMetadata>,
     },
     Missing,
     Unsupported,
+}
+/// Recoverable attributes, without an inode ID or namespace binding. Readers and
+/// metadata-only edits retain these independently of the content hash. Access and
+/// change timestamps remain observations in the filesystem version, rather than
+/// conditional state: reading and applying a file can advance them.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileMetadata {
+    pub uid: u32,
+    pub gid: u32,
+    pub created: Option<FileTimestamp>,
+    pub modified: FileTimestamp,
+    pub backup: Option<FileTimestamp>,
+    pub windows_attributes: u32,
+    pub bsd_flags: u32,
+    pub security: Option<Vec<u8>>,
+    pub reparse_data: Option<Vec<u8>>,
+    pub xattrs: BTreeMap<String, Vec<u8>>,
+}
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FileTimestamp {
+    pub seconds: i64,
+    pub nanos: u32,
+}
+impl FileState {
+    pub fn native(&self) -> Option<&FileMetadata> {
+        match self {
+            Self::RegularFile { native, .. } | Self::Directory { native, .. }
+            | Self::Symlink { native, .. } => native.as_ref(),
+            _ => None,
+        }
+    }
+    pub fn set_native(&mut self, value: FileMetadata) {
+        match self {
+            Self::RegularFile { native, .. } | Self::Directory { native, .. }
+            | Self::Symlink { native, .. } => *native = Some(value),
+            _ => (),
+        }
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

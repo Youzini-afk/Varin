@@ -409,7 +409,7 @@ pub(super) fn agent_file_source(db: &Connection, run: &Run) -> Result<launches::
         if let Some(body) = body {
             let execution: super::delegated::DelegatedExecution = serde_json::from_str(&body)?;
             if let super::collaboration::ChildCodeResult::Published { result, .. } = execution.code_result {
-                source.mode=SourceMode::FixedBranch; source.branch_id=Some(result.branch_id); source.revision=Some(result.result_revision);
+                source.mode=SourceMode::FixedBranch; source.native_scope=None; source.branch_id=Some(result.branch_id); source.revision=Some(result.result_revision);
                 source.live_root=None; source.environment_run_id=None;
             }
         }

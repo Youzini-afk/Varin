@@ -49,7 +49,7 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
     if (!current(controller)) return;
     if (!project) throw new Error(t('directoryExplorerDialog.toast.failedToAddProject'));
     created.current = project;
-    await startThreadFromNavigation({ directory: project.path });
+    await startThreadFromNavigation({ directory: await projectExecutionPath(project) });
     if (current(controller)) onOpenChange(false);
   };
   const create = (event: React.FormEvent) => {
@@ -143,3 +143,4 @@ export function ProjectCreateDialog({ open, onOpenChange, initialPath }: {
     </DialogContent>
   </Dialog>;
 }
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

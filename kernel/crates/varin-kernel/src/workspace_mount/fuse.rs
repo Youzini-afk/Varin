@@ -245,6 +245,7 @@ impl Backend {
     }
 }
 impl Filesystem for Backend {
+    fn destroy(&mut self){self.session.mount_disconnected();}
     fn forget(&self, _: &Request, ino: INodeNo, nlookup: u64) {
         if let Ok(mut handles) = self.handles.lock() {
             if let Some(count) = handles.lookups.get_mut(&ino.0) {
@@ -613,6 +614,7 @@ impl Filesystem for Backend {
                 }
                 if let Some(value) = crtime {
                     attrs.created = Timestamp::from_time(value);
+                    attrs.creation_exported = true;
                 }
                 if let Some(value) = bkuptime {
                     attrs.backup = Some(Timestamp::from_time(value));
@@ -875,6 +877,7 @@ impl Mount {
         target: &Path,
     ) -> Result<Self, KernelError> {
         admit_target(target)?;
+        session.mount_started();
         use std::os::unix::fs::MetadataExt;
         let previous_device = std::fs::metadata(target)?.dev();
         let root = session.lookup("")?;
@@ -994,6 +997,15 @@ impl Mount {
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {
+        if self.native.as_ref().is_some_and(|native|native.guard.is_finished()){
+            self.native.take().unwrap().join().map_err(|error|KernelError::Storage(format!("Workspace callback drainage failed: {error}")))?;
+            // The dispatcher and all its workers have really stopped. These
+            // callbacks can no longer deliver Release; retain dirty namespace
+            // state in Session while dropping their unreachable handle cache.
+            let mut handles=self.handles.lock().map_err(|_|unsupported("Native handle registry failed"))?;
+            handles.handles.clear();handles.nodes.clear();handles.lookups.clear();
+            drop(handles);return self.session.close();
+        }
         {
             let _opens = self
                 .open_boundary

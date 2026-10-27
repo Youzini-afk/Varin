@@ -243,6 +243,8 @@ pub(crate) struct ToolBinding {
     #[serde(default = "default_source_mode")]
     pub source_mode: SourceMode,
     pub materialized_source: Option<FixedFileSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_workspace: Option<NativeWorkspaceBinding>,
     pub live_root: Option<varin_runtime::catalog::launches::LiveRoot>,
     /// Source lineage only; resource admission always uses the registered root.
     pub environment_run_id: Option<String>,
@@ -254,6 +256,15 @@ pub(crate) struct RemoteResourceAuthority {
     pub authority_id: String,
     pub resource_epoch: String,
     pub execution_owner: varin_runtime::ExecutorOwner,
+}
+#[derive(Debug,Clone,Deserialize,Serialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub(crate) struct NativeWorkspaceBinding {
+    pub branch_id:String,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub generation:Option<String>,
+    #[serde(default,skip_serializing_if="Option::is_none")]
+    pub source_path:Option<String>,
 }
 impl ToolBinding {
     fn physical_source(&self) -> Value {
@@ -274,13 +285,14 @@ impl ToolBinding {
             .as_ref()
             .or(self.materialized_source.as_ref());
         let source = varin_runtime::catalog::launches::SourceSelection {
+            native_scope:self.native_workspace.as_ref().and_then(|native|native.source_path.clone()),
             resource_owner: self.resource_owner.clone(),
             environment_run_id: self.environment_run_id.clone(),
             mode: self.source_mode,
-            live_root: self.live_root.clone(),
+            live_root: if self.source_mode == SourceMode::NativeWorkspace {None} else {self.live_root.clone()},
             workspace_id: self.workspace_id.clone(),
             execution_workspace_id: self.execution_workspace_id.clone(),
-            branch_id: fixed.map(|source| source.branch_id.clone()),
+            branch_id: self.native_workspace.as_ref().map(|source|source.branch_id.clone()).or_else(||fixed.map(|source| source.branch_id.clone())),
             revision: fixed
                 .map(|source| u64::try_from(source.revision))
                 .transpose()
@@ -1255,6 +1267,7 @@ impl KernelResourceClient {
                 None
             },
             source_mode: read.1.mode,
+            native_workspace: if read.1.mode==SourceMode::NativeWorkspace {read.1.branch_id.as_ref().map(|id|NativeWorkspaceBinding{branch_id:id.clone(),generation:None,source_path:read.1.native_scope.clone()})}else{None},
             materialized_source: if read.1.mode == SourceMode::Materialized {
                 fixed
             } else {
@@ -1700,7 +1713,8 @@ impl KernelToolExecutor {
         if binding.source_mode != SourceMode::FixedBranch
             && (binding.file_source.is_some()
                 || (binding.root_id.as_deref().is_none_or(str::is_empty)
-                    && !(binding.source_mode == SourceMode::Materialized && binding.materialized_source.is_some())))
+                    && !(binding.source_mode == SourceMode::Materialized && binding.materialized_source.is_some())
+                    && !(binding.source_mode==SourceMode::NativeWorkspace&&binding.enabled_tools.is_empty())))
         {
             return Err(ExecutionError::new(
                 "invalid_tool_binding",
@@ -1717,7 +1731,7 @@ impl KernelToolExecutor {
                 "invalid materialization provenance",
             ));
         }
-        if (binding.source_mode == SourceMode::LiveRoot) != binding.live_root.is_some()
+        if (matches!(binding.source_mode,SourceMode::LiveRoot|SourceMode::NativeWorkspace)&&!(binding.source_mode==SourceMode::NativeWorkspace&&binding.enabled_tools.is_empty()&&binding.root_id.is_none())) != binding.live_root.is_some()
             || binding.live_root.as_ref().is_some_and(|root| {
                 root.host_id.is_empty()
                     || root.canonical_root.is_empty()
@@ -1729,6 +1743,10 @@ impl KernelToolExecutor {
                 "invalid_tool_binding",
                 "live source requires its exact registered environment identity",
             ));
+        }
+        if (binding.source_mode==SourceMode::NativeWorkspace)!=binding.native_workspace.is_some()
+            || binding.native_workspace.as_ref().is_some_and(|source|source.branch_id.is_empty()||(binding.remote_authority.is_none()&&binding.root_id.is_some()&&source.generation.as_deref().is_none_or(str::is_empty))){
+            return Err(ExecutionError::new("invalid_tool_binding","Native workspace requires its original mounted source binding"));
         }
         if binding.enabled_tools.contains(&ToolKind::ProcessSpawn)
             && binding.source_mode == SourceMode::LiveRoot
@@ -2808,6 +2826,7 @@ pub(crate) enum ResourceWork {
     Ready(Value),
     TextMutation(crate::storage::file_mutation_tasks::Task),
     FileRecovery(crate::storage::recovery_file_tasks::Task),
+    NativeHandoff(crate::workspace_handoffs::Task),
     ProcessSpawn(crate::storage::process_tasks::Task),
     BlobRead(crate::storage::blob_reads::BlobReadTask),
     ExecutionView(crate::storage::materialization::Task),
@@ -2821,6 +2840,10 @@ pub(crate) fn prepare_resource(
     host_generation: &str,
     request: &ResourceCall,
 ) -> Result<ResourceWork, ResourceFailure> {
+    if request.binding.source_mode==SourceMode::NativeWorkspace && request.binding.remote_authority.is_none() && request.binding.root_id.is_some(){
+        let native=storage.validate_native_tool_binding(&request.binding);
+        native.map_err(|error|ResourceFailure{error,dispatched:false})?;
+    }
     if let Some(authority) = &request.binding.target_authority {
         storage
             .validate_source_resource(
@@ -2898,6 +2921,19 @@ pub(crate) fn prepare_resource(
             effective=request.with_execution_binding(binding); &effective
         } else {request}
     } else {request};
+    if let ResourceOperation::ChildSourceHandoff{delegation}=&request.operation {
+        let source=delegation.agent_source.as_ref().map(|stage|stage.source.clone()).unwrap_or(request.binding.source_selection().map_err(|error|ResourceFailure{error,dispatched:false})?);
+        if source.mode==SourceMode::NativeWorkspace{
+            let result=(||{
+                let (method,params)=request.operation.params(&request.binding,&request.context);
+                let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,method,&params)?;
+                validate_binding(&grant,&request.binding,&request.context)?;
+                if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
+                Ok(ResourceWork::NativeHandoff(crate::workspace_handoffs::Task{binding:request.binding.clone(),context:request.context.clone(),
+                    delegation:delegation.clone(),source,grant,cancellation:request.cancellation.shared_flag()}))
+            })();return result.map_err(|error|ResourceFailure{error,dispatched:false});
+        }
+    }
     if matches!(request.operation,ResourceOperation::ProcessSpawn(_)) {
         let result=(||{
             let (method,params)=request.operation.params(&request.binding,&request.context);
@@ -3105,6 +3141,7 @@ pub(crate) fn serve_resource(
     match prepare_resource(storage, epoch, host_id, host_generation, request)? {
         ResourceWork::Ready(value) => Ok(value),
         ResourceWork::ProcessSpawn(task) => task.run_local_resource(storage),
+        ResourceWork::NativeHandoff(_) => Err(ResourceFailure{error:KernelError::Protocol("Native handoffs require the workspace executor".into()),dispatched:false}),
         ResourceWork::FileRecovery(task) => {
             let mut dispatched=false;
             task.run_local(storage,&mut dispatched).map_err(|error|ResourceFailure{error,dispatched})
@@ -3208,7 +3245,7 @@ fn serve_resource_immediate(
             if matches!(request.operation,ResourceOperation::ProcessInspect(_)|ResourceOperation::ProcessRead(_)|ResourceOperation::ProcessObservation{..}) {
                 if request.binding.root_id.as_deref()!=Some(root.root_id.as_str()) {return Err(KernelError::Authorization("Original process root binding changed".into()));}
                 storage.validate_recorded_live_root(root,&grant,host_id)?;
-            } else {storage.validate_live_root(root, &grant, host_id)?;}
+            } else {storage.validate_recorded_live_root(root, &grant, host_id)?;}
         }
         match &request.operation {
             ResourceOperation::ChildSourceHandoff { delegation } => {
@@ -3274,7 +3311,7 @@ fn serve_resource_immediate(
                 // Keep the original file scope/lease admission without returning its
                 // authorize-only null before the source descriptor is assembled.
                 storage.set_cancellation(request.cancellation.shared_flag());
-                let admission = storage.file_read(&authorized, &grant, false);
+                let admission = storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag());
                 storage.clear_cancellation();
                 admission?;
             }

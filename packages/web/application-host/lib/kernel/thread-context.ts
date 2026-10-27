@@ -41,13 +41,17 @@ export function resourceThreadSource(source: LaunchSource | null): ThreadSource 
     if (!source.live_root) throw new Error('Resource source has no admitted live root');
     return { ...base, mode: 'live_root', liveRoot: source.live_root };
   }
+  if(source.mode==='native_workspace'){
+    if(!source.branch_id)throw new Error('Native resource branch is missing');
+    return {...base,mode:'native_workspace',branchId:source.branch_id,...(source.native_scope?{nativeScope:source.native_scope}:{})};
+  }
   if (!source.branch_id || source.revision === null || !Number.isSafeInteger(source.revision) || source.revision < 0) {
     throw new Error('Resource source has no fixed branch revision');
   }
   return { ...base, mode: source.mode, branchId: source.branch_id, revision: source.revision, ...(source.environment_run_id ? { environmentRunId: source.environment_run_id } : {}) };
 }
 export function resourceSource(source: ThreadSource | null): LaunchSource | null {
-  return source ? { resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+  return source ? { ...(source.mode==='native_workspace'&&source.nativeScope?{native_scope:source.nativeScope}:{}),resource_owner: source.resourceOwner, workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
     branch_id: source.branchId ?? null, revision: source.revision ?? null, mode: source.mode, live_root: source.liveRoot ?? null, ...(source.environmentRunId ? { environment_run_id: source.environmentRunId } : {}) } : null;
 }
 // Catalog persistence may reorder object keys. Provenance identifies the value, not the

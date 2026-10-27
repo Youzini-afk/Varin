@@ -14,6 +14,7 @@ type RecoveryMethod = 'recovery.points' | 'recovery.files.restore' | 'recovery.p
 const sourceKey = (runId: string, source: LaunchSource) => JSON.stringify([
   source.resource_owner, source.workspace_id, source.execution_workspace_id, source.mode,
   source.live_root?.rootId, source.mode === 'materialized' ? source.environment_run_id ?? runId : null,
+  source.mode==='native_workspace'?[source.branch_id,source.native_scope]:null,
 ]);
 export function createFileRecoveryService(options: {
   runtime: AgentRuntimeClient;
@@ -66,9 +67,14 @@ export function createFileRecoveryService(options: {
     }
     await options.store.listCheckpoints(source.workspace_id);
     const handshake = options.kernel.handshake ?? await options.kernel.start();
+    const native=source.mode==='native_workspace'?await (async()=>{
+      const owner=options.kernel.nativeWorkspaces;if(!owner)throw new Error('Native recovery source is unavailable');
+      const entry=await owner.open(source);return owner.acquire(source,entry.grant);
+    })():undefined;
     const root = source.mode === 'live_root' ? source.live_root!.canonicalRoot
+      : source.mode==='native_workspace' ? native!.path
       : await admitMaterializedRoot((await originalMaterializationLocation(handshake.storageRoot, source.workspace_id, source.environment_run_id ?? sourceRunId)).targetPath);
-    const rootId = source.live_root?.rootId ?? (await options.storage.fileAuthorityContext({
+    const rootId = native?.rootId ?? source.live_root?.rootId ?? (await options.storage.fileAuthorityContext({
       owningWorkspaceId: source.workspace_id, executionWorkspaceId: source.execution_workspace_id, canonicalRoot: root,
       purpose: 'recovery-maintenance', capabilities: ['recovery.maintenance'],
     })).rootId;

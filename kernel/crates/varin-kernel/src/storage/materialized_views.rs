@@ -360,11 +360,7 @@ impl Storage {
                 "Derived source view preparation has not stopped",
             ));
         }
-        let root_id = self.view_container(
-            &params.workspace_id,
-            field(&record, "executionWorkspaceId")?,
-            grant,
-        )?;
+        let root_id = field(&self.storage_cleanup_file_root(grant)?, "rootId")?.to_string();
         let path = field(&record, "path")?.to_string();
         let mut paths = Vec::<(String, DirectoryIdentity)>::new();
         if record["state"] == "releasing" {

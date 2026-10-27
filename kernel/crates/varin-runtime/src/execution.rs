@@ -319,7 +319,7 @@ impl ToolRequirements {
         match self.source {
             ToolSourceRequirement::Source => true,
             ToolSourceRequirement::Physical => mode != crate::SourceMode::FixedBranch,
-            ToolSourceRequirement::Live => mode == crate::SourceMode::LiveRoot,
+            ToolSourceRequirement::Live => matches!(mode, crate::SourceMode::LiveRoot | crate::SourceMode::NativeWorkspace),
         }
     }
 }

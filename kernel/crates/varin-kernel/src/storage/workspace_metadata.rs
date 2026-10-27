@@ -8,6 +8,15 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use serde::{Deserialize, Serialize};
 
 const RECORD: &str = "workspace.filesystem";
+#[path = "workspace_metadata_import.rs"]
+mod imports;
+#[path = "workspace_metadata_changes.rs"]
+mod changes;
+#[path = "workspace_metadata_pins.rs"]
+mod pins;
+#[path = "workspace_metadata_read.rs"]
+mod reader;
+pub(super) use reader::{Reader, changed_paths};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -79,6 +88,9 @@ pub(crate) struct Attributes {
     pub uid: u32,
     pub gid: u32,
     pub created: Timestamp,
+    /// The logical birth time remains available to mounted programs. Only a
+    /// captured/settable birth time is an exact restore requirement on export.
+    pub creation_exported: bool,
     pub accessed: Timestamp,
     pub modified: Timestamp,
     pub changed: Timestamp,
@@ -93,12 +105,59 @@ pub(crate) struct Attributes {
     pub xattrs: BTreeMap<String, Vec<u8>>,
 }
 impl Attributes {
+    pub(crate) fn file_metadata(&self) -> varin_runtime::catalog::followups::FileMetadata {
+        use varin_runtime::catalog::followups::{FileMetadata, FileTimestamp};
+        let time = |v: Timestamp| FileTimestamp {
+            seconds: v.seconds,
+            nanos: v.nanos,
+        };
+        FileMetadata {
+            uid: self.uid,
+            gid: self.gid,
+            created: self.creation_exported.then(|| time(self.created)),
+            modified: time(self.modified),
+            backup: self.backup.map(time),
+            windows_attributes: self.windows_attributes,
+            bsd_flags: self.bsd_flags,
+            security: self.security.clone(),
+            reparse_data: self.reparse_data.clone(),
+            xattrs: self.xattrs.clone(),
+        }
+    }
+    pub(crate) fn with_file_metadata(
+        mut self,
+        value: &varin_runtime::catalog::followups::FileMetadata,
+    ) -> Result<Self, KernelError> {
+        let time = |v: varin_runtime::catalog::followups::FileTimestamp| Timestamp {
+            seconds: v.seconds,
+            nanos: v.nanos,
+        };
+        self.uid = value.uid;
+        self.gid = value.gid;
+        if let Some(created) = value.created {
+            self.created = time(created);
+        }
+        self.creation_exported = value.created.is_some();
+        self.modified = time(value.modified);
+        self.backup = value.backup.map(time);
+        self.changed = Timestamp::now();
+        self.windows_attributes = value.windows_attributes;
+        self.bsd_flags = value.bsd_flags;
+        self.security = value.security.clone();
+        self.reparse_data = value.reparse_data.clone();
+        self.xattrs = value.xattrs.clone();
+        self.validate()?;
+        Ok(self)
+    }
     pub(crate) fn touch(&mut self) {
         let now = Timestamp::now();
         self.modified = now;
         self.changed = now;
     }
     pub(crate) fn validate(&self) -> Result<(), KernelError> {
+        if let Some(security) = &self.security {
+            crate::native_security::validate(security)?;
+        }
         if let Some(data) = &self.reparse_data {
             crate::reparse_data::parse(data)?;
         }
@@ -127,6 +186,10 @@ pub(crate) struct Origin {
 pub(crate) struct Binding {
     pub file_id: Uuid,
     origin: Option<Origin>,
+    /// Changes the path leaf when its shared inode attributes change, allowing
+    /// result workers to skip unchanged namespace subtrees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    attributes_revision: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -194,7 +257,7 @@ fn record_id(branch: &str) -> String {
 }
 fn key(path: &str) -> Result<Vec<String>, KernelError> {
     let mut parts = vec!["namespace".into()];
-    if !path.is_empty() {
+    if !path.is_empty() && path != "." {
         for component in Storage::validate_path(path)? {
             parts.push("children".into());
             parts.push(component);
@@ -233,6 +296,7 @@ fn defaults(id: Uuid, state: &PathState, time: Timestamp) -> Attributes {
         uid,
         gid,
         created: time,
+        creation_exported: cfg!(any(windows,target_os="macos")),
         accessed: time,
         modified: time,
         changed: time,
@@ -245,7 +309,102 @@ fn defaults(id: Uuid, state: &PathState, time: Timestamp) -> Attributes {
     }
 }
 
+pub(crate) fn validate_file_metadata(
+    value: &varin_runtime::catalog::followups::FileMetadata,
+) -> Result<(), KernelError> {
+    let attributes = defaults(
+        Uuid::nil(),
+        &PathState::Directory { mode: None },
+        Timestamp::now(),
+    )
+    .with_file_metadata(value)?;
+    for name in attributes.xattrs.keys() {
+        let bytes = URL_SAFE_NO_PAD
+            .decode(name)
+            .map_err(|_| KernelError::Operation("Invalid native xattr name encoding".into()))?;
+        if bytes.is_empty() || bytes.contains(&0) {
+            return Err(KernelError::Operation("Invalid native xattr name".into()));
+        }
+    }
+    Ok(())
+}
+
 impl Storage {
+    fn selected_filesystem(
+        &self,
+        branch: &str,
+        revision: i64,
+        write_revision: i64,
+        data_root: &str,
+    ) -> Result<Option<(Head, String)>, KernelError> {
+        let data = self.branch(branch)?;
+        let Some(record) = self.domain_record_value(&data.workspace_id, &record_id(branch))? else {
+            return Ok(None);
+        };
+        let mut head: Head = serde_json::from_str(
+            record["payloadJson"]
+                .as_str()
+                .ok_or_else(|| KernelError::Storage("Filesystem metadata is missing".into()))?,
+        )?;
+        let metadata = self.branch(&head.metadata_branch)?;
+        let root = if write_revision >= 0
+            && data_root == data.head_root
+            && data.write_revision == write_revision
+        {
+            metadata.head_root
+        } else if revision == 0 && data_root == data.base_root {
+            metadata.base_root
+        } else {
+            let id = format!("workspace-revision-filesystem:{branch}@{revision}");
+            let value = self
+                .domain_record_value(&data.workspace_id, &id)?
+                .ok_or_else(|| {
+                    KernelError::Operation(
+                        "Selected native file version has no retained attributes".into(),
+                    )
+                })?;
+            let selected: super::workspace_results::FilesystemRevision =
+                serde_json::from_str(value["payloadJson"].as_str().ok_or_else(|| {
+                    KernelError::Storage("Native revision attributes are missing".into())
+                })?)?;
+            head = selected.head;
+            selected.root
+        };
+        Ok(Some((head, root)))
+    }
+    pub(super) fn project_native_entries(
+        &self,
+        branch: &str,
+        revision: i64,
+        write_revision: i64,
+        data_root: &str,
+        pin: Option<&str>,
+        entries: &mut [Value],
+    ) -> Result<(), KernelError> {
+        if entries.is_empty() {
+            return Ok(());
+        }
+        let selected = if let Some(pin) = pin {
+            self.pinned_filesystem(pin, data_root)?
+        } else {
+            self.selected_filesystem(branch, revision, write_revision, data_root)?
+        };
+        let Some((head, root)) = selected else {
+            return Ok(());
+        };
+        for entry in entries {
+            let path = entry["path"]
+                .as_str()
+                .ok_or_else(|| KernelError::Storage("Native entry path is missing".into()))?;
+            let state: PathState = serde_json::from_value(entry["state"].clone())?;
+            if !matches!(state, PathState::Missing | PathState::Unsupported) {
+                let attributes = self.read_workspace_metadata_root(&head, &root, path, &state)?.attributes;
+                entry["state"]["mode"] = json!(attributes.mode);
+                entry["nativeJson"] = json!(serde_json::to_string(&attributes.file_metadata())?);
+            }
+        }
+        Ok(())
+    }
     /// Join the caller's admitted transaction, or create one for an internal
     /// metadata operation that has no public operation receipt of its own.
     pub(super) fn filesystem_transaction<T>(
@@ -592,7 +751,7 @@ impl Storage {
         self.filesystem_transaction(|s|{
             s.create_branch(&json!({"operationId":format!("filesystem-metadata:{}",head.namespace),"branchId":head.metadata_branch,"workspaceId":data.workspace_id,"entries":[],"draftBasePaths":[],"captureScopes":[]}),&grant.grant_id)?;
             let root=s.branch(&head.metadata_branch)?.head_root;
-            let binding=Binding{file_id:head.namespace,origin:Some(Origin{namespace:head.namespace,prefix:String::new()})};
+            let binding=Binding{file_id:head.namespace,attributes_revision:None,origin:Some(Origin{namespace:head.namespace,prefix:String::new()})};
             let root=s.metadata_set(&root,&["namespace".into(),"info".into()],&binding)?;
             let attributes=defaults(binding.file_id,&PathState::Directory{mode:None},head.created);
             let root=s.metadata_set(&root,&["inodes".into(),binding.file_id.to_string()],&attributes)?;
@@ -628,57 +787,8 @@ impl Storage {
         path: &str,
         state: &PathState,
     ) -> Result<Metadata, KernelError> {
-        let parts = if path.is_empty() {
-            vec![]
-        } else {
-            Storage::validate_path(path)?
-        };
-        let mut origin = Origin {
-            namespace: head.namespace,
-            prefix: String::new(),
-        };
-        let mut origin_depth = 0;
-        let mut binding = None;
-        for depth in 0..=parts.len() {
-            let mut slot = key(&parts[..depth].join("/"))?;
-            slot.push("info".into());
-            if let Some(value) = self.metadata_value::<Binding>(root, &slot)? {
-                if let Some(selected) = &value.origin {
-                    origin = selected.clone();
-                    origin_depth = depth;
-                }
-                if depth == parts.len() {
-                    binding = Some(value);
-                }
-            }
-        }
-        let suffix = parts[origin_depth..].join("/");
-        let original = if origin.prefix.is_empty() {
-            suffix
-        } else if suffix.is_empty() {
-            origin.prefix.clone()
-        } else {
-            format!("{}/{suffix}", origin.prefix)
-        };
-        let binding = binding.unwrap_or_else(|| Binding {
-            file_id: identity(origin.namespace, &original),
-            origin: state.is_directory().then_some(Origin {
-                namespace: origin.namespace,
-                prefix: original,
-            }),
-        });
-        let attributes = self
-            .metadata_value::<Attributes>(root, &["inodes".into(), binding.file_id.to_string()])?
-            .unwrap_or_else(|| defaults(binding.file_id, state, head.created));
-        attributes.validate()?;
-        if attributes.file_id != binding.file_id {
-            return Err(KernelError::Storage(
-                "filesystem inode metadata identity differs from namespace".into(),
-            ));
-        }
-        Ok(Metadata {
-            binding,
-            attributes,
+        reader::read_at(head, path, state, |slot| {
+            self.metadata_value::<Value>(root, slot)
         })
     }
     pub(crate) fn new_workspace_metadata(state: &PathState) -> Metadata {
@@ -686,6 +796,7 @@ impl Storage {
         Metadata {
             binding: Binding {
                 file_id: id,
+                attributes_revision: None,
                 origin: state.is_directory().then_some(Origin {
                     namespace: id,
                     prefix: String::new(),
@@ -711,7 +822,9 @@ impl Storage {
         let root = self.branch(&head.metadata_branch)?.head_root;
         let mut info = key(path)?;
         info.push("info".into());
-        let root = self.metadata_set(&root, &info, &value.binding)?;
+        let mut binding = value.binding.clone();
+        binding.attributes_revision = Some(hash_json(&json!([value.attributes.mode, value.attributes.file_metadata()]))?);
+        let root = self.metadata_set(&root, &info, &binding)?;
         let root = self.metadata_set(
             &root,
             &["inodes".into(), value.binding.file_id.to_string()],
@@ -734,7 +847,9 @@ impl Storage {
             }
             let mut info = key(path)?;
             info.push("info".into());
-            root = self.metadata_set(&root, &info, &metadata.binding)?;
+            let mut binding = metadata.binding.clone();
+            binding.attributes_revision = Some(hash_json(&json!([metadata.attributes.mode, metadata.attributes.file_metadata()]))?);
+            root = self.metadata_set(&root, &info, &binding)?;
             root = self.metadata_set(
                 &root,
                 &["inodes".into(), metadata.binding.file_id.to_string()],
@@ -869,6 +984,61 @@ impl Storage {
         }
         self.set_metadata_root(&head, &root)
     }
+    /// Immutable child preparation shares the file attributes as well as the
+    /// body tree. A published baseline never borrows later head attributes.
+    pub(super) fn fork_source_filesystem(
+        &mut self,
+        source: &str,
+        target: &str,
+        pin: Option<&str>,
+        data_root: &str,
+        grant: &Grant,
+    ) -> Result<(), KernelError> {
+        if let Some(pin) = pin {
+            if let Some((head, root)) = self.pinned_filesystem(pin, data_root)? {
+                return self.fork_workspace_metadata(&head, target, &root, grant, &[], "");
+            }
+        }
+        // Body-only immutable sources can outlive their branch through a pin.
+        // Such a pin never claimed a filesystem sidecar; don't look up the
+        // deleted branch merely to synthesize one.
+        if pin.is_some() && self.conn.query_row("SELECT NOT EXISTS(SELECT 1 FROM branches WHERE branch_id=?1)",[source],|row|row.get::<_,bool>(0))? {return Ok(());}
+        let data = self.branch(source)?;
+        let Some(record) = self.domain_record_value(&data.workspace_id, &record_id(source))? else {
+            return Ok(());
+        };
+        let mut head: Head =
+            serde_json::from_str(record["payloadJson"].as_str().ok_or_else(|| {
+                KernelError::Storage("Filesystem source metadata is missing".into())
+            })?)?;
+        let (revision, write_revision) = if let Some(pin) = pin {
+            self.conn.query_row("SELECT revision,write_revision FROM pins WHERE pin_id=?1 AND branch_id=?2 AND root_hash=?3",params![pin,source,data_root],|row|Ok((row.get::<_,i64>(0)?,row.get::<_,i64>(1)?)))?
+        } else {
+            (data.head_revision, data.write_revision)
+        };
+        let metadata = self.branch(&head.metadata_branch)?;
+        let root = if write_revision >= 0 && data_root == data.head_root {
+            metadata.head_root
+        } else if revision == 0 && data_root == data.base_root {
+            metadata.base_root
+        } else {
+            let id = format!("workspace-revision-filesystem:{source}@{revision}");
+            let value = self
+                .domain_record_value(&data.workspace_id, &id)?
+                .ok_or_else(|| {
+                    KernelError::Operation(
+                        "Selected native revision has no retained filesystem attributes".into(),
+                    )
+                })?;
+            let filesystem: super::workspace_results::FilesystemRevision =
+                serde_json::from_str(value["payloadJson"].as_str().ok_or_else(|| {
+                    KernelError::Storage("Native revision attributes are missing".into())
+                })?)?;
+            head = filesystem.head;
+            filesystem.root
+        };
+        self.fork_workspace_metadata(&head, target, &root, grant, &[], "")
+    }
     pub(super) fn fork_workspace_metadata(
         &mut self,
         source: &Head,
@@ -878,8 +1048,28 @@ impl Storage {
         changes: &[(String, Metadata)],
         selected: &str,
     ) -> Result<(), KernelError> {
-        let mut head = source.clone();
+        let (mut head, root) = self.scope_workspace_metadata(source, root, changes, selected)?;
         let workspace = self.branch(target)?.workspace_id;
+        head.branch_id = target.into();
+        head.metadata_branch = format!("workspace-metadata:{}", Uuid::new_v4());
+        self.create_filesystem_snapshot_branch(
+            source.metadata_branch.as_str(),
+            &head.metadata_branch,
+            &workspace,
+            &root,
+            &format!("filesystem-fork:{}", Uuid::new_v4()),
+            grant,
+        )?;
+        self.insert_filesystem_head(&head, &workspace)
+    }
+    fn scope_workspace_metadata(
+        &mut self,
+        source: &Head,
+        root: &str,
+        changes: &[(String, Metadata)],
+        selected: &str,
+    ) -> Result<(Head, String), KernelError> {
+        let mut head = source.clone();
         let mut root = self.workspace_metadata_snapshot(root, changes)?;
         if !selected.is_empty() {
             let directory = self.read_workspace_metadata_root(
@@ -906,18 +1096,7 @@ impl Storage {
             head.outside_namespaces.insert(head.namespace);
             head.namespace = directory.binding.file_id;
         }
-        head.branch_id = target.into();
-        head.metadata_branch = format!("workspace-metadata:{}", Uuid::new_v4());
-        self.create_filesystem_snapshot_branch(
-            source.metadata_branch.as_str(),
-            &head.metadata_branch,
-            &workspace,
-            &root,
-            &format!("filesystem-fork:{}", Uuid::new_v4()),
-            grant,
-        )?;
-        self.insert_filesystem_head(&head, &workspace)?;
-        Ok(())
+        Ok((head, root))
     }
     /// The caller already validated an owned snapshot and runs in its original
     /// transaction. A temporary pin admits the derived root through the normal

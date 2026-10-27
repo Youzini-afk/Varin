@@ -69,6 +69,8 @@ pub enum ChildSourceProvenance {
     FixedRoot {
         root: String,
         #[serde(skip_serializing_if = "Option::is_none")]
+        selection: Option<SourceSnapshotSelection>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         resources: Option<Value>,
     },
     #[serde(rename = "stable-capture")]
@@ -105,6 +107,16 @@ pub enum ChildSourceProvenance {
     },
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct SourceSnapshotSelection {
+    pub capture_identity:String,
+    pub content_mode:ChildSourceContentMode,
+    pub capture_scopes:Vec<String>,
+    pub omitted_draft_paths:Vec<String>,
+    #[serde(skip_serializing_if="Option::is_none")]
+    pub drafts:Option<SourceDraftProvenance>,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 pub enum ChildSourceContentMode {
     SavedFiles,
@@ -114,6 +126,7 @@ pub enum ChildSourceContentMode {
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ChildSourceRoot {
     Fixed { pin: ChildSourcePin },
+    Native { pin: ChildSourcePin },
     Physical { root: launches::LiveRoot },
     /// A fixed baseline whose Run now owns command-modified physical content.
     /// The pin also retains that execution view until this handoff is released.
@@ -186,7 +199,7 @@ impl ChildSource {
             Self::Absent | Self::Shared { .. } => None,
             Self::Ready { pin, .. } => Some(pin),
             Self::Pending { handoff } => match &handoff.root {
-                ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Derived { pin, .. } => Some(pin),
+                ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } | ChildSourceRoot::Derived { pin, .. } => Some(pin),
                 _ => None,
             },
         }
@@ -524,11 +537,15 @@ impl Catalog {
                             selection.environment_run_id.get_or_insert_with(|| handoff.source_run_id.clone().unwrap_or_else(|| run.id.clone()));
                         }
                         if (handoff.source_path.is_some() || matches!(handoff.root, ChildSourceRoot::Derived { .. }))
+                            && selection.mode!=SourceMode::NativeWorkspace
                             && !matches!(handoff.root,ChildSourceRoot::Fixed{..}) {
                             let root = match &handoff.root { ChildSourceRoot::Physical { root } | ChildSourceRoot::Derived { root, .. } => root.clone(), _ => unreachable!() };
                             selection.mode = crate::SourceMode::LiveRoot;
                             selection.live_root = Some(root);
                             selection.branch_id = None; selection.revision = None; selection.environment_run_id = None;
+                        }
+                        if selection.mode==SourceMode::NativeWorkspace {
+                            if let Some(path)=&handoff.source_path{selection.native_scope=Some(selection.native_scope.as_ref().map_or_else(||path.clone(),|scope|format!("{scope}/{path}")));}
                         }
                         ChildSource::Shared { handoff: Some(handoff), selection }
                     } else {
@@ -1543,7 +1560,8 @@ impl ChildSourcePreparation {
         let mode = if profile.work_mode!=super::dispatch::ChildWorkMode::IsolatedWrite {
             SourceMode::FixedBranch
         } else {
-            SourceMode::Materialized
+            match self.selection.mode {SourceMode::NativeWorkspace=>SourceMode::NativeWorkspace,SourceMode::Materialized=>SourceMode::Materialized,
+                _=>return Err(RuntimeError::Conflict("Isolated source needs an independent writable workspace".into()))}
         };
         let (base, handoff) = match (&self.execution.source, &self.execution.source_basis) {
             (Some(ChildSource::Pending { handoff }), None) => {
@@ -1562,13 +1580,17 @@ impl ChildSourcePreparation {
                 ));
             }
         };
+        if handoff.as_ref().is_some_and(|handoff|matches!(handoff.root,ChildSourceRoot::Native{..}))&&mode!=SourceMode::NativeWorkspace{
+            return Err(RuntimeError::Conflict("A native workspace handoff cannot fall back to a physical copy".into()));
+        }
         if self.selection.mode != mode
             || self.selection.branch_id.as_deref() != Some(&branch)
-            || self.selection.revision != Some(0)
+            || self.selection.revision != if mode==SourceMode::NativeWorkspace {None}else{Some(0)}
+            || self.selection.native_scope.is_some()
             || self.selection.environment_run_id.is_some()
             || self.selection.resource_owner != base.resource_owner
             || self.selection.workspace_id != base.workspace_id
-            || self.selection.execution_workspace_id != base.execution_workspace_id
+            || self.selection.execution_workspace_id != if mode==SourceMode::NativeWorkspace {launches::native_execution_workspace_id(&self.execution.execution_id)}else{base.execution_workspace_id.clone()}
             || self.pin.source.mode != SourceMode::FixedBranch
             || self.pin.source.branch_id.as_deref() != Some(&branch)
             || self.pin.source.revision != Some(0)
@@ -1598,7 +1620,7 @@ impl ChildSourcePreparation {
                 ));
             }
         } else if let Some(handoff) = &handoff {
-            if let ChildSourceRoot::Fixed { pin } = &handoff.root {
+            if let ChildSourceRoot::Fixed { pin } | ChildSourceRoot::Native { pin } = &handoff.root {
                 if pin.root != self.pin.root
                     || !matches!(&self.provenance,ChildSourceProvenance::FixedRoot{root,..} if root==&pin.root)
                 {

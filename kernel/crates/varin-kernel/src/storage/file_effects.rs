@@ -25,6 +25,7 @@ pub(crate) struct Task {
     resources: Vec<FileLeaseResource>,
     pub(super) lease_id: String,
     private_lease: bool,
+    root_metadata: bool,
 }
 struct Plan {
     ready: Option<Value>,
@@ -76,7 +77,7 @@ impl Task {
             &self.root,
             self.params[field].as_str().expect("validated file path"),
             &self.grant,
-            false,
+            self.root_metadata,
         )
     }
     pub(super) fn canonical(&self) -> Result<Vec<CanonicalFileLeaseResource>, KernelError> {
@@ -85,7 +86,7 @@ impl Task {
             .map(|resource| {
                 self.check()?;
                 let path =
-                    resolve_admitted_resource(&self.root, &resource.path, &self.grant, false)?;
+                    resolve_admitted_resource(&self.root, &resource.path, &self.grant, self.root_metadata)?;
                 Ok(CanonicalFileLeaseResource {
                     absolute: canonical_lease_path(path.absolute)?,
                     subtree: resource.subtree,
@@ -125,7 +126,7 @@ impl Task {
                 .resources
                 .iter()
                 .map(|resource| {
-                    resolve_admitted_resource(&self.root, &resource.path, &self.grant, false)
+                    resolve_admitted_resource(&self.root, &resource.path, &self.grant, self.root_metadata)
                         .map(|resolved| resolved.absolute)
                 })
                 .collect::<Result<Vec<_>, _>>()?;
@@ -154,7 +155,7 @@ impl Task {
                     "File resource changed while observing its original state".into(),
                 ));
             }
-            let (task, before, resuming) = (self.clone(), observations, plan.resuming);
+            let (task, before, resuming) = (self.clone(), observations.clone(), plan.resuming);
             if let Some(value) =
                 owner.call(move |s| s.decide_file_effect(&task, &before, resuming))?
             {
@@ -191,7 +192,7 @@ impl Task {
             }
             let task = self.clone();
             owner.call(move |s| s.validate_file_effect(&task).map(|_| ()))?;
-            let value = self.apply(plan.resuming)?;
+            let value = self.apply(plan.resuming, &observations)?;
             // Cancellation/revocation after an effect does not erase the actual
             // outcome. The original journal records it before the lease drains.
             let (task, receipt) = (self.clone(), value.clone());
@@ -218,21 +219,58 @@ impl Task {
         }
         outcome
     }
-    fn apply(&self, resuming: bool) -> Result<Value, KernelError> {
+    fn apply(&self, resuming: bool, before: &[FileState]) -> Result<Value, KernelError> {
         match self.method {
             "file.apply" => {
-                let target: FileState = serde_json::from_str(
+                let mut target: FileState = serde_json::from_str(
                     self.params["targetJson"]
                         .as_str()
                         .expect("validated file target"),
                 )?;
+                // A caller replacing text/Office bytes need not reconstruct the
+                // original ACL and xattrs. Unspecified attributes preserve the
+                // actually admitted inode; explicitly selected result attributes
+                // still use their exact conditional restore contract.
+                if target.native().is_none(){
+                    if let Some(current)=before.first(){
+                        if matches!((&target,current),(FileState::RegularFile{..},FileState::RegularFile{..})|(FileState::Directory{..},FileState::Directory{..})){
+                            if let Some(mut attributes)=current.native().cloned(){
+                                if matches!((&target,current),(FileState::RegularFile{object_hash:a,..},FileState::RegularFile{object_hash:b,..})if a!=b){
+                                    let stamp=super::workspace_metadata::Timestamp::now();attributes.modified=varin_runtime::catalog::followups::FileTimestamp{seconds:stamp.seconds,nanos:stamp.nanos};
+                                }
+                                match(&mut target,current){
+                                    (FileState::RegularFile{mode,..},FileState::RegularFile{mode:old,..})|(FileState::Directory{mode,..},FileState::Directory{mode:old,..})=>{if mode.is_none(){*mode=*old;}},_=>()
+                                }
+                                target.set_native(attributes);
+                            }
+                        }
+                    }
+                }
                 let resource = self.resolve("path")?;
-                super::file_resources::apply_physical_state(
+                if let Some(metadata)=target.native() {
+                    super::workspace_metadata::validate_file_metadata(metadata)?;
+                    if let Some(bytes)=&metadata.reparse_data{
+                        let parsed=crate::reparse_data::parse(bytes)?;
+                        if !matches!(&target,FileState::Symlink{symlink_target,..}if symlink_target==&parsed.target){return Err(KernelError::Operation("Reparse attributes differ from the selected symlink target".into()));}
+                    }
+                    if resource.native.is_none(){crate::native_metadata::validate_apply(&resource.absolute,metadata)?;}
+                }
+                let content_unchanged=before.first().is_some_and(|current| {
+                    let(mut left,mut right)=(current.clone(),target.clone());
+                    for value in [&mut left,&mut right]{match value{FileState::RegularFile{mode,native,..}|FileState::Directory{mode,native,..}|FileState::Symlink{mode,native,..}=>{*mode=None;*native=None;},_=>()}}
+                    left==right
+                });
+                if !content_unchanged {super::file_resources::apply_physical_state(
                     &self.storage_root,
                     &resource,
                     &target,
                     &self.cancellation,
-                )?;
+                )?;}
+                let mode=match &target{FileState::RegularFile{mode,..}|FileState::Directory{mode,..}|FileState::Symlink{mode,..}=>*mode,_=>None};
+                if let Some(metadata)=target.native(){
+                    if let Some(native)=&resource.native{native.apply(&resource.path,mode,metadata)?;}
+                    else{crate::native_metadata::apply(&resource.absolute,mode,metadata)?;}
+                }else if content_unchanged&&!matches!(target,FileState::Symlink{..}){super::file_resources::apply_mode(&resource.absolute,mode)?;}
                 let observed = super::capture_resources::observe_effect(
                     &self.root,
                     &resource.path,
@@ -362,12 +400,20 @@ impl Storage {
             ));
         }
         let mut resources = Vec::new();
+        let root_metadata = method == "file.apply" && matches!(value["path"].as_str(), Some("" | "."));
+        if root_metadata {
+            let target: FileState = serde_json::from_str(field("targetJson")?)?;
+            let expected: FileState = serde_json::from_str(field("expectedJson")?)?;
+            if !matches!((&target, &expected), (FileState::Directory {..}, FileState::Directory {..})) {
+                return Err(KernelError::Authorization("workspace root accepts a conditional directory metadata update only".into()));
+            }
+        }
         for name in if method == "file.rename" {
             &["fromPath", "toPath"][..]
         } else {
             &["path"][..]
         } {
-            let path = normalized_relative_path(field(*name)?, false)?.0;
+            let path = normalized_relative_path(field(*name)?, root_metadata)?.0;
             if !path_allowed(grant, &path) {
                 return Err(KernelError::Authorization(
                     "File effect is outside grant scope".into(),
@@ -393,6 +439,7 @@ impl Storage {
             storage_root: self.root.clone(),
             resources,
             private_lease: lease.is_none(),
+            root_metadata,
             lease_id: lease
                 .map(str::to_owned)
                 .unwrap_or_else(|| format!("file-effect:{}", Uuid::new_v4())),

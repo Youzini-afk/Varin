@@ -81,7 +81,7 @@ async function fixture(reply: (body: Record<string, unknown>, response: ServerRe
   const workingStates = createKernelWorkspaceWorkingStateAccess(storage);
   const resources = resourceScopeFixture(root, workingStates, documents, undefined, (input, consume) => storage.withResourceRead(input, consume));
   const sourcePreparer = createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, prepareResources: resources.prepareSourceCapture });
-  const prepare: typeof sourcePreparer = async (...args) => {
+  const prepare = async (...args: Parameters<typeof sourcePreparer>): ReturnType<typeof sourcePreparer> => {
     try { return await sourcePreparer(...args); }
     catch (error) { console.error('Source preparation fixture failed', error); throw error; }
   };

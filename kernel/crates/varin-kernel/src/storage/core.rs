@@ -207,6 +207,9 @@ impl Storage {
             workspace_holders: HashMap::new(),
             private_cleanup: Arc::default(),
             file_roots: HashMap::new(),
+            native_file_roots: HashMap::new(),
+            native_closing_roots: BTreeSet::new(),
+            native_readers: std::sync::Mutex::new(HashMap::new()),
             observation_reads: HashMap::new(),
             observation_hints: None,
             file_leases: HashMap::new(),
@@ -228,6 +231,8 @@ impl Storage {
         // failure remains visible through health instead of being swallowed.
         storage.refresh_process_records()?;
         storage.recover_workspace_adoptions()?;
+        storage.recover_native_handoffs()?;
+        storage.prune_filesystem_pins()?;
         storage.private_cleanup.recover(&root.join("staging"));
         storage.sweep_orphan_objects()?;
         storage.drain_gc_files()?;

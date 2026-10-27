@@ -244,7 +244,7 @@ impl Storage {
                 storage.abort_branch_write_builder(authorized_params, grant_id.unwrap_or(""))
             }
             "branch.publish" => idempotent(storage, method, authorized_params, |storage| {
-                storage.branch_publish(authorized_params)
+                storage.branch_publish(authorized_params,grant_id.unwrap_or(""))
             }),
             "branch.pin" => idempotent(storage, method, authorized_params, |storage| {
                 storage.branch_pin(authorized_params, true, grant_id.unwrap_or(""))

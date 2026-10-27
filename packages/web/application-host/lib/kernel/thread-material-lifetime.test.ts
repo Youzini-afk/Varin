@@ -9,7 +9,7 @@ it('inherits only readable frozen references, survives parent deletion, and rele
   const draft = { sourceUrl: 'file:///report.docx', finalUrl: 'file:///report.docx', contentType: 'text/plain', representation: 'ooxml-index', document: { kind: 'docx' as const, parser: 'ooxml' } };
   const ref = await f.materials.put(scope, draft, Buffer.from('section index'), authority('parent'), { source: { bytes: Buffer.from('original document'), contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } });
   const privateRef = await f.materials.put(scope, draft, Buffer.from('private'), authority('unrelated'));
-  const plan: MaterialRetention = { threads: [{ threadId: 'parent', rootThreadId: 'parent', release: false }, { threadId: 'child', rootThreadId: 'parent', release: false }],
+  const plan: MaterialRetention = { sources:[], threads: [{ threadId: 'parent', rootThreadId: 'parent', release: false }, { threadId: 'child', rootThreadId: 'parent', release: false }],
     inheritances: [{ parentThreadId: 'parent', childThreadId: 'child', rootThreadId: 'parent', snapshotIds: [ref.snapshotId, privateRef.snapshotId] }] };
   const releaseBrowser = vi.fn();
   const owner = createThreadMaterialLifetime({ storage: f.workingStates, materials: f.materials, runtime: { materialRetention: async () => plan }, releaseBrowser });

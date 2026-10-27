@@ -8,6 +8,7 @@ use super::file_resources::{
 use super::*;
 
 pub(crate) struct FileReadTask {
+    _native_retention:Option<Arc<super::native_sources::NativeReadRetention>>,
     pub params: Value,
     pub cancellation: Arc<AtomicBool>,
     root: FileRoot,
@@ -205,6 +206,7 @@ impl FileReadTask {
         let simple = match metadata.as_ref() {
             None => Some(FileState::Missing),
             Some(meta) if meta.file_type().is_symlink() => Some(FileState::Symlink {
+                native: None,
                 symlink_target: fs::read_link(&resource.absolute)?
                     .into_os_string()
                     .into_string()
@@ -212,12 +214,18 @@ impl FileReadTask {
                 mode: Some(file_mode(meta)),
             }),
             Some(meta) if meta.is_dir() => Some(FileState::Directory {
+                native: None,
                 mode: Some(file_mode(meta)),
             }),
             Some(meta) if !meta.is_file() => Some(FileState::Unsupported),
             _ => None,
         };
-        if let Some(state) = simple {
+        if let Some(mut state) = simple {
+            if matches!(state, FileState::Directory {..}|FileState::Symlink {..}) {
+                let attributes=match &resource.native {Some(owner)=>owner.attributes(&resource.path)?,None=>crate::native_metadata::observe(&resource.absolute)?.attributes};
+                if resource.native.is_some(){match &mut state{FileState::Directory{mode,..}|FileState::Symlink{mode,..}=>*mode=Some(attributes.mode),_=>()}}
+                state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some()));
+            }
             self.check()?;
             let after = resolve_admitted_resource(&self.root, requested, &self.grant, false)?;
             if after.absolute != resource.absolute || self.canonical(&after.absolute)? != canonical
@@ -338,11 +346,15 @@ impl FileReadTask {
             ));
         }
         let content_hash = format!("sha256-{}", hex::encode(hash.finalize()));
-        let state = FileState::RegularFile {
+        let mut state = FileState::RegularFile {
+            native: None,
             object_hash: content_hash.clone(),
             byte_length: position,
             mode: Some(file_mode(&after)),
         };
+        let attributes=match &resource.native{Some(owner)=>owner.attributes(&resource.path)?,None=>crate::native_metadata::observe(&resource.absolute)?.attributes};
+        if resource.native.is_some(){if let FileState::RegularFile{mode,..}=&mut state{*mode=Some(attributes.mode);}}
+        state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some()));
         let version = super::file_mutations::read_version(
             self.params["rootId"].as_str().expect("admitted root"),
             &resource.path,
@@ -434,6 +446,7 @@ impl Storage {
             } else { self.active_file_worker_lease(grant, root_id, id)?; }
         }
         let task = FileReadTask {
+            _native_retention:self.retain_native_reader(root_id)?,
             params: params.clone(),
             cancellation,
             root: self.admitted_file_root(root_id, grant)?,

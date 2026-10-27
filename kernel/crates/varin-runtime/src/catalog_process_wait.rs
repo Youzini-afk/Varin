@@ -136,6 +136,7 @@ pub(super) fn delegated_source_lineage(
             ) => {
                 let mut expected = prior_selection.clone();
                 expected.mode = SourceMode::FixedBranch;
+                expected.native_scope = None;
                 expected.branch_id = Some(actual.branch_id.clone());
                 expected.revision = Some(actual.result_revision);
                 expected.live_root = None;

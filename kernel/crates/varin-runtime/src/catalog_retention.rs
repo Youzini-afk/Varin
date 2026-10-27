@@ -133,7 +133,8 @@ impl Catalog {
             for run in &runs {
                 let pending: bool = self.db.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE run_id=?1 AND json_extract(body,'$.phase')!='terminal') OR EXISTS(SELECT 1 FROM model_steps WHERE run_id=?1 AND state IN ('prepared','dispatched'))", [&run.id], |row| row.get(0))?;
                 let (stops, _, models) = self.bot_run_barriers(&run.id)?;
-                if !run.state.terminal() || pending || !stops.is_empty() || !models.is_empty() { drained = false; break; }
+                let child_resources:bool=self.db.query_row("SELECT EXISTS(SELECT 1 FROM delegated_executions d JOIN operations o ON o.id=d.child_operation_id WHERE o.run_id=?1 AND json_extract(d.body,'$.resources_released')=0)",[&run.id],|row|row.get(0))?;
+                if !run.state.terminal() || pending || child_resources || !stops.is_empty() || !models.is_empty() { drained = false; break; }
             }
             if drained { ready.push((thread, runs.into_iter().map(|run| run.id).collect())); } else { pending += 1; }
         }

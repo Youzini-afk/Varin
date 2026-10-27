@@ -12,11 +12,7 @@ use crate::SessionACL;
 use crate::dev_fuse::DevFuse;
 use crate::mnt::MountOption;
 use crate::mnt::fuse3_sys::fuse_lowlevel_ops;
-use crate::mnt::fuse3_sys::fuse_session_destroy;
-use crate::mnt::fuse3_sys::fuse_session_fd;
-use crate::mnt::fuse3_sys::fuse_session_mount;
-use crate::mnt::fuse3_sys::fuse_session_new;
-use crate::mnt::fuse3_sys::fuse_session_unmount;
+use crate::mnt::fuse3_loader::Api;
 use crate::mnt::with_fuse_args;
 
 /// Ensures that an os error is never 0/Success
@@ -30,6 +26,7 @@ fn ensure_last_os_error() -> io::Error {
 
 #[derive(Debug)]
 pub(crate) struct MountImpl {
+    api:&'static Api,
     fuse_session: *mut c_void,
     mountpoint: CString,
     mounted: bool,
@@ -41,11 +38,12 @@ impl MountImpl {
         acl: SessionACL,
     ) -> io::Result<(Arc<DevFuse>, MountImpl)> {
         let mnt = CString::new(mnt.as_os_str().as_bytes()).unwrap();
+        let api=Api::load()?;
         with_fuse_args(options, acl, |args| {
             let ops = fuse_lowlevel_ops::default();
 
             let fuse_session = unsafe {
-                fuse_session_new(
+                (api.new)(
                     args,
                     &ops as *const _,
                     size_of::<fuse_lowlevel_ops>(),
@@ -56,16 +54,17 @@ impl MountImpl {
                 return Err(io::Error::last_os_error());
             }
             let mut mount = MountImpl {
+                api,
                 fuse_session,
                 mountpoint: mnt.clone(),
                 mounted: false,
             };
-            let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
+            let result = unsafe { (mount.api.mount)(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
                 return Err(ensure_last_os_error());
             }
             mount.mounted = true;
-            let fd = unsafe { fuse_session_fd(mount.fuse_session) };
+            let fd = unsafe { (mount.api.fd)(mount.fuse_session) };
             if fd < 0 {
                 return Err(io::Error::last_os_error());
             }
@@ -120,11 +119,11 @@ impl Drop for MountImpl {
         // do not issue another pathname-based unmount against a replacement.
         if self.mounted {
             unsafe {
-                fuse_session_unmount(self.fuse_session);
+                (self.api.unmount)(self.fuse_session);
             }
         }
         unsafe {
-            fuse_session_destroy(self.fuse_session);
+            (self.api.destroy)(self.fuse_session);
         }
     }
 }

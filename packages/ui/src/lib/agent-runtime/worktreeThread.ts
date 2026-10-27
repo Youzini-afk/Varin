@@ -62,7 +62,7 @@ export const createWorktreeThreadWithRuntime = async (
   const activeProject = runtime.getActiveProject();
   if (!activeProject?.path) throw new Error('Select a project before creating a worktree conversation');
   const project: VarinProjectRef = { id: activeProject.id, path: activeProject.path };
-  if (!await runtime.checkIsGitRepository(project.path)) throw new Error('Worktree conversations require a Git repository');
+  if (!await runtime.checkIsGitRepository(await projectExecutionPath(project))) throw new Error('Worktree conversations require a Git repository');
   assertHost();
   const preferredName = runtime.generateBranchName().trim();
   if (!preferredName) throw new Error('Could not generate a worktree branch name');
@@ -83,3 +83,4 @@ export const createWorktreeThreadWithRuntime = async (
 export const createWorktreeThread = async (): Promise<WorktreeThreadResult> => (
   createWorktreeThreadWithRuntime(defaultRuntime)
 );
+import { projectExecutionPath } from '@/lib/nativeWorkspace';

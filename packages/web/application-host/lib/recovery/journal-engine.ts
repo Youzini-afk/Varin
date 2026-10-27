@@ -1,5 +1,6 @@
 import path from "node:path";
 import { isDeepStrictEqual } from "node:util";
+import {sameRecoveryFileTarget} from './file-target.js';
 import { canonicalizePathIdentity } from "../workspace/path-safety.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -71,7 +72,7 @@ import {
   type ResolveDirectoryApplyContext,
 } from "./durable-file-operation.js";
 
-interface WorkspaceRegistration { canonicalPath: string; workspaceId: string }
+interface WorkspaceRegistration { canonicalPath: string; workspaceId: string;nativeSource?:{execution_workspace_id:string} }
 interface DirtyBufferResource {
   bufferHash?: string;
   documentInstanceId?: string;
@@ -169,6 +170,7 @@ export interface CreateWorkspaceRecoveryEngineOptions {
   durableRecoveryStore: RecoveryDurableMetadataPort;
   fileStore: RecoveryFileStore;
   sessionNavigation: RecoverySessionNavigation;
+  resolveFileTarget?:(target:RecoveryFileTarget)=>Promise<RecoveryFileTarget>;
   resolveDirectoryApplyContext?: ResolveDirectoryApplyContext;
   managedRecovery?: ManagedRecoveryPort | undefined;
   coordinatorWorkspaceId?: string;
@@ -464,35 +466,48 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       throw new RecoveryPrimitiveError("dirty-state-unavailable", "Unsaved editor state could not be synchronized", { cause: error, origin: "conflict", retryable: true });
     }
   };
-  const targetIdentity = (identity: RecoveryIdentity, target: RecoveryTargetStates): RecoveryIdentity => {
-    if (target.fileTarget?.kind === 'physical') return { ...identity, workspaceId: target.fileTarget.workspaceId, canonicalRoot: target.fileTarget.canonicalRoot, fileTarget: target.fileTarget };
+  const currentTarget=async(target:RecoveryFileTarget):Promise<RecoveryFileTarget>=>{
+    if(target.kind!=='physical'||target.sourceMode!=='native_workspace')return target;
+    if(!options.resolveFileTarget)throw new Error('Native recovery target resolver is unavailable');
+    const current=await options.resolveFileTarget(target);
+    if(!sameRecoveryFileTarget(target,current))throw new Error('Native recovery target identity changed');return current;
+  };
+  const targetIdentity = async(identity: RecoveryIdentity, target: RecoveryTargetStates):Promise<RecoveryIdentity> => {
+    if (target.fileTarget?.kind === 'physical') {const current=await currentTarget(target.fileTarget);if(current.kind!=='physical')throw new Error('Recovery file target changed');return { ...identity, workspaceId: current.workspaceId, canonicalRoot: current.canonicalRoot, fileTarget: current };}
     if (coordinatorWorkspaces.has(identity.workspaceId)) throw new RecoveryPrimitiveError('workspace-untrusted', 'The recovery coordinator owns metadata only; files require their original physical owner', { origin: 'storage' });
     return identity;
   };
   const adoptState = (source: string, destination: string, state: RecoveryState) => (fileStore as RecoveryFileStore & { adoptState?: (source: string, destination: string, state: RecoveryState) => Promise<void> }).adoptState?.(source,destination,state);
   const captureTarget = async (identity: RecoveryIdentity, targets: RecoveryTargets, key: string, store: boolean) => {
-    const target = targets[key]!; const selected = targetIdentity(identity, target);
+    const target = targets[key]!; const selected = await targetIdentity(identity, target);
     const captured = await fileStore.captureState(selected, selected.canonicalRoot, target.resourcePath ?? key, { store });
     if (store) await adoptState(selected.workspaceId, identity.workspaceId, captured.state);
     return captured;
   };
   const applyTarget = async (identity: RecoveryIdentity, targets: RecoveryTargets, key: string, state: RecoveryState) => {
-    const target = targets[key]!; const selected = targetIdentity(identity, target);
+    const target = targets[key]!; const selected = await targetIdentity(identity, target);
     await adoptState(identity.workspaceId,selected.workspaceId,state);
     return fileStore.applyState(selected, selected.canonicalRoot, target.resourcePath ?? key, parseRecoveryState(state));
   };
   const targetWorkspaces = async (identity: RecoveryIdentity, target: RecoveryTargetStates, key: string): Promise<Array<{workspaceId:string;path:string}>> => {
-    const root = target.fileTarget?.kind === "physical" ? target.fileTarget.canonicalRoot : identity.canonicalRoot;
+    const selected=await targetIdentity(identity,target);
+    const root = selected.canonicalRoot;
     const resource = target.resourcePath ?? key;
     const absolute = path.join(await canonicalizePathIdentity(path.dirname(path.join(root,resource)), {allowMissing:true}),path.basename(resource));
     const normalize = (value:string) => process.platform === "win32" ? value.toLowerCase() : value;
     const result: Array<{workspaceId:string;path:string}> = [];
     for (const registration of await documents.listWorkspaceRegistrations()) {
+      let registeredRoot=registration.canonicalPath;
+      if(registration.nativeSource){
+        if(selected.fileTarget?.kind!=='physical'||selected.fileTarget.sourceMode!=='native_workspace'
+          ||registration.nativeSource.execution_workspace_id!==selected.fileTarget.executionWorkspaceId)continue;
+        registeredRoot=(await documents.inspectWorkspace(registration.workspaceId)).root;
+      }
       // Stored canonical identities select only physically relevant owners; unrelated offline roots are not opened.
-      const relative = path.relative(normalize(registration.canonicalPath),normalize(absolute));
+      const relative = path.relative(normalize(registeredRoot),normalize(absolute));
       if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`)) continue;
-      const current = await canonicalizePathIdentity(registration.canonicalPath);
-      if (normalize(current) !== normalize(registration.canonicalPath)) throw new Error("Affected Documents root changed its physical identity");
+      const current = await canonicalizePathIdentity(registeredRoot);
+      if (normalize(current) !== normalize(registeredRoot)) throw new Error("Affected Documents root changed its physical identity");
       result.push({workspaceId:registration.workspaceId,path:normalizeResourceId(path.relative(current,absolute))});
     }
     return result.sort((a,b)=>a.workspaceId.localeCompare(b.workspaceId));
@@ -515,7 +530,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
       } };
   };
   const gateTarget = (identity: RecoveryIdentity, targets: RecoveryTargets, key: string): HostResourceOperationGate => ({ run: async (_resources, callback) => {
-    const target = targets[key]!; const selected = targetIdentity(identity, target); const resource = { resourceId: target.resourcePath ?? key, scope: "subtree" as const };
+    const target = targets[key]!; const selected = await targetIdentity(identity, target); const resource = { resourceId: target.resourcePath ?? key, scope: "subtree" as const };
     const kernelGate = (fileStore as RecoveryFileStore & { resourceOperationGate?: (identity: RecoveryIdentity) => HostResourceOperationGate }).resourceOperationGate?.(selected);
     const owners = await targetWorkspaces(identity,target,key);
     const apply = () => kernelGate ? kernelGate.run([resource], callback) : callback();
@@ -527,7 +542,7 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     const conflicts: WorkspaceRecoveryConflict[] = [];
     for (const [relativePath, states] of Object.entries(targets)) {
       try {
-        await fileStore.assertApplyState?.(targetIdentity(identity, states), states.resourcePath ?? relativePath, states.target);
+        await fileStore.assertApplyState?.(await targetIdentity(identity, states), states.resourcePath ?? relativePath, states.target);
         const current = (await captureTarget(identity, targets, relativePath, false)).state;
         const surfaces = await targetWorkspaces(identity,states,relativePath);
         const owners = (await Promise.all(surfaces.map(async surface => {
@@ -754,6 +769,8 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
   };
   const physicalKey = async (target: RecoveryFileTarget | undefined, resource: string): Promise<string> => {
     if (target?.kind !== "physical") return resource;
+    target=await currentTarget(target);
+    if(target.kind!=='physical')throw new Error('Recovery source changed');
     const full = path.join(await canonicalizePathIdentity(path.dirname(path.join(target.canonicalRoot, resource)), {allowMissing:true}), path.basename(resource));
     return `files/${revisionOf(process.platform === "win32" ? full.toLowerCase() : full)}`;
   };
@@ -840,11 +857,12 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
     const removedEntryIds = [...new Set(navigation.removedEntryIds ?? [])];
     const loaded = await changesFor(input.workspaceId, input.conversation, removedEntryIds, navigation.journalTurns);
     if (participantInput) for (const target of [ ...loaded.changes.map(change => change.fileTarget), ...Object.values(loaded.uncoveredFiles).map(file => file.target) ]) {
-      if (!target || !participantInput.allowedFileTargets.some(allowed => isDeepStrictEqual(allowed, target)))
+      if (!target || !participantInput.allowedFileTargets.some(allowed => sameRecoveryFileTarget(allowed, target)))
         throw new RecoveryPrimitiveError('workspace-untrusted', 'Recovery journal targets differ from the original admitted source', { origin: 'storage' });
     }
     for (const change of loaded.changes) if (change.fileTarget?.kind === "physical") {
-      const target = change.fileTarget;
+      const target = await currentTarget(change.fileTarget);
+      if(target.kind!=='physical')throw new Error('Recovery source changed');
       await fileStore.captureState({...identity,workspaceId:target.workspaceId,canonicalRoot:target.canonicalRoot,fileTarget:target},target.canonicalRoot,change.path,{store:false});
       (change as SequencedRecoveryChange).physicalKey = await physicalKey(target, change.path);
     }

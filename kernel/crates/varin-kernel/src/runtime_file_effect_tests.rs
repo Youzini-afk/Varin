@@ -3,6 +3,25 @@
 use super::*;
 
 #[test]
+fn root_directory_attribute_effect_is_conditional_and_cannot_replace_the_source() {
+    let mut f=Fixture::new();
+    let captured=f.capture("",false,"observe-root-attributes");
+    let observed:Value=serde_json::from_str(captured["stateJson"].as_str().unwrap()).unwrap();
+    let mut target=observed.clone();
+    let seconds=target["native"]["modified"]["seconds"].as_i64().unwrap();
+    target["native"]["modified"]["seconds"]=json!(seconds+1);
+    f.short("recovery.operation.create",json!({"workspaceId":"workspace","operationId":"root-journal","kind":"integration","state":"planned","dataJson":"{}",
+        "files":[{"path":".","phase":"pending","expectedJson":serde_json::to_string(&observed).unwrap(),"targetJson":serde_json::to_string(&target).unwrap(),"safetyJson":serde_json::to_string(&observed).unwrap(),"references":[]}]}),Some("writer"));
+    f.short("recovery.operation.file.cas",json!({"workspaceId":"workspace","operationId":"root-journal","transitionId":"root-apply-intent","path":".","expectedRevision":1,"expectedPhase":"pending","phase":"apply-intent"}),Some("writer"));
+    let params=json!({"workspaceId":"workspace","rootId":f.root_id,"path":".","operationId":"root-attributes",
+        "expectedJson":serde_json::to_string(&observed).unwrap(),"targetJson":serde_json::to_string(&target).unwrap()});
+    assert_eq!(f.short("file.apply",params.clone(),Some("writer"))["status"],"applied");
+    let mut invalid=params;invalid["operationId"]=json!("root-remove");invalid["targetJson"]=json!("{\"kind\":\"missing\"}");
+    assert!(f.kernel.handle(&Fixture::request("file.apply",invalid,Some("writer")),Arc::new(AtomicBool::new(false)),&f.tx).is_err());
+    assert!(f.work().is_dir());
+}
+
+#[test]
 fn root_registration_reconciles_an_interrupted_write_from_worker_evidence_without_replaying_it() {
     let mut f = Fixture::new();
     fs::write(f.work().join("seed"), "written").unwrap();

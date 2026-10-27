@@ -2,6 +2,13 @@
 
 Varin message recovery is an operation journal, not a workspace archive.
 
+Native workspace targets retain their logical Source and resolve the current generation on execution
+or restart. The original journal, file worker and Storage owner still admit every effect. The selected
+directory's own attributes use path `.`; applying it requires both the original and target directory
+states. Removing/replacing a source root is rejected before dispatch. Root metadata follows the same
+three-way path mapping and safety/undo state as other paths, including a scoped child root mapped to a
+directory in its parent. Ordinary source capture retains these attributes in the initial baseline.
+
 ## Ordinary workspace edits
 
 Documents refactors use the same Rust operation/file journal as `workspace-edit`, without a conversation

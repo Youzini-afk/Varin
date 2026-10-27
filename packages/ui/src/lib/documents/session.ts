@@ -41,6 +41,7 @@ export const getDocumentRegistry = (): DocumentRegistry => {
   if (!active) throw new Error('Document registry is not bound');
   return active;
 };
+export const releaseClosedDocumentWorkspace=(workspaceId:string):void=>active?.releaseClosedWorkspace(workspaceId);
 
 export const resetDocumentRegistry = (): void => {
   active?.dispose();

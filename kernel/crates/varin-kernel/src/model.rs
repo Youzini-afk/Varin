@@ -174,6 +174,7 @@ pub(crate) struct FileRoot {
     pub(crate) owning_workspace_id: String,
     pub(crate) execution_workspace_id: String,
     pub(crate) canonical_root: PathBuf,
+    pub(crate) native: Option<crate::storage::native_sources::NativeFileRoot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

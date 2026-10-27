@@ -71,6 +71,8 @@ import { createSemanticInference } from './lib/knowledge/semantic/runtime-infere
 import { createLanguageOwner } from './lib/kernel/language-owner.js';
 import { createSourceQueryOwner } from './lib/kernel/source-query.js';
 import { createLiveSourceOwner } from './lib/kernel/live-source.js';
+import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './lib/kernel/native-workspaces.js';
+import { registerNativeWorkspaceRoutes } from './lib/workspace/native-workspace-routes.js';
 import { createThreadSourcePreparer, createThreadSourceAdmission, createThreadSourceDirectory } from './lib/kernel/thread-sources.js';
 import { createManagedSourceConsumers } from './lib/kernel/managed-source-consumers.js';
 import { createSourceQueryService } from './lib/kernel/source-query-service.js';
@@ -991,18 +993,36 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     : undefined;
   let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
   let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
+  let nativeWorkspaces:NativeWorkspaceOwner|undefined;
+  let requestSourceMaintenance=()=>{};
+  let releaseSourcePreparations=async(_threads:readonly string[])=>{};
   const documentsAuthority = createDocumentAuthority({
     hostId: extensionRuntime.services.hostId,
     dataDir: VARIN_DATA_DIR,
     maxReadBytes: workspaceConfig.maxReadBytes,
     isAllowedRoot: workspaceRootGuard,
     isTrusted: workspaceRootGuard,
+    nativeWorkspaces:{resolveId:(id,signal,reference)=>nativeWorkspaces?.resolveId(id,signal,reference)??Promise.resolve(undefined),
+      resolvePath:(value,containing)=>nativeWorkspaces?.resolvePath(value,containing)??Promise.resolve(undefined),
+      retainReference:(source,key)=>nativeWorkspaces!.retainReference(source,key),releaseReference:key=>nativeWorkspaces!.releaseReference(key)},
+    onSourceRetentionChanged:()=>requestSourceMaintenance(),
     onMutation: (event) => observeKnowledgeDocumentMutation(event),
     onIntegrationParentChanged: (workspaceId, resourceIds) => observeThreadIntegrationParentChange(workspaceId, resourceIds),
     ...(dirtyBarrierTimeoutMs !== undefined ? { dirtyBarrierTimeoutMs } : {}),
   });
   activeDocumentsAuthority = documentsAuthority;
+  nativeWorkspaces=createNativeWorkspaceOwner({kernel:kernelClient,documents:documentsAuthority,
+    projects:async()=>sanitizeProjects((await readSettingsFromDisk()).projects)??[],
+    update:async(id,value)=>{await updateSettingsOnDisk(current=>{
+      const projects=sanitizeProjects(current.projects)??[];
+      if(!projects.some(project=>project.id===id))throw new Error('The original project was removed');
+      return {...current,projects:projects.map(project=>project.id===id?{...project,versionedWorkspace:value}:project)};
+    });},
+  });
+  kernelClient.nativeWorkspaces=nativeWorkspaces;
+  registerNativeWorkspaceRoutes(app,nativeWorkspaces,uiAuthController.requireAuth);
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
+  let recoveryFileTargetResolver:((target:import('@varin/extension-contract').RecoveryFileTarget)=>Promise<import('@varin/extension-contract').RecoveryFileTarget>)|undefined;
   let threadRecoveryReady = false;
   const managedRecoveryOwner: { current?: ManagedRecoveryPort } = {};
   const recoverySessionNavigation: RecoverySessionNavigation = { ready: () => threadRecoveryReady, commit: input => threadRecoveryNavigation.commit(input), commitLeaf: input => threadRecoveryNavigation.commitLeaf(input), prepare: input => threadRecoveryNavigation.prepare(input), prepareLeaf: input => threadRecoveryNavigation.prepareLeaf(input) };
@@ -1033,6 +1053,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
         documents: documentsAuthority,
         durableRecoveryStore: kernelRecoveryStore,
         sessionNavigation: recoverySessionNavigation,
+        resolveFileTarget:target=>{if(!recoveryFileTargetResolver)throw new Error('Recovery file source is not ready');return recoveryFileTargetResolver(target);},
         resolveDirectoryApplyContext,
         fileStore: kernelRecoveryContentStore,
         coordinatorWorkspaceId: recoveryCoordinatorWorkspace,
@@ -1953,9 +1974,9 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const fileObservationOwner = new DocumentsFileObservationOwner(documentsAuthority, liveSources.validate,
-    receiptId => fileObservations.changed(receiptId));
+    receiptId => fileObservations.changed(receiptId),nativeWorkspaces);
   const fileObservations = new FileObservationService(agentRuntime, fileObservationOwner,
-    () => console.error('[Followup] Original file observation requires attention'));
+    () => console.error('[Followup] Original file observation requires attention'),nativeWorkspaces);
   kernelClient.setFileObservationOwner(fileObservationOwner);
   void fileObservations.recover();
   const modelText = createModelTextService({ kernel: kernelClient, runtime: agentRuntime, models: modelAuthority,
@@ -1983,11 +2004,15 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     },
   });
   const threadMaterialLifetime = createThreadMaterialLifetime({ runtime: agentRuntime, storage: materialStorage, materials: webMaterials,
+    releaseSource:(source,id,signal)=>nativeWorkspaces!.retireSource(source,id,signal),
+    releasePreparations:threads=>releaseSourcePreparations(threads),
     ...(options.browser ? { releaseBrowser: (threadId: string) => options.browser!.releaseThread(threadId) } : {}) });
   const contentMaintenance = createContentMaintenance({ runtime: agentRuntime,
     releaseDeletedResources: signal => threadMaterialLifetime.releaseDeleted(signal),
     onError: () => console.error('[ContentMaintenance] Deleted conversation cleanup will retry after runtime activity'),
   });
+  requestSourceMaintenance=contentMaintenance.resourceIdle;
+  const removeWorkspaceIdleMaintenance=kernelClient.onWorkspaceIdle(()=>contentMaintenance.resourceIdle());
   materialWriteSettled.current = async (scope, threadId) => {
     // A UI upload admitted before deletion can settle after Catalog maintenance.
     // Its original namespace still identifies the bytes, even after lineage retires.
@@ -2026,7 +2051,13 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   const threadResourceOwners: Parameters<typeof createThreadResourceScope>[0] = {
     dataDirectory: VARIN_DATA_DIR, documents: documentsAuthority, workingStates: threadWorkingStates, resolvePrimaryWorktreeRoot,
     validateLiveSource: liveSources.validate,
-    projectTrusted: root => projectTrust.trusted(root),
+    resolveNativeSource:async(source,signal)=>{
+      const ref={workspace_id:source.workspaceId,execution_workspace_id:source.executionWorkspaceId,branch_id:source.branchId,...(source.nativeScope?{native_scope:source.nativeScope}:{})};
+      const entry=await nativeWorkspaces!.open(ref,signal);
+      const actual=await nativeWorkspaces!.acquire(ref,entry.grant,signal);
+      return {hostId:actual.hostId,rootId:actual.rootId,canonicalRoot:actual.path};
+    },
+    projectTrusted: async root => projectTrust.trusted((await nativeWorkspaces?.resolvePath(root,true))?.originalPath??root),
     configuration: (root, resources) => readAgentResourceConfiguration({ dataDirectory: VARIN_DATA_DIR, settings: modelsService.settings, ...(root ? { cwd: root } : {}), ...(resources ? { resources } : {}) }),
     withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume),
   };
@@ -2071,10 +2102,11 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.setContextOwner(contextService);
   const prepareThreadSource = createThreadSourcePreparer({
     inspectInventory: (directory, signal) => inspectSourceInventory(directory, signal),
-    sourceTools: mode => agentRuntime.sourceTools(mode), documents: documentsAuthority, liveSources,
+    sourceTools: mode => agentRuntime.sourceTools(mode), documents: documentsAuthority, liveSources, nativeWorkspaces,
     workingStates: threadWorkingStates, prepareResources: threadResources.prepareSourceCapture, remote: managedSourceConsumers.threads });
+  releaseSourcePreparations=threads=>prepareThreadSource.releaseDeletedThreads(threads);
   const threads = new ThreadAdapter(agentRuntime,
-    modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources, remote: managedSourceConsumers.threads,
+    modelAuthority, createThreadSourceAdmission({ documents: documentsAuthority, liveSources, nativeWorkspaces, remote: managedSourceConsumers.threads,
       withSourceRead: (input, consume) => kernelStorageAdapter.withResourceRead(input, consume), runtime: agentRuntime }), (runId, _error) => {
       // Durable launch remains inspectable/resumable. Never log credentials or provider responses.
       console.error('[Thread] Launch preparation requires attention:', runId);
@@ -2105,7 +2137,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   threads.bindContentMaintenance(contentMaintenance.request);
   externalAgents.bindContentMaintenance(contentMaintenance.request);
   threads.bindFileResolver(createThreadFileTargetResolver({ storageRoot: kernelClient.handshake!.storageRoot,
-    documents: documentsAuthority, validateLiveSource: liveSources.validate }));
+    documents: documentsAuthority, validateLiveSource: liveSources.validate,nativeWorkspaces }));
   threads.bindMaterials(webRuntimeOwner.current.inputMaterials);
   threads.bindMessageTime(async () => {
     const settings = await modelsService.readGlobalInferenceSettings();
@@ -2194,6 +2226,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   kernelRecoveryStore.bindCheckpointRefresh(recoveryCheckpoints.refresh);
   const localRecoveryFileResolver = createThreadRecoveryFileResolver(threadRecoveryOwners);
+  recoveryFileTargetResolver=async target=>targetRecovery.resolveFileTarget(target)??await localRecoveryFileResolver.resolveTarget(target);
   const fileRecoveryService = createFileRecoveryService({ runtime: agentRuntime, kernel: kernelClient,
     storage: kernelStorageAdapter, store: kernelRecoveryStore, documents: documentsAuthority, resolveFiles: localRecoveryFileResolver });
   kernelRecoveryContentStore.bindTargetResources(async identity =>
@@ -2887,7 +2920,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
       await shutdown.run('environmentForwards.dispose', () => environmentForwards.dispose());
       await shutdown.run('computerRuntimeOwner.current?.stop', () => computerRuntimeOwner.current?.stop());
       await shutdown.run('threadNotifications.dispose', () => threadNotifications.dispose());
-      await shutdown.run('contentMaintenance.dispose', () => contentMaintenance.dispose());
+      await shutdown.run('contentMaintenance.dispose', () => {removeWorkspaceIdleMaintenance();return contentMaintenance.dispose();});
       await shutdown.run('runObservers.stop', () => runObservers.stop());
       await shutdown.run('collaboration.stop', () => collaboration.stop());
       await shutdown.run('fileObservations.stop', () => fileObservations.stop());

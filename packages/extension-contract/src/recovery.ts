@@ -29,7 +29,7 @@ export interface WorkspaceRecoveryFailure {
 }
 
 export type RecoveryConversation = { kind: "thread"; threadId: string; branchId: string };
-type LocalRecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" } | { kind: "fixed"; branchId: string; revision: number };
+type LocalRecoveryFileTarget = { kind: "workspace" } | { kind: "physical"; workspaceId: string; threadId: string; runId: string; rootId: string; canonicalRoot: string; executionWorkspaceId: string; sourceMode: "live_root" | "materialized" | "native_workspace" } | { kind: "fixed"; branchId: string; revision: number };
 export type RecoveryFileTarget = LocalRecoveryFileTarget
   | { kind: "managed"; hostId: string; target: Extract<LocalRecoveryFileTarget, { kind: "physical" }> };
 
@@ -435,7 +435,7 @@ export const parseRecoveryFileTarget = (value: unknown): RecoveryFileTarget => {
   }
   if (raw.kind === "workspace") return { kind: "workspace" };
   if (raw.kind === "fixed") return { kind: "fixed", branchId: text(raw.branchId, "target.branchId"), revision: count(raw.revision, "target.revision") };
-  if (raw.kind === "physical") return { kind: "physical", workspaceId: text(raw.workspaceId, "target.workspaceId"), threadId: text(raw.threadId, "target.threadId"), runId: text(raw.runId, "target.runId"), rootId: text(raw.rootId, "target.rootId"), canonicalRoot: text(raw.canonicalRoot, "target.canonicalRoot"), executionWorkspaceId: text(raw.executionWorkspaceId, "target.executionWorkspaceId"), sourceMode: oneOf(raw.sourceMode, ["live_root", "materialized"] as const, "target.sourceMode") };
+  if (raw.kind === "physical") return { kind: "physical", workspaceId: text(raw.workspaceId, "target.workspaceId"), threadId: text(raw.threadId, "target.threadId"), runId: text(raw.runId, "target.runId"), rootId: text(raw.rootId, "target.rootId"), canonicalRoot: text(raw.canonicalRoot, "target.canonicalRoot"), executionWorkspaceId: text(raw.executionWorkspaceId, "target.executionWorkspaceId"), sourceMode: oneOf(raw.sourceMode, ["live_root", "materialized", "native_workspace"] as const, "target.sourceMode") };
   throw new WorkspaceRecoveryContractError("invalid recovery file target");
 };
 

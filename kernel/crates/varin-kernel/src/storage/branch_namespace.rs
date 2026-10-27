@@ -540,6 +540,13 @@ impl Storage {
         if input.source_provenance.is_some() {
             creation["sourceProvenance"] = params["sourceProvenance"].clone();
         }
-        self.create_branch(&creation, grant_id)
+        self.filesystem_transaction(|storage|{
+            let created=storage.create_branch(&creation,grant_id)?;
+            if created["created"]==true{
+                let grant=storage.load_grant(grant_id)?;
+                storage.fork_source_filesystem(&input.source_branch_id,&input.branch_id,input.source_pin_id.as_deref(),&root,&grant)?;
+            }
+            Ok(created)
+        })
     }
 }

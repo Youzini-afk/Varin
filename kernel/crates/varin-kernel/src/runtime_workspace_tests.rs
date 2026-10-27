@@ -3,6 +3,99 @@
 use super::*;
 use sha2::Digest;
 
+#[test]
+fn native_attribute_only_result_survives_fork_publication_and_parent_changes() {
+    let mut fixture=Fixture::new();
+    fixture.short("branch.create.begin",json!({"operationId":"create-origin","builderId":"origin-builder","workspaceId":"workspace","branchId":"origin","draftBasePaths":[],"captureScopes":[]}),Some("writer"));
+    fixture.short("branch.create.finish",json!({"operationId":"create-origin","builderId":"origin-builder"}),Some("writer"));
+    let origin=fixture.workspace("workspace.open",json!({"branchId":"origin"}),"writer").unwrap();
+    fixture.native_workspace_write("origin",b"unchanged");
+    fixture.workspace("workspace.fork",json!({"branchId":"origin","generation":origin["binding"]["generation"],"operationId":"attrs-baseline","targetBranchId":"parent"}),"writer").unwrap();
+    let opened=fixture.workspace("workspace.open",json!({"branchId":"parent"}),"writer").unwrap();
+    let session=fixture.kernel.workspaces.session("parent");let sender=fixture.tx.clone();
+    let worker=thread::spawn(move||{
+        let result=(||{let node=session.lookup("file")?;
+            session.set_attributes(&node,|attributes|{attributes.xattrs.insert("dXNlci52YXJpbg".into(),b"selected".to_vec());Ok(())})?;
+            let root=session.lookup("")?;
+            session.set_attributes(&root,|attributes|{attributes.mode=0o700;Ok(())})?;
+            Ok(Value::Null)})();
+        sender.send(WorkerRequest::WorkspaceDone{request:Some(json!({"id":"set-attrs"})),result}).unwrap();
+    });
+    fixture.workspace_finish().unwrap();worker.join().unwrap();
+    let candidate=fixture.workspace("workspace.result.prepare",json!({"branchId":"parent","generation":opened["binding"]["generation"],"publicationId":"attribute-result"}),"writer").unwrap();
+    assert_eq!(candidate["root"],candidate["baseRoot"],"attributes must not require a different body tree");
+    let published=fixture.publish_native_workspace_result(&candidate,"attribute-result","writer");
+    let result=fixture.short("working.result.get",json!({"workspaceId":"workspace","recordId":published["recordId"]}),Some("reader"));
+    assert_eq!(result["record"]["changedPaths"],json!([".","file"]));
+    assert_eq!(result["record"]["pathStates"]["."]["kind"],"directory");
+    assert_eq!(result["record"]["pathStates"]["."]["mode"],0o700);
+    assert_eq!(result["record"]["baseStates"]["."]["mode"],0o755);
+    assert_eq!(result["record"]["baseStates"]["file"]["objectHash"],result["record"]["pathStates"]["file"]["objectHash"]);
+    assert_eq!(result["record"]["pathStates"]["file"]["native"]["xattrs"]["dXNlci52YXJpbg"],json!(b"selected".to_vec()));
+    assert!(result["record"]["baseStates"]["file"]["native"]["xattrs"].get("dXNlci52YXJpbg").is_none());
+    let pin=fixture.short("branch.pin",json!({"operationId":"pin-attribute-result","branchId":"parent","revision":published["resultRevision"]}),Some("writer"));
+    fixture.short("branch.fork",json!({"operationId":"fork-attribute-result","workspaceId":"workspace","branchId":"attribute-copy","sourceBranchId":"parent","sourcePinId":pin["pinId"],"draftBasePaths":[],"captureScopes":[]}),Some("writer"));
+    fixture.native_workspace_write("parent",b"later-body");
+    let copy=fixture.short("branch.read",json!({"branchId":"attribute-copy","revision":0,"includeEntries":true}),Some("reader"));
+    let metadata:Value=serde_json::from_str(copy["entries"][0]["nativeJson"].as_str().unwrap()).unwrap();
+    assert_eq!(metadata["xattrs"]["dXNlci52YXJpbg"],json!(b"selected".to_vec()));
+    let next=fixture.workspace("workspace.result.prepare",json!({"branchId":"parent","generation":opened["binding"]["generation"],"publicationId":"later-result"}),"writer").unwrap();
+    fixture.publish_native_workspace_result(&next,"later-result","writer");
+    fixture.short("working.result.release",json!({"workspaceId":"workspace","recordId":published["recordId"],"operationId":"release-attribute-result"}),Some("writer"));
+    let retained=fixture.short("pin.read",json!({"pinId":pin["pinId"],"paths":[".","file"]}),Some("reader"));
+    assert_eq!(retained["entries"][0]["state"]["mode"],0o700,"an explicit pin retains attributes after its result and revision are released");
+    let retained_attrs:Value=serde_json::from_str(retained["entries"][1]["nativeJson"].as_str().unwrap()).unwrap();
+    assert_eq!(retained_attrs["xattrs"]["dXNlci52YXJpbg"],json!(b"selected".to_vec()));
+    let request=Fixture::request("kernel.shutdown",json!({}),None);
+    fixture.kernel.handle(&request,Arc::new(AtomicBool::new(false)),&fixture.tx).unwrap();fixture.workspace_finish().unwrap();
+}
+
+#[test]
+fn native_handoff_freezes_dirty_files_without_stopping_parent_or_copying_a_directory() {
+    let mut fixture=Fixture::new();
+    fixture.short("branch.create.begin",json!({"operationId":"parent-create","builderId":"parent-builder","workspaceId":"workspace","branchId":"parent","draftBasePaths":[],"captureScopes":[]}),Some("writer"));
+    fixture.short("branch.create.finish",json!({"operationId":"parent-create","builderId":"parent-builder"}),Some("writer"));
+    let opened=fixture.workspace("workspace.open",json!({"branchId":"parent"}),"writer").unwrap();
+    fixture.native_workspace_write("parent",b"before");
+    let binding:crate::tools::ToolBinding=serde_json::from_value(json!({"resourceOwner":{"kind":"local"},"grantId":"writer","runId":"run","threadId":"thread",
+        "workspaceId":"workspace","executionWorkspaceId":"workspace","sourceMode":"native_workspace","nativeWorkspace":{"branchId":"parent","generation":opened["binding"]["generation"]},"enabledTools":[]})).unwrap();
+    let task=crate::workspace_handoffs::Task{source:binding.source_selection().unwrap(),binding,
+        context:varin_runtime::execution::ToolExecutionContext{run_id:"run".into(),operation_id:"dispatch-boundary".into(),origin:varin_runtime::execution::ToolOrigin::ModelStep{request_id:"request".into()}},
+        delegation:serde_json::from_value(json!({"work_mode":"isolated_write","process":false,"configured_preset":false,"selection_ref":{}})).unwrap(),
+        grant:fixture.kernel.workspaces.session("parent").owner(),cancellation:Arc::new(AtomicBool::new(false))};
+    let (workspaces,port,sender)=(fixture.kernel.workspaces.clone(),Kernel::workspace_port(&fixture.tx),fixture.tx.clone());
+    let worker=thread::spawn(move||{let result=task.run(&workspaces,port);sender.send(WorkerRequest::WorkspaceDone{request:Some(json!({"id":"handoff"})),result}).unwrap();});
+    let handoff=fixture.workspace_finish().unwrap();worker.join().unwrap();
+    assert_eq!(handoff["root"]["kind"],"native");
+    fixture.native_workspace_write("parent",b"after");
+    let frozen=fixture.short("branch.read",json!({"branchId":"native-handoff:dispatch-boundary","revision":0,"includeEntries":true}),Some("reader"));
+    assert_eq!(frozen["entries"][0]["state"]["objectHash"],format!("sha256-{}",hex::encode(sha2::Sha256::digest(b"before"))));
+    let request=Fixture::request("kernel.shutdown",json!({}),None);
+    fixture.kernel.handle(&request,Arc::new(AtomicBool::new(false)),&fixture.tx).unwrap();fixture.workspace_finish().unwrap();
+}
+
+#[test]
+fn native_root_close_observes_real_file_consumers_and_rejects_the_old_generation() {
+    let mut fixture=Fixture::new();
+    fixture.short("branch.create.begin",json!({"operationId":"parent-create","builderId":"parent-builder","workspaceId":"workspace","branchId":"parent","draftBasePaths":[],"captureScopes":[]}),Some("writer"));
+    fixture.short("branch.create.finish",json!({"operationId":"parent-create","builderId":"parent-builder"}),Some("writer"));
+    let opened=fixture.workspace("workspace.open",json!({"branchId":"parent"}),"writer").unwrap();
+    let session=fixture.kernel.workspaces.session("parent");
+    let grant=session.owner();
+    let canonical=fs::canonicalize(fixture.work()).unwrap();
+    let id=fixture.kernel.storage.as_mut().unwrap().register_native_file_root("parent",&session.identity().to_string(),canonical,"",&grant).unwrap();
+    fixture.short("file.lease.acquire",json!({"workspaceId":"workspace","rootId":id,"leaseId":"native-save","resources":[{"path":"file","scope":"subtree"}]}),Some("writer"));
+    let address=json!({"branchId":"parent","generation":opened["binding"]["generation"]});
+    assert!(fixture.workspace("workspace.close",address.clone(),"writer").unwrap_err().to_string().contains("workspace_in_use"));
+    fixture.short("file.lease.release",json!({"workspaceId":"workspace","rootId":id,"leaseId":"native-save"}),Some("writer"));
+    session.mount_disconnected();
+    let request=Fixture::request("file.read",json!({"workspaceId":"workspace","rootId":id,"path":"file"}),Some("writer"));
+    assert!(fixture.kernel.handle(&request,Arc::new(AtomicBool::new(false)),&fixture.tx).unwrap_err().to_string().contains("workspace_mount_disconnected"));
+    fixture.workspace("workspace.close",address,"writer").unwrap();
+    let request=Fixture::request("file.read",json!({"workspaceId":"workspace","rootId":id,"path":"file"}),Some("writer"));
+    assert!(fixture.kernel.handle(&request,Arc::new(AtomicBool::new(false)),&fixture.tx).is_err());
+}
+
 impl Fixture {
     fn publish_native_workspace_result(
         &mut self,

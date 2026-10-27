@@ -225,7 +225,7 @@ jobs:
       # explicit qualification on a machine with an already-enabled component.
       - name: Compile macOS workspace callbacks without system installation
         working-directory: kernel
-        run: cargo check -p varin-kernel --all-targets --features workspace-mount,fuser/macos-no-mount --locked
+        run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
 
   production-build:
     name: Production build

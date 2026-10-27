@@ -154,6 +154,7 @@ impl Review {
             );
             let result = match work {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::NativeHandoff(_))=>panic!("Native handoff needs its workspace executor"),
                 Ok(ResourceWork::ProcessSpawn(task)) => task.run_local_resource(&mut self.fixture.storage.lock().unwrap()),
                 Ok(ResourceWork::TextMutation(task)) => {
                     let mut dispatched = false;

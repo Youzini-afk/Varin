@@ -9,6 +9,7 @@ import { SourceAdmissionError } from './source-admission-error.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import type { LiveSourceOwner } from './live-source.js';
 import { createHash } from 'node:crypto';
+import { nativeExecutionWorkspaceId } from './native-workspaces.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { ThreadIdentity, ThreadSource, ThreadPrepareSource, ThreadPreparedSource, ThreadSourcesAPI } from '@varin/application-client';
 import type { WorkspaceWorkingStateRootAccess } from '../harness/working-state/types.js';
@@ -67,11 +68,13 @@ interface SourcePreparationOwners {
   inspectInventory: StableSourcePreparationOwners['inspectInventory'];
   workingStates: WorkspaceWorkingStateRootAccess;
   liveSources?: LiveSourceOwner;
+  nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
   remote?: Pick<ThreadSourceRemoteOwner, 'prepare'>;
   sourceTools(mode: ThreadSource['mode']): Promise<string[]>;
 }
 
 interface SourcePreparationFlight {
+  threadId:string;
   identity: string;
   controller: AbortController;
   work: Promise<ThreadPreparedSource>;
@@ -102,7 +105,7 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
   if (!input || input.runtime !== 'agent' || !input.threadId || !input.branchId || !input.key
     || typeof input.workspaceId !== 'string' || !input.workspaceId || !Array.isArray(input.captureScopes)
     || input.captureScopes.some(scope => typeof scope !== 'string')
-    || !['fixed_branch', 'materialized', 'live_root'].includes(input.mode)) throw new Error('Source preparation request is malformed');
+    || !['fixed_branch', 'materialized', 'live_root','native_workspace'].includes(input.mode)) throw new Error('Source preparation request is malformed');
   const resourceOwner = parseSourceResourceOwner(input.resourceOwner);
   const captureScopes = [...new Set(input.captureScopes.map(scope => normalizeWorkspaceRelativePath(scope) || '.'))].sort();
   let content: ThreadPrepareSource['content'];
@@ -116,7 +119,7 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
     }
     content = { mode: 'surface-drafts', context };
   } else throw new Error('An explicit source content selection is required');
-  if (input.mode === 'live_root' && (content.mode !== 'saved-files' || captureScopes.length)) {
+  if (['live_root','native_workspace'].includes(input.mode) && (content.mode !== 'saved-files' || captureScopes.length)) {
     throw new Error('Live workspace access uses saved files and does not capture editor drafts or copy scopes');
   }
   if (resourceOwner.kind === 'managed_host' && content.mode !== 'saved-files') throw new Error('Editor drafts belong to this Host; select saved files for a managed source');
@@ -125,7 +128,7 @@ export function normalizeThreadSourcePreparation(input: ThreadPrepareSource): Th
 }
 
 /** Documents supplies original drafts; WorkingState's branch-create receipt owns the fixed source. */
-export function createThreadSourcePreparer({ documents, workingStates, liveSources, prepareResources, inspectInventory, sourceTools, remote }: SourcePreparationOwners) {
+export function createThreadSourcePreparer({ documents, workingStates, liveSources, nativeWorkspaces, prepareResources, inspectInventory, sourceTools, remote }: SourcePreparationOwners) {
   const preparing = new Map<string, SourcePreparationFlight>();
   const prepare = async (input: ThreadPrepareSource, key: string, captureIdentity: string, signal: AbortSignal): Promise<ThreadPreparedSource> => {
     signal.throwIfAborted();
@@ -136,6 +139,11 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     // A saved registration is a namespace, not authority to read a physical directory.
     // Look up the durable receipt before reopening a now-moved directory or expired draft.
     const workspaceId = input.workspaceId;
+    if(input.mode==='live_root'||input.mode==='native_workspace'){
+      const native=await nativeWorkspaces?.prepare(workspaceId,signal);
+      if(native)return {...native,source:{...native.source,tools:await sourceTools('native_workspace')}};
+      if(input.mode==='native_workspace')throw new SourceAdmissionError('source_unavailable');
+    }
     const registration = await documents.admitWorkspaceRegistration(workspaceId, signal);
     const tools = await sourceTools(input.mode);
     signal.throwIfAborted();
@@ -144,23 +152,57 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
       const liveRoot = await liveSources.prepare(workspaceId, workspaceId, input.threadId, signal);
       return { path: registration.canonicalPath, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId, mode: 'live_root', liveRoot, tools } };
     }
-    return workingStates.withBranchStore(workspaceId, 'source-prepare', async store => {
+    const owningWorkspace=registration.nativeSource?.workspace_id??workspaceId;
+    const nativePrepared=async(branchId:string,provenance:import('./protocol.generated.js').ChildSourceProvenance,fallbackPath:string):Promise<ThreadPreparedSource>=>{
+      const mode=input.mode==='materialized'?'native_workspace':'fixed_branch';
+      const selected={workspace_id:owningWorkspace,execution_workspace_id:mode==='native_workspace'?nativeExecutionWorkspaceId(branchId):owningWorkspace,branch_id:branchId};
+      let path=fallbackPath;
+      if(mode==='native_workspace'){
+        if(!nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');
+        const entry=await nativeWorkspaces.open(selected,signal);
+        path=(await nativeWorkspaces.acquire(selected,entry.grant,signal)).path;
+      }
+      return {path,source:{resourceOwner:input.resourceOwner,workspaceId:owningWorkspace,executionWorkspaceId:selected.execution_workspace_id,
+        branchId,mode,...(mode==='fixed_branch'?{revision:0}:{}),tools:await sourceTools(mode)},provenance} as ThreadPreparedSource;
+    };
+    return workingStates.withBranchStore(owningWorkspace, 'source-prepare', async store => {
       const branchId = `source:${key}`;
+      await nativeWorkspaces?.retainPrepared({workspace_id:owningWorkspace,execution_workspace_id:owningWorkspace,branch_id:branchId},input.threadId,false,signal);
       const restored = await store.readOriginalSource(branchId, { signal });
       if (restored) {
-        if (!('captureIdentity' in restored.provenance) || restored.provenance.captureIdentity !== captureIdentity) {
+        const selection=restored.provenance.consistency==='fixed-root'?restored.provenance.selection:undefined;
+        if ((selection?.captureIdentity??('captureIdentity' in restored.provenance?restored.provenance.captureIdentity:undefined)) !== captureIdentity) {
           throw new Error('This source preparation key already has a different selection');
         }
         const pin = await store.pinBranch(branchId, { revision: 0, signal });
         try {
-          if (pin.workspaceId !== workspaceId || pin.branchId !== branchId || pin.revision !== 0 || pin.root !== restored.root) {
+          if (pin.workspaceId !== owningWorkspace || pin.branchId !== branchId || pin.revision !== 0 || pin.root !== restored.root) {
             throw new SourceAdmissionError('source_changed');
           }
         } finally { await pin.release(); }
+        if(selection||input.mode==='materialized'&&nativeWorkspaces)return nativePrepared(branchId,restored.provenance,registration.canonicalPath);
         return { path: registration.canonicalPath, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId,
           branchId, revision: 0, mode: input.mode, tools }, provenance: restored.provenance } as ThreadPreparedSource;
       }
       if (await store.getBranchRoot(branchId, { signal })) throw new Error('Source preparation has no original receipt');
+      const native=await nativeWorkspaces?.prepare(workspaceId,signal);
+      if(native?.source.mode==='native_workspace'){
+        if(native.source.workspaceId!==owningWorkspace)throw new SourceAdmissionError('source_changed');
+        const selected=native.source;
+        const captured=input.content.mode==='surface-drafts'?readSourceDrafts({documents,consumer:{kind:'thread',threadId:input.threadId,branchId:input.branchId},context:input.content.context,workspaceId,signal}):{editorDrafts:[]};
+        const resources=await prepareResources?.({store,directory:native.path,workspaceId:owningWorkspace,captureWorkspaceId:workspaceId,branchId,editorDrafts:captured.editorDrafts,signal});
+        const dirty=input.content.mode==='saved-files'?await documents.inspectDirtyBuffers(workspaceId):[];
+        const selection={captureIdentity,contentMode:input.content.mode==='saved-files'?'saved-files' as const:'fixed-draft-baseline' as const,
+          captureScopes:input.captureScopes,omittedDraftPaths:[...new Set(dirty.flatMap(publication=>publication.resources.map(resource=>resource.resource.resourceId)))].sort(),...(captured.drafts?{drafts:captured.drafts}:{})};
+        await nativeWorkspaces!.snapshot({workspace_id:selected.workspaceId,execution_workspace_id:selected.executionWorkspaceId,
+          branch_id:selected.branchId,...(selected.nativeScope?{native_scope:selected.nativeScope}:{})},branchId,`source-snapshot:${key}`,signal,captureIdentity,
+          {threadId:input.threadId,selection,editorDrafts:captured.editorDrafts,...(resources?{resources:{...resources.resources,coverage:{kind:'complete' as const}},beforePublish:async(_actor,temporary)=>{
+            const states=await store.readStateSlice(temporary,resources.observedPaths,{signal});await resources.validate(states??{},signal);
+          }}:{})});
+        const fixed=await store.readOriginalSource(branchId,{signal});
+        if(!fixed)throw new Error('Native source preparation has no original receipt');
+        return nativePrepared(branchId,fixed.provenance,native.path);
+      }
       const { root } = await documents.inspectWorkspace(workspaceId, { signal });
       const capturedDraft = input.content.mode === 'surface-drafts'
         ? readSourceDrafts({ documents, consumer: { kind: 'thread', threadId: input.threadId, branchId: input.branchId },
@@ -170,11 +212,12 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
           editorDrafts: capturedDraft.editorDrafts, signal,
           content: input.content.mode === 'saved-files' ? { mode: 'saved-files' } : { mode: 'fixed-draft-baseline' } },
         { documents, inspectInventory, ...(prepareResources ? { prepareResources } : {}) });
+        if(input.mode==='materialized'&&nativeWorkspaces)return nativePrepared(branchId,captured.provenance,root);
         return { path: root, source: { resourceOwner: input.resourceOwner, workspaceId, executionWorkspaceId: workspaceId,
           branchId: captured.branch.branchId, revision: 0, mode: input.mode, tools }, provenance: captured.provenance } as ThreadPreparedSource;
     }, 'shared', { threadId: input.threadId });
   };
-  return async (value: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource> => {
+  const prepareSelected=async (value: ThreadPrepareSource, signal?: AbortSignal): Promise<ThreadPreparedSource> => {
     signal?.throwIfAborted();
     const input = normalizeThreadSourcePreparation(value);
     const key = createHash('sha256').update(JSON.stringify([input.threadId, input.branchId, input.key])).digest('hex');
@@ -188,7 +231,7 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     }
     if (!flight) {
       const controller = new AbortController();
-      const next: SourcePreparationFlight = { identity, controller, observers: 0,
+      const next: SourcePreparationFlight = { threadId:input.threadId,identity, controller, observers: 0,
         work: Promise.resolve().then(() => prepare(input, key, identity, controller.signal))
           .finally(() => { if (preparing.get(key) === next) preparing.delete(key); }) };
       preparing.set(key, next);
@@ -196,13 +239,19 @@ export function createThreadSourcePreparer({ documents, workingStates, liveSourc
     }
     return observePreparation(flight, signal);
   };
+  return Object.assign(prepareSelected,{async releaseDeletedThreads(threadIds:readonly string[]){
+    const selected=[...preparing.values()].filter(flight=>threadIds.includes(flight.threadId));
+    for(const flight of selected)flight.controller.abort(new Error('Source preparation Thread was deleted'));
+    await Promise.allSettled(selected.map(flight=>flight.work));
+  }});
 }
 
 /** Submission and every continuation re-admit the same Host source authority. */
-export function createThreadSourceAdmission({ documents, withSourceRead, liveSources, runtime, remote }: {
+export function createThreadSourceAdmission({ documents, withSourceRead, liveSources, nativeWorkspaces, runtime, remote }: {
   documents: Pick<DocumentAuthority, 'admitWorkspaceRegistration'>;
   withSourceRead: ThreadResourceScopeOwners['withSourceRead'];
   liveSources?: LiveSourceOwner;
+  nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
   runtime: AgentRuntimeClient;
   remote?: Pick<ThreadSourceRemoteOwner, 'admit'>;
 }) {
@@ -215,6 +264,7 @@ export function createThreadSourceAdmission({ documents, withSourceRead, liveSou
       || (child.source?.kind !== 'ready' && child.source?.kind !== 'shared') || !isDeepStrictEqual(child.source.selection.resource_owner, resourceOwner)
       || (child.source.selection.environment_run_id ?? undefined) !== source.environmentRunId || child.source.selection.workspace_id !== source.workspaceId
       || child.source.selection.execution_workspace_id !== source.executionWorkspaceId
+      || (child.source.selection.native_scope ?? undefined) !== (source.mode === 'native_workspace' ? source.nativeScope : undefined)
       || child.source.selection.branch_id !== source.branchId || child.source.selection.revision !== source.revision
       || child.source.selection.mode !== source.mode)) throw new SourceAdmissionError('source_changed');
     if (resourceOwner.kind === 'managed_host') {
@@ -225,6 +275,11 @@ export function createThreadSourceAdmission({ documents, withSourceRead, liveSou
     if (source.mode === 'live_root') {
       if (!liveSources) throw new SourceAdmissionError('source_unavailable');
       await liveSources.admit(source, identity.threadId, signal);
+      return;
+    }
+    if(source.mode==='native_workspace'){
+      if(!nativeWorkspaces)throw new SourceAdmissionError('source_unavailable');
+      await nativeWorkspaces.open({workspace_id:source.workspaceId,execution_workspace_id:source.executionWorkspaceId,branch_id:source.branchId,...(source.nativeScope?{native_scope:source.nativeScope}:{})},signal);
       return;
     }
     const admitRegistrations = async () => {

@@ -17,6 +17,13 @@ fn main() {
         if cfg!(feature = "macos-no-mount") {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
         } else {
+            if !cfg!(feature = "libfuse2") && !cfg!(feature = "libfuse3") {
+                // The application must launch without a system filesystem
+                // component. Resolve macFUSE only when a mount is requested.
+                println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse3\"");
+                println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
+                return;
+            }
             // Modern macFUSE no longer supplies a usable compat25 mount fd.
             // Prefer its public session API; preserve an explicit libfuse2
             // build and SDKs that only provide the older pkg-config contract.

@@ -36,6 +36,7 @@ pub(crate) mod branch_namespace;
 pub(crate) mod workspace_files;
 pub(crate) mod workspace_metadata;
 pub(crate) mod workspace_session;
+pub(crate) mod native_sources;
 mod workspace_results;
 pub(crate) mod workspace_adoption;
 pub(crate) mod capture_resources;
@@ -56,7 +57,7 @@ pub(crate) mod file_lease_tasks;
 pub(crate) mod file_effects;
 pub(crate) mod file_inspections;
 pub(crate) mod file_roots;
-mod file_resources;
+pub(crate) mod file_resources;
 mod gc;
 mod maintenance;
 pub(crate) mod materialization;
@@ -237,6 +238,9 @@ pub(crate) struct Storage {
     workspace_holders: HashMap<String, (String, String)>,
     private_cleanup: Arc<workspace_files::StagingCleanup>,
     file_roots: HashMap<String, FileRoot>,
+    native_file_roots: HashMap<String, (String, String, String)>,
+    native_closing_roots: BTreeSet<(String,String)>,
+    native_readers: std::sync::Mutex<HashMap<String,Vec<std::sync::Weak<native_sources::NativeReadRetention>>>>,
     observation_reads: HashMap<String, file_observations::ActiveRead>,
     observation_hints: Option<Arc<dyn Fn(file_observations::Hint) + Send + Sync>>,
     file_leases: HashMap<String, FileLease>,

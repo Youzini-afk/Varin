@@ -64,14 +64,36 @@ pub(crate) struct ReadTask {
     capture: Option<CaptureTask>,
     fixed: Option<FileState>,
     storage_idle: bool,
+    native:Option<NativeRead>,
 }
+struct NativeRead{root:FileRoot,grant:Grant,storage_root:PathBuf,cancel:Arc<AtomicBool>,port:workspace_session::StoragePort,_retention:Option<Arc<super::native_sources::NativeReadRetention>>}
 pub(crate) struct Snapshot {
     pub state: FileState,
     pub storage_idle: bool,
 }
 impl ReadTask {
     pub(crate) fn run(&self) -> Result<FileState, KernelError> {
-        if let Some(capture) = &self.capture {
+        if let Some(native)=&self.native{
+            let resource=super::file_resources::resolve_admitted_resource(&native.root,&self.request.path,&native.grant,false)?;
+            let canonical=super::file_resource_leases::canonical_lease_path(resource.absolute)?;
+            let (id,request,root,grant,storage_root,cancel)=(self.id.clone(),self.request.clone(),native.root.clone(),native.grant.clone(),native.storage_root.clone(),native.cancel.clone());
+            let capture=native.port.call(move|s|{
+                let receipt=s.observation_receipt(&request)?;let actual=s.observation_grant(&receipt,&grant.host_id)?;
+                let current=s.observation_root(&request.source,&request.source_run_id,&grant.host_id)?.ok_or_else(||denied("Native observation source is missing"))?;
+                if current.root_id!=root.root_id||current.canonical_root!=root.canonical_root||actual.grant_id!=grant.grant_id{return Err(denied("Native observation owner changed during path resolution"));}
+                let resources=vec![FileLeaseResource{path:request.path.clone(),subtree:false}];
+                let canonical_resources=vec![crate::model::CanonicalFileLeaseResource{absolute:canonical,subtree:false}];
+                s.assert_file_observation_resources(&canonical_resources)?;
+                let lease=FileLease{lease_id:format!("file-observation-read:{id}"),root_id:root.root_id.clone(),workspace_id:request.source.workspace_id.clone(),grant_id:grant.grant_id.clone(),resources,canonical_resources};
+                let active=s.observation_reads.get_mut(&id).ok_or_else(||denied("Original observation read ended"))?;
+                if active.cancel.load(Ordering::Acquire){return Err(KernelError::Cancelled);}
+                active.lease_id=Some(lease.lease_id.clone());
+                s.retained_file_leases.insert(lease.lease_id.clone(),super::file_resource_leases::RetainedFileLease{release_requested:false});
+                s.file_leases.insert(lease.lease_id.clone(),lease.clone());
+                Ok(CaptureTask::observation(root,grant,request.path,lease,storage_root,cancel))
+            })?;
+            capture.run()?.single_state()
+        }else if let Some(capture) = &self.capture {
             capture.run()?.single_state()
         } else {
             self.fixed
@@ -157,6 +179,7 @@ impl Storage {
         self.observation_hints = Some(Arc::new(hint));
     }
     pub(super) fn hint_file_root(&self, root_id: &str) {
+        if let Some(session)=self.file_roots.get(root_id).and_then(|root|root.native.as_ref()).and_then(|native|native.session.upgrade()){session.notify_native_idle();}
         if let (Some(hint), Some(root)) = (&self.observation_hints, self.file_roots.get(root_id)) {
             hint(Hint::Root {
                 root_id: root_id.into(),
@@ -290,6 +313,15 @@ impl Storage {
         if source.mode == varin_runtime::SourceMode::FixedBranch {
             return Ok(None);
         }
+        if source.mode==varin_runtime::SourceMode::NativeWorkspace{
+            let branch=source.branch_id.as_deref().ok_or_else(||denied("Native observation branch is missing"))?;
+            let id=super::native_sources::root_id(&source.workspace_id,&source.execution_workspace_id,branch,source.native_scope.as_deref().unwrap_or(""));
+            let root=self.file_roots.get(&id).cloned().ok_or_else(||denied("Native observation source has not rebound its mount"))?;
+            let session=root.native.as_ref().and_then(|native|native.session.upgrade()).ok_or_else(||denied("Native observation owner is unavailable"))?;
+            session.check_open()?;
+            if self.native_closing_roots.contains(&(branch.into(),session.identity().to_string())){return Err(denied("Native observation source is closing"));}
+            return Ok(Some(root));
+        }
         let requested = if source.mode == varin_runtime::SourceMode::LiveRoot {
             let root = source
                 .live_root
@@ -345,6 +377,7 @@ impl Storage {
             owning_workspace_id: source.workspace_id.clone(),
             execution_workspace_id: source.execution_workspace_id.clone(),
             canonical_root: canonical,
+            native: None,
         };
         // Pure root identity registration. In particular this never invokes file-operation
         // reconciliation/materialization (the public write-capable registration does).
@@ -361,7 +394,13 @@ impl Storage {
         if authorize {
             self.observation_grant(&receipt, host)?;
         }
-        Ok(receipt.target)
+        let mut target=receipt.target;
+        if target.source.mode==varin_runtime::SourceMode::NativeWorkspace{
+            let source=&target.source;
+            let id=super::native_sources::root_id(&source.workspace_id,&source.execution_workspace_id,source.branch_id.as_deref().ok_or_else(||denied("Native observation branch is missing"))?,source.native_scope.as_deref().unwrap_or(""));
+            if let Some(root)=self.file_roots.get(&id){target.physical_root=Some(LiveRoot{host_id:host.into(),root_id:id,canonical_root:root.canonical_root.to_string_lossy().into()});}
+        }
+        Ok(target)
     }
     pub(crate) fn file_acceptance_page(
         &self,
@@ -729,7 +768,7 @@ impl Storage {
         let root = self.observation_root(&r.source, &r.source_run_id, host)?;
         if let Some(root) = root {
             if receipt.target.physical_root.as_ref().is_none_or(|v| {
-                v.root_id != root.root_id || !fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root)
+                v.root_id != root.root_id || (r.source.mode!=varin_runtime::SourceMode::NativeWorkspace&&!fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root))
             }) {
                 return Err(denied("accepted physical root changed"));
             }
@@ -753,9 +792,10 @@ impl Storage {
         let grant = self.observation_grant(&receipt, host)?;
         let root = self.observation_root(&r.source, &r.source_run_id, host)?;
         let id = Uuid::new_v4().to_string();
+        let mut native=None;
         let (capture, fixed, lease_id, storage_idle) = if let Some(root) = root {
             if receipt.target.physical_root.as_ref().is_none_or(|v| {
-                v.root_id != root.root_id || !fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root)
+                v.root_id != root.root_id || (r.source.mode!=varin_runtime::SourceMode::NativeWorkspace&&!fs::canonicalize(&v.canonical_root).is_ok_and(|path| path == root.canonical_root))
             }) {
                 return Err(denied("accepted physical root changed"));
             }
@@ -763,6 +803,12 @@ impl Storage {
                 path: r.path.clone(),
                 subtree: false,
             }];
+            if let Some(owner)=&root.native{
+                let session=owner.session.upgrade().ok_or_else(||denied("Native observation owner is unavailable"))?;
+                let idle=self.observation_process_idle(&root.canonical_root)?;
+                native=Some(NativeRead{port:session.storage_port(),_retention:self.retain_native_reader(&root.root_id)?,root,grant:grant.clone(),storage_root:self.root.clone(),cancel:cancel.clone()});
+                (None,None,None,idle)
+            }else{
             self.assert_file_observation_lease(&grant, &root.root_id, &paths)?;
             let canonical = self.canonical_lease_resources(&root.root_id, &paths, &grant)?;
             let idle = self.observation_process_idle(&root.canonical_root)?;
@@ -800,6 +846,7 @@ impl Storage {
                 Some(lease_id),
                 idle,
             )
+            }
         } else {
             let root = receipt
                 .fixed_root
@@ -835,6 +882,7 @@ impl Storage {
             capture,
             fixed,
             storage_idle,
+            native,
         })
     }
     pub(crate) fn finish_file_observation(
@@ -861,12 +909,14 @@ impl Storage {
             let idle = if let Some(root) =
                 self.observation_root(&task.request.source, &task.request.source_run_id, host)?
             {
-                super::file_resources::resolve_admitted_resource(
+                if let Some(native)=&task.native{
+                    if root.root_id!=native.root.root_id||root.canonical_root!=native.root.canonical_root{return Err(denied("Native observation source changed before completion"));}
+                }else{super::file_resources::resolve_admitted_resource(
                     &root,
                     &task.request.path,
                     &grant,
                     false,
-                )?;
+                )?;}
                 self.observation_process_idle(&root.canonical_root)?
             } else {
                 true
@@ -982,6 +1032,7 @@ mod tests {
                 thread_id: "thread".into(),
                 actor: FollowupActor::User,
                 source: SourceSelection {
+                    native_scope:None,
                     resource_owner: varin_runtime::catalog::launches::SourceResourceOwner::Local,
                     environment_run_id: None,
                     mode: SourceMode::LiveRoot,

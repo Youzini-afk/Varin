@@ -16,7 +16,7 @@ export * from "./language-support-errors.js";
 export * from "./run-errors.js";
 export * from "./search-errors.js";
 export * from "./transport/index.js";
-export { projectFolders, projectPathKey, projectContainsPath } from './project-folders.js';
+export { projectFolders, projectPathKey, projectContainsPath, parseVersionedProjectWorkspace } from './project-folders.js';
 export type { ProjectFolders } from './project-folders.js';
 export * from "./threads.js";
 export * from "./threads-http.js";

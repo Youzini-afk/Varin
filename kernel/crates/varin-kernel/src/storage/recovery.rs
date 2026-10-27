@@ -152,6 +152,15 @@ impl Storage {
         Ok(())
     }
 
+    fn recovery_path(path: &str) -> Result<String, KernelError> {
+        if path == "." { Ok(".".into()) } else { Self::validate_path(path).map(|parts|parts.join("/")) }
+    }
+    fn validate_root_recovery_state(path:&str,state:&Value)->Result<(),KernelError>{
+        if path == "." && state["kind"] != "directory" {
+            return Err(KernelError::Operation("Workspace root recovery accepts directory metadata only".into()));
+        }
+        Ok(())
+    }
     pub(super) fn validate_recovery_state(value: &Value, label: &str) -> Result<(), KernelError> {
         let object = value.as_object().ok_or_else(|| {
             KernelError::Operation(format!("{label} must be a recovery state object"))
@@ -162,9 +171,9 @@ impl Storage {
             .ok_or_else(|| KernelError::Operation(format!("{label}.kind is required")))?;
         let allowed: &[&str] = match kind {
             "missing" | "unsupported" => &["kind"],
-            "directory" => &["kind", "mode"],
-            "symlink" => &["kind", "mode", "symlinkTarget"],
-            "regular-file" => &["kind", "objectHash", "byteLength", "mode"],
+            "directory" => &["kind", "mode", "native"],
+            "symlink" => &["kind", "mode", "symlinkTarget", "native"],
+            "regular-file" => &["kind", "objectHash", "byteLength", "mode", "native"],
             _ => return Err(KernelError::Operation(format!("{label}.kind is invalid"))),
         };
         if object.keys().any(|key| !allowed.contains(&key.as_str())) {
@@ -172,6 +181,7 @@ impl Storage {
                 "{label} contains unknown fields"
             )));
         }
+        if let Some(native)=object.get("native") { super::workspace_metadata::validate_file_metadata(&serde_json::from_value(native.clone())?)?; }
         if let Some(mode) = object.get("mode") {
             if mode.as_u64().is_none_or(|mode| mode > u32::MAX as u64) {
                 return Err(KernelError::Operation(format!("{label}.mode is invalid")));
@@ -892,7 +902,8 @@ impl Storage {
             .ok_or_else(|| {
                 KernelError::Operation("recovery change path is required".to_string())
             })?;
-        let path = Self::validate_path(raw_path)?.join("/");
+        let path = Self::recovery_path(raw_path)?;
+        Self::validate_root_recovery_state(&path,&before)?;
         let turn: Option<(String, String)> = self.conn.query_row(
             "SELECT checkpoint_id, conversation_json FROM recovery_turns WHERE workspace_id = ?1 AND execution_id = ?2",
             params![workspace_id, execution_id],
@@ -958,7 +969,7 @@ impl Storage {
             .ok_or_else(|| {
                 KernelError::Operation("recovery change path is required".to_string())
             })?;
-        let path = Self::validate_path(raw_path)?.join("/");
+        let path = Self::recovery_path(raw_path)?;
         let row: Option<(String, String, String, String, Option<String>, String, i64)> = self.conn.query_row("SELECT path, before_json, state, execution_id, after_json, updated_at, revision FROM recovery_changes WHERE workspace_id = ?1 AND checkpoint_id = ?2 AND path = ?3", params![workspace_id, checkpoint_id, path], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?))).optional()?;
         let Some((path, before_json, state, execution_id, after_json, updated_at, revision)) = row
         else {
@@ -1150,7 +1161,8 @@ impl Storage {
             .ok_or_else(|| {
                 KernelError::Operation("recovery change path is required".to_string())
             })?;
-        let path = Self::validate_path(raw_path)?.join("/");
+        let path = Self::recovery_path(raw_path)?;
+        Self::validate_root_recovery_state(&path,&after)?;
         let expected = params_value
             .get("expectedRevision")
             .and_then(Value::as_i64)
@@ -1282,7 +1294,7 @@ impl Storage {
                     .ok_or_else(|| {
                         KernelError::Operation("operation file path is required".to_string())
                     })?;
-                let path = Self::validate_path(raw_path)?.join("/");
+                let path = Self::recovery_path(raw_path)?;
                 if !paths.insert(path.to_string()) {
                     return Err(KernelError::Operation(
                         "operation file paths must be unique".to_string(),
@@ -1294,6 +1306,7 @@ impl Storage {
                 for field in ["expectedJson", "targetJson", "safetyJson"] {
                     if let Some(raw) = file.get(field).and_then(Value::as_str) {
                         let value = serde_json::from_str::<Value>(raw)?;
+                        Self::validate_root_recovery_state(&path,&value)?;
                         Self::require_operation_state_references(&value, field, &normalized, kind)?;
                     }
                 }
@@ -1359,7 +1372,7 @@ impl Storage {
             .get("path")
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("operation file path is required".to_string()))?;
-        let path = Self::validate_path(raw_path)?.join("/");
+        let path = Self::recovery_path(raw_path)?;
         let expected = params_value
             .get("expectedRevision")
             .and_then(Value::as_i64)
@@ -1424,6 +1437,7 @@ impl Storage {
         for field in ["expectedJson", "targetJson", "safetyJson"] {
             if let Some(raw) = params_value.get(field).and_then(Value::as_str) {
                 let value = serde_json::from_str::<Value>(raw)?;
+                Self::validate_root_recovery_state(&path,&value)?;
                 let refs = normalized.as_ref().ok_or_else(|| {
                     KernelError::Operation(format!("{field} update requires references"))
                 })?;
@@ -1739,7 +1753,7 @@ impl Storage {
         Ok(json!({"operations":operations}))
     }
     pub(super) fn recovery_file_reservations(&self, workspace: &str, except: Option<&str>) -> Result<Vec<Value>, KernelError> {
-        let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
+        let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')),COALESCE(json_extract(result_json,'$.applyRootId'),json_extract(data_json,'$.applyRootId')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
         let mut rows = statement.query([])?;
         let mut operations = Vec::new();
         while let Some(row) = rows.next()? {
@@ -1748,11 +1762,18 @@ impl Storage {
             if owning == workspace && except == Some(operation.as_str()) {
                 continue;
             }
-            let directory = row.get::<_, Option<String>>(4)?.ok_or_else(|| {
+            let mut directory = row.get::<_, Option<String>>(4)?.ok_or_else(|| {
                 KernelError::Operation(format!(
                     "unresolved Integration reservation root: {owning}/{operation}"
                 ))
             })?;
+            if let Some(id)=row.get::<_,Option<String>>(7)?{
+                if self.native_file_roots.contains_key(&id){
+                    if let Some(root)=self.file_roots.get(&id).filter(|root|root.owning_workspace_id==owning){
+                        directory=root.canonical_root.to_str().ok_or_else(||KernelError::Storage("Native reservation path is not UTF-8".into()))?.into();
+                    }
+                }
+            }
             let paths: Vec<String> = if let Some(raw) = row.get::<_, Option<String>>(5)? {
                 serde_json::from_str(&raw)?
             } else if let Some(raw) = row.get::<_, Option<String>>(6)? {

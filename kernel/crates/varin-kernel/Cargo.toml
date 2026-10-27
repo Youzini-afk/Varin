@@ -6,8 +6,9 @@ license.workspace = true
 description = "Varin private Rust system kernel"
 
 [features]
-# Native access prototypes are opt-in until platform/cache and metadata
-# qualification is complete. No component is installed by enabling this flag.
+# Mount adapters are compiled into product builds. System components are loaded
+# only for an explicitly enabled workspace; building never installs a driver.
+default = ["workspace-mount"]
 workspace-mount = ["dep:winfsp", "dep:winfsp-sys", "dep:fuser"]
 
 [dependencies]

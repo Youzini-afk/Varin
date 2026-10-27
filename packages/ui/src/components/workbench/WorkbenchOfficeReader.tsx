@@ -19,16 +19,17 @@ export function WorkbenchOfficeReader({ workspaceId, workspaceRoot, identity, ta
   const [error, setError] = React.useState('');
   React.useEffect(() => {
     const controller = new AbortController(); setScope(undefined); setError('');
-    if (identity && api?.research) void api.research.scopes(identity, controller.signal).then(scopes => {
+    if (identity && api?.research) void Promise.all([api.research.scopes(identity, controller.signal),apis.documents.resolveWorkspace({workspaceId})]).then(([scopes,workspace]) => {
       // A matching project can have several immutable child revisions. Only a
       // source reading this actual physical directory represents the editor file.
       const normalized = (value: string) => { const path = value.replace(/\\/g, '/').replace(/\/$/, ''); return /^[a-z]:/i.test(path) ? path.toLowerCase() : path; };
-      if (!controller.signal.aborted) setScope(scopes.find(scope => scope.workspaceId === workspaceId
-        && scope.source.mode !== 'fixed_branch' && scope.source.live_root
-        && normalized(scope.source.live_root.canonicalRoot) === normalized(workspaceRoot)));
+      if (!controller.signal.aborted) setScope(scopes.find(scope => workspace.nativeSource
+        ? scope.source.mode==='native_workspace'&&scope.source.resource_owner.kind==='local'&&scope.source.workspace_id===workspace.nativeSource.workspaceId
+          &&scope.source.execution_workspace_id===workspace.nativeSource.executionWorkspaceId&&scope.source.branch_id===workspace.nativeSource.branchId&&(scope.source.native_scope??'')===(workspace.nativeSource.scope??'')
+        : scope.workspaceId===workspaceId&&scope.source.mode!=='fixed_branch'&&scope.source.live_root&&normalized(scope.source.live_root.canonicalRoot)===normalized(workspaceRoot)));
     }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => controller.abort();
-  }, [api, host, identity, workspaceId, workspaceRoot]);
+  }, [api,apis.documents, host, identity, workspaceId, workspaceRoot]);
   const reader = React.useMemo<PdfMaterialReaderPort | OfficeFileReaderPort>(() => {
     const epoch = getRuntimeEndpointGeneration();
     const current = () => epoch === getRuntimeEndpointGeneration() && host === useThreadStore.getState().hostKey;

@@ -129,7 +129,7 @@ impl Storage {
                 "Workspace adoption needs its original operation and target branch".into(),
             ));
         }
-        let identity = json!({"input":{"branchId":input.branch_id,"rootId":input.root_id,"operationId":input.operation_id,"gitRootIds":input.git_root_ids},"grantId":grant.grant_id,"workspaceId":root.owning_workspace_id,"source":root.canonical_root,"gitRoots":git_roots});
+        let identity = json!({"input":{"branchId":input.branch_id,"rootId":input.root_id,"operationId":input.operation_id,"gitRootIds":input.git_root_ids},"workspaceId":root.owning_workspace_id,"executionWorkspaceId":root.execution_workspace_id,"source":root.canonical_root,"gitRoots":git_roots});
         let params_hash = hash_json(&identity)?;
         let prior = self.operation_get(&json!({"operationId":input.operation_id}))?;
         if !prior.is_null() {

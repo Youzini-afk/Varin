@@ -24,6 +24,7 @@ pub enum ExternalCommand {
         title: String,
         cwd: String,
         workspace_id: Option<String>,
+        native_workspace: Option<super::launches::SourceSelection>,
         parent: Option<Value>,
         private_workspace: Option<bool>,
     },
@@ -433,6 +434,7 @@ impl Catalog {
                 title,
                 cwd,
                 workspace_id,
+                native_workspace,
                 parent,
                 private_workspace,
                 ..
@@ -446,6 +448,12 @@ impl Catalog {
                 let mut v = json!({"id":id,"configurationId":configuration_id,"harness":harness,"title":title,"cwd":cwd,"revision":1,"createdAt":now(),"updatedAt":now(),"archived":false,"pinned":false,"deleted":false});
                 if let Some(workspace) = workspace_id {
                     v["workspaceId"] = json!(workspace);
+                }
+                if let Some(source)=native_workspace{
+                    source.validate()?;
+                    super::source_retention::assert_record_available(&tx,"external_conversations",&json!({"nativeWorkspace":source}))?;
+                    if source.mode!=crate::SourceMode::NativeWorkspace||!source.resource_owner.is_local(){return Err(RuntimeError::Invalid("External workspace must be a native source on its execution Host".into()));}
+                    v["nativeWorkspace"]=serde_json::to_value(source)?;
                 }
                 if let Some(parent) = parent {
                     v["parent"] = parent;

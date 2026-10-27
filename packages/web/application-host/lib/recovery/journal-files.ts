@@ -23,11 +23,13 @@ export interface MissingState {
 export interface DirectoryState {
   kind: 'directory';
   mode?: number | undefined;
+  native?: NativeFileMetadata;
 }
 
 export interface SymlinkState {
   kind: 'symlink';
   mode?: number | undefined;
+  native?: NativeFileMetadata;
   symlinkTarget: string;
 }
 
@@ -35,6 +37,7 @@ export interface RegularFileState {
   kind: 'regular-file';
   byteLength: number;
   mode?: number | undefined;
+  native?: NativeFileMetadata;
   objectHash: string;
 }
 
@@ -55,7 +58,43 @@ export interface RecoveryStateLike {
   mode?: number | undefined;
   objectHash?: string | undefined;
   symlinkTarget?: string | undefined;
+  native?: NativeFileMetadata;
 }
+
+export interface FileTimestamp { seconds: number; nanos: number }
+export const nativeMetadataIdentity=(value:unknown):string=>{
+  const ordered=(v:unknown):unknown=>Array.isArray(v)?v.map(ordered):v&&typeof v==='object'
+    ?Object.fromEntries(Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,ordered(item)])):v;
+  return JSON.stringify(ordered(value))??'undefined';
+};
+export interface NativeFileMetadata {
+  uid:number; gid:number; created:FileTimestamp|null; modified:FileTimestamp; backup:FileTimestamp|null;
+  windowsAttributes:number; bsdFlags:number; security:number[]|null; reparseData:number[]|null; xattrs:Record<string,number[]>;
+}
+export const parseNativeFileMetadata=(value:unknown):NativeFileMetadata=>{
+  const fail=():never=>{throw new RecoveryPrimitiveError('storage-malformed','Native file attributes are malformed',{origin:'storage'});};
+  if(!value||typeof value!=='object'||Array.isArray(value))return fail();
+  const v=value as Record<string,unknown>;
+  const keys=['uid','gid','created','modified','backup','windowsAttributes','bsdFlags','security','reparseData','xattrs'];
+  if(Object.keys(v).length!==keys.length||Object.keys(v).some(key=>!keys.includes(key)))return fail();
+  const uint=(n:unknown):number=>Number.isSafeInteger(n)&&(n as number)>=0&&(n as number)<=0xffffffff?n as number:fail();
+  const time=(t:unknown):FileTimestamp=>{
+    if(!t||typeof t!=='object'||Array.isArray(t))return fail();
+    const r=t as Record<string,unknown>;
+    if(Object.keys(r).length!==2||!Number.isSafeInteger(r.seconds)||!Number.isInteger(r.nanos)||(r.nanos as number)<0||(r.nanos as number)>=1e9)return fail();
+    return {seconds:r.seconds as number,nanos:r.nanos as number};
+  };
+  const bytes=(a:unknown):number[]=>Array.isArray(a)&&a.every(n=>Number.isInteger(n)&&n>=0&&n<=255)?[...a] as number[]:fail();
+  if(!v.xattrs||typeof v.xattrs!=='object'||Array.isArray(v.xattrs))return fail();
+  const xattrs:Record<string,number[]>={};
+  for(const key of Object.keys(v.xattrs).sort()){
+    const decoded=Buffer.from(key,'base64url');
+    if(!decoded.length||decoded.includes(0)||decoded.toString('base64url')!==key)return fail();
+    Object.defineProperty(xattrs,key,{value:bytes((v.xattrs as Record<string,unknown>)[key]),enumerable:true,writable:true,configurable:true});
+  }
+  return {uid:uint(v.uid),gid:uint(v.gid),created:v.created===null?null:time(v.created),modified:time(v.modified),backup:v.backup===null?null:time(v.backup),
+    windowsAttributes:uint(v.windowsAttributes),bsdFlags:uint(v.bsdFlags),security:v.security===null?null:bytes(v.security),reparseData:v.reparseData===null?null:bytes(v.reparseData),xattrs};
+};
 
 export interface CapturedState {
   path: string;
@@ -125,10 +164,11 @@ export const parseRecoveryState = (value: unknown): RecoveryState => {
   }
   const record = value as Record<string, unknown>;
   const mode = parseOptionalMode(record.mode);
+  const native=record.native===undefined?{}:{native:parseNativeFileMetadata(record.native)};
   if (record.kind === 'missing') return { kind: 'missing' };
   if (record.kind === 'unsupported') return { kind: 'unsupported' };
   if (record.kind === 'directory') {
-    return { kind: 'directory', ...(mode === undefined ? {} : { mode }) };
+    return { kind: 'directory', ...native, ...(mode === undefined ? {} : { mode }) };
   }
   if (record.kind === 'symlink') {
     if (typeof record.symlinkTarget !== 'string') {
@@ -136,6 +176,7 @@ export const parseRecoveryState = (value: unknown): RecoveryState => {
     }
     return {
       kind: 'symlink',
+      ...native,
       symlinkTarget: record.symlinkTarget,
       ...(mode === undefined ? {} : { mode }),
     };
@@ -148,6 +189,7 @@ export const parseRecoveryState = (value: unknown): RecoveryState => {
     return {
       byteLength: record.byteLength as number,
       kind: 'regular-file',
+      ...native,
       objectHash: record.objectHash,
       ...(mode === undefined ? {} : { mode }),
     };
@@ -192,6 +234,7 @@ export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringif
   mode: persistentMode(state.kind, state.mode),
   objectHash: state.objectHash ?? null,
   symlinkTarget: state.symlinkTarget ?? null,
+  native:state.native?nativeMetadataIdentity(state.native):null,
 });
 
 /**
@@ -201,6 +244,7 @@ export const stateIdentity = (state: RecoveryStateLike): string => JSON.stringif
  * distinguishes them for hashes and fingerprints.
  */
 export const sameState = (left: RecoveryStateLike, right: RecoveryStateLike): boolean => {
+  if(left.native&&right.native&&nativeMetadataIdentity(left.native)!==nativeMetadataIdentity(right.native))return false;
   const leftId = JSON.stringify({
     byteLength: left.byteLength ?? null,
     kind: left.kind,
@@ -252,10 +296,10 @@ export const createRecoveryFileReader = ({
       throw error;
     }
     const relative = normalizeResourceId(contained.relativePath);
-    if (!relative || relative === '.' || relative.split('/').includes('..')) {
+    if (relative.split('/').includes('..')) {
       throw new RecoveryPrimitiveError('workspace-untrusted', `Recovery path is invalid: ${inputPath}`);
     }
-    return { absolute: contained.absolutePath, relative };
+    return { absolute: contained.absolutePath, relative: relative || '.' };
   };
 
   const hashFile = async (filePath: string): Promise<FileHashResult> => {

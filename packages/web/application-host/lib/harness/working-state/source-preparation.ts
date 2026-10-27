@@ -79,7 +79,7 @@ export async function captureStableDirectoryBaseline(input: StableDirectoryCaptu
       input.onProgress?.(completed, total);
     };
     input.onPhase?.('capture');
-    captured = await store.captureDirectory(directory, paths, { ...options, onProgress });
+    captured = await store.captureDirectory(directory, ['.', ...paths], { ...options, onProgress });
     signal?.throwIfAborted();
     const capturedPaths = Object.keys(captured).sort();
     input.onPhase?.('verify');

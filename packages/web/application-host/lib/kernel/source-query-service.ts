@@ -84,7 +84,7 @@ export function createSourceQueryService(options: SourceQueryServiceOptions): So
     const resources = createThreadResourceScope({ ...options.resourceOwners, targetAuthority: { assert: assertResources,
       async withLiveSourceRead(selected, consume, signal) {
         await assertResources(selected, signal);
-        if (!scope.physicalRoot || scope.source.mode !== 'live_root') throw new Error('The original live resource root is unavailable');
+        if (!scope.physicalRoot || !['live_root','native_workspace'].includes(scope.source.mode)) throw new Error('The original live resource root is unavailable');
         const store = new KernelWorkingStateRootStore(await options.storage.contextFromSourceGrant({ grant: scope.grant,
           owningWorkspaceId: scope.source.workspace_id, executionWorkspaceId: scope.source.execution_workspace_id,
           rootId: scope.physicalRoot.rootId, canonicalRoot: scope.physicalRoot.canonicalRoot }));

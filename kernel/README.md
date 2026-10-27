@@ -113,24 +113,32 @@ original SQLite transaction. Checkpoints pin both **current** roots, including n
 since the last published revision, and fork dirty attributes with the selected bytes. Deleting the data
 branch releases its paired metadata branch; existing pins retain the selected versions. Native metadata
 branch identities (`workspace-metadata:<UUID>`) and control records cannot be overwritten/released through
-generic public branch/record methods. Existing imports have only PathState metadata; until stable source
-adoption captures real attributes, missing times use the branch creation time and owners use the Host user.
+generic public branch/record methods. Stable adoption and file captures preserve recoverable native
+attributes; cross-Host entries import those values with fresh local file identities. Normal pins and
+published revisions retain their paired attribute roots independently of a WorkingResult's lifetime.
+Releasing a historical WorkingResult also releases its own revision and paired revision metadata;
+other explicitly retained pins continue to own their selected bytes and attributes. Root directory
+metadata uses `.` in result/import contracts and accepts only conditional directory attribute updates.
+Namespace replacement assigns a fresh local identity; explicit rebases select the filesystem sidecar
+from their original pin/revision instead of borrowing attributes from an equal body hash.
 
-The optional `workspace-mount` feature contains WinFsp and Linux/macOS FUSE qualification adapters.
-It does not install OS components or change any production Run's source selection. WinFsp is delay-loaded;
+The default `workspace-mount` feature contains WinFsp and Linux/macOS FUSE adapters.
+It never installs OS components. New isolated writers use native workspace branches; project settings
+can explicitly adopt a primary workspace into a separate mounted directory. WinFsp is delay-loaded;
 the original installed DLL is located through its system registration only when starting a mount. Building
 this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
-FUSE device/helper for actual mounts; macOS requires an already-enabled macFUSE component and build SDK.
-macOS builds now prefer the SDK's libfuse3 session API, avoiding the compat25 break tracked at
-https://github.com/cberner/fuser/issues/752. An explicit `fuser/libfuse2` build or an SDK providing only
-`fuse.pc` retains the legacy path; that path does not support macFUSE 5.3's disabled compat25 API.
+FUSE device/helper for actual mounts; macOS requires an already-enabled macFUSE component.
+macOS defaults to runtime loading of the installed libfuse3 session API, avoiding the compat25 break tracked at
+https://github.com/cberner/fuser/issues/752. An explicit `fuser/libfuse2` build retains the legacy path;
+the default macOS loader never selects compat25 because an SDK happens to contain `fuse.pc`.
 The libfuse3 owner retains the session while native callbacks use a duplicated fd and destroys it on
 setup failure or after detach. Native OS qualification of this selection is still pending.
 `wait_ready` checks the actual mount device/root inode after the dispatcher
 starts, while keeping the mount object available for cancellation and cleanup; this covers the asynchronous
 readiness distinction at https://github.com/cberner/fuser/issues/736.
-`kernel/vendor/fuser/VARIN_PATCHES.md` records the capability and retryable-detach patch. macOS compile-only
-CI uses `fuser/macos-no-mount`, which deliberately cannot start a real mount and installs no extension.
+`kernel/vendor/fuser/VARIN_PATCHES.md` records the loader, capability and retryable-detach patch. macOS CI
+compiles the real default transport without installing an extension. Dependency absence is reported at
+mount admission and does not prevent the ordinary application from starting.
 
 The ignored `workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent`
 test starts a separate ordinary process and two real mount paths. Invoke it explicitly with

@@ -23,8 +23,9 @@ export class FileObservationService {
   private stopped = false;
   private pumping = false;
   private dirty = false;
+  private readonly nativeReferences=new Set<string>();
   constructor(private readonly runtime: AgentRuntimeClient, private readonly owner: DocumentsFileObservationOwner,
-    private readonly onError: (error: unknown) => void) {
+    private readonly onError: (error: unknown) => void, private readonly native?:import('./native-workspaces.js').NativeWorkspaceOwner) {
     this.removers = [runtime.onEvent(event => { if (event.stream === 'durable') void this.recover(); }),
       runtime.onExit(() => {
         this.suspended = true; this.epoch.abort();
@@ -74,6 +75,8 @@ export class FileObservationService {
     for (const flight of this.flights.values()) flight.controller.abort();
     await Promise.allSettled([...this.flights.values()].map(flight => flight.work));
     this.owner.stop();
+    for(const id of this.nativeReferences)await this.native?.releaseReference(`file-observation:${id}`);
+    this.nativeReferences.clear();
   }
   async recover(): Promise<void> {
     if (this.stopped || this.suspended) return;
@@ -99,7 +102,7 @@ export class FileObservationService {
               continue;
             }
             const seen = this.seen.get(id);
-            if (!binding.target) {
+            if (!binding.target && binding.action !== 'release') {
               this.clearPoll(id);
               // One unavailable original receipt cannot block another source's
               // cancellation or read. Catalog retains this source's diagnosis.
@@ -111,7 +114,7 @@ export class FileObservationService {
               continue;
             }
             const target = binding.target;
-            const managed = target.source.resource_owner.kind === 'managed_host';
+            const managed = target?.source.resource_owner.kind === 'managed_host';
             if (binding.action === 'paused') {
               this.clearPoll(id);
               this.seen.set(id, { action: binding.action, generation: binding.generation, revision: binding.definitionRevision });
@@ -122,7 +125,7 @@ export class FileObservationService {
             if (!changed && !this.pending.has(id)) {
               // A fixed snapshot cannot gain file changes. Only an unresolved
               // original-owner diagnosis needs another transport observation.
-              if (managed && target.immutable && binding.failureCode !== null) this.poll(id);
+              if (managed && target?.immutable && binding.failureCode !== null) this.poll(id);
               continue;
             }
             this.clearPoll(id);
@@ -133,20 +136,26 @@ export class FileObservationService {
             const task: Flight = { action: binding.action, generation: binding.generation, controller, work: Promise.resolve() };
             task.work = (async () => {
               let released = false;
-              let retry = managed && (!target.immutable || binding.action === 'release');
+              let retry = binding.action === 'release' || (managed && !target?.immutable);
               try {
                 if (binding.action === 'release') {
                   released = (await this.runtime.releaseFileFollowup(keyFor(binding), signal)).released;
                 }
                 else {
+                  if (!target) throw new Error('The original file observation target is unavailable');
+                  if(!managed&&target.source.mode==='native_workspace'){
+                    if(!this.native)throw new Error('Native file observation owner is unavailable');
+                    await this.native.retainReference(target.source,`file-observation:${id}`,signal);this.nativeReferences.add(id);
+                  }
                   const result = await this.runtime.observeFileFollowup({ ...keyFor(binding),
                     reopen: !managed && !target.immutable && !this.owner.has(id, binding.watchId) }, signal);
                   if (!result.accepted && !signal.aborted) this.pending.add(id);
                   if (!signal.aborted) this.seen.set(id, { action: binding.action, generation: binding.generation,
                     revision: result.followup.revision });
                 }
+                if(released&&this.nativeReferences.has(id)){await this.native?.releaseReference(`file-observation:${id}`);this.nativeReferences.delete(id);}
               } catch (error) {
-                if (!signal.aborted) { retry = managed; this.onError(error); }
+                if (!signal.aborted) { retry = binding.action === 'release' || managed || target?.source.mode === 'native_workspace'; this.onError(error); }
               }
               finally {
                 if (this.flights.get(id) === task) this.flights.delete(id);
@@ -164,6 +173,7 @@ export class FileObservationService {
           after = page.nextCursor ?? undefined;
         } while (after !== undefined);
         for (const id of this.seen.keys()) if (!found.has(id) && !this.flights.has(id)) {
+          if(this.nativeReferences.has(id)){await this.native?.releaseReference(`file-observation:${id}`);this.nativeReferences.delete(id);}
           this.clearPoll(id); this.seen.delete(id); this.pending.delete(id);
         }
         for (const [id, flight] of this.flights) if (!found.has(id)) {

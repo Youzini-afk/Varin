@@ -82,7 +82,7 @@ export function CalendarTaskEditorDialog({ open, projectId, task, onOpenChange, 
     setResourceOwner(selectedSource.kind === 'workspace' ? selectedSource.resourceOwner : null); setPath('');
     if (selection?.kind === 'new_work') {
       setModel(JSON.stringify([selection.model.providerId, selection.model.modelId])); setThinking(selection.model.thinkingLevel ?? 'off');
-      setSourceMode(selection.sourceMode); setGoal(selection.goal !== null); setBudget(selection.goal?.budget ? String(selection.goal.budget.maxOutputTokens) : '');
+      setSourceMode(selection.sourceMode === 'native_workspace' ? 'live_root' : selection.sourceMode); setGoal(selection.goal !== null); setBudget(selection.goal?.budget ? String(selection.goal.budget.maxOutputTokens) : '');
     } else { setModel(''); setThinking('off'); setSourceMode('materialized'); setGoal(false); setBudget(''); }
     setThreadId(selection?.kind === 'existing_work' ? selection.threadId : ''); setBranchId(selection?.kind === 'existing_work' ? selection.branchId : '');
     setModels([]);

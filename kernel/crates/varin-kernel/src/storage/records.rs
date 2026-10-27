@@ -832,7 +832,7 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("recordType is required".to_string()))?;
-        if self.conn.query_row("SELECT EXISTS(SELECT 1 FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type IN ('workspace.filesystem','workspace.result-filesystem'))",params![workspace_id,record_id],|row|row.get::<_,bool>(0))?
+        if self.conn.query_row("SELECT EXISTS(SELECT 1 FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type IN ('workspace.filesystem','workspace.result-filesystem','workspace.filesystem-pin','workspace.revision-filesystem'))",params![workspace_id,record_id],|row|row.get::<_,bool>(0))?
         {
             return Err(KernelError::Authorization("filesystem metadata is owned by its native branch".into()));
         }
@@ -1440,7 +1440,7 @@ impl Storage {
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("recordId is required".to_string()))?;
         if let Some(value) = self.domain_record_value(&workspace_id, record_id)? {
-            if value["recordType"] == "workspace.filesystem" || value["recordType"] == "workspace.result-filesystem" {
+            if value["recordType"] == "workspace.filesystem" || value["recordType"] == "workspace.result-filesystem" || value["recordType"]=="workspace.filesystem-pin" || value["recordType"]=="workspace.revision-filesystem" {
                 return Err(KernelError::Authorization("filesystem metadata is released with its native branch".into()));
             }
             if !self.grant_can_access_domain_record(&value, grant_id)? {
@@ -1550,6 +1550,7 @@ impl Storage {
                 params![workspace_id, branch_id, revision],
             )?;
             self.release_result_filesystem(&workspace_id,record_id)?;
+            self.release_filesystem_revision(branch_id, &workspace_id, revision)?;
             self.conn.execute(
                 "DELETE FROM domain_records WHERE record_id = ?1 AND workspace_id = ?2",
                 params![record_id, workspace_id],

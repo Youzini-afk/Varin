@@ -5,7 +5,7 @@ import type { KernelClient } from '../kernel/kernel-client.js';
 import { KernelWorkingStateRootStore, type KernelStorageAdapter } from '../kernel/storage-adapter.js';
 import { prepareDispatchSourceStore } from '../kernel/child-source-store.js';
 import { originalMaterializationLocation, admitMaterializedRoot } from '../kernel/source-launch.js';
-import type { ExternalChild } from '../kernel/protocol.generated.js';
+import type { ExternalChild, LaunchSource } from '../kernel/protocol.generated.js';
 import type { StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import type { DocumentAuthority } from '../documents/authority.js';
 import { record, text } from './transport.js';
@@ -60,6 +60,19 @@ export function createExternalSourceOwner(deps: {
   };
   const prepare = async (child: ExternalChild, signal: AbortSignal) => {
     const saved = record(child.source);
+    const native=record(saved.nativeSource);
+    const nativeView=async(source:LaunchSource,baseline?:unknown)=>{
+      const owner=deps.kernel.nativeWorkspaces;if(!owner)throw new Error('Native external source is unavailable');
+      const entry=await owner.open(source,signal),view=await owner.acquire(source,entry.grant,signal);
+      await deps.capture.documents.admitWorkspaceRegistration(source.execution_workspace_id,signal);
+      return {...saved,cwd:view.path,workspaceId:source.workspace_id,executionWorkspaceId:source.execution_workspace_id,
+        kind:child.work_mode==='shared'?'shared' as const:'isolated' as const,nativeSource:source,...(baseline?{baseline}:{})};
+    };
+    if(native.mode==='native_workspace'){
+      const reference=native as unknown as LaunchSource;
+      if(reference.workspace_id!==child.handoff?.source.workspace_id||!reference.branch_id)throw new Error('External workspace identity changed');
+      return nativeView(reference);
+    }
     if (child.resources_released && text(saved.cwd)) {
       const cwd = await admitMaterializedRoot(text(saved.cwd), signal);
       await deps.capture.documents.admitWorkspaceRegistration(text(saved.workspaceId), signal);
@@ -74,6 +87,10 @@ export function createExternalSourceOwner(deps: {
       const handoff = child.handoff!;
       const workspaceId = handoff.source.workspace_id,
         executionWorkspaceId = handoff.source.execution_workspace_id;
+      if(child.work_mode==='shared'&&handoff.source.mode==='native_workspace'){
+        const scope=[handoff.source.native_scope,handoff.source_path].filter(Boolean).join('/');
+        return nativeView({...handoff.source,...(scope?{native_scope:scope}:{})});
+      }
       if (
         child.work_mode === 'shared' &&
         (handoff.root.kind === 'physical' || handoff.root.kind === 'derived')
@@ -86,6 +103,7 @@ export function createExternalSourceOwner(deps: {
         const cwd = await admitMaterializedRoot(text(existing.cwd), signal);
         return { ...existing, cwd, workspaceId, executionWorkspaceId };
       }
+      if(child.work_mode==='isolated_write'&&deps.kernel.nativeWorkspaces)await deps.kernel.nativeWorkspaces.retainPrepared({...handoff.source,branch_id:`child-source:${child.operation_id}`},child.parent_thread_id,false,signal);
       const prepared = await prepareDispatchSourceStore(
         {
           execution_id: child.operation_id,
@@ -121,6 +139,7 @@ export function createExternalSourceOwner(deps: {
           { cause: error },
         );
       });
+      if(prepared.source.mode==='native_workspace')return nativeView(prepared.source,prepared);
       const handshake = deps.kernel.handshake ?? (await deps.kernel.start());
       const location = await originalMaterializationLocation(
         handshake.storageRoot,
@@ -164,7 +183,7 @@ export function createExternalSourceOwner(deps: {
   const release = (child: ExternalChild, signal: AbortSignal) =>
     withSource(child, signal, async (_store, grant) => {
       const root = child.handoff!.root;
-      if (root.kind === 'fixed' || root.kind === 'derived')
+      if (root.kind === 'fixed' || root.kind === 'native' || root.kind === 'derived')
         await deps.kernel
           .scoped(grant)
           .unpinBranch(
@@ -175,6 +194,7 @@ export function createExternalSourceOwner(deps: {
             },
             signal,
           );
+      if(root.kind==='native')await deps.kernel.scoped(grant).deleteBranch({operationId:`external-handoff-delete:${child.operation_id}`,branchId:root.pin.source.branch_id!},signal);
     });
   const remove = async (child: ExternalChild, unstarted = false) => {
     const source = record(child.source);
@@ -189,6 +209,22 @@ export function createExternalSourceOwner(deps: {
         ))
     )
       return;
+    const native=record(source.nativeSource);
+    if(native.mode==='native_workspace'){
+      const reference=native as unknown as LaunchSource;
+      if(reference.branch_id!==`child-source:${child.operation_id}`||reference.workspace_id!==child.handoff.source.workspace_id)throw new Error('External native cleanup identity changed');
+      if(!deps.kernel.nativeWorkspaces)throw new Error('Native external source owner is unavailable');
+      await deps.kernel.nativeWorkspaces.releaseSource(reference);
+      const grant=await deps.kernel.issueGrant({grantId:`external-cleanup:${randomUUID()}`,owningWorkspace:reference.workspace_id,
+        executionWorkspace:reference.execution_workspace_id,capabilities:['storage.read','storage.write','storage.maintenance'],pathScopes:['']});
+      try{
+        const actor=deps.kernel.scoped(grant);
+        await actor.unpinBranch({operationId:`external-baseline-unpin:${child.operation_id}`,branchId:reference.branch_id,pinId:`child-source-pin:${child.operation_id}`});
+        // The saved parent and other external conversations may still own this
+        // branch. Conversation deletion's original source retirement releases it.
+      }finally{await deps.kernel.revokeGrant(grant.grantId);}
+      return;
+    }
     const workspaceId = child.handoff.source.workspace_id,
       executionWorkspaceId = child.handoff.source.execution_workspace_id;
     const handshake = deps.kernel.handshake ?? (await deps.kernel.start());

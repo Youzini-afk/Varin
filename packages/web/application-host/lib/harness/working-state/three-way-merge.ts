@@ -6,6 +6,7 @@ import type {
 import type { ThreadDiffStats } from "@varin/protocol";
 import { diffArrays } from "diff";
 import { sameState } from "../../recovery/journal-files.js";
+import { mergeFileAttributes } from './file-attributes-merge.js';
 
 export interface TextMergeResult {
   clean: boolean;
@@ -257,6 +258,22 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
   }
 
   // 4. Both sides diverged from base
+  const attributes=mergeFileAttributes('native' in baseState?baseState.native:undefined,
+    'native' in parentState?parentState.native:undefined,'native' in childState?childState.native:undefined);
+  const mode=mergeMode('mode' in baseState?baseState.mode:undefined,'mode' in parentState?parentState.mode:undefined,'mode' in childState?childState.mode:undefined);
+  if(!attributes.clean||!mode.clean){return {path,decision:'conflict',conflictReason:!attributes.clean?'File attributes changed differently on both sides':'File mode changed differently on both sides',baseState,parentState,childState,isText:false};}
+  const body=(state:RecoveryState):RecoveryState=>{
+    if(!('mode' in state)&&!('native' in state))return state;
+    const {mode:_,native:__,...rest}=state as RecoveryState&{mode?:number;native?:unknown};return rest as RecoveryState;
+  };
+  let selected:RecoveryState|undefined;
+  if(statesEqual(body(parentState),body(childState)))selected=parentState;
+  else if(statesEqual(body(parentState),body(baseState)))selected=childState;
+  else if(statesEqual(body(childState),body(baseState)))selected=parentState;
+  if(selected&&selected.kind!=='missing'&&selected.kind!=='unsupported'){
+    const state={...selected,...(mode.mode===undefined?{}:{mode:mode.mode}),...(attributes.value?{native:attributes.value}:{})};
+    return {path,decision:'merge-clean',baseState,parentState,childState,mergedState:state,isText:state.kind==='regular-file'};
+  }
   // Check if both are regular files
   if (parentState.kind === "regular-file" && childState.kind === "regular-file") {
     const parentBuf = await readContent(parentState);
@@ -293,22 +310,6 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
     const childStr = childBuf.toString("utf8");
 
     const merged = mergeText3Way(baseStr, parentStr, childStr);
-    const mode = mergeMode(
-      baseState.kind === "regular-file" ? baseState.mode : undefined,
-      parentState.mode,
-      childState.mode,
-    );
-    if (!mode.clean) {
-      return {
-        path,
-        decision: "conflict",
-        conflictReason: "File mode changed differently on both sides",
-        baseState,
-        parentState,
-        childState,
-        isText: false,
-      };
-    }
     if (merged.clean) {
       return {
         path,
@@ -318,6 +319,7 @@ export const planThreeWayPath = async (ctx: PathMergeContext): Promise<ThreeWayP
         childState,
         mergedText: merged.text,
         ...(mode.mode === undefined ? {} : { mergedMode: mode.mode }),
+        ...(attributes.value?{mergedNative:attributes.value}:{}),
         isText: true,
       };
     }

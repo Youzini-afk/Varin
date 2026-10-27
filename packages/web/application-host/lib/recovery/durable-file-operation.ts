@@ -87,6 +87,7 @@ export interface DurableFileOperationSpec {
   retryBinding?: DurableFileRetryBinding;
   /** Parent materialized directory when apply identity is not the owning workspace root. */
   applyCanonicalRoot?: string;
+  applyRootId?: string;
   /** Execution workspace that owns Documents/resource gate for applyCanonicalRoot. */
   applyExecutionWorkspaceId?: string;
 }
@@ -229,6 +230,7 @@ interface PersistedIntegrationData extends Record<string, unknown> {
   executorStopped?: boolean;
   retryBinding?: DurableFileRetryBinding;
   applyCanonicalRoot?: string;
+  applyRootId?: string;
   applyExecutionWorkspaceId?: string;
   parentBranchId?: string;
   beforeWriteRevision?: number;
@@ -365,9 +367,11 @@ const isBranchIntegration = (data: Pick<PersistedIntegrationData, "parentBranchI
 
 const resolvePersistedApplyContext = async (
   context: DurableFileOperationContext,
-  data: Pick<PersistedIntegrationData, "applyCanonicalRoot" | "applyExecutionWorkspaceId">,
+  data: Pick<PersistedIntegrationData, "applyCanonicalRoot" | "applyExecutionWorkspaceId" | "applyRootId">,
 ): Promise<DurableFileOperationContext | "unresolved"> => {
   if (typeof data.applyCanonicalRoot !== "string" || data.applyCanonicalRoot.length === 0) return context;
+  if(context.identity.fileTarget?.kind==='physical'&&context.identity.fileTarget.sourceMode==='native_workspace'
+    &&context.identity.fileTarget.rootId===data.applyRootId)return context;
   if (!context.resolveDirectoryApplyContext) return "unresolved";
   try {
     const resolved = await context.resolveDirectoryApplyContext(
@@ -472,6 +476,7 @@ const applyKernelDurableFileOperation = async (
     ...(spec.operationBinding ? { operationBinding: structuredClone(spec.operationBinding) } : {}),
     ...(spec.retryBinding ? { retryBinding: structuredClone(spec.retryBinding) } : {}),
     ...(spec.applyCanonicalRoot ? { applyCanonicalRoot: spec.applyCanonicalRoot } : {}),
+    ...(context.identity.fileTarget?.kind==='physical'?{applyRootId:context.identity.fileTarget.rootId}:{}),
     ...(spec.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: spec.applyExecutionWorkspaceId } : {}),
   };
   const reserved = spec.reserved ? await durable.getOperation(spec.workspaceId, spec.id) : null;
@@ -680,6 +685,7 @@ export interface DurableIntegrationInspection {
   targetKinds: Record<string, "disk" | "surface" | "branch">;
   externalBindings: Record<string, DurableExternalBinding>;
   applyCanonicalRoot?: string;
+  applyRootId?: string;
   applyExecutionWorkspaceId?: string;
   parentBranchId?: string;
   beforeWriteRevision?: number;
@@ -724,6 +730,7 @@ export const projectIntegrationOperation = (operationId: string, operation: Reco
       diffStats: structuredClone(data.diffStats ?? { files: 0, insertions: 0, deletions: 0 }),
       safety: structuredClone(data.safety ?? {}),
       ...(data.applyCanonicalRoot ? { applyCanonicalRoot: data.applyCanonicalRoot } : {}),
+      ...(data.applyRootId ? { applyRootId: data.applyRootId } : {}),
       ...(data.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: data.applyExecutionWorkspaceId } : {}),
       ...(data.parentBranchId ? { parentBranchId: data.parentBranchId } : {}),
       ...(data.beforeWriteRevision === undefined ? {} : { beforeWriteRevision: data.beforeWriteRevision }),
@@ -801,7 +808,9 @@ export const markDurableIntegrationUndoing = async (
     if (state !== "complete" && state !== "conflict" && state !== "undoing") {
       throw new Error(`Integration ${operationId} cannot begin undo from state ${state}`);
     }
-    if (apply?.applyCanonicalRoot && data.applyCanonicalRoot && apply.applyCanonicalRoot !== data.applyCanonicalRoot) {
+    const native=context.identity.fileTarget?.kind==='physical'&&context.identity.fileTarget.sourceMode==='native_workspace'
+      &&data.applyRootId===context.identity.fileTarget.rootId;
+    if (apply?.applyCanonicalRoot && data.applyCanonicalRoot && apply.applyCanonicalRoot !== data.applyCanonicalRoot&&!native) {
       throw new Error(`Integration ${operationId} undo execution directory changed`);
     }
     if (apply?.applyExecutionWorkspaceId && data.applyExecutionWorkspaceId
@@ -811,7 +820,7 @@ export const markDurableIntegrationUndoing = async (
     const nextData = {
       ...data,
       executorStopped: false,
-      ...(apply?.applyCanonicalRoot ? { applyCanonicalRoot: apply.applyCanonicalRoot } : {}),
+      ...(!native&&apply?.applyCanonicalRoot ? { applyCanonicalRoot: apply.applyCanonicalRoot } : {}),
       ...(apply?.applyExecutionWorkspaceId ? { applyExecutionWorkspaceId: apply.applyExecutionWorkspaceId } : {}),
     };
     if (state !== "undoing" || apply?.applyCanonicalRoot !== data.applyCanonicalRoot || apply?.applyExecutionWorkspaceId !== data.applyExecutionWorkspaceId) {
@@ -1003,7 +1012,8 @@ export const undoBranchIntegrationOnDirectory = async (
     throw new Error(`Integration ${input.operationId} cannot be undone from state ${state}`);
   }
   if (state === "undoing" && data.applyCanonicalRoot
-    && data.applyCanonicalRoot !== context.identity.canonicalRoot) {
+    && data.applyCanonicalRoot !== context.identity.canonicalRoot
+    &&!(context.identity.fileTarget?.kind==='physical'&&context.identity.fileTarget.sourceMode==='native_workspace'&&data.applyRootId===context.identity.fileTarget.rootId)) {
     return await markDurableIntegrationNeedsAttention(
       context,
       input.operationId,
