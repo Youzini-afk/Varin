@@ -105,6 +105,9 @@ impl Task {
     pub(super) fn run_borrowed(&self, owner: &mut impl Control) -> Result<Value, KernelError> {
         self.run_with(owner, true)
     }
+    pub(super) fn run_control(&self, owner: &mut impl Control) -> Result<Value, KernelError> {
+        self.run_with(owner, false)
+    }
     fn run_with(&self, owner: &mut impl Control, borrowed: bool) -> Result<Value, KernelError> {
         let mut retained = false;
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

@@ -253,6 +253,9 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.root.register"
             | "file.operation.reconcile"
             | "file.operation.list"
+            | "recovery.points"
+            | "recovery.files.restore"
+            | "recovery.point.create"
     )
 }
 
@@ -869,6 +872,26 @@ impl Kernel {
                     MaterializationAdmission::Complete(_) => {}
                 }
             }
+        }
+        if matches!(method,"recovery.points"|"recovery.files.restore"|"recovery.point.create") {
+            use crate::storage::recovery_file_tasks::Action;
+            let params:crate::protocol_generated::KernelFileRecoveryParams=crate::storage::recovery_file_tasks::parse_params(&authorized_params)?;
+            let args=serde_json::to_value(&params.arguments)?;
+            let journal=authorized_params.get("journal").map(|value|serde_json::from_value(value.clone())).transpose()?;
+            let mode=serde_json::from_value(json!(params.source_mode.as_deref().unwrap_or("live_root")))?;
+            let action=match method{
+                "recovery.points"=>Action::Points(serde_json::from_value(args)?),
+                "recovery.files.restore"=>Action::Restore{operation:params.operation_id.clone().ok_or_else(||KernelError::Operation("Restore operation is required".into()))?,args:serde_json::from_value(args)?},
+                _=>Action::CreatePoint{params:authorized_params.clone(),args},
+            };
+            let task=storage.prepare_recovery_file_task(&params.workspace_id,&params.root_id,&params.thread_id,action,journal.as_ref(),mode,&authorized_grant,cancellation.clone())?;
+            let (port,completed,request)=(Self::workspace_port(completions),completions.clone(),request.clone());
+            let worker=thread::Builder::new().name("file-recovery".into()).spawn(move ||{
+                let result=task.run_wire(port);
+                let _=completed.send(WorkerRequest::ResourceRequestDone{request,result});
+            })?;
+            self.file_workers.push((cancellation,worker));
+            return Ok(None);
         }
         if matches!(method,"file.operation.reconcile"|"file.operation.list") {
             let task=storage.prepare_file_inspection(method,&authorized_params,&authorized_grant,cancellation.clone())?;
@@ -2225,6 +2248,19 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                             let (key,cancellation)=(call.admission_key.clone(),call.cancellation.shared_flag());
                             let worker=thread::Builder::new().name("process-launch".into()).spawn(move ||{
                                 let result=task.run_resource(port);
+                                let _=completed.send(WorkerRequest::ResourceWorkDone{call,result});
+                            });
+                            match worker {
+                                Ok(worker)=>kernel.file_workers.push((cancellation,worker)),
+                                Err(_)=>if let Some(key)=key{if let Ok(mut active)=worker_cancellations.lock(){active.remove(&key);}},
+                            }
+                            continue;
+                        }
+                        Ok(crate::tools::ResourceWork::FileRecovery(task)) => {
+                            let (port,completed)=(Kernel::workspace_port(&capture_completions),capture_completions.clone());
+                            let (key,cancellation)=(call.admission_key.clone(),call.cancellation.shared_flag());
+                            let worker=thread::Builder::new().name("file-recovery".into()).spawn(move ||{
+                                let result=task.run(port);
                                 let _=completed.send(WorkerRequest::ResourceWorkDone{call,result});
                             });
                             match worker {

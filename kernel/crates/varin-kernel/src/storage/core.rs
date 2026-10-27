@@ -216,6 +216,7 @@ impl Storage {
             materializations: HashMap::new(),
             result_publications: BTreeSet::new(),
             file_effects: BTreeSet::new(),
+            active_recoveries: BTreeSet::new(),
             processes: crate::process::ProcessManager::default(),
             process_receipt_wake: None,
             process_receipt_notify: None,

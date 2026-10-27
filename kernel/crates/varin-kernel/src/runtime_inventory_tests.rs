@@ -107,7 +107,7 @@ impl Fixture {
             )
             .unwrap();
         let Some(response) = response else {
-            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename"|"process.spawn"|"file.operation.reconcile"|"file.operation.list"|"file.root.register") {
+            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename"|"process.spawn"|"file.operation.reconcile"|"file.operation.list"|"file.root.register"|"recovery.points"|"recovery.files.restore"|"recovery.point.create") {
                 return self.finish_effect().unwrap();
             }
             assert!(matches!(method,"file.lease.wait"|"file.lease.acquire"|"file.lease.check"), "short request became pending");

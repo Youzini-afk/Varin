@@ -4,7 +4,7 @@ use crate::protocol_generated::KernelFileRecoveryParams;
 use serde::{Deserialize, Serialize};
 use varin_runtime::catalog::journal::JournalAnchor;
 
-fn restored_file(file: &Value, status: &str) -> Result<Value, KernelError> {
+pub(super) fn restored_file(file: &Value, status: &str) -> Result<Value, KernelError> {
     let mut result = json!({"path":file["path"],"status":status});
     if status == "applied" {
         let before: Value = serde_json::from_str(file["safetyJson"].as_str().ok_or_else(|| KernelError::Storage("Restore before state is missing".into()))?)?;
@@ -194,12 +194,15 @@ impl Storage {
         Ok(targets)
     }
 
-    fn create_named_file_point(
-        &mut self,
-        params: &KernelFileRecoveryParams,
-        args: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
+    fn create_named_file_point(&mut self,params:&KernelFileRecoveryParams,args:&Value,grant:&Grant)->Result<Value,KernelError>{
+        let input=serde_json::to_value(args)?;
+        let task=self.prepare_recovery_file_task(&params.workspace_id,&params.root_id,&params.thread_id,
+            super::recovery_file_tasks::Action::CreatePoint{params:json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"threadId":params.thread_id,
+                "operationId":params.operation_id,"sourceRunId":params.source_run_id,"arguments":input}),args:args.clone()},None,
+            varin_runtime::SourceMode::LiveRoot,grant,self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self,&mut false)
+    }
+    pub(super) fn prepare_named_point_metadata(&self,params:&KernelFileRecoveryParams,args:&Value,grant:&Grant)->Result<Option<Vec<String>>,KernelError>{
         let workspace = &params.workspace_id;
         let root = &params.root_id;
         let thread = &params.thread_id;
@@ -224,59 +227,23 @@ impl Storage {
             && (existing["kind"] != "file-point"
                 || existing["threadId"] != *thread
                 || existing["data"]["rootId"] != *root
-                || existing["data"]["name"] != name)
+                || existing["data"]["name"] != name
+                || existing["data"]["sourceRunId"] != source)
         {
             return Err(KernelError::Operation(
                 "Named point operation changed".into(),
             ));
         }
-        if existing.is_null() {
-            let mut owners = Vec::new();
-            let prepared = (|| {
-                let mut files = Vec::new();
-                for path in changes
-                    .iter()
-                    .map(|c| c.path.clone())
-                    .collect::<BTreeSet<_>>()
-                {
-                    let lease = format!(
-                        "point:{operation}:{}",
-                        hex::encode(Sha256::digest(path.as_bytes()))
-                    );
-                    let acquired=self.file_lease_acquire(&json!({"workspaceId":workspace,"rootId":root,"leaseId":lease,"resources":[{"path":path,"scope":"exact"}]}),grant)?;
-                    if acquired["status"] != "acquired" {
-                        return Err(KernelError::Operation(format!(
-                            "File is being changed: {path}"
-                        )));
-                    }
-                    let captured = self.restore_capture(workspace, root, &path, &lease, grant);
-                    let _ = self.file_lease_release(
-                        &json!({"workspaceId":workspace,"rootId":root,"leaseId":lease}),
-                        grant,
-                    );
-                    let captured = captured?;
-                    if let Some(owner) = captured["ownerId"].as_str() {
-                        owners.push(owner.to_owned());
-                    }
-                    let state: Value =
-                        serde_json::from_str(captured["stateJson"].as_str().unwrap())?;
-                    let refs=state["objectHash"].as_str().map(|hash|vec![json!({"slot":"target","objectHash":hash,"ownerId":captured["ownerId"]})]).unwrap_or_default();
-                    files.push(
-                        json!({"path":path,"targetJson":captured["stateJson"],"references":refs}),
-                    );
-                }
-                self.recovery_operation_create(&json!({"operationId":operation,"workspaceId":workspace,"threadId":thread,"kind":"file-point","state":"planned",
+        Ok(existing.is_null().then(||changes.iter().map(|change|change.path.clone()).collect::<BTreeSet<_>>().into_iter().collect()))
+    }
+    pub(super) fn commit_named_point_metadata(&mut self,params:&KernelFileRecoveryParams,args:&Value,files:Option<Vec<Value>>,grant:&Grant)->Result<Value,KernelError>{
+        let (workspace,root,thread)=(&params.workspace_id,&params.root_id,&params.thread_id);
+        let operation=params.operation_id.as_deref().ok_or_else(||KernelError::Operation("Point operation is required".into()))?;
+        let source=params.source_run_id.as_deref().ok_or_else(||KernelError::Operation("Point source is required".into()))?;
+        let name=args["name"].as_str().ok_or_else(||KernelError::Operation("Point name is required".into()))?;
+        if let Some(files)=files {
+            self.recovery_operation_create(&json!({"operationId":operation,"workspaceId":workspace,"threadId":thread,"kind":"file-point","state":"planned",
                 "dataJson":json!({"rootId":root,"sourceRunId":source,"name":name}).to_string(),"files":files}),&grant.grant_id)?;
-                Ok::<_, KernelError>(())
-            })();
-            for owner in owners {
-                let _ = self.release_object_owner(
-                    &json!({"ownerId":owner}),
-                    Some(workspace),
-                    &grant.grant_id,
-                );
-            }
-            prepared?;
         }
         let checkpoint=self.recovery_checkpoint_create(&json!({"workspaceId":workspace,"operationId":format!("point-label:{operation}"),"label":name}),&grant.grant_id)?;
         self.conn.execute(
@@ -449,7 +416,7 @@ impl Storage {
             &json!({"workspaceId":workspace,"threadId":thread}),
             &grant.grant_id,
         )?;
-        self.registered_file_root(root, grant)?;
+        self.admitted_file_root(root, grant)?;
         let mut query = self.conn.prepare(
             "SELECT c.sequence,t.run_id,d.path,d.before_json,d.after_json,c.created_at,t.status,json_extract(t.file_target_json,'$.runId'),c.id
              FROM recovery_checkpoints c JOIN recovery_turns t ON t.workspace_id=c.workspace_id AND t.checkpoint_id=c.id
@@ -574,7 +541,7 @@ impl Storage {
                 &json!({"workspaceId":workspace,"threadId":thread}),
                 &grant.grant_id,
             )?;
-            self.registered_file_root(root, grant)?;
+            self.admitted_file_root(root, grant)?;
             let cursor = args.cursor.unwrap_or(0);
             let limit = args.limit.unwrap_or(20);
             if limit == 0 {
@@ -715,6 +682,7 @@ impl Storage {
         Ok(operations)
     }
 
+    #[cfg(test)]
     fn restore_capture(
         &mut self,
         workspace: &str,
@@ -738,7 +706,7 @@ impl Storage {
         result
     }
 
-    fn restore_journal(
+    pub(super) fn restore_journal(
         &mut self,
         workspace: &str,
         root: &str,
@@ -772,18 +740,14 @@ impl Storage {
         )
     }
 
-    pub(crate) fn restore_recorded_files(
-        &mut self,
-        workspace: &str,
-        root: &str,
-        thread: &str,
-        operation: &str,
-        args: &FileRestoreArgs,
-        anchor: Option<&JournalAnchor>,
-        mode: varin_runtime::SourceMode,
-        grant: &Grant,
-        dispatched: &mut bool,
-    ) -> Result<Value, KernelError> {
+    pub(crate) fn restore_recorded_files(&mut self,workspace:&str,root:&str,thread:&str,operation:&str,args:&FileRestoreArgs,
+        anchor:Option<&JournalAnchor>,mode:varin_runtime::SourceMode,grant:&Grant,dispatched:&mut bool)->Result<Value,KernelError>{
+        let task=self.prepare_recovery_file_task(workspace,root,thread,super::recovery_file_tasks::Action::Restore{operation:operation.into(),args:args.clone()},
+            anchor,mode,grant,self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self,dispatched)
+    }
+    pub(super) fn prepare_restore_metadata(&mut self,workspace:&str,root:&str,thread:&str,operation:&str,args:&FileRestoreArgs,
+        anchor:Option<&JournalAnchor>,grant:&Grant)->Result<super::recovery_file_tasks::RestorePlan,KernelError>{
         if args.point.is_some() == args.undo.is_some() {
             return Err(KernelError::Operation("Provide point or undo".into()));
         }
@@ -791,14 +755,15 @@ impl Storage {
             &json!({"workspaceId":workspace,"threadId":thread}),
             &grant.grant_id,
         )?;
-        self.registered_file_root(root, grant)?;
+        self.admitted_file_root(root, grant)?;
         for path in args
             .paths
             .iter()
             .flatten()
             .chain(args.overwrite_paths.iter().flatten())
         {
-            self.resolve_file_resource(root, path, grant, false)?;
+            super::file_resources::normalized_relative_path(path,false)?;
+            if !path_allowed(grant,path){return Err(KernelError::Authorization("Restore path is outside grant scope".into()));}
         }
         let original = self.recovery_operation_get(
             &json!({"workspaceId":workspace,"operationId":operation}),
@@ -815,9 +780,9 @@ impl Storage {
                 ));
             }
             if original["state"] == "complete" {
-                return Ok(original["result"].clone());
+                return Ok(super::recovery_file_tasks::RestorePlan::Ready(original["result"].clone()));
             }
-            return self.reconcile_file_restore(workspace, root, thread, operation, grant);
+            return Ok(super::recovery_file_tasks::RestorePlan::Existing);
         }
         let targets = if let Some(undo) = &args.undo {
             let old = self.read_recovery_operation(workspace, undo, None)?;
@@ -867,161 +832,10 @@ impl Storage {
                 grant,
             )?
         };
-        let mut files = Vec::new();
-        let mut results = Vec::new();
-        for path in args
-            .paths
-            .iter()
-            .flatten()
-            .filter(|path| !targets.contains_key(*path))
-        {
-            results.push(json!({"path":path,"status":"unavailable","message":"This path has no recorded state at the selected point."}));
-        }
-        let mut leases = Vec::new();
-        let mut captured_owners = Vec::new();
-        let prepared = (|| {
-            for (path, (expected, target)) in targets {
-                self.check_cancelled()?;
-                let resource = self.resolve_file_resource(root, &path, grant, false)?;
-                if let Some(message) = args
-                    .blocked_paths
-                    .as_ref()
-                    .and_then(|paths| paths.get(&path))
-                {
-                    results.push(json!({"path":path,"status":"busy","message":message}));
-                    continue;
-                }
-                let lease = format!(
-                    "restore:{operation}:{}",
-                    hex::encode(Sha256::digest(path.as_bytes()))
-                );
-                let acquired=self.file_lease_acquire(&json!({"workspaceId":workspace,"rootId":root,"leaseId":lease,"resources":[{"path":path,"scope":"exact"}]}),grant)?;
-                if acquired["status"] != "acquired" {
-                    results.push(json!({"path":path,"status":"busy"}));
-                    continue;
-                }
-                leases.push(lease.clone());
-                let current = serde_json::to_value(self.capture_file_state(&resource)?)?;
-                if current == target {
-                    results.push(json!({"path":path,"status":"unchanged"}));
-                    continue;
-                }
-                if target.is_null() || target["kind"] == "unsupported" {
-                    results.push(json!({"path":path,"status":"unavailable"}));
-                    continue;
-                }
-                if current != expected
-                    && !args
-                        .overwrite_paths
-                        .as_ref()
-                        .is_some_and(|p| p.contains(&path))
-                {
-                    results.push(json!({"path":path,"status":"conflict"}));
-                    continue;
-                }
-                let safety = self.restore_capture(workspace, root, &path, &lease, grant)?;
-                if let Some(owner) = safety["ownerId"].as_str() {
-                    captured_owners.push(owner.to_owned());
-                }
-                let safety_state: Value =
-                    serde_json::from_str(safety["stateJson"].as_str().ok_or_else(|| {
-                        KernelError::Storage("Recovery capture omitted state".into())
-                    })?)?;
-                if safety_state != expected
-                    && !args
-                        .overwrite_paths
-                        .as_ref()
-                        .is_some_and(|paths| paths.contains(&path))
-                {
-                    results.push(json!({"path":path,"status":"conflict"}));
-                    continue;
-                }
-                let mut references = Vec::new();
-                for (slot, state) in [
-                    ("expected", &safety_state),
-                    ("target", &target),
-                    ("safety", &safety_state),
-                ] {
-                    if let Some(hash) = state["objectHash"].as_str() {
-                        let mut reference = json!({"slot":slot,"objectHash":hash});
-                        if slot == "safety" || slot == "expected" {
-                            reference["ownerId"] = safety["ownerId"].clone();
-                        }
-                        references.push(reference);
-                    }
-                }
-                files.push(json!({"path":path,"expectedJson":serde_json::to_string(&safety_state)?,"targetJson":serde_json::to_string(&target)?,"safetyJson":serde_json::to_string(&safety_state)?,"references":references}));
-            }
-            files.sort_by_key(|file| {
-                let target: Value = serde_json::from_str(file["targetJson"].as_str().unwrap())
-                    .expect("prepared state");
-                let depth = file["path"].as_str().unwrap().split('/').count() as i64;
-                let group = if target["kind"] == "missing" {
-                    0
-                } else if target["kind"] == "directory" {
-                    1
-                } else {
-                    2
-                };
-                (
-                    group,
-                    if group == 0 { -depth } else { depth },
-                    file["path"].as_str().unwrap().to_owned(),
-                )
-            });
-            let journal = if files.is_empty() {
-                None
-            } else {
-                Some(self.restore_journal(workspace, root, thread, operation, anchor, mode, grant)?)
-            };
-            self.recovery_operation_create(&json!({"operationId":operation,"workspaceId":workspace,"threadId":thread,
-                "kind":"file-restore","state":"applying","dataJson":json!({"rootId":root,"runId":grant.run_id,"pointRunId":anchor.map(|anchor|&anchor.run_id),"epoch":grant.kernel_epoch,"arguments":args,"files":results,"journal":journal}).to_string(),"files":files}),&grant.grant_id)?;
-            for (index, file) in files.iter().enumerate() {
-                let path = file["path"].as_str().unwrap();
-                let lease = format!(
-                    "restore:{operation}:{}",
-                    hex::encode(Sha256::digest(path.as_bytes()))
-                );
-                let mut params = json!({"workspaceId":workspace,"rootId":root,"path":path,"operationId":format!("{operation}:file:{index}"),
-                    "leaseId":lease,"targetJson":file["targetJson"],"expectedJson":file["safetyJson"]});
-                let target: Value = serde_json::from_str(file["targetJson"].as_str().unwrap())?;
-                if target["kind"] == "regular-file" {
-                    params["recordId"] = json!(format!("operation-file:{operation}:{path}"));
-                    params["slot"] = json!("target");
-                }
-                if let Some(journal) = &journal {
-                    params["__recoveryTurn"] = journal.clone();
-                    params["__recoveryTool"] = json!("file_restore");
-                }
-                *dispatched = true;
-                match self.file_apply(&params, grant) {
-                    Ok(receipt) => results.push(restored_file(file,receipt["status"].as_str().unwrap_or("unknown"))?),
-                    Err(error) => {
-                        let receipt=self.file_operation_reconcile(&json!({"workspaceId":workspace,"rootId":root,"operationId":format!("{operation}:file:{index}")}),grant)?;
-                        let mut result = restored_file(file,if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("failed")})?;
-                        result["message"] = json!(error.to_string()); results.push(result);
-                    }
-                }
-            }
-            self.finish_file_restore(workspace, operation, results, grant)
-        })();
-        for lease in leases {
-            let _ = self.file_lease_release(
-                &json!({"workspaceId":workspace,"rootId":root,"leaseId":lease}),
-                grant,
-            );
-        }
-        for owner in captured_owners {
-            let _ = self.release_object_owner(
-                &json!({"ownerId":owner}),
-                Some(workspace),
-                &grant.grant_id,
-            );
-        }
-        prepared
+        Ok(super::recovery_file_tasks::RestorePlan::Targets(targets))
     }
 
-    fn finish_file_restore(
+    pub(super) fn finish_file_restore(
         &mut self,
         workspace: &str,
         operation: &str,
@@ -1070,41 +884,13 @@ impl Storage {
         Ok(result)
     }
 
-    pub(crate) fn reconcile_file_restore(
-        &mut self,
-        workspace: &str,
-        root: &str,
-        thread: &str,
-        operation: &str,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let row = self.recovery_operation_get(
-            &json!({"workspaceId":workspace,"operationId":operation}),
-            &grant.grant_id,
-        )?;
-        if row.is_null() {
-            return Ok(
-                json!({"operationId":operation,"status":"failed","appliedPaths":[],"conflictPaths":[],"files":[],"message":"The original restore operation was not recorded."}),
-            );
-        }
-        if row["kind"] != "file-restore"
-            || row["threadId"] != thread
-            || row["data"]["rootId"] != root
-        {
-            return Err(KernelError::Authorization("Restore source changed".into()));
-        }
-        if row["state"] == "complete" {
-            return Ok(row["result"].clone());
-        }
-        let mut results = row["data"]["files"].as_array().cloned().unwrap_or_default();
-        for (index, file) in row["files"].as_array().into_iter().flatten().enumerate() {
-            let receipt=self.file_operation_reconcile(&json!({"workspaceId":workspace,"rootId":root,"operationId":format!("{operation}:file:{index}")}),grant)?;
-            results.push(restored_file(file,if receipt["status"]=="pending" {"pending"} else {receipt["result"]["status"].as_str().unwrap_or("interrupted")})?);
-        }
-        self.finish_file_restore(workspace, operation, results, grant)
+    pub(crate) fn reconcile_file_restore(&mut self,workspace:&str,root:&str,thread:&str,operation:&str,grant:&Grant)->Result<Value,KernelError>{
+        let task=self.prepare_recovery_file_task(workspace,root,thread,super::recovery_file_tasks::Action::Reconcile{operation:operation.into()},None,
+            varin_runtime::SourceMode::LiveRoot,grant,self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self,&mut false)
     }
 
-    pub(crate) fn file_restore_receipt(
+    pub(super) fn file_restore_receipt_metadata(
         &mut self,
         workspace: &str,
         root: &str,
@@ -1112,6 +898,7 @@ impl Storage {
         operation: &str,
         args: &FileRestoreArgs,
         grant: &Grant,
+        result: Option<Value>,
     ) -> Result<Option<varin_runtime::ExternalReceipt>, KernelError> {
         let row = self.recovery_operation_get(
             &json!({"workspaceId":workspace,"operationId":operation}),
@@ -1120,7 +907,8 @@ impl Storage {
         if row.is_null() {
             return Ok(None);
         }
-        if row["data"]["arguments"] != serde_json::to_value(args)?
+        if row["kind"] != "file-restore" || row["threadId"] != thread || row["data"]["rootId"] != root
+            || row["data"]["arguments"] != serde_json::to_value(args)?
             || row["data"]["runId"] != json!(grant.run_id)
         {
             return Err(KernelError::Authorization(
@@ -1131,7 +919,7 @@ impl Storage {
             .as_str()
             .ok_or_else(|| KernelError::Storage("Restore epoch is missing".into()))?
             .to_owned();
-        let result = self.reconcile_file_restore(workspace, root, thread, operation, grant)?;
+        let Some(result)=result else{return Ok(None);};
         if result["status"] == "pending" {
             return Ok(None);
         }

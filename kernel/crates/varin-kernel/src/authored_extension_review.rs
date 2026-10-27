@@ -484,6 +484,11 @@ impl Review {
                     task.run_local(&mut self.f.storage.lock().unwrap(), &mut dispatched)
                         .map_err(|error|crate::tools::ResourceFailure{error,dispatched})
                 },
+                Ok(ResourceWork::FileRecovery(task)) => {
+                    let mut dispatched = false;
+                    task.run_local(&mut self.f.storage.lock().unwrap(), &mut dispatched)
+                        .map_err(|error|crate::tools::ResourceFailure{error,dispatched})
+                },
                 Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut self.f.storage.lock().unwrap(), EPOCH, HOST, GENERATION, &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let bytes = task.run();

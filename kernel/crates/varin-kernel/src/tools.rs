@@ -2807,6 +2807,7 @@ fn validate_binding(
 pub(crate) enum ResourceWork {
     Ready(Value),
     TextMutation(crate::storage::file_mutation_tasks::Task),
+    FileRecovery(crate::storage::recovery_file_tasks::Task),
     ProcessSpawn(crate::storage::process_tasks::Task),
     BlobRead(crate::storage::blob_reads::BlobReadTask),
     ExecutionView(crate::storage::materialization::Task),
@@ -2906,6 +2907,30 @@ pub(crate) fn prepare_resource(
                 .with_live_root(request.binding.live_root.clone());
             if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
             Ok(ResourceWork::ProcessSpawn(task))
+        })();
+        return result.map_err(|error|ResourceFailure{error,dispatched:false});
+    }
+    if matches!(request.operation, ResourceOperation::RecoveryPoints(_) | ResourceOperation::FileRestore(_)
+        | ResourceOperation::ReconcileFileRestore(_) | ResourceOperation::ReconcileMutation{..}) {
+        let result=(||{
+            use crate::storage::recovery_file_tasks::Action;
+            let (method,params)=request.operation.params(&request.binding,&request.context);
+            let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,method,&params)?;
+            validate_binding(&grant,&request.binding,&request.context)?;
+            let operation=request.context.operation_id.clone();
+            let action=match &request.operation{
+                ResourceOperation::RecoveryPoints(args)=>Action::Points(args.clone()),
+                ResourceOperation::FileRestore(args)=>Action::Restore{operation,args:args.clone()},
+                ResourceOperation::ReconcileFileRestore(args)=>Action::RestoreReceipt{operation,args:args.clone()},
+                ResourceOperation::ReconcileMutation{mutation,executor}=>Action::TextReceipt{operation,mutation:mutation.clone(),executor:executor.clone()},
+                _=>unreachable!(),
+            };
+            let task=storage.prepare_recovery_file_task(&request.binding.workspace_id,
+                request.binding.root_id.as_deref().ok_or_else(||KernelError::Authorization("Physical recovery source is missing".into()))?,
+                &request.binding.thread_id,action,request.journal.as_ref(),request.binding.source_mode,&grant,
+                request.cancellation.shared_flag())?.with_live_root(request.binding.live_root.clone());
+            if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
+            Ok(ResourceWork::FileRecovery(task))
         })();
         return result.map_err(|error|ResourceFailure{error,dispatched:false});
     }
@@ -3080,6 +3105,10 @@ pub(crate) fn serve_resource(
     match prepare_resource(storage, epoch, host_id, host_generation, request)? {
         ResourceWork::Ready(value) => Ok(value),
         ResourceWork::ProcessSpawn(task) => task.run_local_resource(storage),
+        ResourceWork::FileRecovery(task) => {
+            let mut dispatched=false;
+            task.run_local(storage,&mut dispatched).map_err(|error|ResourceFailure{error,dispatched})
+        },
         ResourceWork::TextMutation(task) => {
             let mut dispatched = false;
             task.run_local(storage, &mut dispatched).map_err(|error|ResourceFailure{error,dispatched})
@@ -3228,43 +3257,9 @@ fn serve_resource_immediate(
                 ));
             }
         }
-        if let ResourceOperation::ReconcileMutation { mutation, executor } = &request.operation {
-            let root_id = request
-                .binding
-                .root_id
-                .as_deref()
-                .ok_or_else(|| KernelError::Authorization("physical root missing".into()))?;
-            storage.set_cancellation(request.cancellation.shared_flag());
-            let result = storage.reconcile_text_mutation(
-                &request.binding.workspace_id,
-                root_id,
-                &request.context.operation_id,
-                mutation,
-                &grant,
-                executor,
-            );
-            storage.clear_cancellation();
-            return result.and_then(|receipt| serde_json::to_value(receipt).map_err(Into::into));
-        }
-        if let ResourceOperation::RecoveryPoints(args) = &request.operation {
-            if request.authorize_only { return Ok(Value::Null); }
-            return storage.file_recovery_points(&request.binding.workspace_id,
-                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
-                args, request.journal.as_ref(), &grant);
-        }
-        if let ResourceOperation::ReconcileFileRestore(args) = &request.operation {
-            return storage.file_restore_receipt(&request.binding.workspace_id,
-                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
-                &request.context.operation_id, args, &grant).and_then(|receipt|serde_json::to_value(receipt).map_err(Into::into));
-        }
-        if let ResourceOperation::FileRestore(args) = &request.operation {
-            if request.authorize_only { return Ok(Value::Null); }
-            storage.set_cancellation(request.cancellation.shared_flag());
-            let result = storage.restore_recorded_files(&request.binding.workspace_id,
-                request.binding.root_id.as_deref().expect("physical source"), &request.binding.thread_id,
-                &request.context.operation_id, args, request.journal.as_ref(), request.binding.source_mode, &grant, &mut dispatched);
-            storage.clear_cancellation();
-            return result;
+        if matches!(request.operation, ResourceOperation::ReconcileMutation{..}|ResourceOperation::RecoveryPoints(_)
+            |ResourceOperation::ReconcileFileRestore(_)|ResourceOperation::FileRestore(_)) {
+            return Err(KernelError::Protocol("File recovery requires its admitted worker".into()));
         }
         if matches!(request.operation, ResourceOperation::FileMutation(_)) {
             return Err(KernelError::Protocol("Text mutations require their admitted file worker".into()));

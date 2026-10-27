@@ -75,6 +75,7 @@ mod records;
 mod recovery;
 mod recovery_journal;
 pub(crate) mod recovery_points;
+pub(crate) mod recovery_file_tasks;
 pub(crate) mod result_publication;
 mod state_tree;
 mod tree_diff;
@@ -245,6 +246,7 @@ pub(crate) struct Storage {
     materializations: HashMap<String, materialization::ActiveMaterialization>,
     result_publications: BTreeSet<String>,
     file_effects: BTreeSet<String>,
+    active_recoveries: BTreeSet<String>,
     processes: crate::process::ProcessManager,
     process_receipt_wake: Option<crate::process::receipt_wake::Watch>,
     process_receipt_notify: Option<Arc<dyn Fn() + Send + Sync>>,

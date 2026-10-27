@@ -15,16 +15,9 @@ impl Storage {
         grant: &Grant,
         executor: &str,
     ) -> Result<Option<varin_runtime::ExternalReceipt>, KernelError> {
-        let resource = self.resolve_file_resource(root_id, mutation.path(), grant, false)?;
-        self.assert_file_lease(
-            grant,
-            root_id,
-            &[FileLeaseResource {
-                path: resource.path.clone(),
-                subtree: false,
-            }],
-            None,
-        )?;
+        self.admitted_file_root(root_id,grant)?;
+        let path=super::file_resources::normalized_relative_path(mutation.path(),false)?.0;
+        if !path_allowed(grant,&path){return Err(KernelError::Authorization("Mutation receipt path is outside grant scope".into()));}
         self.check_cancelled()?;
         let owned: bool = self.conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM operation_owners WHERE operation_id=?1 AND workspace_id=?2)",
@@ -94,30 +87,14 @@ impl Storage {
         if prior["state"] == "started" {
             let intent = receipt["intent"].clone();
             if intent["rootId"] != root_id
-                || intent["path"] != resource.path
+                || intent["path"] != path
                 || intent["workspaceId"] != workspace_id
             {
                 return Err(KernelError::Authorization(
                     "mutation intent source identity changed".into(),
                 ));
             }
-            let target: FileState =
-                serde_json::from_str(intent["targetJson"].as_str().ok_or_else(|| {
-                    KernelError::Storage("mutation intent omitted target".into())
-                })?)?;
-            let observed = self.capture_file_state(&resource)?;
-            if !Self::file_state_matches(&observed, &target) {
-                return Ok(None);
-            }
-            // Same factual reconciliation used by file-root admission. Never
-            // call file_apply or reconstruct/edit the file to produce evidence.
-            receipt = json!({"status":"applied","reconciled":true,"stateJson":serde_json::to_string(&observed)?});
-            self.finish_file_operation_owned(
-                operation_id,
-                &receipt,
-                intent["ownerId"].as_str(),
-                Some(workspace_id),
-            )?;
+            return Ok(None);
         } else if prior["state"] != "committed" {
             return Ok(None);
         }
@@ -151,7 +128,7 @@ impl Storage {
             object.remove("__nativeGrantId");
             object.remove("__nativeEpoch");
         }
-        receipt["path"] = json!(resource.path);
+        receipt["path"] = json!(path);
         Ok(Some(varin_runtime::ExternalReceipt {
             executor: executor.into(),
             identity: operation_id.into(),
