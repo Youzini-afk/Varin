@@ -140,6 +140,7 @@ export interface WorkingSourcePreparation {
 }
 export interface WorkingBranchCreateOptions {
   sourceProvenance?: ChildSourceProvenance;
+  signal?: AbortSignal;
 }
 export interface WorkingResultPublicationOptions {
   /** Durable lifecycle callers provide their original logical publication identity. */

@@ -461,6 +461,9 @@ export class KernelScopedClient {
   releaseBlob(ownerId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.releaseBlob(ownerId, this.grant, signal);
   }
+  releaseBlobs(ownerIds: readonly string[], signal?: AbortSignal): Promise<void> {
+    return this.owner.releaseBlobs(ownerIds, this.grant, signal);
+  }
 
   rebindObjectOwner(workspaceId: string, ownerId: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.rebindObjectOwner(workspaceId, ownerId, this.grant, signal);
@@ -1780,6 +1783,13 @@ export class KernelClient {
 
   async releaseBlob(ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.requestRaw<Record<string, unknown>>("storage.blob.release", { ownerId }, { signal, grant });
+  }
+  async releaseBlobs(ownerIds: readonly string[], grant: KernelGrantHandle, signal?: AbortSignal): Promise<void> {
+    const scoped = this.assertGrant(grant);
+    if (!scoped.owningWorkspace) throw new Error("Batch content release requires its original workspace grant");
+    for (const batch of batchForKernelTransport(ownerIds)) {
+      await this.requestRaw("storage.blob.releaseBatch", { workspaceId: scoped.owningWorkspace, ownerIds: batch }, { signal, grant: scoped, settleCancellation: true });
+    }
   }
 
   async rebindObjectOwner(workspaceId: string, ownerId: string, grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {

@@ -55,6 +55,8 @@ mod objects;
 mod operations;
 #[cfg(test)]
 mod native_authority_tests;
+#[cfg(test)]
+mod versioned_workspaces_review;
 pub(crate) mod process_interactions;
 mod process_resources;
 mod records;

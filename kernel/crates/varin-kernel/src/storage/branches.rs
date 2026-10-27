@@ -3,6 +3,41 @@ use super::operations::idempotent;
 use super::*;
 
 impl Storage {
+    fn branch_entry_sources(
+        entry: &Value,
+        path: &str,
+        state: &PathState,
+        owners: &mut BTreeMap<String, String>,
+        sources: &mut BTreeMap<String, String>,
+        records: &mut BTreeMap<String, (String, String)>,
+        references: &mut BTreeMap<String, String>,
+    ) -> Result<(), KernelError> {
+        let source_count = usize::from(entry.get("ownerId").is_some())
+            + usize::from(entry.get("sourcePath").is_some())
+            + usize::from(entry.get("sourceRecordId").is_some() || entry.get("sourceSlot").is_some());
+        if source_count > 1 || (source_count > 0 && state.object_hash().is_none()) {
+            return Err(KernelError::Operation("a regular-file entry must use exactly one content source".into()));
+        }
+        if let Some(reference) = entry.get("sourceRef").and_then(Value::as_str) {
+            references.insert(path.into(), reference.into());
+        }
+        if let Some(source) = entry.get("sourcePath").and_then(Value::as_str) {
+            sources.insert(path.into(), Self::validate_path(source)?.join("/"));
+        }
+        match (entry.get("sourceRecordId").and_then(Value::as_str), entry.get("sourceSlot").and_then(Value::as_str)) {
+            (Some(record), Some(slot)) if !record.is_empty() && !slot.is_empty() => { records.insert(path.into(), (record.into(), slot.into())); },
+            (None, None) => {},
+            _ => return Err(KernelError::Operation("sourceRecordId and sourceSlot must be supplied together".into())),
+        }
+        if let Some(owner) = entry.get("ownerId").and_then(Value::as_str) {
+            let hash = state.object_hash().ok_or_else(|| KernelError::Operation("ownerId requires a regular-file entry".into()))?;
+            if owners.insert(owner.into(), hash.into()).is_some_and(|old| old != hash) {
+                return Err(KernelError::Operation("one ownerId cannot identify different content objects".into()));
+            }
+        }
+        Ok(())
+    }
+
     fn branch_metadata_paths(params: &Value, field: &str) -> Result<Vec<String>, KernelError> {
         let values = params
             .get(field)
@@ -335,6 +370,10 @@ impl Storage {
                 "entryCount": existing.entries.len(),
             }));
         }
+        let base_root = match base_ref.as_deref() {
+            Some(reference) => self.resolve_base_ref(reference, workspace_id)?,
+            None => self.empty_root()?,
+        };
         self.branch_builders.insert(
             builder_id.to_string(),
             BranchBuilder {
@@ -349,6 +388,9 @@ impl Storage {
                 next_sequence: 0,
                 entries: Vec::new(),
                 grant_id: grant_id.to_string(),
+                staged_root: base_root.clone(),
+                base_root,
+                paths: BTreeSet::new(),
             },
         );
         Ok(
@@ -374,37 +416,69 @@ impl Storage {
             .get("entries")
             .and_then(Value::as_array)
             .ok_or_else(|| KernelError::Operation("entries is required".to_string()))?;
+        let mut states = Vec::with_capacity(entries.len());
+        let mut owners = BTreeMap::new();
+        let mut sources = BTreeMap::new();
+        let mut records = BTreeMap::new();
+        let mut references = BTreeMap::new();
         for entry in entries {
             let path = entry
                 .get("path")
                 .and_then(Value::as_str)
                 .ok_or_else(|| KernelError::Operation("entry.path is required".to_string()))?;
-            Self::validate_path(path)?;
+            let segments = Self::validate_path(path)?;
             let state = entry
                 .get("state")
                 .cloned()
                 .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
-            self.parse_state(&state)?;
+            let state = self.parse_state(&state)?;
+            let normalized = segments.join("/");
+            Self::branch_entry_sources(entry, &normalized, &state, &mut owners, &mut sources, &mut records, &mut references)?;
+            states.push((segments, state));
         }
         let builder = self
             .branch_builders
-            .get_mut(builder_id)
+            .get(builder_id)
             .ok_or_else(|| KernelError::Operation("branch builder not found".to_string()))?;
         if builder.grant_id != grant_id || builder.next_sequence != sequence {
             return Err(KernelError::Authorization(
                 "branch builder identity or sequence is invalid".to_string(),
             ));
         }
-        let original_len = builder.entries.len();
+        Self::validate_batch_paths(&states)?;
+        for (segments, state) in &states {
+            let path = segments.join("/");
+            if builder.paths.contains(&path) {
+                return Err(KernelError::Operation(format!("duplicate normalized path: {path}")));
+            }
+            if !state.is_directory() {
+                let prefix = format!("{path}/");
+                if builder.paths.range(prefix.clone()..).next().is_some_and(|child| child.starts_with(&prefix)) {
+                    return Err(KernelError::Operation(format!("a non-directory path cannot have descendants: {path}")));
+                }
+            }
+        }
+        self.validate_object_owners(&builder.workspace_id, grant_id, &owners)?;
+        self.validate_state_ownership(&states, &owners, &sources, &records, &references,
+            &[&builder.base_root], &builder.workspace_id, grant_id)?;
+        let previous = builder.staged_root.clone();
+        // Each uploaded batch is a finite transaction. The final publication
+        // never has to rebuild every ancestor while the resource actor is held.
+        self.conn.execute_batch("BEGIN IMMEDIATE")?;
+        let staged = (|| {
+            let root = self.root_apply(&previous, &states)?;
+            self.conn.execute_batch("COMMIT")?;
+            Ok::<_, KernelError>(root)
+        })();
+        let root = match staged {
+            Ok(root) => root,
+            Err(error) => { let _ = self.conn.execute_batch("ROLLBACK"); return Err(error); },
+        };
+        let builder = self.branch_builders.get_mut(builder_id).expect("admitted branch builder");
+        for (segments, _) in states { builder.paths.insert(segments.join("/")); }
+        builder.staged_root = root;
         builder.entries.extend(entries.iter().cloned());
         builder.next_sequence += 1;
-        if let Err(error) = self.check_cancelled() {
-            if let Some(builder) = self.branch_builders.get_mut(builder_id) {
-                builder.entries.truncate(original_len);
-                builder.next_sequence = sequence;
-            }
-            return Err(error);
-        }
         Ok(json!({
             "builderId": builder_id,
             "nextSequence": sequence + 1,
@@ -471,7 +545,7 @@ impl Storage {
             .insert("captureScopes".to_string(), json!(builder.capture_scopes));
         let identity = self.branch_creation_identity(&creation)?;
         idempotent(self, "branch.create", &identity, |storage| {
-            storage.create_branch(&creation, grant_id)
+            storage.create_branch_prepared(&creation, grant_id, Some((&builder.base_root, &builder.staged_root)))
         })
     }
 
@@ -496,10 +570,20 @@ impl Storage {
         Ok(json!({"builderId": builder_id, "aborted": true}))
     }
 
+    #[cfg(test)]
     pub(super) fn create_branch(
         &mut self,
         params: &Value,
         grant_id: &str,
+    ) -> Result<Value, KernelError> {
+        self.create_branch_prepared(params, grant_id, None)
+    }
+
+    fn create_branch_prepared(
+        &mut self,
+        params: &Value,
+        grant_id: &str,
+        prepared: Option<(&str, &str)>,
     ) -> Result<Value, KernelError> {
         let branch_id = params
             .get("branchId")
@@ -573,61 +657,9 @@ impl Storage {
                 .cloned()
                 .ok_or_else(|| KernelError::Operation("entry.state is required".to_string()))?;
             let parsed = self.parse_state(&state)?;
-            let source_count = usize::from(entry.get("ownerId").is_some())
-                + usize::from(entry.get("sourcePath").is_some())
-                + usize::from(
-                    entry.get("sourceRecordId").is_some() || entry.get("sourceSlot").is_some(),
-                );
-            if source_count > 1 {
-                return Err(KernelError::Operation(
-                    "a branch entry must use exactly one content source".to_string(),
-                ));
-            }
-            if source_count > 0 && parsed.object_hash().is_none() {
-                return Err(KernelError::Operation(
-                    "content sources are only valid for regular-file entries".to_string(),
-                ));
-            }
             let normalized_path = segments.join("/");
-            if let Some(reference)=entry.get("sourceRef").and_then(Value::as_str) {source_refs.insert(normalized_path.clone(),reference.to_owned());}
-            if let Some(source_path) = entry.get("sourcePath").and_then(Value::as_str) {
-                source_paths.insert(
-                    normalized_path.clone(),
-                    Self::validate_path(source_path)?.join("/"),
-                );
-            }
-            match (
-                entry.get("sourceRecordId").and_then(Value::as_str),
-                entry.get("sourceSlot").and_then(Value::as_str),
-            ) {
-                (Some(record_id), Some(slot)) if !record_id.is_empty() && !slot.is_empty() => {
-                    source_records.insert(
-                        normalized_path.clone(),
-                        (record_id.to_string(), slot.to_string()),
-                    );
-                }
-                (None, None) => {}
-                _ => {
-                    return Err(KernelError::Operation(
-                        "sourceRecordId and sourceSlot must be supplied together".to_string(),
-                    ))
-                }
-            }
-            if let Some(owner_id) = entry.get("ownerId").and_then(Value::as_str) {
-                let hash = parsed.object_hash().ok_or_else(|| {
-                    KernelError::Operation(
-                        "ownerId is only valid for a regular-file entry".to_string(),
-                    )
-                })?;
-                if owners_to_consume
-                    .insert(owner_id.to_string(), hash.to_string())
-                    .is_some_and(|previous| previous != hash)
-                {
-                    return Err(KernelError::Operation(
-                        "one ownerId cannot identify different content objects".to_string(),
-                    ));
-                }
-            }
+            Self::branch_entry_sources(&entry, &normalized_path, &parsed, &mut owners_to_consume,
+                &mut source_paths, &mut source_records, &mut source_refs)?;
             entries_to_write.push((segments, parsed));
         }
         Self::validate_batch_paths(&entries_to_write)?;
@@ -657,20 +689,22 @@ impl Storage {
             .filter_map(|(_, state)| state.object_hash().map(str::to_string))
             .collect::<Vec<_>>();
         let mut root = base_root.clone();
-        if !entries_to_write.is_empty() {
+        if let Some((original_base, staged)) = prepared {
+            if original_base != base_root { return Err(KernelError::Authorization("Branch preparation baseline changed".into())); }
+            self.load_node(staged)?;
+            root = staged.to_owned();
+            self.record_root_blob_hashes(&root, entry_blob_hashes.clone())?;
+        } else if !entries_to_write.is_empty() {
             if params.get("baseRef").is_none() {
                 root = self.build_root(&entries_to_write)?;
             } else {
-                for (segments, state) in entries_to_write {
-                    let refs = segments.iter().map(String::as_str).collect::<Vec<_>>();
-                    root = self.root_set(&root, &refs, state)?;
-                }
+                root = self.root_apply(&root, &entries_to_write)?;
             }
             if params.get("baseRef").is_some() {
                 self.record_root_blob_hashes(&root, entry_blob_hashes.clone())?;
             }
         }
-        if params.get("baseRef").is_none() {
+        if prepared.is_none() && params.get("baseRef").is_none() {
             self.record_root_blobs(&root)?;
         }
         self.consume_object_owners(workspace_id, grant_id, &owners_to_consume)?;
@@ -1127,8 +1161,9 @@ impl Storage {
             .filter_map(|(_, state)| state.object_hash().map(str::to_string))
             .collect::<Vec<_>>();
         let mut root = rebase_root.clone().unwrap_or_else(|| previous_root.clone());
+        let mut updates = Vec::new();
+        let mut restores = Vec::new();
         for (segments, state) in changes_to_write {
-            let refs = segments.iter().map(String::as_str).collect::<Vec<_>>();
             let base_state = self.root_get(&effective_base, &segments.join("/"))?;
             let restores_base = !state.is_directory()
                 && match (&state, base_state.as_ref()) {
@@ -1136,11 +1171,16 @@ impl Storage {
                     (_, Some(base_state)) => base_state == &state,
                     _ => false,
                 };
-            root = if restores_base {
-                self.root_restore_from_base(&root, &effective_base, &refs)?
+            if restores_base {
+                restores.push(segments);
             } else {
-                self.root_set(&root, &refs, state)?
-            };
+                updates.push((segments, state));
+            }
+        }
+        root = self.root_apply(&root, &updates)?;
+        for segments in restores {
+            let refs = segments.iter().map(String::as_str).collect::<Vec<_>>();
+            root = self.root_restore_from_base(&root, &effective_base, &refs)?;
         }
         let next = branch.write_revision + 1;
         if let Some(new_base) = rebase_root.as_ref() {

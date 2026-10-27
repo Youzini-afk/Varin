@@ -32,6 +32,7 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
         | "storage.blob.release"
+        | "storage.blob.releaseBatch"
         | "storage.putBlob.chunk"
         | "branch.create.begin"
         | "branch.create.append"

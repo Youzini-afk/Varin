@@ -867,7 +867,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 67,
+  "protocolVersion": 68,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1414,6 +1414,7 @@
     "storage.putBlob.finish": "KernelPutBlobFinishParams",
     "storage.putBlob.abort": "KernelPutBlobAbortParams",
     "storage.blob.release": "KernelBlobReleaseParams",
+    "storage.blob.releaseBatch": "KernelBlobReleaseBatchParams",
     "storage.getBlob": "KernelGetBlobParams",
     "storage.object.rebindOwner": "KernelObjectOwnerRebindParams",
     "file.read.check": "KernelFileReadCheckParams",
@@ -2329,6 +2330,9 @@
     "KernelBlobReleaseParams": {"fields": {
       "ownerId": {"type": "string"}, "workspaceId": {"type": "string", "optional": true}
     }},
+    "KernelBlobReleaseBatchParams": {"fields": {
+      "ownerIds": {"type": "string[]"}, "workspaceId": {"type": "string"}
+    }},
     "KernelObjectOwnerRebindParams": {"fields": {
       "workspaceId": {"type": "string"}, "ownerId": {"type": "string"}
     }},
@@ -3228,6 +3232,7 @@
     "storage.putBlob.finish": "commit a content upload stream",
     "storage.putBlob.abort": "discard a content upload stream",
     "storage.blob.release": "release a temporary content owner",
+    "storage.blob.releaseBatch": "release a batch of this grant's temporary content owners in one transaction",
     "storage.getBlob": "read a content object or byte range",
     "storage.object.rebindOwner": "rebind one temporary workspace object owner to the current authorized grant",
     "file.read.check": "authorize a read without reading its body and return the current canonical resource identity",

@@ -960,6 +960,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async createBranch(workspaceId: string, branchId: string, baseState: Record<string, RecoveryState>, baseRef?: string, draftBasePaths: string[] = [], captureScopes: string[] = [], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot> {
+    options?.signal?.throwIfAborted();
     if (workspaceId !== this.context.identity.workspaceId) throw new Error("Working-state workspace mismatch");
     const kernelBaseRef = baseRef && (/^sha256-[a-f0-9]+$/i.test(baseRef) || baseRef.startsWith("pin:") || /^.+@\d+$/.test(baseRef)) ? baseRef : undefined;
     const normalizedDraftPaths = [...new Set(draftBasePaths.map(normalize))].sort();
@@ -974,16 +975,19 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
       for (const [hash, ownerId] of pendingOwners) if (this.ownerByHash.get(hash) === ownerId) this.ownerByHash.delete(hash);
     };
     const releasePendingOwners = async (bestEffort = false): Promise<void> => {
-      const releases = [...new Set(pendingOwners.values())].map((ownerId) => this.context.client.releaseBlob(ownerId));
-      if (bestEffort) await Promise.allSettled(releases);
-      else await Promise.all(releases);
-      forgetPendingOwners();
+      try {
+        await this.context.client.releaseBlobs([...new Set(pendingOwners.values())]);
+        forgetPendingOwners();
+      } catch (error) {
+        // Keep failed ownership hints so capture cleanup can retry them.
+        if (!bestEffort) throw error;
+      }
     };
     let created: Record<string, unknown>;
     // The upload is transient until the original branch-create transaction
     // transfers it to its working.source record. No separate source snapshot.
     const provenanceUpload = options?.sourceProvenance
-      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`)
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options.signal)
       : undefined;
     try {
       created = await this.context.client.createBranch({
@@ -996,7 +1000,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
         draftBasePaths: normalizedDraftPaths,
         captureScopes: normalizedCaptureScopes,
         ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
-      });
+      }, options?.signal);
     } catch (error) {
       await releasePendingOwners(true);
       if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
@@ -1395,14 +1399,18 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   async releaseCapturedStates(states: Record<string, RecoveryState>): Promise<void> {
     const owners = this.captureOwners.get(states);
     if (!owners) return;
-    await Promise.all([...owners].map(async ([hash, owner]) => {
+    const pending: Array<[string, string]> = [];
+    for (const [hash, owner] of owners) {
       // Branch commit may already have consumed this owner. Another capture's
       // owner for identical bytes is not ours to release.
-      if (this.ownerByHash.get(hash) !== owner) { owners.delete(hash); return; }
-      await this.context.client.releaseBlob(owner);
+      if (this.ownerByHash.get(hash) !== owner) { owners.delete(hash); continue; }
+      pending.push([hash, owner]);
+    }
+    await this.context.client.releaseBlobs(pending.map(([, owner]) => owner));
+    for (const [hash, owner] of pending) {
       if (this.ownerByHash.get(hash) === owner) this.ownerByHash.delete(hash);
       owners.delete(hash);
-    }));
+    }
     this.captureOwners.delete(states);
     this.captureStates.delete(states);
   }

@@ -38,7 +38,7 @@
 - [工具契约与执行环境优化](design/tool-contracts-and-execution-environment.md)：Windows Shell、PATH 与原生 rg、进程输入回执、完整工具目录、文件与文档默认读取及错误反馈；已实现，当前契约见上面的领域文档。
 
 ## 正在评审的设计
-- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：共享稳定基线、私有修改层、主工作区持续写入、三端文件系统后端与命令／外部 Harness 接入；Windows、macOS、Linux 共同设计验证，设计提案尚未实施。
+- [主与子 Agent 的版本化工作区](design/versioned-agent-workspaces.md)：共享稳定基线、私有修改层、主工作区持续写入、三端文件系统后端与命令／外部 Harness 接入；共用 Storage 树与准备链改造已开始，挂载及主目录接入仍在实施范围内。
 - [外部 Harness 接入与跨 Agent 协作](design/external-harness-integration.md)：直接会话、外部预设、派发、消息与文件交换已接入；CLI / Skills / MCP 共享按产品决定暂缓。当前支持边界见[外部 Agent](external-agents.md)。
 - [快速检索、按需隔离与工具可靠性](design/retrieval-isolation-and-tool-reliability.md)：检索真实启动、默认共享与按次隔离、基线复用／延迟物化及资源回收已实施，边界见原文第 17 节；隔离的后续架构由上面的版本化工作区设计接续。
 - [通用模式与工具披露](design/general-agent-harness.md)：常驻与按需工具、MCP 直接入口、共享 Agent 配置，以及全模式的发现和结果质量改进；不涉及界面设计，尚未实施。

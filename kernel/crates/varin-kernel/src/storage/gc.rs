@@ -190,6 +190,10 @@ impl Storage {
 
     fn gc_reachable(&mut self) -> Result<(BTreeSet<String>, BTreeSet<String>), KernelError> {
         let mut roots = BTreeSet::new();
+        for builder in self.branch_builders.values() {
+            roots.insert(builder.base_root.clone());
+            roots.insert(builder.staged_root.clone());
+        }
         for row in self
             .conn
             .prepare("SELECT base_root, head_root FROM branches")?

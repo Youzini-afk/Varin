@@ -148,6 +148,11 @@ pub(crate) struct BranchBuilder {
     pub(crate) next_sequence: u64,
     pub(crate) entries: Vec<Value>,
     pub(crate) grant_id: String,
+    /// An unpublished candidate in the existing immutable tree store. GC keeps
+    /// it alive only while this original builder is admitted.
+    pub(crate) base_root: String,
+    pub(crate) staged_root: String,
+    pub(crate) paths: BTreeSet<String>,
 }
 
 pub(crate) struct BranchWriteBuilder {

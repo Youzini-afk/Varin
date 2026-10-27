@@ -93,6 +93,7 @@ impl Storage {
                 authorized_params.get("workspaceId").and_then(Value::as_str),
                 grant_id.unwrap_or(""),
             ),
+            "storage.blob.releaseBatch" => storage.release_object_owner_batch(authorized_params, grant_id.unwrap_or("")),
             "storage.object.rebindOwner" => storage.rebind_object_owner(
                 authorized_params,
                 authorized_params.get("workspaceId").and_then(Value::as_str),

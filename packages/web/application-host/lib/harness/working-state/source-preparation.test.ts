@@ -48,6 +48,27 @@ function fixture(initial: Record<string, RecoveryState> = { 'file.txt': { kind: 
 }
 
 describe('shared stable source capture', () => {
+  it('passes original cancellation through branch publication and drains captured owners', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    let publishing!: () => void;
+    const entered = new Promise<void>(resolve => { publishing = resolve; });
+    vi.spyOn(f.store, 'createBranch').mockImplementation(async (_workspace, _branch, _states, _base, _drafts, _scopes, options) => {
+      expect(options?.signal).toBe(controller.signal);
+      publishing();
+      await new Promise<void>((_resolve, reject) => {
+        options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), { once: true });
+      });
+      throw new Error('unreachable');
+    });
+    const pending = captureStableSourceBaseline({ ...f.input, signal: controller.signal }, f);
+    await entered;
+    controller.abort(new Error('cancel original import'));
+    await expect(pending).rejects.toThrow('cancel original import');
+    expect(f.release).toHaveBeenCalledOnce();
+    expect(f.barrier.release).toHaveBeenCalledOnce();
+  });
+
   it('stops verification on an invalidated namespace and releases the captured snapshot', async () => {
     const f = fixture();
     const inventory = createCaptureInventory();

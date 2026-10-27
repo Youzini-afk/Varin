@@ -446,6 +446,7 @@ impl Storage {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn root_set(
         &mut self,
         root: &str,
@@ -485,6 +486,53 @@ impl Storage {
             state: current_state,
             children: Some(next_index),
         })
+    }
+
+    /// Apply one admitted namespace batch. Shared ancestors are rebuilt once;
+    /// untouched subtrees keep their exact identities. In particular, importing
+    /// a cold directory builds its balanced child index directly instead of
+    /// retaining every intermediate AVL root produced by per-path insertion.
+    pub(super) fn root_apply(
+        &mut self,
+        root: &str,
+        entries: &[(Vec<String>, PathState)],
+    ) -> Result<String, KernelError> {
+        Self::validate_batch_paths(entries)?;
+        self.apply_path_tree(root, Self::build_tree(entries)?)
+    }
+
+    fn apply_path_tree(&mut self, root: &str, patch: BuildTree) -> Result<String, KernelError> {
+        self.check_cancelled()?;
+        if patch.state.is_none() && patch.children.is_empty() {
+            return Ok(root.to_owned());
+        }
+        let TrieNode::Path { state, children } = self.load_node(root)? else {
+            return Err(KernelError::Storage("index node used as path".into()));
+        };
+        // A non-directory replacement owns the entire old subtree. A directory
+        // metadata change preserves descendants, just like root_set.
+        let next_state = patch.state.or(state);
+        if next_state.as_ref().is_some_and(|state| !state.is_directory()) {
+            if !patch.children.is_empty() {
+                return Err(KernelError::Operation("a non-directory path cannot have descendants".into()));
+            }
+            return self.store_node(&TrieNode::Path { state: next_state, children: None });
+        }
+        if children.is_none() {
+            return self.build_path_tree(BuildTree { state: next_state, children: patch.children });
+        }
+        let mut next_children = children;
+        for (name, child_patch) in patch.children {
+            let previous = self.index_get(next_children.as_ref(), &name)?;
+            let child = match previous.as_ref() {
+                Some(previous) => self.apply_path_tree(previous, child_patch)?,
+                None => self.build_path_tree(child_patch)?,
+            };
+            if previous.as_ref() != Some(&child) {
+                next_children = Some(self.index_set(next_children, name, child)?);
+            }
+        }
+        self.store_node(&TrieNode::Path { state: next_state, children: next_children })
     }
 
     pub(super) fn root_restore_from_base(

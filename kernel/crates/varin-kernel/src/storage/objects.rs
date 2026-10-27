@@ -102,6 +102,24 @@ impl Storage {
         Ok(json!({"ownerId": owner_id, "released": released > 0}))
     }
 
+    pub(super) fn release_object_owner_batch(&mut self, params: &Value, grant_id: &str) -> Result<Value, KernelError> {
+        let input: crate::protocol_generated::KernelBlobReleaseBatchParams = super::file_resources::parse_file_params(params)?;
+        let transaction = self.conn.transaction()?;
+        let mut released = 0usize;
+        {
+            let mut statement = transaction.prepare_cached(
+                "DELETE FROM object_owners WHERE owner_id = ?1 AND workspace_id = ?2 AND grant_id = ?3")?;
+            for owner in &input.owner_ids {
+                if self.cancellation.as_ref().is_some_and(|token| token.load(Ordering::Acquire)) {
+                    return Err(KernelError::Cancelled);
+                }
+                released += statement.execute(params![owner, input.workspace_id, grant_id])?;
+            }
+        }
+        transaction.commit()?;
+        Ok(json!({"released":released}))
+    }
+
     pub(super) fn rebind_object_owner(
         &mut self,
         params_value: &Value,

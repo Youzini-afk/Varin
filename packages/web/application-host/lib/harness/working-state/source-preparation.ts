@@ -235,7 +235,7 @@ export async function captureStableSourceBaseline(
           subtrees: [...new Set([...scopes, ...resources.captureScopes])].filter(file => file === '.' || effective.effectiveState[file]?.kind === 'directory').map(file => file === '.' ? '' : file).sort() } } } : {}) };
     input.onPhase?.('publish');
     const branch = await store.createBranch(input.workspaceId, input.branchId, effective.effectiveState, captured.baseRef,
-      effective.changedPaths, scopes, { sourceProvenance: provenance });
+      effective.changedPaths, scopes, { sourceProvenance: provenance, ...(signal ? { signal } : {}) });
     result = { branch, provenance };
   } catch (error) {
     failures.push(error instanceof CaptureInventoryChangedError

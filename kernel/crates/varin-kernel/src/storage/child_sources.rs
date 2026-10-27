@@ -367,6 +367,7 @@ impl Storage {
                 | "storage.putBlob.finish"
                 | "storage.putBlob.abort"
                 | "storage.blob.release"
+                | "storage.blob.releaseBatch"
                 | "branch.create.begin"
                 | "branch.create.append"
                 | "branch.create.finish"
@@ -502,7 +503,7 @@ impl Storage {
         let readable=[parent,source.as_str(),incoming.as_str(),merged.as_str()];
         let writable=[source.as_str(),merged.as_str()];
         if !matches!(method,"storage.health"|"storage.getBlob"|"storage.putBlob.begin"|"storage.putBlob.chunk"|
-            "storage.putBlob.finish"|"storage.putBlob.abort"|"storage.blob.release"|"branch.create.begin"|
+            "storage.putBlob.finish"|"storage.putBlob.abort"|"storage.blob.release"|"storage.blob.releaseBatch"|"branch.create.begin"|
             "branch.create.append"|"branch.create.finish"|"branch.create.abort"|"branch.read"|"branch.pin"|
             "branch.unpin"|"branch.delete"|"pin.read"|"operation.get"|"working.result.get") { return Err(deny()); }
         if let Some(branch)=params.get("branchId").and_then(Value::as_str) {

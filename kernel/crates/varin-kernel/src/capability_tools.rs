@@ -194,12 +194,12 @@ impl Call {
                         "related":self.related(&tool.name),
                         "directlyCallable":disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()),
                         "scriptInvocation":{"function":"tools.invoke","arguments":{"name":tool.name,"arguments":{}},
-                            "instruction":"Inside script_run, fill arguments.arguments with the target parameters. Do not copy the model tool_invoke reference wrapper here. Read result.completion.kind first; result completion data is at result.completion.content.data, and media at result.completion.content.parts."},
+                            "instruction":"Inside script_run, call tools.invoke({name: targetName, arguments: targetParameters}). Put the target parameters directly in this arguments object. Do not add another arguments wrapper or copy tool_invoke's reference wrapper. Read result.completion.kind first; result completion data is at result.completion.content.data, and media at result.completion.content.parts."},
                         "invocation":if disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()) {
                             json!({"tool":tool.name,"arguments":{},"instruction":"Fill arguments using parameters. This function is declared in the current model request."})
                         } else {
                             json!({"tool":disclosure::INVOKE,"arguments":{"reference":{"name":tool.name,"version":tool.version},"arguments":{}},
-                                "instruction":"Fill arguments.arguments using parameters. This description does not register a model function. Call tool_invoke, never the target name directly."})
+                                "instruction":"Call tool_invoke with {reference: the reference shown here, arguments: the target parameters}. Put target parameters directly in tool_invoke.arguments; do not wrap them in another arguments object. This description does not register a model function. Call tool_invoke, never the target name directly."})
                         }});
                     if name == "dispatch" {
                         value["dispatch"] = self.dispatch()?;

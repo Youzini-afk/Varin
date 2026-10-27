@@ -74,7 +74,7 @@ it('a rejected progress observation releases every owner in the returned capture
   const result = f.probe.received.find(value => value.id === request.id)?.result as { entries: Array<{ ownerId: string; stateJson: string }> };
   expect(result.entries).toHaveLength(3);
   for (const entry of result.entries) {
-    expect(f.requests.some(value => value.method === 'storage.blob.release' && value.params.ownerId === entry.ownerId)).toBe(true);
+    expect(f.requests.some(value => value.method === 'storage.blob.releaseBatch' && (value.params.ownerIds as string[]).includes(entry.ownerId))).toBe(true);
     await expect(f.context.client.getBlob(JSON.parse(entry.stateJson).objectHash, { ownerId: entry.ownerId }, { offset: 0, length: 100 })).rejects.toThrow();
   }
 });

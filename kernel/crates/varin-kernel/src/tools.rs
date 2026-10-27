@@ -103,7 +103,7 @@ impl ToolKind {
                 "Apply exact text edits against a file read version in the admitted writable workspace."
             }
             Self::RecoveryPoints => "Find file recovery points by conversation round, or inspect a point and its affected paths.",
-            Self::FileRestore => "Restore recorded files to a recovery point or undo a restore. Use current:before for the start of this round; paths selects files. Returns per-file results and keeps the conversation active.",
+            Self::FileRestore => "Restore recorded files to a recovery point or undo a restore. current:before restores the start of this entire conversation round, including deleting files created in this round; it does not mean undo the last edit. Use recovery_points to inspect the selected point and affected paths first. paths selects files. Returns per-file results and keeps the conversation active.",
             Self::ProcessInspect => {
                 "Inspect a retained process owned by the admitted execution environment."
             }

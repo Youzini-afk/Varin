@@ -171,6 +171,13 @@ jobs:
       - id: native-build
         name: Build native kernel
         run: node scripts/test-kernel-authority.mjs --build-only
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
+        name: Verify workspace tree publication on Windows
+        shell: cmd
+        working-directory: kernel
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
+          cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked
       # UI tests use simulated browser/surface inputs and run in source-quality.
       # Keep filesystem, process, worker and Host suites on both operating systems.
       # Bun 1.3 treats multiple filters as alternatives, so use the exclusion alone.
@@ -190,6 +197,17 @@ jobs:
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         name: Verify native kernel authority
         run: node scripts/test-kernel-authority.mjs
+
+  macos-storage:
+    name: macOS storage
+    runs-on: macos-latest
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Verify workspace tree publication on macOS
+        working-directory: kernel
+        run: cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked
 
   production-build:
     name: Production build
