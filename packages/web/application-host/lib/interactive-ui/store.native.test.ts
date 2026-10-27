@@ -31,6 +31,7 @@ it('saves atomic revisions, retains original receipts and selections after reope
     const selection = await store.select('thread-a', { ref: second.ref, viewRef: 'ui-view:test', capturedAt: new Date().toISOString(),
       state: { data: { amount: 42 }, controls: {}, scroll: { x: 0, y: 0 } }, viewport: { width: 300, height: 200 } }, { text: 'BBB' });
     await client.close(); client = createKernelClient(options); await client.start(); store = createUiContentStore(client);
+    expect((await store.view('thread-a', 'ui-view:test'))?.state?.data).toBe(7);
     expect((await store.source('thread-a', first.ref)).contents['index.html']).toBe('AAA\nBBB');
     expect(await store.render('thread-a', { title: 'Compare', changes: [{ op: 'write', file: 'index.html', text: 'AAA\nBBB' }] }, 'call-1')).toEqual(first);
     expect((await store.selection('thread-a', selection.ref)).text).toBe('BBB');

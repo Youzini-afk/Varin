@@ -54,11 +54,15 @@ iframe 将滚轮和触屏阅读方向传给会话以释放自动跟随，滚动�
 
 ```js
 const initial = window.varinUI.state; // 初始 JSON 状态，未保存时为 null
-window.varinUI.saveState({ amount: 500000 });
+await window.varinUI.saveState({ amount: 500000 }); // Host 持久保存后完成，保存失败时拒绝
 window.varinUI.setContext({ selectedPlan: "A", monthlyPayment: 2100 });
 ```
 
-控件值和滚动位置自动保存，复杂组件用 `saveState` 保存业务状态。`setContext` 提供“用当前参数继续讨论”的内容；
+控件值和滚动位置合并自动保存，复杂组件用 `saveState` 立即提交业务状态。调用后本页内存立即更新；
+返回的 Promise 在 Host 完成原 `ui.view` 持久写入后才成功。需要确认保存后再关闭或执行后续操作时应等待它，
+失败会回传给页面并显示在视图状态中。独立导出的 HTML 没有 Host 持久保存通道，业务状态只保留于该页面内存。
+同一视图的保存按调用顺序提交；正常视图卸载会在已提交保存之后提交最后一份控件状态。
+`setContext` 提供“用当前参数继续讨论”的内容；
 该宿主操作只添加输入框引用，不自动发消息。页面没有模型请求、文件系统或 Host 凭据接口。
 
 HTML 在不共享主页面 origin 的 `allow-scripts` 沙盒运行。主题使用 Varin 的实际颜色、字体和减少动态效果偏好。

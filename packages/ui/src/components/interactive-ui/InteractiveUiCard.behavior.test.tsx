@@ -6,7 +6,7 @@ import { InteractiveUiError } from '@varin/application-client';
 import { UiWorkView, InteractiveUiPanel } from './InteractiveUiCard';
 import { uiSession } from '@/lib/interactive-ui/sessions';
 
-const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), openPanel: vi.fn(), t: (key: string) => key }));
+const api = vi.hoisted(() => ({ attach: vi.fn(), detach: vi.fn(async () => {}), state: vi.fn(), observe: vi.fn(), openPanel: vi.fn(), t: (key: string) => key }));
 vi.mock('@varin/application-client', async original => ({ ...await original<typeof import('@varin/application-client')>(), createInteractiveUiHttpAPI: () => api }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: api.t }) }));
 vi.mock('@/lib/desktop', () => ({ invokeDesktop: vi.fn() }));
@@ -77,5 +77,47 @@ it('keeps inline content mounted while inspecting source, restores measured heig
     await act(async () => root.render(null));
     await act(async () => render());
     expect(container.querySelector('iframe')?.style.height).toBe('2400px');
+  } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
+});
+
+it('acknowledges explicit saves after persistence and drains writes before detaching the final automatic state', async () => {
+  vi.useFakeTimers();
+  const { document, window } = parseHTML('<html><body></body></html>');
+  vi.stubGlobal('document', document); vi.stubGlobal('window', window); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  vi.stubGlobal('sessionStorage', { getItem: () => null, setItem: vi.fn() });
+  vi.stubGlobal('getComputedStyle', () => ({ getPropertyValue: () => '', fontFamily: 'system-ui' }));
+  vi.stubGlobal('MutationObserver', class { observe() {} disconnect() {} });
+  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
+  vi.stubGlobal('cancelAnimationFrame', clearTimeout);
+  api.detach.mockClear(); api.state.mockReset();
+  api.attach.mockResolvedValueOnce({ viewRef: 'ui-view:durable', token: 'lease' });
+  api.observe.mockImplementationOnce((...args: unknown[]) => new Promise<void>(resolve => {
+    (args.at(-1) as AbortSignal).addEventListener('abort', () => resolve(), { once: true });
+  }));
+  const pending: { resolve(): void; reject(error: Error): void }[] = [];
+  api.state.mockImplementation(() => new Promise<void>((resolve, reject) => pending.push({ resolve, reject })));
+  const session = uiSession('durable-card', { runtime: 'agent', threadId: 'state-thread', branchId: 'branch' }, 0);
+  const container = document.createElement('div'); document.body.append(container); const root = createRoot(container);
+  const posted = vi.fn(), frameWindow = { postMessage: posted };
+  try {
+    await act(async () => root.render(<UiWorkView session={session} source={{ ref: 'ui:state@1' }} files={{ 'index.html': '<p>state</p>' }} entry="index.html" title="state" committed />));
+    const frame = container.querySelector('iframe')!; Object.defineProperty(frame, 'contentWindow', { value: frameWindow });
+    const channel = /data-channel="([^"]+)"/.exec(frame.getAttribute('srcDoc') ?? frame.getAttribute('srcdoc') ?? frame.srcdoc)![1];
+    const post = (data: object) => { const event = new window.Event('message'); Object.assign(event, { source: frameWindow, data: { channel, ...data } }); window.dispatchEvent(event); };
+    await act(async () => post({ type: 'ready' }));
+    const first = { data: { n: 1 }, controls: {}, scroll: { x: 0, y: 0 } };
+    const second = { ...first, data: { n: 2 } };
+    await act(async () => { post({ type: 'state', id: 'save:1', state: first }); post({ type: 'state', id: 'save:2', state: second }); });
+    expect(api.state).toHaveBeenCalledTimes(1);
+    expect(posted.mock.calls.some(([message]) => message.type === 'state-saved')).toBe(false);
+    await act(async () => pending[0]!.resolve());
+    expect(posted).toHaveBeenCalledWith({ channel, type: 'state-saved', id: 'save:1' }, '*');
+    expect(api.state).toHaveBeenCalledTimes(2);
+    const final = { ...first, data: { n: 3 } };
+    await act(async () => { post({ type: 'state', state: final }); root.render(null); });
+    expect(api.detach).not.toHaveBeenCalled();
+    await act(async () => pending[1]!.reject(new Error('disk unavailable')));
+    expect(posted).toHaveBeenCalledWith({ channel, type: 'state-save-error', id: 'save:2', error: 'disk unavailable' }, '*');
+    expect(api.detach).toHaveBeenCalledWith(session.identity, 'ui-view:durable', 'lease', final);
   } finally { act(() => root.unmount()); container.remove(); vi.unstubAllGlobals(); vi.useRealTimers(); }
 });

@@ -86,8 +86,23 @@ function frameRuntime() {
   };
   let saveFrame = 0;
   const save = () => { cancelAnimationFrame(saveFrame); saveFrame = requestAnimationFrame(() => send({ type: 'state', state: currentState() })); };
+  let saveSequence = 0;
+  const pendingSaves = new Map<string, { resolve(): void; reject(error: Error): void }>();
   Object.defineProperty(window, 'varinUI', { value: Object.freeze({ get state() { return state; },
-    saveState(value: unknown) { state = JSON.parse(JSON.stringify(value)); save(); },
+    saveState(value: unknown) {
+      state = JSON.parse(JSON.stringify(value));
+      cancelAnimationFrame(saveFrame);
+      const id = `save:${++saveSequence}`;
+      const saved = new Promise<void>((resolve, reject) => {
+        if (parent === window) { reject(new Error('This exported page has no state persistence host')); return; }
+        pendingSaves.set(id, { resolve, reject });
+        send({ type: 'state', id, state: currentState() });
+      });
+      // Existing pages may save without awaiting. Keep those calls usable while
+      // callers that await still receive the actual persistence failure.
+      void saved.catch(() => {});
+      return saved;
+    },
     setContext(value: unknown) { context = JSON.parse(JSON.stringify(value)); },
   }), configurable: false });
   const restore = () => {
@@ -172,6 +187,10 @@ function frameRuntime() {
     if (event.source !== parent || event.data?.channel !== channel) return;
     const message = event.data;
     if (message.type === 'update') updates = updates.then(() => update(message)).catch(error => { renderState = 'error'; send({ type: 'error', message: String(error) }); });
+    else if (message.type === 'state-saved' || message.type === 'state-save-error') {
+      const pending = pendingSaves.get(message.id); pendingSaves.delete(message.id);
+      if (message.type === 'state-saved') pending?.resolve(); else pending?.reject(new Error(message.error));
+    }
     else if (message.type === 'theme') { document.getElementById('theme')!.textContent = message.css; measure(); }
     else if (message.type === 'capture') {
       const value = observation();

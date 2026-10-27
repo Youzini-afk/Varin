@@ -61,6 +61,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
   const mobile = useUIStore(value => value.isMobile);
   const [height, setHeight] = React.useState(session.inlineSize?.height ?? 0), [error, setError] = React.useState('');
   const [connectionError, setConnectionError] = React.useState('');
+  const [persistenceError, setPersistenceError] = React.useState('');
   const [selectedText, setSelectedText] = React.useState<string>();
   const textObservation = React.useRef<UiObservation | undefined>(undefined);
   const [regionImage, setRegionImage] = React.useState<UiObservation>();
@@ -73,8 +74,22 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
   const registration = React.useRef<{ viewRef: string; token: string } | undefined>(undefined);
   const captures = React.useRef(new Map<string, { resolve(value: UiObservation): void; reject(reason: unknown): void }>());
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const saves = React.useRef(Promise.resolve());
   const isMounted = React.useRef(true);
   const send = React.useCallback((message: object) => iframe.current?.contentWindow?.postMessage({ channel, ...message }, '*'), [channel]);
+  const persistState = React.useCallback((value: UiViewState, owner = registration.current) => {
+    if (!owner) return Promise.reject(new Error(t('ui.content.notReady')));
+    const write = saves.current.then(() => api.state(session.identity, owner.viewRef, owner.token, value)).then(() => {
+      if (isMounted.current) setPersistenceError('');
+    }, failure => {
+      if (isMounted.current) setPersistenceError(failure instanceof Error ? failure.message : String(failure));
+      throw failure;
+    });
+    // Preserve message order even when an earlier save failed. A later state is
+    // a complete snapshot and can still be saved under its original view lease.
+    saves.current = write.catch(() => {});
+    return write;
+  }, [api, session, t]);
   const capture = React.useCallback(async (screen = false): Promise<UiObservation> => {
     if (!iframe.current || !ready) throw new Error(t('ui.content.notReady'));
     if (choosingRegion.current) {
@@ -136,9 +151,13 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       if (message.type === 'state') {
         state.current = message.state; session.state = message.state;
         clearTimeout(saveTimer.current);
-        saveTimer.current = setTimeout(() => { const owner = registration.current;
-          if (owner) void api.state(session.identity, owner.viewRef, owner.token, message.state).catch(() => {});
-        }, 250);
+        if (typeof message.id === 'string') {
+          const target = event.source as Window;
+          void persistState(message.state).then(
+            () => target.postMessage({ channel, type: 'state-saved', id: message.id }, '*'),
+            failure => target.postMessage({ channel, type: 'state-save-error', id: message.id,
+              error: failure instanceof Error ? failure.message : String(failure) }, '*'));
+        } else saveTimer.current = setTimeout(() => { void persistState(message.state).catch(() => {}); }, 250);
       }
       if (message.type === 'capture') {
         const pending = captures.current.get(message.id); captures.current.delete(message.id);
@@ -148,7 +167,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
     window.addEventListener('message', receive);
     return () => { isMounted.current = false; window.removeEventListener('message', receive); clearTimeout(saveTimer.current);
       for (const pending of pendingCaptures.values()) pending.reject(new Error('页面已关闭')); pendingCaptures.clear(); };
-  }, [channel, api, session, panel, t]);
+  }, [channel, persistState, session, panel, t]);
   React.useEffect(() => {
     if (!ready || !visible) return;
     // Show HTML immediately while restoring view state. A failed observation connection
@@ -187,11 +206,11 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       if (abort.signal.aborted) return;
       registration.current = owner; session.viewRef = owner.viewRef;
       sessionStorage.setItem(`varin.ui-view:${session.key}`, owner.viewRef);
-      if (!state.current && 'state' in owner && owner.state) state.current = owner.state as UiViewState;
+      if (!state.current && 'state' in owner && owner.state) state.current = session.state = owner.state as UiViewState;
       setViewInitialized(true);
       setConnectionError('');
       const selected = owner;
-      if (state.current) await api.state(session.identity, selected.viewRef, selected.token, state.current);
+      if (state.current) await persistState(state.current, selected);
       await api.observe(session.identity, selected.viewRef, selected.token, request => {
         void capture(request.view === 'screen').then(observation => api.reply(session.identity, selected.viewRef, selected.token, request.id, observation),
           failure => api.reply(session.identity, selected.viewRef, selected.token, request.id, undefined, failure instanceof Error ? failure.message : String(failure))).catch(() => {});
@@ -207,8 +226,16 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
         });
       }
     })();
-    return () => { abort.abort(); registration.current = undefined; if (owner) void api.detach(session.identity, owner.viewRef, owner.token, state.current).catch(() => {}); };
-  }, [ready, source.ref, source.preview?.callId, api, session, capture, visible]);
+    return () => {
+      abort.abort(); registration.current = undefined; clearTimeout(saveTimer.current);
+      if (owner) {
+        const selected = owner, finalState = state.current;
+        // Detach carries the final automatic snapshot, after preceding explicit
+        // writes have actually completed, so an older response cannot win last.
+        saves.current = saves.current.then(() => api.detach(session.identity, selected.viewRef, selected.token, finalState)).then(() => {}, () => {});
+      }
+    };
+  }, [ready, source.ref, source.preview?.callId, api, session, capture, visible, persistState]);
   const citeText = async () => {
     if (!selectedText) return;
     try { addReference(session, await api.select(session.identity, textObservation.current ?? await capture(), { text: selectedText })); setSelectedText(undefined); }
@@ -297,7 +324,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
           </div>
         </div>}
       </div>
-      {(error || connectionError || committed && !Object.hasOwn(files, entry)) && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{error || connectionError || t('ui.content.missingEntry', { file: entry })}</p>}
+      {(error || connectionError || persistenceError || committed && !Object.hasOwn(files, entry)) && <p role="status" className="px-3 py-1 text-xs text-muted-foreground">{error || connectionError || persistenceError || t('ui.content.missingEntry', { file: entry })}</p>}
       {!panel && status && <p role="status" className="py-1 text-xs text-muted-foreground">{status}</p>}
     </> : <button className="w-full px-3 py-6 text-sm text-muted-foreground" onClick={returnInline}>{t('ui.content.expanded')}</button>}
     {fullView && <Dialog open onOpenChange={open => { if (!open) returnInline(); }}><DialogContent className="h-[94dvh] w-[96vw] max-w-none p-2">

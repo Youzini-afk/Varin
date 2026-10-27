@@ -12,7 +12,8 @@ const buildVersion = (JSON.parse(await readFile(path.join(repository, 'package.j
 
 it('reads a connected view live and reports a missing or disconnected view with its next readable references', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'varin-ui-runtime-'));
-  const client = createKernelClient({ hostId: 'ui-runtime', storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false });
+  const options = { hostId: 'ui-runtime', storageRoot: root, kernelPath, buildVersion, allowCargoDevRunner: false };
+  let client = createKernelClient(options);
   try {
     await client.start();
     const ui = createInteractiveUiRuntime({ kernel: client, runtime: {} as never, media: {} as never });
@@ -48,6 +49,19 @@ it('reads a connected view live and reports a missing or disconnected view with 
     expect(await ui.read(family, { kind: 'ui', ref: viewRef, view: 'state' }, signal)).toMatchObject({
       status: 'unavailable', code: 'ui_view_disconnected', source: saved.ref, savedStateAvailable: true,
       next: [{ kind: 'ui', ref: saved.ref, view: 'summary' }, { kind: 'ui', ref: saved.ref, view: 'source' }] });
+
+    // An acknowledged explicit save survives immediate owner shutdown and a
+    // fresh view attachment, without depending on detach or a live iframe.
+    const connected = await ui.attach(family, { ref: saved.ref }, viewRef, 'client-a');
+    const state = { data: { count: 7 }, controls: { '#n': '7' }, scroll: { x: 0, y: 42 } };
+    expect(await ui.state(family, viewRef, connected.token, state)).toEqual({ saved: true });
+    ui.close(); await client.close(); client = createKernelClient(options); await client.start();
+    const reopened = createInteractiveUiRuntime({ kernel: client, runtime: {} as never, media: {} as never });
+    const restored = await reopened.attach(family, { ref: saved.ref }, viewRef, 'client-a');
+    expect(restored.state).toEqual(state);
+    expect(restored.token).not.toBe(connected.token);
+    await expect(reopened.state(family, viewRef, connected.token, { ...state, data: 'old client' })).rejects.toMatchObject({ status: 409 });
+    reopened.close();
   } finally {
     await client.close();
     await rm(root, { recursive: true, force: true });
