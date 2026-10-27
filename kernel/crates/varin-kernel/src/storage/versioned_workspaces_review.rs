@@ -44,6 +44,24 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
     let mut bytes = [0; 6];
     parent.read(&alias, 0, &mut bytes).unwrap();
     assert_eq!(&bytes, b"before");
+    assert!(matches!(parent.checkpoint_native("left", &[alias.clone()], &[]),
+        Err(KernelError::Execution(error)) if error.code=="workspace_snapshot_writers_active"),
+        "an outside writable name still fences its hard link inside the selected subtree");
+    let unrelated = parent.create_file("right/unrelated", 0o644).unwrap();
+    parent.write(&unrelated, None, b"outside scope").unwrap();
+    let scoped_boundary = parent.checkpoint_native("left", &[unrelated.clone()], &[]).unwrap();
+    let scoped_grant = port.call(|s| {
+        let root = s.root.to_string_lossy().into_owned();
+        s.issue_grant(&json!({"grantId":"left-only","hostGeneration":"generation","owningWorkspace":"project",
+            "executionWorkspace":"project","capabilities":["storage.read","storage.write"],"pathScopes":["left"]}),
+            "host", "generation", &root, "epoch")?;
+        s.load_grant("left-only")
+    }).unwrap();
+    assert!(scoped_boundary.fork_for("wrong-scope", "wrong-scope", "right", grant.clone(),
+        Arc::new(AtomicBool::new(false))).is_err());
+    scoped_boundary.fork_for("local-only", "local-only", "left", scoped_grant,
+        Arc::new(AtomicBool::new(false))).unwrap();
+    scoped_boundary.release().unwrap();
     let boundary = parent.checkpoint().unwrap();
     parent.write(&alias, Some(0), b"parent").unwrap();
     parent
@@ -62,7 +80,43 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
             &AtomicBool::new(false),
         )
         .unwrap();
+    let scoped = boundary.fork_for(
+        "scoped-child", "scoped-child-fork", "left", grant.clone(),
+        Arc::new(AtomicBool::new(false)),
+    ).unwrap();
+    assert_eq!(scoped["filesystem"]["sourcePath"], "left");
+    assert_eq!(boundary.fork_for(
+        "scoped-child", "scoped-child-fork", "left", grant.clone(),
+        Arc::new(AtomicBool::new(false)),
+    ).unwrap(), scoped);
+    assert!(boundary.fork_for(
+        "scoped-child", "scoped-child-fork", "right", grant.clone(),
+        Arc::new(AtomicBool::new(false)),
+    ).is_err(), "an operation cannot be replayed for another subtree");
     boundary.release().unwrap();
+    let scoped_session = Session::open(port.clone(), "scoped-child".into(), grant.clone()).unwrap();
+    let scoped_file = scoped_session.lookup("file").unwrap();
+    assert_eq!(scoped_file.attributes().unwrap().file_id, file.attributes().unwrap().file_id);
+    assert_eq!(scoped_file.link_count().unwrap(), 1, "a name outside the selected root is not a child link");
+    assert!(scoped_session.lookup("right/alias").is_err());
+    scoped_session.read(&scoped_file, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"before");
+    let scoped_alias = scoped_session.link(&scoped_file, "second").unwrap();
+    assert!(Arc::ptr_eq(&scoped_file, &scoped_alias));
+    assert_eq!(scoped_file.link_count().unwrap(), 2);
+    scoped_session.write(&scoped_alias, Some(0), b"scoped").unwrap();
+    scoped_session.flush(&scoped_file).unwrap();
+    scoped_session.remove("file", false).unwrap();
+    assert_eq!(scoped_alias.link_count().unwrap(), 1);
+    scoped_session.close().unwrap();
+    drop((scoped_file, scoped_alias, scoped_session));
+    let scoped_session = Session::open(port.clone(), "scoped-child".into(), grant.clone()).unwrap();
+    let scoped_alias = scoped_session.lookup("second").unwrap();
+    assert_eq!(scoped_alias.link_count().unwrap(), 1);
+    scoped_session.read(&scoped_alias, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"scoped");
+    scoped_session.close().unwrap();
+    drop((scoped_alias, scoped_session));
     let child = Session::open(port.clone(), "hardlink-child".into(), grant.clone()).unwrap();
     let child_file = child.lookup("left/file").unwrap();
     let child_alias = child.lookup("right/alias").unwrap();
@@ -76,7 +130,7 @@ fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_mov
     assert_eq!(&bytes, b"parent");
     child.close().unwrap();
     parent.close().unwrap();
-    drop((file, alias, child_file, child_alias, child, parent));
+    drop((file, alias, unrelated, child_file, child_alias, child, parent));
     let reopened = Session::open(port.clone(), "hardlinks".into(), grant).unwrap();
     let first = reopened.lookup("moved/alias").unwrap();
     let second = reopened.lookup("left/file").unwrap();

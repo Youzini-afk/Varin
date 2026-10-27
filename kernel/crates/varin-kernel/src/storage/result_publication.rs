@@ -386,28 +386,14 @@ pub(crate) struct PreparedWorkingResult {
 }
 impl ResultPublicationTask {
     pub(crate) fn run(&self) -> Result<PreparedWorkingResult, KernelError> {
-        let base = super::state_tree::read_immutable_tree_entries(
-            &self.database,
-            &self.branch.base_root,
-            &self.cancellation,
-        )?
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
-        let current = super::state_tree::read_immutable_tree_entries(
-            &self.database,
-            &self.branch.head_root,
-            &self.cancellation,
-        )?
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
-        let paths = base
-            .keys()
-            .chain(current.keys())
-            .cloned()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .filter(|path| base.get(path) != current.get(path))
-            .collect::<Vec<_>>();
+        let difference = super::tree_diff::compare(&self.database, &self.branch.base_root,
+            &self.branch.head_root, &self.cancellation)?;
+        let paths = difference.paths.keys().cloned().collect::<Vec<_>>();
+        let (mut base, mut current) = (BTreeMap::new(), BTreeMap::new());
+        for (path, (before, after)) in difference.paths {
+            if let Some(before) = before { base.insert(path.clone(), before); }
+            if let Some(after) = after { current.insert(path, after); }
+        }
         let connection = Connection::open_with_flags(
             &self.database,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
@@ -446,6 +432,9 @@ impl ResultPublicationTask {
         let mut insertions = 0usize;
         let mut deletions = 0usize;
         for path in &paths {
+            if base.get(path).and_then(PathState::object_hash) == current.get(path).and_then(PathState::object_hash) {
+                continue;
+            }
             let read = |state: Option<&PathState>| -> Result<Option<String>, KernelError> {
                 let Some(PathState::RegularFile {
                     object_hash,

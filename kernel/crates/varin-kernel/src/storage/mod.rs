@@ -71,6 +71,7 @@ mod recovery_journal;
 pub(crate) mod recovery_points;
 pub(crate) mod result_publication;
 mod state_tree;
+mod tree_diff;
 mod source_authorities;
 mod source_mcp_deliveries;
 pub(crate) mod source_mcp_children;

@@ -62,7 +62,7 @@ impl BlobReadTask {
         match self { Self::Immutable(task) => &task.params, Self::File(task) => &task.params }
     }
     pub(crate) fn method(&self) -> &'static str {
-        match self { Self::Immutable(_) => "storage.getBlob", Self::File(_) => "file.read" }
+        match self { Self::Immutable(_) => "storage.getBlob", Self::File(task) => task.method() }
     }
     pub(crate) fn cancellation(&self) -> Arc<AtomicBool> {
         match self { Self::Immutable(task) => task.cancellation.clone(), Self::File(task) => task.cancellation.clone() }

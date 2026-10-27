@@ -232,14 +232,11 @@ impl Storage {
                 }
             }
             let params = json!({"rootId":root_id,"path":resource.path,"offset":0,"leaseId":lease_id});
-            let (expected, observed) = match self.prepare_file_mutation_read(&params, grant)? {
-                Some(task) => {
-                    let prepared = task.run()?;
-                    let state = prepared.state.clone();
-                    (state, Some(self.finish_file_read(&task, Ok(prepared), grant)?))
-                },
-                None => (self.capture_file_state(&resource)?, None),
-            };
+            let task = self.prepare_file_mutation_read(&params, grant)?;
+            let prepared = task.run()?;
+            let expected = prepared.state.clone();
+            let value = self.finish_file_read(&task, Ok(prepared), grant)?;
+            let observed = matches!(expected, FileState::RegularFile { .. }).then_some(value);
             let current_version = read_version(root_id, &resource.path, &expected)?;
             if let TextMutation::Write(args) = mutation {
                 let missing = matches!(expected, FileState::Missing);

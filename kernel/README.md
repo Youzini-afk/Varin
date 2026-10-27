@@ -146,7 +146,11 @@ Hard-link names share a live inode and durable metadata within a workspace; fork
 byte generations. Directory moves update stable parent identities instead of rewriting every link.
 The FUSE adapter implements link. WinFsp's native protocol has no hard-link operation, and its runtime
 capability reports that limitation. Writable native references (including possible mappings) prevent
-an unfenceable snapshot; cached I/O and mmap remain enabled.
+an unfenceable snapshot within the selected scope; cached I/O and mmap remain enabled.
+`workspace.fork` accepts `sourcePath`. It selects a persistent subtree without enumerating its files,
+seals only its dirty content, preserves directory origins and filters external hard-link names.
+Native writable references are checked against actual inode names under the same namespace lock as
+the checkpoint, so unrelated writers do not block it and an outside alias cannot evade the fence.
 
 `workspace_resources.rs` connects these sessions to real Kernel requests and the Host scoped client.
 The project filesystem owner and Run/Operation leases have separate lifetimes. Native callbacks return
@@ -157,6 +161,8 @@ references close. Its original response remains pending during this drainage. Cl
 trigger retries and a wake arriving before the cleanup continuation is retained, without polling.
 `workspace.result.prepare` captures only dirty native ranges into the existing WorkingResult pipeline.
 Publication appends its selected immutable revision while preserving subsequent writes to the live head.
+Its worker compares persistent trees and skips equal path/index subtrees instead of listing both entire
+namespaces. Equal content hashes also avoid redundant reads for text line statistics.
 Filesystem metadata has independent candidate/result retention; releasing a result or its branch releases
 the corresponding metadata record and pins for both the selected attributes and their baseline. Empty
 native objects reuse their known content identity without writing/fsyncing an empty staging per inode.

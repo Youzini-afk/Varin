@@ -2237,6 +2237,7 @@ pub(crate) struct KernelWorkspaceForkParams {
     pub(crate) generation: String,
     pub(crate) target_branch_id: String,
     pub(crate) operation_id: String,
+    pub(crate) source_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

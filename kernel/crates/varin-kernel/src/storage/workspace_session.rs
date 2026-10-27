@@ -147,6 +147,7 @@ pub(crate) struct Session {
 /// Parent writes continue while a worker hashes/installs these individual files.
 pub(crate) struct Checkpoint {
     session_id: Uuid,
+    selected_scope: String,
     port: StoragePort,
     source_branch: String,
     workspace: String,
@@ -330,9 +331,11 @@ impl Session {
         &self,
         operation: &str,
         target: &str,
+        selected: &str,
         requester: Grant,
     ) -> Result<Option<Value>, KernelError> {
-        self.admit(&requester, "", true)?;
+        let selected = path(selected)?;
+        self.admit(&requester, &selected, true)?;
         let (operation, target, branch, session, grant) = (
             operation.to_owned(),
             target.to_owned(),
@@ -341,7 +344,9 @@ impl Session {
             self.grant.clone(),
         );
         self.port.call(move |storage| {
-            storage.replay_workspace_fork(&operation, &branch, &target, session, &grant, &requester)
+            storage.replay_workspace_fork(
+                &operation, &branch, &target, &selected, session, &grant, &requester,
+            )
         })
     }
     pub(crate) fn replayed_result(
@@ -512,7 +517,7 @@ impl Session {
     /// Caller holds a shared namespace boundary. Metadata lookup/stat never
     /// opens a body: only an actual native open or byte operation retains it.
     fn content_locked(&self, node: &Node) -> Result<Arc<PrivateFile>, KernelError> {
-        if lock(&node.state)?.observed["state"]["kind"]!="regular-file" {
+        if lock(&node.state)?.observed["state"]["kind"] != "regular-file" {
             return Err(failure(
                 "namespace_not_file",
                 "Native byte I/O requires a regular file",
@@ -1541,15 +1546,42 @@ impl Session {
     /// This boundary covers writes already delivered by a native backend. Its
     /// caller must first complete that backend's cache/mmap flush fence.
     pub(crate) fn checkpoint(&self) -> Result<Checkpoint, KernelError> {
+        self.checkpoint_native("", &[], &[])
+    }
+    /// The backend seals new native opens while this method checks original
+    /// writable references and captures the selected namespace under one lock.
+    /// A rename cannot move an unfenced writer into scope between these steps.
+    pub(crate) fn checkpoint_native(
+        &self,
+        selected: &str,
+        writers: &[Arc<Node>],
+        unsettled: &[Arc<Node>],
+    ) -> Result<Checkpoint, KernelError> {
+        let selected = path(selected)?;
         let _boundary = self
             .boundary
             .write()
             .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
         self.active()?;
         let namespace = lock(&self.namespace)?;
+        for (nodes, code, message) in [
+            (writers, "workspace_snapshot_writers_active", "An active writable native file reference in the selected scope may retain mapped writes"),
+            (unsettled, "workspace_snapshot_cleanup_pending", "Native file cleanup in the selected scope has not completed"),
+        ] {
+            for node in nodes {
+                self.owns(node)?;
+                if self.node_in_scope(node, &selected, true)? {
+                    return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(code, message)
+                        .with_details(json!({"sourcePath":selected,"path":node.path()?,"parentAvailable":true}))));
+                }
+            }
+        }
         let mut files = Vec::new();
         let mut metadata = Vec::new();
         for node in namespace.dirty.values() {
+            if !self.node_in_scope(node, &selected, false)? {
+                continue;
+            }
             let state = lock(&node.state)?;
             if let Some(path) = &state.path {
                 if state.metadata_generation != state.clean_metadata_generation {
@@ -1611,6 +1643,7 @@ impl Session {
         })?;
         Ok(Checkpoint {
             session_id: self.id,
+            selected_scope: selected,
             port: self.port.clone(),
             source_branch: self.branch.clone(),
             workspace: self.workspace.clone(),
@@ -1625,6 +1658,49 @@ impl Session {
             files,
             released: false,
         })
+    }
+    /// Caller owns the session boundary. Names are read from the same immutable
+    /// metadata graph, including hard-link aliases never opened in this process.
+    fn node_in_scope(
+        &self,
+        node: &Node,
+        selected: &str,
+        ancestors: bool,
+    ) -> Result<bool, KernelError> {
+        let state = lock(&node.state)?;
+        let Some(path) = state.path.clone() else {
+            return Ok(false);
+        };
+        if selected.is_empty() {
+            return Ok(true);
+        }
+        let directory = state.observed["state"]["kind"] == "directory";
+        let regular = state.observed["state"]["kind"] == "regular-file";
+        let id = state.metadata.binding.file_id;
+        drop(state);
+        let contains = |path: &str| {
+            path == selected
+                || path
+                    .strip_prefix(selected)
+                    .is_some_and(|tail| tail.starts_with('/'))
+                || (ancestors
+                    && directory
+                    && (path.is_empty()
+                        || selected
+                            .strip_prefix(path)
+                            .is_some_and(|tail| tail.starts_with('/'))))
+        };
+        if contains(&path) {
+            return Ok(true);
+        }
+        if !regular {
+            return Ok(false);
+        }
+        let (branch, grant) = (self.branch.clone(), self.grant.clone());
+        let paths = self
+            .port
+            .call(move |s| s.workspace_file_links(&branch, id, Some(&path), &grant))?;
+        Ok(paths.iter().any(|path| contains(path)))
     }
     /// Discard only this operation's unpublished import, never a public workspace.
     pub(crate) fn discard_adoption(&self) -> Result<(), KernelError> {
@@ -1716,15 +1792,29 @@ impl Checkpoint {
     fn install_files(
         &self,
         cancelled: &AtomicBool,
+        selected: &str,
     ) -> Result<Vec<(Vec<String>, u32, super::workspace_files::InstalledFile)>, KernelError> {
         let mut installed = Vec::new();
         for (paths, mode, snapshot) in &self.files {
+            let paths: Vec<_> = paths
+                .iter()
+                .filter(|path| {
+                    selected.is_empty()
+                        || path
+                            .strip_prefix(selected)
+                            .is_some_and(|tail| tail.starts_with('/'))
+                })
+                .cloned()
+                .collect();
+            if paths.is_empty() {
+                continue;
+            }
             let sealed = snapshot.seal(&self.root.join("staging"), cancelled)?;
             let (retention, sealed) = self
                 .port
                 .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
             installed.push((
-                paths.clone(),
+                paths,
                 *mode,
                 sealed.install(&self.root, retention, cancelled)?,
             ));
@@ -1739,7 +1829,13 @@ impl Checkpoint {
         grant: Grant,
         cancelled: Arc<AtomicBool>,
     ) -> Result<Value, KernelError> {
-        let files = self.install_files(cancelled.as_ref())?;
+        if !self.selected_scope.is_empty() {
+            return Err(failure(
+                "workspace_checkpoint_scope",
+                "A subtree boundary cannot publish a whole-workspace result",
+            ));
+        }
+        let files = self.install_files(cancelled.as_ref(), "")?;
         if cancelled.load(Ordering::Acquire) {
             return Err(KernelError::Cancelled);
         }
@@ -1784,18 +1880,20 @@ impl Checkpoint {
         operation: &str,
         cancelled: &AtomicBool,
     ) -> Result<Value, KernelError> {
-        self.fork_inner(target, operation, cancelled, self.grant.clone(), None)
+        self.fork_inner(target, operation, "", cancelled, self.grant.clone(), None)
     }
     pub(crate) fn fork_for(
         &self,
         target: &str,
         operation: &str,
+        selected: &str,
         requester: Grant,
         cancelled: Arc<AtomicBool>,
     ) -> Result<Value, KernelError> {
         self.fork_inner(
             target,
             operation,
+            selected,
             cancelled.as_ref(),
             requester,
             Some(cancelled.clone()),
@@ -1805,10 +1903,24 @@ impl Checkpoint {
         &self,
         target: &str,
         operation: &str,
+        selected: &str,
         cancelled: &AtomicBool,
         requester: Grant,
         late_cancel: Option<Arc<AtomicBool>>,
     ) -> Result<Value, KernelError> {
+        let selected = path(selected)?;
+        if !self.selected_scope.is_empty()
+            && selected != self.selected_scope
+            && !selected
+                .strip_prefix(&self.selected_scope)
+                .is_some_and(|tail| tail.starts_with('/'))
+        {
+            return Err(failure(
+                "workspace_checkpoint_scope",
+                "Fork sourcePath is outside its original checkpoint scope",
+            ));
+        }
+        let selected_replay = selected.clone();
         let (operation_key, source, target_key, session_id, grant) = (
             operation.to_owned(),
             self.source_branch.clone(),
@@ -1822,6 +1934,7 @@ impl Checkpoint {
                 &operation_key,
                 &source,
                 &target_key,
+                &selected_replay,
                 session_id,
                 &grant,
                 &original_requester,
@@ -1829,7 +1942,7 @@ impl Checkpoint {
         })? {
             return Ok(result);
         }
-        let installed = self.install_files(cancelled)?;
+        let installed = self.install_files(cancelled, &selected)?;
         let (source, pin, workspace, actor, target, operation) = (
             self.source_branch.clone(),
             self.pin.clone(),
@@ -1850,7 +1963,7 @@ impl Checkpoint {
                 return Err(KernelError::Cancelled);
             }
             if let Some(result) = s.replay_workspace_fork(
-                &operation, &source, &target, session_id, &actor, &requester,
+                &operation, &source, &target, &selected, session_id, &actor, &requester,
             )? {
                 return Ok(result);
             }
@@ -1860,6 +1973,7 @@ impl Checkpoint {
                 &workspace,
                 &target,
                 &operation,
+                &selected,
                 &installed,
                 &actor,
                 &metadata_head,
@@ -1949,6 +2063,7 @@ impl Storage {
         operation: &str,
         source: &str,
         target: &str,
+        selected: &str,
         session: Uuid,
         owner: &Grant,
         requester: &Grant,
@@ -1965,7 +2080,15 @@ impl Storage {
         if requested.state != crate::model::GrantState::Active
             || requested.kernel_epoch != requester.kernel_epoch
             || requested.owning_workspace != current.owning_workspace
-            || !path_allowed(&requested, "")
+            || requested
+                .execution_workspace
+                .as_ref()
+                .or(requested.owning_workspace.as_ref())
+                != current
+                    .execution_workspace
+                    .as_ref()
+                    .or(current.owning_workspace.as_ref())
+            || !path_allowed(&requested, selected)
         {
             return Err(KernelError::Authorization(
                 "Fork execution no longer owns its original workspace scope".into(),
@@ -1980,6 +2103,7 @@ impl Storage {
         if prior["kind"] != "workspace.checkpoint.fork"
             || origin["sourceBranchId"] != source
             || origin["targetBranchId"] != target
+            || origin["sourcePath"] != selected
             || origin["sessionId"] != session.to_string()
             || origin["ownerGrantId"] != owner.grant_id
             || origin["requestGrantId"] != requester.grant_id
@@ -2140,6 +2264,27 @@ impl Storage {
             return Err(KernelError::Authorization(
                 "workspace session path is outside its original source".into(),
             ));
+        }
+        if let Some(session) = self
+            .workspace_sessions
+            .get(branch)
+            .and_then(std::sync::Weak::upgrade)
+        {
+            if session.active().is_ok()
+                && grant
+                    .execution_workspace
+                    .as_ref()
+                    .or(grant.owning_workspace.as_ref())
+                    != session
+                        .grant
+                        .execution_workspace
+                        .as_ref()
+                        .or(session.grant.owning_workspace.as_ref())
+            {
+                return Err(KernelError::Authorization(
+                    "Workspace execution authority belongs to another original source".into(),
+                ));
+            }
         }
         require_capability(
             &grant,

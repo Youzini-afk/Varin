@@ -3853,6 +3853,7 @@ export interface KernelWorkspaceForkParams {
   generation: string;
   targetBranchId: string;
   operationId: string;
+  sourcePath?: string;
 }
 
 export interface KernelWorkspaceResultPrepareParams {

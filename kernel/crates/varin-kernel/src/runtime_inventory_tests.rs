@@ -112,6 +112,9 @@ impl Fixture {
     }
     fn blob(&mut self, params: Value, grant: &str) -> Result<Value, KernelError> {
         self.begin("storage.getBlob", params, grant);
+        self.finish_read()
+    }
+    fn finish_read(&mut self) -> Result<Value, KernelError> {
         match self
             .rx
             .recv_timeout(WAIT)
@@ -191,6 +194,75 @@ impl Fixture {
             resume: Some(resume),
         }
     }
+}
+
+#[test]
+fn file_reader_keeps_all_filesystem_access_on_worker_and_rechecks_original_grant() {
+    use crate::storage::blob_reads::BlobReadPhase;
+    let mut f = Fixture::new();
+    fs::write(f.work().join("file"), b"worker bytes").unwrap();
+    let moved = f.directory.0.join("temporarily-away");
+    fs::rename(f.work(), &moved).unwrap();
+    let (entered, admission) = mpsc::channel();
+    let (resume, resumed) = mpsc::channel();
+    f.kernel.blob_read_hold = Some((BlobReadPhase::Verify, Box::new(move || {
+        entered.send(()).unwrap();
+        resumed.recv_timeout(WAIT).unwrap();
+    })));
+    // A missing root would fail a synchronous canonicalize/open. Admission is
+    // strictly against Storage records while the worker owns filesystem work.
+    f.begin("file.read", f.params("file"), "reader");
+    admission.recv_timeout(WAIT).unwrap();
+    f.short("storage.health", json!({}), Some("reader"));
+    fs::rename(&moved, f.work()).unwrap();
+    resume.send(()).unwrap();
+    assert_eq!(f.finish_read().unwrap()["content"]["text"], "worker bytes");
+    f.short("file.lease.acquire", json!({"workspaceId":"workspace","rootId":f.root_id,"leaseId":"busy-file",
+        "resources":[{"path":"file","scope":"exact"}]}), Some("writer"));
+    let storage = f.kernel.storage.as_mut().unwrap();
+    let (reader, _) = storage.authorize(Some("reader"), EPOCH, HOST, GENERATION, "file.read",
+        &json!({"workspaceId":"workspace","rootId":f.root_id,"path":"file"})).unwrap();
+    let key = storage.prepare_file_read(&json!({"rootId":f.root_id,"path":"file"}), &reader,
+        Arc::new(AtomicBool::new(false))).unwrap().identity_only();
+    let prepared = key.run().unwrap();
+    assert!(storage.finish_file_read(&key, Ok(prepared), &reader).unwrap()["resourceKey"].is_string(),
+        "canonical scheduling identity remains available while another operation holds the file lease");
+    f.short("file.lease.release", json!({"workspaceId":"workspace","rootId":f.root_id,"leaseId":"busy-file"}), Some("writer"));
+    f.begin("file.read", f.params("file"), "reader");
+    let completion = f.rx.recv_timeout(WAIT).unwrap();
+    f.short("authority.grant.revoke", json!({"grantId":"reader"}), None);
+    let WorkerRequest::BlobReadDone { reply:BlobReadReply::Wire(request), task, result } = completion else { panic!("wrong read continuation"); };
+    assert!(result.is_ok(), "the read itself completed before revocation");
+    assert!(f.kernel.complete_blob_read(&request, &task, result, &f.revoked).is_err());
+}
+
+#[test]
+fn file_reader_worker_preserves_missing_directory_binary_and_unicode_ranges() {
+    let mut f = Fixture::new();
+    fs::create_dir(f.work().join("dir")).unwrap();
+    fs::write(f.work().join("binary"), b"ab\0defghij").unwrap();
+    fs::write(f.work().join("unicode"), "a中文🙂z").unwrap();
+    for (path, offset, length, expected) in [
+        ("missing", 0, 0, json!(true)),
+        ("dir", 0, 0, json!("directory")),
+        ("binary", 2, 4, json!("AGRlZg==")),
+        ("unicode", 2, 3, json!("中文")),
+    ] {
+        f.begin("file.read", json!({"workspaceId":"workspace","rootId":f.root_id,"path":path,"offset":offset,"length":length}), "reader");
+        let value = f.finish_read().unwrap();
+        match path {
+            "missing" => { assert_eq!(value["missing"], expected); assert!(value["readVersion"].is_string()); }
+            "dir" => assert_eq!(value["state"]["kind"], expected),
+            "binary" => { assert_eq!(value["content"]["bytesBase64"], expected); assert_eq!(value["content"]["offset"], 2); assert_eq!(value["content"]["nextOffset"], 6); }
+            _ => assert_eq!(value["content"]["text"], expected),
+        }
+    }
+    f.begin("file.read.check", f.params("unicode"), "reader");
+    let identity = f.finish_read().unwrap();
+    assert!(identity["resourceKey"].is_string());
+    assert!(identity.get("content").is_none());
+    f.begin("file.read.check", f.params("dir"), "reader");
+    assert!(f.finish_read().is_err(), "retrieval admission still requires an actual regular file");
 }
 fn active(request: &Value, token: Arc<AtomicBool>) -> ActiveRequest {
     ActiveRequest {

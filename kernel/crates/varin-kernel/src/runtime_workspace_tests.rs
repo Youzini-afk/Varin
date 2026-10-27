@@ -386,6 +386,17 @@ fn native_workspace_runtime_preserves_execution_leases_fork_receipts_and_shutdow
         "an execution lease cannot become the persistent project owner"
     );
     let address = json!({"branchId":"parent","generation":opened["binding"]["generation"]});
+    fixture.short("authority.grant.issue",json!({"grantId":"other-source","hostGeneration":GENERATION,
+        "capabilities":["storage.read","storage.write"],"pathScopes":[""],"storageIdentity":fixture.kernel.storage.as_ref().unwrap().root(),
+        "owningWorkspace":"workspace","executionWorkspace":"another-source","threadId":"thread-b","runId":"run-b"}),None);
+    let mut foreign = address.clone();
+    foreign["leaseId"] = json!("foreign-holder");
+    assert!(
+        fixture
+            .workspace("workspace.acquire", foreign, "other-source")
+            .is_err(),
+        "a matching project identity cannot substitute for the original execution source"
+    );
     let mut lease = address.clone();
     lease["leaseId"] = json!("run-holder");
     fixture

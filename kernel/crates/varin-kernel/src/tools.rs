@@ -2907,8 +2907,14 @@ pub(crate) fn prepare_resource(
             validate_binding(&grant,&request.binding,&request.context).map_err(|error|ResourceFailure{error,dispatched:false})?;
             return Ok(ResourceWork::Ready(json!({"resourceKey":fixed_read_key(&request.binding,&args.path)})));
         }
-        return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
-            .map(ResourceWork::Ready);
+        let (method, params) = request.operation.params(&request.binding, &request.context);
+        let (grant, authorized) = storage.authorize(Some(&request.binding.grant_id), epoch, host_id,
+            host_generation, method, &params).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        validate_binding(&grant, &request.binding, &request.context).map_err(|error|ResourceFailure{error,dispatched:false})?;
+        let task = storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())
+            .map_err(|error|ResourceFailure{error,dispatched:false})?
+            .identity_only().with_live_root(request.binding.live_root.clone());
+        return Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task)));
     }
     let mut dispatched = false;
     let result = (|| -> Result<ResourceWork, KernelError> {
@@ -2927,17 +2933,10 @@ pub(crate) fn prepare_resource(
         validate_binding(&grant, &request.binding, &request.context)?;
         dispatched = true;
         if request.binding.source_mode != SourceMode::FixedBranch {
-            if let Some(root) = &request.binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
-            let key = storage.file_resource_key(request.binding.root_id.as_deref().expect("physical root"), &args.path, &grant)?;
-            if request.expected_resource_key.as_deref() != Some(key.as_str()) {
-                return Err(KernelError::Authorization("canonical file resource changed after admission".into()));
-            }
-            return match storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())? {
-                Some(task) => Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task))),
-                None => storage.file_read(&authorized, &grant, true).map(|mut value| {
-                    value["source"] = request.binding.physical_source(); ResourceWork::Ready(value)
-                }),
-            };
+            let expected = request.expected_resource_key.clone().ok_or_else(|| KernelError::Authorization("File read has no original canonical resource admission".into()))?;
+            let task = storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())?
+                .with_expected_key(expected).with_live_root(request.binding.live_root.clone());
+            return Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task)));
         }
         if request.expected_resource_key.as_deref().is_some_and(|key|key!=fixed_read_key(&request.binding,&args.path)) {
             return Err(KernelError::Authorization("Fixed file source changed after admission".into()));
@@ -3016,17 +3015,8 @@ pub(crate) fn finish_resource_blob_read(
         let effective = storage.deferred_source_binding(&request.binding, &grant)?
             .or(storage.execution_tool_binding(&request.binding, &grant)?);
         let binding = effective.as_ref().unwrap_or(&request.binding);
-        if task.method() == "file.read" {
-            if let Some(root) = &binding.live_root { storage.validate_live_root(root, &grant, host_id)?; }
-            if let ResourceOperation::FileRead(args) = &request.operation {
-                let key = storage.file_resource_key(binding.root_id.as_deref().ok_or_else(||KernelError::Authorization("Execution view disappeared during read".into()))?, &args.path, &grant)?;
-                if request.expected_resource_key.as_deref() != Some(key.as_str()) {
-                    return Err(KernelError::Authorization("canonical file resource changed during read".into()));
-                }
-            }
-        }
         storage.finish_blob_read(task, result, &grant).map(|mut value| {
-            if task.method() == "file.read" { value["source"] = binding.physical_source(); }
+            if task.method() == "file.read" && !request.authorize_only { value["source"] = binding.physical_source(); }
             value
         })
     })()

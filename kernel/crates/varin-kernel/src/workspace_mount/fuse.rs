@@ -964,6 +964,12 @@ impl Mount {
     pub(crate) fn checkpoint(
         &self,
     ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
+        self.checkpoint_at("")
+    }
+    pub(crate) fn checkpoint_at(
+        &self,
+        selected: &str,
+    ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
         let _opens = self
             .open_boundary
             .write()
@@ -978,17 +984,15 @@ impl Mount {
             .filter(|handle| {
                 handle._content.is_some() && handle.flags & libc::O_ACCMODE != libc::O_RDONLY
             })
-            .count();
+            .map(|handle| handle.node.clone())
+            .collect::<Vec<_>>();
         if self.closing.load(std::sync::atomic::Ordering::Acquire) {
             return Err(unsupported("The original native mount is closing"));
         }
-        if writers != 0 {
-            return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
-                "workspace_snapshot_writers_active", format!("Cannot fence {writers} active writable native file references and their possible mappings; the parent workspace remains available"))));
-        }
         drop(handles);
-        self.session.checkpoint()
+        self.session.checkpoint_native(selected, &writers, &[])
     }
+
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {
         {
             let _opens = self

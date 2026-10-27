@@ -182,6 +182,10 @@ pub(crate) struct Head {
     pub branch_id: String,
     pub metadata_branch: String,
     namespace: Uuid,
+    /// A scoped fork retains the shared inode/link graph. These former roots
+    /// terminate names outside this branch, without enumerating the subtree.
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    outside_namespaces: BTreeSet<Uuid>,
     created: Timestamp,
 }
 
@@ -386,10 +390,13 @@ impl Storage {
         head: &Head,
         root: &str,
         mut id: Uuid,
-    ) -> Result<String, KernelError> {
+    ) -> Result<Option<String>, KernelError> {
         let mut parts = Vec::new();
         let mut seen = BTreeSet::new();
         while id != head.namespace {
+            if head.outside_namespaces.contains(&id) {
+                return Ok(None);
+            }
             if !seen.insert(id) {
                 return Err(KernelError::Storage(
                     "hard-link parent identities contain a cycle".into(),
@@ -410,7 +417,7 @@ impl Storage {
             id = entry.parent;
         }
         parts.reverse();
-        Ok(parts.join("/"))
+        Ok(Some(parts.join("/")))
     }
     /// Return all actual names of one inode. The fallback is used only for a
     /// regular file that has never been hard-linked.
@@ -430,7 +437,9 @@ impl Storage {
         };
         let mut paths = Vec::with_capacity(group.entries.len());
         for entry in group.entries {
-            let dir = self.resolve_link_directory(&head, &root, entry.directory)?;
+            let Some(dir) = self.resolve_link_directory(&head, &root, entry.directory)? else {
+                continue;
+            };
             let path = if dir.is_empty() {
                 entry.name
             } else {
@@ -470,7 +479,18 @@ impl Storage {
             Some(group) if group.entries.is_empty() => Err(KernelError::Storage(
                 "empty hard-link group is invalid".into(),
             )),
-            Some(group) => Ok(group.entries.len()),
+            Some(group) => {
+                let mut count = 0;
+                for entry in group.entries {
+                    if self
+                        .resolve_link_directory(&head, &root, entry.directory)?
+                        .is_some()
+                    {
+                        count += 1;
+                    }
+                }
+                Ok(count)
+            }
             None => Ok(1),
         }
     }
@@ -520,7 +540,7 @@ impl Storage {
         )?;
         let root = self.metadata_set(&root, &group_path, &group)?;
         self.set_metadata_root(&head, &root)?;
-        Ok(group.entries.len())
+        self.workspace_file_link_count(branch, metadata.binding.file_id, grant)
     }
     pub(super) fn workspace_metadata_head(
         &mut self,
@@ -563,6 +583,7 @@ impl Storage {
             branch_id: branch.into(),
             metadata_branch: format!("workspace-metadata:{}", Uuid::new_v4()),
             namespace: Uuid::new_v4(),
+            outside_namespaces: BTreeSet::new(),
             created: Timestamp {
                 seconds: data.created_at.div_euclid(1000),
                 nanos: (data.created_at.rem_euclid(1000) * 1_000_000) as u32,
@@ -855,17 +876,72 @@ impl Storage {
         root: &str,
         grant: &Grant,
         changes: &[(String, Metadata)],
+        selected: &str,
     ) -> Result<(), KernelError> {
         let mut head = source.clone();
         let workspace = self.branch(target)?.workspace_id;
+        let mut root = self.workspace_metadata_snapshot(root, changes)?;
+        if !selected.is_empty() {
+            let directory = self.read_workspace_metadata_root(
+                source,
+                &root,
+                selected,
+                &PathState::Directory { mode: None },
+            )?;
+            let subtree = self.find_path_node(&root, &key(selected)?)?;
+            // An implicit directory still has a stable Origin. Save its info
+            // at the new root so unopened descendants retain their identities.
+            root =
+                self.graft_tree_node(&root, &["namespace".into()], subtree.as_deref(), true, true)?;
+            root = self.metadata_set(
+                &root,
+                &["namespace".into(), "info".into()],
+                &directory.binding,
+            )?;
+            root = self.metadata_set(
+                &root,
+                &["inodes".into(), directory.binding.file_id.to_string()],
+                &directory.attributes,
+            )?;
+            head.outside_namespaces.insert(head.namespace);
+            head.namespace = directory.binding.file_id;
+        }
         head.branch_id = target.into();
         head.metadata_branch = format!("workspace-metadata:{}", Uuid::new_v4());
-        self.create_branch(&json!({"operationId":format!("filesystem-fork:{}",Uuid::new_v4()),"branchId":head.metadata_branch,"workspaceId":workspace,"baseRef":root,"entries":[],"draftBasePaths":[],"captureScopes":[]}),&grant.grant_id)?;
+        self.create_filesystem_snapshot_branch(
+            source.metadata_branch.as_str(),
+            &head.metadata_branch,
+            &workspace,
+            &root,
+            &format!("filesystem-fork:{}", Uuid::new_v4()),
+            grant,
+        )?;
         self.insert_filesystem_head(&head, &workspace)?;
-        for (path, metadata) in changes {
-            self.save_workspace_metadata(target, path, metadata, grant)?;
-        }
         Ok(())
+    }
+    /// The caller already validated an owned snapshot and runs in its original
+    /// transaction. A temporary pin admits the derived root through the normal
+    /// branch owner; no physical materialization or parallel writer is involved.
+    pub(super) fn create_filesystem_snapshot_branch(
+        &mut self,
+        source: &str,
+        target: &str,
+        workspace: &str,
+        root: &str,
+        operation: &str,
+        grant: &Grant,
+    ) -> Result<Value, KernelError> {
+        let pin = format!("workspace-fork-build:{}", Uuid::new_v4());
+        self.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) VALUES(?1,?2,?3,-1,?4,?5,?6,1,?7)",
+            params![pin,source,workspace,crate::model::SNAPSHOT_PIN_WRITE_REVISION,root,grant.grant_id,now_ms()])?;
+        let result = self.create_branch(
+            &json!({"operationId":operation,"branchId":target,"workspaceId":workspace,
+            "baseRef":root,"entries":[],"draftBasePaths":[],"captureScopes":[]}),
+            &grant.grant_id,
+        );
+        self.conn
+            .execute("DELETE FROM pins WHERE pin_id=?1", params![pin])?;
+        result
     }
     pub(super) fn release_workspace_metadata(
         &mut self,

@@ -92,6 +92,14 @@ impl Storage {
         if retained_owner.state != crate::model::GrantState::Active
             || retained_owner.kernel_epoch != file_owner.kernel_epoch
             || retained_owner.owning_workspace != Some(branch.workspace_id.clone())
+            || current
+                .execution_workspace
+                .as_ref()
+                .or(current.owning_workspace.as_ref())
+                != retained_owner
+                    .execution_workspace
+                    .as_ref()
+                    .or(retained_owner.owning_workspace.as_ref())
         {
             return Err(KernelError::Authorization(
                 "Native file-service owner is no longer current".into(),

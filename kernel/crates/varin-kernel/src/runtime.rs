@@ -213,6 +213,7 @@ fn pending_file_worker(method: &str) -> bool {
         method,
         "storage.getBlob"
             | "file.read"
+            | "file.read.check"
             | "file.lease.wait"
             | "file.capture"
             | "file.captureBatch"
@@ -639,12 +640,11 @@ impl Kernel {
             self.spawn_blob_read(task, BlobReadReply::Wire(request.clone()), completions)?;
             return Ok(None);
         }
-        if method == "file.read" {
-            if let Some(task)=storage.prepare_file_read(&authorized_params,&authorized_grant,cancellation)? {
-                self.spawn_blob_read(crate::storage::blob_reads::BlobReadTask::File(task),BlobReadReply::Wire(request.clone()),completions)?;
-                return Ok(None);
-            }
-            return Ok(Some(response_ok(id,storage.file_read(&authorized_params,&authorized_grant,true)?)));
+        if matches!(method, "file.read" | "file.read.check") {
+            let mut task=storage.prepare_file_read(&authorized_params,&authorized_grant,cancellation)?;
+            if method == "file.read.check" { task=task.regular_identity(); }
+            self.spawn_blob_read(crate::storage::blob_reads::BlobReadTask::File(task),BlobReadReply::Wire(request.clone()),completions)?;
+            return Ok(None);
         }
         if method == "working.result.publish" {
             use crate::storage::result_publication::ResultPublicationAdmission;

@@ -1694,23 +1694,10 @@ impl Storage {
         params: &Value,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
-        let args: crate::protocol_generated::KernelFileReadCheckParams = parse_file_params(params)?;
-        let key = self.file_resource_key(&args.root_id, &args.path, grant)?;
-        self.check_cancelled()?;
-        let resource = self.resolve_file_resource(&args.root_id, &args.path, grant, false)?;
-        let metadata = fs::symlink_metadata(&resource.absolute)?;
-        if !metadata.is_file() || metadata.file_type().is_symlink() {
-            return Err(KernelError::Authorization(
-                "retrieval read admission requires a regular file, not a symlink".into(),
-            ));
-        }
-        // Parent symlinks may have changed while the permission/lease checks ran.
-        if self.file_resource_key(&args.root_id, &args.path, grant)? != key {
-            return Err(KernelError::Authorization(
-                "canonical file resource changed during admission".into(),
-            ));
-        }
-        Ok(json!({"resourceKey":key}))
+        let task = self.prepare_file_read(params, grant, self.cancellation.clone()
+            .unwrap_or_else(||Arc::new(AtomicBool::new(false))))?.regular_identity();
+        let result = task.run();
+        self.finish_file_read(&task, result, grant)
     }
     /// Typed native adapter entry point. This is deliberately not a wire method:
     /// the bound Run supplies the root, and the existing grant/root/lease owner
@@ -1746,45 +1733,12 @@ impl Storage {
         grant: &Grant,
         read_body: bool,
     ) -> Result<Value, KernelError> {
-        let resource = self.resolve_file_read(params, grant)?;
-        let root_id = params["rootId"].as_str().expect("admitted root");
-        let path = params["path"].as_str().expect("admitted path");
         if !read_body {
+            self.resolve_file_read(params, grant)?;
             return Ok(Value::Null);
         }
-        let source = json!({"rootId":root_id});
-        let metadata = match fs::symlink_metadata(&resource.absolute) {
-            Ok(value) => value,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                return Ok(
-                    json!({"path":path,"source":source,"missing":true,"readVersion":super::file_mutations::read_version(root_id,&resource.path,&FileState::Missing)?}),
-                )
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let state = if metadata.file_type().is_symlink() {
-            Some(FileState::Symlink {
-                symlink_target: fs::read_link(&resource.absolute)?
-                    .into_os_string()
-                    .into_string()
-                    .map_err(|_| KernelError::Operation("symlink target is not UTF-8".into()))?,
-                mode: Some(file_mode(&metadata)),
-            })
-        } else if metadata.is_dir() {
-            Some(FileState::Directory {
-                mode: Some(file_mode(&metadata)),
-            })
-        } else if !metadata.is_file() {
-            Some(FileState::Unsupported)
-        } else {
-            None
-        };
-        if let Some(state) = state {
-            return Ok(json!({"path":path,"source":source,"state":state,"missing":false}));
-        }
         let task = self.prepare_file_read(params, grant, self.cancellation.clone()
-            .unwrap_or_else(|| Arc::new(AtomicBool::new(false))))?
-            .ok_or_else(|| KernelError::Operation("file changed before read".into()))?;
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false))))?;
         let result = task.run();
         self.finish_file_read(&task, result, grant)
     }

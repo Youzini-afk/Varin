@@ -2313,7 +2313,7 @@
     "KernelWorkspaceOpenParams": {"fields":{"branchId":{"type":"string"}}},
     "KernelWorkspaceAddress": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"}}},
     "KernelWorkspaceLeaseParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"leaseId":{"type":"string"}}},
-    "KernelWorkspaceForkParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"targetBranchId":{"type":"string"},"operationId":{"type":"string"}}},
+    "KernelWorkspaceForkParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"targetBranchId":{"type":"string"},"operationId":{"type":"string"},"sourcePath":{"type":"string","optional":true}}},
     "KernelWorkspaceResultPrepareParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"publicationId":{"type":"string"}}},
     "KernelWorkspaceBinding": {"fields":{"branchId":{"type":"string"},"workspaceId":{"type":"string"},"executionWorkspaceId":{"type":"string"},"generation":{"type":"string"},"ownerGrantId":{"type":"string"}}},
     "KernelWorkspaceLeaseReceipt": {"fields":{"binding":{"type":"KernelWorkspaceBinding"},"leaseId":{"type":"string"},"released":{"type":"boolean"}}},

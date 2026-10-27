@@ -920,6 +920,7 @@ impl Storage {
         workspace: &str,
         target: &str,
         operation: &str,
+        selected: &str,
         files: &[(Vec<String>, u32, InstalledFile)],
         actor: &Grant,
         metadata_head: &super::workspace_metadata::Head,
@@ -960,18 +961,56 @@ impl Storage {
                 "filesystem metadata pin belongs to another checkpoint".into(),
             ));
         }
+        let original_root = pinned["root"]
+            .as_str()
+            .ok_or_else(|| KernelError::Storage("Checkpoint pin has no root".into()))?;
+        let base = if selected.is_empty() {
+            original_root.to_owned()
+        } else {
+            let node = self
+                .find_path_node(original_root, &Self::validate_path(selected)?)?
+                .ok_or_else(|| {
+                    KernelError::NotFound("sourcePath directory does not exist".into())
+                })?;
+            let TrieNode::Path { state, children } = self.load_node(&node)? else {
+                return Err(KernelError::Storage(
+                    "sourcePath points to a namespace index".into(),
+                ));
+            };
+            if state.as_ref().is_some_and(|state| !state.is_directory()) {
+                return Err(KernelError::Operation(
+                    "sourcePath must select a directory".into(),
+                ));
+            }
+            // Only the ancestor chain is read. The child shares the selected
+            // persistent subtree; it does not enumerate or rehash its files.
+            self.store_node(&TrieNode::Path {
+                state: None,
+                children,
+            })?
+        };
         let mut entries = Vec::new();
         for (paths, mode, file) in files {
             for path in paths {
-                let owner = blob_owner_id(&format!("{operation}:{path}"));
-                entries.push(json!({"path":path,"state":{"kind":"regular-file","objectHash":file.content.hash,"byteLength":file.content.length,"mode":mode},"ownerId":owner}));
+                let relative = if selected.is_empty() {
+                    path.as_str()
+                } else {
+                    path.strip_prefix(selected)
+                        .and_then(|tail| tail.strip_prefix('/'))
+                        .ok_or_else(|| {
+                            KernelError::Authorization(
+                                "Checkpoint file is outside sourcePath".into(),
+                            )
+                        })?
+                };
+                entries.push((Self::validate_path(relative)?, file.state(*mode)));
             }
         }
-        let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":pinned["root"],
+        let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":base,"sourcePath":selected,
             "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[],
             "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata,"sessionId":session_id,"requestGrantId":request_grant_id});
         super::operations::idempotent(self, "workspace.checkpoint.fork", &input, |s| {
-            for (paths, _, file) in files {
+            for (_, _, file) in files {
                 let content = &file.content;
                 s.conn.execute(
                     "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
@@ -982,33 +1021,27 @@ impl Storage {
                         ))?
                     ],
                 )?;
-                for path in paths {
-                    s.record_object_owner(
-                        &blob_owner_id(&format!("{operation}:{path}")),
-                        &content.hash,
-                        Some(workspace),
-                        Some(operation),
-                        &actor.grant_id,
-                    )?;
-                }
             }
-            let mut creation = input.clone();
-            creation.as_object_mut().unwrap().remove("sourcePinId");
-            for key in [
-                "filesystemHead",
-                "metadataPin",
-                "metadata",
-                "sessionId",
-                "requestGrantId",
-            ] {
-                creation.as_object_mut().unwrap().remove(key);
+            let root = s.root_apply(&base, &entries)?;
+            s.record_root_blob_hashes(
+                &root,
+                entries
+                    .iter()
+                    .filter_map(|(_, state)| state.object_hash().map(str::to_owned)),
+            )?;
+            if selected.is_empty() {
+                s.record_root_parent(&root, &base)?;
             }
-            let mut result = s.create_branch(&creation, &actor.grant_id)?;
+            // Dispatch-time dirty bytes are part of the child's baseline, not
+            // new changes authored by that child after it starts.
+            let mut result = s.create_filesystem_snapshot_branch(
+                source, target, workspace, &root, operation, actor,
+            )?;
             let root = pinned_metadata["root"]
                 .as_str()
                 .ok_or_else(|| KernelError::Storage("metadata checkpoint has no root".into()))?;
-            s.fork_workspace_metadata(metadata_head, target, root, actor, metadata)?;
-            result["filesystem"] = json!({"sourceBranchId":source,"targetBranchId":target,"sessionId":session_id,"ownerGrantId":actor.grant_id,"requestGrantId":request_grant_id});
+            s.fork_workspace_metadata(metadata_head, target, root, actor, metadata, selected)?;
+            result["filesystem"] = json!({"sourceBranchId":source,"targetBranchId":target,"sourcePath":selected,"sessionId":session_id,"ownerGrantId":actor.grant_id,"requestGrantId":request_grant_id});
             Ok(result)
         })
     }

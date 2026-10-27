@@ -138,16 +138,25 @@ fn path(name: &U16CStr) -> winfsp::Result<String> {
     }
     Ok(value)
 }
+type Writers = Arc<Mutex<BTreeMap<u64, (std::sync::Weak<Node>, usize)>>>;
 pub(super) struct Handle {
     node: Arc<Node>,
     _content: Option<Arc<PrivateFile>>,
-    writer: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    writer: Option<Writers>,
     opens: Arc<std::sync::atomic::AtomicUsize>,
 }
 impl Drop for Handle {
     fn drop(&mut self) {
         if let Some(writers) = &self.writer {
-            writers.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+            let mut writers = writers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some((_, count)) = writers.get_mut(&self.node.id) {
+                *count -= 1;
+                if *count == 0 {
+                    writers.remove(&self.node.id);
+                }
+            }
         }
         self.opens.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
     }
@@ -161,12 +170,27 @@ type Pending = Arc<Mutex<BTreeMap<(u64, bool), PendingCleanup>>>;
 pub(super) struct Backend {
     session: Arc<Session>,
     errors: Pending,
-    writers: Arc<std::sync::atomic::AtomicUsize>,
+    writers: Writers,
     open_boundary: Arc<std::sync::RwLock<()>>,
     opens: Arc<std::sync::atomic::AtomicUsize>,
     closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Backend {
+    fn retain_writer(&self, node: &Arc<Node>, writable: bool) -> winfsp::Result<Option<Writers>> {
+        if !writable {
+            return Ok(None);
+        }
+        let mut writers = self
+            .writers
+            .lock()
+            .map_err(|_| FspError::NTSTATUS(0xc00000e5u32 as i32))?;
+        writers
+            .entry(node.id)
+            .or_insert_with(|| (Arc::downgrade(node), 0))
+            .1 += 1;
+        Ok(Some(self.writers.clone()))
+    }
+
     fn info(&self, node: &Node, out: &mut FileInfo) -> winfsp::Result<()> {
         self.session.check_open().map_err(native)?;
         let state = node.state().map_err(native)?;
@@ -320,18 +344,13 @@ impl FileSystemContext for Backend {
         } else {
             None
         };
+        let writer = self.retain_writer(&node, !directory && access & 6 != 0)?;
         self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         Ok(Handle {
             node,
             _content: content,
             opens: self.opens.clone(),
-            writer: if !directory && access & 6 != 0 {
-                self.writers
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-                Some(self.writers.clone())
-            } else {
-                None
-            },
+            writer,
         })
     }
     fn create(
@@ -408,18 +427,13 @@ impl FileSystemContext for Backend {
         } else {
             None
         };
+        let writer = self.retain_writer(&node, !directory && access & 6 != 0)?;
         self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         Ok(Handle {
             node,
             _content: content,
             opens: self.opens.clone(),
-            writer: if !directory && access & 6 != 0 {
-                self.writers
-                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
-                Some(self.writers.clone())
-            } else {
-                None
-            },
+            writer,
         })
     }
     fn close(&self, context: Handle) {
@@ -803,7 +817,7 @@ pub(crate) struct Mount {
     host: FileSystemHost<Backend>,
     session: Arc<Session>,
     errors: Pending,
-    writers: Arc<std::sync::atomic::AtomicUsize>,
+    writers: Writers,
     open_boundary: Arc<std::sync::RwLock<()>>,
     opens: Arc<std::sync::atomic::AtomicUsize>,
     closing: Arc<std::sync::atomic::AtomicBool>,
@@ -825,7 +839,7 @@ impl Mount {
             .reparse_points(true)
             .flush_and_purge_on_cleanup(true);
         let errors = Arc::new(Mutex::new(BTreeMap::new()));
-        let writers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let writers = Arc::new(Mutex::new(BTreeMap::new()));
         let open_boundary = Arc::new(std::sync::RwLock::new(()));
         let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -874,30 +888,37 @@ impl Mount {
     pub(crate) fn checkpoint(
         &self,
     ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
+        self.checkpoint_at("")
+    }
+    pub(crate) fn checkpoint_at(
+        &self,
+        selected: &str,
+    ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
         let _opens = self
             .open_boundary
             .write()
             .map_err(|_| unsupported("Native open boundary failed"))?;
-        let writers = self.writers.load(std::sync::atomic::Ordering::Acquire);
+        let writers = self
+            .writers
+            .lock()
+            .map_err(|_| unsupported("Native writer registry failed"))?
+            .values()
+            .filter_map(|(node, _)| node.upgrade())
+            .collect::<Vec<_>>();
         if self.closing.load(std::sync::atomic::Ordering::Acquire) {
             return Err(unsupported("The original native mount is closing"));
         }
-        if writers != 0 {
-            return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
-                "workspace_snapshot_writers_active", format!("Cannot fence {writers} active writable native file references and their possible sections; the parent workspace remains available"))));
-        }
-        if !self
+        let unsettled = self
             .errors
             .lock()
             .map_err(|_| unsupported("Native cleanup registry failed"))?
-            .is_empty()
-        {
-            return Err(unsupported(
-                "Pending native cleanup must finish before selecting a workspace version",
-            ));
-        }
-        self.session.checkpoint()
+            .values()
+            .map(|work| work.node.clone())
+            .collect::<Vec<_>>();
+        self.session
+            .checkpoint_native(selected, &writers, &unsettled)
     }
+
     /// Seal new opens and retain the dispatcher until native Close drains the
     /// original references. Callback joins stay outside Storage control.
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {

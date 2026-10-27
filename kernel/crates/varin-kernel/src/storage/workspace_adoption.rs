@@ -268,7 +268,7 @@ impl Storage {
         self.filesystem_transaction(|s|{
             let mut result=s.create_branch(&json!({"operationId":plan.input.operation_id,"branchId":plan.input.branch_id,"workspaceId":data.workspace_id,
                 "baseRef":data.head_root,"entries":[],"draftBasePaths":[],"captureScopes":[]}),&plan.grant.grant_id)?;
-            s.fork_workspace_metadata(&metadata,&plan.input.branch_id,&metadata_root,&plan.grant,&[])?;
+            s.fork_workspace_metadata(&metadata,&plan.input.branch_id,&metadata_root,&plan.grant,&[], "")?;
             result["adoption"]=json!({"consistency":"stable-capture","sourceRootId":plan.input.root_id,"entries":entries,"bytes":bytes});
             s.remove_adoption_branch(&plan.temporary)?;
             s.operation_finish(&plan.input.operation_id,&result)?;

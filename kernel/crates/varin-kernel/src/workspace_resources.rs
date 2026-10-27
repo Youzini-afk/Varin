@@ -93,7 +93,7 @@ impl Workspaces {
             "capabilities":{"nativeFiles":true,"mountCompiled":cfg!(feature="workspace-mount"),"hardlinks":!cfg!(windows),"symlinks":true,"xattrs":cfg!(unix),"losslessNativeNames":false,"activeWritableMappingFork":false}}),
         )
     }
-    fn checkpoint(entry: &Entry) -> Result<Checkpoint, KernelError> {
+    fn checkpoint(entry: &Entry, selected: &str) -> Result<Checkpoint, KernelError> {
         let mounted = entry.mount.try_lock().map_err(|_| {
             error(
                 "workspace_mount_preparing",
@@ -101,9 +101,9 @@ impl Workspaces {
             )
         })?;
         if let Some(mount) = mounted.as_ref() {
-            mount.checkpoint()
+            mount.checkpoint(selected)
         } else {
-            entry.session.checkpoint()
+            entry.session.checkpoint_native(selected, &[], &[])
         }
     }
     pub(crate) fn execute(
@@ -281,21 +281,24 @@ impl Workspaces {
             }
             "workspace.fork" => {
                 let args: Fork = serde_json::from_value(params)?;
-                entry.session.admit(&grant, "", true)?;
+                let selected = args.source_path.as_deref().unwrap_or("");
+                entry.session.admit(&grant, selected, true)?;
                 if let Some(result) = entry.session.replayed_fork(
                     &args.operation_id,
                     &args.target_branch_id,
+                    selected,
                     grant.clone(),
                 )? {
                     return Ok(result);
                 }
-                let boundary = Self::checkpoint(&entry)?;
+                let boundary = Self::checkpoint(&entry, selected)?;
                 if cancelled.load(Ordering::Acquire) {
                     return Err(KernelError::Cancelled);
                 }
                 let fork = boundary.fork_for(
                     &args.target_branch_id,
                     &args.operation_id,
+                    selected,
                     grant,
                     cancelled,
                 )?;
@@ -310,7 +313,7 @@ impl Workspaces {
                 {
                     candidate
                 } else {
-                    let boundary = Self::checkpoint(&entry)?;
+                    let boundary = Self::checkpoint(&entry, "")?;
                     let candidate =
                         boundary.prepare_result(&args.publication_id, grant, cancelled)?;
                     boundary.release()?;
@@ -405,7 +408,7 @@ fn backend() -> &'static str {
 }
 
 enum MountCommand {
-    Checkpoint(mpsc::Sender<Result<Checkpoint, KernelError>>),
+    Checkpoint(String, mpsc::Sender<Result<Checkpoint, KernelError>>),
     Stop(mpsc::Sender<Result<(), KernelError>>),
 }
 struct MountWorker {
@@ -443,8 +446,8 @@ impl MountWorker {
             }
             while let Ok(command) = receiver.recv() {
                 match command {
-                    MountCommand::Checkpoint(reply) => {
-                        let _ = reply.send(if active { mount.checkpoint() } else {
+                    MountCommand::Checkpoint(selected, reply) => {
+                        let _ = reply.send(if active { mount.checkpoint_at(&selected) } else {
                             Err(error("workspace_mount_not_ready", "Original mount startup failed; finish its cleanup before reopening"))
                         });
                     }
@@ -492,10 +495,10 @@ impl MountWorker {
             "This kernel was built without native mount support",
         ))
     }
-    fn checkpoint(&self) -> Result<Checkpoint, KernelError> {
+    fn checkpoint(&self, selected: &str) -> Result<Checkpoint, KernelError> {
         let (reply, result) = mpsc::channel();
         self.sender
-            .send(MountCommand::Checkpoint(reply))
+            .send(MountCommand::Checkpoint(selected.to_owned(), reply))
             .map_err(|_| {
                 error(
                     "workspace_mount_disconnected",
