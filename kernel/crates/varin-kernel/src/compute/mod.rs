@@ -31,6 +31,7 @@ pub(crate) struct Task {
     pub overlays: Vec<ObjectSource>,
     pub scopes: Vec<String>,
     pub recipes: HashMap<String, KernelComputeGrammarParams>,
+    pub traversal: Option<source::Traversal>,
 }
 struct Buffered { cursor: u64, bytes: usize, record: Value }
 struct State {

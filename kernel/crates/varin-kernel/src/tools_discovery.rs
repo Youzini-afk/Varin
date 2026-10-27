@@ -591,7 +591,7 @@ fn empty_result_explanation(args: &FileQueryArgs, scope: &Value) -> Value {
 
 pub(super) fn schema(search: bool) -> Value {
     let mut schema = json!({"type":"object","additionalProperties":false,
-        "description":if search {"Search text in the selected source. Supply query or queries; a batch scans each file once and reports matching queryIndices. Returns exact paths, revisions and line positions. Use nextCursor with the same filters to continue; page size may change."} else {"List a directory in the selected source. Omit paths for the root. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
+        "description":if search {"Search text in the selected source. Supply query or queries; a batch scans each file once and reports matching queryIndices. Returns exact paths, revisions and line positions. Use nextCursor with the same filters to continue; page size may change."} else {"List directories in the selected source. Omit paths for the root. Multiple directory roots contribute entries in turns; groups identify each path's entries on this page. Pass nextCursor as cursor with the same filters to continue; recursive includes descendants. Revisions are captured only when includeRevisions is true."},
         "properties":{
             "paths":{"type":"array","items":{"type":"string"},"description":"Explicit files or directories, including ignored paths."},
             "globs":{"type":"array","items":{"type":"string"}},

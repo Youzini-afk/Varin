@@ -51,6 +51,10 @@ app's windows by handle or title (see `windows` in `list_apps`/snapshots;
 the handle is HWND on Windows, CGWindowNumber on macOS, and the AT-SPI child
 index on Linux).
 
+The Host retains the snapshot's window inventory but omits it from the default model-facing
+observation. `includeWindows:true`, including with an existing `observationId`, reveals it without
+another driver read. The selected window handle/title/bounds stay in the ordinary observation.
+
 `return_state` defaults to `none`: a deterministic batch does not capture or
 sleep after every action. `tree` and `screenshot` request an explicit post-action
 read. The existing 120ms input-settle allowance now applies only at a subsequent

@@ -557,6 +557,7 @@ export interface ComputerService {
     /** Select one of the app's windows: hwnd number or title (BC4.B). */
     window?: number | string;
     includeScreenshot?: boolean;
+    includeWindows?: boolean;
     observationId?: string;
     offset?: number;
     textLimit?: number | "max";
@@ -1874,7 +1875,7 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     return element as unknown as Record<string, unknown>;
   };
 
-  const observationPage = (observation: ComputerObservation, params: Pick<Parameters<ComputerService['observe']>[0], 'offset' | 'textLimit' | 'includeScreenshot'>): ComputerObservation => {
+  const observationPage = (observation: ComputerObservation, params: Pick<Parameters<ComputerService['observe']>[0], 'offset' | 'textLimit' | 'includeScreenshot' | 'includeWindows'>): ComputerObservation => {
     const offset = params.offset ?? 0;
     const limit = params.textLimit ?? 100;
     if (!Number.isSafeInteger(offset) || offset < 0 || (limit !== 'max' && (!Number.isSafeInteger(limit) || limit < 1))) {
@@ -1885,8 +1886,12 @@ export function createComputerService(options: ComputerServiceOptions): Computer
     const end = limit === 'max' ? total : Math.min(total, offset + limit);
     const treeLines = observation.treeLines.slice(offset, end);
     const indexes = new Set(treeLines.flatMap(line => { const match = /^\s*(\d+)\s/.exec(line); return match ? [Number(match[1])] : []; }));
-    const { screenshot, ...rest } = observation;
-    return { ...rest, treeLines, elements: observation.elements.filter(element => indexes.has(element.index)),
+    const { screenshot, windows, app, ...rest } = observation;
+    const { windows: appWindows, ...target } = app;
+    const inventory = windows ?? appWindows;
+    return { ...rest, app: target, treeLines, elements: observation.elements.filter(element => indexes.has(element.index)),
+      ...(inventory ? { windowCount: inventory.length } : {}),
+      ...(params.includeWindows === true && inventory ? { windows: inventory } : {}),
       treePage: { offset, total, ...(end < total ? { nextOffset: end } : {}) },
       ...(params.includeScreenshot === true && screenshot ? { screenshot } : {}) };
   };
@@ -1901,7 +1906,8 @@ export function createComputerService(options: ComputerServiceOptions): Computer
       if (observation && observationOwners.get(observation.id)?.key !== automation.context.getStore()?.key) {
         throw new HarnessServiceError('forbidden', 'This observation belongs to another execution');
       }
-      if (observation && (!observation.treePage || observation.treePage.total === observation.treeLines.length)) {
+      if (observation && (!observation.treePage || observation.treePage.total === observation.treeLines.length)
+        && (!remote || !params.includeWindows || observation.windows !== undefined || observation.app.windows !== undefined)) {
         if (params.includeScreenshot && !observation.screenshot) throw new HarnessServiceError('invalid-params', 'This observation has no screenshot; request a fresh observation with includeScreenshot:true');
         return observationPage(observation, params);
       }
@@ -1917,6 +1923,9 @@ export function createComputerService(options: ComputerServiceOptions): Computer
           app: params.app,
           ...(params.window !== undefined ? { window: params.window } : {}),
           includeScreenshot: params.includeScreenshot === true,
+          // Retain the complete remote snapshot just as for a local driver. Public
+          // projection can reveal its window inventory later without another scan.
+          includeWindows: true,
           textLimit: 'max',
           ...(params.observationId ? { observationId: params.observationId } : {}),
           ...(params.maxTreeNodes !== undefined ? { maxTreeNodes: params.maxTreeNodes } : {}),

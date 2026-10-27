@@ -215,7 +215,7 @@ pub(crate) fn execute(task:&mut Task,shared:&Shared,syntax:&mut SyntaxRuntime)->
     if !continuation_seen { return Err("Search continuation file is unavailable. Restart the query without cursor.".into()); }
     limited |= shared.page_full();
     let resumable=params.paged==Some(true) && limited;
-    if resumable {
+    if resumable && params.operation!="list" {
         let (path,line,revision)=shared.checkpoint().ok_or("Paged query stopped without a scan position")?;
         task.params.start_after_path=Some(path);task.params.start_after_line=line;task.params.start_after_revision=revision;
     }

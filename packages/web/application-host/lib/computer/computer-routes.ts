@@ -206,6 +206,7 @@ export function registerComputerRoutes(app: Express, { computers, requireAuth = 
         ...(body.window !== undefined && (typeof body.window === "number" || typeof body.window === "string")
           ? { window: body.window } : {}),
         ...(typeof body.includeScreenshot === "boolean" ? { includeScreenshot: body.includeScreenshot } : {}),
+        ...(typeof body.includeWindows === "boolean" ? { includeWindows: body.includeWindows } : {}),
         ...(typeof body.textLimit === "number" || body.textLimit === "max" ? { textLimit: body.textLimit } : {}),
         ...(typeof body.observationId === 'string' ? { observationId: body.observationId } : {}),
         ...(typeof body.offset === 'number' ? { offset: body.offset } : {}),

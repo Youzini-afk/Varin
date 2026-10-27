@@ -248,6 +248,11 @@ again; its original element indexes and execution ownership remain authoritative
 explicit. Post-action observations use the same paging contract. Native per-field text handling is
 independent of public tree pagination.
 
+The default projection shows the selected window, tree and `windowCount` when available.
+`includeWindows:true` adds the app's retained window inventory; requesting it with the original
+`observationId` does not capture again or change element freshness. Local and remote observations
+retain that inventory at the owning Host. Post-action display pages also omit it by default.
+
 Native helpers emit optional `target` and `dispatched` NDJSON gesture events after window/element
 relocation. The supervisor correlates them with the live request without treating progress as its
 final receipt. The Host emits completion/failure/cancellation using that receipt and discards obsolete

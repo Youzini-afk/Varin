@@ -120,7 +120,7 @@ impl Storage {
         let mut recipes=HashMap::new();
         for id in selected{if let Some(recipe)=self.computations.recipes.get(id){recipes.insert(id.clone(),recipe.clone());}}
         let id=params.job_id.clone();
-        let task=Task{params,source,overlays,scopes,recipes};
+        let task=Task{params,source,overlays,scopes,recipes,traversal:None};
         if let Err(error)=self.computations.start(id.clone(),task,grant.grant_id.clone(),grant.kernel_epoch.clone(),pin_id.clone(),root,hash){
             if let Some(pin)=pin_id{self.conn.execute("DELETE FROM pins WHERE pin_id=?1",params![pin])?;}
             return Err(failure(error));

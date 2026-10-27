@@ -437,7 +437,9 @@ export interface ComputerObservation {
   nativeTarget?: string;
   /** Window DPI scale (physical px per logical px) at capture time. */
   dpiScale?: number;
-  /** All top-level windows the observed process owned at capture time. */
+  /** Number of windows in the retained app inventory, when the driver supplies it. */
+  windowCount?: number;
+  /** Retained app window inventory, returned only when includeWindows is requested. */
   windows?: ComputerWindowDescriptor[];
   windowBounds?: ComputerFrame;
   treeLines: string[];
@@ -534,6 +536,8 @@ export interface ComputerObserveParams {
   /** Window selector within the app: native handle number or window title. */
   window?: number | string;
   includeScreenshot?: boolean;
+  /** Include the app's window inventory. Can be requested later with the same observationId. */
+  includeWindows?: boolean;
   /** Read another page from the same retained observation without scanning again. */
   observationId?: string;
   offset?: number;

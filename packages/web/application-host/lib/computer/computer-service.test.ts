@@ -680,7 +680,13 @@ describe("computer service (BC4)", () => {
       desktopId: "local-console", app: "notepad", includeScreenshot: false, window: 778812,
     });
     expect(observation.windowHandle).toBe(778812);
-    expect(observation.windows).toHaveLength(2);
+    expect(observation.windowCount).toBe(2);
+    expect(observation.windows).toBeUndefined();
+    const inventory = await service.observe({ app: 'notepad', observationId: observation.id, includeWindows: true });
+    expect(inventory.windows?.map(window => window.handle)).toEqual([778811, 778812]);
+    expect(inventory.id).toBe(observation.id);
+    expect(driver.calls.filter(call => call.tool === 'get_app_state')).toHaveLength(1);
+    expect((await service.observe({ app: 'notepad', observationId: observation.id })).windows).toBeUndefined();
     const observeOp = driver.calls.find((c) => c.tool === "get_app_state");
     expect(observeOp?.window).toBe(778812);
     // The action binds the observed hwnd even without an explicit selector.
@@ -723,7 +729,7 @@ describe("computer service (BC4)", () => {
         } })
       : okResponse());
     const { service } = makeService(driver);
-    const observation = await service.observe({ desktopId: "local-console", app: "notepad", window: 0 });
+    const observation = await service.observe({ desktopId: "local-console", app: "notepad", window: 0, includeWindows: true });
     expect(observation.windowHandle).toBe(0);
     expect(observation.windows?.[0]?.handle).toBe(0);
     await service.act({
@@ -1091,6 +1097,7 @@ describe("computer service (BC6 remote hosts)", () => {
           return jsonResponse({ observation: {
             id: "remote-obs-9", desktopId: "d0", machineId: "local",
             app: { name: "term", pid: 7 }, treeLines: [], elements: [{ index: 0, name: "ok" }], capturedAt: "t",
+            windowHandle: 123, windows: [{ handle: 123, title: 'Terminal' }, { handle: 456, title: 'Other terminal' }],
           } });
         }
         if (url.endsWith("/act")) {
@@ -1102,6 +1109,13 @@ describe("computer service (BC6 remote hosts)", () => {
     await service.list(); // mirrors the catalog
     const observation = await service.observe({ desktopId: "remote:r1:remote-h:d0", app: "term" });
     expect(observation.id).toBe("remote-obs-9"); // remote freshness id preserved
+    expect(observation.windowHandle).toBe(123);
+    expect(observation.windowCount).toBe(2);
+    expect(observation.windows).toBeUndefined();
+    const inventory = await service.observe({ desktopId: 'remote:r1:remote-h:d0', app: 'term', observationId: observation.id, includeWindows: true });
+    expect(inventory.windows?.map(window => window.handle)).toEqual([123, 456]);
+    expect(seen.filter(entry => entry.url.endsWith('/observe'))).toHaveLength(1);
+    expect(seen.find(entry => entry.url.endsWith('/observe'))?.body.includeWindows).toBe(true);
     const result = await service.act({
       desktopId: "remote:r1:remote-h:d0",
       action: { kind: "click", app: "term", observationId: observation.id, elementIndex: 0 },

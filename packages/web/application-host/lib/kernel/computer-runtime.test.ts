@@ -190,7 +190,9 @@ test('both original tool origins dispatch through Computer owner without a file 
   for (const policy of [false, true]) {
     const f = await fixture();
     try {
-      await f.invoke('observe', { desktopId: 'local-console', app: 'editor' }, 'root', policy);
+      const observed = await f.invoke('observe', { desktopId: 'local-console', app: 'editor', includeWindows: true }, 'root', policy);
+      assert.equal(observed.receipt.completion.kind, 'result');
+      if (observed.receipt.completion.kind === 'result') assert.equal(observed.receipt.completion.outcome, 'succeeded');
       const { receipt } = await f.invoke('act', { desktopId: 'local-console', action: { kind: 'key', app: 'editor', key: 'enter' } }, 'root', policy);
       assert.equal(receipt.executor_stopped, true); assert.equal(receipt.completion.kind, 'result');
       if (receipt.completion.kind === 'result') assert.equal(receipt.completion.effect, 'dispatched');

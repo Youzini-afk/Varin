@@ -5,7 +5,38 @@ use crate::{model::{PathState, TrieNode}, protocol::{node_hash, object_path}};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rusqlite::{Connection, OpenFlags};
 use sha2::{Digest,Sha256};
-use std::{collections::{HashMap,HashSet}, fs::{self,File}, io::{Read,Seek,SeekFrom}, path::{Path,PathBuf}};
+use std::{collections::{HashMap,HashSet,VecDeque}, fs::{self,File}, io::{Read,Seek,SeekFrom}, path::{Path,PathBuf}};
+
+enum TreeVisit {Path(String,String),Index(String,String)}
+#[derive(Default)]
+struct TreeTraversal {
+    initialized: bool,
+    roots: VecDeque<Vec<TreeVisit>>,
+}
+struct DiskWalk {
+    walk: ignore::Walk,
+    nested: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+#[derive(Default)]
+struct DiskTraversal {
+    initialized: bool,
+    pending: Vec<String>,
+    initial: HashSet<String>,
+    visited: HashSet<String>,
+    walks: VecDeque<DiskWalk>,
+    ignore_errors: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+/// Listings retain their actual iterators across output pages. Each selected root
+/// gets a turn before a busy sibling contributes another entry. The compute job
+/// still owns one record cursor, one reader pin and the original cancellation.
+#[derive(Default)]
+pub(crate) struct Traversal {
+    tree: TreeTraversal,
+    disk: DiskTraversal,
+    overlays: VecDeque<ObjectSource>,
+    shadowed: HashSet<String>,
+    partial: bool,
+}
 
 pub(crate) struct SourceMetadata {pub byte_length:u64,pub modified_time_ns:Option<String>}
 pub(crate) struct Document {pub path:String,pub revision:String,pub state:PathState,pub bytes:Option<Vec<u8>>,pub metadata:Option<SourceMetadata>}
@@ -202,61 +233,77 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
         (explicit.is_empty()||explicit.iter().any(|f|within(f,path)||f==path))&&scopes.iter().any(|s|within(path,s)||within(s,path))&&roots.iter().any(|s|within(path,s)||within(s,path))
             &&(selections.iter().any(|root|within(root,path))||!selection_relative(path,&selections).split('/').any(|s|dirs.contains(s)||(!include_hidden&&s.starts_with('.'))))
     };
-    let mut overlays=std::mem::take(&mut task.overlays).into_iter().map(|o|(o.path.clone(),o)).collect::<HashMap<_,_>>();
-    let shadowed=overlays.keys().cloned().collect::<HashSet<_>>();
+    let listing=task.params.operation=="list";
+    let mut traversal=task.traversal.take().unwrap_or_else(|| {
+        let mut overlays=std::mem::take(&mut task.overlays).into_iter().map(|o|(o.path.clone(),o)).collect::<HashMap<_,_>>();
+        let mut paths=overlays.keys().cloned().collect::<Vec<_>>();paths.sort();
+        Traversal {shadowed:paths.iter().cloned().collect(),overlays:paths.into_iter().map(|path|overlays.remove(&path).unwrap()).collect(),..Default::default()}
+    });
+    let shadowed=traversal.shadowed.clone();
+    let result=(|| {
     // Fixed overlays participate before any source candidate budget. Tombstones
     // hide entire subtrees, including children that still exist on parent disk.
-    let mut overlay_paths=overlays.keys().cloned().collect::<Vec<_>>();overlay_paths.sort();
-    for path in overlay_paths {
+    while let Some(overlay)=traversal.overlays.pop_front() {
+        let path=overlay.path.clone();
         shared.check()?; if !eligible(&path,false) {continue;}
         if shadowed.iter().any(|ancestor|ancestor!=&path&&within(&path,ancestor)){continue;}
-        let document=load_object(overlays.remove(&path).unwrap(),content,shared)?;
+        let document=load_object(overlay,content,shared)?;
         if !matches!(document.state,PathState::Missing)&&!callback(document)? {return Ok(false);}
     }
-    let mut partial=false;
+    let mut partial=traversal.partial;
     match &task.source {
         Source::Objects=>{},
         Source::Tree{catalog,objects,root}=>{
             let reader=TreeReader::open(catalog)?;
-            enum Visit {Path(String,String),Index(String,String)}
-            let mut stack=Vec::new();let mut seeded=Vec::<String>::new();
-            for requested in &roots {
-                for scope in &scopes {
-                    let prefix=if within(requested,scope){requested}else if within(scope,requested){scope}else{continue;};
-                    if seeded.iter().any(|p|within(prefix,p)){continue;}seeded.push(prefix.clone());
-                    if let Some(hash)=reader.path(root,prefix)?{stack.push(Visit::Path(hash,prefix.clone()));}
+            let tree=&mut traversal.tree;
+            if !tree.initialized {
+                let mut prefixes=roots.iter().flat_map(|requested|scopes.iter().filter_map(|scope| {
+                    if within(requested,scope){Some(requested.clone())}else if within(scope,requested){Some(scope.clone())}else{None}
+                })).collect::<Vec<_>>();
+                prefixes.sort_by(|a,b|a.split('/').cmp(b.split('/')));
+                let mut seeded=Vec::<String>::new();
+                for prefix in &prefixes {
+                    // Disjoint roots avoid retaining a set of every emitted path
+                    // for the entire paginated listing, including long listings.
+                    if seeded.iter().any(|parent|within(prefix,parent)){continue;}seeded.push(prefix.clone());
+                    if let Some(hash)=reader.path(root,prefix)?{tree.roots.push_back(vec![TreeVisit::Path(hash,prefix.clone())]);}
                     else if !shadowed.iter().any(|p|within(p,prefix)||within(prefix,p)) {
                         if !matches!(task.params.operation.as_str(),"list"|"search") || selections.len()==1 {return Err(format!("Discovery path does not exist: {prefix}"));}
                         partial=true;shared.emit("error",prefix,"",serde_json::json!({"status":"missing","message":"Discovery path does not exist"}))?;
                     }
                 }
+                tree.initialized=true;
+                traversal.partial=partial;
             }
-            let mut seen=HashSet::new();
-            while let Some(next)=stack.pop(){shared.check()?;if shared.page_full(){return Ok(partial);}match next{
-                Visit::Index(hash,prefix)=>{
+            while !tree.roots.is_empty(){shared.check()?;if shared.page_full(){return Ok(partial);}
+                let stack=tree.roots.front_mut().unwrap();
+                let Some(next)=stack.pop() else {tree.roots.pop_front();continue;};
+                match next{
+                TreeVisit::Index(hash,prefix)=>{
                     let TrieNode::Index{key,child,left,right,..}=reader.node(&hash)? else{return Err("Invalid immutable index".into());};
-                    if let Some(right)=right{stack.push(Visit::Index(right,prefix.clone()));}
+                    if let Some(right)=right{stack.push(TreeVisit::Index(right,prefix.clone()));}
                     let path=if prefix.is_empty(){key}else{format!("{prefix}/{key}")};
-                    if descend(&path){stack.push(Visit::Path(child,path));}
-                    if let Some(left)=left{stack.push(Visit::Index(left,prefix));}
+                    if descend(&path){stack.push(TreeVisit::Path(child,path));}
+                    if let Some(left)=left{stack.push(TreeVisit::Index(left,prefix));}
                 },
-                Visit::Path(hash,path)=>{
-                    if !seen.insert(path.clone()){continue;}
+                TreeVisit::Path(hash,path)=>{
                     let TrieNode::Path{state,children}=reader.node(&hash)? else{return Err("Invalid immutable path".into());};
                     let state=state.unwrap_or(PathState::Directory{mode:None});
                     if matches!(state,PathState::Missing){continue;}
                     let directory=state.is_directory();
                     if directory&&descend(&path){if let Some(children)=children{
                         let depth_allowed=!immediate||selections.iter().any(|r|path==*r||within(r,&path));
-                        if depth_allowed{stack.push(Visit::Index(children,path.clone()));}
+                        if depth_allowed{stack.push(TreeVisit::Index(children,path.clone()));}
                     }}
+                    if listing {tree.roots.rotate_left(1);}
                     if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,directory){continue;}
                     let (bytes,revision)=match &state{PathState::RegularFile{object_hash,..} if content=>{
                         let file=File::open(object_path(objects,object_hash).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
                         let captured=read_capture(file,Some(object_hash),shared)?;
                         (Some(captured.bytes),captured.revision)
                     },_=>{let revision=if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};(None,revision)}};
-                    if !callback(Document{path,revision,state,bytes,metadata:None})?{return Ok(partial);}
+                    let more=callback(Document{path,revision,state,bytes,metadata:None})?;
+                    if !more{return Ok(partial);}
                 }
             }}
         },
@@ -267,8 +314,9 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
             // Traverse selected directories independently. A non-Git parent
             // keeps ignore rules active and hands nested repositories to their
             // own Git inventory (including tracked files ignored by patterns).
+            let disk=&mut traversal.disk;
+            if !disk.initialized {
             let mut selected = HashSet::new();
-            let mut walk_starts = Vec::new();
             for prefix in &roots {
                 let target = root.join(prefix);
                 let metadata = match fs::symlink_metadata(&target) {
@@ -286,14 +334,20 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 let directory_prefix = if metadata.is_dir()||(!task.params.include_tracked.unwrap_or(false)&&!metadata.file_type().is_symlink()) {
                     prefix.clone()
                 } else { prefix.rsplit_once('/').map(|(parent,_)|parent.to_string()).unwrap_or_default() };
-                if selected.insert(directory_prefix.clone()) { walk_starts.push(directory_prefix); }
+                if selected.insert(directory_prefix.clone()) { disk.pending.push(directory_prefix); }
             }
-            let initial = selected.clone();
-            let mut visited = HashSet::new();
+            disk.initial=selected;
+            disk.initialized=true;
+            traversal.partial=partial;
+            }
             let mut ignore_matchers=None;
-            let ignore_errors=std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-            while let Some(prefix) = walk_starts.pop() {
-                if !visited.insert(prefix.clone()) { continue; }
+            let ignore_errors=disk.ignore_errors.clone();
+            while !disk.pending.is_empty() || !disk.walks.is_empty() {
+                // Build one iterator per selected root for listings. Other source
+                // consumers retain their depth-first order and line checkpoints.
+                while disk.walks.is_empty() || listing {
+                let Some(prefix)=disk.pending.pop() else {break;};
+                if !disk.visited.insert(prefix.clone()) { continue; }
                 shared.check()?;
                 let directory = fs::canonicalize(root.join(&prefix)).map_err(|e|e.to_string())?;
                 if !directory.starts_with(&root) { continue; }
@@ -304,7 +358,7 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     }).collect::<Vec<_>>())
                 };
                 let inventory = if git_visible { super::inventory::git_inventory(&directory,shared,exact.as_deref())? } else { None };
-                if task.params.operation == "list" && task.params.include_tracked.unwrap_or(false) && initial.contains(&prefix) {
+                if task.params.operation == "list" && task.params.include_tracked.unwrap_or(false) && disk.initial.contains(&prefix) {
                     shared.emit("inventory", &prefix, "", match &inventory {
                         Some(inventory) => serde_json::json!({"strategy":"git-visible","gitRoot":inventory.git_root,
                             "selectedRootIgnored":inventory.selected_root_ignored}),
@@ -372,7 +426,16 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                         }
                         true
                     });
-            for entry in builder.build(){shared.check()?;if shared.page_full(){return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
+                disk.walks.push_back(DiskWalk{walk:builder.build(),nested});
+                }
+                shared.check()?;if shared.page_full(){return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
+                let Some(walk)=disk.walks.front_mut() else {continue;};
+                let Some(entry)=walk.walk.next() else {
+                    let finished=disk.walks.pop_front().unwrap();
+                    disk.pending.extend(std::mem::take(&mut *finished.nested.lock().unwrap()));
+                    continue;
+                };
+                if listing {disk.walks.rotate_left(1);}
                 let entry=match entry{Ok(entry)=>entry,Err(_)=>{partial=true;continue;}};
                 if entry.error().is_some(){partial=true;}
                 let path=entry.path().strip_prefix(&root).map_err(|e|e.to_string())?.to_string_lossy().replace('\\',"/");
@@ -403,12 +466,13 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                 }else{PathState::Unsupported};
                 if !callback(Document{path,revision,state,bytes,metadata})?{return Ok(partial||ignore_errors.load(std::sync::atomic::Ordering::Relaxed));}
             }
-                partial|=ignore_errors.load(std::sync::atomic::Ordering::Relaxed);
-                walk_starts.extend(std::mem::take(&mut *nested.lock().unwrap()));
-            }
+            partial|=ignore_errors.load(std::sync::atomic::Ordering::Relaxed);
         }
     }
     Ok(partial)
+    })();
+    if listing {task.traversal=Some(traversal);}
+    result
 }
 
 #[cfg(test)]

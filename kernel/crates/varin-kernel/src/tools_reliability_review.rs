@@ -779,3 +779,49 @@ fn multiple_listing_scopes_report_page_membership_without_claiming_unseen_roots_
         }
     }
 }
+
+#[test]
+fn multiple_listing_scopes_share_pages_and_resume_without_duplicates_on_disk_and_tree() {
+    for fixed in [false, true] {
+        let mut f=Fixture::new();
+        let mut expected=(0..9).map(|i|format!("a/{i:03}")).collect::<Vec<_>>();
+        expected.extend(["a/sub/inside".into(),"z/000".into(),"z/001".into()]);
+        for dir in ["a/sub","empty","z"] {fs::create_dir_all(f.root.join("work").join(dir)).unwrap();}
+        for path in &expected {fs::write(f.root.join("work").join(path),"body").unwrap();}
+        if fixed {
+            let mut storage=f._storage.lock().unwrap();
+            let mut invoke=|method:&str,params:Value| {
+                let (grant,params)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,method,&params).unwrap();
+                storage.dispatch(method,&params,Some("actor"),&grant).unwrap()
+            };
+            invoke("storage.putBlob.begin",json!({"operationId":"list-blob","streamId":"list-body","workspaceId":"workspace","byteLength":4}));
+            invoke("storage.putBlob.chunk",json!({"streamId":"list-body","sequence":0,"bytesBase64":BASE64.encode(b"body")}));
+            let blob=invoke("storage.putBlob.finish",json!({"operationId":"list-blob","streamId":"list-body","workspaceId":"workspace"}));
+            let mut entries=expected.iter().map(|path|json!({"path":path,"state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":4,"mode":420},"ownerId":blob["ownerId"]})).collect::<Vec<_>>();
+            entries.push(json!({"path":"empty","state":{"kind":"directory","mode":493}}));
+            invoke("branch.create.begin",json!({"operationId":"list-create","builderId":"list-builder","workspaceId":"workspace","branchId":"fixed","draftBasePaths":[],"captureScopes":[]}));
+            invoke("branch.create.append",json!({"builderId":"list-builder","sequence":0,"entries":entries}));
+            invoke("branch.create.finish",json!({"operationId":"list-create","builderId":"list-builder"}));
+            f.executor.binding.source_mode=SourceMode::FixedBranch;
+            f.executor.binding.root_id=None;f.executor.binding.live_root=None;
+            f.executor.binding.file_source=Some(FixedFileSource{branch_id:"fixed".into(),revision:0});
+        }
+        let mut cursor=None;
+        let mut seen=Vec::new();
+        let mut page_number=0;
+        loop {
+            let mut args=json!({"paths":["a","empty","z","a","a/sub"],"maxResults":if page_number==0{3}else{1+page_number%3},"maxBytes":if page_number==0{65536}else{420}});
+            if let Some(cursor)=&cursor {args["cursor"]=json!(cursor);}
+            let ToolCompletion::Result{outcome:Outcome::Succeeded,content,..}=f.call("file_list",args) else {panic!("listing failed")};
+            let paths=content.data["records"].as_array().unwrap().iter().map(|record|record["path"].as_str().unwrap().to_owned()).collect::<Vec<_>>();
+            if page_number==0 {assert_eq!(paths,["a/000","z/000","a/001"],"source fixed={fixed}");}
+            seen.extend(paths);
+            cursor=content.data["nextCursor"].as_str().map(str::to_owned);
+            page_number+=1;
+            if cursor.is_none(){break;}
+            assert!(page_number<20,"listing did not advance");
+        }
+        seen.sort();expected.sort();
+        assert_eq!(seen,expected,"source fixed={fixed}");
+    }
+}
