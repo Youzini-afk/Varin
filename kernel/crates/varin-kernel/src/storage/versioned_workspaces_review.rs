@@ -536,13 +536,20 @@ fn workspace_namespace_rejects_foreign_sources_and_rechecks_both_rename_paths_on
         "executionWorkspace":"project","capabilities":["storage.read","storage.write"],"pathScopes":[""]}),
         "host","generation",&f.directory.to_string_lossy(),"epoch").unwrap();
     let head = f.inspect("main", "");
-    let pin = f.call("branch.pin", json!({"operationId":"private-query-pin","branchId":"main",
-        "expectedWriteRevision":head["writeRevision"],"expectedRoot":head["root"]})).unwrap();
+    let pin = f
+        .call(
+            "branch.pin",
+            json!({"operationId":"private-query-pin","branchId":"main",
+        "expectedWriteRevision":head["writeRevision"],"expectedRoot":head["root"]}),
+        )
+        .unwrap();
     let fork = json!({"operationId":"private-pin-fork","workspaceId":"project","branchId":"private-pin-child",
         "sourceBranchId":"main","sourcePinId":pin["pinId"],"draftBasePaths":[],"captureScopes":[]});
     f.call("branch.fork", fork.clone()).unwrap();
-    assert!(f.call_as("other-reader", "branch.fork", fork).is_err(),
-        "completed fork receipts still check a live query pin's original owner");
+    assert!(
+        f.call_as("other-reader", "branch.fork", fork).is_err(),
+        "completed fork receipts still check a live query pin's original owner"
+    );
     // A caller-supplied workspace cannot mask the branch's actual ownership.
     f.storage.issue_grant(&json!({"grantId":"foreign-owner","hostGeneration":"generation","owningWorkspace":"other-project",
         "executionWorkspace":"other-project","capabilities":["storage.read","storage.write"],"pathScopes":[""]}),
@@ -615,5 +622,550 @@ fn workspace_failed_rename_preserves_source_and_returns_a_typed_reason() {
     assert_eq!(f.inspect("main", "src")["root"], root);
     assert_eq!(f.inspect("main", "src")["node"], source["node"]);
     assert!(f.directory.join("managed").exists() == false);
+    f.close();
+}
+
+#[test]
+fn workspace_private_ranges_keep_snapshots_stable_and_publish_only_one_changed_file() {
+    let mut f = Fixture::new();
+    let original = (0..1024 * 1024)
+        .map(|i| (i % 251) as u8)
+        .collect::<Vec<_>>();
+    let content = f.blob("private-base", &original);
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([{"path":"large.bin","state":content["state"],"ownerId":content["ownerId"]}]),
+    )
+    .unwrap();
+    f.finish("main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    {
+        let (file, observation) = f
+            .storage
+            .open_private_file(
+                "main",
+                "large.bin",
+                &grant,
+                Arc::new(AtomicBool::new(false)),
+            )
+            .unwrap();
+        assert_eq!(
+            fs::read_dir(f.directory.join("staging")).unwrap().count(),
+            0,
+            "opening an immutable file does not copy its body"
+        );
+        file.write(Some(4000), b"hello").unwrap();
+        let logs = fs::read_dir(f.directory.join("staging"))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(fs::read(logs[0].path()).unwrap().len(), 5);
+        let snapshot = file.snapshot().unwrap();
+        // The same opened parent continues to overwrite and truncate while the
+        // selected snapshot retains its original ranges and immutable body.
+        file.write(Some(4001), b"new parent").unwrap();
+        file.truncate(2).unwrap();
+        file.truncate(20).unwrap();
+        let mut current = vec![255; 20];
+        assert_eq!(file.read(0, &mut current).unwrap(), 20);
+        assert_eq!(&current[..2], &original[..2]);
+        assert!(current[2..].iter().all(|byte| *byte == 0));
+        let mut expected = original.clone();
+        expected[4000..4005].copy_from_slice(b"hello");
+        let mut observed = vec![0; expected.len()];
+        snapshot
+            .read(0, &mut observed, &AtomicBool::new(false))
+            .unwrap();
+        assert_eq!(observed, expected);
+        let staging = f.directory.join("staging");
+        let sealed = std::thread::spawn(move || snapshot.seal(&staging, &AtomicBool::new(false)))
+            .join()
+            .unwrap()
+            .unwrap();
+        let retention = f.storage.retain_private_file(&sealed);
+        let installed = sealed
+            .install(&f.directory, retention, &AtomicBool::new(false))
+            .unwrap();
+        f.collect("collect-between-seal-and-publish");
+        let committed = f
+            .storage
+            .publish_private_file(
+                "private-publish",
+                "main",
+                "large.bin",
+                &observation,
+                420,
+                &file,
+                &installed,
+                &grant,
+            )
+            .unwrap()
+            .finish();
+        assert_eq!(committed["status"], "committed");
+        assert_eq!(
+            f.storage
+                .publish_private_file(
+                    "private-publish",
+                    "main",
+                    "large.bin",
+                    &observation,
+                    420,
+                    &file,
+                    &installed,
+                    &grant
+                )
+                .unwrap()
+                .finish(),
+            committed
+        );
+        f.call("branch.fork",json!({"operationId":"fork-private-checkpoint","workspaceId":"project","branchId":"child",
+            "sourceBranchId":"main","draftBasePaths":[],"captureScopes":[]})).unwrap();
+        let state = f.inspect("child", "large.bin");
+        let read = f
+            .call(
+                "storage.getBlob",
+                json!({"hash":state["state"]["objectHash"],"branchId":"child","path":"large.bin"}),
+            )
+            .unwrap();
+        assert_eq!(
+            BASE64
+                .decode(read["bytesBase64"].as_str().unwrap())
+                .unwrap(),
+            expected
+        );
+        assert_eq!(
+            fs::read(
+                object_path(
+                    &f.directory,
+                    content["state"]["objectHash"].as_str().unwrap()
+                )
+                .unwrap()
+            )
+            .unwrap(),
+            original
+        );
+        assert!(!f.directory.join("managed").exists());
+    }
+    assert!(fs::read_dir(f.directory.join("staging"))
+        .unwrap()
+        .next()
+        .is_none());
+    f.close();
+}
+
+#[test]
+fn workspace_private_overwrites_truncation_and_append_match_bytes_across_live_versions() {
+    let f = Fixture::new();
+    let file = Arc::new(workspace_files::PrivateFile::new_for_test(
+        f.directory.join("staging"),
+    ));
+    let mut expected = Vec::new();
+    let mut retained = Vec::new();
+    let mut seed = 7u64;
+    for step in 0..240 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        let offset = ((seed >> 32) % 160) as usize;
+        let length = ((seed >> 24) % 24 + 1) as usize;
+        if step % 7 == 0 {
+            file.truncate(offset as u64).unwrap();
+            expected.resize(offset, 0);
+        } else {
+            let bytes = vec![step as u8; length];
+            file.write(Some(offset as u64), &bytes).unwrap();
+            expected.resize(expected.len().max(offset + length), 0);
+            expected[offset..offset + length].copy_from_slice(&bytes);
+        }
+        let mut actual = vec![0; expected.len()];
+        file.read(0, &mut actual).unwrap();
+        assert_eq!(actual, expected, "step {step}");
+        if step % 30 == 0 {
+            retained.push((file.snapshot().unwrap(), expected.clone()));
+        }
+    }
+    let mut workers = Vec::new();
+    for byte in 0..4u8 {
+        let file = file.clone();
+        workers.push(std::thread::spawn(move || {
+            for _ in 0..50 {
+                file.write(None, &[byte; 4]).unwrap();
+            }
+        }));
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    let mut actual = vec![0; expected.len() + 800];
+    file.read(0, &mut actual).unwrap();
+    assert_eq!(&actual[..expected.len()], &expected);
+    for byte in 0..4u8 {
+        assert_eq!(
+            actual[expected.len()..]
+                .iter()
+                .filter(|value| **value == byte)
+                .count(),
+            200
+        );
+    }
+    for (snapshot, expected) in retained {
+        let mut actual = vec![0; expected.len()];
+        snapshot
+            .read(0, &mut actual, &AtomicBool::new(false))
+            .unwrap();
+        assert_eq!(actual, expected);
+    }
+    drop(file);
+    f.close();
+}
+
+#[test]
+fn workspace_private_publication_rejects_stale_paths_and_revoked_original_owners() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.finish("main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    let (file, observation) = f
+        .storage
+        .open_private_file("main", "a", &grant, Arc::new(AtomicBool::new(false)))
+        .unwrap();
+    file.write(Some(0), b"private").unwrap();
+    let snapshot = file.snapshot().unwrap();
+    let cancelled = AtomicBool::new(true);
+    assert!(matches!(
+        snapshot.seal(&f.directory.join("staging"), &cancelled),
+        Err(KernelError::Cancelled)
+    ));
+    let sealed = snapshot
+        .seal(&f.directory.join("staging"), &AtomicBool::new(false))
+        .unwrap();
+    let retention = f.storage.retain_private_file(&sealed);
+    let installed = sealed
+        .install(&f.directory, retention, &AtomicBool::new(false))
+        .unwrap();
+    let other = f.blob("other-write", b"other");
+    f.apply(
+        "other-write-publish",
+        "a",
+        &json!({"kind":"missing"}),
+        &other,
+    );
+    assert_eq!(
+        f.storage
+            .publish_private_file(
+                "stale-private",
+                "main",
+                "a",
+                &observation,
+                420,
+                &file,
+                &installed,
+                &grant
+            )
+            .unwrap()
+            .finish()["status"],
+        "conflict"
+    );
+    f.storage
+        .revoke_grant(&json!({"grantId":"owner"}), "host")
+        .unwrap();
+    assert!(f
+        .storage
+        .publish_private_file(
+            "revoked-private",
+            "main",
+            "a",
+            &observation,
+            420,
+            &file,
+            &installed,
+            &grant
+        )
+        .is_err());
+    assert!(matches!(
+        file.read(0, &mut [0; 4]),
+        Err(KernelError::Cancelled)
+    ));
+    assert!(matches!(
+        snapshot.read(0, &mut [0; 4], &AtomicBool::new(false)),
+        Err(KernelError::Cancelled)
+    ));
+    drop(installed);
+    drop(snapshot);
+    drop(file);
+    f.close();
+}
+
+#[test]
+fn workspace_private_publication_compacts_only_its_current_generation() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.finish("main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    let (file, observation) = f
+        .storage
+        .open_private_file("main", "a", &grant, Arc::new(AtomicBool::new(false)))
+        .unwrap();
+    file.write(Some(0), b"abc").unwrap();
+    let old = file.snapshot().unwrap();
+    let sealed = old
+        .seal(&f.directory.join("staging"), &AtomicBool::new(false))
+        .unwrap();
+    let retention = f.storage.retain_private_file(&sealed);
+    let installed = sealed
+        .install(&f.directory, retention, &AtomicBool::new(false))
+        .unwrap();
+    let publication = f
+        .storage
+        .publish_private_file(
+            "compact-private",
+            "main",
+            "a",
+            &observation,
+            420,
+            &file,
+            &installed,
+            &grant,
+        )
+        .unwrap();
+    let result = std::thread::spawn(move || publication.finish())
+        .join()
+        .unwrap();
+    assert_eq!(result["status"], "committed");
+    assert!(
+        fs::read_dir(f.directory.join("staging"))
+            .unwrap()
+            .next()
+            .is_some(),
+        "old reader still retains its exact backing"
+    );
+    drop(old);
+    assert!(
+        fs::read_dir(f.directory.join("staging"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "published idle file releases obsolete private ranges"
+    );
+    file.write(Some(1), b"Z").unwrap();
+    assert_eq!(
+        f.storage
+            .publish_private_file(
+                "compact-private",
+                "main",
+                "a",
+                &observation,
+                420,
+                &file,
+                &installed,
+                &grant
+            )
+            .unwrap()
+            .finish(),
+        result
+    );
+    let mut bytes = [0; 3];
+    file.read(0, &mut bytes).unwrap();
+    assert_eq!(
+        &bytes, b"aZc",
+        "receipt replay must not roll a later write back"
+    );
+    drop(file);
+    drop(installed);
+    f.close();
+}
+
+#[test]
+fn workspace_private_staging_recovers_only_its_files_and_keeps_failed_cleanup_visible() {
+    let f = Fixture::new();
+    let directory = f.directory;
+    drop(f.storage);
+    let orphan = directory
+        .join("staging")
+        .join(format!("{}.private", Uuid::new_v4()));
+    let sealed = directory
+        .join("staging")
+        .join(format!("{}.sealed", Uuid::new_v4()));
+    let failed = directory
+        .join("staging")
+        .join(format!("{}.private", Uuid::new_v4()));
+    let unrelated = directory.join("staging/retained.private");
+    fs::write(&orphan, b"unconfirmed ranges").unwrap();
+    fs::write(&sealed, b"unpublished candidate").unwrap();
+    fs::write(&unrelated, b"unrelated asset").unwrap();
+    fs::create_dir(&failed).unwrap();
+    let storage = Storage::open(&directory, "host").unwrap();
+    assert!(!orphan.exists() && !sealed.exists());
+    assert_eq!(fs::read(&unrelated).unwrap(), b"unrelated asset");
+    let (pending, failures) = storage.cleanup_status().unwrap();
+    assert_eq!(pending, 1);
+    assert_eq!(failures.len(), 1);
+    assert!(
+        failed.is_dir(),
+        "cleanup must never turn a failed file unlink into recursive deletion"
+    );
+    fs::remove_dir(&failed).unwrap();
+    storage.private_cleanup.retry();
+    assert_eq!(storage.cleanup_status().unwrap().0, 0);
+    drop(storage);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn workspace_directory_pages_keep_their_selected_namespace_and_recheck_authority() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([
+            {"path":"one/A","state":{"kind":"symlink","symlinkTarget":"a","mode":511}},
+            {"path":"one/B","state":{"kind":"symlink","symlinkTarget":"b","mode":511}},
+            {"path":"two","state":{"kind":"symlink","symlinkTarget":"c","mode":511}}
+        ]),
+    )
+    .unwrap();
+    f.finish("main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    let pin = f
+        .call(
+            "branch.pin",
+            json!({"operationId":"directory-pin","branchId":"main","revision":0}),
+        )
+        .unwrap();
+    let page = f
+        .storage
+        .read_branch_directory("main", "", None, None, 1, &grant)
+        .unwrap();
+    assert_eq!(page.entries[0].name, "one");
+    assert!(page.entries[0].state.is_directory());
+    let child = f.inspect("main", "one");
+    assert_eq!(page.entries[0].node, child["node"].as_str().unwrap());
+    assert_eq!(page.node, f.inspect("main", "")["node"].as_str().unwrap());
+    f.call("branch.path.apply",json!({"operationId":"directory-new-child","branchId":"main","changes":[{
+        "path":"alpha","expectedState":{"kind":"missing"},"state":{"kind":"directory","mode":493}
+    }]})).unwrap();
+    let changed = f
+        .storage
+        .read_branch_directory("main", "", None, page.next.as_deref(), 1, &grant)
+        .err()
+        .unwrap();
+    assert_eq!(crate::error::error_code(&changed), "namespace_stale_cursor");
+    let next = f
+        .storage
+        .read_branch_directory(
+            "main",
+            "",
+            pin["pinId"].as_str(),
+            page.next.as_deref(),
+            1,
+            &grant,
+        )
+        .unwrap();
+    assert_eq!(next.entries[0].name, "two");
+    assert!(next.next.is_none());
+    f.storage.issue_grant(&json!({"grantId":"directory-reader","hostGeneration":"generation","owningWorkspace":"project",
+        "executionWorkspace":"project","capabilities":["storage.read"],"pathScopes":["one/A"]}),
+        "host","generation",&f.directory.to_string_lossy(),"epoch").unwrap();
+    let reader = f.storage.load_grant("directory-reader").unwrap();
+    let selected = f
+        .storage
+        .read_branch_directory("main", "", None, None, 10, &reader)
+        .unwrap();
+    assert_eq!(
+        selected
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["one"]
+    );
+    let selected = f
+        .storage
+        .read_branch_directory("main", "one", None, None, 10, &reader)
+        .unwrap();
+    assert_eq!(
+        selected
+            .entries
+            .iter()
+            .map(|entry| entry.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["A"]
+    );
+    f.storage
+        .revoke_grant(&json!({"grantId":"directory-reader"}), "host")
+        .unwrap();
+    assert!(f
+        .storage
+        .read_branch_directory("main", "one", None, None, 10, &reader)
+        .is_err());
+    f.call(
+        "branch.delete",
+        json!({"operationId":"delete-directory-parent","branchId":"main"}),
+    )
+    .unwrap();
+    f.collect("directory-reader-gc");
+    let retained = f
+        .storage
+        .read_branch_directory("main", "one", pin["pinId"].as_str(), None, 10, &grant)
+        .unwrap();
+    assert_eq!(retained.entries.len(), 2);
+    f.close();
+}
+
+#[test]
+fn workspace_private_sparse_ranges_seal_with_their_exact_logical_bytes() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.finish("main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    let (file, observation) = f
+        .storage
+        .open_private_file(
+            "main",
+            "sparse.bin",
+            &grant,
+            Arc::new(AtomicBool::new(false)),
+        )
+        .unwrap();
+    let offset = 1024 * 1024 + 37;
+    file.write(Some(offset), b"tail").unwrap();
+    file.truncate(offset + 100).unwrap();
+    let snapshot = file.snapshot().unwrap();
+    let sealed = snapshot
+        .seal(&f.directory.join("staging"), &AtomicBool::new(false))
+        .unwrap();
+    let retention = f.storage.retain_private_file(&sealed);
+    let installed = sealed
+        .install(&f.directory, retention, &AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(
+        f.storage
+            .publish_private_file(
+                "sparse-publish",
+                "main",
+                "sparse.bin",
+                &observation,
+                420,
+                &file,
+                &installed,
+                &grant
+            )
+            .unwrap()
+            .finish()["status"],
+        "committed"
+    );
+    let state = f.inspect("main", "sparse.bin");
+    let bytes = fs::read(
+        object_path(&f.directory, state["state"]["objectHash"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    let mut expected = vec![0; offset as usize + 100];
+    expected[offset as usize..offset as usize + 4].copy_from_slice(b"tail");
+    assert_eq!(bytes, expected);
+    drop(snapshot);
+    drop(file);
+    drop(installed);
     f.close();
 }

@@ -215,6 +215,7 @@ impl Storage {
             Ok(()) => {
                 self.conn.execute_batch("COMMIT")?;
                 self.processes.revoke_subscriptions(grant_id);
+                self.revoke_private_files(grant_id);
                 self.file_leases.retain(|id, lease| {
                     if lease.grant_id != grant_id {
                         return true;
@@ -355,6 +356,7 @@ impl Storage {
         }
         self.conn.execute_batch("COMMIT")?;
         self.computations.revoke(id);
+        self.revoke_private_files(id);
         self.processes.revoke_subscriptions(id);
         self.file_leases.retain(|key, lease| {
             if lease.grant_id != id {

@@ -82,6 +82,18 @@ reselect a later parent head. All paths, source workspace and pin ownership are 
 Exact branch/pin blob reads use the actual path state as proof, rather than derived intermediate-root
 indexes that GC may release. These are namespace primitives, not mounted filesystem or open-handle APIs.
 
+`workspace_files.rs` provides the native private-byte generation primitive: immutable base objects,
+an append-only private log and a structurally shared ordered range map. Snapshotting retains ranges;
+later writes/truncation cannot modify an older view. Reads select only the required base gaps and
+overwritten ranges. A file worker seals a changed file, retaining its exact hash before installation;
+publication reuses path CAS and the original operation transaction. Successful idle publication can
+release obsolete ranges while older readers retain their backing; the publication finisher performs
+backing cleanup on the file worker after the Storage transaction returns. Revocation closes original handles,
+and failed temporary-file cleanup remains visible/retryable through Storage cleanup status.
+These primitives have native tests but are not yet connected to runtime mounts or ordinary file tools.
+Mount integration must supply shared inode/handle identities, cache fences and actual flush/drainage;
+durable success follows publication, while an unsealed generation is process-local state.
+
 Root admission queries an index of pending file operations; protocol traffic is not scanned as
 file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary
 `storage.health` returns statistics with `integrity: not_checked`; only `deep: true` runs integrity checks.

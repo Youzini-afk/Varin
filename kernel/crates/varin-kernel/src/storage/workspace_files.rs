@@ -1,0 +1,915 @@
+//! Native private file generations. Writes append only their changed bytes;
+//! snapshots retain immutable ranges while later writes keep using the handle.
+//! This is an in-process file-service primitive, not a per-syscall JSON endpoint.
+use super::*;
+use imbl::OrdMap;
+use std::sync::Mutex;
+
+#[derive(Default)]
+struct CleanupState {
+    files: BTreeMap<PathBuf, String>,
+    scan: Option<(PathBuf, String)>,
+}
+#[derive(Default)]
+pub(super) struct StagingCleanup(Mutex<CleanupState>);
+impl StagingCleanup {
+    fn remove(&self, path: &Path) {
+        let failure = match fs::remove_file(path) {
+            Ok(()) => None,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => None,
+            Err(error) => Some(error.to_string()),
+        };
+        let mut pending = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(failure) = failure {
+            pending.files.insert(path.to_owned(), failure);
+        } else {
+            pending.files.remove(path);
+        }
+    }
+    pub(super) fn recover(&self, staging: &Path) {
+        let result = (|| -> Result<(), io::Error> {
+            for entry in fs::read_dir(staging)? {
+                let entry = entry?;
+                let path = entry.path();
+                if matches!(
+                    path.extension().and_then(|value| value.to_str()),
+                    Some("private" | "sealed")
+                ) && path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|value| Uuid::parse_str(value).is_ok())
+                {
+                    self.remove(&path);
+                }
+            }
+            Ok(())
+        })();
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .scan = result
+            .err()
+            .map(|error| (staging.to_owned(), error.to_string()));
+    }
+    pub(super) fn retry(&self) {
+        let (paths, scan) = {
+            let pending = self
+                .0
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            (
+                pending.files.keys().cloned().collect::<Vec<_>>(),
+                pending.scan.as_ref().map(|(path, _)| path.clone()),
+            )
+        };
+        if let Some(staging) = scan {
+            self.recover(&staging);
+        }
+        for path in paths {
+            self.remove(&path);
+        }
+    }
+    pub(super) fn status(&self) -> (i64, Vec<String>) {
+        let pending = self
+            .0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut failures = pending
+            .files
+            .iter()
+            .map(|(path, error)| format!("private staging {}: {error}", path.display()))
+            .collect::<Vec<_>>();
+        if let Some((path, error)) = &pending.scan {
+            failures.push(format!("private staging scan {}: {error}", path.display()));
+        }
+        (
+            (pending.files.len() + usize::from(pending.scan.is_some())) as i64,
+            failures,
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Extent {
+    length: u64,
+    log_offset: u64,
+}
+
+struct ImmutableFile {
+    file: File,
+    hash: String,
+    length: u64,
+    verified: Mutex<bool>,
+    _retention: blob_reads::BlobReadRetention,
+}
+
+struct PrivateLog {
+    file: Option<File>,
+    path: PathBuf,
+    cleanup: Arc<StagingCleanup>,
+}
+impl PrivateLog {
+    fn file(&self) -> &File {
+        self.file.as_ref().expect("live private log")
+    }
+}
+impl Drop for PrivateLog {
+    fn drop(&mut self) {
+        drop(self.file.take());
+        self.cleanup.remove(&self.path);
+    }
+}
+
+struct Generation {
+    base: Option<Arc<ImmutableFile>>,
+    base_length: u64,
+    length: u64,
+    extents: OrdMap<u64, Extent>,
+    log: Option<Arc<PrivateLog>>,
+    log_length: u64,
+    generation: u64,
+}
+
+/// All native handles of one open file identity share this value. No writable
+/// descriptor to a shared content object is ever exposed to the file backend.
+pub(crate) struct PrivateFile {
+    id: String,
+    staging: PathBuf,
+    generation: Mutex<Generation>,
+    revoked: Arc<AtomicBool>,
+    cleanup: Arc<StagingCleanup>,
+}
+
+/// Append-only range references are stable without copying the active backing.
+/// The file's subsequent append, overwrite and truncate cannot alter this view.
+#[derive(Clone)]
+pub(crate) struct FileSnapshot {
+    file_id: String,
+    base: Option<Arc<ImmutableFile>>,
+    base_length: u64,
+    length: u64,
+    extents: OrdMap<u64, Extent>,
+    log: Option<Arc<PrivateLog>>,
+    generation: u64,
+    revoked: Arc<AtomicBool>,
+    cleanup: Arc<StagingCleanup>,
+}
+
+/// Unpublished complete object, produced on a file worker. Its exact hash must
+/// be retained by Storage before installation; Drop cleans only its own file.
+pub(crate) struct SealedFile {
+    file_id: String,
+    staging: PathBuf,
+    hash: String,
+    length: u64,
+    generation: u64,
+    revoked: Arc<AtomicBool>,
+    cleanup: Arc<StagingCleanup>,
+}
+#[derive(Clone)]
+pub(crate) struct InstalledFile {
+    file_id: String,
+    content: Arc<ImmutableFile>,
+    generation: u64,
+}
+
+pub(crate) struct FilePublication {
+    receipt: Value,
+    file: Arc<PrivateFile>,
+    installed: InstalledFile,
+}
+impl FilePublication {
+    /// Finish on the file worker after the Storage transaction returned. A
+    /// backing unlink can involve the native filesystem and stays off control.
+    pub(crate) fn finish(self) -> Value {
+        if self.receipt["status"] == "committed" && !self.file.revoked.load(Ordering::Acquire) {
+            // Compaction is conditional on the acknowledged generation. A later
+            // write or revocation leaves the original durable receipt intact.
+            let _ = self.file.rebase(&self.installed);
+        }
+        self.receipt
+    }
+}
+impl Drop for SealedFile {
+    fn drop(&mut self) {
+        self.cleanup.remove(&self.staging);
+    }
+}
+
+fn check(cancelled: &AtomicBool) -> Result<(), KernelError> {
+    if cancelled.load(Ordering::Acquire) {
+        Err(KernelError::Cancelled)
+    } else {
+        Ok(())
+    }
+}
+
+fn prepare_sparse_file(file: &File) -> Result<(), KernelError> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows_sys::Win32::{
+            Foundation::{ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED},
+            System::{Ioctl::FSCTL_SET_SPARSE, IO::DeviceIoControl},
+        };
+        let mut returned = 0;
+        if unsafe {
+            DeviceIoControl(
+                file.as_raw_handle(),
+                FSCTL_SET_SPARSE,
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                0,
+                &mut returned,
+                std::ptr::null_mut(),
+            )
+        } == 0
+        {
+            let error = io::Error::last_os_error();
+            if !matches!(error.raw_os_error(),Some(code) if code==ERROR_INVALID_FUNCTION as i32 || code==ERROR_NOT_SUPPORTED as i32)
+            {
+                return Err(error.into());
+            }
+        }
+    }
+    #[cfg(not(windows))]
+    let _ = file;
+    Ok(())
+}
+
+fn read_at(file: &File, mut offset: u64, mut bytes: &mut [u8]) -> io::Result<()> {
+    while !bytes.is_empty() {
+        #[cfg(unix)]
+        let count = std::os::unix::fs::FileExt::read_at(file, bytes, offset)?;
+        #[cfg(windows)]
+        let count = std::os::windows::fs::FileExt::seek_read(file, bytes, offset)?;
+        if count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "private file range is incomplete",
+            ));
+        }
+        offset += count as u64;
+        bytes = &mut bytes[count..];
+    }
+    Ok(())
+}
+
+fn write_at(file: &File, mut offset: u64, mut bytes: &[u8]) -> io::Result<()> {
+    while !bytes.is_empty() {
+        #[cfg(unix)]
+        let count = std::os::unix::fs::FileExt::write_at(file, bytes, offset)?;
+        #[cfg(windows)]
+        let count = std::os::windows::fs::FileExt::seek_write(file, bytes, offset)?;
+        if count == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "private file write made no progress",
+            ));
+        }
+        offset += count as u64;
+        bytes = &bytes[count..];
+    }
+    Ok(())
+}
+
+impl ImmutableFile {
+    fn verify(&self, cancellation: &AtomicBool) -> Result<(), KernelError> {
+        let mut verified = self
+            .verified
+            .lock()
+            .map_err(|_| KernelError::Storage("immutable verification lock poisoned".into()))?;
+        if *verified {
+            return Ok(());
+        }
+        check(cancellation)?;
+        if self.file.metadata()?.len() != self.length {
+            return Err(KernelError::Storage(
+                "workspace base object length changed".into(),
+            ));
+        }
+        let mut digest = Sha256::new();
+        let mut offset = 0;
+        let mut bytes = [0; 128 * 1024];
+        while offset < self.length {
+            check(cancellation)?;
+            let length = (self.length - offset).min(bytes.len() as u64) as usize;
+            read_at(&self.file, offset, &mut bytes[..length])?;
+            digest.update(&bytes[..length]);
+            offset += length as u64;
+        }
+        if format!("sha256-{}", hex::encode(digest.finalize())) != self.hash {
+            return Err(KernelError::Storage(
+                "workspace base object is corrupt".into(),
+            ));
+        }
+        *verified = true;
+        Ok(())
+    }
+}
+
+impl Generation {
+    fn snapshot(
+        &self,
+        file_id: String,
+        revoked: Arc<AtomicBool>,
+        cleanup: Arc<StagingCleanup>,
+    ) -> FileSnapshot {
+        FileSnapshot {
+            file_id,
+            base: self.base.clone(),
+            base_length: self.base_length,
+            length: self.length,
+            extents: self.extents.clone(),
+            log: self.log.clone(),
+            generation: self.generation,
+            revoked,
+            cleanup,
+        }
+    }
+    fn replace_range(&mut self, start: u64, length: u64, log_offset: u64) {
+        let end = start + length;
+        let mut affected = Vec::new();
+        if let Some((&offset, extent)) = self.extents.range(..start).next_back() {
+            if offset + extent.length > start {
+                affected.push(offset);
+            }
+        }
+        affected.extend(self.extents.range(start..end).map(|(&offset, _)| offset));
+        for offset in affected {
+            let extent = self.extents.remove(&offset).expect("selected range");
+            let previous_end = offset + extent.length;
+            if offset < start {
+                self.extents.insert(
+                    offset,
+                    Extent {
+                        length: start - offset,
+                        log_offset: extent.log_offset,
+                    },
+                );
+            }
+            if previous_end > end {
+                self.extents.insert(
+                    end,
+                    Extent {
+                        length: previous_end - end,
+                        log_offset: extent.log_offset + end - offset,
+                    },
+                );
+            }
+        }
+        self.extents.insert(start, Extent { length, log_offset });
+        // Sequential writes remain one range; metadata does not grow per syscall.
+        let (mut start, mut length, mut log_offset) = (start, length, log_offset);
+        if let Some((&previous, extent)) = self.extents.range(..start).next_back() {
+            if previous + extent.length == start && extent.log_offset + extent.length == log_offset
+            {
+                let previous_extent = self.extents.remove(&previous).unwrap();
+                self.extents.remove(&start);
+                length += previous_extent.length;
+                start = previous;
+                log_offset = previous_extent.log_offset;
+            }
+        }
+        let end = start + length;
+        if let Some(next) = self.extents.get(&end) {
+            if log_offset + length == next.log_offset {
+                length += next.length;
+                self.extents.remove(&end);
+            }
+        }
+        self.extents.insert(start, Extent { length, log_offset });
+    }
+}
+
+impl PrivateFile {
+    #[cfg(test)]
+    pub(super) fn new_for_test(staging: PathBuf) -> Self {
+        Self::new(
+            staging,
+            None,
+            Arc::new(AtomicBool::new(false)),
+            Arc::default(),
+        )
+    }
+    fn new(
+        staging: PathBuf,
+        base: Option<Arc<ImmutableFile>>,
+        revoked: Arc<AtomicBool>,
+        cleanup: Arc<StagingCleanup>,
+    ) -> Self {
+        let length = base.as_ref().map_or(0, |base| base.length);
+        Self {
+            id: Uuid::new_v4().to_string(),
+            staging,
+            revoked,
+            cleanup,
+            generation: Mutex::new(Generation {
+                base,
+                base_length: length,
+                length,
+                extents: OrdMap::new(),
+                log: None,
+                log_length: 0,
+                generation: 0,
+            }),
+        }
+    }
+    fn lock(&self) -> Result<std::sync::MutexGuard<'_, Generation>, KernelError> {
+        check(&self.revoked)?;
+        let guard = self
+            .generation
+            .lock()
+            .map_err(|_| KernelError::Storage("private file lock poisoned".into()))?;
+        check(&self.revoked)?;
+        Ok(guard)
+    }
+    /// Taking a version boundary performs no full-file copy or hashing.
+    pub(crate) fn snapshot(&self) -> Result<FileSnapshot, KernelError> {
+        Ok(self
+            .lock()?
+            .snapshot(self.id.clone(), self.revoked.clone(), self.cleanup.clone()))
+    }
+    pub(crate) fn read(&self, offset: u64, bytes: &mut [u8]) -> Result<usize, KernelError> {
+        self.snapshot()?.read(offset, bytes, &self.revoked)
+    }
+    /// Returns the actual selected offset too, so append receipts never guess it.
+    pub(crate) fn write(
+        &self,
+        offset: Option<u64>,
+        bytes: &[u8],
+    ) -> Result<(u64, usize), KernelError> {
+        let mut generation = self.lock()?;
+        let offset = offset.unwrap_or(generation.length);
+        let end = offset
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| KernelError::Operation("file write range overflows".into()))?;
+        i64::try_from(end).map_err(|_| {
+            KernelError::Operation("file write exceeds the native signed file-offset range".into())
+        })?;
+        if bytes.is_empty() {
+            return Ok((offset, 0));
+        }
+        let log_end = generation
+            .log_length
+            .checked_add(bytes.len() as u64)
+            .ok_or_else(|| KernelError::Operation("private backing length overflows".into()))?;
+        let next_generation = generation
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| KernelError::Storage("file generation overflow".into()))?;
+        if generation.log.is_none() {
+            let path = self.staging.join(format!("{}.private", Uuid::new_v4()));
+            let file = OpenOptions::new()
+                .create_new(true)
+                .read(true)
+                .write(true)
+                .open(&path)?;
+            generation.log = Some(Arc::new(PrivateLog {
+                file: Some(file),
+                path,
+                cleanup: self.cleanup.clone(),
+            }));
+        }
+        let log_offset = generation.log_length;
+        // Failed writes are outside the published extent map. A retry appends
+        // at the same unused offset; readers never observe a partial candidate.
+        write_at(generation.log.as_ref().unwrap().file(), log_offset, bytes)?;
+        generation.replace_range(offset, bytes.len() as u64, log_offset);
+        generation.log_length = log_end;
+        generation.length = generation.length.max(end);
+        generation.generation = next_generation;
+        Ok((offset, bytes.len()))
+    }
+    pub(crate) fn truncate(&self, length: u64) -> Result<(), KernelError> {
+        i64::try_from(length).map_err(|_| {
+            KernelError::Operation("file length exceeds the native signed file-offset range".into())
+        })?;
+        let mut generation = self.lock()?;
+        if length == generation.length {
+            return Ok(());
+        }
+        let next_generation = generation
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| KernelError::Storage("file generation overflow".into()))?;
+        generation.base_length = generation.base_length.min(length);
+        if generation.base_length == 0 {
+            generation.base = None;
+        }
+        if length == 0 {
+            generation.extents.clear();
+        } else {
+            let removed = generation
+                .extents
+                .range(length..)
+                .map(|(&offset, _)| offset)
+                .collect::<Vec<_>>();
+            for offset in removed {
+                generation.extents.remove(&offset);
+            }
+        }
+        if let Some((&offset, extent)) = generation.extents.range(..length).next_back() {
+            if offset + extent.length > length {
+                let log_offset = extent.log_offset;
+                generation.extents.insert(
+                    offset,
+                    Extent {
+                        length: length - offset,
+                        log_offset,
+                    },
+                );
+            }
+        }
+        if generation.extents.is_empty() {
+            generation.log = None;
+            generation.log_length = 0;
+        }
+        generation.length = length;
+        generation.generation = next_generation;
+        Ok(())
+    }
+    pub(crate) fn revoke(&self) {
+        self.revoked.store(true, Ordering::Release);
+    }
+    fn rebase(&self, installed: &InstalledFile) -> Result<bool, KernelError> {
+        if self.id != installed.file_id {
+            return Err(KernelError::Authorization(
+                "file snapshot belongs to another private handle".into(),
+            ));
+        }
+        let mut current = self.lock()?;
+        if current.generation != installed.generation {
+            return Ok(false);
+        }
+        current.base = Some(installed.content.clone());
+        current.base_length = installed.content.length;
+        current.extents.clear();
+        current.log = None;
+        current.log_length = 0;
+        Ok(true)
+    }
+}
+
+impl FileSnapshot {
+    pub(crate) fn byte_length(&self) -> u64 {
+        self.length
+    }
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub(crate) fn read(
+        &self,
+        offset: u64,
+        output: &mut [u8],
+        cancellation: &AtomicBool,
+    ) -> Result<usize, KernelError> {
+        check(cancellation)?;
+        check(&self.revoked)?;
+        if offset >= self.length || output.is_empty() {
+            return Ok(0);
+        }
+        let count = (self.length - offset).min(output.len() as u64) as usize;
+        let end = offset + count as u64;
+        let bytes = &mut output[..count];
+        bytes.fill(0);
+        let mut base_verified = false;
+        let mut base_range = |from: u64, to: u64, output: &mut [u8]| -> Result<(), KernelError> {
+            let to = to.min(self.base_length);
+            if from < to {
+                let base = self.base.as_ref().expect("immutable range backing");
+                if !base_verified {
+                    base.verify(cancellation)?;
+                    base_verified = true;
+                }
+                read_at(&base.file, from, &mut output[..(to - from) as usize])?;
+            }
+            Ok(())
+        };
+        let first = self
+            .extents
+            .range(..=offset)
+            .next_back()
+            .map(|(&start, _)| start)
+            .unwrap_or(offset);
+        let mut position = offset;
+        for (&start, extent) in self.extents.range(first..end) {
+            check(cancellation)?;
+            check(&self.revoked)?;
+            let from = start.max(position);
+            let to = (start + extent.length).min(end);
+            if from < to {
+                if position < from {
+                    base_range(
+                        position,
+                        from,
+                        &mut bytes[(position - offset) as usize..(from - offset) as usize],
+                    )?;
+                }
+                read_at(
+                    self.log.as_ref().expect("range backing").file(),
+                    extent.log_offset + from - start,
+                    &mut bytes[(from - offset) as usize..(to - offset) as usize],
+                )?;
+                position = to;
+            }
+        }
+        if position < end {
+            base_range(position, end, &mut bytes[(position - offset) as usize..])?;
+        }
+        check(cancellation)?;
+        check(&self.revoked)?;
+        Ok(count)
+    }
+    /// Finite worker work: one changed file is serialized, not its workspace.
+    pub(crate) fn seal(
+        &self,
+        staging: &Path,
+        cancellation: &AtomicBool,
+    ) -> Result<SealedFile, KernelError> {
+        check(cancellation)?;
+        check(&self.revoked)?;
+        let path = staging.join(format!("{}.sealed", Uuid::new_v4()));
+        let mut candidate = SealedFile {
+            file_id: self.file_id.clone(),
+            staging: path,
+            hash: String::new(),
+            length: self.length,
+            generation: self.generation,
+            revoked: self.revoked.clone(),
+            cleanup: self.cleanup.clone(),
+        };
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&candidate.staging)?;
+        prepare_sparse_file(&file)?;
+        let mut digest = Sha256::new();
+        let mut offset = 0;
+        let mut bytes = [0; 128 * 1024];
+        while offset < self.length {
+            check(cancellation)?;
+            let count = self.read(offset, &mut bytes, cancellation)?;
+            if bytes[..count].iter().all(|byte| *byte == 0) {
+                file.seek(SeekFrom::Current(count as i64))?;
+            } else {
+                file.write_all(&bytes[..count])?;
+            }
+            digest.update(&bytes[..count]);
+            offset += count as u64;
+        }
+        file.set_len(self.length)?;
+        file.sync_all()?;
+        check(cancellation)?;
+        check(&self.revoked)?;
+        candidate.hash = format!("sha256-{}", hex::encode(digest.finalize()));
+        Ok(candidate)
+    }
+}
+
+impl SealedFile {
+    /// Call only after Storage retained this exact hash. Installation does no
+    /// catalog mutation and can run while the original owner handles controls.
+    pub(crate) fn install(
+        self,
+        storage: &Path,
+        retention: blob_reads::BlobReadRetention,
+        cancellation: &AtomicBool,
+    ) -> Result<InstalledFile, KernelError> {
+        check(cancellation)?;
+        check(&self.revoked)?;
+        let target = object_path(storage, &self.hash)?;
+        match fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                if !metadata.is_file() || metadata.file_type().is_symlink() {
+                    return Err(KernelError::Storage(
+                        "workspace object path is not a regular file".into(),
+                    ));
+                }
+                let mut digest = Sha256::new();
+                let mut file = File::open(&target)?;
+                let mut length = 0;
+                let mut bytes = [0; 128 * 1024];
+                loop {
+                    check(cancellation)?;
+                    check(&self.revoked)?;
+                    let count = file.read(&mut bytes)?;
+                    if count == 0 {
+                        break;
+                    }
+                    digest.update(&bytes[..count]);
+                    length += count as u64;
+                }
+                if length != self.length
+                    || format!("sha256-{}", hex::encode(digest.finalize())) != self.hash
+                {
+                    return Err(KernelError::Storage(
+                        "existing workspace content object is corrupt".into(),
+                    ));
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let shard = target.parent().expect("object shard");
+                fs::create_dir_all(shard)?;
+                sync_directory(&storage.join("objects"))?;
+                check(cancellation)?;
+                check(&self.revoked)?;
+                durable_rename(&self.staging, &target)?;
+                sync_directory(shard)?;
+                sync_directory(&storage.join("staging"))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        Ok(InstalledFile {
+            file_id: self.file_id.clone(),
+            generation: self.generation,
+            content: Arc::new(ImmutableFile {
+                file: File::open(target)?,
+                hash: self.hash.clone(),
+                length: self.length,
+                verified: Mutex::new(true),
+                _retention: retention,
+            }),
+        })
+    }
+}
+
+impl Storage {
+    /// The source is selected by the native Storage owner. Backends receive a
+    /// scoped byte handle, never an authority-bearing arbitrary object path.
+    pub(crate) fn open_private_file(
+        &mut self,
+        branch_id: &str,
+        path: &str,
+        grant: &Grant,
+        revoked: Arc<AtomicBool>,
+    ) -> Result<(Arc<PrivateFile>, Value), KernelError> {
+        let current = self.load_grant(&grant.grant_id)?;
+        if current.state != crate::model::GrantState::Active
+            || current.kernel_epoch != grant.kernel_epoch
+        {
+            return Err(KernelError::Authorization(
+                "private file's original grant is no longer active".into(),
+            ));
+        }
+        let grant = &current;
+        require_capability(grant, "storage.getBlob")?;
+        require_capability(grant, "branch.path.apply")?;
+        let path = Self::validate_path(path)?.join("/");
+        let branch = self.branch(branch_id)?;
+        if grant.owning_workspace.as_deref() != Some(&branch.workspace_id)
+            || !path_allowed(grant, &path)
+        {
+            return Err(KernelError::Authorization(
+                "private file source is outside the original workspace/path".into(),
+            ));
+        }
+        let observed = self.branch_path_inspect(&json!({"branchId":branch_id,"path":path}))?;
+        let state: PathState = self.parse_state(&observed["state"])?;
+        self.validate_blob_metadata(&state)?;
+        let base = match state {
+            PathState::RegularFile {
+                object_hash,
+                byte_length,
+                ..
+            } => {
+                let file = File::open(object_path(&self.root, &object_hash)?)?;
+                Some(Arc::new(ImmutableFile {
+                    file,
+                    length: byte_length,
+                    verified: Mutex::new(self.verified_objects.contains(&object_hash)),
+                    _retention: self.blob_read_roots.retain(&object_hash),
+                    hash: object_hash,
+                }))
+            }
+            PathState::Missing => None,
+            _ => {
+                return Err(KernelError::Operation(
+                    "private byte handles require a regular file or missing create target".into(),
+                ))
+            }
+        };
+        let file = Arc::new(PrivateFile::new(
+            self.root.join("staging"),
+            base,
+            revoked,
+            self.private_cleanup.clone(),
+        ));
+        let handles = self
+            .private_files
+            .entry(grant.grant_id.clone())
+            .or_default();
+        handles.retain(|handle| handle.strong_count() > 0);
+        handles.push(Arc::downgrade(&file));
+        Ok((file, observed))
+    }
+
+    pub(super) fn revoke_private_files(&mut self, grant: &str) {
+        for handle in self
+            .private_files
+            .remove(grant)
+            .into_iter()
+            .flatten()
+            .filter_map(|handle| handle.upgrade())
+        {
+            handle.revoke();
+        }
+    }
+
+    pub(crate) fn retain_private_file(
+        &mut self,
+        candidate: &SealedFile,
+    ) -> blob_reads::BlobReadRetention {
+        self.blob_read_roots.retain(&candidate.hash)
+    }
+
+    pub(crate) fn publish_private_file(
+        &mut self,
+        operation_id: &str,
+        branch_id: &str,
+        path: &str,
+        expected: &Value,
+        mode: u32,
+        file: &Arc<PrivateFile>,
+        installed: &InstalledFile,
+        grant: &Grant,
+    ) -> Result<FilePublication, KernelError> {
+        if file.id != installed.file_id {
+            return Err(KernelError::Authorization(
+                "file snapshot belongs to another private handle".into(),
+            ));
+        }
+        let stored = self.load_grant(&grant.grant_id)?;
+        if stored.state != crate::model::GrantState::Active
+            || stored.kernel_epoch != grant.kernel_epoch
+        {
+            return Err(KernelError::Authorization(
+                "private file's original grant is no longer active".into(),
+            ));
+        }
+        require_capability(&stored, "branch.path.apply")?;
+        let path = Self::validate_path(path)?.join("/");
+        let branch = self.branch(branch_id)?;
+        if stored.owning_workspace.as_deref() != Some(&branch.workspace_id)
+            || !path_allowed(&stored, &path)
+            || expected["branchId"] != branch_id
+            || expected["path"] != path
+        {
+            return Err(KernelError::Authorization(
+                "private file publication changed its admitted source".into(),
+            ));
+        }
+        let owner = blob_owner_id(&format!("private-file:{operation_id}"));
+        let content = &installed.content;
+        let input = json!({"operationId":operation_id,"workspaceId":branch.workspace_id,"branchId":branch_id,
+            "fileGeneration":installed.generation,"changes":[{"path":path,"expectedState":expected["state"],
+                "expectedNode":expected["node"],"state":{"kind":"regular-file","objectHash":content.hash,"byteLength":content.length,"mode":mode},"ownerId":owner}]});
+        // Optional expectedNode is omitted for a missing target.
+        let mut input = input;
+        if input["changes"][0]["expectedNode"].is_null() {
+            input["changes"][0]
+                .as_object_mut()
+                .unwrap()
+                .remove("expectedNode");
+        }
+        let result =
+            super::operations::idempotent(self, "workspace.file.publish", &input, |storage| {
+                storage.conn.execute(
+                    "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
+                    params![
+                        content.hash,
+                        i64::try_from(content.length).map_err(|_| KernelError::Operation(
+                            "content length exceeds the Storage range".into()
+                        ))?
+                    ],
+                )?;
+                storage.record_object_owner(
+                    &owner,
+                    &content.hash,
+                    Some(&branch.workspace_id),
+                    Some(operation_id),
+                    &stored.grant_id,
+                )?;
+                let mut change = input.clone();
+                change.as_object_mut().unwrap().remove("fileGeneration");
+                let result = storage.branch_path_apply(&change, &stored.grant_id)?;
+                if result["status"] != "committed" {
+                    storage.release_object_owner(
+                        &json!({"ownerId":owner}),
+                        Some(&branch.workspace_id),
+                        &stored.grant_id,
+                    )?;
+                }
+                Ok(result)
+            })?;
+        Ok(FilePublication {
+            receipt: result,
+            file: file.clone(),
+            installed: installed.clone(),
+        })
+    }
+}

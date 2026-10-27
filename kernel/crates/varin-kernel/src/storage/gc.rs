@@ -7,6 +7,7 @@ impl Storage {
     }
 
     pub(super) fn drain_selected_gc_files(&mut self, selected: Option<&BTreeSet<String>>) -> Result<Value, KernelError> {
+        self.private_cleanup.retry();
         let rows: Vec<(String, String)> = self
             .conn
             .prepare("SELECT hash, path FROM pending_gc_files WHERE state IN ('pending', 'failed') ORDER BY queued_at")?
@@ -185,6 +186,8 @@ impl Storage {
                 ));
             }
         }
+        let (private_pending,private_failures)=self.private_cleanup.status();
+        pending+=private_pending;failures.extend(private_failures);
         Ok((pending, failures))
     }
 

@@ -201,6 +201,8 @@ impl Storage {
             verified_objects: BTreeSet::new(),
             source_capture_cache: HashMap::new(),
             blob_read_roots: Default::default(),
+            private_files: HashMap::new(),
+            private_cleanup: Arc::default(),
             file_roots: HashMap::new(),
             observation_reads: HashMap::new(),
             observation_hints: None,
@@ -220,6 +222,7 @@ impl Storage {
         // object unlink. Retry durable cleanup on the next owner start; a
         // failure remains visible through health instead of being swallowed.
         storage.refresh_process_records()?;
+        storage.private_cleanup.recover(&root.join("staging"));
         storage.sweep_orphan_objects()?;
         storage.drain_gc_files()?;
         Ok(storage)

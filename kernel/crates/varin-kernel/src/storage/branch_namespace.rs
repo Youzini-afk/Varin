@@ -11,6 +11,25 @@ struct NodeObservation {
     state: PathState,
 }
 
+pub(crate) struct DirectoryEntry {
+    pub name: String,
+    pub node: String,
+    pub state: PathState,
+}
+pub(crate) struct DirectoryPage {
+    pub node: String,
+    pub entries: Vec<DirectoryEntry>,
+    pub next: Option<String>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectoryCursor {
+    branch_id: String,
+    path: String,
+    node: String,
+    after: String,
+}
+
 fn namespace_error(code: &str, message: &str, path: &str) -> KernelError {
     KernelError::Execution(
         varin_runtime::execution::ExecutionError::new(code, message)
@@ -19,6 +38,184 @@ fn namespace_error(code: &str, message: &str, path: &str) -> KernelError {
 }
 
 impl Storage {
+    /// Immediate children only. Native directory handles can retain a pin and
+    /// continue in lexical order without rescanning the tree or file bodies.
+    pub(crate) fn read_branch_directory(
+        &self,
+        branch_id: &str,
+        path: &str,
+        pin: Option<&str>,
+        cursor: Option<&str>,
+        count: usize,
+        grant: &Grant,
+    ) -> Result<DirectoryPage, KernelError> {
+        let current = self.load_grant(&grant.grant_id)?;
+        if current.state != crate::model::GrantState::Active
+            || current.kernel_epoch != grant.kernel_epoch
+        {
+            return Err(KernelError::Authorization(
+                "directory handle's original grant is no longer active".into(),
+            ));
+        }
+        let grant = &current;
+        require_capability(grant, "branch.read")?;
+        let path = if path.is_empty() {
+            String::new()
+        } else {
+            Self::validate_path(path)?.join("/")
+        };
+        if !path_metadata_allowed_scopes(&grant.path_scopes, &path) {
+            return Err(KernelError::Authorization(
+                "directory is outside the original path scope".into(),
+            ));
+        }
+        if count == 0 {
+            return Err(KernelError::Operation(
+                "directory page must have space for an entry".into(),
+            ));
+        }
+        let (workspace, root) = if let Some(pin) = pin {
+            let retained = self.pin_read(
+                &json!({"pinId":pin,"includeEntries":false}),
+                &grant.grant_id,
+            )?;
+            if retained["branchId"] != branch_id {
+                return Err(KernelError::Authorization(
+                    "directory pin belongs to another branch".into(),
+                ));
+            }
+            (
+                retained["workspaceId"]
+                    .as_str()
+                    .expect("pin workspace")
+                    .to_owned(),
+                retained["root"].as_str().expect("pin root").to_owned(),
+            )
+        } else {
+            let branch = self.branch(branch_id)?;
+            (branch.workspace_id, branch.head_root)
+        };
+        if grant.owning_workspace.as_deref() != Some(workspace.as_str()) {
+            return Err(KernelError::Authorization(
+                "directory belongs to another workspace".into(),
+            ));
+        }
+        let observed = self.observe_branch_node(&root, &path)?;
+        let node = observed.node.ok_or_else(|| {
+            namespace_error("namespace_not_found", "Directory does not exist", &path)
+        })?;
+        if !observed.state.is_directory() {
+            return Err(namespace_error(
+                "namespace_not_directory",
+                "Selected path is not a directory",
+                &path,
+            ));
+        }
+        let after = cursor
+            .map(|cursor| -> Result<String, KernelError> {
+                let decoded = BASE64
+                    .decode(cursor)
+                    .map_err(|_| KernelError::Operation("directory cursor is invalid".into()))?;
+                let cursor: DirectoryCursor = serde_json::from_slice(&decoded)
+                    .map_err(|_| KernelError::Operation("directory cursor is invalid".into()))?;
+                if cursor.branch_id != branch_id || cursor.path != path || cursor.node != node {
+                    return Err(namespace_error(
+                        "namespace_stale_cursor",
+                        "Directory changed; reopen its enumeration or retain a directory pin",
+                        &path,
+                    ));
+                }
+                Ok(cursor.after)
+            })
+            .transpose()?;
+        let TrieNode::Path { children, .. } = self.load_node(&node)? else {
+            return Err(KernelError::Storage("directory points to an index".into()));
+        };
+        // Keep only the successor path through the AVL index. Later pages seek
+        // to the preceding key rather than skipping every earlier child.
+        let mut stack = Vec::new();
+        let mut pending = children;
+        while let Some(index) = pending {
+            self.check_cancelled()?;
+            let TrieNode::Index {
+                key,
+                child,
+                left,
+                right,
+                ..
+            } = self.load_node(&index)?
+            else {
+                return Err(KernelError::Storage(
+                    "directory index points to a path".into(),
+                ));
+            };
+            if after.as_ref().is_some_and(|after| &key <= after) {
+                pending = right;
+            } else {
+                stack.push((key, child, right));
+                pending = left;
+            }
+        }
+        let mut entries = Vec::new();
+        let mut last = None;
+        let mut next = None;
+        while let Some((name, child, right)) = stack.pop() {
+            self.check_cancelled()?;
+            let child_path = if path.is_empty() {
+                name.clone()
+            } else {
+                format!("{path}/{name}")
+            };
+            if path_metadata_allowed_scopes(&grant.path_scopes, &child_path) {
+                let TrieNode::Path { state, .. } = self.load_node(&child)? else {
+                    return Err(KernelError::Storage(
+                        "directory child points to an index".into(),
+                    ));
+                };
+                let state = state.unwrap_or(PathState::Directory { mode: None });
+                if !matches!(state, PathState::Missing) {
+                    if entries.len() == count {
+                        next = Some(BASE64.encode(serde_json::to_vec(&DirectoryCursor {
+                            branch_id: branch_id.into(),
+                            path: path.clone(),
+                            node: node.clone(),
+                            after: last.expect("page entry"),
+                        })?));
+                        break;
+                    }
+                    last = Some(name.clone());
+                    entries.push(DirectoryEntry {
+                        name,
+                        node: child,
+                        state,
+                    });
+                }
+            }
+            let mut pending = right;
+            while let Some(index) = pending {
+                self.check_cancelled()?;
+                let TrieNode::Index {
+                    key,
+                    child,
+                    left,
+                    right,
+                    ..
+                } = self.load_node(&index)?
+                else {
+                    return Err(KernelError::Storage(
+                        "directory index points to a path".into(),
+                    ));
+                };
+                stack.push((key, child, right));
+                pending = left;
+            }
+        }
+        Ok(DirectoryPage {
+            node,
+            entries,
+            next,
+        })
+    }
     fn observe_branch_node(&self, root: &str, path: &str) -> Result<NodeObservation, KernelError> {
         let segments = if path.is_empty() {
             vec![]

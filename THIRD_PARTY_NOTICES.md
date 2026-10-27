@@ -5,6 +5,14 @@ upstream portions and do not make Varin as a whole available under the MIT Licen
 fonts, icons, and other separately distributed components remain under the licenses shipped with
 their respective packages or source files.
 
+## imbl persistent collections
+
+The native private-file generation engine uses unmodified `imbl` 7.0.2, licensed
+under the Mozilla Public License 2.0 (the package declares `MPL-2.0+`).
+Copyright 2017--2021 Bodil Stokke. Copyright 2021 Joe Neeman.
+Source and the accompanying licence are available at
+https://github.com/jneem/imbl and https://docs.rs/crate/imbl/7.0.2/source/LICENCE.md.
+
 ## Claude Agent SDK
 
 The external Claude Code connection uses `@anthropic-ai/claude-agent-sdk` 0.3.310,
