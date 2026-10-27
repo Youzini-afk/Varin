@@ -9,6 +9,23 @@ const identity: ThreadIdentity = { runtime: 'agent', threadId: 'thread:projectio
 const deferred = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes; }); return { promise, resolve }; };
 afterEach(() => { vi.useRealTimers(); });
 
+it('cancels an unfinished snapshot when leaving a conversation without reporting a load failure', async () => {
+  vi.useFakeTimers();
+  let reading: AbortSignal | undefined;
+  const snapshot: ThreadsAPI['snapshot'] = async (_identity, signal) => {
+    reading = signal;
+    return new Promise((_resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
+  const f = await startProjection(snapshot);
+  expect(reading).toBeInstanceOf(AbortSignal);
+  expect(reading?.aborted).toBe(false);
+  f.projection.close();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reading?.aborted).toBe(true);
+  expect(f.report).not.toHaveBeenCalled();
+  expect(f.publish).not.toHaveBeenCalled();
+});
+
 it('reconnects from the last durable cursor and replaces lossy progress with authoritative history', async () => {
   vi.useFakeTimers();
   const run = { id: 'run', thread_id: identity.threadId, branch_id: identity.branchId, state: 'generating' as const, revision: 1, epoch: 1, configuration: {}, cancel_requested: false, waiting_on: null };

@@ -139,7 +139,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     historyUsage: (identity, cursor, signal) => post('history/usage', { ...identity, ...cursor }, signal),
     fileTarget: (input, signal) => post('history/file', input, signal),
     usage: (selected, signal) => post('usage', selected, signal),
-    snapshot: selected => post('snapshot', selected), run: runId => post('run', { runId }),
+    snapshot: (selected, signal) => post('snapshot', selected, signal), run: runId => post('run', { runId }),
     contextInspection: (identity, cursor, signal) => post('context/inspect', { ...identity, ...cursor }, signal),
     inspectTools: (identity, runId) => post('tools/inspect', { ...identity, runId }),
     inspectPolicy: (identity, runId) => post('policy/inspect', { ...identity, runId }),

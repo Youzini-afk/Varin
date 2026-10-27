@@ -449,6 +449,35 @@ it('selects a desired model during an active run and keeps its display until act
   expect(container.textContent).not.toContain('chat.model.nextRequest');
 });
 
+it('shows the selected child load failure and retries instead of leaving the parent history under a loading overlay', async () => {
+  const f = fixture();
+  f.view.history = [{ id: 'parent-message', thread_id: identity.threadId, run_id: 'parent-run', parent: null, source: 'user', provider: null, content: { text: 'Parent conversation body' } }];
+  f.view.historyPage = { head: 'parent-message', previous: null };
+  const selected: ThreadIdentity = { runtime: 'agent', threadId: 'thread:child:probe', branchId: 'branch:child:probe' };
+  const child = initialSnapshot();
+  child.identity = selected;
+  child.thread = { ...child.thread, thread_id: selected.threadId, main_branch_id: selected.branchId, parent_thread_id: identity.threadId,
+    branches: [{ branch_id: selected.branchId, head: 'child-message', active_run_id: null, latest_run: null }] };
+  child.history = [{ id: 'child-message', thread_id: selected.threadId, run_id: 'child-run', parent: null, source: 'user', provider: null, content: { text: 'Child conversation body' } }];
+  child.historyPage = { head: 'child-message', previous: null };
+  let fail = true;
+  f.api.snapshot = async target => {
+    if (target.threadId !== selected.threadId) return structuredClone(f.view);
+    if (fail) throw new Error('Child history is temporarily unavailable');
+    return structuredClone(child);
+  };
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  expect(container.textContent).toContain('Parent conversation body');
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={selected} />));
+  const failure = container.querySelector('.conversation-content [role="alert"]');
+  expect(failure?.textContent).toContain('Child history is temporarily unavailable');
+  expect(container.querySelector('.conversation-loading')).toBeNull();
+  fail = false;
+  await act(async () => failure!.querySelector<HTMLButtonElement>('button')!.click());
+  expect(container.textContent).toContain('Child conversation body');
+  expect(container.querySelector('.conversation-content [role="alert"]')).toBeNull();
+});
+
 it('renders the composer and retries an uncertain send with the same request identity and text', async () => {
   const f = fixture();
   f.submit.mockRejectedValueOnce(new Error('temporary transport failure'));

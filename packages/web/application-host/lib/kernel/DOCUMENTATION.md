@@ -97,6 +97,10 @@ body pagination and virtual rows never supply Run ordinals. Preview bodies are r
 Thread adapters validate authenticated product requests, prepare actual owners and project results. Rust
 owns admission and original command receipts, not an in-memory Host request queue.
 
+Thread snapshot reads retain the caller's AbortSignal through Catalog, history hydration, context policy,
+child metadata and recovery reads. Switching conversations or closing the HTTP observer cancels those
+reads and their queued continuations; it does not issue Run or child cancellation commands.
+
 - Submit/enqueue retries query their original receipt before preparing another source/model/resource.
 - Family reads bind the trusted caller and derive allowed ancestry in Catalog. Opening a view does not
   send a message, create a wait or resume a child. Original content reads retain Run identity.

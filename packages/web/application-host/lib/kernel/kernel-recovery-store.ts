@@ -909,30 +909,33 @@ export class KernelRecoveryStore {
     }
   }
 
-  async getOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown> | null> {
+  async getOperation(workspaceId: string, operationId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
+    signal?.throwIfAborted();
     const client = this.scopedActor?.client ?? await this.adapter.recoveryMetadataClient(workspaceId);
-    const operation = await client.recoveryOperationGet({ workspaceId, operationId });
+    const operation = await client.recoveryOperationGet({ workspaceId, operationId }, signal);
     if (operation) this.registerOperationSources(workspaceId, operation);
     return operation;
   }
 
-  async listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]> {
+  async listOperations(workspaceId: string, kind?: string, signal?: AbortSignal): Promise<Record<string, unknown>[]> {
+    signal?.throwIfAborted();
     if (this.scopedActor) {
       if (workspaceId !== this.scopedActor.identity.workspaceId || !this.scopedActor.metadataReader) {
         throw new Error("Workspace operation inspection requires its explicit metadata reader");
       }
-      return this.scopedActor.metadataReader.listOperations(workspaceId, kind);
+      return this.scopedActor.metadataReader.listOperations(workspaceId, kind, signal);
     }
     const client = await this.adapter.recoveryMetadataClient(workspaceId);
     const output: Record<string, unknown>[] = [];
     let cursor: number | undefined;
     do {
+      signal?.throwIfAborted();
       const value = await client.recoveryOperationList({
         workspaceId,
         ...(kind ? { kind } : {}),
         pageSize: 512,
         ...(cursor === undefined ? {} : { cursor }),
-      });
+      }, signal);
       if (Array.isArray(value.operations)) {
         output.push(...value.operations.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object"));
       }

@@ -158,6 +158,9 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     return () => { active = false; unsubscribe(); };
   }, [api, host, t]);
   const [error, setError] = React.useState<string>();
+  const [loadFailure, setLoadFailure] = React.useState<{ scope: typeof viewScope; message: string }>();
+  const loadError = loadFailure?.scope === viewScope ? loadFailure.message : undefined;
+  const loadingTitle = useThreadStore(state => state.threads.find(thread => thread.thread_id === identity.threadId)?.title);
   const resourceFailure = React.useRef<{ snapshotId: string | null; message: string } | null>(null);
   const [historyOpen, setHistoryOpen] = React.useState(false);
   const [actionPending, setPending] = React.useState(false);
@@ -169,10 +172,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     pendingAction.current = null; resourceFailure.current = null; setPending(false); setError(undefined);
     setSnapshot(undefined); setProgress([]); setToolProgress([]); setHistoryOpen(false); setReadingFiles(false); fileReadGeneration.current += 1;
     fileRead.current?.abort(); fileRead.current = null;
-    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); }, value => setError(value instanceof Error ? value.message : 'Thread unavailable'), setProgress, setStreamingTools, setToolProgress);
+    const view = new ThreadProjection(api, identity, value => { snapshotHost.current = host; historyWindow.accept(value); handoff.observe(value); setSnapshot(value); setLoadFailure(undefined); }, value => setLoadFailure({ scope: viewScope, message: value instanceof Error ? value.message : 'Thread unavailable' }), setProgress, setStreamingTools, setToolProgress);
     projection.current = view; view.start();
     return () => { identityGeneration.current += 1; fileReadGeneration.current += 1; fileRead.current?.abort(); fileRead.current = null; view.close(); };
-  }, [api, identity, host, handoff, historyWindow]);
+  }, [api, identity, host, handoff, historyWindow, viewScope]);
   const snapshot = snapshotHost.current === host && snapshotState?.identity.threadId === identity.threadId && snapshotState?.identity.branchId === identity.branchId ? snapshotState : undefined;
   React.useEffect(() => {
     const failure = resourceFailure.current, resourceId = snapshot?.context.checkpoint?.resources?.snapshot.id;
@@ -455,8 +458,12 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
     {historyOpen && <ChatTreeDialog api={api} identity={identity} open onOpenChange={setHistoryOpen} busy={pending} recoverDisabled={active}
       onFork={entry => { void forkFrom(entry.id); }} onRecover={entry => { showOverview('recovery'); void recovery.recover(entry.id); }} />}
     <div className={cn('relative flex min-h-0 flex-1', empty && 'hidden')}>
-    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message)} loadingLabel={t('common.loading')}>
-    <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
+    {snapshot && loadError && <p role="alert" className="mx-auto w-full max-w-3xl break-words px-4 py-2 text-sm text-destructive">{loadError}</p>}
+    <ConversationSurface owner={String(host)} identity={draftKey} ready={Boolean(history.ready || snapshot || firstMessage.message || loadError)} loadingLabel={[loadingTitle, t('common.loading')].filter(Boolean).join(' · ')}>
+    {loadError && !snapshot ? <div role="alert" className="mx-auto flex h-full max-w-3xl flex-col items-center justify-center gap-3 px-6 py-8 text-sm">
+      <p className="break-words text-destructive">{loadError}</p>
+      <Button variant="outline" onClick={() => { setLoadFailure(undefined); void projection.current?.refresh(); }}>{t('harness.threads.history.retry')}</Button>
+    </div> : <ConversationTimeline api={api} identity={identity} snapshot={history.connecting ? undefined : snapshot} history={visibleHistory}
       onScrollContainerChange={bindScrollViewport}
       runUsage={history.usage} historyReset={history.reset} historyReady={history.ready}
       navigation={{ runs: history.runs, readPreview: historyWindow.readRunPreview, ensureItem: historyWindow.ensureItem, error: history.navigationError, retry: historyWindow.retryNavigation }}
@@ -473,7 +480,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       </div>)}</div>
       {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
         models={models} selectedModel={samplingModel} modelError={modelError} />}
-</>} />
+</>} />}
     </ConversationSurface>
     {readOnly && error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     </div>

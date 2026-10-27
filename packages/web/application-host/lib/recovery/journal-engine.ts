@@ -140,8 +140,8 @@ export interface RecoveryDurableOperationPort {
   createOperation(input: { operationId: string; workspaceId: string; kind: string; state: string; data: Record<string, unknown>; targets: Record<string, { expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState }>; surfacePaths?: readonly string[]; threadId?: string; runId?: string }): Promise<Record<string, unknown>>;
   updateOperationFile(input: { operationId: string; workspaceId: string; path: string; expectedRevision: number; expectedPhase: string; phase: string; observedFingerprint?: string; expected?: RecoveryState; target?: RecoveryState; safety?: RecoveryState; threadId?: string }): Promise<Record<string, unknown>>;
   completeOperation(input: { operationId: string; workspaceId: string; expectedRevision: number; state: string; result?: Record<string, unknown>; failure?: Record<string, unknown>; threadId?: string }): Promise<Record<string, unknown>>;
-  getOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown> | null>;
-  listOperations(workspaceId: string, kind?: string): Promise<Record<string, unknown>[]>;
+  getOperation(workspaceId: string, operationId: string, signal?: AbortSignal): Promise<Record<string, unknown> | null>;
+  listOperations(workspaceId: string, kind?: string, signal?: AbortSignal): Promise<Record<string, unknown>[]>;
   /** Original journal reservations across physical root aliases, restricted to the admitted target. */
   listOperationConflicts(input: RecoveryOperationConflictQuery): Promise<RecoveryOperationConflict[]>;
   releaseOperation(workspaceId: string, operationId: string): Promise<Record<string, unknown>>;
@@ -199,7 +199,7 @@ export interface WorkspaceRecoveryEngine extends RecoveryFileParticipantEngine {
   getCombinedOperation(operationId: string): Promise<WorkspaceCombinedRecoveryOperationResult>;
   getStorageMove(operationId: string): Promise<RecoveryStorageMoveResult>;
   listCheckpoints(input: WorkspaceRecoveryCheckpointQuery): Promise<WorkspaceRecoveryCheckpointListResult>;
-  listCombinedOperations(workspaceId: string): Promise<WorkspaceCombinedRecoveryListResult>;
+  listCombinedOperations(workspaceId: string, signal?: AbortSignal): Promise<WorkspaceCombinedRecoveryListResult>;
   listStorageWorkspaces(): Promise<RecoveryStorageWorkspaceListResult>;
   prepareCombinedRecovery(input: WorkspaceCombinedRecoveryPrepareInput): Promise<WorkspaceCombinedRecoveryPrepareResult>;
   prepareCombinedUndo(operationId: string): Promise<WorkspaceCombinedRecoveryPrepareResult>;
@@ -1576,9 +1576,11 @@ export const createWorkspaceRecoveryEngine = (options: CreateWorkspaceRecoveryEn
         status: "ready",
       };
     }),
-    listCombinedOperations: (workspaceId) => safe(async () => {
-      const summaries = await durable.listOperations(workspaceId, "combined");
-      const stored = await Promise.all(summaries.map((value) => durable.getOperation(workspaceId, requireString(value.operationId, "Recovery operation id"))));
+    listCombinedOperations: (workspaceId, signal) => safe(async () => {
+      signal?.throwIfAborted();
+      const summaries = await durable.listOperations(workspaceId, "combined", signal);
+      signal?.throwIfAborted();
+      const stored = await Promise.all(summaries.map((value) => durable.getOperation(workspaceId, requireString(value.operationId, "Recovery operation id"), signal)));
       return {
         operations: stored.filter((value): value is Record<string, unknown> => Boolean(value)).map(parseCombined).sort((left, right) => right.createdAt.localeCompare(left.createdAt)).map(publicOperation),
         status: "ready",

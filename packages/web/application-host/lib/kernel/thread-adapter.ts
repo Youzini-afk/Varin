@@ -104,8 +104,8 @@ export class ThreadAdapter {
   bindCompaction(owner: ContextCompactionOwner): void { this.compaction = owner; }
   private contextAgent?: ContextAgentOwner;
   bindContextAgent(owner: ContextAgentOwner): void { this.contextAgent = owner; }
-  private readContextPolicy?: (run: import('@varin/protocol').Run) => Promise<NonNullable<ThreadContextState['policy']>>;
-  bindContextPolicy(reader: (run: import('@varin/protocol').Run) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
+  private readContextPolicy?: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>;
+  bindContextPolicy(reader: (run: import('@varin/protocol').Run, signal?: AbortSignal) => Promise<NonNullable<ThreadContextState['policy']>>): void { this.readContextPolicy = reader; }
   private sourceDirectory?: SourceDirectory;
   bindSourceDirectory(directory: SourceDirectory): void { this.sourceDirectory = directory; }
   private fileResolver?: import('./thread-file-target.js').ThreadFileTargetResolver;
@@ -138,8 +138,8 @@ export class ThreadAdapter {
     return this.sourceDirectory.resolve(request, signal);
   }
 
-  private recoveryReader?: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>;
-  bindRecoveryReader(reader: (identity: ThreadIdentity) => Promise<NonNullable<ThreadSnapshot['recovery']>>): void { this.recoveryReader = reader; }
+  private recoveryReader?: (identity: ThreadIdentity, signal?: AbortSignal) => Promise<NonNullable<ThreadSnapshot['recovery']>>;
+  bindRecoveryReader(reader: (identity: ThreadIdentity, signal?: AbortSignal) => Promise<NonNullable<ThreadSnapshot['recovery']>>): void { this.recoveryReader = reader; }
 
   private async skillInput(identity: ThreadIdentity, resources: ContextResources | undefined, text: string, signal?: AbortSignal): Promise<PreparedExplicitSkill | null> {
     if (!parseExplicitSkillCommand(text)) return null;
@@ -432,11 +432,11 @@ export class ThreadAdapter {
     const selected=pairs.filter((pair):pair is NonNullable<typeof pair>=>pair!==null);
     return {directory:{...directory,members:directory.members.filter(member=>selected.some(pair=>pair.child.child_thread_id===member.threadId))},children:selected.map(pair=>pair.child),executions:selected.map(pair=>pair.execution)};
   }
-  private async currentChildren(identity:ThreadIdentity) {
+  private async currentChildren(identity:ThreadIdentity, signal?:AbortSignal) {
     let cursor:string|undefined;
     let combined:import('@varin/application-client').ThreadChildPage|undefined;
     do {
-      const page=await this.childPage(identity,{scope:'current',...(cursor?{cursor}:{})});
+      const page=await this.childPage(identity,{scope:'current',...(cursor?{cursor}:{})},signal);
       combined=combined?{directory:{...page.directory,members:[...combined.directory.members,...page.directory.members]},children:[...combined.children,...page.children],executions:[...combined.executions,...page.executions]}:page;
       cursor=page.directory.nextCursor??undefined;
     }while(cursor);
@@ -641,9 +641,9 @@ export class ThreadAdapter {
     return this.runtime.refreshResources({ branchId: input.branchId, expectedRevision: input.expectedRevision, context }, signal);
   }
 
-  async context(identity: ThreadIdentity): Promise<ThreadContextState> {
-    const [checkpoint, jobs] = await Promise.all([this.runtime.context(identity.branchId), this.runtime.contextJobs(identity.branchId)]);
-    return { checkpoint, jobs: await Promise.all(jobs.map(async job => ({ job, run: await this.runtime.run(job.receipt.run_id) }))) };
+  async context(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadContextState> {
+    const [checkpoint, jobs] = await Promise.all([this.runtime.context(identity.branchId, signal), this.runtime.contextJobs(identity.branchId, signal)]);
+    return { checkpoint, jobs: await Promise.all(jobs.map(async job => ({ job, run: await this.runtime.run(job.receipt.run_id, signal) }))) };
   }
 
   async requireContextJob(identity: ThreadIdentity, runId: string) {
@@ -976,8 +976,8 @@ export class ThreadAdapter {
     return thread;
   }
 
-  async requireRun(runId: string) {
-    const run = await this.runtime.run(runId);
+  async requireRun(runId: string, signal?: AbortSignal) {
+    const run = await this.runtime.run(runId, signal);
     if (!run.thread_id.startsWith('thread:')) throw new Error('Run is not owned by a thread');
     return run;
   }
@@ -1047,27 +1047,28 @@ export class ThreadAdapter {
     }) };
   }
 
-  async snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot> {
-    const { eventCursor } = await this.runtime.status();
-    const thread = await this.requireIdentity(identity);
+  async snapshot(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadSnapshot> {
+    signal?.throwIfAborted();
+    const { eventCursor } = await this.runtime.status(signal);
+    const thread = await this.requireIdentity(identity, signal);
     const branch = thread.branches.find(branch => branch.branch_id === identity.branchId)!;
     const [page, inputs, activeOperations, context, followups, goals, childState, delegatedExecutions] = await Promise.all([
-      this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined),
-      this.runtime.inputs(identity.branchId), this.runtime.activeOperations(identity.threadId, identity.branchId), this.context(identity),
-      listThreadFollowups(this, identity),
-      listThreadGoals(this, identity),
-      this.currentChildren(identity),
-      this.childExecutions(identity),
+      this.readHistoryPage(identity.branchId, branch.head ? { headId: branch.head } : undefined, signal),
+      this.runtime.inputs(identity.branchId, signal), this.runtime.activeOperations(identity.threadId, identity.branchId, signal), this.context(identity, signal),
+      listThreadFollowups(this, identity, signal),
+      listThreadGoals(this, identity, signal),
+      this.currentChildren(identity, signal),
+      this.childExecutions(identity, undefined, signal),
     ]);
     if (branch.latest_run && this.readContextPolicy) {
-      try { context.policy = await this.readContextPolicy(branch.latest_run); }
-      catch (error) { context.policyError = error instanceof Error ? error.message : String(error); }
+      try { context.policy = await this.readContextPolicy(branch.latest_run, signal); }
+      catch (error) { signal?.throwIfAborted(); context.policyError = error instanceof Error ? error.message : String(error); }
     }
     const childActivity: NonNullable<ThreadSnapshot['childActivity']> = {};
     const latestExecutions = new Map(childState.executions.map(execution => [execution.child_operation_id, execution]));
     await Promise.all([...latestExecutions.values()].filter(execution => execution.state === 'ready' && execution.receipt).map(async execution => {
       const runId = execution.receipt!.run_id;
-      const [run, launch] = await Promise.all([this.runtime.run(runId), this.runtime.launch(runId)]);
+      const [run, launch] = await Promise.all([this.runtime.run(runId, signal), this.runtime.launch(runId, signal)]);
       childActivity[execution.execution_id] = launch?.preparation_failure ? { state: 'preparation_failed', reason: launch.preparation_failure_detail ?? launch.preparation_failure }
         : run.waiting_on?.startsWith('preparation:') ? { state: 'preparing' }
           : ['completed', 'failed', 'cancelled'].includes(run.state) ? { state: 'settling' }
@@ -1107,21 +1108,22 @@ export class ThreadAdapter {
     const operations = new Map(activeOperations.map(operation => [operation.id, operation]));
     const visible = await Promise.all([...operationIds].filter(id => !operations.has(id)).map(async id => {
       // Read-only policy evidence may have no durable Operation. Only a real missing row is optional.
-      const operation = observerIds.has(id) ? await this.runtime.findOperation(id) : await this.runtime.operation(id);
+      const operation = observerIds.has(id) ? await this.runtime.findOperation(id, signal) : await this.runtime.operation(id, signal);
       if (!operation || observerIds.has(id) && (!operation.mcp_resource_subscription || !effectful(operation.effect))) return null;
-      const run = await this.requireRun(operation.run_id);
+      const run = await this.requireRun(operation.run_id, signal);
       // Forked history retains the original receipt, not control over the source branch's job.
       return run.thread_id === identity.threadId && run.branch_id === identity.branchId ? operation : null;
     }));
     for (const operation of visible) if (operation) operations.set(operation.id, operation);
     const latest = branch.latest_run;
-    const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id) : null;
+    const activeRun = branch.active_run_id ? await this.runtime.run(branch.active_run_id, signal) : null;
     const shownRun = activeRun ?? latest;
-    const runFailure = shownRun?.state === 'failed' ? await this.runtime.runFailure(shownRun.id) : null;
-    const launch = shownRun ? await this.runtime.launch(shownRun.id) : null;
-    const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id) : {desired:null,active:null};
-    const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id) : null;
-    const recovery = this.recoveryReader ? await this.recoveryReader(identity) : undefined;
+    const runFailure = shownRun?.state === 'failed' ? await this.runtime.runFailure(shownRun.id, signal) : null;
+    const launch = shownRun ? await this.runtime.launch(shownRun.id, signal) : null;
+    const modelSelection = shownRun ? await this.runtime.modelSelections(shownRun.id, signal) : {desired:null,active:null};
+    const policySelection = shownRun && launch ? await this.runtime.inspectPolicy(shownRun.id, signal) : null;
+    const recovery = this.recoveryReader ? await this.recoveryReader(identity, signal) : undefined;
+    signal?.throwIfAborted();
     return { identity, ...(recovery ? { recovery } : {}), eventCursor, thread, activeRun, runFailure, history, historyPage: { head: page.head, previous: page.previous }, inputs,
       operations: [...operations.values()], followups, goals, launch, modelSelection, policySelection, context,
       children: childState.children, childExecutions: childState.executions, childDirectory:childState.directory,childActivity, delegatedExecutions };

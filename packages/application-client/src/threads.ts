@@ -454,7 +454,7 @@ export interface ThreadsAPI {
   /** Secondary read; history bodies never wait for a whole Run's usage scan. */
   historyUsage(identity: ThreadIdentity, cursor: { headId: string; beforeId?: string; limit?: number }, signal?: AbortSignal): Promise<ThreadRunUsage[]>;
   fileTarget(input: ThreadIdentity & { itemId: string; path: string }, signal?: AbortSignal): Promise<ThreadFileTarget>;
-  snapshot(identity: ThreadIdentity): Promise<ThreadSnapshot>;
+  snapshot(identity: ThreadIdentity, signal?: AbortSignal): Promise<ThreadSnapshot>;
   contextInspection(identity: ThreadIdentity, cursor: { headId: string | null }, signal?: AbortSignal): Promise<ThreadContextInspection>;
   /** Original execution usage on this branch, excluding child Threads and standalone utility work. */
   usage(identity: ThreadIdentity, signal?: AbortSignal): Promise<import('@varin/protocol').ThreadUsage>;

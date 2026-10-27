@@ -514,7 +514,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
   post('history/run-preview', (body, signal) => adapter.historyRunPreview(identity(body), { headId: text(body.headId), runId: text(body.runId) }, signal));
   post('history/usage', (body, signal) => adapter.historyUsage(identity(body), { headId: text(body.headId), ...(body.beforeId === undefined ? {} : { beforeId: text(body.beforeId) }), ...(body.limit === undefined ? {} : { limit: Number(body.limit) }) }, signal));
   post('history/file', (body, signal) => adapter.fileTarget({ ...identity(body), itemId: text(body.itemId), path: text(body.path) }, signal));
-  post('snapshot', body => adapter.snapshot(identity(body)));
+  post('snapshot', (body, signal) => adapter.snapshot(identity(body), signal));
   post('next-step', (body, signal) => adapter.nextStep(identity(body), text(body.runId), text(body.headId), signal));
   post('context/inspect', (body, signal) => adapter.contextInspection(identity(body), { headId: body.headId === null ? null : text(body.headId) }, signal));
   post('usage', (body, signal) => adapter.usage(identity(body), signal));

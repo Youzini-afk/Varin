@@ -28,10 +28,12 @@ type CompactQuery = Extract<ContextQuery,{action:'compact'}>;
 /** Credentials remain with the existing model authority; Rust owns each summary Run and CAS. */
 export class ContextService implements ContextOwner {
   private readonly observedPolicies = new Map<string, { runId: string; policy: ContextPolicySnapshot }>();
-  async presentation(run: Run): Promise<NonNullable<import('@varin/application-client').ThreadContextState['policy']>> {
+  async presentation(run: Run, signal?: AbortSignal): Promise<NonNullable<import('@varin/application-client').ThreadContextState['policy']>> {
+    const reading = signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal;
+    reading.throwIfAborted();
     const observed = this.observedPolicies.get(run.branch_id);
     const policy = observed?.runId === run.id ? observed.policy
-      : (await this.readPolicy(run, await this.runtime.launch(run.id), this.lifetime.signal)).policy;
+      : (await this.readPolicy(run, await this.runtime.launch(run.id, reading), reading)).policy;
     const capacityTokens = (run.configuration as { contextWindowTokens?: number }).contextWindowTokens ?? null;
     return { enabled: policy.enabled, backgroundPreparation: policy.backgroundPreparation, reserveTokens: policy.reserveTokens,
       preparationWaterline: policy.preparationWaterline, capacityTokens };

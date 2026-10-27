@@ -2132,7 +2132,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   });
   const unsubscribeNextStepSettings = modelsService.settings.subscribe(scope => { if (scope === 'global') void nextSteps.settingsChanged(); });
   threads.bindNextSteps(nextSteps);
-  threads.bindContextPolicy(run => contextService.presentation(run));
+  threads.bindContextPolicy((run, signal) => contextService.presentation(run, signal));
   threads.bindSourceDirectory(sourceDirectory);
   threads.bindContentMaintenance(contentMaintenance.request);
   externalAgents.bindContentMaintenance(contentMaintenance.request);
@@ -2231,20 +2231,20 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     storage: kernelStorageAdapter, store: kernelRecoveryStore, documents: documentsAuthority, resolveFiles: localRecoveryFileResolver });
   kernelRecoveryContentStore.bindTargetResources(async identity =>
     await targetRecovery.resolveFileResources(identity) ?? localRecoveryFileResolver(identity));
-  threads.bindRecoveryReader(async identity => {
+  threads.bindRecoveryReader(async (identity, signal) => {
     try {
     const branch = { threadId: identity.threadId, branchId: identity.branchId };
-    const sources = await agentRuntime.recoveryWorkspaces(branch);
-    const receipt = await agentRuntime.navigationReceipt(branch);
+    const sources = await agentRuntime.recoveryWorkspaces(branch, signal);
+    const receipt = await agentRuntime.navigationReceipt(branch, signal);
     const workspaces = [...new Set([recoveryCoordinatorWorkspace,
       ...sources.filter(source => source.resource_owner.kind === 'local').map(source => source.workspace_id)])];
     const operations = (await Promise.all(workspaces.map(async workspaceId => {
-      const result = await foundationalRecoveryEngine.listCombinedOperations(workspaceId);
+      const result = await foundationalRecoveryEngine.listCombinedOperations(workspaceId, signal);
       if (result.status !== 'ready') throw new Error('Recovery status unavailable');
       return result.operations.map(({editorText: _text,editorImages: _images,...operation}) => operation).filter(operation => operation.conversation.kind === 'thread' && operation.conversation.threadId === identity.threadId && operation.conversation.branchId === identity.branchId);
     }))).flat();
     return { navigation: receipt && !operations.some(operation => operation.id === receipt.key) ? receipt : null, operations };
-    } catch { return {navigation:null,operations:[],unavailable:"Recovery status is unavailable; conversation history remains readable"}; }
+    } catch { signal?.throwIfAborted(); return {navigation:null,operations:[],unavailable:"Recovery status is unavailable; conversation history remains readable"}; }
   });
   threadRecoveryReady = true;
   await foundationalRecoveryEngine.resumeCombinedOperations();

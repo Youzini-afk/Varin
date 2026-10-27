@@ -50,6 +50,11 @@ identity. Changing targets invalidates both the request and its intended mutatio
 can preserve continuity but cannot turn missing, loading, failed, or inaccessible data into success.
 Complete authoritative snapshots and partial save responses have different merge semantics.
 
+Leaving a conversation aborts its in-flight snapshot read as well as its event observation. The
+Host carries that read cancellation through history, context, child and recovery queries. A target
+conversation's initial load failure replaces the previous painted scene with its own retry state;
+loading labels identify the selected conversation. Retrying reads that same identity and preserves drafts.
+
 Conversation cards project native history IDs and original request metadata. File navigation resolves the
 history item's original source through the Host before opening Documents; the selected navigation project
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports

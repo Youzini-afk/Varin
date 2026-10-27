@@ -58,7 +58,7 @@ export class ThreadProjection {
       while (this.dirty && !this.abort.signal.aborted) {
         this.dirty = false;
         const observedBeforeSnapshot = this.progressObservation;
-        const snapshot = await this.api.snapshot(this.identity);
+        const snapshot = await this.api.snapshot(this.identity, this.abort.signal);
         if (!this.abort.signal.aborted) {
           if (!this.initialized) { this.cursor = Math.max(this.cursor, snapshot.eventCursor); this.initialized = true; }
           let activeRunId = snapshot.thread.branches.find(branch => branch.branch_id === this.identity.branchId)?.active_run_id ?? null;

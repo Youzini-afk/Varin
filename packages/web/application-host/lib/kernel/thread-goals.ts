@@ -5,7 +5,7 @@ type GoalOwner = Pick<ThreadAdapter, 'runtime' | 'requireIdentity'>;
 
 /** Catalog owns authorization, objective versions, inference usage and continuation admission. */
 export async function listThreadGoals(owner: GoalOwner, identity: ThreadIdentity, signal?: AbortSignal) {
-  await owner.requireIdentity(identity);
+  await owner.requireIdentity(identity, signal);
   return (await owner.runtime.goals(identity.threadId, signal))
     .filter(goal => goal.thread_id === identity.threadId && goal.branch_id === identity.branchId);
 }

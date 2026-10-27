@@ -10,7 +10,7 @@ import { registerThreadRoutes } from './thread-routes.js';
 /** Execute the public HTTP client, authentication, parser, adapter and private RPC mapping.
  * Catalog behavior and persistence are exercised in the Rust owner's real-database tests. */
 function fixture() {
-  const requests = vi.fn(async (_method: string, _params: unknown): Promise<unknown> => []);
+  const requests = vi.fn(async (_method: string, _params: unknown, _signal?: AbortSignal): Promise<unknown> => []);
   const runtime = new AgentRuntimeClient({ subscribeExit() {}, onToolReleased() {}, agentRuntimeRequest: requests } as unknown as KernelClient);
   const adapter = new ThreadAdapter(runtime, { resolveModel: vi.fn(), rebindModel: vi.fn() }, vi.fn(), vi.fn());
   const routes = new Map<string, RequestHandler[]>();
@@ -44,6 +44,20 @@ function fixture() {
 }
 afterEach(() => vi.unstubAllGlobals());
 const target = { runtime: 'agent' as const, threadId: 'original-thread' };
+
+it('propagates snapshot cancellation to the original native read without cancelling the Run', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  f.requests.mockImplementation(async (_method, _params, signal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const pending = f.adapter.snapshot({ ...target, branchId: 'original-branch' }, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(f.requests.mock.calls[0]?.[2]).toBe(controller.signal);
+  controller.abort();
+  await rejected;
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.status']);
+});
 
 it('lets an authenticated draft discover source Hosts without creating or granting a Thread', async () => {
   const f = fixture();
