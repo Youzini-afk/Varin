@@ -128,6 +128,7 @@ impl Storage {
         if record["status"] == "released" {
             return Ok(Some(record));
         }
+        if self.processes.is_starting(id) { return Ok(Some(record)); }
         if let Some(observed) = self.processes.observation(id)? {
             for (key, value) in observed.as_object().into_iter().flatten() {
                 record[key] = value.clone();
@@ -212,6 +213,7 @@ impl Storage {
         if record["status"] == "released" || record["writerActive"] == false {
             return Ok(Some(record));
         }
+        if self.processes.is_starting(id) { return Ok(Some(record)); }
         if let Some(observed) = self.processes.observation(id)? {
             for (key, value) in observed.as_object().into_iter().flatten() {
                 record[key] = value.clone();
@@ -417,7 +419,7 @@ impl Storage {
                         .into(),
                 ));
             }
-            let root = self.registered_file_root(
+            let root = self.admitted_file_root(
                 root_id.ok_or_else(|| {
                     KernelError::Authorization(
                         "native process access requires its physical source root".into(),
@@ -443,41 +445,28 @@ impl Storage {
         }
         Ok((record, actor))
     }
-    fn spawn_process(&mut self, params_value: &Value, grant: &Grant) -> Result<Value, KernelError> {
-        self.check_cancelled()?;
+    fn spawn_process(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let task = self.prepare_process_spawn(
+            params,
+            grant,
+            self.cancellation
+                .clone()
+                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
+        )?;
+        task.run_local(self)
+    }
+    pub(super) fn begin_process_launch(
+        &mut self,
+        params_value: &Value,
+        root: &FileRoot,
+        cwd: &Path,
+        canonical_relative: &str,
+        canonical: &Path,
+        grant: &Grant,
+    ) -> Result<super::process_tasks::Admission, KernelError> {
         let id = string(params_value, "processId")?;
-        if id.is_empty() || id.len() > 200 {
-            return Err(KernelError::Operation("invalid process identity".into()));
-        }
         let workspace = string(params_value, "workspaceId")?;
         let root_id = string(params_value, "rootId")?;
-        let root = self.registered_file_root(root_id, grant)?.clone();
-        if root.owning_workspace_id != workspace {
-            return Err(KernelError::Authorization(
-                "process root workspace mismatch".into(),
-            ));
-        }
-        let cwd = self.resolve_file_resource(root_id, string(params_value, "cwd")?, grant, true)?;
-        let cwd = fs::canonicalize(&cwd.absolute).map_err(|error| {
-            if error.kind() == io::ErrorKind::NotFound {
-                KernelError::NotFound(format!("process working directory {:?} under the selected source root", params_value["cwd"]))
-            } else { error.into() }
-        })?;
-        if !contains(&root.canonical_root, &cwd) || !cwd.is_dir() {
-            return Err(KernelError::Authorization(
-                "process cwd escaped the registered directory".into(),
-            ));
-        }
-        let canonical_relative = cwd
-            .strip_prefix(&root.canonical_root)
-            .map_err(|_| KernelError::Authorization("process cwd identity mismatch".into()))?
-            .to_string_lossy()
-            .replace('\\', "/");
-        if !path_allowed(grant, &canonical_relative) {
-            return Err(KernelError::Authorization(
-                "process cwd is outside grant scope".into(),
-            ));
-        }
         let mode = string(params_value, "mode")?;
         if !matches!(mode, "pty" | "pipe") {
             return Err(KernelError::Operation(
@@ -489,7 +478,9 @@ impl Storage {
             Some(_) => string(params_value, "stdinMode")?,
         };
         if !matches!(stdin_mode, "pipe" | "null") || (mode == "pty" && stdin_mode == "null") {
-            return Err(KernelError::Operation("stdinMode must be pipe, or null for a pipe process".into()));
+            return Err(KernelError::Operation(
+                "stdinMode must be pipe, or null for a pipe process".into(),
+            ));
         }
         if let Some(raw) = params_value
             .get("windowsRawArguments")
@@ -535,13 +526,15 @@ impl Storage {
                 ));
             }
             // Even after release/restart, a command identity never starts twice.
-            return Ok(self.refresh_process_record(id)?.unwrap_or(record));
+            return Ok(super::process_tasks::Admission::Complete(
+                self.refresh_process_record(id)?.unwrap_or(record),
+            ));
         }
-        self.assert_file_lease(
+        self.assert_canonical_file_lease(
             grant,
             root_id,
-            &[FileLeaseResource {
-                path: canonical_relative.clone(),
+            &[crate::model::CanonicalFileLeaseResource {
+                absolute: canonical.to_path_buf(),
                 subtree: true,
             }],
             None,
@@ -555,39 +548,64 @@ impl Storage {
         let job_name = process::job_name(&self.root, id);
         self.conn.execute("INSERT INTO process_records(process_id,workspace_id,execution_workspace_id,grant_id,kernel_epoch,cwd,job_name,params_hash,status_json) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)",
             params![id,workspace,root.execution_workspace_id,grant.grant_id,grant.kernel_epoch,cwd.to_string_lossy(),job_name,hash,serde_json::to_string(&record)?])?;
-        let receipt_path = process::receipt_path(&self.root, id);
-        let spawned = (|| {
-            fs::create_dir_all(receipt_path.parent().ok_or_else(|| {
-                KernelError::Storage("process receipt directory is unavailable".into())
-            })?)?;
-            sync_directory(&self.root)?;
-            self.check_cancelled()?;
-            self.processes.spawn(id, json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
-                "receiptPath":receipt_path,"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
-                "windowsRawArguments":params_value["windowsRawArguments"],
-                "env":params_value["env"],"mode":mode,"stdinMode":stdin_mode,"cols":cols,"rows":rows,"runId":grant.run_id}))
-        })();
+        let launch=self.processes.prepare_launch(id,json!({"processId":id,"kernelEpoch":grant.kernel_epoch,
+            "receiptPath":process::receipt_path(&self.root,id),"jobName":job_name,"cwd":cwd,"command":command,"args":params_value["args"],
+            "windowsRawArguments":params_value["windowsRawArguments"],"env":params_value["env"],"mode":mode,"stdinMode":stdin_mode,"cols":cols,"rows":rows,"runId":grant.run_id}));
+        match launch {
+            Ok(launch) => Ok(super::process_tasks::Admission::Launch(launch)),
+            Err(error) => self
+                .finish_process_launch(id, Err(error))
+                .map(super::process_tasks::Admission::Complete),
+        }
+    }
+    pub(super) fn finish_process_launch(
+        &mut self,
+        id: &str,
+        result: Result<process::launch::Started, KernelError>,
+    ) -> Result<Value, KernelError> {
+        let spawned = self.processes.finish_launch(id, result);
+        let mut record = self
+            .process_record(id)?
+            .ok_or_else(|| KernelError::Storage("Original process intent disappeared".into()))?;
         if let Err(error) = spawned {
-            let mut failed = record;
-            failed["reason"] = json!(error.to_string());
+            record["reason"] = json!(error.to_string());
             if self.processes.is_live(id) {
-                // A duplicate live identity can already own a target. Rejection is not its
-                // stop receipt; retain writer activity until the original tree is observed.
-                failed["status"] = json!("unknown");
+                record["status"] = json!("unknown");
             } else {
-                // ProcessManager sends the first guardian config only after every fallible
-                // admission step. These errors prove no target was admitted, even if a
-                // guardian was created. Keep that proof in the original durable intent.
-                failed["status"] = json!("failed");
-                failed["writerActive"] = json!(false);
-                failed["treeConfirmed"] = json!(true);
-                failed["spawned"] = json!(false);
+                record["status"] = json!("failed");
+                record["writerActive"] = json!(false);
+                record["treeConfirmed"] = json!(true);
+                record["spawned"] = json!(false);
             }
-            self.persist_process_record(id, &failed)?;
+            self.persist_process_record(id, &record)?;
             return Err(error);
         }
+        let actor: String = self.conn.query_row(
+            "SELECT grant_id FROM process_records WHERE process_id=?1",
+            [id],
+            |row| row.get(0),
+        )?;
+        if self.load_grant(&actor)?.state != GrantState::Active {
+            let _ = self.processes.kill(id, true);
+        }
         self.refresh_process_record(id)?
-            .ok_or_else(|| KernelError::Storage("process intent disappeared".into()))
+            .ok_or_else(|| KernelError::Storage("Original process intent disappeared".into()))
+    }
+    pub(super) fn fail_uncertain_process_launch(&mut self, id: &str) -> Result<Value, KernelError> {
+        let stop = self.processes.abandon_uncertain_launch(id);
+        let mut record = self
+            .process_record(id)?
+            .ok_or_else(|| KernelError::Storage("Original process intent disappeared".into()))?;
+        record["status"] = json!("unknown");
+        record["reason"] =
+            json!("Guardian startup worker stopped without a conclusive dispatch receipt");
+        if let Err(error) = stop {
+            record["stopError"] = json!(error.to_string());
+        }
+        self.persist_process_record(id, &record)?;
+        Err(KernelError::Storage(
+            "Guardian startup outcome is unknown; the original process intent is retained".into(),
+        ))
     }
     /// Read-only access to a Catalog-validated original Thread/Environment process Job.
     /// Catalog checks the exact requested process, branch, lifetime and source_run_id.
@@ -634,7 +652,7 @@ impl Storage {
                 "original process authority was revoked or does not match this Run/source".into(),
             ));
         }
-        let root = self.registered_file_root(
+        let root = self.admitted_file_root(
             root_id.ok_or_else(|| {
                 KernelError::Authorization(
                     "process observation requires its physical source root".into(),
@@ -736,7 +754,7 @@ impl Storage {
                 ));
             }
             let root = self
-                .registered_file_root(string(params_value, "rootId")?, grant)?
+                .admitted_file_root(string(params_value, "rootId")?, grant)?
                 .clone();
             self.refresh_process_records()?;
             let cursor = i64::try_from(unsigned(params_value, "cursor", 0)?).map_err(|_| {

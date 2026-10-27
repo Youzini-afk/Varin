@@ -42,11 +42,11 @@ enum WorkerRequest {
         prepared: crate::storage::capture_resources::CapturePreparation,
         result: Result<Vec<crate::model::CanonicalFileLeaseResource>, KernelError>,
     },
-    TextMutationDone {
+    ResourceWorkDone {
         call: crate::tools::ResourceCall,
         result: Result<Value, crate::tools::ResourceFailure>,
     },
-    FileEffectDone {
+    ResourceRequestDone {
         request: Value,
         result: Result<Value, KernelError>,
     },
@@ -67,6 +67,7 @@ enum WorkerRequest {
     FileObservation(crate::file_observation::Command),
     Workspace(crate::storage::workspace_session::Command),
     WorkspaceIdle,
+    FileWorkersDrained,
     WorkspaceDone { request: Option<Value>, result: Result<Value, KernelError> },
     WorkspaceShutdownDone {
         request: Option<Value>, result: Result<Value, KernelError>,
@@ -239,6 +240,7 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.mkdir"
             | "file.remove"
             | "file.rename"
+            | "process.spawn"
             | "file.capture"
             | "file.captureBatch"
             | "file.scan"
@@ -283,6 +285,7 @@ struct Kernel {
     workspace_tasks: HashMap<String, Arc<AtomicBool>>,
     workspace_shutdown: bool,
     workspace_shutdown_started: bool,
+    file_workers_draining: bool,
     workspace_shutdown_request: Option<Value>,
     shutdown_complete: bool,
     workspace_idle_pending:bool,
@@ -325,19 +328,28 @@ impl Kernel {
         if !self.workspace_shutdown || self.workspace_shutdown_started || !self.workspace_tasks.is_empty()
             || !self.source_tasks.is_empty() || self.active_materializations != 0
             || self.storage.as_ref().is_some_and(Storage::file_observation_reads_active) { return; }
+        if self.file_workers_draining { return; }
+        self.file_workers.retain(|(_,worker)|!worker.is_finished());
+        if !self.file_workers.is_empty() {
+            self.file_workers_draining=true;
+            let (workers,sender)=(std::mem::take(&mut self.file_workers),completions.clone());
+            thread::spawn(move ||{
+                for (_,worker) in workers {let _=worker.join();}
+                let _=sender.send(WorkerRequest::FileWorkersDrained);
+            });
+            return;
+        }
         self.workspace_shutdown_started = true;
         self.workspace_idle_pending=false;
         let request = self.workspace_shutdown_request.take();
         let execution = self.storage.as_mut().map(Storage::take_execution_for_shutdown).unwrap_or_default();
-        let workers = std::mem::take(&mut self.file_workers);
         let (workspaces, sender) = (self.workspaces.clone(), completions.clone());
         thread::spawn(move || {
             let (mut processes, mut computations) = execution;
-            // Native users may be waiting in a filesystem callback. Keep its
-            // StoragePort owner responsive while stopping and joining them.
+            // File/launch executors have transferred their final handles above.
+            // Keep Storage responsive to callbacks from the remaining native users.
             let result = processes.shutdown();
             computations.shutdown();
-            for (_, worker) in workers { let _ = worker.join(); }
             let result = result.and_then(|()| workspaces.shutdown()).map(|()| json!({"stopping":true}));
             let _ = sender.send(WorkerRequest::WorkspaceShutdownDone { request, result, processes, computations });
         });
@@ -368,6 +380,7 @@ impl Kernel {
             workspace_tasks: HashMap::new(),
             workspace_shutdown: false,
             workspace_shutdown_started: false,
+            file_workers_draining: false,
             workspace_shutdown_request: None,
             shutdown_complete: false,
             workspace_idle_pending:false,
@@ -665,9 +678,19 @@ impl Kernel {
             self.file_workers.retain(|(_, worker)| !worker.is_finished());
             let worker = thread::Builder::new().name("file-effect".into()).spawn(move || {
                 let result = task.run(port);
-                let _ = completed.send(WorkerRequest::FileEffectDone { request, result });
+                let _ = completed.send(WorkerRequest::ResourceRequestDone { request, result });
             })?;
             self.file_workers.push((cancellation, worker));
+            return Ok(None);
+        }
+        if method=="process.spawn" {
+            let task=storage.prepare_process_spawn(&authorized_params,&authorized_grant,cancellation.clone())?;
+            let (port,completed,request)=(Self::workspace_port(completions),completions.clone(),request.clone());
+            let worker=thread::Builder::new().name("process-launch".into()).spawn(move ||{
+                let result=task.run(port);
+                let _=completed.send(WorkerRequest::ResourceRequestDone{request,result});
+            })?;
+            self.file_workers.push((cancellation,worker));
             return Ok(None);
         }
         if method == "storage.getBlob" {
@@ -1810,14 +1833,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     respond!(response);
                     continue;
                 }
-                WorkerRequest::TextMutationDone { call, result } => {
+                WorkerRequest::ResourceWorkDone { call, result } => {
                     if let Some(key) = &call.admission_key {
                         if let Ok(mut active) = worker_cancellations.lock() { active.remove(key); }
                     }
                     let _ = call.reply.send(result);
                     continue;
                 }
-                WorkerRequest::FileEffectDone { request, result } => {
+                WorkerRequest::ResourceRequestDone { request, result } => {
                     let id = request["id"].as_str().unwrap_or("");
                     if let Ok(mut active) = worker_cancellations.lock() { active.remove(id); }
                     // The original worker has already committed its actual receipt
@@ -2082,6 +2105,11 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if stopping && kernel.drained() { break; }
                     continue;
                 }
+                WorkerRequest::FileWorkersDrained => {
+                    kernel.file_workers_draining=false;
+                    kernel.advance_shutdown(&capture_completions);
+                    continue;
+                }
                 WorkerRequest::RecheckRecoveredProcessReceipts => {
                     kernel.workspace_idle_pending=true;
                     if let Some(storage) = kernel.storage.as_mut() {
@@ -2145,12 +2173,25 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     let result = match result {
                         Ok(crate::tools::ResourceWork::Ready(value)) => Ok(value),
+                        Ok(crate::tools::ResourceWork::ProcessSpawn(task)) => {
+                            let (port,completed)=(Kernel::workspace_port(&capture_completions),capture_completions.clone());
+                            let (key,cancellation)=(call.admission_key.clone(),call.cancellation.shared_flag());
+                            let worker=thread::Builder::new().name("process-launch".into()).spawn(move ||{
+                                let result=task.run_resource(port);
+                                let _=completed.send(WorkerRequest::ResourceWorkDone{call,result});
+                            });
+                            match worker {
+                                Ok(worker)=>kernel.file_workers.push((cancellation,worker)),
+                                Err(_)=>if let Some(key)=key{if let Ok(mut active)=worker_cancellations.lock(){active.remove(&key);}},
+                            }
+                            continue;
+                        }
                         Ok(crate::tools::ResourceWork::TextMutation(task)) => {
                             let (port, completed) = (Kernel::workspace_port(&capture_completions), capture_completions.clone());
                             let (key, cancellation) = (call.admission_key.clone(), call.cancellation.shared_flag());
                             let worker = thread::Builder::new().name("text-mutation".into()).spawn(move || {
                                 let result = task.run(port);
-                                let _ = completed.send(WorkerRequest::TextMutationDone { call, result });
+                                let _ = completed.send(WorkerRequest::ResourceWorkDone { call, result });
                             });
                             match worker {
                                 Ok(worker) => kernel.file_workers.push((cancellation, worker)),

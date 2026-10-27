@@ -50,6 +50,10 @@ impl Fixture {
                         .remove(request["id"].as_str().unwrap());
                     return result;
                 }
+                WorkerRequest::FileWorkersDrained => {
+                    self.kernel.file_workers_draining=false;
+                    self.kernel.advance_shutdown(&self.tx);
+                },
                 WorkerRequest::WorkspaceShutdownDone {
                     result,
                     processes,

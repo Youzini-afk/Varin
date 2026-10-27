@@ -107,7 +107,7 @@ impl Fixture {
             )
             .unwrap();
         let Some(response) = response else {
-            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename") {
+            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename"|"process.spawn") {
                 return self.finish_effect().unwrap();
             }
             assert!(matches!(method,"file.lease.wait"|"file.lease.acquire"|"file.lease.check"), "short request became pending");
@@ -120,7 +120,7 @@ impl Fixture {
         loop {
             match self.rx.recv_timeout(WAIT).expect("file effect did not drain") {
                 WorkerRequest::Workspace(command) => command(self.kernel.storage.as_mut()),
-                WorkerRequest::FileEffectDone { result, .. } => return result,
+                WorkerRequest::ResourceRequestDone { result, .. } => return result,
                 _ => panic!("unexpected file effect continuation"),
             }
         }

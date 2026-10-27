@@ -396,6 +396,30 @@ pub(super) fn create_symlink(target: &str, path: &Path) -> Result<(), KernelErro
 }
 
 impl Storage {
+    /// Process output/control uses the admitted original executor, not a new
+    /// filesystem access. Reopening its cwd can enter a mounted filesystem and
+    /// can also make a stopped process unreadable after its directory disappears.
+    pub(crate) fn validate_recorded_live_root(
+        &self, identity: &varin_runtime::catalog::launches::LiveRoot, grant: &Grant, host_id: &str,
+    ) -> Result<(), KernelError> {
+        let root=self.admitted_file_root(&identity.root_id,grant)?;
+        #[cfg(windows)]
+        let same={
+            let normalize=|path:&Path|{
+                let value=path.to_string_lossy().replace('/',"\\");
+                let value=if let Some(unc)=value.strip_prefix(r"\\?\UNC\"){format!(r"\\{unc}")}
+                    else{value.strip_prefix(r"\\?\").unwrap_or(&value).to_owned()};
+                value.trim_end_matches('\\').to_lowercase()
+            };
+            normalize(Path::new(&identity.canonical_root))==normalize(&root.canonical_root)
+        };
+        #[cfg(not(windows))]
+        let same=Path::new(&identity.canonical_root)==root.canonical_root;
+        if identity.host_id!=host_id||!same{
+            return Err(KernelError::Authorization("Recorded process source identity changed".into()));
+        }
+        Ok(())
+    }
     pub(crate) fn validate_live_root(
         &self,
         identity: &varin_runtime::catalog::launches::LiveRoot,

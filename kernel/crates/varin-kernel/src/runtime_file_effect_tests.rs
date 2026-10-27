@@ -1,6 +1,87 @@
 //! Real worker/control continuations: neither cancellation nor observation can
 //! release the original writer before its filesystem effect and receipt drain.
 use super::*;
+
+#[test]
+fn process_launch_does_not_turn_pending_startup_into_a_false_exit_and_can_be_stopped_before_dispatch(
+) {
+    let mut f = Fixture::new();
+    f.grant("process", &["storage.admin", "process"], &[""]);
+    let params = json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch","cwd":"","command":"must-not-start",
+        "args":[],"env":[],"mode":"pipe"});
+    f.begin("process.spawn", params.clone(), "process");
+    let WorkerRequest::Workspace(admission) = f.rx.recv_timeout(WAIT).unwrap() else {
+        panic!("process cwd admission did not return to Storage");
+    };
+    f.short("storage.health", json!({}), Some("reader"));
+    admission(f.kernel.storage.as_mut());
+    let WorkerRequest::Workspace(before_launch) = f.rx.recv_timeout(WAIT).unwrap() else {
+        panic!("guardian launch did not preserve its authorization boundary");
+    };
+    let inspected = f.short(
+        "process.inspect",
+        json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch"}),
+        Some("process"),
+    );
+    assert_eq!(inspected["status"], "starting");
+    assert_eq!(
+        inspected["writerActive"], true,
+        "a guardian that has not registered yet is still an admitted writer"
+    );
+    let stopped = f.short(
+        "process.kill",
+        json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch","force":true}),
+        Some("process"),
+    );
+    assert_eq!(stopped["requested"], true);
+    assert_eq!(stopped["exited"], false);
+    before_launch(f.kernel.storage.as_mut());
+    assert!(matches!(f.finish_effect(), Err(KernelError::Cancelled)));
+    let inspected = f.short(
+        "process.inspect",
+        json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch"}),
+        Some("process"),
+    );
+    assert_eq!(inspected["spawned"], false);
+    assert_eq!(inspected["writerActive"], false);
+    assert_eq!(inspected["treeConfirmed"], true);
+    let replay = f.short("process.spawn", params, Some("process"));
+    assert_eq!(
+        replay["spawned"], false,
+        "the original process identity must not launch again"
+    );
+    fs::rename(f.work(), f.directory.0.join("removed-cwd")).unwrap();
+    assert_eq!(
+        f.short(
+            "process.inspect",
+            json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"launch"}),
+            Some("process")
+        )["spawned"],
+        false
+    );
+}
+
+#[test]
+fn process_cwd_resolution_leaves_control_responsive_when_the_source_disappears() {
+    let mut f = Fixture::new();
+    f.grant("process", &["storage.admin", "process"], &[""]);
+    fs::rename(f.work(), f.directory.0.join("away")).unwrap();
+    f.begin(
+        "process.spawn",
+        json!({"workspaceId":"workspace","rootId":f.root_id,"processId":"missing","cwd":"",
+        "command":"unused","args":[],"env":[],"mode":"pipe"}),
+        "process",
+    );
+    f.short("storage.health", json!({}), Some("reader"));
+    assert!(f.finish_effect().is_err());
+    assert!(f
+        .kernel
+        .storage
+        .as_ref()
+        .unwrap()
+        .process_spawn_not_dispatched("missing")
+        .unwrap());
+}
 use crate::storage::file_mutations::{FileWriteArgs, FileWriteMode, TextMutation};
 
 #[test]
@@ -46,7 +127,7 @@ fn file_effect_records_actual_result_after_cancel_revoke_and_deferred_release() 
                 }
                 command(f.kernel.storage.as_mut());
             }
-            WorkerRequest::FileEffectDone { result, .. } => {
+            WorkerRequest::ResourceRequestDone { result, .. } => {
                 assert_eq!(result.unwrap()["status"], "applied");
                 break;
             }

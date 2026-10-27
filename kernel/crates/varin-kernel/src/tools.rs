@@ -2807,6 +2807,7 @@ fn validate_binding(
 pub(crate) enum ResourceWork {
     Ready(Value),
     TextMutation(crate::storage::file_mutation_tasks::Task),
+    ProcessSpawn(crate::storage::process_tasks::Task),
     BlobRead(crate::storage::blob_reads::BlobReadTask),
     ExecutionView(crate::storage::materialization::Task),
 }
@@ -2896,6 +2897,18 @@ pub(crate) fn prepare_resource(
             effective=request.with_execution_binding(binding); &effective
         } else {request}
     } else {request};
+    if matches!(request.operation,ResourceOperation::ProcessSpawn(_)) {
+        let result=(||{
+            let (method,params)=request.operation.params(&request.binding,&request.context);
+            let (grant,authorized)=storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,method,&params)?;
+            validate_binding(&grant,&request.binding,&request.context)?;
+            let task=storage.prepare_process_spawn(&authorized,&grant,request.cancellation.shared_flag())?
+                .with_live_root(request.binding.live_root.clone());
+            if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
+            Ok(ResourceWork::ProcessSpawn(task))
+        })();
+        return result.map_err(|error|ResourceFailure{error,dispatched:false});
+    }
     if let ResourceOperation::FileMutation(mutation) = &request.operation {
         let result = (|| {
             let (method, params) = request.operation.params(&request.binding, &request.context);
@@ -3066,6 +3079,7 @@ pub(crate) fn serve_resource(
 ) -> Result<Value, ResourceFailure> {
     match prepare_resource(storage, epoch, host_id, host_generation, request)? {
         ResourceWork::Ready(value) => Ok(value),
+        ResourceWork::ProcessSpawn(task) => task.run_local_resource(storage),
         ResourceWork::TextMutation(task) => {
             let mut dispatched = false;
             task.run_local(storage, &mut dispatched).map_err(|error|ResourceFailure{error,dispatched})
@@ -3162,7 +3176,10 @@ fn serve_resource_immediate(
             ));
         }
         if let Some(root) = &request.binding.live_root {
-            storage.validate_live_root(root, &grant, host_id)?;
+            if matches!(request.operation,ResourceOperation::ProcessInspect(_)|ResourceOperation::ProcessRead(_)|ResourceOperation::ProcessObservation{..}) {
+                if request.binding.root_id.as_deref()!=Some(root.root_id.as_str()) {return Err(KernelError::Authorization("Original process root binding changed".into()));}
+                storage.validate_recorded_live_root(root,&grant,host_id)?;
+            } else {storage.validate_live_root(root, &grant, host_id)?;}
         }
         match &request.operation {
             ResourceOperation::ChildSourceHandoff { delegation } => {
@@ -3182,9 +3199,6 @@ fn serve_resource_immediate(
                 return storage.require_child_root_idle(&request.binding, &grant);
             }
             _ => (),
-        }
-        if let Some(root) = &request.binding.live_root {
-            storage.validate_live_root(root, &grant, host_id)?;
         }
         let file_path = match &request.operation {
             ResourceOperation::FileMutation(mutation) => Some(mutation.path()),

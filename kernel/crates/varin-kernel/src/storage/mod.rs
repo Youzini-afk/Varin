@@ -68,6 +68,7 @@ mod native_authority_tests;
 mod versioned_workspaces_review;
 pub(crate) mod process_interactions;
 mod process_resources;
+pub(crate) mod process_tasks;
 mod records;
 mod recovery;
 mod recovery_journal;
