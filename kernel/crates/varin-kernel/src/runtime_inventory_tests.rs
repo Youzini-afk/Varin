@@ -7,6 +7,9 @@ const GENERATION: &str = "inventory-generation";
 const EPOCH: &str = "inventory-epoch";
 const WAIT: Duration = Duration::from_secs(10);
 
+#[path = "runtime_workspace_tests.rs"]
+mod workspace_tests;
+
 struct TempRoot(PathBuf);
 impl Drop for TempRoot {
     fn drop(&mut self) {
@@ -287,32 +290,21 @@ fn file_inventory_shutdown_retains_storage_until_real_worker_stops() {
     let mut hold = f.hold();
     let (_, token) = f.begin("file.measure", f.params(""), "reader");
     hold.entered();
-    assert_eq!(
-        f.short("kernel.shutdown", json!({}), None)["stopping"],
-        true
-    );
+    let request = Fixture::request("kernel.shutdown", json!({}), None);
+    assert!(f.kernel.handle(&request,Arc::new(AtomicBool::new(false)),&f.tx).unwrap().is_none());
     assert!(token.load(Ordering::Acquire));
     let store = f.directory.0.join("store");
-    let kernel = std::mem::replace(&mut f.kernel, Kernel::new("closed".into()));
-    let (dropping, entered) = mpsc::channel();
-    let (done, finished) = mpsc::channel();
-    let shutdown = thread::spawn(move || {
-        dropping.send(()).unwrap();
-        drop(kernel);
-        done.send(()).unwrap();
-    });
-    entered.recv_timeout(WAIT).unwrap();
     assert!(
         crate::storage::Storage::open(&store, HOST).is_err(),
         "Storage released before its reader stopped"
     );
-    assert!(matches!(
-        finished.try_recv(),
-        Err(mpsc::TryRecvError::Empty)
-    ));
+    assert!(!f.kernel.drained(), "shutdown must remain pending while the real reader is blocked");
     hold.release();
-    finished.recv_timeout(WAIT).unwrap();
-    shutdown.join().unwrap();
+    assert!(matches!(f.finish(),Err(KernelError::Cancelled)));
+    assert_eq!(f.workspace_finish().unwrap()["stopping"],true);
+    assert!(f.kernel.drained());
+    let kernel = std::mem::replace(&mut f.kernel, Kernel::new("closed".into()));
+    drop(kernel);
     assert!(crate::storage::Storage::open(&store, HOST).is_ok());
 }
 

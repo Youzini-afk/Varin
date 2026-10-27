@@ -25,7 +25,7 @@ pub(crate) const STORAGE_FORMAT_VERSION: &str = "22";
 // begin/data/finish stream and therefore do not need a giant JSON envelope.
 pub(crate) const MAX_FRAME_BYTES: usize = crate::protocol_generated::KERNEL_MAX_FRAME_BYTES;
 pub(crate) const MAX_BLOB_RESPONSE_BYTES: usize = (MAX_FRAME_BYTES * 3 / 4).saturating_sub(1024);
-pub(crate) const KERNEL_CAPABILITIES: [&str; 9] = [
+pub(crate) const KERNEL_CAPABILITIES: [&str; 10] = [
     "storage",
     "workingState",
     "recovery",
@@ -35,6 +35,7 @@ pub(crate) const KERNEL_CAPABILITIES: [&str; 9] = [
     "branchCas",
     "pins",
     "gc",
+    "nativeWorkspaces",
 ];
 
 pub(crate) fn now_ms() -> i64 {

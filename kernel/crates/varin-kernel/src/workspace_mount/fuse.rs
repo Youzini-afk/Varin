@@ -61,10 +61,13 @@ struct Handles {
     next: u64,
     nodes: HashMap<u64, Arc<Node>>,
     handles: HashMap<u64, Handle>,
+    lookups: HashMap<u64, u64>,
 }
 struct Backend {
     session: Arc<WorkspaceSession>,
-    handles: Mutex<Handles>,
+    handles: Arc<Mutex<Handles>>,
+    open_boundary: Arc<std::sync::RwLock<()>>,
+    closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Backend {
     fn node(&self, id: INodeNo) -> Result<Arc<Node>, KernelError> {
@@ -78,12 +81,51 @@ impl Backend {
             .ok_or_else(|| crate::error::KernelError::NotFound("native inode".into()))
     }
     fn remember(&self, node: Arc<Node>) -> Result<Arc<Node>, KernelError> {
-        self.handles
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|_| unsupported("Native handle registry failed"))?;
+        let count = handles.lookups.entry(node.id).or_default();
+        *count = count
+            .checked_add(1)
+            .ok_or_else(|| unsupported("Native lookup reference space exhausted"))?;
+        handles.nodes.insert(node.id, node.clone());
+        Ok(node)
+    }
+    fn retire(&self, ino: u64) -> Result<(), KernelError> {
+        let node = {
+            let mut handles = self
+                .handles
+                .lock()
+                .map_err(|_| unsupported("Native handle registry failed"))?;
+            if ino == 1
+                || handles.lookups.get(&ino).copied().unwrap_or(0) != 0
+                || handles.handles.values().any(|handle| handle.node.id == ino)
+            {
+                return Ok(());
+            }
+            handles.lookups.remove(&ino);
+            handles.nodes.remove(&ino)
+        };
+        if let Some(node) = node {
+            self.session.forget_cached(&node)?;
+        }
+        Ok(())
+    }
+    fn release_handle(&self, fh: FileHandle) -> Result<(), KernelError> {
+        let handle = self
+            .handles
             .lock()
             .map_err(|_| unsupported("Native handle registry failed"))?
-            .nodes
-            .insert(node.id, node.clone());
-        Ok(node)
+            .handles
+            .remove(&fh.0);
+        if let Some(handle) = handle {
+            let id = handle.node.id;
+            drop(handle);
+            self.retire(id)?;
+        }
+        self.session.notify_native_idle();
+        Ok(())
     }
     fn selected(&self, parent: INodeNo, name: &OsStr) -> Result<String, KernelError> {
         let parent = self
@@ -129,7 +171,7 @@ impl Backend {
             crtime: metadata.created.time()?,
             kind,
             perm: metadata.mode as u16,
-            nlink: if node.linked()? { 1 } else { 0 },
+            nlink: node.link_count()?,
             uid: metadata.uid,
             gid: metadata.gid,
             rdev: 0,
@@ -138,6 +180,16 @@ impl Backend {
         })
     }
     fn handle(&self, node: Arc<Node>, flags: i32) -> Result<FileHandle, KernelError> {
+        let _open = self
+            .open_boundary
+            .read()
+            .map_err(|_| unsupported("Native open boundary failed"))?;
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(unsupported("The original native mount is closing"));
+        }
+        self.register_handle(node, flags)
+    }
+    fn register_handle(&self, node: Arc<Node>, flags: i32) -> Result<FileHandle, KernelError> {
         let content = if matches!(node.state()?, PathState::RegularFile { .. }) {
             Some(self.session.open_file(&node)?)
         } else {
@@ -193,6 +245,17 @@ impl Backend {
     }
 }
 impl Filesystem for Backend {
+    fn forget(&self, _: &Request, ino: INodeNo, nlookup: u64) {
+        if let Ok(mut handles) = self.handles.lock() {
+            if let Some(count) = handles.lookups.get_mut(&ino.0) {
+                *count = count.saturating_sub(nlookup);
+            }
+        }
+        if let Err(error) = self.retire(ino.0) {
+            eprintln!("Native lookup release remains pending: {error}");
+        }
+        self.session.notify_native_idle();
+    }
     fn init(&mut self, _: &Request, config: &mut KernelConfig) -> std::io::Result<()> {
         #[cfg(target_os = "macos")]
         config.remove_capabilities(
@@ -206,8 +269,11 @@ impl Filesystem for Backend {
         let result = self
             .selected(parent, name)
             .and_then(|p| self.session.lookup(&p))
-            .and_then(|node| self.remember(node))
-            .and_then(|node| self.attr(&node));
+            .and_then(|node| {
+                let attr = self.attr(&node)?;
+                self.remember(node)?;
+                Ok(attr)
+            });
         match result {
             Ok(attr) => reply.entry(&Duration::ZERO, &attr, Generation(1)),
             Err(error) => reply.error(native(error)),
@@ -302,11 +368,10 @@ impl Filesystem for Backend {
         reply: ReplyEmpty,
     ) {
         let result = self.sync(fh);
-        if let Ok(mut handles) = self.handles.lock() {
-            // Native release ended this descriptor even on a flush error.
-            // Unsaved bytes remain owned by the session's dirty inode set.
-            handles.handles.remove(&fh.0);
-        }
+        // Release ended this descriptor even on a flush error. Unsaved bytes
+        // remain owned by the session's dirty inode set.
+        let retired = self.release_handle(fh);
+        let result = result.and(retired);
         match result {
             Ok(()) => reply.ok(),
             Err(error) => reply.error(native(error)),
@@ -323,6 +388,13 @@ impl Filesystem for Backend {
         reply: ReplyCreate,
     ) {
         let result = (|| {
+            let _open = self
+                .open_boundary
+                .read()
+                .map_err(|_| unsupported("Native open boundary failed"))?;
+            if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(unsupported("The original native mount is closing"));
+            }
             let node = self.session.create_file_with_attributes(
                 &self.selected(parent, name)?,
                 mode & 0o7777 & !umask,
@@ -333,7 +405,9 @@ impl Filesystem for Backend {
                 },
             )?;
             let attr = self.attr(&node)?;
-            Ok((attr, self.handle(node, flags)?))
+            let handle = self.register_handle(node.clone(), flags)?;
+            self.remember(node)?;
+            Ok((attr, handle))
         })();
         match result {
             Ok((attr, handle)) => reply.created(
@@ -367,8 +441,9 @@ impl Filesystem for Backend {
                     Ok(())
                 },
             )?;
-            let node = self.remember(node)?;
-            self.attr(&node)
+            let attr = self.attr(&node)?;
+            self.remember(node)?;
+            Ok(attr)
         })();
         match result {
             Ok(attr) => reply.entry(&Duration::ZERO, &attr, Generation(1)),
@@ -381,6 +456,28 @@ impl Filesystem for Backend {
             .and_then(|p| self.session.remove(&p, false))
         {
             Ok(()) => reply.ok(),
+            Err(error) => reply.error(native(error)),
+        }
+    }
+    fn link(
+        &self,
+        _: &Request,
+        ino: INodeNo,
+        newparent: INodeNo,
+        newname: &OsStr,
+        reply: ReplyEntry,
+    ) {
+        let result = (|| {
+            let source = self.node(ino)?;
+            let node = self
+                .session
+                .link(&source, &self.selected(newparent, newname)?)?;
+            let attr = self.attr(&node)?;
+            self.remember(node)?;
+            Ok(attr)
+        })();
+        match result {
+            Ok(attr) => reply.entry(&Duration::ZERO, &attr, Generation(1)),
             Err(error) => reply.error(native(error)),
         }
     }
@@ -455,8 +552,9 @@ impl Filesystem for Backend {
                     Ok(())
                 },
             )?;
-            let node = self.remember(node)?;
-            self.attr(&node)
+            let attr = self.attr(&node)?;
+            self.remember(node)?;
+            Ok(attr)
         })();
         match result {
             Ok(attr) => reply.entry(&Duration::ZERO, &attr, Generation(1)),
@@ -673,8 +771,10 @@ impl Filesystem for Backend {
             }
             if offset == 1 {
                 let parent = directory.rsplit_once('/').map_or("", |(parent, _)| parent);
-                let parent = self.remember(self.session.lookup(parent)?)?;
-                if reply.add(INodeNo(parent.id), 2, FileType::Directory, "..") {
+                let parent = self.session.lookup(parent)?;
+                let full = reply.add(INodeNo(parent.id), 2, FileType::Directory, "..");
+                self.session.forget_cached(&parent)?;
+                if full {
                     return Ok(());
                 }
                 offset = 2;
@@ -700,12 +800,15 @@ impl Filesystem for Backend {
                     } else {
                         format!("{directory}/{}", entry.name)
                     };
-                    let node = self.remember(self.session.lookup(&selected)?)?;
+                    // Plain readdir does not establish a FUSE lookup reference.
+                    let node = self.session.lookup(&selected)?;
                     let kind = self.attr(&node)?.kind;
                     let next = offset
                         .checked_add(1)
                         .ok_or_else(|| unsupported("Native directory cookie space exhausted"))?;
-                    if reply.add(INodeNo(node.id), next, kind, &entry.name) {
+                    let full = reply.add(INodeNo(node.id), next, kind, &entry.name);
+                    self.session.forget_cached(&node)?;
+                    if full {
                         return Ok(());
                     }
                     self.handles
@@ -730,10 +833,10 @@ impl Filesystem for Backend {
         }
     }
     fn releasedir(&self, _: &Request, _: INodeNo, fh: FileHandle, _: OpenFlags, reply: ReplyEmpty) {
-        if let Ok(mut handles) = self.handles.lock() {
-            handles.handles.remove(&fh.0);
+        match self.release_handle(fh) {
+            Ok(()) => reply.ok(),
+            Err(error) => reply.error(native(error)),
         }
-        reply.ok();
     }
     fn fsyncdir(&self, _: &Request, _: INodeNo, _: FileHandle, _: bool, reply: ReplyEmpty) {
         match self.session.flush_all() {
@@ -762,6 +865,9 @@ pub(crate) struct Mount {
     session: Arc<WorkspaceSession>,
     target: std::path::PathBuf,
     previous_device: u64,
+    handles: Arc<Mutex<Handles>>,
+    open_boundary: Arc<std::sync::RwLock<()>>,
+    closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Mount {
     pub(crate) fn start(
@@ -772,13 +878,19 @@ impl Mount {
         use std::os::unix::fs::MetadataExt;
         let previous_device = std::fs::metadata(target)?.dev();
         let root = session.lookup("")?;
+        let handles = Arc::new(Mutex::new(Handles {
+            next: 1,
+            nodes: HashMap::from([(root.id, root)]),
+            handles: HashMap::new(),
+            lookups: HashMap::from([(1, 1)]),
+        }));
+        let open_boundary = Arc::new(std::sync::RwLock::new(()));
+        let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let backend = Backend {
             session: session.clone(),
-            handles: Mutex::new(Handles {
-                next: 1,
-                nodes: HashMap::from([(root.id, root)]),
-                handles: HashMap::new(),
-            }),
+            handles: handles.clone(),
+            open_boundary: open_boundary.clone(),
+            closing: closing.clone(),
         };
         let mut options = Config::default();
         options.mount_options = vec![
@@ -802,13 +914,25 @@ impl Mount {
             session,
             target: target.to_owned(),
             previous_device,
+            handles,
+            open_boundary,
+            closing,
         })
     }
     /// A running dispatcher is not yet a ready macOS mount. Keep the Mount
     /// object while waiting, so cancellation/failure retains cleanup ownership.
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
+        self.wait_ready_cancelled(&std::sync::atomic::AtomicBool::new(false))
+    }
+    pub(crate) fn wait_ready_cancelled(
+        &self,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), KernelError> {
         use std::os::unix::fs::MetadataExt;
         loop {
+            if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
             self.session.check_open()?;
             let native = self
                 .native
@@ -834,7 +958,55 @@ impl Mount {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+    /// FUSE does not identify which writable opens still own an mmap. A final
+    /// release drains that file reference, including its mappings. Reject an
+    /// unfenceable active writer explicitly; cached reads and mmap stay enabled.
+    pub(crate) fn checkpoint(
+        &self,
+    ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
+        let _opens = self
+            .open_boundary
+            .write()
+            .map_err(|_| unsupported("Native open boundary failed"))?;
+        let handles = self
+            .handles
+            .lock()
+            .map_err(|_| unsupported("Native handle registry failed"))?;
+        let writers = handles
+            .handles
+            .values()
+            .filter(|handle| {
+                handle._content.is_some() && handle.flags & libc::O_ACCMODE != libc::O_RDONLY
+            })
+            .count();
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(unsupported("The original native mount is closing"));
+        }
+        if writers != 0 {
+            return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
+                "workspace_snapshot_writers_active", format!("Cannot fence {writers} active writable native file references and their possible mappings; the parent workspace remains available"))));
+        }
+        drop(handles);
+        self.session.checkpoint()
+    }
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {
+        {
+            let _opens = self
+                .open_boundary
+                .write()
+                .map_err(|_| unsupported("Native open boundary failed"))?;
+            self.closing
+                .store(true, std::sync::atomic::Ordering::Release);
+            let remaining = self
+                .handles
+                .lock()
+                .map_err(|_| unsupported("Native handle registry failed"))?
+                .handles
+                .len();
+            if remaining != 0 {
+                return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
+            }
+        }
         if let Some(native) = self.native.as_mut() {
             native.unmount().map_err(|error| {
                 KernelError::Storage(format!("Workspace FUSE detach failed: {error}"))

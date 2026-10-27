@@ -29,7 +29,14 @@ pub(crate) fn required_capability(method: &str) -> &'static str {
         | "file.read.check"
         | "file.measure"
         | "file.operation.list" => "storage.read",
+        "workspace.inspect" | "workspace.acquire" | "workspace.release" => "storage.read",
         "storage.putBlob.begin"
+        | "workspace.adopt"
+        | "workspace.open"
+        | "workspace.mount"
+        | "workspace.fork"
+        | "workspace.result.prepare"
+        | "workspace.close"
         | "storage.putBlob.finish"
         | "storage.putBlob.abort"
         | "storage.blob.release"

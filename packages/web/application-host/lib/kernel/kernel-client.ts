@@ -147,6 +147,33 @@ interface InternalGrantHandle extends KernelGrantHandle {
 }
 
 export class KernelScopedClient {
+  adoptWorkspace(params: KernelMethodParams['workspace.adopt'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<Record<string, unknown>>('workspace.adopt', params, this.grant, signal);
+  }
+  openWorkspace(params: KernelMethodParams['workspace.open'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceInspection>('workspace.open', params, this.grant, signal);
+  }
+  inspectWorkspace(params: KernelMethodParams['workspace.inspect'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceInspection>('workspace.inspect', params, this.grant, signal);
+  }
+  acquireWorkspace(params: KernelMethodParams['workspace.acquire'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceLeaseReceipt>('workspace.acquire', params, this.grant, signal);
+  }
+  releaseWorkspace(params: KernelMethodParams['workspace.release'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceLeaseReceipt>('workspace.release', params, this.grant, signal);
+  }
+  mountWorkspace(params: KernelMethodParams['workspace.mount'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceInspection>('workspace.mount', params, this.grant, signal);
+  }
+  forkWorkspace(params: KernelMethodParams['workspace.fork'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<Record<string, unknown>>('workspace.fork', params, this.grant, signal);
+  }
+  prepareWorkspaceResult(params: KernelMethodParams['workspace.result.prepare'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<KernelWorkingResultCandidate>('workspace.result.prepare', params, this.grant, signal);
+  }
+  closeWorkspace(params: KernelMethodParams['workspace.close'], signal?: AbortSignal) {
+    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceClosed>('workspace.close', params, this.grant, signal);
+  }
   private readonly grant: KernelGrantHandle;
 
   constructor(private readonly owner: KernelClient, grant: KernelGrantHandle) {
@@ -566,6 +593,14 @@ const canonicalStoragePath = (value: string): string => {
 };
 
 export class KernelClient {
+  private nativeWorkspaceLifetime = false;
+  workspaceRequest<T>(method: 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
+    params: KernelMethodParams[typeof method], grant: KernelGrantHandle, signal?: AbortSignal): Promise<T> {
+    // A mount or dirty native file may outlive the HTTP caller. Once this
+    // lifetime is used, graceful shutdown must await its actual drain receipt.
+    if (method === 'workspace.open' || method === 'workspace.adopt') this.nativeWorkspaceLifetime = true;
+    return this.requestRaw<T>(method, params, { signal, grant, settleCancellation: true });
+  }
   private readonly options: KernelClientOptions;
   private readonly spawnProcess: typeof spawn;
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -1905,7 +1940,12 @@ export class KernelClient {
         return await Promise.race([work.then(() => true, () => false), new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 5_000); })]);
       } finally { if (timer) clearTimeout(timer); }
     };
-    if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()])) && this.handshakeResult && !child.killed) {
+    if (this.nativeWorkspaceLifetime && this.handshakeResult && !child.killed) {
+      // Send cancellation/drain through the control lane immediately. Waiting
+      // for every data request first can strand a filesystem callback. A failed
+      // cleanup keeps this original kernel and its transport for explicit retry.
+      await this.requestRaw('kernel.shutdown', {}, { grant: this.managementGrant ?? undefined });
+    } else if (await bounded(Promise.all([this.window.whenIdle(), this.controlWindow.whenIdle(), this.whenRequestsIdle()])) && this.handshakeResult && !child.killed) {
       await bounded(this.requestRaw("kernel.shutdown", {}, { grant: this.managementGrant ?? undefined }));
     }
     await this.transport?.close();

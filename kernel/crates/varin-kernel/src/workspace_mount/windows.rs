@@ -115,6 +115,10 @@ fn native(error: KernelError) -> FspError {
         "namespace_not_empty" => 0xc0000101,
         "namespace_conflict" | "namespace_stale_cursor" => 0xc0000054,
         "workspace_backend_unsupported" => 0xc00000bb,
+        "workspace_not_reparse" => 0xc0000275,
+        "workspace_reparse_invalid"
+        | "workspace_reparse_nonempty"
+        | "workspace_reparse_hardlinks" => 0xc000000d,
         _ => 0xc0000185,
     };
     FspError::NTSTATUS(status as i32)
@@ -137,6 +141,16 @@ fn path(name: &U16CStr) -> winfsp::Result<String> {
 pub(super) struct Handle {
     node: Arc<Node>,
     _content: Option<Arc<PrivateFile>>,
+    writer: Option<Arc<std::sync::atomic::AtomicUsize>>,
+    opens: Arc<std::sync::atomic::AtomicUsize>,
+}
+impl Drop for Handle {
+    fn drop(&mut self) {
+        if let Some(writers) = &self.writer {
+            writers.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+        }
+        self.opens.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
 }
 struct PendingCleanup {
     node: Arc<Node>,
@@ -147,6 +161,10 @@ type Pending = Arc<Mutex<BTreeMap<(u64, bool), PendingCleanup>>>;
 pub(super) struct Backend {
     session: Arc<Session>,
     errors: Pending,
+    writers: Arc<std::sync::atomic::AtomicUsize>,
+    open_boundary: Arc<std::sync::RwLock<()>>,
+    opens: Arc<std::sync::atomic::AtomicUsize>,
+    closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Backend {
     fn info(&self, node: &Node, out: &mut FileInfo) -> winfsp::Result<()> {
@@ -172,6 +190,14 @@ impl Backend {
                 out.allocation_size = byte_length.div_ceil(4096) * 4096;
             }
             PathState::Directory { .. } => out.file_attributes |= 0x10,
+            PathState::Symlink { symlink_target, .. } => {
+                let data = match &metadata.reparse_data {
+                    Some(data) => data.clone(),
+                    None => crate::reparse_data::symlink(&symlink_target).map_err(native)?,
+                };
+                out.reparse_tag = crate::reparse_data::parse(&data).map_err(native)?.tag;
+                out.file_attributes |= 0x400;
+            }
             _ => return Err(native(unsupported(
                 "WinFsp reparse/metadata qualification is not implemented for this source entry",
             ))),
@@ -200,6 +226,21 @@ impl Backend {
             }
         }
         Ok(descriptor.len() as u64)
+    }
+    fn reparse(&self, node: &Node, buffer: &mut [u8]) -> winfsp::Result<u64> {
+        self.session.check_open().map_err(native)?;
+        let PathState::Symlink { symlink_target, .. } = node.state().map_err(native)? else {
+            return Err(FspError::NTSTATUS(0xc0000275u32 as i32));
+        };
+        let data = match node.attributes().map_err(native)?.reparse_data {
+            Some(data) => data,
+            None => crate::reparse_data::symlink(&symlink_target).map_err(native)?,
+        };
+        if buffer.len() < data.len() {
+            return Err(FspError::NTSTATUS(0xc0000023u32 as i32));
+        }
+        buffer[..data.len()].copy_from_slice(&data);
+        Ok(data.len() as u64)
     }
     fn directory_path(&self, handle: &Handle) -> winfsp::Result<String> {
         if !handle.node.state().map_err(native)?.is_directory() {
@@ -236,62 +277,102 @@ impl FileSystemContext for Backend {
         &self,
         name: &U16CStr,
         descriptor: Option<&mut [c_void]>,
-        _resolve: impl FnOnce(&U16CStr) -> Option<FileSecurity>,
+        resolve: impl FnOnce(&U16CStr) -> Option<FileSecurity>,
     ) -> winfsp::Result<FileSecurity> {
+        if let Some(security) = resolve(name) {
+            return Ok(security);
+        }
         let node = self.session.lookup(&path(name)?).map_err(native)?;
         let mut info = FileInfo::default();
         self.info(&node, &mut info)?;
-        Ok(FileSecurity {
+        let result = FileSecurity {
             reparse: false,
             sz_security_descriptor: self.security(&node, descriptor)?,
             attributes: info.file_attributes,
-        })
+        };
+        self.session.forget_cached(&node).map_err(native)?;
+        Ok(result)
     }
     fn open(
         &self,
         name: &U16CStr,
         options: u32,
-        _access: u32,
+        access: u32,
         info: &mut OpenFileInfo,
     ) -> winfsp::Result<Handle> {
+        let _open = self
+            .open_boundary
+            .read()
+            .map_err(|_| FspError::NTSTATUS(0xc00000e5u32 as i32))?;
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(FspError::NTSTATUS(0xc00000a3u32 as i32));
+        }
         let node = self.session.lookup(&path(name)?).map_err(native)?;
-        let directory = node.state().map_err(native)?.is_directory();
+        let state = node.state().map_err(native)?;
+        let directory = state.is_directory()
+            || node.attributes().map_err(native)?.windows_attributes & 0x10 != 0;
         if (options & 1 != 0 && !directory) || (options & 0x40 != 0 && directory) {
             return Err(FspError::NTSTATUS(0xc0000103u32 as i32));
         }
         self.info(&node, info.as_mut())?;
-        let content = if !directory {
+        let content = if matches!(state, PathState::RegularFile { .. }) {
             Some(self.session.open_file(&node).map_err(native)?)
         } else {
             None
         };
+        self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         Ok(Handle {
             node,
             _content: content,
+            opens: self.opens.clone(),
+            writer: if !directory && access & 6 != 0 {
+                self.writers
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                Some(self.writers.clone())
+            } else {
+                None
+            },
         })
     }
     fn create(
         &self,
         name: &U16CStr,
         options: u32,
-        _access: u32,
+        access: u32,
         attributes: u32,
         security: Option<&[c_void]>,
         _allocation: u64,
-        _extra: Option<&[u8]>,
+        extra: Option<&[u8]>,
         reparse: bool,
         info: &mut OpenFileInfo,
     ) -> winfsp::Result<Handle> {
-        if reparse {
-            return Err(native(unsupported(
-                "Native reparse points require metadata qualification",
-            )));
+        let _open = self
+            .open_boundary
+            .read()
+            .map_err(|_| FspError::NTSTATUS(0xc00000e5u32 as i32))?;
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(FspError::NTSTATUS(0xc00000a3u32 as i32));
         }
+        let point = if reparse {
+            let bytes = extra.ok_or(FspError::NTSTATUS(0xc0000278u32 as i32))?;
+            Some((
+                crate::reparse_data::parse(bytes)
+                    .map_err(|_| FspError::NTSTATUS(0xc0000278u32 as i32))?,
+                bytes.to_vec(),
+            ))
+        } else {
+            None
+        };
+        let target = point.as_ref().map(|(point, _)| point.target.clone());
         let descriptor = security.map(|value| unsafe {
             std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), value.len()).to_vec()
         });
         let configure = |attrs: &mut crate::storage::workspace_metadata::Attributes| {
-            attrs.windows_attributes = attributes;
+            attrs.windows_attributes = attributes | if options & 1 != 0 { 0x10 } else { 0 };
+            if let Some((_, data)) = point {
+                attrs.windows_attributes |= 0x400;
+                attrs.reparse_data = Some(data);
+            }
             if let Some(descriptor) = descriptor {
                 attrs.security = Some(descriptor);
             }
@@ -300,7 +381,17 @@ impl FileSystemContext for Backend {
             }
             Ok(())
         };
-        let node = if options & 1 != 0 {
+        let directory = options & 1 != 0;
+        let node = if let Some(target) = target {
+            self.session.create_with_attributes(
+                &path(name)?,
+                PathState::Symlink {
+                    symlink_target: target,
+                    mode: Some(0o777),
+                },
+                configure,
+            )
+        } else if options & 1 != 0 {
             self.session.create_with_attributes(
                 &path(name)?,
                 PathState::Directory { mode: Some(0o755) },
@@ -312,23 +403,123 @@ impl FileSystemContext for Backend {
         }
         .map_err(native)?;
         self.info(&node, info.as_mut())?;
-        let content = if options & 1 == 0 {
+        let content = if matches!(node.state().map_err(native)?, PathState::RegularFile { .. }) {
             Some(self.session.open_file(&node).map_err(native)?)
         } else {
             None
         };
+        self.opens.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         Ok(Handle {
             node,
             _content: content,
+            opens: self.opens.clone(),
+            writer: if !directory && access & 6 != 0 {
+                self.writers
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                Some(self.writers.clone())
+            } else {
+                None
+            },
         })
     }
     fn close(&self, context: Handle) {
         self.remember(&context.node, false, &self.session.flush(&context.node));
+        let node = context.node.clone();
+        drop(context);
+        if let Err(error) = self.session.forget_cached(&node) {
+            eprintln!("Native lookup release remains pending: {error}");
+        }
+        self.session.notify_native_idle();
     }
-    fn cleanup(&self, context: &Handle, _name: Option<&U16CStr>, flags: u32) {
+    fn get_reparse_point_by_name(
+        &self,
+        name: &U16CStr,
+        _: bool,
+        buffer: &mut [u8],
+    ) -> winfsp::Result<u64> {
+        let node = self.session.lookup(&path(name)?).map_err(native)?;
+        let result = self.reparse(&node, buffer);
+        self.session.forget_cached(&node).map_err(native)?;
+        result
+    }
+    fn get_reparse_point(
+        &self,
+        context: &Handle,
+        _: &U16CStr,
+        buffer: &mut [u8],
+    ) -> winfsp::Result<u64> {
+        self.reparse(&context.node, buffer)
+    }
+    fn set_reparse_point(
+        &self,
+        context: &Handle,
+        _: &U16CStr,
+        buffer: &[u8],
+    ) -> winfsp::Result<()> {
+        let incoming = crate::reparse_data::parse(buffer)
+            .map_err(|_| FspError::NTSTATUS(0xc0000278u32 as i32))?;
+        if matches!(
+            context.node.state().map_err(native)?,
+            PathState::Symlink { .. }
+        ) {
+            let current = context
+                .node
+                .attributes()
+                .map_err(native)?
+                .reparse_data
+                .map(|data| crate::reparse_data::parse(&data).map(|point| point.tag))
+                .transpose()
+                .map_err(native)?
+                .unwrap_or(crate::reparse_data::SYMLINK);
+            if current != incoming.tag {
+                return Err(FspError::NTSTATUS(0xc0000277u32 as i32));
+            }
+        }
+        self.session
+            .set_reparse_data(&context.node, Some(buffer.to_vec()))
+            .map_err(native)
+    }
+    fn delete_reparse_point(
+        &self,
+        context: &Handle,
+        _: &U16CStr,
+        buffer: &[u8],
+    ) -> winfsp::Result<()> {
+        let tag = buffer
+            .get(..4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+            .ok_or(FspError::NTSTATUS(0xc0000278u32 as i32))?;
+        if !matches!(
+            context.node.state().map_err(native)?,
+            PathState::Symlink { .. }
+        ) {
+            return Err(FspError::NTSTATUS(0xc0000275u32 as i32));
+        }
+        let current = context
+            .node
+            .attributes()
+            .map_err(native)?
+            .reparse_data
+            .map(|data| crate::reparse_data::parse(&data).map(|point| point.tag))
+            .transpose()
+            .map_err(native)?
+            .unwrap_or(crate::reparse_data::SYMLINK);
+        if current != tag {
+            return Err(FspError::NTSTATUS(0xc0000277u32 as i32));
+        }
+        self.session
+            .set_reparse_data(&context.node, None)
+            .map_err(native)
+    }
+    fn cleanup(&self, context: &Handle, name: Option<&U16CStr>, flags: u32) {
         if flags & 1 != 0 {
             let result = (|| {
-                let Some(path) = context.node.path()? else {
+                let Some(path) = name
+                    .map(path)
+                    .transpose()
+                    .map_err(|e| KernelError::Storage(format!("Native delete name failed: {e}")))?
+                    .or(context.node.path()?)
+                else {
                     return Ok(());
                 };
                 self.session
@@ -365,7 +556,10 @@ impl FileSystemContext for Backend {
         self.session
             .set_attributes(&context.node, |attrs| {
                 if attributes != u32::MAX {
-                    attrs.windows_attributes = attributes;
+                    // Directory/reparse type changes use their own native
+                    // operations. SetBasicInfo cannot silently change the inode.
+                    attrs.windows_attributes = (attributes & !(0x10 | 0x400))
+                        | (attrs.windows_attributes & (0x10 | 0x400));
                     if attributes & 1 != 0 {
                         attrs.mode &= !0o222;
                     } else {
@@ -585,6 +779,7 @@ impl FileSystemContext for Backend {
             let mut entry = DirInfo::<256>::new();
             entry.set_name(&item.name)?;
             self.info(&node, entry.file_info_mut())?;
+            self.session.forget_cached(&node).map_err(native)?;
             if !entry.append_to_buffer(buffer, &mut written) {
                 complete = false;
                 break;
@@ -608,6 +803,10 @@ pub(crate) struct Mount {
     host: FileSystemHost<Backend>,
     session: Arc<Session>,
     errors: Pending,
+    writers: Arc<std::sync::atomic::AtomicUsize>,
+    open_boundary: Arc<std::sync::RwLock<()>>,
+    opens: Arc<std::sync::atomic::AtomicUsize>,
+    closing: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Mount {
     pub(crate) fn start(session: Arc<Session>, target: &Path) -> Result<Self, KernelError> {
@@ -623,13 +822,22 @@ impl Mount {
             .case_sensitive_search(true)
             .case_preserved_names(true)
             .unicode_on_disk(true)
+            .reparse_points(true)
             .flush_and_purge_on_cleanup(true);
         let errors = Arc::new(Mutex::new(BTreeMap::new()));
+        let writers = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let open_boundary = Arc::new(std::sync::RwLock::new(()));
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let mut host = FileSystemHost::<Backend>::new(
             params,
             Backend {
                 session: session.clone(),
                 errors: errors.clone(),
+                writers: writers.clone(),
+                open_boundary: open_boundary.clone(),
+                opens: opens.clone(),
+                closing: closing.clone(),
             },
         )
         .map_err(|e| KernelError::Storage(format!("WinFsp filesystem creation failed: {e}")))?;
@@ -645,16 +853,77 @@ impl Mount {
             host,
             session,
             errors,
+            writers,
+            open_boundary,
+            opens,
+            closing,
         })
     }
     pub(crate) fn wait_ready(&self) -> Result<(), KernelError> {
         self.session.check_open()
     }
-    /// Caller must first close/stop native users. Stopping dispatcher callbacks
-    /// is outside Storage control and cannot deadlock the metadata port.
+    pub(crate) fn wait_ready_cancelled(
+        &self,
+        cancelled: &std::sync::atomic::AtomicBool,
+    ) -> Result<(), KernelError> {
+        if cancelled.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        self.wait_ready()
+    }
+    pub(crate) fn checkpoint(
+        &self,
+    ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
+        let _opens = self
+            .open_boundary
+            .write()
+            .map_err(|_| unsupported("Native open boundary failed"))?;
+        let writers = self.writers.load(std::sync::atomic::Ordering::Acquire);
+        if self.closing.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(unsupported("The original native mount is closing"));
+        }
+        if writers != 0 {
+            return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
+                "workspace_snapshot_writers_active", format!("Cannot fence {writers} active writable native file references and their possible sections; the parent workspace remains available"))));
+        }
+        if !self
+            .errors
+            .lock()
+            .map_err(|_| unsupported("Native cleanup registry failed"))?
+            .is_empty()
+        {
+            return Err(unsupported(
+                "Pending native cleanup must finish before selecting a workspace version",
+            ));
+        }
+        self.session.checkpoint()
+    }
+    /// Seal new opens and retain the dispatcher until native Close drains the
+    /// original references. Callback joins stay outside Storage control.
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {
+        {
+            let _opens = self
+                .open_boundary
+                .write()
+                .map_err(|_| unsupported("Native open boundary failed"))?;
+            self.closing
+                .store(true, std::sync::atomic::Ordering::Release);
+            let remaining = self.opens.load(std::sync::atomic::Ordering::Acquire);
+            if remaining != 0 {
+                return Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_native_handles_active",format!("Waiting for {remaining} original native file/directory handles to close before detaching the workspace"))));
+            }
+        }
+        // Waiting callbacks can now take the admission lock and reject new
+        // opens. Never hold that lock while joining dispatcher callbacks.
         self.host.unmount();
         self.host.stop();
+        if self.session.revoked() {
+            self.errors
+                .lock()
+                .map_err(|_| unsupported("Native cleanup registry failed"))?
+                .clear();
+            return self.session.close();
+        }
         let pending = std::mem::take(&mut *self.errors.lock().unwrap_or_else(|p| p.into_inner()));
         for (key, mut work) in pending {
             let result = if work.delete {

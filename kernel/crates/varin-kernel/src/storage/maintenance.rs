@@ -199,17 +199,21 @@ impl Storage {
                 write_revision,
                 root,
                 branch_workspace,
-                branch_head_root,
+                _branch_head_root,
                 branch_write_revision,
             ) = row?;
             let branch_identity_invalid = branch_workspace
                 .as_deref()
                 .is_some_and(|branch_workspace| branch_workspace != workspace);
-            let pin_target_invalid = if branch_workspace.is_none() {
+            let pin_target_invalid = if write_revision == crate::model::SNAPSHOT_PIN_WRITE_REVISION {
+                revision != -1
+            } else if write_revision < -1 || revision < 0 { true
+            } else if branch_workspace.is_none() {
                 false
             } else if write_revision >= 0 {
-                branch_head_root.as_deref() != Some(root.as_str())
-                    || branch_write_revision != Some(write_revision)
+                // Current and subtree pins retain their selected root after
+                // the source advances. The live head is not their identity.
+                branch_write_revision.is_none_or(|current|current < write_revision)
             } else {
                 let revision_root = self
                     .conn

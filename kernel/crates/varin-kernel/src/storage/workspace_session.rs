@@ -56,6 +56,9 @@ struct NodeState {
     /// None means unlink/replaced. Open handles continue to refer to this inode.
     path: Option<String>,
     observed: Value,
+    /// Loaded names of this inode. All hard-link names share one byte handle.
+    aliases: BTreeMap<String, Value>,
+    link_count: usize,
     clean_generation: u64,
     metadata: Metadata,
     metadata_generation: u64,
@@ -102,6 +105,14 @@ impl Node {
     pub(crate) fn linked(&self) -> Result<bool, KernelError> {
         Ok(lock(&self.state)?.path.is_some())
     }
+    pub(crate) fn link_count(&self) -> Result<u32, KernelError> {
+        let state = lock(&self.state)?;
+        Ok(if state.path.is_none() {
+            0
+        } else {
+            u32::try_from(state.link_count).unwrap_or(u32::MAX)
+        })
+    }
     pub(crate) fn path(&self) -> Result<Option<String>, KernelError> {
         Ok(lock(&self.state)?.path.clone())
     }
@@ -109,6 +120,8 @@ impl Node {
 
 struct Namespace {
     paths: BTreeMap<String, Arc<Node>>,
+    inodes: HashMap<Uuid, std::sync::Weak<Node>>,
+    numbers: HashMap<Uuid, u64>,
     dirty: BTreeMap<u64, Arc<Node>>,
     next_id: u64,
 }
@@ -122,6 +135,7 @@ pub(crate) struct Session {
     root: PathBuf,
     revoked: Arc<AtomicBool>,
     closed: AtomicBool,
+    native_idle: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Namespace mutations use the exclusive boundary. A flush owns only its
     /// file publication lock during sealing, and joins the shared boundary for
     /// its short metadata commit. Checkpoints never acquire publication locks.
@@ -132,16 +146,19 @@ pub(crate) struct Session {
 /// Owns a frozen namespace and only the dirty file range maps at its boundary.
 /// Parent writes continue while a worker hashes/installs these individual files.
 pub(crate) struct Checkpoint {
+    session_id: Uuid,
     port: StoragePort,
     source_branch: String,
     workspace: String,
     grant: Grant,
     root: PathBuf,
     pin: String,
+    base_pin: String,
     metadata_pin: String,
     metadata_head: Head,
+    branch: BranchRow,
     metadata: Vec<(String, Metadata)>,
-    files: Vec<(String, u32, FileSnapshot)>,
+    files: Vec<(Vec<String>, u32, FileSnapshot)>,
     released: bool,
 }
 
@@ -187,12 +204,15 @@ impl Session {
                 &grant,
             )?;
             let id = Uuid::new_v4();
+            let root_inode = metadata.binding.file_id;
             let root_node = Arc::new(Node {
                 id: 1,
                 session: id,
                 state: Mutex::new(NodeState {
                     path: Some(String::new()),
                     observed,
+                    aliases: BTreeMap::new(),
+                    link_count: 1,
                     clean_generation: 0,
                     metadata,
                     metadata_generation: 0,
@@ -217,9 +237,12 @@ impl Session {
                 root: storage.root.clone(),
                 revoked,
                 closed: AtomicBool::new(false),
+                native_idle: Mutex::new(None),
                 boundary: RwLock::new(()),
                 namespace: Mutex::new(Namespace {
                     paths: BTreeMap::from([(String::new(), root_node)]),
+                    inodes: HashMap::new(),
+                    numbers: HashMap::from([(root_inode, 1)]),
                     dirty: BTreeMap::new(),
                     next_id: 2,
                 }),
@@ -229,6 +252,20 @@ impl Session {
             storage
                 .workspace_sessions
                 .insert(branch, Arc::downgrade(&session));
+            let root = session
+                .namespace
+                .lock()
+                .map_err(|_| KernelError::Storage("workspace namespace lock poisoned".into()))?
+                .paths
+                .get("")
+                .cloned()
+                .expect("root inode");
+            session
+                .namespace
+                .lock()
+                .map_err(|_| KernelError::Storage("workspace namespace lock poisoned".into()))?
+                .inodes
+                .insert(root_inode, Arc::downgrade(&root));
             Ok(session)
         })
     }
@@ -251,6 +288,135 @@ impl Session {
     pub(crate) fn check_open(&self) -> Result<(), KernelError> {
         self.active()
     }
+    pub(crate) fn on_native_idle(&self, notify: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .native_idle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(notify);
+    }
+    pub(crate) fn notify_native_idle(&self) {
+        let notify = self
+            .native_idle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(notify) = notify {
+            notify();
+        }
+    }
+    pub(crate) fn revoked(&self) -> bool {
+        self.revoked.load(Ordering::Acquire)
+    }
+    /// An execution lease never replaces the project filesystem's owner. Check
+    /// its own current grant before exposing any view or choosing a boundary.
+    pub(crate) fn admit(
+        &self,
+        grant: &Grant,
+        requested: &str,
+        write: bool,
+    ) -> Result<(), KernelError> {
+        self.active()?;
+        let (branch, grant, selected) = (self.branch.clone(), grant.clone(), path(requested)?);
+        self.port
+            .call(move |storage| storage.admit_workspace_session(&branch, &selected, &grant, write))
+    }
+    pub(crate) fn owned_by(&self, grant: &str) -> bool {
+        self.grant.grant_id == grant
+    }
+    pub(crate) fn identity(&self) -> Uuid {
+        self.id
+    }
+    pub(crate) fn replayed_fork(
+        &self,
+        operation: &str,
+        target: &str,
+        requester: Grant,
+    ) -> Result<Option<Value>, KernelError> {
+        self.admit(&requester, "", true)?;
+        let (operation, target, branch, session, grant) = (
+            operation.to_owned(),
+            target.to_owned(),
+            self.branch.clone(),
+            self.id,
+            self.grant.clone(),
+        );
+        self.port.call(move |storage| {
+            storage.replay_workspace_fork(&operation, &branch, &target, session, &grant, &requester)
+        })
+    }
+    pub(crate) fn replayed_result(
+        &self,
+        publication: &str,
+        grant: Grant,
+    ) -> Result<Option<Value>, KernelError> {
+        self.admit(&grant, "", true)?;
+        let (publication, branch, session) = (publication.to_owned(), self.branch.clone(), self.id);
+        self.port.call(move |storage| {
+            storage.replay_workspace_result(&publication, &branch, session, &grant)
+        })
+    }
+    pub(crate) fn lease_count(&self) -> Result<usize, KernelError> {
+        self.leases(&self.grant, None)
+    }
+    pub(crate) fn leases(
+        &self,
+        grant: &Grant,
+        lease: Option<(&str, bool)>,
+    ) -> Result<usize, KernelError> {
+        self.active()?;
+        let (branch, grant) = (self.branch.clone(), grant.clone());
+        let lease = lease.map(|(id, release)| (id.to_owned(), release));
+        let project_owner = self.grant.grant_id.clone();
+        self.port.call(move |storage| {
+            storage.admit_workspace_session(&branch, "", &grant, false)?;
+            if grant.grant_id == project_owner {
+                // Revoke requests retain their lease until the actual resource
+                // owners stop. Release those completed lifetimes on observation,
+                // so a revoked Run cannot leave a permanent project holder.
+                let holders = storage.workspace_holders.iter().filter(|(_, (selected, _))| selected == &branch)
+                    .map(|(id, (_, owner))| (id.clone(), owner.clone())).collect::<Vec<_>>();
+                for (id, owner) in holders {
+                    if storage.load_grant(&owner)?.state != crate::model::GrantState::Active {
+                        match storage.assert_workspace_grant_idle(&owner) {
+                            Ok(()) => { storage.workspace_holders.remove(&id); }
+                            Err(KernelError::Execution(error)) if error.code == "workspace_in_use" => {},
+                            Err(error) => return Err(error),
+                        }
+                    }
+                }
+            }
+            if let Some((id, release)) = lease {
+                if id.is_empty() { return Err(failure("workspace_lease_invalid", "Workspace lease identity is required")); }
+                if let Some((original_branch, owner)) = storage.workspace_holders.get(&id) {
+                    if original_branch != &branch || owner != &grant.grant_id {
+                        return Err(failure("workspace_lease_owner_changed", "Workspace lease belongs to another original workspace or execution authority"));
+                    }
+                }
+                if release {
+                    // A cancellation request is not a stopped process. Consult
+                    // the same native Process owner used by grant retirement.
+                    storage.assert_workspace_grant_idle(&grant.grant_id)?;
+                    storage.workspace_holders.remove(&id);
+                } else { storage.workspace_holders.insert(id, (branch.clone(), grant.grant_id)); }
+            }
+            Ok(storage.workspace_holders.values().filter(|(selected, _)| selected == &branch).count())
+        })
+    }
+    pub(crate) fn release_drained_leases(&self) -> Result<(), KernelError> {
+        if !self.closed.load(Ordering::Acquire) {
+            return Err(failure(
+                "workspace_in_use",
+                "Native callbacks have not finished closing",
+            ));
+        }
+        let branch = self.branch.clone();
+        self.port.call(move |storage| {
+            storage
+                .workspace_holders
+                .retain(|_, (selected, _)| selected != &branch);
+            Ok(())
+        })
+    }
     fn observe(&self, path: &str, write: bool) -> Result<Value, KernelError> {
         self.active()?;
         let (branch, path, actor) = (self.branch.clone(), path.to_owned(), self.grant.clone());
@@ -264,12 +430,17 @@ impl Session {
             return Ok(node.clone());
         }
         let (branch, selected, actor) = (self.branch.clone(), path.to_owned(), self.grant.clone());
-        let (observed, metadata) = self.port.call(move |s| {
+        let (observed, metadata, count) = self.port.call(move |s| {
             s.admit_workspace_session(&branch, &selected, &actor, false)?;
             let observed = s.branch_path_inspect(&json!({"branchId":branch,"path":selected}))?;
             let state = serde_json::from_value(observed["state"].clone())?;
             let metadata = s.read_workspace_metadata(&branch, &selected, &state, &actor)?;
-            Ok((observed, metadata))
+            let count = if matches!(state, PathState::RegularFile { .. }) {
+                s.workspace_file_link_count(&branch, metadata.binding.file_id, &actor)?
+            } else {
+                1
+            };
+            Ok((observed, metadata, count))
         })?;
         let state: PathState = serde_json::from_value(observed["state"].clone())?;
         if matches!(state, PathState::Missing) {
@@ -284,12 +455,48 @@ impl Session {
                 "Source entry cannot be represented by this filesystem",
             ));
         }
+        if let Some(existing) = namespace
+            .inodes
+            .get(&metadata.binding.file_id)
+            .and_then(std::sync::Weak::upgrade)
+        {
+            let mut selected = lock(&existing.state)?;
+            if !matches!(state, PathState::RegularFile { .. })
+                || selected.observed["state"] != observed["state"]
+                || selected.path.is_none()
+            {
+                return Err(KernelError::Storage(
+                    "workspace inode identity has incompatible namespace entries".into(),
+                ));
+            }
+            selected.aliases.insert(path.to_owned(), observed);
+            selected.link_count = count;
+            drop(selected);
+            namespace.paths.insert(path.into(), existing.clone());
+            return Ok(existing);
+        }
+        let inode = metadata.binding.file_id;
+        let number = if let Some(number) = namespace.numbers.get(&inode) {
+            *number
+        } else {
+            let number = namespace.next_id;
+            namespace.next_id = number.checked_add(1).ok_or_else(|| {
+                failure(
+                    "namespace_identity_exhausted",
+                    "Native file identity space exhausted",
+                )
+            })?;
+            namespace.numbers.insert(inode, number);
+            number
+        };
         let node = Arc::new(Node {
-            id: namespace.next_id,
+            id: number,
             session: self.id,
             state: Mutex::new(NodeState {
                 path: Some(path.into()),
-                observed,
+                observed: observed.clone(),
+                aliases: BTreeMap::from([(path.to_owned(), observed)]),
+                link_count: count,
                 clean_generation: 0,
                 metadata,
                 metadata_generation: 0,
@@ -298,18 +505,19 @@ impl Session {
             content: Mutex::new(ContentSlot::default()),
             publication: Mutex::new(()),
         });
-        namespace.next_id = namespace.next_id.checked_add(1).ok_or_else(|| {
-            failure(
-                "namespace_identity_exhausted",
-                "Native file identity space exhausted",
-            )
-        })?;
         namespace.paths.insert(path.into(), node.clone());
+        namespace.inodes.insert(inode, Arc::downgrade(&node));
         Ok(node)
     }
     /// Caller holds a shared namespace boundary. Metadata lookup/stat never
     /// opens a body: only an actual native open or byte operation retains it.
     fn content_locked(&self, node: &Node) -> Result<Arc<PrivateFile>, KernelError> {
+        if lock(&node.state)?.observed["state"]["kind"]!="regular-file" {
+            return Err(failure(
+                "namespace_not_file",
+                "Native byte I/O requires a regular file",
+            ));
+        }
         let mut content = lock(&node.content)?;
         if let Some(file) = content.open.upgrade() {
             return Ok(file);
@@ -360,6 +568,52 @@ impl Session {
             .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
         self.active()?;
         self.load(&mut *lock(&self.namespace)?, &requested)
+    }
+    /// Release a clean lookup cache only after native references have ended.
+    /// Dirty data, open handles and concurrently returned nodes retain it. The
+    /// small inode number map preserves native identity across cache eviction.
+    pub(crate) fn forget_cached(&self, node: &Arc<Node>) -> Result<(), KernelError> {
+        if node.id == 1 {
+            return Ok(());
+        }
+        let _boundary = self
+            .boundary
+            .read()
+            .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+        let mut namespace = lock(&self.namespace)?;
+        if namespace.dirty.contains_key(&node.id) {
+            return Ok(());
+        }
+        let state = lock(&node.state)?;
+        let mut names = state.aliases.keys().cloned().collect::<BTreeSet<_>>();
+        if let Some(path) = &state.path {
+            names.insert(path.clone());
+        }
+        let cached = names
+            .iter()
+            .filter(|name| {
+                namespace
+                    .paths
+                    .get(*name)
+                    .is_some_and(|cached| Arc::ptr_eq(cached, node))
+            })
+            .count();
+        if Arc::strong_count(node) != cached + 1 {
+            return Ok(());
+        }
+        let inode = state.metadata.binding.file_id;
+        drop(state);
+        for name in names {
+            if namespace
+                .paths
+                .get(&name)
+                .is_some_and(|cached| Arc::ptr_eq(cached, node))
+            {
+                namespace.paths.remove(&name);
+            }
+        }
+        namespace.inodes.remove(&inode);
+        Ok(())
     }
     pub(crate) fn read(
         &self,
@@ -475,6 +729,7 @@ impl Session {
                 &installed,
                 &actor,
                 Some(&metadata),
+                false,
             )?;
             let updated = storage.branch_path_inspect(&json!({"branchId":branch,"path":path}))?;
             Ok((publication, updated))
@@ -486,6 +741,13 @@ impl Session {
             ));
         }
         state.observed = updated;
+        let mut aliases = BTreeMap::new();
+        for path in state.aliases.keys() {
+            let mut observed = state.observed.clone();
+            observed["path"] = json!(path);
+            aliases.insert(path.clone(), observed);
+        }
+        state.aliases = aliases;
         state.clean_generation = generation;
         state.clean_metadata_generation = metadata_generation;
         drop(state);
@@ -537,6 +799,162 @@ impl Session {
         node: &Arc<Node>,
         update: impl FnOnce(&mut Attributes) -> Result<(), KernelError>,
     ) -> Result<(), KernelError> {
+        self.set_attributes_inner(node, update, true)
+    }
+    /// Source import preserves the observed change time; ordinary chmod/utimes
+    /// still advance it. The caller cannot replace this workspace's inode ID.
+    pub(crate) fn import_attributes(
+        &self,
+        node: &Arc<Node>,
+        mut attributes: Attributes,
+    ) -> Result<(), KernelError> {
+        self.set_attributes_inner(
+            node,
+            |current| {
+                attributes.file_id = current.file_id;
+                *current = attributes;
+                Ok(())
+            },
+            false,
+        )
+    }
+    /// Standard Windows symbolic links/junctions change the existing empty
+    /// inode, rather than replacing its native handle or copying a workspace.
+    pub(crate) fn set_reparse_data(
+        &self,
+        node: &Arc<Node>,
+        data: Option<Vec<u8>>,
+    ) -> Result<(), KernelError> {
+        let parsed = data
+            .as_deref()
+            .map(crate::reparse_data::parse)
+            .transpose()?;
+        self.owns(node)?;
+        self.flush(node)?;
+        let empty = if data.is_none() {
+            let cleanup = self.port.call(|s| Ok(s.private_cleanup.clone()))?;
+            let sealed = FileSnapshot::empty(self.revoked.clone(), cleanup)
+                .seal(&self.root.join("staging"), &self.revoked)?;
+            let (retained, sealed) = self
+                .port
+                .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
+            Some(sealed.install(&self.root, retained, &self.revoked)?)
+        } else {
+            None
+        };
+        let _boundary = self
+            .boundary
+            .write()
+            .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+        self.owns(node)?;
+        let mut namespace = lock(&self.namespace)?;
+        let mut state = lock(&node.state)?;
+        let path = state
+            .path
+            .clone()
+            .filter(|p| !p.is_empty())
+            .ok_or_else(|| {
+                failure(
+                    "workspace_reparse_invalid",
+                    "An unlinked inode or workspace root cannot change reparse type",
+                )
+            })?;
+        if state.link_count != 1 {
+            return Err(failure(
+                "workspace_reparse_hardlinks",
+                "A reparse inode must have one namespace name in this backend",
+            ));
+        }
+        let original: PathState = serde_json::from_value(state.observed["state"].clone())?;
+        let directory = original.is_directory()
+            || matches!(original, PathState::Symlink { .. })
+                && state.metadata.attributes.windows_attributes & 0x10 != 0;
+        if parsed.is_none() && !matches!(original, PathState::Symlink { .. }) {
+            return Err(failure(
+                "workspace_not_reparse",
+                "The inode has no reparse point",
+            ));
+        }
+        if let PathState::RegularFile { byte_length, .. } = original {
+            let length = node
+                .file()?
+                .map(|file| file.snapshot().map(|snapshot| snapshot.byte_length()))
+                .transpose()?
+                .unwrap_or(byte_length);
+            if length != 0 {
+                return Err(failure("workspace_reparse_nonempty","This backend cannot hide existing file bytes behind a reparse point; the original bytes were retained"));
+            }
+        }
+        let target = if let Some(parsed) = parsed {
+            PathState::Symlink {
+                symlink_target: parsed.target,
+                mode: Some(state.metadata.attributes.mode),
+            }
+        } else if directory {
+            PathState::Directory {
+                mode: Some(state.metadata.attributes.mode),
+            }
+        } else {
+            empty
+                .as_ref()
+                .expect("regular empty object prepared")
+                .state(state.metadata.attributes.mode)
+        };
+        let mut metadata = state.metadata.clone();
+        metadata.attributes.reparse_data = data;
+        if metadata.attributes.reparse_data.is_some() {
+            metadata.attributes.windows_attributes |= 0x400;
+        } else {
+            metadata.attributes.windows_attributes &= !0x400;
+        }
+        if target.is_directory() {
+            metadata.directory_origin();
+        }
+        metadata.attributes.touch();
+        let (branch, actor, expected, selected, target_path) = (
+            self.branch.clone(),
+            self.grant.clone(),
+            state.observed.clone(),
+            metadata.clone(),
+            path.clone(),
+        );
+        let observed=self.port.call(move|s|{
+            s.admit_workspace_session(&branch,&target_path,&actor,true)?;
+            s.filesystem_transaction(|s|{
+                if original.is_directory(){
+                    let page=s.read_branch_directory(&branch,&target_path,None,None,1,&actor)?;
+                    if !page.entries.is_empty(){return Err(failure("namespace_not_empty","A reparse directory must be empty"));}
+                }
+                let operation=format!("workspace-reparse:{}",Uuid::new_v4());
+                let mut change=json!({"path":target_path,"expectedState":expected["state"],"expectedNode":expected["node"],"state":target});
+                if let Some(empty)=empty.as_ref().filter(|_|matches!(target,PathState::RegularFile{..})){
+                    let PathState::RegularFile{object_hash,..}=empty.state(selected.attributes.mode) else{unreachable!()};
+                    s.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,0)",params![object_hash])?;
+                    let owner=blob_owner_id(&operation);
+                    s.record_object_owner(&owner,&object_hash,Some(&s.branch(&branch)?.workspace_id),Some(&operation),&actor.grant_id)?;
+                    change["ownerId"]=json!(owner);
+                }
+                let result=s.branch_path_apply(&json!({"operationId":operation,"branchId":branch,"changes":[change]}),&actor.grant_id)?;
+                if result["status"]!="committed"{return Err(failure("namespace_conflict","The reparse inode changed before publication"));}
+                s.save_workspace_metadata(&branch,&target_path,&selected,&actor)?;
+                s.branch_path_inspect(&json!({"branchId":branch,"path":target_path}))
+            })
+        })?;
+        state.observed = observed.clone();
+        state.aliases = BTreeMap::from([(path, observed)]);
+        state.metadata = metadata;
+        state.metadata_generation = state.metadata_generation.wrapping_add(1);
+        state.clean_metadata_generation = state.metadata_generation;
+        namespace.dirty.remove(&node.id);
+        lock(&node.content)?.dirty = None;
+        Ok(())
+    }
+    fn set_attributes_inner(
+        &self,
+        node: &Arc<Node>,
+        update: impl FnOnce(&mut Attributes) -> Result<(), KernelError>,
+        advance_changed: bool,
+    ) -> Result<(), KernelError> {
         let _boundary = self
             .boundary
             .write()
@@ -547,7 +965,7 @@ impl Session {
         let previous_change = metadata.attributes.changed;
         update(&mut metadata.attributes)?;
         metadata.attributes.validate()?;
-        if metadata.attributes.changed == previous_change {
+        if advance_changed && metadata.attributes.changed == previous_change {
             metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
         }
         if metadata.attributes.file_id != metadata.binding.file_id {
@@ -572,10 +990,21 @@ impl Session {
                         _=>{},
                     }
                     if !path.is_empty() && serde_json::to_value(&next)?!=expected["state"] {
-                        let mut input=json!({"operationId":format!("workspace-attributes:{}",Uuid::new_v4()),"branchId":branch,"changes":[{"path":path,"expectedNode":expected["node"],"expectedState":expected["state"],"state":next}]});
-                        // Chmod preserves directory children. Cached ancestor
-                        // hashes can legitimately change after any child write.
-                        if next.is_directory(){input["changes"][0].as_object_mut().unwrap().remove("expectedNode");}
+                        let paths=if matches!(next,PathState::RegularFile{..}){
+                            s.workspace_file_links(&branch,selected.binding.file_id,Some(&path),&actor)?
+                        }else{vec![path.clone()]};
+                        let mut changes=Vec::with_capacity(paths.len());
+                        for alias in paths {
+                            s.admit_workspace_session(&branch,&alias,&actor,true)?;
+                            let original=if alias==path{expected.clone()}else{s.branch_path_inspect(&json!({"branchId":branch,"path":alias}))?};
+                            if original["state"]!=expected["state"]{return Err(failure("namespace_conflict","Hard-link attributes differ between names"));}
+                            let mut change=json!({"path":alias,"expectedNode":original["node"],"expectedState":original["state"],"state":next});
+                            // Chmod preserves directory children. Cached ancestor
+                            // hashes can legitimately change after any child write.
+                            if next.is_directory(){change.as_object_mut().unwrap().remove("expectedNode");}
+                            changes.push(change);
+                        }
+                        let input=json!({"operationId":format!("workspace-attributes:{}",Uuid::new_v4()),"branchId":branch,"changes":changes});
                         if s.branch_path_apply(&input,&actor.grant_id)?["status"]!="committed"{return Err(failure("namespace_conflict","File changed while setting attributes"));}
                     }
                     s.save_workspace_metadata(&branch,&path,&selected,&actor)?;
@@ -583,6 +1012,13 @@ impl Session {
                 })
             })?;
             state.observed = observed;
+            let mut aliases = BTreeMap::new();
+            for path in state.aliases.keys() {
+                let mut observed = state.observed.clone();
+                observed["path"] = json!(path);
+                aliases.insert(path.clone(), observed);
+            }
+            state.aliases = aliases;
         }
         state.metadata = metadata;
         state.metadata_generation = state.metadata_generation.wrapping_add(1);
@@ -665,7 +1101,7 @@ impl Session {
         self.port.call(move |storage| {
             storage.admit_workspace_session(&branch, &selected, &actor, true)?;
             let input = json!({"operationId":operation,"workspaceId":actor.owning_workspace,"branchId":branch,"changes":[{"path":selected,"expectedState":before["state"],"state":state}]});
-            let result = super::operations::idempotent(storage, "workspace.namespace.create", &input, |s| {
+            let result = storage.filesystem_transaction(|s| {
                 let result=s.branch_path_apply(&input, &actor.grant_id)?;
                 if result["status"]=="committed"{s.save_workspace_metadata(&branch,&selected,&metadata,&actor)?;}
                 Ok(result)
@@ -757,6 +1193,7 @@ impl Session {
                     &installed,
                     &actor,
                     Some(&metadata),
+                    false,
                 )
             })?
             .finish();
@@ -767,6 +1204,79 @@ impl Session {
         lock(&node.content)?.open = Arc::downgrade(&content);
         self.touch_parent(&mut namespace, &requested)?;
         Ok(node)
+    }
+    /// Introduce another name for the same native inode. Namespace and link
+    /// identities commit together; dirty byte ranges stay shared in memory.
+    pub(crate) fn link(&self, node: &Arc<Node>, requested: &str) -> Result<Arc<Node>, KernelError> {
+        let requested = path(requested)?;
+        if requested.is_empty() {
+            return Err(failure("namespace_exists", "Workspace root already exists"));
+        }
+        let _boundary = self
+            .boundary
+            .write()
+            .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+        self.owns(node)?;
+        let mut namespace = lock(&self.namespace)?;
+        if !self
+            .load(&mut namespace, parent(&requested))?
+            .state()?
+            .is_directory()
+        {
+            return Err(failure(
+                "namespace_not_directory",
+                "Parent is not a directory",
+            ));
+        }
+        let mut state = lock(&node.state)?;
+        let from = state
+            .path
+            .clone()
+            .ok_or_else(|| failure("namespace_missing", "Cannot link an unlinked file"))?;
+        if state.observed["state"]["kind"] != "regular-file" {
+            return Err(failure(
+                "namespace_not_file",
+                "Only regular files can have hard links",
+            ));
+        }
+        let before = self.observe(&requested, true)?;
+        if before["state"]["kind"] != "missing" {
+            return Err(failure(
+                "namespace_exists",
+                "Hard-link destination already exists",
+            ));
+        }
+        let expected = state.observed.clone();
+        let mut metadata = state.metadata.clone();
+        metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
+        let selected = metadata.clone();
+        let (branch, actor, to) = (self.branch.clone(), self.grant.clone(), requested.clone());
+        let (observed,count)=self.port.call(move |s|{
+            s.admit_workspace_session(&branch,&from,&actor,true)?;
+            s.admit_workspace_session(&branch,&to,&actor,true)?;
+            let input=json!({"operationId":format!("workspace-hardlink:{}",Uuid::new_v4()),"branchId":branch,
+                "changes":[{"path":to,"expectedState":before["state"],"state":expected["state"],"sourcePath":from}]});
+            s.filesystem_transaction(|s|{
+                let current=s.branch_path_inspect(&json!({"branchId":branch,"path":from}))?;
+                if current["state"]!=expected["state"] || current["node"]!=expected["node"]{return Err(failure("namespace_conflict","Hard-link source changed"));}
+                if s.branch_path_apply(&input,&actor.grant_id)?["status"]!="committed"{return Err(failure("namespace_conflict","Hard-link destination changed"));}
+                let count=s.link_workspace_metadata(&branch,&from,&to,&selected,&actor)?;
+                let observed=s.branch_path_inspect(&json!({"branchId":branch,"path":to}))?;
+                Ok(json!({"status":"committed","observed":observed,"count":count}))
+            }).and_then(|result|{
+                let count=result["count"].as_u64().and_then(|n|usize::try_from(n).ok()).ok_or_else(||KernelError::Storage("hard-link count is invalid".into()))?;
+                Ok((result["observed"].clone(),count))
+            })
+        })?;
+        state.aliases.insert(requested.clone(), observed);
+        state.metadata = metadata;
+        state.metadata_generation = state.metadata_generation.wrapping_add(1);
+        state.clean_metadata_generation = state.metadata_generation;
+        state.link_count = count;
+        drop(state);
+        namespace.paths.insert(requested.clone(), node.clone());
+        self.touch_parent(&mut namespace, &requested)?;
+        Ok(node.clone())
     }
     pub(crate) fn remove(&self, requested: &str, directory: bool) -> Result<(), KernelError> {
         let requested = path(requested)?;
@@ -799,7 +1309,8 @@ impl Session {
         }
         let (branch, actor, selected) =
             (self.branch.clone(), self.grant.clone(), requested.clone());
-        self.port.call(move |s| {
+        let id = lock(&node.state)?.metadata.binding.file_id;
+        let remaining=self.port.call(move |s| {
             s.admit_workspace_session(&branch, &selected, &actor, true)?;
             let mut changes=vec![json!({"path":selected,"expectedState":before["state"],"expectedNode":before["node"],"state":{"kind":"missing"}})];
             if !parent(&selected).is_empty() {
@@ -810,21 +1321,51 @@ impl Session {
                 changes.push(json!({"path":parent["path"],"expectedState":parent["state"],"state":parent["state"]}));
             }
             let input = json!({"operationId":format!("workspace-unlink:{}", Uuid::new_v4()),"workspaceId":actor.owning_workspace,"branchId":branch,"changes":changes});
-            let receipt = super::operations::idempotent(s,"workspace.namespace.unlink",&input,|s|{
+            let receipt = s.filesystem_transaction(|s|{
                 let receipt=s.branch_path_apply(&input,&actor.grant_id)?;
                 if receipt["status"]=="committed"{s.remove_workspace_metadata(&branch,&selected,&actor)?;}
                 Ok(receipt)
             })?;
             if receipt["status"] != "committed" { return Err(failure("namespace_conflict", "Unlink target changed")); }
-            Ok(())
+            let paths=s.workspace_file_links(&branch,id,None,&actor)?;
+            let mut remaining=Vec::with_capacity(paths.len());
+            for path in paths{
+                s.admit_workspace_session(&branch,&path,&actor,true)?;
+                remaining.push(s.branch_path_inspect(&json!({"branchId":branch,"path":path}))?);
+            }
+            Ok(remaining)
         })?;
+        let mut retired = None;
         {
             let mut state = lock(&node.state)?;
-            state.path = None;
+            state.aliases.remove(&requested);
+            state.link_count = remaining.len();
+            if remaining.is_empty() {
+                state.path = None;
+                namespace.inodes.remove(&state.metadata.binding.file_id);
+                namespace.numbers.remove(&state.metadata.binding.file_id);
+                namespace.dirty.remove(&node.id);
+                retired = lock(&node.content)?.dirty.take();
+            } else {
+                for observed in remaining {
+                    let path = observed["path"]
+                        .as_str()
+                        .ok_or_else(|| {
+                            KernelError::Storage("hard-link observation omitted path".into())
+                        })?
+                        .to_owned();
+                    state.aliases.insert(path.clone(), observed.clone());
+                    namespace.paths.insert(path.clone(), node.clone());
+                    if state.path.as_deref() == Some(&requested) {
+                        state.path = Some(path);
+                        state.observed = observed;
+                    }
+                }
+                state.metadata_generation = state.metadata_generation.wrapping_add(1);
+                namespace.dirty.insert(node.id, node.clone());
+            }
             state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
         }
-        namespace.dirty.remove(&node.id);
-        let retired = lock(&node.content)?.dirty.take();
         namespace.paths.remove(&requested);
         self.touch_parent(&mut namespace, &requested)?;
         drop(namespace);
@@ -845,23 +1386,37 @@ impl Session {
             .write()
             .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
         let mut namespace = lock(&self.namespace)?;
-        self.load(&mut namespace, &from)?;
-        let replaced = namespace.paths.get(&to).cloned();
+        let source_node = self.load(&mut namespace, &from)?;
         let source = self.observe(&from, true)?;
         let target = self.observe(&to, true)?;
+        let replaced = if target["state"]["kind"] != "missing" {
+            Some(self.load(&mut namespace, &to)?)
+        } else {
+            None
+        };
+        if replaced
+            .as_ref()
+            .is_some_and(|node| Arc::ptr_eq(node, &source_node))
+        {
+            return Ok(());
+        }
+        let replaced_id = replaced
+            .as_ref()
+            .map(|node| node.attributes().map(|a| a.file_id))
+            .transpose()?;
         let (branch, actor, a, b) = (
             self.branch.clone(),
             self.grant.clone(),
             from.clone(),
             to.clone(),
         );
-        self.port.call(move |s| {
+        let remaining=self.port.call(move |s| {
             s.admit_workspace_session(&branch, &a, &actor, true)?;
             s.admit_workspace_session(&branch, &b, &actor, true)?;
             require_capability(&actor,"branch.rename")?;
             let input = json!({"operationId":format!("workspace-rename:{}",Uuid::new_v4()),"workspaceId":actor.owning_workspace,"branchId":branch,"sourcePath":a,"path":b,
                 "expectedSourceNode":source["node"],"expectedTargetNode":target["node"],"replace":replace});
-            let receipt = super::operations::idempotent(s,"workspace.namespace.rename",&input,|s|{
+            let receipt = s.filesystem_transaction(|s|{
                 let receipt=s.branch_rename(&input)?;
                 if receipt["status"]=="committed" && a!=b {
                     s.rename_workspace_metadata(&branch,&a,&b,&serde_json::from_value(source["state"].clone())?,&serde_json::from_value(target["state"].clone())?,&actor)?;
@@ -869,7 +1424,14 @@ impl Session {
                 Ok(receipt)
             })?;
             if receipt["status"] != "committed" { return Err(failure("namespace_conflict", "Rename source or target changed")); }
-            Ok(())
+            let mut remaining=Vec::new();
+            if let Some(id)=replaced_id {
+                for path in s.workspace_file_links(&branch,id,None,&actor)?{
+                    s.admit_workspace_session(&branch,&path,&actor,true)?;
+                    remaining.push(s.branch_path_inspect(&json!({"branchId":branch,"path":path}))?);
+                }
+            }
+            Ok(remaining)
         })?;
         if from == to {
             return Ok(());
@@ -878,11 +1440,34 @@ impl Session {
         if let Some(replaced) = replaced {
             {
                 let mut state = lock(&replaced.state)?;
-                state.path = None;
+                state.aliases.remove(&to);
+                state.link_count = remaining.len();
+                if remaining.is_empty() {
+                    state.path = None;
+                    namespace.inodes.remove(&state.metadata.binding.file_id);
+                    namespace.numbers.remove(&state.metadata.binding.file_id);
+                    namespace.dirty.remove(&replaced.id);
+                    retired = lock(&replaced.content)?.dirty.take();
+                } else {
+                    for observed in remaining {
+                        let path = observed["path"]
+                            .as_str()
+                            .ok_or_else(|| {
+                                KernelError::Storage("hard-link observation omitted path".into())
+                            })?
+                            .to_owned();
+                        state.aliases.insert(path.clone(), observed.clone());
+                        namespace.paths.insert(path.clone(), replaced.clone());
+                        if state.path.as_deref() == Some(&to) {
+                            state.path = Some(path);
+                            state.observed = observed;
+                        }
+                    }
+                    state.metadata_generation = state.metadata_generation.wrapping_add(1);
+                    namespace.dirty.insert(replaced.id, replaced.clone());
+                }
                 state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
             }
-            namespace.dirty.remove(&replaced.id);
-            retired = lock(&replaced.content)?.dirty.take();
         }
         let prefix = format!("{from}/");
         let affected = namespace
@@ -894,8 +1479,16 @@ impl Session {
         for (old, node) in affected {
             let next = format!("{to}{}", &old[from.len()..]);
             let mut state = lock(&node.state)?;
-            state.path = Some(next.clone());
-            state.observed["path"] = json!(next);
+            let mut observed = state
+                .aliases
+                .remove(&old)
+                .unwrap_or_else(|| state.observed.clone());
+            observed["path"] = json!(next);
+            if state.path.as_deref() == Some(&old) {
+                state.path = Some(next.clone());
+                state.observed = observed.clone();
+            }
+            state.aliases.insert(next.clone(), observed);
             if old == from {
                 state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
                 state.metadata_generation = state.metadata_generation.wrapping_add(1);
@@ -970,7 +1563,16 @@ impl Session {
                 if snapshot.generation() != state.clean_generation {
                     let mode = state.metadata.attributes.mode;
                     if let Some(path) = &state.path {
-                        files.push((path.clone(), mode, snapshot));
+                        let (branch, actor, id, path) = (
+                            self.branch.clone(),
+                            self.grant.clone(),
+                            state.metadata.binding.file_id,
+                            path.clone(),
+                        );
+                        let paths = self.port.call(move |s| {
+                            s.workspace_file_links(&branch, id, Some(&path), &actor)
+                        })?;
+                        files.push((paths, mode, snapshot));
                     }
                 }
             }
@@ -981,13 +1583,17 @@ impl Session {
             format!("workspace-boundary:{}", Uuid::new_v4()),
         );
         let pinned = pin.clone();
+        let base_pin = format!("{pin}:base");
+        let pinned_base = base_pin.clone();
         let metadata_pin = format!("{pin}:filesystem");
         let pinned_metadata = metadata_pin.clone();
-        let metadata_head = self.port.call(move |s| {
+        let (metadata_head, branch) = self.port.call(move |s| {
             s.admit_workspace_session(&branch, "", &actor, false)?;
             require_capability(&actor, "branch.pin")?;
             s.filesystem_transaction(|s| {
                 let data=s.branch(&branch)?;
+                s.conn.execute("INSERT INTO pins(pin_id,branch_id,workspace_id,revision,write_revision,root_hash,grant_id,ephemeral,created_at) VALUES(?1,?2,?3,-1,?4,?5,?6,1,?7)",
+                    params![pinned_base,branch,data.workspace_id,crate::model::SNAPSHOT_PIN_WRITE_REVISION,data.base_root,actor.grant_id,now_ms()])?;
                 s.branch_pin(
                     &json!({"branchId":branch,"pinId":pinned,"expectedRoot":data.head_root,"expectedWriteRevision":data.write_revision}),
                     true,
@@ -1000,27 +1606,65 @@ impl Session {
                     true,
                     &actor.grant_id,
                 )?;
-                Ok(head)
+                Ok((head, data))
             })
         })?;
         Ok(Checkpoint {
+            session_id: self.id,
             port: self.port.clone(),
             source_branch: self.branch.clone(),
             workspace: self.workspace.clone(),
             grant: self.grant.clone(),
             root: self.root.clone(),
             pin,
+            base_pin,
             metadata_pin,
             metadata_head,
+            branch,
             metadata,
             files,
             released: false,
         })
     }
+    /// Discard only this operation's unpublished import, never a public workspace.
+    pub(crate) fn discard_adoption(&self) -> Result<(), KernelError> {
+        let branch = self.branch.clone();
+        let actor = self.grant.grant_id.clone();
+        self.port.call(move|s| {
+            if !branch.starts_with("workspace-adoption:"){return Err(KernelError::Authorization("Only an unpublished source adoption may discard private bytes".into()));}
+            let owned:bool=s.conn.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE kind='workspace.adopt' AND state='started' AND json_extract(result_json,'$.temporaryBranchId')=?1 AND json_extract(result_json,'$.identity.grantId')=?2)",params![branch,actor],|row|row.get(0))?;
+            if !owned{return Err(KernelError::Authorization("The original unpublished adoption owner is unavailable".into()));}
+            Ok(())
+        })?;
+        self.revoked.store(true, Ordering::Release);
+        self.close()
+    }
     /// Only call after all native callbacks and process handles have drained.
     /// Errors leave the live session usable for retry, rather than discarding data.
     pub(crate) fn close(&self) -> Result<(), KernelError> {
         if self.closed.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        if self.revoked() {
+            // Explicit revocation has already made every private range
+            // inaccessible. Drain native handles before calling this path;
+            // durable acknowledged publications remain in the branch.
+            let _boundary = self
+                .boundary
+                .write()
+                .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+            let mut namespace = lock(&self.namespace)?;
+            let mut retired = Vec::new();
+            for node in namespace.dirty.values() {
+                if let Some(content) = lock(&node.content)?.dirty.take() {
+                    retired.push(content);
+                }
+            }
+            namespace.dirty.clear();
+            self.closed.store(true, Ordering::Release);
+            drop(namespace);
+            drop(_boundary);
+            drop(retired);
             return Ok(());
         }
         self.flush_all()?;
@@ -1069,6 +1713,68 @@ impl Session {
     }
 }
 impl Checkpoint {
+    fn install_files(
+        &self,
+        cancelled: &AtomicBool,
+    ) -> Result<Vec<(Vec<String>, u32, super::workspace_files::InstalledFile)>, KernelError> {
+        let mut installed = Vec::new();
+        for (paths, mode, snapshot) in &self.files {
+            let sealed = snapshot.seal(&self.root.join("staging"), cancelled)?;
+            let (retention, sealed) = self
+                .port
+                .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
+            installed.push((
+                paths.clone(),
+                *mode,
+                sealed.install(&self.root, retention, cancelled)?,
+            ));
+        }
+        Ok(installed)
+    }
+    /// Fix a publication candidate without updating the active branch or
+    /// materializing/scanning a directory. Sealing remains on this worker.
+    pub(crate) fn prepare_result(
+        &self,
+        publication: &str,
+        grant: Grant,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Value, KernelError> {
+        let files = self.install_files(cancelled.as_ref())?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let (publication, branch_id, pin, base_pin, metadata_pin, branch, head, metadata, session) = (
+            publication.to_owned(),
+            self.source_branch.clone(),
+            self.pin.clone(),
+            self.base_pin.clone(),
+            self.metadata_pin.clone(),
+            self.branch.clone(),
+            self.metadata_head.clone(),
+            self.metadata.clone(),
+            self.session_id,
+        );
+        let file_owner = self.grant.clone();
+        self.port.call(move |storage| {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(KernelError::Cancelled);
+            }
+            storage.prepare_workspace_result(
+                &publication,
+                &branch_id,
+                &pin,
+                &base_pin,
+                &metadata_pin,
+                &branch,
+                &head,
+                &metadata,
+                &files,
+                session,
+                &grant,
+                &file_owner,
+            )
+        })
+    }
     /// Complete a fork on a finite worker. Parent writes and unrelated Storage
     /// requests continue throughout hashing and installation. Publication of all
     /// dirty files and the target root is one original Storage transaction.
@@ -1078,18 +1784,52 @@ impl Checkpoint {
         operation: &str,
         cancelled: &AtomicBool,
     ) -> Result<Value, KernelError> {
-        let mut installed = Vec::new();
-        for (path, mode, snapshot) in &self.files {
-            let sealed = snapshot.seal(&self.root.join("staging"), cancelled)?;
-            let (retention, sealed) = self
-                .port
-                .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
-            installed.push((
-                path.clone(),
-                *mode,
-                sealed.install(&self.root, retention, cancelled)?,
-            ));
+        self.fork_inner(target, operation, cancelled, self.grant.clone(), None)
+    }
+    pub(crate) fn fork_for(
+        &self,
+        target: &str,
+        operation: &str,
+        requester: Grant,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Value, KernelError> {
+        self.fork_inner(
+            target,
+            operation,
+            cancelled.as_ref(),
+            requester,
+            Some(cancelled.clone()),
+        )
+    }
+    fn fork_inner(
+        &self,
+        target: &str,
+        operation: &str,
+        cancelled: &AtomicBool,
+        requester: Grant,
+        late_cancel: Option<Arc<AtomicBool>>,
+    ) -> Result<Value, KernelError> {
+        let (operation_key, source, target_key, session_id, grant) = (
+            operation.to_owned(),
+            self.source_branch.clone(),
+            target.to_owned(),
+            self.session_id,
+            self.grant.clone(),
+        );
+        let original_requester = requester.clone();
+        if let Some(result) = self.port.call(move |s| {
+            s.replay_workspace_fork(
+                &operation_key,
+                &source,
+                &target_key,
+                session_id,
+                &grant,
+                &original_requester,
+            )
+        })? {
+            return Ok(result);
         }
+        let installed = self.install_files(cancelled)?;
         let (source, pin, workspace, actor, target, operation) = (
             self.source_branch.clone(),
             self.pin.clone(),
@@ -1101,7 +1841,19 @@ impl Checkpoint {
         let metadata_head = self.metadata_head.clone();
         let metadata_pin = self.metadata_pin.clone();
         let metadata = self.metadata.clone();
+        let session_id = self.session_id;
         self.port.call(move |s| {
+            if late_cancel
+                .as_ref()
+                .is_some_and(|cancel| cancel.load(Ordering::Acquire))
+            {
+                return Err(KernelError::Cancelled);
+            }
+            if let Some(result) = s.replay_workspace_fork(
+                &operation, &source, &target, session_id, &actor, &requester,
+            )? {
+                return Ok(result);
+            }
             s.publish_workspace_checkpoint(
                 &source,
                 &pin,
@@ -1113,6 +1865,8 @@ impl Checkpoint {
                 &metadata_head,
                 &metadata_pin,
                 &metadata,
+                session_id,
+                &requester.grant_id,
             )
         })
     }
@@ -1124,8 +1878,14 @@ impl Checkpoint {
         );
         let metadata_branch = self.metadata_head.metadata_branch.clone();
         let metadata_pin = self.metadata_pin.clone();
+        let base_pin = self.base_pin.clone();
         self.port.call(move |s| {
             s.filesystem_transaction(|s| {
+                s.branch_pin(
+                    &json!({"branchId":branch,"pinId":base_pin}),
+                    false,
+                    &actor.grant_id,
+                )?;
                 s.branch_pin(
                     &json!({"branchId":metadata_branch,"pinId":metadata_pin}),
                     false,
@@ -1155,11 +1915,17 @@ impl Drop for Checkpoint {
         );
         let metadata_branch = self.metadata_head.metadata_branch.clone();
         let metadata_pin = self.metadata_pin.clone();
+        let base_pin = self.base_pin.clone();
         // Drop never waits on control: native backend teardown may be running
         // during drainage. The original grant still owns a failed release.
         let _ = (self.port.0)(Box::new(move |storage| {
             if let Some(s) = storage {
                 let _ = s.filesystem_transaction(|s| {
+                    s.branch_pin(
+                        &json!({"branchId":branch,"pinId":base_pin}),
+                        false,
+                        &actor.grant_id,
+                    )?;
                     s.branch_pin(
                         &json!({"branchId":metadata_branch,"pinId":metadata_pin}),
                         false,
@@ -1178,6 +1944,100 @@ impl Drop for Checkpoint {
 }
 
 impl Storage {
+    fn replay_workspace_fork(
+        &self,
+        operation: &str,
+        source: &str,
+        target: &str,
+        session: Uuid,
+        owner: &Grant,
+        requester: &Grant,
+    ) -> Result<Option<Value>, KernelError> {
+        let current = self.load_grant(&owner.grant_id)?;
+        if current.state != crate::model::GrantState::Active
+            || current.kernel_epoch != owner.kernel_epoch
+        {
+            return Err(KernelError::Authorization(
+                "Workspace fork owner is no longer active".into(),
+            ));
+        }
+        let requested = self.load_grant(&requester.grant_id)?;
+        if requested.state != crate::model::GrantState::Active
+            || requested.kernel_epoch != requester.kernel_epoch
+            || requested.owning_workspace != current.owning_workspace
+            || !path_allowed(&requested, "")
+        {
+            return Err(KernelError::Authorization(
+                "Fork execution no longer owns its original workspace scope".into(),
+            ));
+        }
+        require_capability(&requested, "branch.fork")?;
+        let prior = self.operation_get(&json!({"operationId":operation}))?;
+        if prior.is_null() {
+            return Ok(None);
+        }
+        let origin = &prior["result"]["filesystem"];
+        if prior["kind"] != "workspace.checkpoint.fork"
+            || origin["sourceBranchId"] != source
+            || origin["targetBranchId"] != target
+            || origin["sessionId"] != session.to_string()
+            || origin["ownerGrantId"] != owner.grant_id
+            || origin["requestGrantId"] != requester.grant_id
+        {
+            return Err(failure("workspace_operation_changed", "Fork operation does not match its original workspace, target and filesystem lifetime"));
+        }
+        if prior["state"] != "committed" {
+            return Err(failure(
+                "workspace_operation_pending",
+                "Original workspace fork has not committed",
+            ));
+        }
+        Ok(Some(prior["result"].clone()))
+    }
+    fn assert_workspace_grant_idle(&mut self, grant: &str) -> Result<(), KernelError> {
+        if self
+            .computations
+            .jobs
+            .values()
+            .any(|job| job.grant_id == grant && !job.done())
+            || self
+                .file_leases
+                .values()
+                .any(|lease| lease.grant_id == grant)
+        {
+            return Err(failure(
+                "workspace_in_use",
+                "Original computation or file lease still retains this workspace execution",
+            ));
+        }
+        let ids = {
+            let mut query = self
+                .conn
+                .prepare("SELECT process_id FROM process_records WHERE grant_id=?1")?;
+            let rows = query.query_map([grant], |row| row.get::<_, String>(0))?;
+            rows.collect::<Result<Vec<_>, _>>()?
+        };
+        for id in ids {
+            let process = self.refresh_process_record(&id)?.ok_or_else(|| {
+                failure(
+                    "workspace_process_unknown",
+                    "Original workspace process receipt is missing",
+                )
+            })?;
+            if process["writerActive"] != false
+                || !matches!(
+                    process["status"].as_str(),
+                    Some("exited" | "failed" | "released")
+                )
+            {
+                return Err(failure(
+                    "workspace_in_use",
+                    "Original workspace process has not confirmed its stop",
+                ));
+            }
+        }
+        Ok(())
+    }
     pub(super) fn admit_workspace_branch_request(
         &self,
         method: &str,
@@ -1224,17 +2084,20 @@ impl Storage {
                 ));
             }
         }
-        let current_boundary = matches!(
-            method,
-            "branch.write"
-                | "branch.write.begin"
-                | "branch.write.finish"
-                | "branch.path.apply"
-                | "branch.rename"
-                | "branch.publish"
-                | "branch.delete"
-        ) || (method == "branch.pin" && params["revision"].is_null());
-        let branch = if method == "branch.write.finish" {
+        let current_boundary =
+            matches!(
+                method,
+                "branch.write"
+                    | "branch.write.begin"
+                    | "branch.write.finish"
+                    | "branch.path.apply"
+                    | "branch.rename"
+                    | "branch.publish"
+                    | "branch.delete"
+                    | "working.result.prepare"
+            ) || (matches!(method, "branch.pin" | "branch.read" | "branch.path.inspect")
+                && params["revision"].is_null());
+        let branch = if matches!(method, "branch.write.finish" | "working.result.prepare") {
             params["builderId"]
                 .as_str()
                 .and_then(|id| self.branch_write_builders.get(id))

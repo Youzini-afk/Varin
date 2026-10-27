@@ -204,6 +204,7 @@ impl Storage {
             private_files: HashMap::new(),
             workspace_revocations: HashMap::new(),
             workspace_sessions: HashMap::new(),
+            workspace_holders: HashMap::new(),
             private_cleanup: Arc::default(),
             file_roots: HashMap::new(),
             observation_reads: HashMap::new(),
@@ -224,6 +225,7 @@ impl Storage {
         // object unlink. Retry durable cleanup on the next owner start; a
         // failure remains visible through health instead of being swallowed.
         storage.refresh_process_records()?;
+        storage.recover_workspace_adoptions()?;
         storage.private_cleanup.recover(&root.join("staging"));
         storage.sweep_orphan_objects()?;
         storage.drain_gc_files()?;

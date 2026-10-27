@@ -1435,6 +1435,7 @@ impl Storage {
             )
             .optional()?;
         let released_records = if let Some(workspace_id) = workspace_id.as_deref() {
+            self.release_branch_result_filesystems(workspace_id,branch_id)?;
             self.release_workspace_metadata(branch_id, workspace_id)?;
             self.conn.execute(
                 "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND record_type LIKE 'working.%'",
@@ -1561,7 +1562,11 @@ impl Storage {
             Vec::new()
         };
         Ok(
-            json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": workspace_id, "revision": revision, "writeRevision": write_revision, "view": if write_revision >= 0 { "current" } else { "revision" }, "root": root, "entries": entries, "nextCursor": next_cursor}),
+            json!({"pinId": pin_id, "branchId": branch_id, "workspaceId": workspace_id,
+                "revision":if write_revision==crate::model::SNAPSHOT_PIN_WRITE_REVISION {Value::Null}else{json!(revision)},
+                "writeRevision":if write_revision==crate::model::SNAPSHOT_PIN_WRITE_REVISION {Value::Null}else{json!(write_revision)},
+                "view": if write_revision==crate::model::SNAPSHOT_PIN_WRITE_REVISION {"snapshot"}else if write_revision >= 0 { "current" } else { "revision" },
+                "root": root, "entries": entries, "nextCursor": next_cursor}),
         )
     }
 

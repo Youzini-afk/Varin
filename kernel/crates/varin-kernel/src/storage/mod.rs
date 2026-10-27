@@ -36,6 +36,8 @@ pub(crate) mod branch_namespace;
 pub(crate) mod workspace_files;
 pub(crate) mod workspace_metadata;
 pub(crate) mod workspace_session;
+mod workspace_results;
+pub(crate) mod workspace_adoption;
 pub(crate) mod capture_resources;
 mod child_sources;
 mod compute_resources;
@@ -224,6 +226,7 @@ pub(crate) struct Storage {
     private_files: HashMap<String, Vec<std::sync::Weak<workspace_files::PrivateFile>>>,
     workspace_revocations: HashMap<String, Vec<std::sync::Weak<AtomicBool>>>,
     workspace_sessions: HashMap<String, std::sync::Weak<workspace_session::Session>>,
+    workspace_holders: HashMap<String, (String, String)>,
     private_cleanup: Arc<workspace_files::StagingCleanup>,
     file_roots: HashMap<String, FileRoot>,
     observation_reads: HashMap<String, file_observations::ActiveRead>,
@@ -241,6 +244,17 @@ pub(crate) struct Storage {
     computations: crate::compute::ComputeManager,
 }
 
+impl Storage {
+    pub(crate) fn take_execution_for_shutdown(&mut self) -> (crate::process::ProcessManager, crate::compute::ComputeManager) {
+        (std::mem::take(&mut self.processes), std::mem::take(&mut self.computations))
+    }
+    pub(crate) fn finish_execution_shutdown(&mut self, processes: crate::process::ProcessManager, computations: crate::compute::ComputeManager) -> Result<(), KernelError> {
+        self.processes = processes;
+        self.computations = computations;
+        self.refresh_process_records()?;
+        self.sweep_compute_readers()
+    }
+}
 impl Drop for Storage {
     fn drop(&mut self) {
         // Keep the catalog and storage lock alive through process drainage.

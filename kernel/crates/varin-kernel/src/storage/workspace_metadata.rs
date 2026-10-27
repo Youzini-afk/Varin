@@ -71,7 +71,7 @@ impl Timestamp {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Attributes {
     pub file_id: Uuid,
@@ -87,6 +87,8 @@ pub(crate) struct Attributes {
     pub windows_attributes: u32,
     pub bsd_flags: u32,
     pub security: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reparse_data: Option<Vec<u8>>,
     /// Native xattr names/bytes, losslessly encoded for the platform adapter.
     pub xattrs: BTreeMap<String, Vec<u8>>,
 }
@@ -97,6 +99,9 @@ impl Attributes {
         self.changed = now;
     }
     pub(crate) fn validate(&self) -> Result<(), KernelError> {
+        if let Some(data) = &self.reparse_data {
+            crate::reparse_data::parse(data)?;
+        }
         for stamp in [self.created, self.accessed, self.modified, self.changed]
             .into_iter()
             .chain(self.backup)
@@ -128,6 +133,46 @@ pub(crate) struct Binding {
 pub(crate) struct Metadata {
     pub binding: Binding,
     pub attributes: Attributes,
+}
+impl Metadata {
+    pub(super) fn directory_origin(&mut self) {
+        if self.binding.origin.is_none() {
+            self.binding.origin = Some(Origin {
+                namespace: self.binding.file_id,
+                prefix: String::new(),
+            });
+        }
+    }
+}
+
+/// A hard-link name belongs to a stable directory identity, not an absolute
+/// path. Moving a directory therefore changes one parent pointer even when it
+/// contains many links; no descendant enumeration is needed.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LinkName {
+    directory: Uuid,
+    name: String,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DirectoryName {
+    parent: Uuid,
+    name: String,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LinkSet {
+    entries: BTreeSet<LinkName>,
+}
+
+fn split_link_path(path: &str) -> Result<(String, String), KernelError> {
+    let parts = Storage::validate_path(path)?;
+    let name = parts
+        .last()
+        .ok_or_else(|| KernelError::Operation("workspace root is not a file link".into()))?
+        .clone();
+    Ok((parts[..parts.len() - 1].join("/"), name))
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -191,6 +236,7 @@ fn defaults(id: Uuid, state: &PathState, time: Timestamp) -> Attributes {
         windows_attributes: if state.is_directory() { 0x10 } else { 0x20 },
         bsd_flags: 0,
         security: None,
+        reparse_data: None,
         xattrs: BTreeMap::new(),
     }
 }
@@ -274,6 +320,207 @@ impl Storage {
             children: Some(index),
         })?;
         self.graft_tree_node(root, path, Some(&leaf), true, true)
+    }
+
+    /// Materialize identities only along the parent chain of an actual link.
+    /// Unrelated directories and their entries remain untouched.
+    fn ensure_link_directory(
+        &mut self,
+        head: &Head,
+        mut root: String,
+        branch: &str,
+        directory: &str,
+    ) -> Result<(String, Uuid), KernelError> {
+        let mut parent = head.namespace;
+        let mut path = String::new();
+        if directory.is_empty() {
+            return Ok((root, parent));
+        }
+        for name in Self::validate_path(directory)? {
+            if !path.is_empty() {
+                path.push('/');
+            }
+            path.push_str(&name);
+            let observed = self.branch_path_inspect(&json!({"branchId":branch,"path":path}))?;
+            let state: PathState = serde_json::from_value(observed["state"].clone())?;
+            if !state.is_directory() {
+                return Err(KernelError::Storage(
+                    "hard-link parent is no longer a directory".into(),
+                ));
+            }
+            let selected = self.read_workspace_metadata_root(head, &root, &path, &state)?;
+            let entry = DirectoryName { parent, name };
+            let entry_path = ["directories".into(), selected.binding.file_id.to_string()];
+            if let Some(existing) = self.metadata_value::<DirectoryName>(&root, &entry_path)? {
+                if existing != entry {
+                    return Err(KernelError::Storage(
+                        "hard-link directory identity differs from its parent".into(),
+                    ));
+                }
+            } else {
+                let mut info = key(&path)?;
+                info.push("info".into());
+                root = self.metadata_set(&root, &info, &selected.binding)?;
+                root = self.metadata_set(&root, &entry_path, &entry)?;
+            }
+            parent = selected.binding.file_id;
+        }
+        Ok((root, parent))
+    }
+    fn existing_link_parent(
+        &self,
+        head: &Head,
+        root: &str,
+        directory: &str,
+    ) -> Result<Uuid, KernelError> {
+        let directory = self.read_workspace_metadata_root(
+            head,
+            root,
+            directory,
+            &PathState::Directory { mode: None },
+        )?;
+        Ok(directory.binding.file_id)
+    }
+    fn resolve_link_directory(
+        &self,
+        head: &Head,
+        root: &str,
+        mut id: Uuid,
+    ) -> Result<String, KernelError> {
+        let mut parts = Vec::new();
+        let mut seen = BTreeSet::new();
+        while id != head.namespace {
+            if !seen.insert(id) {
+                return Err(KernelError::Storage(
+                    "hard-link parent identities contain a cycle".into(),
+                ));
+            }
+            let entry = self
+                .metadata_value::<DirectoryName>(root, &["directories".into(), id.to_string()])?
+                .ok_or_else(|| {
+                    KernelError::Storage("hard-link parent identity is missing".into())
+                })?;
+            let checked = Self::validate_path(&entry.name)?;
+            if checked.len() != 1 || checked[0] != entry.name {
+                return Err(KernelError::Storage(
+                    "hard-link parent name is invalid".into(),
+                ));
+            }
+            parts.push(entry.name);
+            id = entry.parent;
+        }
+        parts.reverse();
+        Ok(parts.join("/"))
+    }
+    /// Return all actual names of one inode. The fallback is used only for a
+    /// regular file that has never been hard-linked.
+    pub(super) fn workspace_file_links(
+        &mut self,
+        branch: &str,
+        id: Uuid,
+        fallback: Option<&str>,
+        grant: &Grant,
+    ) -> Result<Vec<String>, KernelError> {
+        let head = self.workspace_metadata_head(branch, grant)?;
+        let root = self.branch(&head.metadata_branch)?.head_root;
+        let Some(group) =
+            self.metadata_value::<LinkSet>(&root, &["links".into(), id.to_string()])?
+        else {
+            return Ok(fallback.into_iter().map(str::to_owned).collect());
+        };
+        let mut paths = Vec::with_capacity(group.entries.len());
+        for entry in group.entries {
+            let dir = self.resolve_link_directory(&head, &root, entry.directory)?;
+            let path = if dir.is_empty() {
+                entry.name
+            } else {
+                format!("{dir}/{}", entry.name)
+            };
+            let checked = Self::validate_path(&path)?.join("/");
+            if checked != path {
+                return Err(KernelError::Storage("hard-link name is invalid".into()));
+            }
+            let actual = self.branch_path_inspect(&json!({"branchId":branch,"path":path}))?;
+            let state: PathState = serde_json::from_value(actual["state"].clone())?;
+            if !matches!(state, PathState::RegularFile { .. })
+                || self
+                    .read_workspace_metadata_root(&head, &root, &path, &state)?
+                    .binding
+                    .file_id
+                    != id
+            {
+                return Err(KernelError::Storage(
+                    "hard-link namespace does not match its inode".into(),
+                ));
+            }
+            paths.push(path);
+        }
+        paths.sort();
+        Ok(paths)
+    }
+    pub(super) fn workspace_file_link_count(
+        &mut self,
+        branch: &str,
+        id: Uuid,
+        grant: &Grant,
+    ) -> Result<usize, KernelError> {
+        let head = self.workspace_metadata_head(branch, grant)?;
+        let root = self.branch(&head.metadata_branch)?.head_root;
+        match self.metadata_value::<LinkSet>(&root, &["links".into(), id.to_string()])? {
+            Some(group) if group.entries.is_empty() => Err(KernelError::Storage(
+                "empty hard-link group is invalid".into(),
+            )),
+            Some(group) => Ok(group.entries.len()),
+            None => Ok(1),
+        }
+    }
+    pub(super) fn link_workspace_metadata(
+        &mut self,
+        branch: &str,
+        from: &str,
+        to: &str,
+        metadata: &Metadata,
+        grant: &Grant,
+    ) -> Result<usize, KernelError> {
+        let head = self.workspace_metadata_head(branch, grant)?;
+        let root = self.branch(&head.metadata_branch)?.head_root;
+        let (from_dir, from_name) = split_link_path(from)?;
+        let (to_dir, to_name) = split_link_path(to)?;
+        let (root, from_id) = self.ensure_link_directory(&head, root, branch, &from_dir)?;
+        let (root, to_id) = self.ensure_link_directory(&head, root, branch, &to_dir)?;
+        let from_link = LinkName {
+            directory: from_id,
+            name: from_name,
+        };
+        let to_link = LinkName {
+            directory: to_id,
+            name: to_name,
+        };
+        let group_path = ["links".into(), metadata.binding.file_id.to_string()];
+        let mut group = self
+            .metadata_value::<LinkSet>(&root, &group_path)?
+            .unwrap_or_else(|| LinkSet {
+                entries: BTreeSet::from([from_link.clone()]),
+            });
+        if !group.entries.contains(&from_link) || !group.entries.insert(to_link) {
+            return Err(KernelError::Storage(
+                "hard-link identity changed during creation".into(),
+            ));
+        }
+        let mut from_info = key(from)?;
+        from_info.push("info".into());
+        let mut to_info = key(to)?;
+        to_info.push("info".into());
+        let root = self.metadata_set(&root, &from_info, &metadata.binding)?;
+        let root = self.metadata_set(&root, &to_info, &metadata.binding)?;
+        let root = self.metadata_set(
+            &root,
+            &["inodes".into(), metadata.binding.file_id.to_string()],
+            &metadata.attributes,
+        )?;
+        let root = self.metadata_set(&root, &group_path, &group)?;
+        self.set_metadata_root(&head, &root)?;
+        Ok(group.entries.len())
     }
     pub(super) fn workspace_metadata_head(
         &mut self,
@@ -451,6 +698,30 @@ impl Storage {
         )?;
         self.set_metadata_root(&head, &root)
     }
+    pub(super) fn workspace_metadata_snapshot(
+        &mut self,
+        root: &str,
+        changes: &[(String, Metadata)],
+    ) -> Result<String, KernelError> {
+        let mut root = root.to_owned();
+        for (path, metadata) in changes {
+            metadata.attributes.validate()?;
+            if metadata.attributes.file_id != metadata.binding.file_id {
+                return Err(KernelError::Storage(
+                    "Snapshot inode has a different metadata binding".into(),
+                ));
+            }
+            let mut info = key(path)?;
+            info.push("info".into());
+            root = self.metadata_set(&root, &info, &metadata.binding)?;
+            root = self.metadata_set(
+                &root,
+                &["inodes".into(), metadata.binding.file_id.to_string()],
+                &metadata.attributes,
+            )?;
+        }
+        Ok(root)
+    }
     pub(super) fn remove_workspace_metadata(
         &mut self,
         branch: &str,
@@ -462,18 +733,59 @@ impl Storage {
         let mut info = key(path)?;
         info.push("info".into());
         let binding = self.metadata_value::<Binding>(&root, &info)?;
-        let root = self.graft_tree_node(&root, &key(path)?, None, true, false)?;
-        let root = if let Some(binding) = binding {
-            self.graft_tree_node(
-                &root,
-                &["inodes".into(), binding.file_id.to_string()],
-                None,
-                true,
-                false,
-            )?
+        let link = if let Some(binding) = &binding {
+            let group_path = ["links".into(), binding.file_id.to_string()];
+            if let Some(mut group) = self.metadata_value::<LinkSet>(&root, &group_path)? {
+                let (directory, name) = split_link_path(path)?;
+                let directory = self.existing_link_parent(&head, &root, &directory)?;
+                if !group.entries.remove(&LinkName { directory, name }) {
+                    return Err(KernelError::Storage(
+                        "removed hard-link is not in its inode".into(),
+                    ));
+                }
+                Some((group_path, group))
+            } else {
+                None
+            }
         } else {
-            root
+            None
         };
+        let mut root = self.graft_tree_node(&root, &key(path)?, None, true, false)?;
+        if let Some(binding) = binding {
+            if binding.origin.is_some() {
+                root = self.graft_tree_node(
+                    &root,
+                    &["directories".into(), binding.file_id.to_string()],
+                    None,
+                    true,
+                    false,
+                )?;
+            }
+            match link {
+                Some((group_path, group)) if !group.entries.is_empty() => {
+                    root = self.metadata_set(&root, &group_path, &group)?
+                }
+                Some((group_path, _)) => {
+                    root = self.graft_tree_node(&root, &group_path, None, true, false)?;
+                    root = self.graft_tree_node(
+                        &root,
+                        &["inodes".into(), binding.file_id.to_string()],
+                        None,
+                        true,
+                        false,
+                    )?;
+                }
+                None => {
+                    root = self.graft_tree_node(
+                        &root,
+                        &["inodes".into(), binding.file_id.to_string()],
+                        None,
+                        true,
+                        false,
+                    )?
+                }
+            }
+        }
         self.set_metadata_root(&head, &root)
     }
     pub(super) fn rename_workspace_metadata(
@@ -496,7 +808,44 @@ impl Storage {
             .find_path_node(&root, &key(from)?)?
             .ok_or_else(|| KernelError::Storage("filesystem rename metadata missing".into()))?;
         let root = self.graft_tree_node(&root, &key(from)?, None, true, false)?;
-        let root = self.graft_tree_node(&root, &key(to)?, Some(&selected), true, true)?;
+        let mut root = self.graft_tree_node(&root, &key(to)?, Some(&selected), true, true)?;
+        let directory_path = ["directories".into(), metadata.binding.file_id.to_string()];
+        let group_path = ["links".into(), metadata.binding.file_id.to_string()];
+        let is_tracked_directory = self
+            .metadata_value::<DirectoryName>(&root, &directory_path)?
+            .is_some();
+        let group = self.metadata_value::<LinkSet>(&root, &group_path)?;
+        if is_tracked_directory || group.is_some() {
+            let (from_dir, from_name) = split_link_path(from)?;
+            let (to_dir, to_name) = split_link_path(to)?;
+            let (next, from_id) = self.ensure_link_directory(&head, root, branch, &from_dir)?;
+            let (next, to_id) = self.ensure_link_directory(&head, next, branch, &to_dir)?;
+            root = next;
+            if is_tracked_directory {
+                root = self.metadata_set(
+                    &root,
+                    &directory_path,
+                    &DirectoryName {
+                        parent: to_id,
+                        name: to_name.clone(),
+                    },
+                )?;
+            }
+            if let Some(mut group) = group {
+                if !group.entries.remove(&LinkName {
+                    directory: from_id,
+                    name: from_name,
+                }) || !group.entries.insert(LinkName {
+                    directory: to_id,
+                    name: to_name,
+                }) {
+                    return Err(KernelError::Storage(
+                        "renamed hard-link identity changed".into(),
+                    ));
+                }
+                root = self.metadata_set(&root, &group_path, &group)?;
+            }
+        }
         self.set_metadata_root(&head, &root)
     }
     pub(super) fn fork_workspace_metadata(

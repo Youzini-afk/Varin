@@ -47,6 +47,13 @@ enum WorkerRequest {
     SourceDone { request:Value, key:String, result:Result<crate::source_resources::SourceWorkResult,KernelError> },
     Resource(crate::tools::ResourceCall),
     FileObservation(crate::file_observation::Command),
+    Workspace(crate::storage::workspace_session::Command),
+    WorkspaceIdle,
+    WorkspaceDone { request: Option<Value>, result: Result<Value, KernelError> },
+    WorkspaceShutdownDone {
+        request: Option<Value>, result: Result<Value, KernelError>,
+        processes: crate::process::ProcessManager, computations: crate::compute::ComputeManager,
+    },
     FileWriterStopped(String),
     RecheckRecoveredProcessReceipts,
     FileLeasesChanged,
@@ -247,6 +254,13 @@ struct Kernel {
     source_resources:Option<crate::tools::KernelResourceClient>,
     source_request_cancel:Option<varin_runtime::execution::CancellationToken>,
     source_tasks:HashMap<String,varin_runtime::execution::CancellationToken>,
+    workspaces: Arc<crate::workspace_resources::Workspaces>,
+    workspace_tasks: HashMap<String, Arc<AtomicBool>>,
+    workspace_shutdown: bool,
+    workspace_shutdown_started: bool,
+    workspace_shutdown_request: Option<Value>,
+    shutdown_complete: bool,
+    workspace_idle_pending:bool,
     agent_control: crate::agent_runtime::AgentControl,
 }
 
@@ -262,6 +276,47 @@ impl Drop for Kernel {
 }
 
 impl Kernel {
+    fn drained(&self) -> bool {
+        self.shutdown_complete && self.active_materializations == 0 && self.source_tasks.is_empty()
+            && self.workspace_tasks.is_empty() && !self.workspace_shutdown && self.workspaces.is_empty()
+            && !self.storage.as_ref().is_some_and(Storage::file_observation_reads_active)
+    }
+    fn workspace_port(completions: &mpsc::Sender<WorkerRequest>) -> crate::storage::workspace_session::StoragePort {
+        let sender = completions.clone();
+        crate::storage::workspace_session::StoragePort::new(move |command| {
+            sender.send(WorkerRequest::Workspace(command)).map_err(|_| KernelError::Storage("Runtime workspace Storage owner disconnected".into()))
+        })
+    }
+    fn stop_workspaces(&mut self, request: Option<Value>, completions: &mpsc::Sender<WorkerRequest>) {
+        if self.workspace_shutdown { return; }
+        self.workspace_shutdown = true;
+        if request.is_some(){self.workspace_shutdown_request=request;}
+        for cancelled in self.workspace_tasks.values() { cancelled.store(true, Ordering::Release); }
+        for cancelled in self.source_tasks.values() { cancelled.cancel(); }
+        for (cancelled, _) in &self.file_workers { cancelled.store(true, Ordering::Release); }
+        self.advance_shutdown(completions);
+    }
+    fn advance_shutdown(&mut self, completions: &mpsc::Sender<WorkerRequest>) {
+        if !self.workspace_shutdown || self.workspace_shutdown_started || !self.workspace_tasks.is_empty()
+            || !self.source_tasks.is_empty() || self.active_materializations != 0
+            || self.storage.as_ref().is_some_and(Storage::file_observation_reads_active) { return; }
+        self.workspace_shutdown_started = true;
+        self.workspace_idle_pending=false;
+        let request = self.workspace_shutdown_request.take();
+        let execution = self.storage.as_mut().map(Storage::take_execution_for_shutdown).unwrap_or_default();
+        let workers = std::mem::take(&mut self.file_workers);
+        let (workspaces, sender) = (self.workspaces.clone(), completions.clone());
+        thread::spawn(move || {
+            let (mut processes, mut computations) = execution;
+            // Native users may be waiting in a filesystem callback. Keep its
+            // StoragePort owner responsive while stopping and joining them.
+            let result = processes.shutdown();
+            computations.shutdown();
+            for (_, worker) in workers { let _ = worker.join(); }
+            let result = result.and_then(|()| workspaces.shutdown()).map(|()| json!({"stopping":true}));
+            let _ = sender.send(WorkerRequest::WorkspaceShutdownDone { request, result, processes, computations });
+        });
+    }
     fn new(epoch: String) -> Self {
         Self {
             epoch,
@@ -284,6 +339,13 @@ impl Kernel {
             source_resources:None,
             source_request_cancel:None,
             source_tasks:HashMap::new(),
+            workspaces: Arc::new(crate::workspace_resources::Workspaces::default()),
+            workspace_tasks: HashMap::new(),
+            workspace_shutdown: false,
+            workspace_shutdown_started: false,
+            workspace_shutdown_request: None,
+            shutdown_complete: false,
+            workspace_idle_pending:false,
             agent_control: crate::agent_runtime::AgentControl::default(),
         }
     }
@@ -461,11 +523,10 @@ impl Kernel {
             for (cancel, _) in &self.file_workers {
                 cancel.store(true, Ordering::Release);
             }
-            if let Some(storage) = self.storage.as_mut() {
-                storage.shutdown_computations()?;
-                storage.shutdown_processes()?;
-            }
-            return Ok(Some(response_ok(id, json!({"stopping": true}))));
+            if self.workspace_shutdown || self.workspace_shutdown_request.is_some() { return Err(KernelError::Operation("The original kernel shutdown is still draining".into())); }
+            if let Some(storage) = self.storage.as_ref() { storage.cancel_file_observation_reads(); }
+            self.stop_workspaces(Some(request.clone()), completions);
+            return Ok(None);
         }
         if matches!(method, "model.adapters.publish" | "model.adapters.revoke" | "model.adapters.retain" | "model.adapters.release") {
             if request.get("grantId").is_some() { return Err(KernelError::Authorization("model adapter composition requires authenticated Host ownership".into())); }
@@ -556,6 +617,18 @@ impl Kernel {
             method,
             &params_value,
         )?;
+        if method.starts_with("workspace.") {
+            if self.workspace_shutdown { return Err(KernelError::Operation("Workspace shutdown is in progress".into())); }
+            let (workspaces, sender, request, method, port) = (self.workspaces.clone(), completions.clone(), request.clone(), method.to_owned(), Self::workspace_port(completions));
+            let idle_sender=completions.clone();
+            let notify_idle=Arc::new(move ||{let _=idle_sender.send(WorkerRequest::WorkspaceIdle);});
+            self.workspace_tasks.insert(id.to_owned(), cancellation.clone());
+            thread::spawn(move || {
+                let result = workspaces.execute(port, notify_idle, &method, params_value, authorized_grant, cancellation);
+                let _ = sender.send(WorkerRequest::WorkspaceDone { request:Some(request), result });
+            });
+            return Ok(None);
+        }
         if method == "file.lease.wait" {
             return storage.wait_file_lease(id, &params_value, &authorized_grant, cancellation)
                 .map(|result| result.map(|value| response_ok(id, value)));
@@ -1398,16 +1471,25 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
         kernel.model_protocol = Some(worker_model_protocol.clone());
         kernel.source_resources=Some(source_resources);
         let mut stopping = false;
-        for message in request_rx {
-            if stopping
-                && kernel.active_materializations == 0 && kernel.source_tasks.is_empty()
-                && !kernel
-                    .storage
-                    .as_ref()
-                    .is_some_and(Storage::file_observation_reads_active)
-            {
+        macro_rules! respond {
+            ($response:expr) => {
+                if worker_response_tx.send($response).is_err() {
+                    worker_writer_failed.store(true, Ordering::Release);
+                    stopping = true;
+                    if !kernel.shutdown_complete { kernel.stop_workspaces(None, &capture_completions); }
+                }
+            };
+        }
+        loop {
+            if worker_writer_failed.load(Ordering::Acquire) && !stopping {
+                stopping = true;
+                kernel.stop_workspaces(None, &capture_completions);
+            }
+            kernel.advance_shutdown(&capture_completions);
+            if stopping && kernel.drained() {
                 break;
             }
+            let Ok(message) = request_rx.recv() else { break; };
             let (request, cancellation) = match message {
                 WorkerRequest::Wire(request, cancellation) => (request, cancellation),
                 WorkerRequest::SourceWire(request,cancel)=>{kernel.source_request_cancel=Some(cancel.clone());(request,cancel.shared_flag())},
@@ -1417,11 +1499,12 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Ok(mut active)=worker_cancellations.lock(){active.remove(id);}
                     let result=result.and_then(|value|value.finish(kernel.storage.as_mut().expect("source Storage owner")));
                     let response=match result{Ok(value)=>response_ok(id,value),Err(error)=>response_error(id,&error)};
-                    if worker_response_tx.send(response).is_err(){break;}
+                    respond!(response);
                     continue;
                 },
                 WorkerRequest::Stop => {
                     stopping = true;
+                    kernel.stop_workspaces(None, &capture_completions);
                     for cancel in kernel.source_tasks.values(){cancel.cancel();}
                     for (cancel, _) in &kernel.file_workers {
                         cancel.store(true, Ordering::Release);
@@ -1435,12 +1518,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(storage) = kernel.storage.as_ref() {
                         storage.cancel_file_observation_reads();
                     }
-                    if kernel.active_materializations == 0 && kernel.source_tasks.is_empty()
-                        && !kernel
-                            .storage
-                            .as_ref()
-                            .is_some_and(Storage::file_observation_reads_active)
-                    {
+                    if kernel.drained() {
                         break;
                     }
                     continue;
@@ -1473,9 +1551,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         let id=request["id"].as_str().unwrap_or("");
                         worker_cancellations.lock().ok().map(|mut active|active.remove(id));
                         let response=match result {Ok(result)=>response_ok(id,result),Err(error)=>response_error(id,&error)};
-                        if worker_response_tx.send(response).is_err(){break;}
+                        respond!(response);
                     } else if let Err(error)=result {eprintln!("derived view cleanup failed: {error}");}
-                    if stopping && kernel.active_materializations==0 {break;}
+                    if stopping && kernel.drained() {break;}
                     continue;
                 }
                 WorkerRequest::MaterializationDone {
@@ -1563,11 +1641,9 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     };
                     if let Some(response) = response {
-                        if worker_response_tx.send(response).is_err() {
-                            break;
-                        }
+                        respond!(response);
                     }
-                    if stopping && kernel.active_materializations == 0 && kernel.source_tasks.is_empty() {
+                    if stopping && kernel.drained() {
                         break;
                     }
                     continue;
@@ -1611,9 +1687,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(value) => response_ok(id, value),
                         Err(error) => response_error(id, &error),
                     };
-                    if worker_response_tx.send(response).is_err() {
-                        break;
-                    }
+                    respond!(response);
                     continue;
                 }
                 WorkerRequest::BlobReadDone {
@@ -1638,9 +1712,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                                 Ok(value) => response_ok(id, value),
                                 Err(error) => response_error(id, &error),
                             };
-                            if worker_response_tx.send(response).is_err() {
-                                break;
-                            }
+                            respond!(response);
                         }
                         BlobReadReply::Resource(call) => {
                             let denied = worker_revoked_grants
@@ -1699,9 +1771,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(value) => response_ok(id, value),
                         Err(error) => response_error(id, &error),
                     };
-                    if worker_response_tx.send(response).is_err() {
-                        break;
-                    }
+                    respond!(response);
                     continue;
                 }
                 WorkerRequest::CaptureHashed { request, task, result } => {
@@ -1716,7 +1786,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     if let Err(error) = continued {
                         worker_cancellations.lock().ok().map(|mut active| active.remove(&id));
-                        if worker_response_tx.send(response_error(&id, &error)).is_err() { break; }
+                        respond!(response_error(&id, &error));
                     }
                     // The same request/credit remains active across the continuation.
                     continue;
@@ -1741,9 +1811,7 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Ok(value) => response_ok(id, value),
                         Err(error) => response_error(id, &error),
                     };
-                    if worker_response_tx.send(response).is_err() {
-                        break;
-                    }
+                    respond!(response);
                     continue;
                 }
                 WorkerRequest::Interaction(command) => {
@@ -1804,10 +1872,62 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     continue;
                 }
+                WorkerRequest::Workspace(command) => {
+                    command(kernel.storage.as_mut());
+                    continue;
+                }
+                WorkerRequest::WorkspaceIdle => {
+                    kernel.workspace_idle_pending=true;
+                    if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
+                    continue;
+                }
+                WorkerRequest::WorkspaceDone { request, result } => {
+                    if let Some(request) = request {
+                        let id = request["id"].as_str().unwrap_or_default();
+                        kernel.workspace_tasks.remove(id);
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(id); }
+                        let result=if request["method"]=="workspace.inspect" {result.and_then(|value|{
+                            kernel.storage.as_mut().ok_or_else(||KernelError::Storage("Workspace Storage owner disconnected".into()))?
+                                .authorize(request["grantId"].as_str(),&kernel.epoch,kernel.host_id.as_deref().unwrap_or_default(),kernel.host_generation.as_deref().unwrap_or_default(),"workspace.inspect",&request["params"])
+                                .map(|_|value)
+                        })}else{result};
+                        let response = match result { Ok(value) => response_ok(id, value), Err(error) => response_error(id, &error) };
+                        respond!(response);
+                    }
+                    if stopping && kernel.drained() { break; }
+                    continue;
+                }
+                WorkerRequest::WorkspaceShutdownDone { request, result, processes, computations } => {
+                    let restored = kernel.storage.as_mut().map(|storage| storage.finish_execution_shutdown(processes, computations))
+                        .unwrap_or(Ok(()));
+                    let result = result.and_then(|value| restored.map(|()| value));
+                    kernel.workspace_shutdown = false;
+                    kernel.workspace_shutdown_started = false;
+                    kernel.shutdown_complete = result.is_ok();
+                    if matches!(&result,Err(KernelError::Execution(error)) if error.code=="workspace_native_handles_active"){
+                        // Keep the original shutdown reply pending while real
+                        // native references drain. A Close received before this
+                        // continuation is remembered, so the wake cannot be lost.
+                        if request.is_some(){kernel.workspace_shutdown_request=request;}
+                        if kernel.workspace_idle_pending {kernel.stop_workspaces(None,&capture_completions);}
+                        continue;
+                    }
+                    if let Some(request) = request {
+                        let id = request["id"].as_str().unwrap_or_default();
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(id); }
+                        let response = match result { Ok(value) => response_ok(id, value), Err(error) => response_error(id, &error) };
+                        respond!(response);
+                    } else if let Err(error) = result { eprintln!("Workspace shutdown remains pending: {error}"); }
+                    if stopping && !kernel.shutdown_complete && kernel.workspace_idle_pending { kernel.stop_workspaces(None,&capture_completions); }
+                    if stopping && kernel.drained() { break; }
+                    continue;
+                }
                 WorkerRequest::RecheckRecoveredProcessReceipts => {
+                    kernel.workspace_idle_pending=true;
                     if let Some(storage) = kernel.storage.as_mut() {
                         storage.recheck_recovered_process_receipts();
                     }
+                    if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
                     continue;
                 }
                 WorkerRequest::FileLeasesChanged => {
@@ -1817,16 +1937,18 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         for (id, result) in completed {
                             if let Ok(mut active) = worker_cancellations.lock() { active.remove(&id); }
                             let response = match result { Ok(value) => response_ok(&id, value), Err(error) => response_error(&id, &error) };
-                            if worker_response_tx.send(response).is_err() { worker_writer_failed.store(true, Ordering::Release); break; }
+                            respond!(response);
                         }
                     }
                     continue;
                 }
                 WorkerRequest::FileWriterStopped(id) => {
+                    kernel.workspace_idle_pending=true;
                     if let Some(storage) = kernel.storage.as_mut() {
                         let _ = storage.observe_file_writer_stopped(&id);
                     }
                     if let Err(error)=kernel.collect_obsolete_materialized_views(&capture_completions) {eprintln!("derived view cleanup pending: {error}");}
+                    if stopping && !kernel.workspace_shutdown && !kernel.shutdown_complete { kernel.stop_workspaces(None,&capture_completions); }
                     continue;
                 }
                 WorkerRequest::Resource(call) => {
@@ -1927,20 +2049,29 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     .ok()
                     .is_some_and(|revoked| revoked.contains(grant_id))
             });
-            let handled = if stopping {
+            let handled = if stopping && !matches!(method.as_deref(), Some("kernel.shutdown" | "kernel.ping" | "workspace.inspect" | "workspace.release" | "workspace.close")) {
                 Err(KernelError::Operation("kernel is stopping".into()))
             } else if revoked {
                 Err(KernelError::Authorization("grant is revoked".to_string()))
             } else {
                 kernel.handle(&request, cancellation, &capture_completions)
             };
+            if kernel.workspace_shutdown {
+                stopping = true;
+                if let Some(storage) = kernel.storage.as_mut() {
+                    for pending in storage.cancel_file_lease_waiters() {
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(&pending); }
+                        let _ = worker_response_tx.send(response_error(&pending, &KernelError::Cancelled));
+                    }
+                }
+            }
             let response = match handled {
                 Ok(Some(response)) => response,
                 Ok(None) => {
                     if method.as_deref() == Some("file.lease.wait") {
                         release_request_credit(&worker_cancellations, &worker_response_tx, &id, "file.lease.wait");
                     }
-                    if method.as_deref().is_some_and(|method| pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.file_observation"|"source.resource.observe"|"source.resource.cancel")) {
+                    if method.as_deref().is_some_and(|method| method.starts_with("workspace.") || method == "kernel.shutdown" || pending_file_worker(method)||matches!(method,"source.resource.authorize"|"source.resource.execute"|"source.service.call"|"source.file_observation"|"source.resource.observe"|"source.resource.cancel")) {
                         continue;
                     }
                     worker_cancellations
@@ -2067,13 +2198,10 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                 .lock()
                 .ok()
                 .map(|mut active| active.remove(&id));
-            if worker_response_tx.send(response).is_err() {
-                worker_writer_failed.store(true, Ordering::Release);
-                break;
-            }
+            respond!(response);
             if shutdown {
                 stopping = true;
-                if kernel.active_materializations == 0 && kernel.source_tasks.is_empty() {
+                if kernel.drained() {
                     break;
                 }
             }

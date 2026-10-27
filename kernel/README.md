@@ -142,9 +142,46 @@ FUSE callbacks persist chmod/chown/times/xattrs. WinFsp callbacks persist basic 
 the requested Windows security information with the original descriptor, preserving unrelated parts.
 These callbacks do not yet qualify complete ACL enforcement. Positioned resource-fork I/O returns
 an explicit unsupported error instead of silently ignoring an offset.
-Remaining qualification includes stable source attribute capture, native names, hardlinks,
-Windows reparse points, cache/mmap fences and application runtime drainage/restart. FSKit is not yet a
-backend. Current file tools, processes, IDE and external harnesses still use their existing source paths.
+Hard-link names share a live inode and durable metadata within a workspace; forks retain independent
+byte generations. Directory moves update stable parent identities instead of rewriting every link.
+The FUSE adapter implements link. WinFsp's native protocol has no hard-link operation, and its runtime
+capability reports that limitation. Writable native references (including possible mappings) prevent
+an unfenceable snapshot; cached I/O and mmap remain enabled.
+
+`workspace_resources.rs` connects these sessions to real Kernel requests and the Host scoped client.
+The project filesystem owner and Run/Operation leases have separate lifetimes. Native callbacks return
+metadata commands to the one Storage owner; mount startup, sealing, detach and executor shutdown wait
+on workers while that owner continues serving callbacks. Inspect stays available during mount/detach.
+Shutdown seals native open/create admission and retains the dispatcher until actual file/directory
+references close. Its original response remains pending during this drainage. Close/executor events
+trigger retries and a wake arriving before the cleanup continuation is retained, without polling.
+`workspace.result.prepare` captures only dirty native ranges into the existing WorkingResult pipeline.
+Publication appends its selected immutable revision while preserving subsequent writes to the live head.
+Filesystem metadata has independent candidate/result retention; releasing a result or its branch releases
+the corresponding metadata record and pins for both the selected attributes and their baseline. Empty
+native objects reuse their known content identity without writing/fsyncing an empty staging per inode.
+Temporary checkpoint pins recover with the existing ephemeral
+pin cleanup. Snapshot pins explicitly identify an immutable root without claiming a published revision.
+
+`workspace.adopt` stabilizes an admitted physical source once on a worker and atomically publishes
+its namespace and native metadata. Hardlinks, timestamps, Unix xattrs and Windows descriptors survive
+the import. Git common/private administration and local object alternates become a standalone private
+`.git`; external administration needs its original admitted root. The original operation reports actual
+phase/entry/byte progress. Failed/cancelled candidates and interrupted imports are reclaimed without
+changing the original directory. Internal native syscalls do not accumulate a receipt per operation;
+lookup-cache eviction follows actual native references while preserving inode numbers and dirty data.
+
+Windows source symlinks and junctions retain their original REPARSE_DATA_BUFFER. WinFsp resolves,
+reads, creates, sets and deletes these standard points through the same inode/metadata transaction,
+including directory enumeration. Converting a nonempty file/directory or a multiple-name inode is
+explicitly rejected because the current shared representation cannot retain hidden backing data.
+Unknown reparse tags still require a corresponding shared representation.
+
+Remaining work includes lossless native names, opaque reparse backing data,
+active writable mapping fences, project activation, source/consumer binding and mount restart recovery.
+FSKit is not yet a backend. Current file tools, processes, IDE and external harnesses still use their
+existing source paths. Registering a mount as a legacy physical root is not supported: synchronous path
+I/O on the Storage actor would wait for callbacks to that same actor.
 
 Root admission queries an index of pending file operations; protocol traffic is not scanned as
 file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary

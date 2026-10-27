@@ -8,6 +8,106 @@ struct Fixture {
 }
 
 #[test]
+fn workspace_hardlinks_share_live_bytes_and_preserve_each_fork_and_directory_move() {
+    use super::workspace_session::{Command, Session, StoragePort};
+    let mut fixture = Fixture::new();
+    fixture.begin("hardlinks", None);
+    fixture.finish("hardlinks");
+    let grant = fixture.storage.load_grant("owner").unwrap();
+    let directory = fixture.directory;
+    let mut storage = fixture.storage;
+    let (sender, receiver) = std::sync::mpsc::channel::<Option<Command>>();
+    let stopping = sender.clone();
+    let owner = std::thread::spawn(move || {
+        while let Ok(Some(command)) = receiver.recv() {
+            command(Some(&mut storage));
+        }
+        storage
+    });
+    let port = StoragePort::new(move |command| {
+        sender
+            .send(Some(command))
+            .map_err(|_| KernelError::Storage("test owner stopped".into()))
+    });
+    let parent = Session::open(port.clone(), "hardlinks".into(), grant.clone()).unwrap();
+    parent
+        .create("left", PathState::Directory { mode: Some(0o755) })
+        .unwrap();
+    parent
+        .create("right", PathState::Directory { mode: Some(0o755) })
+        .unwrap();
+    let file = parent.create_file("left/file", 0o644).unwrap();
+    parent.write(&file, None, b"before").unwrap();
+    let alias = parent.link(&file, "right/alias").unwrap();
+    assert!(Arc::ptr_eq(&file, &alias));
+    assert_eq!(file.link_count().unwrap(), 2);
+    let mut bytes = [0; 6];
+    parent.read(&alias, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"before");
+    let boundary = parent.checkpoint().unwrap();
+    parent.write(&alias, Some(0), b"parent").unwrap();
+    parent
+        .set_attributes(&file, |attrs| {
+            attrs.mode = 0o600;
+            Ok(())
+        })
+        .unwrap();
+    parent.rename("right", "moved", false).unwrap();
+    assert!(Arc::ptr_eq(&file, &parent.lookup("moved/alias").unwrap()));
+    parent.flush(&file).unwrap();
+    boundary
+        .fork(
+            "hardlink-child",
+            "hardlink-child-fork",
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+    boundary.release().unwrap();
+    let child = Session::open(port.clone(), "hardlink-child".into(), grant.clone()).unwrap();
+    let child_file = child.lookup("left/file").unwrap();
+    let child_alias = child.lookup("right/alias").unwrap();
+    assert!(Arc::ptr_eq(&child_file, &child_alias));
+    assert_eq!(child_alias.attributes().unwrap().mode, 0o644);
+    child.read(&child_alias, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"before");
+    child.write(&child_alias, Some(0), b"child!").unwrap();
+    child.flush(&child_alias).unwrap();
+    parent.read(&file, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"parent");
+    child.close().unwrap();
+    parent.close().unwrap();
+    drop((file, alias, child_file, child_alias, child, parent));
+    let reopened = Session::open(port.clone(), "hardlinks".into(), grant).unwrap();
+    let first = reopened.lookup("moved/alias").unwrap();
+    let second = reopened.lookup("left/file").unwrap();
+    assert!(Arc::ptr_eq(&first, &second));
+    assert_eq!(first.link_count().unwrap(), 2);
+    assert_eq!(first.attributes().unwrap().mode, 0o600);
+    reopened.rename("moved/alias", "left/file", true).unwrap();
+    assert_eq!(
+        first.link_count().unwrap(),
+        2,
+        "rename over the same inode is a no-op"
+    );
+    let handle = reopened.open_file(&first).unwrap();
+    reopened.remove("moved/alias", false).unwrap();
+    assert_eq!(first.link_count().unwrap(), 1);
+    reopened.write(&first, Some(0), b"last!!").unwrap();
+    reopened.flush(&first).unwrap();
+    reopened.read(&second, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"last!!");
+    reopened.remove("left/file", false).unwrap();
+    assert_eq!(first.link_count().unwrap(), 0);
+    handle.read(0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"last!!", "the last open handle survives unlink");
+    reopened.close().unwrap();
+    drop((first, second, handle, reopened, port));
+    stopping.send(None).unwrap();
+    drop(owner.join().unwrap());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping_parent() {
     use super::workspace_session::{Command, Session, StoragePort};
     let mut f = Fixture::new();

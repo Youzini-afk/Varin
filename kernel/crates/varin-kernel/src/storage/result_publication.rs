@@ -33,7 +33,7 @@ pub(crate) fn candidate_view(
     Ok(serde_json::from_value(Value::Object(object))?)
 }
 impl Storage {
-    fn require_result_scope(&self, grant_id: &str, workspace: &str) -> Result<Grant, KernelError> {
+    pub(super) fn require_result_scope(&self, grant_id: &str, workspace: &str) -> Result<Grant, KernelError> {
         let grant = self.load_grant(grant_id)?;
         if grant
             .owning_workspace
@@ -189,8 +189,14 @@ impl Storage {
             return Ok(ResultPublicationAdmission::Complete(result));
         }
         self.require_candidate_pins(&candidate)?;
-        let branch = self.branch(required(&candidate, "branchId")?)?;
+        let mut branch = self.branch(required(&candidate, "branchId")?)?;
         self.check_result_branch(&candidate, &branch)?;
+        if candidate.get("filesystem").is_some() {
+            branch.base_root = required(&candidate,"baseRoot")?.to_owned();
+            branch.head_root = required(&candidate,"root")?.to_owned();
+            branch.write_revision = candidate["writeRevision"].as_i64().ok_or_else(||KernelError::Storage("Native result has no boundary revision".into()))?;
+            branch.parent_ref = candidate["parentRef"].as_str().map(str::to_owned);
+        }
         let identity = required(&candidate, "candidateOperationId")?.to_string();
         if !self.result_publications.insert(identity) {
             return Err(KernelError::Operation(
@@ -210,6 +216,10 @@ impl Storage {
         candidate: &Value,
         branch: &BranchRow,
     ) -> Result<(), KernelError> {
+        if candidate.get("filesystem").is_some() {
+            if branch.workspace_id != candidate["workspaceId"] { return Err(KernelError::Authorization("Native result workspace identity changed".into())); }
+            return self.require_candidate_pins(candidate);
+        }
         if branch.workspace_id != candidate["workspaceId"]
             || branch.base_root != candidate["baseRoot"]
             || branch.head_root != candidate["root"]
@@ -231,7 +241,7 @@ impl Storage {
                 ));
             }
         }
-        Ok(())
+        self.require_result_filesystem_pin(candidate)
     }
     pub(crate) fn finish_result_publication(
         &mut self,
@@ -258,14 +268,23 @@ impl Storage {
                     "working result publication revision advanced".into(),
                 ));
             }
-            let published = storage.branch_publish(
+            let published = if candidate.get("filesystem").is_some() {
+                // This revision is the selected immutable boundary. Preserve
+                // the active root and its newer writes throughout publication.
+                let revision = branch.head_revision.checked_add(1).ok_or_else(||KernelError::Storage("Result revision overflow".into()))?;
+                storage.conn.execute("INSERT INTO revisions(branch_id,revision,root_hash,operation_id,created_at) VALUES(?1,?2,?3,?4,?5)",
+                    params![branch_id,revision,required(&candidate,"root")?,task.params["operationId"].as_str(),now_ms()])?;
+                storage.conn.execute("UPDATE branches SET head_revision=?2,updated_at=?3 WHERE branch_id=?1",params![branch_id,revision,now_ms()])?;
+                json!({"revision":revision})
+            } else { storage.branch_publish(
                 &json!({"operationId":task.params["operationId"],"branchId":branch_id,
                 "expectedWriteRevision":branch.write_revision,"expectedRoot":branch.head_root}),
-            )?;
+            )? };
             if published["revision"] != prepared.revision {
                 return Err(KernelError::Storage("result revision mismatch".into()));
             }
             storage.insert_prepared_working_result(&prepared)?;
+            storage.retain_published_result_filesystem(&candidate,&prepared)?;
             Ok(prepared.receipt)
         })
     }
@@ -330,6 +349,13 @@ impl Storage {
                         required(&candidate, "workspaceId")?
                     ],
                 )?;
+                if let Some(value)=candidate.get("filesystem") {
+                    let filesystem: super::workspace_results::FilesystemRevision=serde_json::from_value(value.clone())?;
+                    storage.conn.execute("DELETE FROM pins WHERE pin_id=?1 AND branch_id=?2 AND workspace_id=?3 AND root_hash=?4",
+                        params![filesystem.pin_id,filesystem.head.metadata_branch,required(&candidate,"workspaceId")?,filesystem.root])?;
+                    storage.conn.execute("DELETE FROM pins WHERE pin_id=?1 AND branch_id=?2 AND workspace_id=?3 AND root_hash=?4",
+                        params![filesystem.base_pin_id,filesystem.head.metadata_branch,required(&candidate,"workspaceId")?,filesystem.base_root])?;
+                }
                 Ok(json!({"released":count>0}))
             },
         )
@@ -399,7 +425,10 @@ impl ResultPublicationTask {
             ] {
                 let state = tree.get(path).cloned().unwrap_or(PathState::Missing);
                 if let Some(hash) = state.object_hash() {
-                    let present:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1 AND EXISTS(SELECT 1 FROM root_blobs WHERE blob_hash=?1))",[hash],|row|row.get(0))?;
+                    // The retained immutable tree above owns this exact path.
+                    // root_blobs is a collectable hint, not content authority.
+                    let length:Option<i64>=connection.query_row("SELECT byte_length FROM blobs WHERE hash=?1",[hash],|row|row.get(0)).optional()?;
+                    let present=matches!(&state,PathState::RegularFile {byte_length,..} if length.and_then(|value|u64::try_from(value).ok())==Some(*byte_length));
                     if !present {
                         return Err(KernelError::Storage(
                             "result references an unavailable captured object".into(),

@@ -164,6 +164,7 @@ pub(crate) struct FileSnapshot {
 pub(crate) struct SealedFile {
     file_id: String,
     staging: PathBuf,
+    staged: bool,
     hash: String,
     length: u64,
     generation: u64,
@@ -208,7 +209,9 @@ impl FilePublication {
 }
 impl Drop for SealedFile {
     fn drop(&mut self) {
-        self.cleanup.remove(&self.staging);
+        if self.staged {
+            self.cleanup.remove(&self.staging);
+        }
     }
 }
 
@@ -599,6 +602,19 @@ impl PrivateFile {
 }
 
 impl FileSnapshot {
+    pub(super) fn empty(revoked: Arc<AtomicBool>, cleanup: Arc<StagingCleanup>) -> Self {
+        Self {
+            file_id: Uuid::new_v4().to_string(),
+            base: None,
+            base_length: 0,
+            length: 0,
+            extents: OrdMap::new(),
+            log: None,
+            generation: 0,
+            revoked,
+            cleanup,
+        }
+    }
     pub(crate) fn byte_length(&self) -> u64 {
         self.length
     }
@@ -680,16 +696,26 @@ impl FileSnapshot {
         let mut candidate = SealedFile {
             file_id: self.file_id.clone(),
             staging: path,
+            staged: false,
             hash: String::new(),
             length: self.length,
             generation: self.generation,
             revoked: self.revoked.clone(),
             cleanup: self.cleanup.clone(),
         };
+        // Creating a native file starts at zero bytes. Its content identity is
+        // known without writing/fsyncing another empty staging file per inode.
+        // Installation still retains/verifies the object and creates it if GC
+        // removed the shared empty object before this request acquired it.
+        if self.length == 0 {
+            candidate.hash = format!("sha256-{}", hex::encode(Sha256::digest([])));
+            return Ok(candidate);
+        }
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&candidate.staging)?;
+        candidate.staged = true;
         prepare_sparse_file(&file)?;
         let mut digest = Sha256::new();
         let mut offset = 0;
@@ -718,7 +744,7 @@ impl SealedFile {
     /// Call only after Storage retained this exact hash. Installation does no
     /// catalog mutation and can run while the original owner handles controls.
     pub(crate) fn install(
-        self,
+        mut self,
         storage: &Path,
         retention: blob_reads::BlobReadRetention,
         cancellation: &AtomicBool,
@@ -756,12 +782,21 @@ impl SealedFile {
                 }
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                if !self.staged {
+                    let file = OpenOptions::new()
+                        .create_new(true)
+                        .write(true)
+                        .open(&self.staging)?;
+                    self.staged = true;
+                    file.sync_all()?;
+                }
                 let shard = target.parent().expect("object shard");
                 fs::create_dir_all(shard)?;
                 sync_directory(&storage.join("objects"))?;
                 check(cancellation)?;
                 check(&self.revoked)?;
                 durable_rename(&self.staging, &target)?;
+                self.staged = false;
                 sync_directory(shard)?;
                 sync_directory(&storage.join("staging"))?;
             }
@@ -885,11 +920,13 @@ impl Storage {
         workspace: &str,
         target: &str,
         operation: &str,
-        files: &[(String, u32, InstalledFile)],
+        files: &[(Vec<String>, u32, InstalledFile)],
         actor: &Grant,
         metadata_head: &super::workspace_metadata::Head,
         metadata_pin: &str,
         metadata: &[(String, super::workspace_metadata::Metadata)],
+        session_id: Uuid,
+        request_grant_id: &str,
     ) -> Result<Value, KernelError> {
         let grant = self.load_grant(&actor.grant_id)?;
         if grant.state != crate::model::GrantState::Active
@@ -924,15 +961,17 @@ impl Storage {
             ));
         }
         let mut entries = Vec::new();
-        for (path, mode, file) in files {
-            let owner = blob_owner_id(&format!("{operation}:{path}"));
-            entries.push(json!({"path":path,"state":{"kind":"regular-file","objectHash":file.content.hash,"byteLength":file.content.length,"mode":mode},"ownerId":owner}));
+        for (paths, mode, file) in files {
+            for path in paths {
+                let owner = blob_owner_id(&format!("{operation}:{path}"));
+                entries.push(json!({"path":path,"state":{"kind":"regular-file","objectHash":file.content.hash,"byteLength":file.content.length,"mode":mode},"ownerId":owner}));
+            }
         }
         let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":pinned["root"],
             "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[],
-            "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata});
+            "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata,"sessionId":session_id,"requestGrantId":request_grant_id});
         super::operations::idempotent(self, "workspace.checkpoint.fork", &input, |s| {
-            for (path, _, file) in files {
+            for (paths, _, file) in files {
                 let content = &file.content;
                 s.conn.execute(
                     "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
@@ -943,24 +982,33 @@ impl Storage {
                         ))?
                     ],
                 )?;
-                s.record_object_owner(
-                    &blob_owner_id(&format!("{operation}:{path}")),
-                    &content.hash,
-                    Some(workspace),
-                    Some(operation),
-                    &actor.grant_id,
-                )?;
+                for path in paths {
+                    s.record_object_owner(
+                        &blob_owner_id(&format!("{operation}:{path}")),
+                        &content.hash,
+                        Some(workspace),
+                        Some(operation),
+                        &actor.grant_id,
+                    )?;
+                }
             }
             let mut creation = input.clone();
             creation.as_object_mut().unwrap().remove("sourcePinId");
-            for key in ["filesystemHead", "metadataPin", "metadata"] {
+            for key in [
+                "filesystemHead",
+                "metadataPin",
+                "metadata",
+                "sessionId",
+                "requestGrantId",
+            ] {
                 creation.as_object_mut().unwrap().remove(key);
             }
-            let result = s.create_branch(&creation, &actor.grant_id)?;
+            let mut result = s.create_branch(&creation, &actor.grant_id)?;
             let root = pinned_metadata["root"]
                 .as_str()
                 .ok_or_else(|| KernelError::Storage("metadata checkpoint has no root".into()))?;
             s.fork_workspace_metadata(metadata_head, target, root, actor, metadata)?;
+            result["filesystem"] = json!({"sourceBranchId":source,"targetBranchId":target,"sessionId":session_id,"ownerGrantId":actor.grant_id,"requestGrantId":request_grant_id});
             Ok(result)
         })
     }
@@ -986,6 +1034,7 @@ impl Storage {
             installed,
             grant,
             None,
+            true,
         )
     }
     pub(super) fn publish_private_file_metadata(
@@ -999,6 +1048,7 @@ impl Storage {
         installed: &InstalledFile,
         grant: &Grant,
         metadata: Option<&super::workspace_metadata::Metadata>,
+        durable_receipt: bool,
     ) -> Result<FilePublication, KernelError> {
         if file.id != installed.file_id {
             return Err(KernelError::Authorization(
@@ -1027,56 +1077,94 @@ impl Storage {
         }
         let owner = blob_owner_id(&format!("private-file:{operation_id}"));
         let content = &installed.content;
+        let aliases = match metadata {
+            Some(metadata) => self.workspace_file_links(
+                branch_id,
+                metadata.binding.file_id,
+                Some(&path),
+                &stored,
+            )?,
+            None => vec![path.clone()],
+        };
+        if !aliases.contains(&path) {
+            return Err(KernelError::Storage(
+                "published hard-link inode lost its original name".into(),
+            ));
+        }
+        let mut changes = Vec::with_capacity(aliases.len());
+        for alias in aliases {
+            if !path_allowed(&stored, &alias) {
+                return Err(KernelError::Authorization(
+                    "hard-link update exceeds the original path scope".into(),
+                ));
+            }
+            let original = if alias == path {
+                expected.clone()
+            } else {
+                self.branch_path_inspect(&json!({"branchId":branch_id,"path":alias}))?
+            };
+            if original["state"] != expected["state"] {
+                return Err(KernelError::Storage(
+                    "hard-link names have different published content".into(),
+                ));
+            }
+            let mut change = json!({"path":alias,"expectedState":original["state"],"expectedNode":original["node"],
+                "state":{"kind":"regular-file","objectHash":content.hash,"byteLength":content.length,"mode":mode},"ownerId":owner});
+            if change["expectedNode"].is_null() {
+                change.as_object_mut().unwrap().remove("expectedNode");
+            }
+            changes.push(change);
+        }
         let input = json!({"operationId":operation_id,"workspaceId":branch.workspace_id,"branchId":branch_id,
-            "fileGeneration":installed.generation,"metadata":metadata,"changes":[{"path":path,"expectedState":expected["state"],
-                "expectedNode":expected["node"],"state":{"kind":"regular-file","objectHash":content.hash,"byteLength":content.length,"mode":mode},"ownerId":owner}]});
+            "fileGeneration":installed.generation,"metadata":metadata,"changes":changes});
         // Optional expectedNode is omitted for a missing target.
         let mut input = input;
         if metadata.is_none() {
             input.as_object_mut().unwrap().remove("metadata");
         }
-        if input["changes"][0]["expectedNode"].is_null() {
-            input["changes"][0]
-                .as_object_mut()
-                .unwrap()
-                .remove("expectedNode");
-        }
-        let result =
-            super::operations::idempotent(self, "workspace.file.publish", &input, |storage| {
-                storage.conn.execute(
-                    "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
-                    params![
-                        content.hash,
-                        i64::try_from(content.length).map_err(|_| KernelError::Operation(
-                            "content length exceeds the Storage range".into()
-                        ))?
-                    ],
-                )?;
-                storage.record_object_owner(
-                    &owner,
-                    &content.hash,
+        let apply = |storage: &mut Storage| {
+            storage.conn.execute(
+                "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
+                params![
+                    content.hash,
+                    i64::try_from(content.length).map_err(|_| KernelError::Operation(
+                        "content length exceeds the Storage range".into()
+                    ))?
+                ],
+            )?;
+            storage.record_object_owner(
+                &owner,
+                &content.hash,
+                Some(&branch.workspace_id),
+                Some(operation_id),
+                &stored.grant_id,
+            )?;
+            let mut change = input.clone();
+            change.as_object_mut().unwrap().remove("fileGeneration");
+            change.as_object_mut().unwrap().remove("metadata");
+            let result = storage.branch_path_apply(&change, &stored.grant_id)?;
+            if result["status"] == "committed" {
+                if let Some(metadata) = metadata {
+                    storage.save_workspace_metadata(branch_id, &path, metadata, &stored)?;
+                }
+            }
+            if result["status"] != "committed" {
+                storage.release_object_owner(
+                    &json!({"ownerId":owner}),
                     Some(&branch.workspace_id),
-                    Some(operation_id),
                     &stored.grant_id,
                 )?;
-                let mut change = input.clone();
-                change.as_object_mut().unwrap().remove("fileGeneration");
-                change.as_object_mut().unwrap().remove("metadata");
-                let result = storage.branch_path_apply(&change, &stored.grant_id)?;
-                if result["status"] == "committed" {
-                    if let Some(metadata) = metadata {
-                        storage.save_workspace_metadata(branch_id, &path, metadata, &stored)?;
-                    }
-                }
-                if result["status"] != "committed" {
-                    storage.release_object_owner(
-                        &json!({"ownerId":owner}),
-                        Some(&branch.workspace_id),
-                        &stored.grant_id,
-                    )?;
-                }
-                Ok(result)
-            })?;
+            }
+            Ok(result)
+        };
+        // Native syscalls have no externally retryable operation ID. Commit
+        // bytes + metadata atomically without a permanent receipt per flush.
+        // Explicit publication requests keep their original replay contract.
+        let result = if durable_receipt {
+            super::operations::idempotent(self, "workspace.file.publish", &input, apply)
+        } else {
+            self.filesystem_transaction(apply)
+        }?;
         Ok(FilePublication {
             receipt: result,
             file: file.clone(),

@@ -46,6 +46,10 @@ mod storage_schema;
 mod source_resources;
 mod tools;
 mod transport;
+mod workspace_resources;
+mod workspace_adoption;
+mod native_metadata;
+mod reparse_data;
 #[cfg(feature = "workspace-mount")]
 mod workspace_mount;
 

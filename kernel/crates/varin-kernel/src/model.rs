@@ -73,6 +73,9 @@ pub(crate) struct BranchRow {
     pub(crate) created_at: i64,
     pub(crate) updated_at: i64,
 }
+/// A retained file-service snapshot has a real immutable root but does not
+/// claim to be an already-published branch revision or a stored head.
+pub(crate) const SNAPSHOT_PIN_WRITE_REVISION: i64 = -2;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]

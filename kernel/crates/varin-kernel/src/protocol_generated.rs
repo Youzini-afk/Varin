@@ -10,6 +10,9 @@ pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
+    "workspace.inspect",
+    "workspace.release",
+    "workspace.close",
     "runtime.thread.usage",
     "runtime.operation.calls",
     "runtime.model.presentations",
@@ -94,6 +97,9 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
 pub(crate) const KERNEL_CONTROL_RESPONSE_METHODS: &[&str] = &[
     "runtime.context.observations.sources",
     "runtime.context.observations.admit",
+    "workspace.inspect",
+    "workspace.release",
+    "workspace.close",
     "runtime.thread.usage",
     "runtime.operation.calls",
     "runtime.model.presentations",
@@ -2192,6 +2198,53 @@ pub(crate) struct KernelBranchForkParams {
     pub(crate) draft_base_paths: Vec<String>,
     pub(crate) capture_scopes: Vec<String>,
     pub(crate) source_provenance: Option<KernelSourceProvenanceReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceAdoptParams {
+    pub(crate) branch_id: String,
+    pub(crate) root_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) git_root_ids: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceOpenParams {
+    pub(crate) branch_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceAddress {
+    pub(crate) branch_id: String,
+    pub(crate) generation: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceLeaseParams {
+    pub(crate) branch_id: String,
+    pub(crate) generation: String,
+    pub(crate) lease_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceForkParams {
+    pub(crate) branch_id: String,
+    pub(crate) generation: String,
+    pub(crate) target_branch_id: String,
+    pub(crate) operation_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelWorkspaceResultPrepareParams {
+    pub(crate) branch_id: String,
+    pub(crate) generation: String,
+    pub(crate) publication_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4711,6 +4764,35 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "branch.fork" => serde_json::from_value::<KernelBranchForkParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.adopt" => serde_json::from_value::<KernelWorkspaceAdoptParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.open" => serde_json::from_value::<KernelWorkspaceOpenParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.inspect" => serde_json::from_value::<KernelWorkspaceAddress>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.acquire" => serde_json::from_value::<KernelWorkspaceLeaseParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.release" => serde_json::from_value::<KernelWorkspaceLeaseParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.mount" => serde_json::from_value::<KernelWorkspaceAddress>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.fork" => serde_json::from_value::<KernelWorkspaceForkParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "workspace.result.prepare" => {
+            serde_json::from_value::<KernelWorkspaceResultPrepareParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "workspace.close" => serde_json::from_value::<KernelWorkspaceAddress>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "branch.write.begin" => {

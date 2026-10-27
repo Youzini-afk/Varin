@@ -304,6 +304,11 @@ impl Storage {
         if grant.state == GrantState::Revoked {
             return Ok(());
         }
+        if self.workspace_holders.values().any(|(_, owner)| owner == id)
+            || self.workspace_sessions.values().filter_map(std::sync::Weak::upgrade)
+                .any(|session| session.owned_by(id) && session.check_open().is_ok()) {
+            return Err(KernelError::Operation("native workspace still retains this grant; drain its original filesystem or execution lease before retirement".into()));
+        }
         let ids = {
             let mut q = self
                 .conn
