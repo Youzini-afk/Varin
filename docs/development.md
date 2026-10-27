@@ -54,6 +54,10 @@ Host→Rust 的恢复/undo 与响应丢失重启由 `recovery/kernel-durable-eng
 `recovery/engine.test.ts` 接收这些 owner 提供的变更事实，验证 dirty buffer、冲突确认、取消、原 Thread 身份
 与未知导航结果的协调，不在 fixture 中再实现 checkpoint、覆盖率或 GC 算法。
 
+解析语法在对外 tokenizer 边界验证；高亮和编辑器层只补文本完整性、交互与动态配置更新，不重复枚举全部语法。
+加密互操作使用实际客户端和 Host 两端，不在测试中重写握手；拒绝错误身份、篡改和重放仍属于必要契约。
+依赖回归覆盖真实消费者和本地安全补丁，不为产品未使用的上游 API 预建兼容性套件。
+
 共享 fixture 只负责准备输入、故障注入和资源回收。若测试结果完全由 fixture 自己算出，改为观察真实 owner，
 或在已有 owner 回归足够时删除该重复证明；仍需保留 Host 对冲突、未知效果、权限及取消的独立处理。
 CI 的 cloud 部署 smoke 直接消费本轮生成并校验锁文件/布局的 archive，不另造一份无人消费的 staging 输出。
@@ -73,6 +77,7 @@ PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 nativ
 | 正式跨包类型检查 | `bun run type-check` |
 | 已准备输出后的类型检查 | `bun run type-check:prepared` |
 | 源码测试 / 已构建产物测试 | `bun run test:packages` / `bun run test:packages:dist` |
+| 第二操作系统的文件/进程/外壳包（不含 native Host） | `bun run test:packages:platform` |
 | Rust 编译检查 / release binary | `bun run kernel:check` / `bun run kernel:build` |
 | Rust workspace 测试 | `bun run test:rust` |
 | 已核验 release kernel 的 Host 验收 | `bun run test:kernel` |
@@ -84,12 +89,18 @@ PR 中的 Docker workflow 验证实际镜像的构建、启动、身份和 nativ
 定向例子：在 `packages/web` 或 `packages/ui` 中运行 `bun run test 路径`；Rust 使用
 `cargo test --manifest-path kernel/Cargo.toml -p varin-kernel --lib FILTER --locked`。
 新环境资源不足时可加 `-j1`，不能把编译被终止记成测试通过。
-Node 测试包可用 `node --import tsx --test packages/<包>/test/<文件>.test.ts` 定向运行。
+Node 测试包统一使用 `node --import tsx --test`，不额外启动 CLI 包装进程与 IPC listener；
+可用 `node --import tsx --test packages/<包>/test/<文件>.test.ts` 定向运行。
 原生 Host 定向验证用 `bun run test:kernel -- --vitest-file=application-host/lib/<文件>.native.test.ts`，
 不会额外重跑 Node transport 全套。仅需要纯查询、排序或 mock owner 的验证应留在 portable suite；
 需要真实 IPC、文件存储、进程树的验证才进入 native 入口。
 
-`test:tooling` 是 CI 中轻量工具测试的统一入口；`test:cloud` 是其子集，无需顺序重复运行。
+`test:tooling` 是 CI 中轻量工具测试的统一入口，包含 Electron 打包与更新清单 helper；`test:cloud` 是其子集，无需顺序重复运行。
+Electron 的运行时、更新策略与路径打开行为统一由包的 `test` 自动发现；Linux autostart 仅在 Linux 执行，
+真实桌面发现仍使用 `test:linux-desktop`。不为同一种 runner 维护额外配置和手写测试文件清单。
+Windows 用 `test:packages:platform` 重跑拥有文件、进程、worker 与原生外壳边界的包，另外运行 Host、
+打包 helper 与 native 验收。纯协议/解析、SDK conformance、客户端观察和 UI 投影由 Linux 验证一次；
+新增平台敏感 owner 时更新包级入口，不维护第二份逐文件清单。包测试和打包 helper 不依赖 native 构建成功。
 CI 的手动运行会对所选 ref 执行完整 code/Rust 检查，不依赖最近一次提交的差异；普通 push/PR
 仍按改动范围选择检查。不依赖 native executable 的包测试和 tooling 在原生构建前执行一次；只有 Host 包的 Documents fixture
 仍需原生目录观察器。各组按依赖安装/类型输出准备的真实结果启动，任一独立检查失败不会遮蔽其他组，

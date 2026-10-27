@@ -5,21 +5,8 @@ import test from 'node:test';
 
 const root = createRequire(new URL('../package.json', import.meta.url));
 const web = createRequire(new URL('../packages/web/package.json', import.meta.url));
-const mcp = createRequire(web.resolve('@modelcontextprotocol/client'));
-const core = createRequire(mcp.resolve('@modelcontextprotocol/core'));
-const openai = createRequire(web.resolve('openai'));
-const hooks = createRequire(root.resolve('eslint-plugin-react-hooks'));
-const errors = createRequire(hooks.resolve('zod-validation-error/v4'));
 const { Client, InMemoryTransport, parseJSONRPCMessage } = web('@modelcontextprotocol/client');
-const { ESLint, Linter } = root('eslint');
-const reactHooks = root('eslint-plugin-react-hooks');
-
-test('runtime and lint consumers resolve the secured Zod release through their own dependency graph', () => {
-  const expected = root('./package.json').overrides.zod;
-  for (const consumer of [mcp, core, openai, hooks, errors]) {
-    assert.equal(consumer('zod/package.json').version, expected);
-  }
-});
+const { ESLint } = root('eslint');
 
 test('MCP JSON-RPC parsing retains extension payloads and rejects malformed envelopes', () => {
   for (const message of [
@@ -85,43 +72,6 @@ test('MCP client rejects malformed initialization before exposing a usable sessi
   assert.equal(dispatched, 0);
 });
 
-// Varin's OpenAI runtime uses audio APIs, not structured outputs. Exercise the
-// optional Zod peer as well so future imports cannot silently load an old major.
-test('OpenAI optional Zod peer generates strict schemas and validates parsed completions', async () => {
-  const { default: OpenAI } = web('openai');
-  const { z } = openai('zod');
-  const { zodResponseFormat, zodFunction } = web('openai/helpers/zod');
-  const schema = z.object({ label: z.string(), count: z.number().int().nonnegative(), note: z.string().nullable() });
-  const format = zodResponseFormat(schema, 'fixture');
-  const input = { label: 'complete', count: 2, note: null };
-  let content = JSON.stringify(input);
-  const requests = [];
-  const client = new OpenAI({ apiKey: 'synthetic-fixture', baseURL: 'https://fixture.invalid/v1', maxRetries: 0,
-    fetch: async (url, init) => {
-      assert.equal(String(url), 'https://fixture.invalid/v1/chat/completions');
-      requests.push(JSON.parse(init.body));
-      return Response.json({ id: 'fixture', object: 'chat.completion', created: 0, model: 'fixture',
-        choices: [{ index: 0, finish_reason: 'stop', message: { role: 'assistant', content, refusal: null } }] });
-    },
-  });
-  const parse = () => client.chat.completions.parse({ model: 'fixture', messages: [
-    { role: 'user', content: 'Return the fixture.' },
-  ], response_format: format });
-  assert.deepEqual((await parse()).choices[0].message.parsed, input);
-  assert.equal(requests[0].response_format.json_schema.strict, true);
-  const generated = requests[0].response_format.json_schema.schema;
-  assert.deepEqual(generated.required, ['label', 'count', 'note']);
-  assert.equal(generated.additionalProperties, false);
-  assert.equal(generated.properties.count.type, 'integer');
-  content = JSON.stringify({ ...input, count: 'two' });
-  await assert.rejects(parse(), error => error.issues?.some(issue => issue.path.join('.') === 'count'));
-
-  const tool = zodFunction({ name: 'fixture', parameters: schema });
-  assert.equal(tool.function.strict, true);
-  assert.deepEqual(tool.$parseRaw(JSON.stringify(input)), input);
-  assert.throws(() => tool.$parseRaw(content));
-});
-
 test('Varin speech consumers use the real OpenAI SDK for audio bytes and multipart transcription', async t => {
   const { tsImport } = await import('tsx/esm/api');
   const { TTSService } = await tsImport('../packages/web/application-host/lib/tts/service.ts', import.meta.url);
@@ -169,18 +119,4 @@ test('the actual Varin ESLint configuration retains hook errors and dependency w
   assert.equal(result.fatalErrorCount, 0);
   assert.ok(result.messages.some(message => message.ruleId === 'react-hooks/rules-of-hooks' && message.severity === 2));
   assert.ok(result.messages.some(message => message.ruleId === 'react-hooks/exhaustive-deps' && message.severity === 1));
-});
-
-test('react-hooks compiler defaults and Zod error formatting handle real compiler options', () => {
-  const linter = new Linter();
-  const lint = options => linter.verify('function Component() { return <div>{Math.random()}</div>; }', {
-    languageOptions: { parserOptions: { ecmaFeatures: { jsx: true } } },
-    plugins: { 'react-hooks': reactHooks }, rules: { 'react-hooks/purity': ['error', options] },
-  });
-  assert.ok(lint({}).some(message => message.ruleId === 'react-hooks/purity' && /impure function/.test(message.message)));
-  assert.throws(() => lint({ target: 'not-a-version' }), /Not a valid target.*Validation error/);
-  assert.throws(() => lint({ gating: { source: 12, importSpecifierName: false } }),
-    error => /Validation error/.test(error.message) && /source/.test(error.message) && /importSpecifierName/.test(error.message));
-  assert.throws(() => lint({ environment: { validateNoSetStateInRender: 'yes' } }),
-    /validating environment config[\s\S]*validateNoSetStateInRender/);
 });

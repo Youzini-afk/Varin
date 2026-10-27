@@ -1,180 +1,55 @@
 import { describe, expect, test } from 'vitest';
-
 import { resolveHighlightSegments } from '../../../composerHighlight';
-import {
-    tokenizeComposer,
-    tokenizeMentions,
-    type ComposerLanguageContext,
-} from '../tokenize';
+import { tokenizeComposer, tokenizeMentions, type ComposerLanguageContext } from '../tokenize';
 
-const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLanguageContext => ({
+const context: ComposerLanguageContext = {
     inputMode: 'normal',
-    knownAgentNames: new Set(['build', 'plan']),
+    knownAgentNames: new Set(['build', 'plan', 'a.ts']),
     confirmedMentions: new Set(['NOTES']),
-    knownSlashNames: new Set(['review', 'explore']),
-    attachmentFilenames: [],
-    ...overrides,
-});
+    knownSlashNames: new Set(['review', 'skill:workspace-check']),
+    attachmentFilenames: ['shot.png'],
+};
+const styled = (text: string) => tokenizeComposer(text, context)
+    .filter(range => ['mentionAgent', 'mentionFile', 'mentionCommand', 'path'].includes(range.style))
+    .map(range => [text.slice(range.start, range.end), range.style]);
 
-/** The substring and style of every range, sorted for stable comparison. */
-const styled = (text: string, ctx = context()) =>
-    tokenizeComposer(text, ctx)
-        .map((range) => [text.slice(range.start, range.end), range.style] as const)
-        .sort((a, b) => a[0].localeCompare(b[0]) || a[1].localeCompare(b[1]));
+describe('composer references', () => {
+    // Test the consumer boundary once, not each scanner and its mapping helper again.
+    test.each([
+        ['ask @Build and (@plan)', [['@Build', 'mentionAgent'], ['@plan', 'mentionAgent']]],
+        ['see `@src/app.ts`, @NOTES and @src/components/', [['@src/app.ts', 'mentionFile'], ['@NOTES', 'mentionFile'], ['@src/components/', 'mentionFile']]],
+        ['@a.ts', [['@a.ts', 'mentionAgent']]], // Registered agents outrank file-looking names.
+        ['run /Review then /skill:workspace-check', [['/Review', 'mentionCommand'], ['/skill:workspace-check', 'mentionCommand']]],
+        ['see [shot.png] and [missing.png]', [['[shot.png]', 'mentionFile']]],
+        ['(~src/app.ts), ~README.md ~C:\\repo\\a.ts', [['~src/app.ts', 'path'], ['~README.md', 'path'], ['~C:\\repo\\a.ts', 'path']]],
+    ])('%s', (text, expected) => expect(styled(text as string)).toEqual(expected));
 
-const stylesOf = (text: string, ctx = context()) =>
-    new Set(tokenizeComposer(text, ctx).map((range) => range.style));
+    test.each([
+        'me@example.com foo@scope/pkg @stranger @... @',
+        '@import</style> @src/<style.css',
+        'src/app.ts /unknown / /-dash /_under #sig',
+        '~approximately ~500 ~1.2 ~0.5x foo~bar/baz.ts ~~struck~~',
+        '~~~\nbody\n~~~',
+        '',
+    ])('leaves non-references as ordinary text: %s', text => expect(styled(text)).toEqual([]));
 
-describe('tokenizeComposer — reference constructs', () => {
-    test('a known agent mention is styled as an agent', () => {
-        expect(styled('ask @build please')).toEqual([['@build', 'mentionAgent']]);
+    test('only explicit references become attachments; inert paths and unknown words do not', () => {
+        const text = 'see @Build, @src/a.ts and @NOTES; ~src/b.ts @nobody';
+        expect(tokenizeMentions(text, context).map(range => [text.slice(range.start, range.end), range.kind]))
+            .toEqual([['@Build', 'agent'], ['@src/a.ts', 'file'], ['@NOTES', 'file']]);
     });
 
-    test('a path mention is styled as a file', () => {
-        expect(styled('see @src/app.ts')).toEqual([['@src/app.ts', 'mentionFile']]);
+    test('combines markdown and references without changing the text or swallowing punctuation', () => {
+        const text = '# Title\nsee `@src/app.ts`, **bold** and /review';
+        const ranges = tokenizeComposer(text, context);
+        expect(new Set(ranges.map(range => range.style)))
+            .toEqual(new Set(['marker', 'heading', 'code', 'strong', 'mentionFile', 'mentionCommand']));
+        const segments = resolveHighlightSegments(text, ranges);
+        expect(segments.map(segment => text.slice(segment.start, segment.end)).join('')).toBe(text);
+        expect(segments.map(segment => text.slice(segment.start, segment.end))).toContain('@src/app.ts');
     });
 
-    test('an unknown bare mention is not tokenized', () => {
-        expect(styled('hi @stranger')).toEqual([]);
-    });
-
-    test('a known slash token is styled as a command', () => {
-        expect(styled('run /review now')).toEqual([['/review', 'mentionCommand']]);
-    });
-
-    test('an unknown slash token stays plain prose', () => {
-        expect(styled('run /nosuchthing now')).toEqual([]);
-    });
-
-    test('a registered skill invocation is styled as one complete slash token', () => {
-        expect(styled(
-            'use /skill:workspace-check now',
-            context({ knownSlashNames: new Set(['skill:workspace-check']) }),
-        )).toEqual([['/skill:workspace-check', 'mentionCommand']]);
-    });
-
-    test('hash names stay ordinary text', () => {
-        expect(styled('end with #sig')).toEqual([]);
-    });
-
-    test('an attachment citation is styled as a file', () => {
-        expect(styled('here [shot.png]', context({ attachmentFilenames: ['shot.png'] })))
-            .toEqual([['[shot.png]', 'mentionFile']]);
-    });
-
-    test('a citation for a file that is not attached is not tokenized', () => {
-        expect(styled('here [other.png]', context({ attachmentFilenames: ['shot.png'] })))
-            .toEqual([]);
-    });
-});
-
-describe('tokenizeComposer — a path is highlighted but never attached', () => {
-    test('a ~path is styled', () => {
-        expect(styled('see ~src/app.ts')).toEqual([['~src/app.ts', 'path']]);
-    });
-
-    test('it needs no registry and no confirmation, unlike @', () => {
-        // The same path behind `@` only resolves because it looks like a path;
-        // behind `~` it is inert either way.
-        const empty = context({ knownAgentNames: new Set(), confirmedMentions: new Set() });
-        expect(styled('~docs/NOTES', empty)).toEqual([['~docs/NOTES', 'path']]);
-    });
-
-    test('an @mention covering the same text keeps its own style', () => {
-        expect(styled('@src/app.ts')).toEqual([['@src/app.ts', 'mentionFile']]);
-    });
-
-    test('both forms can appear in one message', () => {
-        expect(stylesOf('attach @a/b.ts but only mention ~c/d.ts'))
-            .toEqual(new Set(['mentionFile', 'path']));
-    });
-});
-
-describe('tokenizeComposer — emphasis and attention', () => {
-    test('emphasis is tokenized', () => {
-        expect(stylesOf('**bold** and *slanted*'))
-            .toEqual(new Set(['marker', 'strong', 'emphasis']));
-    });
-
-    test('an attention line is tokenized', () => {
-        expect(stylesOf('!!! read this')).toEqual(new Set(['marker', 'attention']));
-    });
-
-    test('shell mode still disables everything', () => {
-        expect(tokenizeComposer('**bold** ~a/b.ts !!! x', context({ inputMode: 'shell' })))
-            .toEqual([]);
-    });
-});
-
-describe('tokenizeComposer — markdown still applies', () => {
-    test('markdown and references coexist in one pass', () => {
-        expect(stylesOf('# Title\n- see @src/app.ts and /review'))
-            .toEqual(new Set(['marker', 'heading', 'listMarker', 'mentionFile', 'mentionCommand']));
-    });
-
-    test('fenced code is tokenized', () => {
-        expect(stylesOf('```\nplain\n```').has('codeFence')).toBe(true);
-    });
-});
-
-describe('tokenizeComposer — disabled and empty paths', () => {
-    test('shell mode tokenizes nothing', () => {
-        expect(tokenizeComposer('@build /review #sig', context({ inputMode: 'shell' })))
-            .toEqual([]);
-    });
-
-    test('empty text tokenizes nothing', () => {
-        expect(tokenizeComposer('', context())).toEqual([]);
-    });
-
-    test('empty registries leave their sigils plain', () => {
-        expect(styled('/review #sig', context({
-            knownSlashNames: new Set(),
-        }))).toEqual([]);
-    });
-});
-
-describe('tokenizeComposer — ranges are usable', () => {
-    test('every range indexes real text', () => {
-        const text = '# H\n@src/a.ts /review #sig `code` [x.png]';
-        const ctx = context({ attachmentFilenames: ['x.png'] });
-        for (const range of tokenizeComposer(text, ctx)) {
-            expect(range.start >= 0).toBe(true);
-            expect(range.end <= text.length).toBe(true);
-            expect(range.end > range.start).toBe(true);
-        }
-    });
-
-    test('the ranges reconstruct the text exactly through resolveHighlightSegments', () => {
-        const text = 'ping @build about /review\n> quoted `code`';
-        const parts = resolveHighlightSegments(text, tokenizeComposer(text, context()));
-        expect(parts.map(part => text.slice(part.start, part.end)).join('')).toBe(text);
-    });
-
-    test('a mention inside inline code keeps the mention style', () => {
-        // Mentions outrank code in the priority table, so a referenced path
-        // stays recognizable even when the user wrapped it in backticks.
-        const text = '`@src/app.ts`';
-        const parts = resolveHighlightSegments(text, tokenizeComposer(text, context()));
-        expect(parts.map(part => text.slice(part.start, part.end))).toEqual(['`', '@src/app.ts', '`']);
-    });
-});
-
-describe('tokenizeMentions', () => {
-    test('classifies agents and files, skipping unknown words', () => {
-        expect(tokenizeMentions('@build @src/a.ts @nobody', {
-            knownAgentNames: new Set(['build']),
-            confirmedMentions: new Set(),
-        })).toEqual([
-            { start: 0, end: 6, kind: 'agent' },
-            { start: 7, end: 16, kind: 'file' },
-        ]);
-    });
-
-    test('a picker-confirmed extensionless name counts as a file', () => {
-        expect(tokenizeMentions('@NOTES', {
-            knownAgentNames: new Set(),
-            confirmedMentions: new Set(['NOTES']),
-        })).toEqual([{ start: 0, end: 6, kind: 'file' }]);
+    test('shell input bypasses the entire prompt language', () => {
+        expect(tokenizeComposer('# Title\n@build /review ~src/a.ts [shot.png] **bold**', { ...context, inputMode: 'shell' })).toEqual([]);
     });
 });

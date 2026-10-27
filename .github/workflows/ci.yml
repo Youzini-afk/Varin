@@ -175,11 +175,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 24
-      - run: bun install --frozen-lockfile
+      - id: dependencies
+        run: bun install --frozen-lockfile
       - id: prepare
         run: bun run build:type-dependencies
+      # OS-sensitive package checks do not depend on native compilation.
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        run: bun run test:packages:platform
+      - if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: bun run --cwd packages/electron test:packaging-tools
       # Documents package tests use the native directory observer.
-      - id: native-build
+      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
+        id: native-build
         name: Build native kernel
         run: node scripts/test-kernel-authority.mjs --build-only
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
@@ -190,18 +197,10 @@ jobs:
           for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath`) do call "%%i\Common7\Tools\VsDevCmd.bat" -arch=x64 -host_arch=x64
           set "LIBCLANG_PATH=%ProgramFiles%\LLVM\bin"
           cargo test -p varin-kernel --lib workspace --features workspace-mount --locked
-      # UI tests use simulated browser/surface inputs and run in source-quality.
-      # Keep filesystem, process, worker and Host suites on both operating systems.
-      # Bun 1.3 treats multiple filters as alternatives, so use the exclusion alone.
-      # Run package and desktop checks before the long native acceptance.
+      # Host fixtures require the native directory observer; portable contracts
+      # and projections have one Linux owner.
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
-        run: bun run --sequential --no-exit-on-error --filter '!@varin/ui' test
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:runtime
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:packaging-tools
-      - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
-        run: bun run --cwd packages/electron test:updater
+        run: bun run --cwd packages/web test
       - if: ${{ !cancelled() && steps.prepare.outcome == 'success' }}
         name: Test Windows input targeting without desktop access
         shell: pwsh

@@ -1,5 +1,5 @@
 // Integration test: fake relay (minimal Layer 1) + real host-client + a scripted
-// client using the JS e2ee initiator. Verifies the full handshake and a tunneled
+// client using the production browser handshake. Verifies the full handshake and a tunneled
 // HTTP GET /health, and asserts only binary frames cross the relay post-handshake.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -10,14 +10,10 @@ import type { AddressInfo } from 'node:net';
 import type { RawData } from 'ws';
 
 import { startRelayHost } from './host-client.js';
+import { createClientHandshake } from './client-handshake.test-helper.js';
 import {
-  bytesToBase64Url,
-  createFrameDecryptor,
-  createFrameEncryptor,
-  deriveSessionKeys,
   exportPublicKeyJwk,
   generateEcdhKeyPair,
-  generateHandshakeNonce,
   importEcdhPrivateKey,
   RELAY_PROTOCOL_VERSION,
 } from './e2ee.js';
@@ -204,7 +200,7 @@ const buildIdentity = async (): Promise<RelayIdentity> => {
   };
 };
 
-// Scripted client using the JS initiator: connects, handshakes, does a GET.
+// The real browser handshake negotiates unbatched framing for this transport probe.
 const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }: {
   hostEncPubJwk: RelayIdentity['hostEncPubJwk'];
   relayUrl: string;
@@ -216,15 +212,7 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }: {
   url.searchParams.set('role', 'client');
   url.searchParams.set('serverId', serverId);
   url.searchParams.set('connectionId', connectionId);
-  const hostPub = await globalThis.crypto.subtle.importKey(
-    'jwk',
-    hostEncPubJwk,
-    { name: 'ECDH', namedCurve: 'P-256' },
-    true,
-    [],
-  );
-  const ephemeral = await generateEcdhKeyPair();
-  const nonce = generateHandshakeNonce();
+  const handshake = await createClientHandshake(hostEncPubJwk, { batch: false });
   const ws = new WebSocket(url.toString());
 
   let channel: RelayFrameChannel | null = null;
@@ -248,16 +236,7 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }: {
     rejectDone(error instanceof Error ? error : new Error(String(error)));
   };
 
-  ws.on('open', () => {
-    void exportPublicKeyJwk(ephemeral.publicKey).then((clientPubJwk) => {
-      ws.send(JSON.stringify({
-        t: 'hello',
-        v: RELAY_PROTOCOL_VERSION,
-        clientPubJwk,
-        nonce: bytesToBase64Url(nonce),
-      }));
-    }).catch(fail);
-  });
+  ws.on('open', () => ws.send(handshake.helloText));
   ws.on('error', fail);
   ws.on('close', () => {
     if (!settled) fail(new Error('Scripted relay client closed before the tunneled response completed.'));
@@ -269,13 +248,9 @@ const runScriptedClient = async ({ relayUrl, serverId, hostEncPubJwk }: {
   let processing = Promise.resolve();
   const handleMessage = async (data: RawData, isBinary: boolean): Promise<void> => {
     if (!isBinary) {
-      const msg = JSON.parse(data.toString('utf8'));
-      if (msg.t === 'ready') {
-        const keys = await deriveSessionKeys(ephemeral.privateKey, hostPub, nonce);
-        channel = {
-          encryptor: createFrameEncryptor(keys.clientToHost),
-          decryptor: createFrameDecryptor(keys.hostToClient),
-        };
+      const action = await handshake.handleText(data.toString('utf8'));
+      if (action.type === 'established') {
+        channel = action.channel;
         // Send an HTTP GET /health over stream 1.
         const req = encodeTunnelFrame(TunnelFrameType.HttpRequest, 1, encodeJsonPayload({
           method: 'GET',

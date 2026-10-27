@@ -3,10 +3,9 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['*.test.ts'],
-    // Owned by test:updater and test:linux-desktop so each file runs exactly
-    // once per environment instead of inside the architecture pass and again
-    // through its dedicated entry.
-    exclude: ['updater-*.test.ts', 'linux-autostart.test.ts'],
+    // Platform-specific fixtures run only on their owner; portable shell and
+    // updater contracts run through the same package entry on Linux/Windows.
+    exclude: process.platform === 'linux' ? [] : ['linux-autostart.test.ts'],
     testTimeout: 30_000,
   },
 });

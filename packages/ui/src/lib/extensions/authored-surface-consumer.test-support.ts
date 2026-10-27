@@ -1,33 +1,12 @@
+import { parseHTML } from 'linkedom';
 import { SurfaceExtensionRuntime } from '@varin/extension-surface';
 import { SurfaceExtensionLoader, type SurfaceExtensionHost } from '@varin/extension-loader';
 import { createWorkbenchCompositionHost } from './workbench-composition-host.js';
 
-/** Minimal DOM implementation for the authored package's real framework-neutral mount/disposer. */
-export type AuthoredPanelTestElement = HTMLElement & { children: AuthoredPanelTestElement[] };
-
-export const createAuthoredPanelTestContainer = (): AuthoredPanelTestElement => {
-  const document = {} as Document;
-  const makeElement = (): AuthoredPanelTestElement => {
-    const children: AuthoredPanelTestElement[] = [];
-    let parent: AuthoredPanelTestElement | undefined;
-    const element = {
-      children, dataset: {}, style: {}, className: '', textContent: '', hidden: false, ownerDocument: document,
-      appendChild(child: AuthoredPanelTestElement & { setParent(parent: AuthoredPanelTestElement): void }) {
-        child.remove(); children.push(child); child.setParent(element as AuthoredPanelTestElement); return child;
-      },
-      setParent(value: AuthoredPanelTestElement) { parent = value; },
-      remove() {
-        if (!parent) return;
-        const index = parent.children.indexOf(element as AuthoredPanelTestElement);
-        if (index >= 0) parent.children.splice(index, 1);
-        parent = undefined;
-      },
-      addEventListener() {}, removeEventListener() {},
-    } as unknown as AuthoredPanelTestElement;
-    return element;
-  };
-  document.createElement = (() => makeElement()) as Document['createElement'];
-  return makeElement();
+/** Use the same DOM implementation as component tests; do not reproduce tree mutation. */
+export const createAuthoredPanelTestContainer = (): HTMLDivElement => {
+  const { document } = parseHTML('<html><body></body></html>');
+  return document.createElement('div');
 };
 
 /** No Host implementation or listener fixture: all catalog and artifact reads use the supplied API. */

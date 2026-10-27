@@ -35,7 +35,7 @@ let router: ReturnType<typeof express.Router>;
 const id = 'example.agent-authored-panel';
 const forwarded: string[] = [];
 const readyArtifacts = new Set<string>();
-interface PanelElement { children: PanelElement[]; textContent: string; dataset: Record<string, string> }
+interface PanelElement { children: ArrayLike<PanelElement>; textContent: string; dataset: Record<string, string> }
 interface PanelConsumer {
   container: PanelElement;
   errors: unknown[];
@@ -48,8 +48,8 @@ let panel: PanelConsumer | undefined;
 let firstSection: PanelElement | undefined;
 let originalService: HostServicePin | undefined;
 let firstStyles: PanelConsumer['styles'] = [];
-const sectionOf = (panel: PanelConsumer) => panel.container.children
-  .find(child => child.children.some(node => node.children[1]?.textContent.includes('Agent-authored text counter')))?.children[0];
+const sectionOf = (panel: PanelConsumer) => Array.from(panel.container.children)
+  .find(child => Array.from(child.children).some(node => node.children[1]?.textContent.includes('Agent-authored text counter')))?.children[0];
 
 function request(method: string, params: unknown, options: { grant?: { grantId: string } } = {}) {
   const key = `authored:${++sequence}`;
@@ -283,7 +283,7 @@ async function handle(frame: Record<string, unknown>) {
     assert(entry); assert.equal(entry.source.kind, 'source_view');
     assert(forwarded.includes('file.captureBatch')); assert(forwarded.includes('storage.getBlob'));
     assert(panel); assert.equal(panel.errors.length, 0);
-    const mounted = [...panel.container.children];
+    const mounted = Array.from(panel.container.children);
     await panel.close();
     assert.equal(panel.container.children.length, 0);
     assert(mounted.every(child => child.children.length === 0));

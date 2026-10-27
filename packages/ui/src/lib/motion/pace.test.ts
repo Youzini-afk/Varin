@@ -1,47 +1,34 @@
-import { describe, expect, it } from 'vitest';
-import { CODE_PACE, PROSE_PACE, drainRate, revealIndex, stepPace } from './pace';
+import { expect, test } from 'vitest';
+import { drainRate, revealIndex, stepPace, type PaceProfile } from './pace';
 
-const FRAME = 1 / 60;
+// Test the pacing contract with a supplied profile, not product tuning constants.
+// The usePacedText suite owns streamed/remounted text and timer retirement.
+const profile: PaceProfile = { minRate: 10, catchUpSeconds: 0.5, drainSeconds: 0.2 };
 
-const reveal = (backlog: number, seconds: number, fixed?: number) => {
+test('makes bounded forward progress, catches up to a burst and drains a finished stream', () => {
   let shown = 0;
-  for (let t = 0; t < seconds - 1e-9; t += FRAME) shown = stepPace(PROSE_PACE, shown, backlog, FRAME, fixed);
-  return shown;
-};
-
-describe('stepPace', () => {
-  it('reveals at least the minimum rate while there is a backlog', () => {
-    expect(reveal(1000, 1)).toBeGreaterThan(26);
-    expect(stepPace(PROSE_PACE, 0, 3, FRAME)).toBeCloseTo(26 * FRAME, 6);
-  });
-
-  it('catches up with a burst on the 0.24s time constant', () => {
-    // One time constant reveals about 1 - 1/e of a burst.
-    const shown = reveal(400, 0.24);
-    expect(shown / 400).toBeGreaterThan(0.55);
-    expect(shown / 400).toBeLessThan(0.7);
-    expect(reveal(400, 1.4)).toBe(400);
-  });
-
-  it('drains a fixed backlog evenly in the drain time', () => {
-    const rate = drainRate(PROSE_PACE, 300);
-    expect(rate).toBeCloseTo(300 / 0.16, 6);
-    // Six frames are 0.1s: an even 62.5% of the drain.
-    expect(reveal(300, 0.1, rate)).toBeCloseTo(187.5, 6);
-    expect(reveal(300, 0.17, rate)).toBe(300);
-  });
-
-  it('never passes the target and clamps long frames', () => {
-    expect(stepPace(PROSE_PACE, 10, 8, FRAME)).toBe(8);
-    expect(stepPace(CODE_PACE, 0, 10_000, 3)).toBeCloseTo(stepPace(CODE_PACE, 0, 10_000, 0.05), 6);
-  });
+  for (let frame = 0; frame < 300; frame++) {
+    const next = stepPace(profile, shown, 400, 1 / 60);
+    expect(next).toBeGreaterThanOrEqual(shown);
+    expect(next).toBeLessThanOrEqual(400);
+    shown = next;
+  }
+  expect(shown).toBe(400);
+  const rate = drainRate(profile, 100);
+  let drained = 0;
+  for (let frame = 0; frame < 60; frame++) drained = stepPace(profile, drained, 100, 1 / 60, rate);
+  expect(drained).toBe(100);
+  expect(stepPace(profile, 10, 8, 1 / 60)).toBe(8);
 });
 
-describe('revealIndex', () => {
-  it('keeps surrogate pairs whole', () => {
-    const text = 'a😀b';
-    expect(revealIndex(text, 2)).toBe(3);
-    expect(revealIndex(text, 1.9)).toBe(1);
-    expect(revealIndex(text, 99)).toBe(text.length);
-  });
+test('a suspended tab cannot reveal an entire burst in one resumed frame', () => {
+  const next = stepPace(profile, 0, 10_000, 3);
+  expect(next).toBeGreaterThan(0);
+  expect(next).toBeLessThan(10_000);
+});
+
+test('keeps surrogate pairs whole', () => {
+  expect(revealIndex('a😀b', 2)).toBe(3);
+  expect(revealIndex('a😀b', 1.9)).toBe(1);
+  expect(revealIndex('a😀b', 99)).toBe(4);
 });

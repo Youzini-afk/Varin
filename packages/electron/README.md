@@ -68,7 +68,7 @@ The contract exports:
 
 - `VarinDesktopCommandMap` — a map from command name to `{ args, result }` for the exhaustive command catalog
 - `VarinDesktopBridge` — the typed bridge interface implemented by preload and consumed by the UI
-- `VARIN_DESKTOP_COMMAND_LIST` — the canonical command catalog (used by architecture tests)
+- `VARIN_DESKTOP_COMMAND_LIST` — the canonical runtime command catalog
 - `VARIN_REMOTE_SAFE_DESKTOP_COMMANDS` — the subset allowed for non-local renderers
 - `PreloadBootstrapPayload` — a discriminated union that carries credentials only for local pages
 
@@ -77,6 +77,14 @@ The preload bridge (`preload.ts`) implements `VarinDesktopBridge` and accepts on
 `renderer-security-policy.test.ts` verifies trusted renderer origins, remote command restrictions,
 and bootstrap credential isolation. Command guards are tested in `application-client`;
 production main/preload/UI consumers type-check against the shared desktop contract.
+
+## Tests
+
+`bun run test` discovers shell, updater-policy and path-opening behavior in one Vitest configuration;
+Linux autostart is included only on Linux. `bun run test:packaging-tools` discovers Node helper tests,
+including update manifests, and is included in the root `test:tooling` command. Do not run both entries
+for the same helper suite. `test:linux-desktop` exercises Linux application discovery separately.
+Installed-product and real-browser smoke commands remain separate from these source-level checks.
 
 ## Development
 
