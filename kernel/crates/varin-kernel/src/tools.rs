@@ -2806,6 +2806,7 @@ fn validate_binding(
 }
 pub(crate) enum ResourceWork {
     Ready(Value),
+    TextMutation(crate::storage::file_mutation_tasks::Task),
     BlobRead(crate::storage::blob_reads::BlobReadTask),
     ExecutionView(crate::storage::materialization::Task),
 }
@@ -2895,6 +2896,26 @@ pub(crate) fn prepare_resource(
             effective=request.with_execution_binding(binding); &effective
         } else {request}
     } else {request};
+    if let ResourceOperation::FileMutation(mutation) = &request.operation {
+        let result = (|| {
+            let (method, params) = request.operation.params(&request.binding, &request.context);
+            let (grant, authorized) = storage.authorize(Some(&request.binding.grant_id), epoch, host_id, host_generation, method, &params)?;
+            validate_binding(&grant, &request.binding, &request.context)?;
+            if request.authorize_only {
+                let task = storage.prepare_file_read(&authorized, &grant, request.cancellation.shared_flag())?
+                    .mutation_identity().with_live_root(request.binding.live_root.clone());
+                return Ok(ResourceWork::BlobRead(crate::storage::blob_reads::BlobReadTask::File(task)));
+            }
+            let key = request.expected_resource_key.clone().ok_or_else(||KernelError::Authorization("File mutation has no original canonical resource admission".into()))?;
+            let task = storage.prepare_text_mutation(&request.binding.workspace_id,
+                request.binding.root_id.as_deref().ok_or_else(||KernelError::Authorization("Physical file source is missing".into()))?,
+                &request.context.operation_id, mutation, &grant, request.journal.as_ref(), request.binding.source_mode,
+                request.binding.materialized_source.as_ref(), request.cancellation.shared_flag())?
+                .with_source(Some(key), request.binding.live_root.clone());
+            Ok(ResourceWork::TextMutation(task))
+        })();
+        return result.map_err(|error|ResourceFailure{error,dispatched:false});
+    }
     let ResourceOperation::FileRead(args) = &request.operation else {
         return serve_resource_immediate(storage, epoch, host_id, host_generation, request)
             .map(ResourceWork::Ready);
@@ -3045,6 +3066,10 @@ pub(crate) fn serve_resource(
 ) -> Result<Value, ResourceFailure> {
     match prepare_resource(storage, epoch, host_id, host_generation, request)? {
         ResourceWork::Ready(value) => Ok(value),
+        ResourceWork::TextMutation(task) => {
+            let mut dispatched = false;
+            task.run_local(storage, &mut dispatched).map_err(|error|ResourceFailure{error,dispatched})
+        },
         ResourceWork::ExecutionView(task) => serve_execution_view_fixture(storage,epoch,host_id,host_generation,request,task),
         ResourceWork::BlobRead(task) => {
             let result = task.run();
@@ -3227,26 +3252,8 @@ fn serve_resource_immediate(
             storage.clear_cancellation();
             return result;
         }
-        if let ResourceOperation::FileMutation(mutation) = &request.operation {
-            storage.set_cancellation(request.cancellation.shared_flag());
-            let result = storage.file_mutate(
-                &request.binding.workspace_id,
-                request
-                    .binding
-                    .root_id
-                    .as_deref()
-                    .expect("validated physical root"),
-                &request.context.operation_id,
-                mutation,
-                &grant,
-                request.journal.as_ref(),
-                request.binding.source_mode,
-                !request.authorize_only,
-                &mut dispatched,
-                request.binding.materialized_source.as_ref(),
-            );
-            storage.clear_cancellation();
-            return result;
+        if matches!(request.operation, ResourceOperation::FileMutation(_)) {
+            return Err(KernelError::Protocol("Text mutations require their admitted file worker".into()));
         }
         if matches!(
             request.operation,

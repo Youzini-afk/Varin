@@ -80,7 +80,7 @@ impl Storage {
                 "journal anchor is outside the original Run".into(),
             ));
         }
-        let root = self.registered_file_root(root_id, grant)?;
+        let root = self.admitted_file_root(root_id, grant)?;
         let file_target = json!({"kind":"physical","workspaceId":workspace,"threadId":anchor.thread_id,"runId":anchor.run_id,"rootId":root_id,"canonicalRoot":root.canonical_root,"executionWorkspaceId":root.execution_workspace_id,"sourceMode":mode});
         let conversation =
             json!({"kind":"thread","threadId":anchor.thread_id,"branchId":anchor.branch_id});

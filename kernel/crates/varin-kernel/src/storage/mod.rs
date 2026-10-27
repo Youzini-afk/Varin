@@ -48,9 +48,12 @@ mod file_identity;
 pub(crate) mod file_reads;
 pub(crate) mod line_reads;
 pub(crate) mod file_mutations;
+pub(crate) mod file_mutation_tasks;
 pub(crate) mod file_observations;
 mod file_reconciliation;
 mod file_resource_leases;
+pub(crate) mod file_lease_tasks;
+pub(crate) mod file_effects;
 mod file_resources;
 mod gc;
 mod maintenance;
@@ -238,6 +241,7 @@ pub(crate) struct Storage {
     retained_file_leases: HashMap<String, file_resource_leases::RetainedFileLease>,
     materializations: HashMap<String, materialization::ActiveMaterialization>,
     result_publications: BTreeSet<String>,
+    file_effects: BTreeSet<String>,
     processes: crate::process::ProcessManager,
     process_receipt_wake: Option<crate::process::receipt_wake::Watch>,
     process_receipt_notify: Option<Arc<dyn Fn() + Send + Sync>>,

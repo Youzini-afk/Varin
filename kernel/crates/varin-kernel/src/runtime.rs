@@ -37,10 +37,28 @@ enum BlobReadReply {
 }
 
 enum WorkerRequest {
+    CaptureResolved {
+        request: Value,
+        prepared: crate::storage::capture_resources::CapturePreparation,
+        result: Result<Vec<crate::model::CanonicalFileLeaseResource>, KernelError>,
+    },
+    TextMutationDone {
+        call: crate::tools::ResourceCall,
+        result: Result<Value, crate::tools::ResourceFailure>,
+    },
+    FileEffectDone {
+        request: Value,
+        result: Result<Value, KernelError>,
+    },
     BlobReadDone {
         reply: BlobReadReply,
         task: crate::storage::blob_reads::BlobReadTask,
         result: Result<crate::storage::blob_reads::PreparedBlobRead, KernelError>,
+    },
+    FileLeaseResolved {
+        request: Value,
+        task: crate::storage::file_lease_tasks::Task,
+        result: Result<crate::storage::file_lease_tasks::Resolved, KernelError>,
     },
     Wire(Value, Arc<AtomicBool>),
     SourceWire(Value,varin_runtime::execution::CancellationToken),
@@ -215,6 +233,12 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.read"
             | "file.read.check"
             | "file.lease.wait"
+            | "file.lease.acquire"
+            | "file.lease.check"
+            | "file.apply"
+            | "file.mkdir"
+            | "file.remove"
+            | "file.rename"
             | "file.capture"
             | "file.captureBatch"
             | "file.scan"
@@ -630,9 +654,21 @@ impl Kernel {
             });
             return Ok(None);
         }
-        if method == "file.lease.wait" {
-            return storage.wait_file_lease(id, &params_value, &authorized_grant, cancellation)
-                .map(|result| result.map(|value| response_ok(id, value)));
+        if matches!(method, "file.lease.wait" | "file.lease.acquire" | "file.lease.check") {
+            let task = storage.prepare_file_lease_task(method, &authorized_params, &authorized_grant, cancellation)?;
+            self.spawn_file_lease(request.clone(), task, completions)?;
+            return Ok(None);
+        }
+        if matches!(method, "file.apply" | "file.mkdir" | "file.remove" | "file.rename") {
+            let task = storage.prepare_file_effect(method, &authorized_params, &authorized_grant, cancellation.clone())?;
+            let (port, completed, request) = (Self::workspace_port(completions), completions.clone(), request.clone());
+            self.file_workers.retain(|(_, worker)| !worker.is_finished());
+            let worker = thread::Builder::new().name("file-effect".into()).spawn(move || {
+                let result = task.run(port);
+                let _ = completed.send(WorkerRequest::FileEffectDone { request, result });
+            })?;
+            self.file_workers.push((cancellation, worker));
+            return Ok(None);
         }
         if method == "storage.getBlob" {
             let task =
@@ -736,45 +772,14 @@ impl Kernel {
             return Ok(None);
         }
         if matches!(method, "file.capture" | "file.captureBatch") {
-            let task = storage.prepare_capture(
-                method,
-                &authorized_params,
-                &authorized_grant,
-                cancellation.clone(),
-            )?;
-            #[cfg(test)]
-            let task = {
-                let mut task = task;
-                if let Some((phase, hold)) = self.capture_hold.take() {
-                    task.hold_at(phase, hold);
-                }
-                task
-            };
-            let lease_id = task.lease_id().to_string();
-            let request = request.clone();
-            let completed = completions.clone();
-            self.file_workers
-                .retain(|(_, worker)| !worker.is_finished());
-            let spawned = thread::Builder::new()
-                .name("file-capture".into())
-                .spawn(move || {
-                    if task.store() {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.hash_sources()))
-                            .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
-                        let _ = completed.send(WorkerRequest::CaptureHashed { request, task, result });
-                    } else {
-                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
-                            .unwrap_or_else(|_| Err(KernelError::Storage("capture worker panicked".into())));
-                        let _ = completed.send(WorkerRequest::CaptureDone { request, task, result });
-                    }
-                });
-            match spawned {
-                Ok(worker) => self.file_workers.push((cancellation, worker)),
-                Err(error) => {
-                    storage.finish_retained_file_lease(&lease_id);
-                    return Err(error.into());
-                }
-            }
+            let prepared=storage.prepare_capture_resolution(method,&authorized_params,&authorized_grant,cancellation.clone())?;
+            let (request,completed)=(request.clone(),completions.clone());
+            let worker=thread::Builder::new().name("capture-admission".into()).spawn(move ||{
+                let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||prepared.resolve()))
+                    .unwrap_or_else(|_|Err(KernelError::Storage("Capture admission worker panicked".into())));
+                let _=completed.send(WorkerRequest::CaptureResolved{request,prepared,result});
+            })?;
+            self.file_workers.push((cancellation,worker));
             return Ok(None);
         }
         if method == "file.materializedView.prepare" {
@@ -904,6 +909,77 @@ impl Kernel {
         Ok(Some(response_ok(id, result)))
     }
 
+    fn continue_capture_admission(
+        &mut self,
+        request: Value,
+        prepared: crate::storage::capture_resources::CapturePreparation,
+        resolved: Result<Vec<crate::model::CanonicalFileLeaseResource>, KernelError>,
+        completions: &mpsc::Sender<WorkerRequest>,
+    ) -> Result<(), KernelError> {
+        let storage = self
+            .storage
+            .as_mut()
+            .ok_or_else(|| KernelError::Storage("Kernel stopped".into()))?;
+        let (grant, _) = storage.authorize(
+            request["grantId"].as_str(),
+            &self.epoch,
+            self.host_id.as_deref().unwrap_or_default(),
+            self.host_generation.as_deref().unwrap_or_default(),
+            request["method"].as_str().unwrap_or_default(),
+            &request["params"],
+        )?;
+        let task = storage.finish_capture_resolution(prepared, resolved?, &grant)?;
+        let cancellation = task.cancellation();
+        #[cfg(test)]
+        let task = {
+            let mut task = task;
+            if let Some((phase, hold)) = self.capture_hold.take() {
+                task.hold_at(phase, hold);
+            }
+            task
+        };
+        let lease_id = task.lease_id().to_string();
+        let completed = completions.clone();
+        self.file_workers
+            .retain(|(_, worker)| !worker.is_finished());
+        let spawned = thread::Builder::new()
+            .name("file-capture".into())
+            .spawn(move || {
+                if task.store() {
+                    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        task.hash_sources()
+                    }))
+                    .unwrap_or_else(|_| {
+                        Err(KernelError::Storage("capture worker panicked".into()))
+                    });
+                    let _ = completed.send(WorkerRequest::CaptureHashed {
+                        request,
+                        task,
+                        result,
+                    });
+                } else {
+                    let result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task.run()))
+                            .unwrap_or_else(|_| {
+                                Err(KernelError::Storage("capture worker panicked".into()))
+                            });
+                    let _ = completed.send(WorkerRequest::CaptureDone {
+                        request,
+                        task,
+                        result,
+                    });
+                }
+            });
+        match spawned {
+            Ok(worker) => self.file_workers.push((cancellation, worker)),
+            Err(error) => {
+                storage.finish_retained_file_lease(&lease_id);
+                return Err(error.into());
+            }
+        }
+        Ok(())
+    }
+
     fn continue_file_capture(
         &mut self,
         request: Value,
@@ -1019,6 +1095,50 @@ impl Kernel {
         completed
     }
 
+    fn resume_file_lease_waiters(&mut self, completions: &mpsc::Sender<WorkerRequest>) -> Vec<(String, Result<Value, KernelError>)> {
+        let Some(storage) = self.storage.as_mut() else { return Vec::new(); };
+        let (mut completed, tasks) = storage.prepare_file_lease_waiters(&self.epoch,
+            self.host_id.as_deref().unwrap_or_default(), self.host_generation.as_deref().unwrap_or_default());
+        for continuation in tasks {
+            let request = json!({"v":PROTOCOL_VERSION,"kind":"request","id":continuation.request_id,
+                "method":"file.lease.wait","params":continuation.task.params,"epoch":self.epoch,"grantId":continuation.grant_id});
+            if let Err(error) = self.spawn_file_lease(request, continuation.task, completions) {
+                if let Some(storage) = self.storage.as_mut() { storage.finish_file_lease_waiter(&continuation.request_id); }
+                completed.push((continuation.request_id, Err(error)));
+            }
+        }
+        completed
+    }
+    fn spawn_file_lease(&mut self, request: Value, task: crate::storage::file_lease_tasks::Task,
+        completions: &mpsc::Sender<WorkerRequest>) -> Result<(), KernelError> {
+        let completed = completions.clone();
+        let cancellation = task.cancellation.clone();
+        self.file_workers.retain(|(_, worker)|!worker.is_finished());
+        let worker = thread::Builder::new().name("file-lease".into()).spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(||task.run()))
+                .unwrap_or_else(|_|Err(KernelError::Storage("File lease resolution worker panicked".into())));
+            let _ = completed.send(WorkerRequest::FileLeaseResolved { request, task, result });
+        })?;
+        self.file_workers.push((cancellation, worker));
+        Ok(())
+    }
+    fn complete_file_lease(&mut self, request: &Value, task: &crate::storage::file_lease_tasks::Task,
+        result: Result<crate::storage::file_lease_tasks::Resolved, KernelError>, revoked: &Mutex<HashSet<String>>)
+        -> Result<Option<Value>, KernelError> {
+        let storage = self.storage.as_mut().ok_or_else(||KernelError::Storage("Kernel stopped".into()))?;
+        let id = request["id"].as_str().unwrap_or("");
+        let outcome = (|| {
+            let (grant, _) = storage.authorize(request["grantId"].as_str(), &self.epoch,
+                self.host_id.as_deref().unwrap_or(""),self.host_generation.as_deref().unwrap_or(""),task.method(),&task.params)?;
+            if request["epoch"].as_str() != Some(&self.epoch)
+                || revoked.lock().map(|ids|ids.contains(&grant.grant_id)).unwrap_or(true) {
+                return Err(KernelError::Authorization("File lease owner changed or was revoked".into()));
+            }
+            storage.finish_file_lease_task(id, task, result, &grant)
+        })();
+        if outcome.is_err() { storage.finish_file_lease_waiter(id); }
+        outcome
+    }
     fn spawn_blob_read(
         &mut self,
         mut task: crate::storage::blob_reads::BlobReadTask,
@@ -1690,6 +1810,37 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     respond!(response);
                     continue;
                 }
+                WorkerRequest::TextMutationDone { call, result } => {
+                    if let Some(key) = &call.admission_key {
+                        if let Ok(mut active) = worker_cancellations.lock() { active.remove(key); }
+                    }
+                    let _ = call.reply.send(result);
+                    continue;
+                }
+                WorkerRequest::FileEffectDone { request, result } => {
+                    let id = request["id"].as_str().unwrap_or("");
+                    if let Ok(mut active) = worker_cancellations.lock() { active.remove(id); }
+                    // The original worker has already committed its actual receipt
+                    // and drained its lease. Late cancellation cannot erase an effect.
+                    respond!(match result {
+                        Ok(value) => response_ok(id, value),
+                        Err(error) => response_error(id, &error),
+                    });
+                    continue;
+                }
+                WorkerRequest::FileLeaseResolved { request, task, result } => {
+                    let id = request["id"].as_str().unwrap_or("");
+                    let result = kernel.complete_file_lease(&request, &task, result, &worker_revoked_grants);
+                    if matches!(result, Ok(None)) { continue; }
+                    if let Ok(mut active) = worker_cancellations.lock() { active.remove(id); }
+                    let response = match result {
+                        Ok(Some(value)) => response_ok(id, value),
+                        Err(error) => response_error(id, &error),
+                        Ok(None) => unreachable!("queued lease keeps its original request"),
+                    };
+                    respond!(response);
+                    continue;
+                }
                 WorkerRequest::BlobReadDone {
                     reply,
                     task,
@@ -1772,6 +1923,15 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Err(error) => response_error(id, &error),
                     };
                     respond!(response);
+                    continue;
+                }
+                WorkerRequest::CaptureResolved { request, prepared, result } => {
+                    let id=request["id"].as_str().unwrap_or_default().to_owned();
+                    let result=if stopping{Err(KernelError::Cancelled)}else{kernel.continue_capture_admission(request,prepared,result,&capture_completions)};
+                    if let Err(error)=result{
+                        if let Ok(mut active)=worker_cancellations.lock(){active.remove(&id);}
+                        respond!(response_error(&id,&error));
+                    }
                     continue;
                 }
                 WorkerRequest::CaptureHashed { request, task, result } => {
@@ -1931,9 +2091,8 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     continue;
                 }
                 WorkerRequest::FileLeasesChanged => {
-                    if let Some(storage) = kernel.storage.as_mut() {
-                        let completed = storage.settle_file_lease_waiters(&kernel.epoch,
-                            kernel.host_id.as_deref().unwrap_or_default(), kernel.host_generation.as_deref().unwrap_or_default());
+                    {
+                        let completed = kernel.resume_file_lease_waiters(&capture_completions);
                         for (id, result) in completed {
                             if let Ok(mut active) = worker_cancellations.lock() { active.remove(&id); }
                             let response = match result { Ok(value) => response_ok(&id, value), Err(error) => response_error(&id, &error) };
@@ -1986,6 +2145,21 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                     };
                     let result = match result {
                         Ok(crate::tools::ResourceWork::Ready(value)) => Ok(value),
+                        Ok(crate::tools::ResourceWork::TextMutation(task)) => {
+                            let (port, completed) = (Kernel::workspace_port(&capture_completions), capture_completions.clone());
+                            let (key, cancellation) = (call.admission_key.clone(), call.cancellation.shared_flag());
+                            let worker = thread::Builder::new().name("text-mutation".into()).spawn(move || {
+                                let result = task.run(port);
+                                let _ = completed.send(WorkerRequest::TextMutationDone { call, result });
+                            });
+                            match worker {
+                                Ok(worker) => kernel.file_workers.push((cancellation, worker)),
+                                Err(_) => if let Some(key) = key {
+                                    if let Ok(mut active) = worker_cancellations.lock() { active.remove(&key); }
+                                },
+                            }
+                            continue;
+                        }
                         Ok(crate::tools::ResourceWork::ExecutionView(task)) => {
                             let key = call.admission_key.clone();
                             let grant_id = call.binding.grant_id.clone();

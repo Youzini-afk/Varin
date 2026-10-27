@@ -16,6 +16,8 @@ pub(crate) struct FileReadTask {
     response: bool,
     identity_only: bool,
     regular_only: bool,
+    retained_lease: bool,
+    identity_method: Option<&'static str>,
     expected_key: Option<String>,
     live_root: Option<varin_runtime::catalog::launches::LiveRoot>,
     #[cfg(test)]
@@ -49,13 +51,19 @@ impl FileReadTask {
         self.identity_only = true;
         self
     }
+    pub(crate) fn mutation_identity(mut self) -> Self {
+        self.identity_only = true;
+        self.identity_method = Some("file.apply");
+        self
+    }
     pub(crate) fn regular_identity(mut self) -> Self {
         self.identity_only = true;
         self.regular_only = true;
         self
     }
     pub(crate) fn method(&self) -> &'static str {
-        if self.regular_only {
+        if let Some(method) = self.identity_method { method }
+        else if self.regular_only {
             "file.read.check"
         } else {
             "file.read"
@@ -395,21 +403,10 @@ impl Storage {
         grant: &Grant,
         cancellation: Arc<AtomicBool>,
     ) -> Result<FileReadTask, KernelError> {
-        self.prepare_file_read_inner(params, grant, cancellation, true)
+        self.prepare_file_read_inner(params, grant, cancellation, true, false)
     }
-    pub(super) fn prepare_file_mutation_read(
-        &self,
-        params: &Value,
-        grant: &Grant,
-    ) -> Result<FileReadTask, KernelError> {
-        self.prepare_file_read_inner(
-            params,
-            grant,
-            self.cancellation
-                .clone()
-                .unwrap_or_else(|| Arc::new(AtomicBool::new(false))),
-            false,
-        )
+    pub(super) fn prepare_retained_mutation_read(&self, params: &Value, grant: &Grant, cancellation: Arc<AtomicBool>) -> Result<FileReadTask, KernelError> {
+        self.prepare_file_read_inner(params, grant, cancellation, false, true)
     }
     fn prepare_file_read_inner(
         &self,
@@ -417,6 +414,7 @@ impl Storage {
         grant: &Grant,
         cancellation: Arc<AtomicBool>,
         response: bool,
+        retained_lease: bool,
     ) -> Result<FileReadTask, KernelError> {
         let root_id = params["rootId"]
             .as_str()
@@ -431,7 +429,9 @@ impl Storage {
             ));
         }
         if let Some(id) = params["leaseId"].as_str() {
-            self.active_file_worker_lease(grant, root_id, id)?;
+            if retained_lease {
+                self.assert_retained_canonical_file_lease(grant, root_id, &[], id)?;
+            } else { self.active_file_worker_lease(grant, root_id, id)?; }
         }
         let task = FileReadTask {
             params: params.clone(),
@@ -442,6 +442,8 @@ impl Storage {
             response,
             identity_only: false,
             regular_only: false,
+            retained_lease,
+            identity_method: None,
             expected_key: None,
             live_root: None,
             #[cfg(test)]
@@ -469,12 +471,14 @@ impl Storage {
         }
         let prepared = result?;
         if !task.identity_only {
-            self.assert_canonical_file_lease(
+            if task.retained_lease {
+                self.assert_retained_canonical_file_lease(grant, &root.root_id, &[prepared.resource], task.params["leaseId"].as_str().expect("retained mutation lease"))?;
+            } else { self.assert_canonical_file_lease(
                 grant,
                 &root.root_id,
                 &[prepared.resource],
                 task.params["leaseId"].as_str(),
-            )?;
+            )?; }
         }
         Ok(prepared.value)
     }

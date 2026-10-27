@@ -3,6 +3,8 @@ use super::*;
 
 #[path = "runtime_file_lease_review.rs"]
 mod file_lease_review;
+#[path = "runtime_file_effect_tests.rs"]
+mod effects;
 use crate::storage::capture_resources::{CapturePhase, CaptureTask, CapturedBatch};
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -211,9 +213,8 @@ fn single_capture_real_body_retains_original_or_implicit_exclusion_while_control
                 json!({"workspaceId":"workspace","rootId":f.root_id,"operationId":"must-not-write","path":"body","targetJson":"{\"kind\":\"missing\"}"}),
                 Some("writer"),
             );
-            assert!(
-                matches!(f.kernel.handle(&apply, Arc::new(AtomicBool::new(false)), &f.tx), Err(KernelError::Operation(message)) if message.contains("busy"))
-            );
+            assert!(f.kernel.handle(&apply, Arc::new(AtomicBool::new(false)), &f.tx).unwrap().is_none());
+            assert!(matches!(f.finish_effect(), Err(KernelError::Operation(message)) if message.contains("busy")));
             if supplied {
                 let duplicate = Fixture::request("file.capture", params, Some("writer"));
                 assert!(

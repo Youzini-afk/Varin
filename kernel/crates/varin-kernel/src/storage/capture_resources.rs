@@ -22,6 +22,35 @@ fn paths_from_request(request: &CaptureRequest) -> &[String] {
     match request { CaptureRequest::Single(params) => std::slice::from_ref(&params.path),
         CaptureRequest::Batch(params) => &params.paths, CaptureRequest::Observation { path } => std::slice::from_ref(path) }
 }
+/// Conditional mutations use the same observed-state algorithm on their I/O
+/// worker, without creating another object or operation owner.
+pub(super) fn observe_effect(root: &FileRoot, path: &str, grant: &Grant, cancel: &AtomicBool) -> Result<FileState, KernelError> {
+    capture_entry(||resolve_admitted_resource(root, path, grant, false), cancel, &CaptureHooks::default())
+        .map(|entry|entry.state).map_err(|error|match error {
+            KernelError::SnapshotChanged(message) => KernelError::Operation(message), other => other,
+        })
+}
+pub(crate) struct CapturePreparation {
+    request: CaptureRequest,
+    root: FileRoot,
+    grant: Grant,
+    paths: Vec<FileLeaseResource>,
+    expected: Option<BTreeMap<String,FileState>>,
+    cancellation: Arc<AtomicBool>,
+}
+impl CapturePreparation {
+    pub(crate) fn resolve(&self)->Result<Vec<CanonicalFileLeaseResource>,KernelError>{
+        let resolve=||self.paths.iter().map(|path|{
+            check(&self.cancellation)?;
+            let resource=resolve_admitted_resource(&self.root,&path.path,&self.grant,true)?;
+            Ok(CanonicalFileLeaseResource{absolute:canonical_lease_path(resource.absolute)?,subtree:false})
+        }).collect::<Result<Vec<_>,KernelError>>();
+        let canonical=resolve()?;
+        if resolve()?!=canonical {return Err(KernelError::Authorization("Capture resource changed during physical admission".into()));}
+        check(&self.cancellation)?;
+        Ok(canonical)
+    }
+}
 pub(crate) struct CaptureTask {
     request: CaptureRequest,
     root: FileRoot,
@@ -578,13 +607,13 @@ fn capture_entry(
     verify_entry(entry, resolve, None, cancel, hooks)
 }
 impl Storage {
-    pub(crate) fn prepare_capture(
-        &mut self,
+    pub(crate) fn prepare_capture_resolution(
+        &self,
         method: &str,
         value: &Value,
         grant: &Grant,
         cancellation: Arc<AtomicBool>,
-    ) -> Result<CaptureTask, KernelError> {
+    ) -> Result<CapturePreparation, KernelError> {
         check(&cancellation)?;
         let request = match method {
             "file.capture" => CaptureRequest::Single(parse_file_params(value)?),
@@ -629,7 +658,7 @@ impl Storage {
             }
             CaptureRequest::Observation { .. } => unreachable!(),
         };
-        let root = self.registered_file_root(root_id, grant)?;
+        let root = self.admitted_file_root(root_id, grant)?;
         let mut seen = BTreeSet::new();
         let paths = paths
             .iter()
@@ -644,7 +673,30 @@ impl Storage {
                 })
             })
             .collect::<Result<Vec<_>, KernelError>>()?;
-        let canonical_resources = self.canonical_lease_resources(root_id, &paths, grant)?;
+        if root.owning_workspace_id != *workspace_id { return Err(KernelError::Authorization("Capture workspace differs from its root".into())); }
+        if let Some(id)=supplied_lease { self.active_file_worker_lease(grant,root_id,id)?; }
+        Ok(CapturePreparation { request, root, grant:grant.clone(), paths, expected, cancellation })
+    }
+    /// Legacy non-mounted recovery and direct owner fixtures use the same stages.
+    pub(crate) fn prepare_capture(&mut self,method:&str,value:&Value,grant:&Grant,cancellation:Arc<AtomicBool>)->Result<CaptureTask,KernelError>{
+        let task=self.prepare_capture_resolution(method,value,grant,cancellation)?;
+        let resolved=task.resolve()?;
+        self.finish_capture_resolution(task,resolved,grant)
+    }
+    pub(crate) fn finish_capture_resolution(&mut self,prepared:CapturePreparation,canonical_resources:Vec<CanonicalFileLeaseResource>,grant:&Grant)->Result<CaptureTask,KernelError>{
+        let CapturePreparation { request, root, grant:original, paths, expected, cancellation }=prepared;
+        check(&cancellation)?;
+        let admitted=self.admitted_file_root(&root.root_id,grant)?;
+        if admitted.canonical_root!=root.canonical_root || admitted.execution_workspace_id!=root.execution_workspace_id
+            || admitted.owning_workspace_id!=root.owning_workspace_id || original.grant_id!=grant.grant_id {
+            return Err(KernelError::Authorization("Capture authority changed during physical admission".into()));
+        }
+        if paths.iter().any(|path|!path_allowed(grant,&path.path)) {return Err(KernelError::Authorization("Capture scope changed during admission".into()));}
+        let (root_id,workspace_id,supplied_lease)=match &request {
+            CaptureRequest::Single(params)=>(&params.root_id,&params.workspace_id,params.lease_id.as_deref()),
+            CaptureRequest::Batch(params)=>(&params.root_id,&params.workspace_id,Some(params.lease_id.as_str())),
+            CaptureRequest::Observation{..}=>unreachable!(),
+        };
         self.assert_canonical_file_lease(grant, root_id, &canonical_resources, supplied_lease)?;
         let lease = if let Some(id) = supplied_lease {
             self.file_leases
@@ -652,20 +704,12 @@ impl Storage {
                 .expect("checked capture lease")
                 .clone()
         } else {
-            // The old synchronous capture excluded managed writers for its entire read.
-            // Retain that exclusion using the existing physical lease authority.
             let lease_id = format!("file-capture:{}", Uuid::new_v4());
-            let lease = FileLease {
-                lease_id,
-                root_id: root_id.clone(),
-                workspace_id: workspace_id.clone(),
-                grant_id: grant.grant_id.clone(),
-                resources: paths,
-                canonical_resources,
-            };
-            self.file_leases
-                .insert(lease.lease_id.clone(), lease.clone());
-            lease
+            let params=parse_file_params(&json!({"workspaceId":workspace_id,"rootId":root_id,"leaseId":lease_id,
+                "resources":paths.iter().map(|resource|json!({"path":resource.path,"scope":"exact"})).collect::<Vec<_>>()}))?;
+            let acquired=self.acquire_file_lease_for(super::file_resource_leases::FileLeaseRequest{params,resources:paths,canonical_resources},grant,None)?;
+            if acquired["status"]!="acquired" {return Err(KernelError::Operation("file resource is busy".into()));}
+            self.file_leases.get(&lease_id).expect("original capture lease").clone()
         };
         self.retained_file_leases.insert(
             lease.lease_id.clone(),
@@ -715,7 +759,7 @@ impl Storage {
     }
     fn validate_capture(&self, task: &CaptureTask, grant: &Grant) -> Result<(), KernelError> {
         check(&task.cancellation)?;
-        let root = self.registered_file_root(&task.root.root_id, grant)?;
+        let root = self.admitted_file_root(&task.root.root_id, grant)?;
         if root.canonical_root != task.root.canonical_root {
             return Err(KernelError::Authorization(
                 "capture root changed before publication".into(),

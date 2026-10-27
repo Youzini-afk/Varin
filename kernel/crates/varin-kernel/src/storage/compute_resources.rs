@@ -110,7 +110,9 @@ impl Storage {
             pin_id=Some(reader_pin);root=Some(hash.clone());
             Source::Tree{catalog:self.root.join("catalog.sqlite"),objects:self.root.clone(),root:hash}
         }else if let Some(root_id)=&params.root_id{
-            let admitted=self.registered_file_root(root_id,grant)?;
+            // The compute worker verifies the physical root in both inventory
+            // and query traversal. Control must not synchronously enter a mount.
+            let admitted=self.admitted_file_root(root_id,grant)?;
             if admitted.owning_workspace_id!=params.workspace_id{return Err(KernelError::Authorization("Root workspace does not match computation".into()));}
             Source::Disk{root:admitted.canonical_root}
         }else if params.objects.is_some(){Source::Objects}else{return Err(failure("Computation requires an admitted pin, root, or fixed text source"));};

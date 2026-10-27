@@ -154,6 +154,11 @@ impl Review {
             );
             let result = match work {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::TextMutation(task)) => {
+                    let mut dispatched = false;
+                    task.run_local(&mut self.fixture.storage.lock().unwrap(), &mut dispatched)
+                        .map_err(|error|crate::tools::ResourceFailure{error,dispatched})
+                },
                 Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut self.fixture.storage.lock().unwrap(), EPOCH, HOST, GENERATION, &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let body = task.run();

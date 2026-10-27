@@ -158,6 +158,11 @@ fn assembled_tool_journal_and_explicit_successor_use_the_selected_ancestry() {
             );
             let result = match work {
                 Ok(ResourceWork::Ready(value)) => Ok(value),
+                Ok(ResourceWork::TextMutation(task)) => {
+                    let mut dispatched = false;
+                    task.run_local(&mut storage_for_call.lock().unwrap(), &mut dispatched)
+                        .map_err(|error|crate::tools::ResourceFailure{error,dispatched})
+                },
                 Ok(ResourceWork::ExecutionView(task)) => crate::tools::serve_execution_view_fixture(&mut storage_for_call.lock().unwrap(), "epoch", "host", "generation", &call, task),
                 Ok(ResourceWork::BlobRead(task)) => {
                     let body = task.run();

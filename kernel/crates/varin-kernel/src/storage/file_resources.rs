@@ -62,7 +62,7 @@ impl Storage {
     }
 }
 
-fn file_params_value(params_value: &Value) -> Value {
+pub(super) fn file_params_value(params_value: &Value) -> Value {
     let mut params = params_value.clone();
     if let Some(object) = params.as_object_mut() {
         object.remove("__pathScopes");
@@ -469,91 +469,6 @@ impl Storage {
         self.capture_file_state(resource)
     }
 
-    fn apply_file_state(
-        &mut self,
-        resource: &ResolvedFileResource,
-        state: &FileState,
-        workspace_id: &str,
-    ) -> Result<(), KernelError> {
-        self.check_cancelled()?;
-        if resource.path.is_empty() {
-            return Err(KernelError::Authorization(
-                "workspace root cannot be applied as a file state".to_string(),
-            ));
-        }
-        match state {
-            FileState::Missing => remove_existing(&resource.absolute),
-            FileState::Directory { mode } => {
-                match fs::symlink_metadata(&resource.absolute) {
-                    Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-                    Ok(_) => remove_existing(&resource.absolute)?,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                }
-                fs::create_dir_all(&resource.absolute)?;
-                apply_mode(&resource.absolute, *mode)
-            }
-            FileState::Symlink {
-                symlink_target,
-                mode: _,
-            } => {
-                remove_existing(&resource.absolute)?;
-                if let Some(parent) = resource.absolute.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                create_symlink(symlink_target, &resource.absolute)
-            }
-            FileState::RegularFile {
-                object_hash,
-                byte_length,
-                mode,
-            } => {
-                if !self.blob_owned(object_hash, Some(workspace_id))? {
-                    return Err(KernelError::Authorization(
-                        "file target object is not owned by the workspace".to_string(),
-                    ));
-                }
-                let object = object_path(&self.root, object_hash)?;
-                let (actual_hash, actual_length) = hash_file(&object)?;
-                if actual_hash != *object_hash || actual_length != *byte_length {
-                    return Err(KernelError::Storage(format!(
-                        "content object is corrupt: {object_hash}"
-                    )));
-                }
-                if let Some(parent) = resource.absolute.parent() {
-                    fs::create_dir_all(parent)?;
-                }
-                match fs::symlink_metadata(&resource.absolute) {
-                    Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                        fs::remove_dir(&resource.absolute)?
-                    }
-                    Ok(_) | Err(_) => {}
-                }
-                let temporary = resource
-                    .absolute
-                    .with_file_name(format!(".varin-kernel-{}", Uuid::new_v4()));
-                fs::copy(&object, &temporary)?;
-                // Acquire the flush handle before making the file readonly.
-                // Reopening with WRITE afterwards fails on Windows and POSIX.
-                let installed = OpenOptions::new().read(true).write(true).open(&temporary)?;
-                apply_mode(&temporary, *mode)?;
-                installed.sync_all()?;
-                drop(installed);
-                durable_rename(&temporary, &resource.absolute).map_err(|error| {
-                    let _ = fs::remove_file(&temporary);
-                    KernelError::Storage(error.to_string())
-                })?;
-                if let Some(parent) = resource.absolute.parent() {
-                    sync_directory(parent)?;
-                }
-                Ok(())
-            }
-            FileState::Unsupported => Err(KernelError::Operation(
-                "unsupported file states cannot be applied".to_string(),
-            )),
-        }
-    }
-
     pub(super) fn file_state_matches(observed: &FileState, expected: &FileState) -> bool {
         match (observed, expected) {
             (FileState::Missing, FileState::Missing)
@@ -788,6 +703,10 @@ impl Storage {
         let mut reconciled = 0usize;
         let mut unresolved = 0usize;
         for (operation_id, kind, stored) in pending {
+            if self.file_effects.contains(&operation_id) {
+                unresolved += 1;
+                continue;
+            }
             let Some(stored) = stored else {
                 unresolved += 1;
                 continue;
@@ -946,7 +865,9 @@ impl Storage {
                 })?
                 .to_string()]
         };
-        let (disposition, reason) = match kind {
+        let (disposition, reason) = if self.file_effects.contains(operation_id) {
+            ("needs-attention", "original-file-worker-running")
+        } else { match kind {
             "file.apply" => {
                 let params: KernelFileApplyParams = parse_file_params(intent)?;
                 let resource = self.resolve_file_resource(root_id, &params.path, grant, false)?;
@@ -1020,7 +941,7 @@ impl Storage {
                 ("reconcile", "materialization-observation-required")
             }
             _ => ("needs-attention", "unknown-file-operation-kind"),
-        };
+        }};
         Ok(json!({
             "operationId": operation_id,
             "kind": kind,
@@ -1114,7 +1035,7 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         let params: KernelFileOperationReconcileParams = parse_file_params(params_value)?;
-        self.registered_file_root(&params.root_id, grant)?;
+        self.admitted_file_root(&params.root_id, grant)?;
         let owned: Option<i64> = self
             .conn
             .query_row(
@@ -1260,331 +1181,27 @@ impl Storage {
         }))
     }
 
-    pub(super) fn file_apply(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileApplyParams = parse_file_params(params_value)?;
-        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
-        self.assert_file_lease(
-            grant,
-            &params.root_id,
-            &[FileLeaseResource {
-                path: resource.path.clone(),
-                subtree: false,
-            }],
-            params.lease_id.as_deref(),
-        )?;
-        let target: FileState = serde_json::from_str(&params.target_json)?;
-        let expected = params
-            .expected_json
-            .as_deref()
-            .map(serde_json::from_str::<FileState>)
-            .transpose()?;
-        let journalled = self.journal_for_file_reservation(params_value, grant)?;
-        let params_value = journalled.as_ref().unwrap_or(params_value);
-        let (_params_hash, committed, resuming) =
-            self.begin_file_operation(&params.operation_id, "file.apply", params_value)?;
-        if let Some(committed) = committed {
-            return Ok(committed);
-        }
-        if params.record_id.is_some() || params.slot.is_some() {
-            let FileState::RegularFile { object_hash, .. } = &target else {
-                return Err(KernelError::Authorization("only a file target can use a content record".into()));
-            };
-            let mut reference = json!({"recordId":params.record_id,"slot":params.slot});
-            if let Some(owner) = &params.owner_id { reference["ownerId"] = json!(owner); }
-            self.validate_blob_read_source(&reference, object_hash, &grant.grant_id, false)?;
-        } else if let Some(owner_id) = params.owner_id.as_ref() {
-            let FileState::RegularFile { object_hash, .. } = &target else {
-                return Err(KernelError::Authorization(
-                    "only a file target can consume an object owner".to_string(),
-                ));
-            };
-            self.validate_object_owners(
-                &params.workspace_id,
-                &grant.grant_id,
-                &BTreeMap::from([(owner_id.clone(), object_hash.clone())]),
-            )?;
-        } else if matches!(&target, FileState::RegularFile { .. })
-            && !grant.capabilities.contains("storage.maintenance")
-            && !grant.capabilities.contains("recovery.maintenance")
-            && !grant.capabilities.contains("storage.admin")
-        {
-            return Err(KernelError::Authorization(
-                "file apply requires an exact object owner or Host maintenance authority"
-                    .to_string(),
-            ));
-        }
-        if grant.capabilities.contains("recovery.maintenance") {
-            if !self.observation_process_idle(&resource.absolute)? { return Err(KernelError::Operation("affected resource still has an active process writer".into())); }
-            let conflicts = self.recovery_operation_conflicts(&json!({"workspaceId":params.workspace_id,"rootId":params.root_id,"paths":[resource.path],"exceptOperationId":params.reservation_operation_id}), grant)?;
-            if conflicts["operations"].as_array().is_some_and(|values|!values.is_empty()) { return Err(KernelError::Operation("affected resource has an unfinished Integration".into())); }
-        }
-        let current = self.observe_state(&resource)?;
-        if Self::file_state_matches(&current, &target) {
-            let result = json!({"status": "applied", "reconciled": resuming, "stateJson": serde_json::to_string(&current)?});
-            self.finish_file_operation_owned(
-                &params.operation_id,
-                &result,
-                params.owner_id.as_deref(),
-                Some(&params.workspace_id),
-            )?;
-            return Ok(result);
-        }
-        if let Some(expected) = expected.as_ref() {
-            if !Self::file_state_matches(&current, expected) {
-                let result =
-                    json!({"status": "conflict", "stateJson": serde_json::to_string(&current)?});
-                self.finish_file_operation_owned(
-                    &params.operation_id,
-                    &result,
-                    params.owner_id.as_deref(),
-                    Some(&params.workspace_id),
-                )?;
-                return Ok(result);
-            }
-        }
-        self.apply_file_state(&resource, &target, &params.workspace_id)?;
-        let observed = self.observe_state(&resource)?;
-        if !Self::file_state_matches(&observed, &target) {
-            return Err(KernelError::Storage(format!(
-                "file state did not match target after apply: {}",
-                resource.path
-            )));
-        }
-        let result = json!({"status": "applied", "reconciled": false, "stateJson": serde_json::to_string(&observed)?});
-        self.finish_file_operation_owned(
-            &params.operation_id,
-            &result,
-            params.owner_id.as_deref(),
-            Some(&params.workspace_id),
-        )?;
-        Ok(result)
+    pub(super) fn file_apply(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let task = self.prepare_file_effect("file.apply", params, grant,
+            self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self)
+    }
+    pub(super) fn file_mkdir(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let task = self.prepare_file_effect("file.mkdir", params, grant,
+            self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self)
+    }
+    pub(super) fn file_remove(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let task = self.prepare_file_effect("file.remove", params, grant,
+            self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self)
+    }
+    pub(super) fn file_rename(&mut self, params: &Value, grant: &Grant) -> Result<Value, KernelError> {
+        let task = self.prepare_file_effect("file.rename", params, grant,
+            self.cancellation.clone().unwrap_or_else(||Arc::new(AtomicBool::new(false))))?;
+        task.run_local(self)
     }
 
-    pub(super) fn file_mkdir(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileMkdirParams = parse_file_params(params_value)?;
-        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
-        self.assert_file_lease(
-            grant,
-            &params.root_id,
-            &[FileLeaseResource {
-                path: resource.path.clone(),
-                subtree: true,
-            }],
-            params.lease_id.as_deref(),
-        )?;
-        let (_hash, committed, resuming) =
-            self.begin_file_operation(&params.operation_id, "file.mkdir", params_value)?;
-        if let Some(committed) = committed {
-            return Ok(committed);
-        }
-        match fs::symlink_metadata(&resource.absolute) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => {
-                return Err(KernelError::Operation(
-                    "mkdir target exists and is not a directory".to_string(),
-                ))
-            }
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                if params.recursive {
-                    fs::create_dir_all(&resource.absolute)?;
-                } else {
-                    fs::create_dir(&resource.absolute)?;
-                }
-                if let Some(parent) = resource.absolute.parent() {
-                    sync_directory(parent)?;
-                }
-            }
-            Err(error) => return Err(error.into()),
-        }
-        let result = json!({"status": "created", "reconciled": resuming});
-        self.finish_file_operation(&params.operation_id, &result)?;
-        Ok(result)
-    }
-
-    pub(super) fn file_remove(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileRemoveParams = parse_file_params(params_value)?;
-        let resource = self.resolve_file_resource(&params.root_id, &params.path, grant, false)?;
-        self.assert_file_lease(
-            grant,
-            &params.root_id,
-            &[FileLeaseResource {
-                path: resource.path.clone(),
-                subtree: params.recursive,
-            }],
-            params.lease_id.as_deref(),
-        )?;
-        let (_hash, committed, resuming) =
-            self.begin_file_operation(&params.operation_id, "file.remove", params_value)?;
-        if let Some(committed) = committed {
-            return Ok(committed);
-        }
-        if resuming {
-            if !fs::symlink_metadata(&resource.absolute)
-                .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
-            {
-                return Err(KernelError::Operation("remove needs attention: target exists after interrupted operation; refusing destructive replay".to_string()));
-            }
-            let result = json!({"status": "removed", "reconciled": true});
-            self.finish_file_operation(&params.operation_id, &result)?;
-            return Ok(result);
-        }
-        self.assert_process_directory_idle(&resource.absolute)?;
-        match fs::symlink_metadata(&resource.absolute) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                if params.recursive {
-                    fs::remove_dir_all(&resource.absolute)?;
-                } else {
-                    fs::remove_dir(&resource.absolute)?;
-                }
-            }
-            Ok(_) => fs::remove_file(&resource.absolute)?,
-            Err(error) if error.kind() == io::ErrorKind::NotFound && params.force => {}
-            Err(error) => return Err(error.into()),
-        }
-        if let Some(parent) = resource.absolute.parent() {
-            sync_directory(parent)?;
-        }
-        let result = json!({"status": "removed", "reconciled": resuming});
-        self.finish_file_operation(&params.operation_id, &result)?;
-        Ok(result)
-    }
-
-    pub(super) fn file_rename(
-        &mut self,
-        params_value: &Value,
-        grant: &Grant,
-    ) -> Result<Value, KernelError> {
-        let params: KernelFileRenameParams = parse_file_params(params_value)?;
-        let source =
-            self.resolve_file_resource(&params.root_id, &params.from_path, grant, false)?;
-        let target = self.resolve_file_resource(&params.root_id, &params.to_path, grant, false)?;
-        let resources = [
-            FileLeaseResource {
-                path: source.path.clone(),
-                subtree: true,
-            },
-            FileLeaseResource {
-                path: target.path.clone(),
-                subtree: true,
-            },
-        ];
-        self.assert_file_lease(
-            grant,
-            &params.root_id,
-            &resources,
-            params.lease_id.as_deref(),
-        )?;
-        let (_hash, committed, resuming) =
-            self.begin_file_operation(&params.operation_id, "file.rename", params_value)?;
-        if let Some(committed) = committed {
-            return Ok(committed);
-        }
-        let source_state = self.observe_state(&source)?;
-        let target_state = self.observe_state(&target)?;
-        if resuming {
-            let envelope: String = self.conn.query_row(
-                "SELECT result_json FROM operations WHERE operation_id = ?1",
-                params![params.operation_id],
-                |row| row.get(0),
-            )?;
-            let envelope: Value = serde_json::from_str(&envelope)?;
-            let before = envelope
-                .get("renameSourceState")
-                .cloned()
-                .map(serde_json::from_value::<FileState>)
-                .transpose()?;
-            if matches!(source_state, FileState::Missing)
-                && before.as_ref().is_some_and(|state| {
-                    matches!(
-                        state,
-                        FileState::RegularFile { .. } | FileState::Symlink { .. }
-                    ) && Self::file_state_matches(&target_state, state)
-                })
-            {
-                let result = json!({"status": "renamed", "reconciled": true});
-                self.finish_file_operation(&params.operation_id, &result)?;
-                return Ok(result);
-            }
-            return Err(KernelError::Operation("rename needs attention: interrupted operation has no provable target; refusing replay".to_string()));
-        }
-        let expected_source = params
-            .expected_from_json
-            .as_deref()
-            .map(serde_json::from_str::<FileState>)
-            .transpose()?;
-        let expected_target = params
-            .expected_to_json
-            .as_deref()
-            .map(serde_json::from_str::<FileState>)
-            .transpose()?;
-        if expected_source
-            .as_ref()
-            .is_some_and(|expected| !Self::file_state_matches(&source_state, expected))
-            || expected_target
-                .as_ref()
-                .is_some_and(|expected| !Self::file_state_matches(&target_state, expected))
-        {
-            let result = json!({
-                "status": "conflict",
-                "sourceStateJson": serde_json::to_string(&source_state)?,
-                "targetStateJson": serde_json::to_string(&target_state)?,
-            });
-            self.finish_file_operation(&params.operation_id, &result)?;
-            return Ok(result);
-        }
-        let source_exists = !matches!(source_state, FileState::Missing);
-        let target_exists = !matches!(target_state, FileState::Missing);
-        if !source_exists {
-            return Err(KernelError::Operation(
-                "rename source is missing".to_string(),
-            ));
-        }
-        if params.target_must_be_missing.unwrap_or(false) && target_exists {
-            let result = json!({"status": "target-exists"});
-            self.finish_file_operation(&params.operation_id, &result)?;
-            return Ok(result);
-        }
-        if let Some(parent) = target.absolute.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let envelope: String = self.conn.query_row(
-            "SELECT result_json FROM operations WHERE operation_id = ?1",
-            params![params.operation_id],
-            |row| row.get(0),
-        )?;
-        let mut envelope: Value = serde_json::from_str(&envelope)?;
-        envelope["renameSourceState"] = serde_json::to_value(&source_state)?;
-        self.conn.execute(
-            "UPDATE operations SET result_json = ?2 WHERE operation_id = ?1",
-            params![params.operation_id, serde_json::to_string(&envelope)?],
-        )?;
-        self.assert_process_directory_idle(&source.absolute)?;
-        self.assert_process_directory_idle(&target.absolute)?;
-        durable_rename(&source.absolute, &target.absolute)?;
-        if let Some(parent) = source.absolute.parent() {
-            sync_directory(parent)?;
-        }
-        if source.absolute.parent() != target.absolute.parent() {
-            if let Some(parent) = target.absolute.parent() {
-                sync_directory(parent)?;
-            }
-        }
-        let result = json!({"status": "renamed", "reconciled": resuming});
-        self.finish_file_operation(&params.operation_id, &result)?;
-        Ok(result)
-    }
 }
 
 // Shared path resolution for Storage-admitted background captures.
@@ -1747,3 +1364,101 @@ impl Storage {
 #[cfg(test)]
 #[path = "non_directory_ancestor_review.rs"]
 mod non_directory_ancestor_review;
+
+/// Filesystem effects execute on the admitted worker. Content authority and the
+/// retained lease have already been checked by the original Storage owner.
+pub(super) fn apply_physical_state(storage_root: &Path, resource: &ResolvedFileResource,
+    state: &FileState, cancellation: &AtomicBool) -> Result<(), KernelError> {
+    if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        if resource.path.is_empty() {
+            return Err(KernelError::Authorization(
+                "workspace root cannot be applied as a file state".to_string(),
+            ));
+        }
+        match state {
+            FileState::Missing => remove_existing(&resource.absolute),
+            FileState::Directory { mode } => {
+                match fs::symlink_metadata(&resource.absolute) {
+                    Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                    Ok(_) => remove_existing(&resource.absolute)?,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+                fs::create_dir_all(&resource.absolute)?;
+                apply_mode(&resource.absolute, *mode)
+            }
+            FileState::Symlink {
+                symlink_target,
+                mode: _,
+            } => {
+                remove_existing(&resource.absolute)?;
+                if let Some(parent) = resource.absolute.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                create_symlink(symlink_target, &resource.absolute)
+            }
+            FileState::RegularFile {
+                object_hash,
+                byte_length,
+                mode,
+            } => {
+                let object = object_path(storage_root, object_hash)?;
+                if let Some(parent) = resource.absolute.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                let temporary = resource.absolute.with_file_name(format!(".varin-kernel-{}", Uuid::new_v4()));
+                let mut installed = OpenOptions::new().read(true).write(true).create_new(true).open(&temporary)?;
+                let mut owned = EffectTemporary(Some(temporary.clone()));
+                let mut input = File::open(object)?;
+                let mut hash = Sha256::new();
+                let mut length = 0u64;
+                let mut buffer = [0u8; 64 * 1024];
+                loop {
+                    if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                    let read = input.read(&mut buffer)?;
+                    if read == 0 { break; }
+                    hash.update(&buffer[..read]);
+                    installed.write_all(&buffer[..read])?;
+                    length += read as u64;
+                }
+                if format!("sha256-{}", hex::encode(hash.finalize())) != *object_hash || length != *byte_length {
+                    return Err(KernelError::Storage(format!("content object is corrupt: {object_hash}")));
+                }
+                // The existing open handle can flush readonly files on every platform.
+                apply_mode(&temporary, *mode)?;
+                installed.sync_all()?;
+                drop(installed);
+                if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                if fs::symlink_metadata(&resource.absolute).is_ok_and(|meta| meta.is_dir() && !meta.file_type().is_symlink()) {
+                    fs::remove_dir(&resource.absolute)?;
+                }
+                durable_rename(&temporary, &resource.absolute)?;
+                owned.0 = None;
+                if let Some(parent) = resource.absolute.parent() {
+                    sync_directory(parent)?;
+                }
+                Ok(())
+            }
+            FileState::Unsupported => Err(KernelError::Operation(
+                "unsupported file states cannot be applied".to_string(),
+            )),
+        }
+}
+
+/// Only the worker that successfully created this unique path owns its cleanup.
+struct EffectTemporary(Option<PathBuf>);
+impl Drop for EffectTemporary {
+    fn drop(&mut self) {
+        if let Some(path) = self.0.take() {
+            #[cfg(windows)]
+            if let Ok(meta) = fs::symlink_metadata(&path) {
+                if meta.permissions().readonly() {
+                    let mut permissions = meta.permissions();
+                    permissions.set_readonly(false);
+                    let _ = fs::set_permissions(&path, permissions);
+                }
+            }
+            let _ = fs::remove_file(path);
+        }
+    }
+}

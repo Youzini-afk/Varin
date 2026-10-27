@@ -3,6 +3,45 @@ use super::*;
 use crate::storage::capture_resources::CapturePhase;
 
 #[test]
+fn file_lease_resolution_preserves_fifo_without_partial_holds_and_cancellation_unblocks_successors() {
+    let mut f = Fixture::new();
+    f.short("file.lease.acquire", f.lease("a", "holder"), Some("writer"));
+    let first = json!({"workspaceId":"workspace","rootId":f.root_id,"leaseId":"multi",
+        "resources":[{"path":"a","scope":"exact"},{"path":"b","scope":"exact"}]});
+    let (original, cancelled) = f.begin("file.lease.wait", first, "writer");
+    assert!(f.finish_lease().unwrap().is_none());
+    f.begin("file.lease.wait", f.lease("b", "successor"), "writer");
+    assert!(f.finish_lease().unwrap().is_none());
+    assert_eq!(f.short("file.lease.acquire", f.lease("c", "independent"), Some("writer"))["status"], "acquired");
+    cancelled.store(true, Ordering::Release);
+    let completed = f.kernel.resume_file_lease_waiters(&f.tx);
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0].0, original["id"].as_str().unwrap());
+    assert!(matches!(&completed[0].1, Err(KernelError::Cancelled)));
+    let successor = f.finish_lease().unwrap().unwrap();
+    assert_eq!(successor["leaseId"], "successor");
+    assert_eq!(successor["status"], "acquired", "the multi-resource waiter never partially held b");
+}
+
+#[test]
+fn file_lease_admission_is_metadata_only_and_late_revocation_never_installs_a_lease() {
+    let mut f = Fixture::new();
+    let moved = f.directory.0.join("away");
+    fs::rename(f.work(), &moved).unwrap();
+    f.begin("file.lease.acquire", f.lease("file", "missing-root"), "writer");
+    f.short("storage.health", json!({}), Some("reader"));
+    assert!(f.finish_lease().is_err());
+    fs::rename(moved, f.work()).unwrap();
+    f.begin("file.lease.acquire", f.lease("file", "late"), "writer");
+    let WorkerRequest::FileLeaseResolved { request, task, result } = f.rx.recv_timeout(WAIT).unwrap() else { panic!("unexpected lease continuation"); };
+    assert!(result.is_ok());
+    f.short("authority.grant.revoke", json!({"grantId":"writer"}), None);
+    assert!(f.kernel.complete_file_lease(&request, &task, result, &f.revoked).is_err());
+    f.grant("replacement", &["storage.read","storage.write"], &[""]);
+    assert_eq!(f.short("file.lease.acquire", f.lease("file", "replacement-lease"), Some("replacement"))["status"], "acquired");
+}
+
+#[test]
 fn lease_wait_remains_queued_until_a_cancelled_capture_worker_has_really_drained() {
     for supplied in [false, true] {
         let mut f = Fixture::new();
@@ -37,6 +76,7 @@ fn lease_wait_remains_queued_until_a_cancelled_capture_worker_has_really_drained
             )
             .unwrap()
             .is_none());
+        assert!(f.finish_lease().unwrap().is_none());
         if supplied {
             assert_eq!(
                 f.short(

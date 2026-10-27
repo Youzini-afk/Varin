@@ -105,10 +105,32 @@ impl Fixture {
                 Arc::new(AtomicBool::new(false)),
                 &self.tx,
             )
-            .unwrap()
-            .expect("short request became pending");
+            .unwrap();
+        let Some(response) = response else {
+            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename") {
+                return self.finish_effect().unwrap();
+            }
+            assert!(matches!(method,"file.lease.wait"|"file.lease.acquire"|"file.lease.check"), "short request became pending");
+            return self.finish_lease().unwrap().expect("short lease request remained queued");
+        };
         assert_eq!(response["ok"], true, "{response}");
         response["result"].clone()
+    }
+    fn finish_effect(&mut self) -> Result<Value, KernelError> {
+        loop {
+            match self.rx.recv_timeout(WAIT).expect("file effect did not drain") {
+                WorkerRequest::Workspace(command) => command(self.kernel.storage.as_mut()),
+                WorkerRequest::FileEffectDone { result, .. } => return result,
+                _ => panic!("unexpected file effect continuation"),
+            }
+        }
+    }
+    fn finish_lease(&mut self) -> Result<Option<Value>, KernelError> {
+        match self.rx.recv_timeout(WAIT).expect("lease resolution did not drain") {
+            WorkerRequest::FileLeaseResolved { request, task, result } =>
+                self.kernel.complete_file_lease(&request, &task, result, &self.revoked),
+            _ => panic!("unexpected lease continuation"),
+        }
     }
     fn blob(&mut self, params: Value, grant: &str) -> Result<Value, KernelError> {
         self.begin("storage.getBlob", params, grant);
@@ -145,6 +167,10 @@ impl Fixture {
             pending_file_worker(method),
             "production loop would discard the active cancellation identity"
         );
+        if matches!(method,"file.capture"|"file.captureBatch") {
+            let WorkerRequest::CaptureResolved { request, prepared, result } = self.rx.recv_timeout(WAIT).expect("capture admission did not drain") else {panic!("unexpected capture admission continuation");};
+            self.kernel.continue_capture_admission(request,prepared,result,&self.tx).unwrap();
+        }
         (request, cancel)
     }
     fn receive(

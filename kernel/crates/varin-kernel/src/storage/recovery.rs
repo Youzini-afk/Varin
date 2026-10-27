@@ -1734,6 +1734,11 @@ impl Storage {
         let except = params_value
             .get("exceptOperationId")
             .and_then(Value::as_str);
+        let reservations = self.recovery_file_reservations(&workspace, except)?;
+        let operations = resolve_reservation_conflicts(&reservations, &requested)?;
+        Ok(json!({"operations":operations}))
+    }
+    pub(super) fn recovery_file_reservations(&self, workspace: &str, except: Option<&str>) -> Result<Vec<Value>, KernelError> {
         let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
         let mut rows = statement.query([])?;
         let mut operations = Vec::new();
@@ -1770,31 +1775,30 @@ impl Storage {
                     "Integration reservation root is not canonical".into(),
                 ));
             }
-            let physical = paths
-                .iter()
-                .map(|path| {
-                    let resolved = super::file_resources::resolve_scoped_resource(
-                        &directory_path,
-                        path,
-                        true,
-                        true,
-                        |_| true,
-                    )?;
-                    super::file_resource_leases::canonical_lease_path(resolved.absolute)
-                })
-                .collect::<Result<Vec<_>, KernelError>>()?;
-            let overlap = requested.iter().any(|left| {
-                physical
-                    .iter()
-                    .any(|right| physical_paths_overlap(&left.absolute, right))
-            });
-            if overlap {
+
                 operations.push(json!({"operationId":operation,"workspaceId":owning,"state":row.get::<_,String>(2)?,"revision":row.get::<_,i64>(3)?,"canonicalRoot":directory,"paths":paths}));
-            }
+
         }
-        Ok(json!({"operations":operations}))
+        Ok(operations)
     }
+
 }
+pub(super) fn resolve_reservation_conflicts(reservations: &[Value], requested: &[crate::model::CanonicalFileLeaseResource]) -> Result<Vec<Value>, KernelError> {
+    let mut operations = Vec::new();
+    for reservation in reservations {
+        let directory = reservation["canonicalRoot"].as_str().ok_or_else(||KernelError::Storage("Integration reservation root is missing".into()))?;
+        let paths: Vec<String> = serde_json::from_value(reservation["paths"].clone())?;
+        let physical = paths.iter().map(|path| {
+            let resolved = super::file_resources::resolve_scoped_resource(Path::new(directory), path, true, true, |_|true)?;
+            super::file_resource_leases::canonical_lease_path(resolved.absolute)
+        }).collect::<Result<Vec<_>, KernelError>>()?;
+        if requested.iter().any(|left|physical.iter().any(|right|physical_paths_overlap(&left.absolute,right))) {
+            operations.push(reservation.clone());
+        }
+    }
+    Ok(operations)
+}
+
 fn physical_paths_overlap(left: &Path, right: &Path) -> bool {
     #[cfg(windows)]
     let (left, right) = (
