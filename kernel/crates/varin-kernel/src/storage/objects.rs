@@ -601,7 +601,20 @@ impl Storage {
             )
         })?;
         let path = Self::validate_path(raw_path)?.join("/");
+        let grant = self.load_grant(grant_id)?;
+        if !path_allowed(&grant, &path) {
+            return Err(KernelError::Authorization("content path is outside the grant scope".into()));
+        }
+        let check_workspace = |workspace: &str| -> Result<(), KernelError> {
+            if grant.owning_workspace.as_deref().is_some_and(|owning| owning != workspace)
+                || params.get("workspaceId").and_then(Value::as_str).is_some_and(|requested| requested != workspace) {
+                return Err(KernelError::Authorization("content source belongs to another workspace".into()));
+            }
+            Ok(())
+        };
         let root = if let Some(branch_id) = branch_id {
+            let branch = self.branch(branch_id)?;
+            check_workspace(&branch.workspace_id)?;
             if let Some(revision) = params.get("revision").and_then(Value::as_i64) {
                 self.conn
                     .query_row(
@@ -616,7 +629,7 @@ impl Storage {
                         other => other.into(),
                     })?
             } else {
-                self.branch(branch_id)?.head_root
+                branch.head_root
             }
         } else {
             if params.get("revision").is_some() {
@@ -624,12 +637,12 @@ impl Storage {
                     "revision is only valid for a branch content source".to_string(),
                 ));
             }
-            let (root, owner_grant, ephemeral): (String, String, bool) = self
+            let (root, owner_grant, ephemeral, workspace): (String, String, bool, String) = self
                 .conn
                 .query_row(
-                    "SELECT root_hash, grant_id, ephemeral FROM pins WHERE pin_id = ?1",
+                    "SELECT root_hash, grant_id, ephemeral, workspace_id FROM pins WHERE pin_id = ?1",
                     params![pin_id.expect("source count checked")],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
                 )
                 .map_err(|error| match error {
                     rusqlite::Error::QueryReturnedNoRows => {
@@ -637,6 +650,7 @@ impl Storage {
                     }
                     other => other.into(),
                 })?;
+            check_workspace(&workspace)?;
             if ephemeral && owner_grant != grant_id && !storage_admin {
                 return Err(KernelError::Authorization(
                     "query pin belongs to another actor".to_string(),

@@ -17,6 +17,46 @@ const kernelPath = process.env.VARIN_TEST_KERNEL_PATH ?? path.join(repositoryRoo
 const hasReleaseKernel = await fs.stat(kernelPath).then(() => true).catch(() => false);
 const buildVersion = JSON.parse(await fs.readFile(path.join(repositoryRoot, "package.json"), "utf8")).version as string;
 
+it.skipIf(!hasReleaseKernel)("forks the exact pinned namespace and applies path transactions without a physical execution copy", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-kernel-namespace-"));
+  const storageRoot = path.join(root, "storage");
+  const workspaceId = "namespace-workspace";
+  const client = createKernelClient({ hostId: "namespace-host", storageRoot, buildVersion, kernelPath, allowCargoDevRunner: false });
+  const adapter = new KernelStorageAdapter({ client, hostId: "namespace-host", storageRoot, resolveWorkspaceRoot: async () => root });
+  try {
+    await client.start();
+    const context = await adapter.context(workspaceId, "namespace-context");
+    const store = new KernelWorkingStateRootStore(context);
+    await store.createBranch(workspaceId, "parent", {}, "base");
+    const pin = await store.pinBranch("parent");
+    try {
+      const bytes = Buffer.from("parent keeps working\n");
+      const object = await context.client.putBlob(bytes, "parent-body");
+      const state = { kind: "regular-file" as const, objectHash: object.hash, byteLength: object.byteLength, mode: 0o644 };
+      assert.equal((await context.client.applyBranchPaths({ operationId: "parent-write", branchId: "parent",
+        changes: [{ path: "src/a.txt", expectedState: { kind: "missing" }, state, ownerId: object.ownerId }] })).status, "committed");
+      await store.createBranchFromPin(workspaceId, "child", pin, "parent@0");
+      assert.equal((await context.client.inspectBranchPath({ branchId: "child", path: "src/a.txt" })).state.kind, "missing");
+
+      const directory = await context.client.inspectBranchPath({ branchId: "parent", path: "src" });
+      assert.equal(directory.state.kind, "directory");
+      assert.ok(directory.node);
+      const rename = { operationId: "move-src", branchId: "parent", sourcePath: "src", path: "renamed",
+        expectedSourceNode: directory.node!, expectedTargetNode: null };
+      const moved = await context.client.renameBranchPath(rename);
+      assert.equal(moved.status, "committed");
+      assert.deepEqual(await context.client.renameBranchPath(rename), moved);
+      assert.equal((await context.client.inspectBranchPath({ branchId: "parent", path: "renamed" })).node, directory.node);
+      const read = await context.client.getBlob(object.hash, { branchId: "parent", path: "renamed/a.txt" });
+      assert.deepEqual(Buffer.from(read.bytesBase64, "base64"), bytes);
+      assert.equal((await context.client.applyBranchPaths({ operationId: "stale-parent-write", branchId: "parent",
+        changes: [{ path: "renamed/a.txt", expectedState: { kind: "missing" }, state: { kind: "missing" } }] })).status, "conflict");
+      assert.equal((await fs.readdir(storageRoot)).includes("managed"), false);
+      await assert.rejects(fs.stat(path.join(root, "src")), { code: "ENOENT" });
+    } finally { await pin.release(); }
+  } finally { await adapter.dispose(); await client.close(); await fs.rm(root, { recursive: true, force: true }); }
+});
+
 it.skipIf(!hasReleaseKernel)("equivalent actor fields share one native grant regardless of construction order", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "varin-grant-identity-"));
   const client = createKernelClient({ hostId: "grant-identity", storageRoot: path.join(root, "storage"),

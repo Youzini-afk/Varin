@@ -17,16 +17,13 @@ impl Fixture {
         Self { storage, directory }
     }
     fn call(&mut self, method: &str, params: Value) -> Result<Value, KernelError> {
-        let (grant, params) = self.storage.authorize(
-            Some("owner"),
-            "epoch",
-            "host",
-            "generation",
-            method,
-            &params,
-        )?;
-        self.storage
-            .dispatch(method, &params, Some("owner"), &grant)
+        self.call_as("owner", method, params)
+    }
+    fn call_as(&mut self, actor: &str, method: &str, params: Value) -> Result<Value, KernelError> {
+        let (grant, params) =
+            self.storage
+                .authorize(Some(actor), "epoch", "host", "generation", method, &params)?;
+        self.storage.dispatch(method, &params, Some(actor), &grant)
     }
     fn begin(&mut self, name: &str, base: Option<&str>) {
         let mut params = json!({"operationId":format!("create:{name}"),"builderId":name,"branchId":name,
@@ -58,6 +55,31 @@ impl Fixture {
     fn collect(&mut self, name: &str) {
         self.call("storage.gc", json!({"operationId":name}))
             .unwrap();
+    }
+    fn blob(&mut self, name: &str, bytes: &[u8]) -> Value {
+        let input = json!({"workspaceId":"project","operationId":name,"streamId":name,"byteLength":bytes.len()});
+        self.storage.begin_blob_stream(&input, "owner").unwrap();
+        self.storage
+            .stream_blob_bytes(name, 0, bytes, "owner")
+            .unwrap();
+        let blob = self.storage.finish_blob_stream(&input, "owner").unwrap();
+        json!({"state":{"kind":"regular-file","objectHash":blob["hash"],"byteLength":bytes.len(),"mode":420},"ownerId":blob["ownerId"]})
+    }
+    fn inspect(&mut self, branch: &str, path: &str) -> Value {
+        self.call(
+            "branch.path.inspect",
+            json!({"branchId":branch,"path":path}),
+        )
+        .unwrap()
+    }
+    fn apply(&mut self, operation: &str, path: &str, before: &Value, content: &Value) -> Value {
+        self.call("branch.path.apply", json!({"operationId":operation,"branchId":"main","changes":[{
+            "path":path,"expectedState":before,"state":content["state"],"ownerId":content["ownerId"]
+        }]})).unwrap()
+    }
+    fn close(self) {
+        drop(self.storage);
+        fs::remove_dir_all(self.directory).unwrap();
     }
 }
 #[test]
@@ -271,4 +293,327 @@ fn workspace_capture_cleanup_releases_only_original_owners_and_replays_after_res
     let directory = f.directory.clone();
     drop(f.storage);
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn workspace_path_conditions_allow_disjoint_writes_and_reject_stale_content() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.finish("main");
+    let a = f.blob("a", b"first");
+    let b = f.blob("b", b"second");
+    let missing = json!({"kind":"missing"});
+    assert_eq!(
+        f.apply("write-a", "src/a", &missing, &a)["status"],
+        "committed"
+    );
+    // This observation predates a different path's commit. It remains valid.
+    assert_eq!(
+        f.apply("write-b", "src/b", &missing, &b)["status"],
+        "committed"
+    );
+    let observed = f.inspect("main", "src/a");
+    let next = f.blob("next", b"changed");
+    let written = f.apply("edit-a", "src/a", &observed["state"], &next);
+    assert_eq!(written["status"], "committed");
+    assert_eq!(
+        f.apply("edit-a", "src/a", &observed["state"], &next),
+        written,
+        "replay must not edit twice after consuming its owner"
+    );
+    let stale = f.blob("stale", b"should not overwrite");
+    assert_eq!(
+        f.apply("stale-edit", "src/a", &observed["state"], &stale)["status"],
+        "conflict"
+    );
+    assert_eq!(f.inspect("main", "src/a")["state"], next["state"]);
+    assert_eq!(f.inspect("main", "src")["state"]["kind"], "directory");
+    assert!(
+        !f.directory.join("managed").exists(),
+        "path writes must not materialize an execution directory"
+    );
+    f.close();
+}
+
+#[test]
+fn workspace_directory_replacement_fences_descendants_and_recreation_stays_empty() {
+    let mut f = Fixture::new();
+    let a = f.blob("a", b"first");
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([{"path":"dir/a","state":a["state"],"ownerId":a["ownerId"]}]),
+    )
+    .unwrap();
+    f.finish("main");
+    let before = f.inspect("main", "dir");
+    let b = f.blob("b", b"later");
+    f.apply("write-b", "dir/b", &json!({"kind":"missing"}), &b);
+    let remove = |operation: &str, node: &Value| {
+        json!({"operationId":operation,"branchId":"main","changes":[{
+            "path":"dir","expectedState":before["state"],"expectedNode":node,"state":{"kind":"missing"}
+        }]})
+    };
+    assert_eq!(
+        f.call(
+            "branch.path.apply",
+            remove("stale-directory", &before["node"])
+        )
+        .unwrap()["status"],
+        "conflict"
+    );
+    assert!(f
+        .call(
+            "branch.path.apply",
+            json!({"operationId":"unfenced-directory","branchId":"main","changes":[{
+                "path":"dir","expectedState":before["state"],"state":{"kind":"missing"}
+            }]})
+        )
+        .is_err());
+    let current = f.inspect("main", "dir");
+    assert_eq!(
+        f.call(
+            "branch.path.apply",
+            remove("remove-directory", &current["node"])
+        )
+        .unwrap()["status"],
+        "committed"
+    );
+    f.call(
+        "branch.path.apply",
+        json!({"operationId":"recreate-directory","branchId":"main","changes":[{
+            "path":"dir","expectedState":{"kind":"missing"},"state":{"kind":"directory","mode":493}
+        }]}),
+    )
+    .unwrap();
+    assert_eq!(f.inspect("main", "dir/a")["state"]["kind"], "missing");
+    assert_eq!(f.inspect("main", "dir/b")["state"]["kind"], "missing");
+    f.close();
+}
+
+#[test]
+fn workspace_subtree_rename_retains_identity_and_bytes_after_gc_and_restart() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.finish("main");
+    let a = f.blob("a", b"\0binary\xffdata");
+    f.apply("write-a", "src/a", &json!({"kind":"missing"}), &a);
+    let b = f.blob("b", b"another file");
+    f.apply("write-b", "other/b", &json!({"kind":"missing"}), &b);
+    let before = f.inspect("main", "src");
+    let rename = json!({"operationId":"move-src","branchId":"main","sourcePath":"src","path":"renamed",
+        "expectedSourceNode":before["node"],"expectedTargetNode":null});
+    let result = f.call("branch.rename", rename.clone()).unwrap();
+    assert_eq!(result["status"], "committed");
+    assert_eq!(f.call("branch.rename", rename).unwrap(), result);
+    assert_eq!(f.inspect("main", "renamed")["node"], before["node"]);
+    assert_eq!(f.inspect("main", "src")["state"]["kind"], "missing");
+    f.collect("gc-after-namespace-move");
+    let read = f
+        .call(
+            "storage.getBlob",
+            json!({"branchId":"main","path":"renamed/a","hash":a["state"]["objectHash"]}),
+        )
+        .unwrap();
+    assert_eq!(
+        BASE64
+            .decode(read["bytesBase64"].as_str().unwrap())
+            .unwrap(),
+        b"\0binary\xffdata"
+    );
+    assert!(f
+        .call(
+            "storage.getBlob",
+            json!({"branchId":"main","path":"other/b","hash":a["state"]["objectHash"]})
+        )
+        .is_err());
+    let root = f.storage.branch("main").unwrap().head_root;
+    drop(f.storage);
+    let mut storage = Storage::open(&f.directory, "host").unwrap();
+    assert_eq!(storage.branch("main").unwrap().head_root, root);
+    assert_eq!(
+        storage
+            .branch_path_inspect(&json!({"branchId":"main","path":"renamed/a"}))
+            .unwrap()["state"],
+        a["state"]
+    );
+    storage.gc().unwrap();
+    drop(storage);
+    fs::remove_dir_all(f.directory).unwrap();
+}
+
+#[test]
+fn workspace_fork_selects_current_or_exact_pin_and_survives_parent_release() {
+    let mut f = Fixture::new();
+    let old = f.blob("old", b"old");
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([{"path":"a","state":old["state"],"ownerId":old["ownerId"]}]),
+    )
+    .unwrap();
+    f.finish("main");
+    f.call(
+        "branch.pin",
+        json!({"operationId":"pin-base","branchId":"main","pinId":"base","revision":0}),
+    )
+    .unwrap();
+    let next = f.blob("next", b"current");
+    f.apply("advance-main", "a", &old["state"], &next);
+    let nodes = f.nodes();
+    let fork = json!({"operationId":"fork-current","branchId":"current-child","sourceBranchId":"main","workspaceId":"project","draftBasePaths":[],"captureScopes":[]});
+    let created = f.call("branch.fork", fork.clone()).unwrap();
+    assert_eq!(
+        f.nodes(),
+        nodes,
+        "forking must not enumerate or rebuild content nodes"
+    );
+    let latest = f.blob("latest", b"parent continues");
+    f.apply("advance-again", "a", &next["state"], &latest);
+    assert_eq!(
+        f.call("branch.fork", fork).unwrap(),
+        created,
+        "replay must preserve the original fork boundary"
+    );
+    assert_eq!(f.inspect("current-child", "a")["state"], next["state"]);
+    f.call(
+        "branch.delete",
+        json!({"operationId":"release-parent","branchId":"main"}),
+    )
+    .unwrap();
+    f.call("branch.fork", json!({"operationId":"fork-retained-base","branchId":"old-child","sourceBranchId":"main","sourcePinId":"base",
+        "workspaceId":"project","draftBasePaths":[],"captureScopes":[]})).unwrap();
+    f.call(
+        "branch.unpin",
+        json!({"operationId":"release-base","branchId":"main","pinId":"base"}),
+    )
+    .unwrap();
+    f.collect("gc-after-parent-release");
+    assert_eq!(f.inspect("old-child", "a")["state"], old["state"]);
+    assert_eq!(f.inspect("current-child", "a")["state"], next["state"]);
+    f.close();
+}
+
+#[test]
+fn workspace_namespace_rejects_foreign_sources_and_rechecks_both_rename_paths_on_replay() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([
+            {"path":"allowed/a","state":{"kind":"symlink","symlinkTarget":"first","mode":511}},
+            {"path":"private/a","state":{"kind":"symlink","symlinkTarget":"other","mode":511}}
+        ]),
+    )
+    .unwrap();
+    f.finish("main");
+    f.storage.issue_grant(&json!({"grantId":"limited","hostGeneration":"generation","owningWorkspace":"project",
+        "executionWorkspace":"project","capabilities":["storage.read","storage.write"],"pathScopes":["allowed"]}),
+        "host","generation",&f.directory.to_string_lossy(),"epoch").unwrap();
+    let from = f.inspect("main", "private/a");
+    let rename = json!({"operationId":"move-private","branchId":"main","sourcePath":"private/a","path":"allowed/b",
+        "expectedSourceNode":from["node"],"expectedTargetNode":null});
+    assert_eq!(
+        f.call("branch.rename", rename.clone()).unwrap()["status"],
+        "committed"
+    );
+    assert!(
+        f.call_as("limited", "branch.rename", rename).is_err(),
+        "completed receipts must not bypass the source-path grant"
+    );
+    assert!(f
+        .call_as(
+            "limited",
+            "branch.fork",
+            json!({"operationId":"wide-fork","workspaceId":"project","branchId":"child",
+        "sourceBranchId":"main","draftBasePaths":[],"captureScopes":[]})
+        )
+        .is_err());
+    f.storage.issue_grant(&json!({"grantId":"other-reader","hostGeneration":"generation","owningWorkspace":"project",
+        "executionWorkspace":"project","capabilities":["storage.read","storage.write"],"pathScopes":[""]}),
+        "host","generation",&f.directory.to_string_lossy(),"epoch").unwrap();
+    let head = f.inspect("main", "");
+    let pin = f.call("branch.pin", json!({"operationId":"private-query-pin","branchId":"main",
+        "expectedWriteRevision":head["writeRevision"],"expectedRoot":head["root"]})).unwrap();
+    let fork = json!({"operationId":"private-pin-fork","workspaceId":"project","branchId":"private-pin-child",
+        "sourceBranchId":"main","sourcePinId":pin["pinId"],"draftBasePaths":[],"captureScopes":[]});
+    f.call("branch.fork", fork.clone()).unwrap();
+    assert!(f.call_as("other-reader", "branch.fork", fork).is_err(),
+        "completed fork receipts still check a live query pin's original owner");
+    // A caller-supplied workspace cannot mask the branch's actual ownership.
+    f.storage.issue_grant(&json!({"grantId":"foreign-owner","hostGeneration":"generation","owningWorkspace":"other-project",
+        "executionWorkspace":"other-project","capabilities":["storage.read","storage.write"],"pathScopes":[""]}),
+        "host","generation",&f.directory.to_string_lossy(),"epoch").unwrap();
+    f.call_as(
+        "foreign-owner",
+        "branch.create.begin",
+        json!({"operationId":"foreign","builderId":"foreign","workspaceId":"other-project",
+        "branchId":"foreign","draftBasePaths":[],"captureScopes":[]}),
+    )
+    .unwrap();
+    f.call_as(
+        "foreign-owner",
+        "branch.create.finish",
+        json!({"operationId":"foreign","builderId":"foreign"}),
+    )
+    .unwrap();
+    assert!(f
+        .call(
+            "branch.path.inspect",
+            json!({"workspaceId":"project","branchId":"foreign","path":"a"})
+        )
+        .is_err());
+    assert!(f
+        .call(
+            "branch.fork",
+            json!({"operationId":"foreign-fork","workspaceId":"project","branchId":"foreign-child",
+        "sourceBranchId":"foreign","draftBasePaths":[],"captureScopes":[]})
+        )
+        .is_err());
+    let observed = f
+        .call(
+            "branch.path.inspect",
+            json!({"branchId":"main","path":"allowed/a","revision":0}),
+        )
+        .unwrap();
+    assert!(
+        observed["writeRevision"].is_null(),
+        "a fixed path observation must not advertise a current write fence"
+    );
+    f.close();
+}
+
+#[test]
+fn workspace_failed_rename_preserves_source_and_returns_a_typed_reason() {
+    let mut f = Fixture::new();
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([
+            {"path":"src/a","state":{"kind":"symlink","symlinkTarget":"data","mode":511}},
+            {"path":"occupied/a","state":{"kind":"directory","mode":493}}
+        ]),
+    )
+    .unwrap();
+    f.finish("main");
+    let source = f.inspect("main", "src");
+    let root = source["root"].clone();
+    let missing = f.call("branch.rename", json!({"operationId":"missing-parent","branchId":"main","sourcePath":"src","path":"missing/target",
+        "expectedSourceNode":source["node"],"expectedTargetNode":null})).unwrap_err();
+    assert_eq!(
+        crate::error::error_code(&missing),
+        "namespace_parent_missing"
+    );
+    let target = f.inspect("main", "occupied");
+    let occupied = f.call("branch.rename", json!({"operationId":"nonempty-target","branchId":"main","sourcePath":"src","path":"occupied",
+        "expectedSourceNode":source["node"],"expectedTargetNode":target["node"],"replace":true})).unwrap_err();
+    assert_eq!(crate::error::error_code(&occupied), "namespace_not_empty");
+    assert_eq!(f.inspect("main", "src")["root"], root);
+    assert_eq!(f.inspect("main", "src")["node"], source["node"]);
+    assert!(f.directory.join("managed").exists() == false);
+    f.close();
 }

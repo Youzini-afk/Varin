@@ -372,6 +372,7 @@ impl Storage {
                 | "branch.create.append"
                 | "branch.create.finish"
                 | "branch.create.abort"
+                | "branch.fork"
                 | "branch.read"
                 | "branch.pin"
                 | "branch.unpin"
@@ -433,6 +434,17 @@ impl Storage {
                 return Err(deny());
             }
         }
+        if method == "branch.fork" {
+            let parent = match &handoff.root {
+                varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
+                | varin_runtime::catalog::collaboration::ChildSourceRoot::Derived { pin, .. } => pin,
+                _ => return Err(deny()),
+            };
+            if params["branchId"] != branch || params["operationId"] != format!("branch-fork:{branch}")
+                || params["sourceBranchId"] != json!(parent.source.branch_id) || params["sourcePinId"] != parent.pin_id {
+                return Err(deny());
+            }
+        }
         if let Some(pin) = params.get("pinId").and_then(Value::as_str) {
             let parent = match &handoff.root {
                 varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin }
@@ -465,8 +477,10 @@ impl Storage {
         if method == "operation.get"
             && params["operationId"] != id
             && params["operationId"] != format!("branch-create:{branch}")
+            && params["operationId"] != format!("branch-fork:{branch}")
             && !parent_branch
-                .is_some_and(|parent| params["operationId"] == format!("branch-create:{parent}"))
+                .is_some_and(|parent| params["operationId"] == format!("branch-create:{parent}")
+                    || params["operationId"] == format!("branch-fork:{parent}"))
         {
             return Err(deny());
         }
@@ -505,7 +519,7 @@ impl Storage {
         if !matches!(method,"storage.health"|"storage.getBlob"|"storage.putBlob.begin"|"storage.putBlob.chunk"|
             "storage.putBlob.finish"|"storage.putBlob.abort"|"storage.blob.release"|"storage.blob.releaseBatch"|"branch.create.begin"|
             "branch.create.append"|"branch.create.finish"|"branch.create.abort"|"branch.read"|"branch.pin"|
-            "branch.unpin"|"branch.delete"|"pin.read"|"operation.get"|"working.result.get") { return Err(deny()); }
+            "branch.unpin"|"branch.delete"|"branch.fork"|"pin.read"|"operation.get"|"working.result.get") { return Err(deny()); }
         if let Some(branch)=params.get("branchId").and_then(Value::as_str) {
             if !readable.contains(&branch) { return Err(deny()); }
             if method.starts_with("branch.create.") && !writable.contains(&branch) {return Err(deny());}
@@ -523,6 +537,16 @@ impl Storage {
                 if params["baseRef"]!=prior.base_root || params["parentRef"]!=format!("{merged}@0") {return Err(deny());}
             } else if params.get("baseRef").is_some() {return Err(deny());}
         }
+        if method=="branch.fork" {
+            let pin=params["sourcePinId"].as_str().ok_or_else(deny)?;
+            let retained:Option<(String,String)>=self.conn.query_row("SELECT branch_id,grant_id FROM pins WHERE pin_id=?1 AND workspace_id=?2 AND revision=0",
+                params![pin,handoff.source.workspace_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+            if params["branchId"]!=source || params["sourceBranchId"]!=merged || params["parentRef"]!=format!("{merged}@0")
+                || params["operationId"]!=format!("branch-fork:{source}")
+                || retained.as_ref().is_none_or(|(branch,owner)| branch!=&merged || owner!=&grant.grant_id) {
+                return Err(deny());
+            }
+        }
         if method=="pin.read" {
             let pin=params["pinId"].as_str().ok_or_else(deny)?;
             let owned:bool=self.conn.query_row("SELECT EXISTS(SELECT 1 FROM pins WHERE pin_id=?1 AND grant_id=?2)",
@@ -538,7 +562,8 @@ impl Storage {
             } else {return Err(deny());}
         }
         if method=="operation.get" && params["operationId"]!=handoff.operation_id
-            && !readable.iter().any(|branch|params["operationId"]==format!("branch-create:{branch}")) {return Err(deny());}
+            && !readable.iter().any(|branch|params["operationId"]==format!("branch-create:{branch}")
+                || params["operationId"]==format!("branch-fork:{branch}")) {return Err(deny());}
         Ok(())
     }
 }
@@ -982,6 +1007,16 @@ mod handoff_tests {
                 &good
             )
             .is_ok());
+        let varin_runtime::catalog::collaboration::ChildSourceRoot::Fixed { pin } = &handoff.root else { panic!("fixed source expected") };
+        let fork = json!({"operationId":"branch-fork:child-source:request:tool:dispatch","workspaceId":"workspace",
+            "branchId":"child-source:request:tool:dispatch","sourceBranchId":"fixed","sourcePinId":pin.pin_id,
+            "draftBasePaths":[],"captureScopes":[]});
+        let child = invoke(&mut storage,"claim","branch.fork",fork.clone()).unwrap();
+        assert_eq!(child["root"], pin.root);
+        assert_eq!(invoke(&mut storage,"claim","branch.fork",fork.clone()).unwrap(),child);
+        assert_eq!(invoke(&mut storage,"claim","operation.get",json!({"operationId":fork["operationId"]})).unwrap()["kind"],"branch.fork");
+        let mut wrong_source=fork;wrong_source["sourceBranchId"]=json!("other-parent");
+        assert!(invoke(&mut storage,"claim","branch.fork",wrong_source).is_err());
         for (method, params) in [
             (
                 "branch.write.begin",

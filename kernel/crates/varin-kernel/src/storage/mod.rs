@@ -32,6 +32,7 @@ use crate::storage_schema::{
 mod authority_store;
 pub(crate) mod blob_reads;
 mod branches;
+mod branch_namespace;
 pub(crate) mod capture_resources;
 mod child_sources;
 mod compute_resources;

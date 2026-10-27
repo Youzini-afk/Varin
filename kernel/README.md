@@ -73,6 +73,15 @@ Namespace batches share ancestor rebuilds and leave untouched subtrees intact. T
 can be released in transport-sized batches under their original workspace/grant, without one queued
 request per object; a failed cleanup keeps the Host ownership hints available for retry.
 
+`branch.path.inspect/apply` observe and conditionally update paths in that same tree. Disjoint files
+can commit without a whole-head revision fence; destructive directory changes require their subtree
+identity or a whole-head fence. `branch.rename` atomically grafts an unchanged subtree by identity.
+Implicit ancestors are directories, including when a baseline did not store explicit directory metadata.
+`branch.fork` selects a current root or exact retained pin in the original transaction; replay does not
+reselect a later parent head. All paths, source workspace and pin ownership are checked before replay.
+Exact branch/pin blob reads use the actual path state as proof, rather than derived intermediate-root
+indexes that GC may release. These are namespace primitives, not mounted filesystem or open-handle APIs.
+
 Root admission queries an index of pending file operations; protocol traffic is not scanned as
 file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary
 `storage.health` returns statistics with `integrity: not_checked`; only `deep: true` runs integrity checks.

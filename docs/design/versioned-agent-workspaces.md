@@ -1,8 +1,13 @@
 # 主与子 Agent 的版本化工作区设计
 
-状态：实施中，已开始共用 Storage 树与来源准备的基础改造；工作区挂载、主目录接入与平台后端尚未交付。日期：2026-10-26。设计源码基线：`3da1bd863`；故障证据来自 0.9.33 发布版。
+状态：实施中，已接入共用 Storage 树、原子分叉与逐路径命名空间事务；工作区挂载、私有打开文件、主目录接入与平台后端尚未交付。日期：2026-10-26。设计源码基线：`3da1bd863`；故障证据来自 0.9.33 发布版。
 
 已接入生产路径的基础改造：分批上传时构建未发布候选树、批内共享祖先更新、候选根的 GC 保护、来源发布取消传递与临时正文 owner 分批释放。最终发布继续核验原 grant、内容 owner 与创建身份；同一资源线程仍处理每批元数据操作。这些变更减轻现有整目录准备链的集中工作，首次来源捕获和命令物化成本仍在，不能据此将 D1 或本设计标为全部完成。
+
+命名空间层已复用同一树实现逐路径条件更新、目录子树版本校验、原子重命名与原请求固定的 `branch.fork`。
+Host 的固定来源派发／续接已经使用原生分叉；父分支继续写入或释放后，被 pin／子分支持有的版本仍独立存活。
+精确正文读取沿实际树核验，GC 回收中间提示索引后仍能读取存活文件。这些事务不创建物理执行副本；
+普通进程当前仍走既有物化路径，尚未切换成挂载，也未建立活动句柄与 dirty 文件的版本切分。
 
 平台范围：Windows、macOS、Linux 从首轮共同设计和验证；故障发生在 Windows 不决定平台优先级。平台可以使用不同文件接口和 CoW 原语，工作区版本、隔离、恢复与交付语义保持一致。
 
@@ -63,7 +68,7 @@
 | Recovery／Integration | before/after、三方合并、条件应用、undo | 消费同一工作区版本与实际文件变化 |
 | guardian／进程资源 | 进程树、真实停止和输出回执 | 进程绑定准确 workspace 与 mount generation |
 
-现有 [state_tree.rs](../../kernel/crates/varin-kernel/src/storage/state_tree.rs) 已按内容标识保存树节点，`root_set` 共享未变化节点；[branches.rs](../../kernel/crates/varin-kernel/src/storage/branches.rs) 保存根与修订。它们不等于完整的操作系统文件系统实现。
+现有 [state_tree.rs](../../kernel/crates/varin-kernel/src/storage/state_tree.rs) 已按内容标识保存树节点，`root_apply` 按批共享祖先与未变化节点；[branches.rs](../../kernel/crates/varin-kernel/src/storage/branches.rs) 保存根与修订，[branch_namespace.rs](../../kernel/crates/varin-kernel/src/storage/branch_namespace.rs) 提供逐路径事务与子树移动。它们不等于完整的操作系统文件系统实现。
 
 主要成本入口是 [source-preparation.ts](../../packages/web/application-host/lib/harness/working-state/source-preparation.ts)、[child-source-store.ts](../../packages/web/application-host/lib/kernel/child-source-store.ts)、[source.rs](../../kernel/crates/varin-kernel/src/compute/source.rs) 与 [materialization.rs](../../kernel/crates/varin-kernel/src/storage/materialization.rs)。Windows 的 [file_resources.rs](../../kernel/crates/varin-kernel/src/storage/file_resources.rs) 当前未实现 clone，走校验复制。
 

@@ -124,11 +124,11 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
         root: input.revision === 7 ? 'fixed-result-root' : branch.baseRoot };
     }),
     putBlob: vi.fn(async (bytes: Buffer) => ({ hash: 'source-provenance-object', byteLength: bytes.length, ownerId: 'source-provenance-upload' })),
-    createBranch: vi.fn(async (input: Parameters<KernelScopedClient['createBranch']>[0]) => {
+    forkBranch: vi.fn(async (input: Parameters<KernelScopedClient['forkBranch']>[0]) => {
       branches.set(input.branchId, { branchId: input.branchId, workspaceId: input.workspaceId,
-        root: input.baseRef!, baseRoot: input.baseRef!, writeRevision: 0, headRevision: 0,
+        root: 'fixed-result-root', baseRoot: 'fixed-result-root', writeRevision: 0, headRevision: 0,
         parentRef: input.parentRef!, captureScopes: input.captureScopes!, draftBasePaths: input.draftBasePaths!, createdAt: 3, updatedAt: 3 });
-      return { created: true, branchId: input.branchId, root: input.baseRef, writeRevision: 0, headRevision: 0 };
+      return { created: true, branchId: input.branchId, root: 'fixed-result-root', writeRevision: 0, headRevision: 0 };
     }),
     unpinBranch: vi.fn(async (_input: Parameters<KernelScopedClient['unpinBranch']>[0]) => ({ released: true })),
     fileRootRegister: vi.fn(),
@@ -176,10 +176,10 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
     }
     await vi.waitFor(() => { expect(errors).toEqual([]); expect(continueRun).toHaveBeenCalledOnce(); });
     expect(scoped.pinBranch).toHaveBeenNthCalledWith(1, expect.objectContaining({ branchId: 'old-result', revision: 7 }), expect.any(AbortSignal));
-    expect(scoped.createBranch).toHaveBeenCalledOnce();
-    expect(scoped.createBranch).toHaveBeenCalledWith({ operationId: 'branch-create:child-source:execution:new',
-      branchId: 'child-source:execution:new', workspaceId: 'workspace', entries: [], baseRef: 'fixed-result-root', parentRef: 'old-result@7',
-      draftBasePaths: [], captureScopes: [], sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } });
+    expect(scoped.forkBranch).toHaveBeenCalledOnce();
+    expect(scoped.forkBranch).toHaveBeenCalledWith({ operationId: 'branch-fork:child-source:execution:new',
+      branchId: 'child-source:execution:new', workspaceId: 'workspace', sourceBranchId: 'old-result', sourcePinId: 'predecessor-query-pin', parentRef: 'old-result@7',
+      draftBasePaths: [], captureScopes: [], sourceProvenance: { objectHash: 'source-provenance-object', ownerId: 'source-provenance-upload' } }, undefined);
     expect(JSON.parse(scoped.putBlob.mock.calls[0]![0].toString('utf8'))).toEqual(child.source_basis!.provenance);
     expect(scoped.pinBranch).toHaveBeenNthCalledWith(2, expect.objectContaining({ branchId: 'child-source:execution:new',
       pinId: 'child-source-pin:execution:new', revision: 0 }), expect.any(AbortSignal));

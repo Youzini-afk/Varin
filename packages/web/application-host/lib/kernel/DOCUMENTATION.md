@@ -74,6 +74,13 @@ preparation; the last cancelled observer drains the original capture before its 
 replacement prepares context before publishing the new input/Run/source transaction. A failed or stale
 candidate leaves the active source/checkpoint intact.
 
+Pinned-source branch creation calls native `branch.fork`, preserving the exact pin and source
+provenance. Preparation grants admit only their original child target and handed-off source/pin;
+refreshed continuation forks only its owned merged revision. The Host does not select a later root
+or build a second namespace. `KernelScopedClient` exposes path observations, conditional path updates
+and atomic subtree rename for the same authority. Existing large bulk integration writes keep their
+streamed transaction path; the new per-path calls do not impose a smaller bulk payload limit.
+
 `resource_read` sees the actual ContextCheckpoint attached to the ModelStep/Policy invocation. Captured
 bodies need no source reopening. An uncaptured immutable dependency reopens only its original branch
 with a narrow reader grant/pin; capture-only sources require explicit refresh. User `/skill:` activation

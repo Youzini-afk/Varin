@@ -904,11 +904,14 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async readOriginalSource(branchId: string, options?: { signal?: AbortSignal }): Promise<WorkingOriginalSource | null> {
-    const operation = await this.context.client.getOperation(`branch-create:${branchId}`, options?.signal);
+    // Captured physical sources and forked immutable sources are both current
+    // production creation paths, with distinct original-operation identities.
+    const operation = await this.context.client.getOperation(`branch-fork:${branchId}`, options?.signal)
+      ?? await this.context.client.getOperation(`branch-create:${branchId}`, options?.signal);
     if (operation === null) {
       return null;
     }
-    if (operation.kind !== "branch.create" || operation.state !== "committed") {
+    if ((operation.kind !== "branch.create" && operation.kind !== "branch.fork") || operation.state !== "committed") {
       throw new Error("Working source preparation is not committed");
     }
     const receipt = asRecord(operation.result);
@@ -1033,6 +1036,7 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
   }
 
   async createBranchFromPin(workspaceId: string, branchId: string, pin: WorkingStatePin, parentRef: string, draftBaselineId?: string | null, captureScopes: string[] = [], options?: WorkingBranchCreateOptions): Promise<WorkingBranchRoot> {
+    options?.signal?.throwIfAborted();
     if (pin.workspaceId !== workspaceId) throw new Error("Parent working-state pin belongs to another workspace");
     this.assertPinForBranch(pin.branchId, pin);
     const draft = draftBaselineId ? await this.getDraftBaseline(draftBaselineId) : null;
@@ -1048,20 +1052,20 @@ export class KernelWorkingStateRootStore implements WorkingStateRootStore {
     const normalizedDraftPaths = [...draftClosure].sort();
     const normalizedCaptureScopes = [...new Set(captureScopes.map(normalizeCaptureScope))].sort();
     const provenanceUpload = options?.sourceProvenance
-      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`)
+      ? await this.context.client.putBlob(Buffer.from(JSON.stringify(parseSourceProvenance(options.sourceProvenance)), "utf8"), `source-provenance:${branchId}:${randomUUID()}`, options.signal)
       : undefined;
     let created: Record<string, unknown>;
-    try { created = await this.context.client.createBranch({
-      operationId: `branch-create:${branchId}`,
+    try { created = await this.context.client.forkBranch({
+      operationId: `branch-fork:${branchId}`,
       branchId,
       workspaceId,
-      entries: [],
-      baseRef: pin.root,
+      sourceBranchId: pin.branchId,
+      sourcePinId: pin.pinId,
       parentRef,
       draftBasePaths: normalizedDraftPaths,
       captureScopes: normalizedCaptureScopes,
       ...(provenanceUpload ? { sourceProvenance: { objectHash: provenanceUpload.hash, ownerId: provenanceUpload.ownerId } } : {}),
-    }); } catch (error) {
+    }, options?.signal); } catch (error) {
       if (provenanceUpload) await this.context.client.releaseBlob(provenanceUpload.ownerId).catch(() => undefined);
       throw error;
     }

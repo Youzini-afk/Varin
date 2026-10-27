@@ -220,6 +220,16 @@ impl Storage {
                 storage.abort_branch_builder(authorized_params, grant_id.unwrap_or(""))
             }
             "branch.read" => storage.branch_read(authorized_params),
+            "branch.path.inspect" => storage.branch_path_inspect(authorized_params),
+            "branch.path.apply" => idempotent(storage, method, authorized_params, |storage| {
+                storage.branch_path_apply(authorized_params, grant_id.unwrap_or(""))
+            }),
+            "branch.rename" => idempotent(storage, method, authorized_params, |storage| {
+                storage.branch_rename(authorized_params)
+            }),
+            "branch.fork" => idempotent(storage, method, authorized_params, |storage| {
+                storage.branch_fork(authorized_params, grant_id.unwrap_or(""))
+            }),
             "branch.write.begin" => {
                 storage.begin_branch_write_builder(authorized_params, grant_id.unwrap_or(""))
             }

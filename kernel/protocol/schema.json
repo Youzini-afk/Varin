@@ -867,7 +867,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 68,
+  "protocolVersion": 69,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1463,6 +1463,10 @@
     "branch.create.finish": "KernelCreateBranchFinishParams",
     "branch.create.abort": "KernelCreateBranchAbortParams",
     "branch.read": "KernelBranchReadParams",
+    "branch.path.inspect": "KernelBranchPathInspectParams",
+    "branch.path.apply": "KernelBranchPathApplyParams",
+    "branch.rename": "KernelBranchRenameParams",
+    "branch.fork": "KernelBranchForkParams",
     "branch.write.begin": "KernelBranchWriteBeginParams",
     "branch.write.append": "KernelBranchWriteAppendParams",
     "branch.write.finish": "KernelBranchWriteFinishParams",
@@ -2483,6 +2487,32 @@
     "KernelBranchWriteBeginParams": {"fields": {
       "operationId": {"type": "string"}, "builderId": {"type": "string"}, "branchId": {"type": "string"}, "expectedWriteRevision": {"type": "number"}
     }},
+    "KernelBranchPathInspectParams": {"fields": {
+      "workspaceId": {"type":"string","optional":true}, "branchId": {"type":"string"}, "path": {"type":"string"}, "revision": {"type":"number","optional":true}
+    }},
+    "KernelBranchPathChange": {"fields": {
+      "path":{"type":"string"}, "expectedState":{"type":"KernelBranchState"}, "expectedNode":{"type":"string","optional":true},
+      "state":{"type":"KernelBranchState"}, "ownerId":{"type":"string","optional":true}, "sourcePath":{"type":"string","optional":true},
+      "sourceRef":{"type":"string","optional":true}, "sourceRecordId":{"type":"string","optional":true}, "sourceSlot":{"type":"string","optional":true}
+    }},
+    "KernelBranchPathObservation": {"fields": {
+      "branchId":{"type":"string"}, "path":{"type":"string"}, "root":{"type":"string"}, "node":{"type":"string | null"},
+      "state":{"type":"KernelBranchState"}, "writeRevision":{"type":"number | null"}, "revision":{"type":"number | null"}
+    }},
+    "KernelBranchPathApplyParams": {"fields": {
+      "workspaceId":{"type":"string","optional":true}, "operationId":{"type":"string"}, "branchId":{"type":"string"},
+      "expectedWriteRevision":{"type":"number","optional":true}, "changes":{"type":"KernelBranchPathChange[]"}
+    }},
+    "KernelBranchRenameParams": {"fields": {
+      "workspaceId":{"type":"string","optional":true}, "operationId":{"type":"string"}, "branchId":{"type":"string"},
+      "sourcePath":{"type":"string"}, "path":{"type":"string"}, "expectedSourceNode":{"type":"string"}, "expectedTargetNode":{"type":"string | null"},
+      "replace":{"type":"boolean","optional":true}
+    }},
+    "KernelBranchForkParams": {"fields": {
+      "workspaceId":{"type":"string"}, "operationId":{"type":"string"}, "branchId":{"type":"string"}, "sourceBranchId":{"type":"string"},
+      "sourcePinId":{"type":"string","optional":true}, "parentRef":{"type":"string","optional":true},
+      "draftBasePaths":{"type":"string[]"}, "captureScopes":{"type":"string[]"}, "sourceProvenance":{"type":"KernelSourceProvenanceReference","optional":true}
+    }},
     "KernelBranchWriteAppendParams": {"fields": {"builderId": {"type": "string"}, "sequence": {"type": "number"}, "changes": {"type": "KernelBranchChange[]"}}},
     "KernelBranchWriteFinishParams": {"fields": {"operationId": {"type": "string"}, "builderId": {"type": "string"}, "baseRef": {"type": "string", "optional": true}, "parentRef": {"type": "string", "optional": true}}},
     "KernelBranchWriteAbortParams": {"fields": {"builderId": {"type": "string"}}},
@@ -3281,6 +3311,10 @@
     "branch.create.finish": "atomically publish a completed branch builder",
     "branch.create.abort": "discard a branch builder",
     "branch.read": "read a root or selected paths",
+    "branch.path.inspect": "inspect an exact path and its immutable subtree identity",
+    "branch.path.apply": "conditionally update selected paths in the current branch without rebuilding unrelated files",
+    "branch.rename": "atomically move an immutable subtree within the current branch",
+    "branch.fork": "fork a retained pin or current branch root without enumerating its contents",
     "branch.write.begin": "open a backpressured copy-on-write mutation",
     "branch.write.append": "append a bounded change batch",
     "branch.write.finish": "commit the complete mutation with writeRevision CAS",

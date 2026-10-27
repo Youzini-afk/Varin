@@ -570,7 +570,6 @@ impl Storage {
         Ok(json!({"builderId": builder_id, "aborted": true}))
     }
 
-    #[cfg(test)]
     pub(super) fn create_branch(
         &mut self,
         params: &Value,
@@ -773,7 +772,12 @@ impl Storage {
                         )));
                     }
                 }
-                if let Some(state) = self.root_get(&root, &canonical)?.or_else(|| canonical.is_empty().then_some(PathState::Directory{mode:None})) {
+                let segments = if canonical.is_empty() { vec![] } else { Self::validate_path(&canonical)? };
+                if let Some(node) = self.find_path_node(&root, &segments)? {
+                    let TrieNode::Path { state, .. } = self.load_node(&node)? else {
+                        return Err(KernelError::Storage("a branch path points to an index".into()));
+                    };
+                    let state = state.unwrap_or(PathState::Directory { mode: None });
                     selected.push(json!({"path": canonical, "state": state}));
                 }
             }

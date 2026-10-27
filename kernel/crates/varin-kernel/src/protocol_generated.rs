@@ -5,7 +5,7 @@ use crate::model::PathState;
 use serde::Deserialize;
 use serde_json::Value;
 
-pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 68;
+pub(crate) const KERNEL_PROTOCOL_VERSION: u64 = 69;
 pub(crate) const KERNEL_MAX_FRAME_BYTES: usize = 16777216;
 pub(crate) const KERNEL_REQUEST_WINDOW: usize = 2;
 pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
@@ -2150,6 +2150,52 @@ pub(crate) struct KernelBranchReadParams {
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchPathInspectParams {
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) branch_id: String,
+    pub(crate) path: String,
+    pub(crate) revision: Option<i64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchPathApplyParams {
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) operation_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) expected_write_revision: Option<i64>,
+    pub(crate) changes: Vec<KernelBranchPathChange>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchRenameParams {
+    pub(crate) workspace_id: Option<String>,
+    pub(crate) operation_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) source_path: String,
+    pub(crate) path: String,
+    pub(crate) expected_source_node: String,
+    pub(crate) expected_target_node: RequiredNullable<String>,
+    pub(crate) replace: Option<bool>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchForkParams {
+    pub(crate) workspace_id: String,
+    pub(crate) operation_id: String,
+    pub(crate) branch_id: String,
+    pub(crate) source_branch_id: String,
+    pub(crate) source_pin_id: Option<String>,
+    pub(crate) parent_ref: Option<String>,
+    pub(crate) draft_base_paths: Vec<String>,
+    pub(crate) capture_scopes: Vec<String>,
+    pub(crate) source_provenance: Option<KernelSourceProvenanceReference>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelBranchWriteBeginParams {
     pub(crate) operation_id: String,
     pub(crate) builder_id: String,
@@ -3244,6 +3290,20 @@ pub(crate) struct KernelSourceProvenanceReference {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelCreateEntry {
     pub(crate) path: String,
+    pub(crate) state: PathState,
+    pub(crate) owner_id: Option<String>,
+    pub(crate) source_path: Option<String>,
+    pub(crate) source_ref: Option<String>,
+    pub(crate) source_record_id: Option<String>,
+    pub(crate) source_slot: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct KernelBranchPathChange {
+    pub(crate) path: String,
+    pub(crate) expected_state: PathState,
+    pub(crate) expected_node: Option<String>,
     pub(crate) state: PathState,
     pub(crate) owner_id: Option<String>,
     pub(crate) source_path: Option<String>,
@@ -4635,6 +4695,22 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "branch.read" => serde_json::from_value::<KernelBranchReadParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "branch.path.inspect" => {
+            serde_json::from_value::<KernelBranchPathInspectParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "branch.path.apply" => {
+            serde_json::from_value::<KernelBranchPathApplyParams>(params.clone())
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+        "branch.rename" => serde_json::from_value::<KernelBranchRenameParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "branch.fork" => serde_json::from_value::<KernelBranchForkParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "branch.write.begin" => {

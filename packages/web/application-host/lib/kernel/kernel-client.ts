@@ -35,6 +35,7 @@ import {
   type KernelMaterializedView,
   type KernelBranchReadResult,
   type KernelBranchChange,
+  type KernelBranchPathObservation,
   type KernelWorkingResultCandidate,
   type KernelWorkingResultPublication,
   type KernelWorkingResultCandidateReleased,
@@ -325,6 +326,18 @@ export class KernelScopedClient {
 
   createBranch(params: KernelCreateBranchInput, signal?: AbortSignal): Promise<Record<string, unknown>> {
     return this.owner.createBranch(params, this.grant, signal);
+  }
+  forkBranch(params: KernelMethodParams['branch.fork'], signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.owner.forkBranch(params, this.grant, signal);
+  }
+  inspectBranchPath(params: KernelMethodParams['branch.path.inspect'], signal?: AbortSignal): Promise<KernelBranchPathObservation> {
+    return this.owner.inspectBranchPath(params, this.grant, signal);
+  }
+  applyBranchPaths(params: KernelMethodParams['branch.path.apply'], signal?: AbortSignal): Promise<KernelWriteResult> {
+    return this.owner.applyBranchPaths(params, this.grant, signal);
+  }
+  renameBranchPath(params: KernelMethodParams['branch.rename'], signal?: AbortSignal): Promise<KernelWriteResult> {
+    return this.owner.renameBranchPath(params, this.grant, signal);
   }
 
   readBranch(params: { branchId: string; revision?: number; paths?: string[]; roots?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, signal?: AbortSignal): Promise<KernelBranchReadResult> {
@@ -1528,6 +1541,18 @@ export class KernelClient {
 
   async readBranch(params: { branchId: string; revision?: number; paths?: string[]; roots?: string[]; includeEntries?: boolean; cursor?: number; pageSize?: number }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchReadResult> {
     return this.requestRaw<KernelBranchReadResult>("branch.read", params, { signal, grant });
+  }
+  async forkBranch(params: KernelMethodParams['branch.fork'], grant: KernelGrantHandle, signal?: AbortSignal): Promise<Record<string, unknown>> {
+    return this.requestRaw('branch.fork', params, { grant, signal, settleCancellation: true });
+  }
+  async inspectBranchPath(params: KernelMethodParams['branch.path.inspect'], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelBranchPathObservation> {
+    return this.requestRaw('branch.path.inspect', params, { grant, signal });
+  }
+  async applyBranchPaths(params: KernelMethodParams['branch.path.apply'], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {
+    return this.requestRaw('branch.path.apply', params, { grant, signal, settleCancellation: true });
+  }
+  async renameBranchPath(params: KernelMethodParams['branch.rename'], grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {
+    return this.requestRaw('branch.rename', params, { grant, signal, settleCancellation: true });
   }
 
   async writeBranch(params: { operationId: string; branchId: string; expectedWriteRevision: number; changes: KernelBranchChange[]; baseRef?: string; parentRef?: string }, grant: KernelGrantHandle, signal?: AbortSignal): Promise<KernelWriteResult> {

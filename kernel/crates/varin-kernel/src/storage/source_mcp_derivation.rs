@@ -336,10 +336,13 @@ impl Storage {
                 return Err(denied("Fixed child handoff differs from its immutable initial root"));
             }
         }
-        // A physical capture has no parent immutable root to compare. Its factual
-        // root is the real revision-0 pin created under the restricted handoff grant.
-        let created = self.operation_get(&json!({"operationId":format!("branch-create:{branch_id}")}))?;
-        if created["kind"] != "branch.create" || created["state"] != "committed"
+        // Both a physical capture and an immutable fork retain an original
+        // creation receipt matching the restricted preparation's revision-0 pin.
+        let mut created = self.operation_get(&json!({"operationId":format!("branch-fork:{branch_id}")}))?;
+        if created.is_null() {
+            created = self.operation_get(&json!({"operationId":format!("branch-create:{branch_id}")}))?;
+        }
+        if (created["kind"] != "branch.create" && created["kind"] != "branch.fork") || created["state"] != "committed"
             || created["result"]["branchId"] != branch_id || created["result"]["workspaceId"] != source.workspace_id
             || created["result"]["root"] != root
         { return Err(denied("Child initial branch has no matching creation receipt")); }

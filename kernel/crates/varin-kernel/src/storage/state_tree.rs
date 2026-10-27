@@ -679,7 +679,9 @@ impl Storage {
         let TrieNode::Path { state, .. } = self.load_node(&hash)? else {
             return Err(KernelError::Storage("index node used as path".to_string()));
         };
-        Ok(state)
+        // A path node also represents an implicit directory. Its children must
+        // not be mistaken for an absent baseline during restore/delete CAS.
+        Ok(Some(state.unwrap_or(PathState::Directory { mode: None })))
     }
 
     pub(super) fn branch(&self, branch_id: &str) -> Result<BranchRow, KernelError> {

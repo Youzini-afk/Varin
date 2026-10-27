@@ -449,6 +449,34 @@ impl Storage {
         }
         require_capability(&grant, method)?;
         self.authorize_child_handoff(&grant, method, params)?;
+        if let (Some(workspace), Some(branch)) = (params.get("workspaceId").and_then(Value::as_str), params.get("branchId").and_then(Value::as_str)) {
+            let actual: Option<String> = self.conn.query_row("SELECT workspace_id FROM branches WHERE branch_id=?1", [branch], |row| row.get(0)).optional()?;
+            if actual.as_deref().is_some_and(|actual| actual != workspace) {
+                return Err(KernelError::Authorization("branch belongs to another workspace".into()));
+            }
+        }
+        if method == "branch.fork" {
+            if !grant.path_scopes.iter().any(String::is_empty) {
+                return Err(KernelError::Authorization("Forking a complete namespace requires whole-root read authority".into()));
+            }
+            let source_workspace: Option<String> = if let Some(pin) = params.get("sourcePinId").and_then(Value::as_str) {
+                let exists: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM pins WHERE pin_id=?1)", [pin], |row| row.get(0))?;
+                if exists {
+                    // A cached fork receipt must not bypass a still-live query
+                    // pin's owner. Released pins need not be recreated for replay.
+                    let retained = self.pin_read(&json!({"pinId":pin,"includeEntries":false}), grant_id)?;
+                    if retained["branchId"] != params["sourceBranchId"] {
+                        return Err(KernelError::Authorization("Fork pin belongs to another source branch".into()));
+                    }
+                    retained["workspaceId"].as_str().map(str::to_owned)
+                } else { None }
+            } else if let Some(source) = params.get("sourceBranchId").and_then(Value::as_str) {
+                self.conn.query_row("SELECT workspace_id FROM branches WHERE branch_id=?1", [source], |row| row.get(0)).optional()?
+            } else { None };
+            if source_workspace.as_deref().is_some_and(|actual| Some(actual) != params.get("workspaceId").and_then(Value::as_str)) {
+                return Err(KernelError::Authorization("Fork source belongs to another workspace".into()));
+            }
+        }
         let mut authorized = params.clone();
         let workspace = if let Some(workspace) = params.get("workspaceId").and_then(Value::as_str) {
             Some(workspace.to_string())
@@ -698,15 +726,21 @@ impl Storage {
         }
         if let Some(path) = params.get("path").and_then(Value::as_str) {
             let canonical =
-                if (method == "file.scan" || method == "file.measure") && path.is_empty() {
+                if matches!(method, "file.scan" | "file.measure" | "branch.path.inspect") && path.is_empty() {
                     String::new()
                 } else {
                     Self::validate_path(path)?.join("/")
                 };
-            if !path_allowed(&grant, &canonical) {
+            if !(if method == "branch.path.inspect" { path_metadata_allowed_scopes(&grant.path_scopes, &canonical) } else { path_allowed(&grant, &canonical) }) {
                 return Err(KernelError::Authorization(format!(
                     "path is outside grant scope: {canonical}"
                 )));
+            }
+        }
+        if method == "branch.rename" {
+            let from = Self::validate_path(params["sourcePath"].as_str().ok_or_else(|| KernelError::Authorization("Rename source path is required".into()))?)?.join("/");
+            if !path_allowed(&grant, &from) {
+                return Err(KernelError::Authorization("Rename source is outside the grant scope".into()));
             }
         }
         if method == "storage.getBlob" {
@@ -714,7 +748,11 @@ impl Storage {
                 .get("hash")
                 .and_then(Value::as_str)
                 .ok_or_else(|| KernelError::Authorization("hash is required".to_string()))?;
-            if !self.blob_owned(
+            if params.get("branchId").is_some() || params.get("pinId").is_some() {
+                // The exact path in an admitted immutable root is the authority.
+                // Derived-root hint indexes may be collected between reads.
+                self.validate_blob_read_source(params, hash, grant_id, grant.capabilities.contains("storage.admin"))?;
+            } else if !self.blob_owned(
                 hash,
                 workspace.as_deref().or(grant.owning_workspace.as_deref()),
             )? {
