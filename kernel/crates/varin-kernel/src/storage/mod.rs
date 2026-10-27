@@ -54,6 +54,8 @@ mod file_reconciliation;
 mod file_resource_leases;
 pub(crate) mod file_lease_tasks;
 pub(crate) mod file_effects;
+pub(crate) mod file_inspections;
+pub(crate) mod file_roots;
 mod file_resources;
 mod gc;
 mod maintenance;

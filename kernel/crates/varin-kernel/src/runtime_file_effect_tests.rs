@@ -3,6 +3,78 @@
 use super::*;
 
 #[test]
+fn root_registration_reconciles_an_interrupted_write_from_worker_evidence_without_replaying_it() {
+    let mut f = Fixture::new();
+    fs::write(f.work().join("seed"), "written").unwrap();
+    let captured = f.capture("seed", true, "interrupted-content");
+    f.begin("file.apply",json!({"workspaceId":"workspace","rootId":f.root_id,"operationId":"interrupted-write","path":"target",
+        "targetJson":captured["stateJson"],"ownerId":captured["ownerId"],"expectedJson":"{\"kind\":\"missing\"}"}),"writer");
+    loop {
+        let WorkerRequest::Workspace(command) = f.rx.recv_timeout(WAIT).unwrap() else {
+            panic!("write lost its original continuation");
+        };
+        if fs::read(f.work().join("target")).ok().as_deref() == Some(b"written") {
+            // Lose only the original receipt submission after the physical effect.
+            command(None);
+            break;
+        }
+        command(f.kernel.storage.as_mut());
+    }
+    assert!(f.finish_effect().is_err());
+    assert_eq!(
+        f.short(
+            "operation.get",
+            json!({"operationId":"interrupted-write"}),
+            Some("writer")
+        )["state"],
+        "started"
+    );
+    let listed = f.short(
+        "file.operation.list",
+        json!({"workspaceId":"workspace","rootId":f.root_id}),
+        Some("reader"),
+    );
+    assert_eq!(listed["operations"][0]["disposition"], "reconcile");
+    assert_eq!(listed["operations"][0]["reason"], "target-observed");
+    assert_eq!(
+        f.short(
+            "operation.get",
+            json!({"operationId":"interrupted-write"}),
+            Some("writer")
+        )["state"],
+        "started",
+        "listing is observation"
+    );
+    let original_root = f.root_id.clone();
+    let registered=f.short("file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":f.work()}),Some("writer"));
+    assert_eq!(registered["rootId"], original_root);
+    assert_eq!(registered["reconciledOperations"], 1);
+    assert_eq!(registered["pendingOperations"], 0);
+    assert_eq!(fs::read(f.work().join("target")).unwrap(), b"written");
+    assert_eq!(
+        f.short(
+            "operation.get",
+            json!({"operationId":"interrupted-write"}),
+            Some("writer")
+        )["state"],
+        "committed"
+    );
+    assert_eq!(
+        f.short("storage.health", json!({}), Some("writer"))["temporaryObjectOwners"],
+        0
+    );
+}
+
+#[test]
+fn root_registration_proves_the_directory_on_a_worker_and_keeps_control_available_on_failure() {
+    let mut f = Fixture::new();
+    fs::rename(f.work(), f.directory.0.join("missing-root")).unwrap();
+    f.begin("file.root.register",json!({"workspaceId":"workspace","executionWorkspaceId":"workspace","canonicalRoot":f.work()}),"writer");
+    f.short("storage.health", json!({}), Some("reader"));
+    assert!(f.finish_effect().is_err());
+}
+
+#[test]
 fn process_launch_does_not_turn_pending_startup_into_a_false_exit_and_can_be_stopped_before_dispatch(
 ) {
     let mut f = Fixture::new();

@@ -17,12 +17,13 @@ use crate::protocol_generated::{
 pub(crate) struct Task {
     pub params: Value,
     pub cancellation: Arc<AtomicBool>,
-    method: &'static str,
-    root: FileRoot,
-    grant: Grant,
+    pub(super) method: &'static str,
+    pub(super) access_method: &'static str,
+    pub(super) root: FileRoot,
+    pub(super) grant: Grant,
     storage_root: PathBuf,
     resources: Vec<FileLeaseResource>,
-    lease_id: String,
+    pub(super) lease_id: String,
     private_lease: bool,
 }
 struct Plan {
@@ -55,7 +56,7 @@ impl Control for workspace_session::StoragePort {
     }
 }
 impl Task {
-    fn operation(&self) -> &str {
+    pub(super) fn operation(&self) -> &str {
         self.params["operationId"]
             .as_str()
             .expect("validated file operation")
@@ -63,14 +64,14 @@ impl Task {
     fn workspace(&self) -> &str {
         &self.root.owning_workspace_id
     }
-    fn check(&self) -> Result<(), KernelError> {
+    pub(super) fn check(&self) -> Result<(), KernelError> {
         if self.cancellation.load(Ordering::Acquire) {
             Err(KernelError::Cancelled)
         } else {
             Ok(())
         }
     }
-    fn resolve(&self, field: &str) -> Result<ResolvedFileResource, KernelError> {
+    pub(super) fn resolve(&self, field: &str) -> Result<ResolvedFileResource, KernelError> {
         resolve_admitted_resource(
             &self.root,
             self.params[field].as_str().expect("validated file path"),
@@ -78,7 +79,7 @@ impl Task {
             false,
         )
     }
-    fn canonical(&self) -> Result<Vec<CanonicalFileLeaseResource>, KernelError> {
+    pub(super) fn canonical(&self) -> Result<Vec<CanonicalFileLeaseResource>, KernelError> {
         self.resources
             .iter()
             .map(|resource| {
@@ -383,6 +384,7 @@ impl Storage {
             params: file_params_value(value),
             cancellation,
             method,
+            access_method: method,
             root,
             grant: grant.clone(),
             storage_root: self.root.clone(),
@@ -395,7 +397,7 @@ impl Storage {
         task.check()?;
         Ok(task)
     }
-    fn validate_file_effect(&self, task: &Task) -> Result<Grant, KernelError> {
+    pub(super) fn validate_file_effect(&self, task: &Task) -> Result<Grant, KernelError> {
         task.check()?;
         let grant = self.load_grant(&task.grant.grant_id)?;
         if grant.state != crate::model::GrantState::Active
@@ -405,7 +407,7 @@ impl Storage {
                 "File effect's original grant is no longer active".into(),
             ));
         }
-        require_capability(&grant, task.method)?;
+        require_capability(&grant, task.access_method)?;
         let root = self.admitted_file_root(&task.root.root_id, &grant)?;
         if root.canonical_root != task.root.canonical_root
             || root.execution_workspace_id != task.root.execution_workspace_id
@@ -436,7 +438,7 @@ impl Storage {
         }
         Ok(grant)
     }
-    fn retain_file_effect(
+    pub(super) fn retain_file_effect(
         &mut self,
         task: &Task,
         canonical: &[CanonicalFileLeaseResource],
@@ -446,6 +448,20 @@ impl Storage {
             return Err(KernelError::Operation(
                 "The original file operation is still executing".into(),
             ));
+        }
+        if !self.try_retain_file_effect(task, canonical, borrowed)? {
+            return Err(KernelError::Operation("file resource is busy".into()));
+        }
+        Ok(())
+    }
+    pub(super) fn try_retain_file_effect(
+        &mut self,
+        task: &Task,
+        canonical: &[CanonicalFileLeaseResource],
+        borrowed: bool,
+    ) -> Result<bool, KernelError> {
+        if self.file_effects.contains(task.operation()) {
+            return Ok(false);
         }
         let grant = self.validate_file_effect(task)?;
         if borrowed {
@@ -475,7 +491,7 @@ impl Storage {
                 None,
             )?;
             if result["status"] != "acquired" {
-                return Err(KernelError::Operation("file resource is busy".into()));
+                return Ok(false);
             }
         } else {
             self.assert_canonical_file_lease(
@@ -494,7 +510,7 @@ impl Storage {
             );
         }
         self.file_effects.insert(task.operation().into());
-        Ok(())
+        Ok(true)
     }
     fn begin_file_effect(
         &mut self,

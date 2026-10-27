@@ -107,7 +107,7 @@ impl Fixture {
             )
             .unwrap();
         let Some(response) = response else {
-            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename"|"process.spawn") {
+            if matches!(method,"file.apply"|"file.mkdir"|"file.remove"|"file.rename"|"process.spawn"|"file.operation.reconcile"|"file.operation.list"|"file.root.register") {
                 return self.finish_effect().unwrap();
             }
             assert!(matches!(method,"file.lease.wait"|"file.lease.acquire"|"file.lease.check"), "short request became pending");
@@ -120,6 +120,11 @@ impl Fixture {
         loop {
             match self.rx.recv_timeout(WAIT).expect("file effect did not drain") {
                 WorkerRequest::Workspace(command) => command(self.kernel.storage.as_mut()),
+                WorkerRequest::RootRegistered { request,cancellation,result } => {
+                    let response=self.kernel.continue_root_registration(&request,result?,cancellation,&self.tx)?.expect("root fixture has no pending materializations");
+                    assert_eq!(response["ok"],true,"{response}");
+                    return Ok(response["result"].clone());
+                },
                 WorkerRequest::ResourceRequestDone { result, .. } => return result,
                 _ => panic!("unexpected file effect continuation"),
             }

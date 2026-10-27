@@ -37,6 +37,7 @@ enum BlobReadReply {
 }
 
 enum WorkerRequest {
+    RootRegistered { request: Value, cancellation: Arc<AtomicBool>, result: Result<Value, KernelError> },
     CaptureResolved {
         request: Value,
         prepared: crate::storage::capture_resources::CapturePreparation,
@@ -251,6 +252,7 @@ fn pending_file_worker(method: &str) -> bool {
             | "file.materializedView.release"
             | "file.root.register"
             | "file.operation.reconcile"
+            | "file.operation.list"
     )
 }
 
@@ -868,60 +870,25 @@ impl Kernel {
                 }
             }
         }
-        if method == "file.root.register" {
-            storage.set_cancellation(cancellation.clone());
-            let registered =
-                storage.dispatch(method, &authorized_params, grant_id, &authorized_grant);
-            storage.clear_cancellation();
-            let result = registered?;
-            let intents = storage.pending_materializations(
-                result["rootId"].as_str().unwrap_or(""),
-                authorized_params["workspaceId"].as_str().unwrap_or(""),
-                None,
-            )?;
-            let mut tasks = Vec::new();
-            for intent in intents {
-                // Busy or unadmitted journals remain explicit pending work.
-                if let Ok(MaterializationAdmission::Work(task)) = storage.prepare_materialization(
-                    &intent,
-                    &authorized_grant,
-                    cancellation.clone(),
-                ) {
-                    tasks.push(task);
-                }
-            }
-            if tasks.is_empty() {
-                return Ok(Some(response_ok(id, result)));
-            }
-            self.pending_root_registrations.insert(
-                id.to_string(),
-                PendingRootRegistration {
-                    response: response_ok(id, result),
-                    remaining: tasks.len(),
-                },
-            );
-            for task in tasks {
-                if let Err(_) = self.spawn_materialization(
-                    task,
-                    MaterializationReply::RootRegistration(id.to_string()),
-                    authorized_grant.grant_id.clone(),
-                    cancellation.clone(),
-                    completions,
-                ) {
-                    self.pending_root_registrations
-                        .get_mut(id)
-                        .expect("root registration")
-                        .remaining -= 1;
-                }
-            }
-            if self.pending_root_registrations[id].remaining == 0 {
-                return Ok(Some(
-                    self.pending_root_registrations
-                        .remove(id)
-                        .expect("root registration")
-                        .response,
-                ));
-            }
+        if matches!(method,"file.operation.reconcile"|"file.operation.list") {
+            let task=storage.prepare_file_inspection(method,&authorized_params,&authorized_grant,cancellation.clone())?;
+            let (port,completed,request)=(Self::workspace_port(completions),completions.clone(),request.clone());
+            let worker=thread::Builder::new().name("file-inspection".into()).spawn(move ||{
+                let result=task.run(port);
+                let _=completed.send(WorkerRequest::ResourceRequestDone{request,result});
+            })?;
+            self.file_workers.push((cancellation,worker));
+            return Ok(None);
+        }
+        if method=="file.root.register" {
+            let task=storage.prepare_file_root_registration(&authorized_params,&authorized_grant,cancellation.clone())?;
+            let (port,completed,request)=(Self::workspace_port(completions),completions.clone(),request.clone());
+            let worker=thread::Builder::new().name("file-root-registration".into()).spawn(move ||{
+                let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||task.run(port)))
+                    .unwrap_or_else(|_|Err(KernelError::Storage("File root registration worker panicked".into())));
+                let _=completed.send(WorkerRequest::RootRegistered{request,cancellation:task.cancellation,result});
+            })?;
+            self.file_workers.push((cancellation,worker));
             return Ok(None);
         }
         storage.set_cancellation(cancellation);
@@ -930,6 +897,78 @@ impl Kernel {
         let result = result?;
         if method == "storage.gc" { self.collect_obsolete_materialized_views(completions)?; }
         Ok(Some(response_ok(id, result)))
+    }
+
+    fn continue_root_registration(
+        &mut self,
+        request: &Value,
+        result: Value,
+        cancellation: Arc<AtomicBool>,
+        completions: &mpsc::Sender<WorkerRequest>,
+    ) -> Result<Option<Value>, KernelError> {
+        if cancellation.load(Ordering::Acquire) {
+            return Err(KernelError::Cancelled);
+        }
+        let id = request["id"].as_str().unwrap_or_default();
+        let storage = self
+            .storage
+            .as_mut()
+            .ok_or_else(|| KernelError::Storage("Kernel stopped".into()))?;
+        let (authorized_grant, authorized_params) = storage.authorize(
+            request["grantId"].as_str(),
+            &self.epoch,
+            self.host_id.as_deref().unwrap_or_default(),
+            self.host_generation.as_deref().unwrap_or_default(),
+            "file.root.register",
+            &request["params"],
+        )?;
+        let intents = storage.pending_materializations(
+            result["rootId"].as_str().unwrap_or(""),
+            authorized_params["workspaceId"].as_str().unwrap_or(""),
+            None,
+        )?;
+        let mut tasks = Vec::new();
+        for intent in intents {
+            // Busy or unadmitted journals remain explicit pending work.
+            if let Ok(MaterializationAdmission::Work(task)) =
+                storage.prepare_materialization(&intent, &authorized_grant, cancellation.clone())
+            {
+                tasks.push(task);
+            }
+        }
+        if tasks.is_empty() {
+            return Ok(Some(response_ok(id, result)));
+        }
+        self.pending_root_registrations.insert(
+            id.to_string(),
+            PendingRootRegistration {
+                response: response_ok(id, result),
+                remaining: tasks.len(),
+            },
+        );
+        for task in tasks {
+            if let Err(_) = self.spawn_materialization(
+                task,
+                MaterializationReply::RootRegistration(id.to_string()),
+                authorized_grant.grant_id.clone(),
+                cancellation.clone(),
+                completions,
+            ) {
+                self.pending_root_registrations
+                    .get_mut(id)
+                    .expect("root registration")
+                    .remaining -= 1;
+            }
+        }
+        if self.pending_root_registrations[id].remaining == 0 {
+            return Ok(Some(
+                self.pending_root_registrations
+                    .remove(id)
+                    .expect("root registration")
+                    .response,
+            ));
+        }
+        return Ok(None);
     }
 
     fn continue_capture_admission(
@@ -1831,6 +1870,14 @@ pub(crate) fn run() -> Result<(), Box<dyn std::error::Error>> {
                         Err(error) => response_error(id, &error),
                     };
                     respond!(response);
+                    continue;
+                }
+                WorkerRequest::RootRegistered { request, cancellation, result } => {
+                    let id=request["id"].as_str().unwrap_or_default();
+                    let result=if stopping{Err(KernelError::Cancelled)}else{result.and_then(|value|kernel.continue_root_registration(&request,value,cancellation,&capture_completions))};
+                    if matches!(result,Ok(None)){continue;}
+                    if let Ok(mut active)=worker_cancellations.lock(){active.remove(id);}
+                    respond!(match result{Ok(Some(response))=>response,Err(error)=>response_error(id,&error),Ok(None)=>unreachable!()});
                     continue;
                 }
                 WorkerRequest::ResourceWorkDone { call, result } => {
