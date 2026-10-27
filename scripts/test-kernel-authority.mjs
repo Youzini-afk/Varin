@@ -11,13 +11,18 @@ const vitestFiles = args.filter((arg) => arg.startsWith('--vitest-file=')).map((
 const buildOnly = args.includes('--build-only');
 const env = { ...process.env, VARIN_REQUIRE_RELEASE_KERNEL: '1' };
 
-function run(command, arguments_) {
+function run(command, arguments_, { collectFailure = false } = {}) {
   const result = spawnSync(command, arguments_, {
     cwd: root, env, stdio: 'inherit', windowsHide: true,
   });
   if (result.error) throw result.error;
   if (result.signal || result.status !== 0) {
-    throw new Error(`${command} failed (${result.signal ?? result.status ?? 'unknown exit'})`);
+    const error = new Error(`${command} failed (${result.signal ?? result.status ?? 'unknown exit'})`);
+    // A terminated runner is not an ordinary test failure: keep interruption
+    // fail-fast rather than starting another suite after cancellation.
+    if (result.signal || !collectFailure) throw error;
+    console.error(error);
+    process.exitCode = 1;
   }
 }
 
@@ -43,12 +48,13 @@ if (!fs.existsSync(binary)) {
 env.VARIN_TEST_KERNEL_PATH = binary;
 env.VARIN_KERNEL_PATH = binary;
 run(process.execPath, ['scripts/generate-kernel-protocol.mjs', '--check']);
+// Prerequisites above fail fast; independent test runners both report failures.
 // A default invocation covers both runners. A targeted Vitest invocation must
 // not silently run the unrelated full node:test transport suite first.
 if (vitestFiles.length === 0) {
   run(process.execPath, ['--import', 'tsx', '--test',
     'packages/web/application-host/lib/kernel/kernel-client.test.ts',
-  ]);
+  ], { collectFailure: true });
 }
 // The kernel Vitest config collects *.native.test.ts: every file that starts real kernels, durable
 // stores or OS process trees runs here and nowhere else. These tests start real
@@ -57,4 +63,4 @@ if (vitestFiles.length === 0) {
 run(process.execPath, ['node_modules/vitest/vitest.mjs', 'run', '--config', 'packages/web/vitest.kernel.config.ts',
   ...vitestFiles,
   '--no-file-parallelism',
-]);
+], { collectFailure: true });

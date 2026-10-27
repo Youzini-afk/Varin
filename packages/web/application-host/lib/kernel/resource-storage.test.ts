@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { createThreadSourceAdmission } from './thread-sources.js';
 import type { AgentRuntimeClient } from './agent-runtime-client.js';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,8 +7,10 @@ import { createPinnedResourceReader } from '../agent-resources/source-reader.js'
 import { KernelStorageAdapter } from './storage-adapter.js';
 import type { ResourceSourceReadInput } from './thread-resource-scope.js';
 
+const objectHash = (body: string) => `sha256-${createHash('sha256').update(body).digest('hex')}`;
+
 function fixture() {
-  const file = { path: '.varin/resources/skills/review/SKILL.md', state: { kind: 'regular-file', objectHash: 'sha256-body', byteLength: 4, mode: 0o644 } };
+  const file = { path: '.varin/resources/skills/review/SKILL.md', state: { kind: 'regular-file', objectHash: objectHash('BODY'), byteLength: 4, mode: 0o644 } };
   const branch = { branchId: 'source', workspaceId: 'original', root: 'fixed-root', currentRoot: 'later-root', revision: 7,
     writeRevision: 8, headRevision: 7, view: 'revision', captureScopes: [], draftBasePaths: [], createdAt: 1, updatedAt: 2, entries: [file], nextCursor: null };
   const pin = { ...branch, pinId: 'resource-pin', writeRevision: 7 };
@@ -47,7 +50,7 @@ describe('frozen resource Storage admission', () => {
     expect(f.client.issueGrant).toHaveBeenCalledWith({ grantId: expect.stringMatching(/^resource-read:/), threadId: 'fork', runId: 'new-run',
       owningWorkspace: 'original', executionWorkspace: 'original-execution', capabilities: ['storage.read'], pathScopes: ['.varin/resources/skills/review'] }, undefined);
     expect(f.scoped.pinBranch).toHaveBeenCalledWith(expect.objectContaining({ branchId: 'source', revision: 7 }), undefined);
-    expect(f.scoped.getBlob).toHaveBeenCalledWith('sha256-body', { pinId: 'resource-pin', path: f.file.path }, expect.anything());
+    expect(f.scoped.getBlob).toHaveBeenCalledWith(objectHash('BODY'), { pinId: 'resource-pin', path: f.file.path }, expect.anything());
     expect(f.resolveWorkspaceRoot).not.toHaveBeenCalled();
     expect(f.scoped.unpinBranch).toHaveBeenCalledOnce();
     expect(f.client.revokeGrant).toHaveBeenCalledWith(expect.stringMatching(/^resource-read:/));
@@ -87,8 +90,8 @@ describe('frozen resource Storage admission', () => {
       ['src', { kind: 'directory' }], ['guidance', { kind: 'directory' }], ['guidance/versions', { kind: 'directory' }],
       ['src/AGENTS.md', { kind: 'symlink', symlinkTarget: '../guidance/current.md' }],
       ['guidance/current.md', { kind: 'symlink', symlinkTarget: 'versions/v1.md' }],
-      ['guidance/versions/v1.md', { kind: 'regular-file', objectHash: 'original', byteLength: 8 }],
-      ['guidance/secret.md', { kind: 'regular-file', objectHash: 'secret', byteLength: 6 }],
+      ['guidance/versions/v1.md', { kind: 'regular-file', objectHash: objectHash('ORIGINAL'), byteLength: 8 }],
+      ['guidance/secret.md', { kind: 'regular-file', objectHash: objectHash('SECRET'), byteLength: 6 }],
     ]);
     const grants: KernelGrantIssueInput[] = [];
     const released: string[] = [];
@@ -121,7 +124,7 @@ describe('frozen resource Storage admission', () => {
           getOperation: async () => null,
           getBlob: async (hash: string, source: { pinId: string; path: string }) => {
             if (pinOwners.get(source.pinId) !== grant.grantId || !contentAllowed(source.path)) denied();
-            return { bytesBase64: Buffer.from(hash === 'original' ? 'ORIGINAL' : 'SECRET').toString('base64'), nextOffset: 8, eof: true };
+            return { bytesBase64: Buffer.from(hash === objectHash('ORIGINAL') ? 'ORIGINAL' : 'SECRET').toString('base64'), nextOffset: 8, eof: true };
           },
         };
       },
@@ -132,7 +135,7 @@ describe('frozen resource Storage admission', () => {
     await adapter.withResourceRead(input, async ({ store, pin, admitSymlinkTarget }) => {
       const reader = createPinnedResourceReader({ domainId: 'project', store, pin, coverage: { kind: 'complete' }, ...(admitSymlinkTarget ? { admitSymlinkTarget } : {}) });
       expect(await reader.read('src/AGENTS.md')).toMatchObject({ status: 'ready', content: 'ORIGINAL', reference: { canonicalId: 'resource:project/guidance/versions/v1.md' } });
-      await expect(store.readContent({ path: 'guidance/secret.md', state: { kind: 'regular-file', objectHash: 'secret', byteLength: 6 }, origin: 'base',
+      await expect(store.readContent({ path: 'guidance/secret.md', state: { kind: 'regular-file', objectHash: objectHash('SECRET'), byteLength: 6 }, origin: 'base',
         contentSource: { kind: 'pin', pinId: `pin:${grants.at(-1)!.grantId}`, path: 'guidance/secret.md' } })).rejects.toMatchObject({ code: 'unauthorized' });
     });
     expect(grants.map(grant => grant.pathScopes)).toEqual([

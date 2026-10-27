@@ -124,7 +124,9 @@ Host 类型由独立 Node 工程检查，Web/CLI/跨层测试通过 `#applicatio
 schema 匹配的 executable 和 manifest。手工改生成文件、运行旧 binary 或只通过 TypeScript 都不能证明 native 接线。
 
 `*.native.test.ts` 由专用 kernel 入口运行，portable Web suite 不运行它们。`test:kernel` 消费已核验的 release binary；
-需要重建时显式传 `--build`。`test:rust` 本身不构建这份 release binary；涉及 Host/guardian 的测试还需要 Node/tsx、
+需要重建时显式传 `--build`。构建、binary 与协议前置检查失败时立即停止；前置检查通过后，
+Node transport 与 Vitest native suite 各自报告结果，任一失败仍返回非零，不用前一组的断言失败遮蔽后一组。
+`test:rust` 本身不构建这份 release binary；涉及 Host/guardian 的测试还需要 Node/tsx、
 相应 Host/builtin 输出和指向匹配 executable 的 `VARIN_TEST_KERNEL_EXECUTABLE`。
 
 `test:rust` 使用 Cargo 默认选择，不执行标记 `#[ignore]` 的场景；`test:kernel` 只运行 Node transport 和

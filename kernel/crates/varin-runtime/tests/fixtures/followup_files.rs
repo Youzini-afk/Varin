@@ -11,6 +11,7 @@ pub(super) fn body(value: &str) -> FileState {
         object_hash: format!("sha256-{value}"),
         byte_length: value.len() as u64,
         mode: Some(420),
+        native: None,
     }
 }
 fn register_file(
@@ -127,7 +128,10 @@ fn file_exists_enters_original_active_input_once_and_normalizes_only_source_path
             &w,
             update(
                 &w,
-                FileState::Directory { mode: Some(493) },
+                FileState::Directory {
+                    mode: Some(493),
+                    native: None,
+                },
                 1,
                 false,
                 false
@@ -319,7 +323,10 @@ fn fixed_changed_stays_static_while_snapshot_ready_and_directory_exists_are_hone
             path: "result.txt".into(),
             condition: FileCondition::Exists
         },
-        FileState::Directory { mode: Some(493) },
+        FileState::Directory {
+            mode: Some(493),
+            native: None,
+        },
         true
     )
     .occurrence
