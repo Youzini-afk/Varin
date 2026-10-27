@@ -1,4 +1,5 @@
 import { WorkConnectionsPage } from '@/components/sections/connections/WorkConnectionsPage';
+import { ExternalAgentsPage } from '@/components/sections/external-agents/ExternalAgentsPage';
 import { AccessSettingsPage, HistorySettingsPage, NetworkSettingsPage } from '@/components/sections/connections/SettingsUtilityPages';
 import { StorageSettingsPage } from '@/components/sections/storage/StorageSettingsPage';
 import { HarnessSettingsPage } from '@/components/sections/harness/HarnessSettingsPage';
@@ -37,6 +38,7 @@ const implementationFor = (spec: BuiltinSettingsPageSpec): SettingsPageImplement
     implementation = varinPage(spec.renderer.slice('varin:'.length) as VarinSettingsSection);
   } else {
     switch (spec.renderer) {
+      case 'external-agents': implementation = { renderContent: () => <ExternalAgentsPage /> }; break;
       case 'history': implementation = { renderContent: () => <HistorySettingsPage /> }; break;
       case 'storage': implementation = { renderContent: () => <StorageSettingsPage /> }; break;
       case 'work-connections': implementation = { renderContent: () => <WorkConnectionsPage /> }; break;

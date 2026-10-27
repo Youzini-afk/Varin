@@ -15,6 +15,7 @@ export type ObservationServerMessage =
   | { type: 'error'; id: number; message: string };
 
 const GET_PATHS = new Set([
+  '/api/external-agents/observe',
   '/api/threads/observe',
   '/api/interactive-ui/view/observe',
   '/api/varin/events',

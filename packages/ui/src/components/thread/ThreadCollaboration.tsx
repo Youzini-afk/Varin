@@ -1,4 +1,7 @@
 import React from "react";
+import type { ExternalDelegation } from '@varin/application-client';
+import { useExternalAgentStore, useExternalAgents } from '@/stores/useExternalAgentStore';
+import { ExternalDelegationMessage } from './ExternalDelegates';
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   getRuntimeEndpointGeneration,
@@ -267,9 +270,17 @@ function CollaborationRoomContent({
     </DropdownMenuItem>
   );
   const [expandedMessages, setExpandedMessages] = React.useState(() => new Set<string>());
-  const renderMessage = ({ item, index }: { item: CollaborationFeedItem; index: number }) => {
+  useExternalAgents();
+  const externalChildren = useExternalAgentStore(value => value.children);
+  type FeedItem = CollaborationFeedItem | { id: string; kind: 'external'; child: ExternalDelegation; report: boolean; acceptedAtMs: number };
+  const feedItems = React.useMemo<FeedItem[]>(() => [...state.items, ...externalChildren.filter(child => child.parentThreadId === identity.threadId || state.members.some(m => m.threadId === child.parentThreadId)).flatMap(child => [
+    { id: `external-dispatch:${child.operationId}`, kind: 'external' as const, child, report: false, acceptedAtMs: child.acceptedAtMs },
+    ...(child.messageKind !== 'inform' && child.reportReady && child.finishedAtMs !== undefined ? [{ id: `external-report:${child.operationId}`, kind: 'external' as const, child, report: true, acceptedAtMs: child.finishedAtMs }] : []),
+  ])].sort((a, b) => (a.acceptedAtMs ?? 0) - (b.acceptedAtMs ?? 0)), [state.items, state.members, externalChildren, identity.threadId]);
+  const renderMessage = ({ item, index }: { item: FeedItem; index: number }) => {
+    if (item.kind === 'external') return <div className="px-3 pb-4 sm:px-4"><ExternalDelegationMessage child={item.child} report={item.report} /></div>;
     const day = item.acceptedAtMs === undefined ? undefined : new Date(item.acceptedAtMs).toLocaleDateString();
-    const previous = state.items[index - 1];
+    const previous = feedItems[index - 1];
     const showDay = day && (!previous || previous.acceptedAtMs === undefined || day !== new Date(previous.acceptedAtMs).toLocaleDateString());
     const original = item.kind === 'message' && item.message.replyTo
       ? state.messages.find(message => message.messageId === item.message.replyTo) : undefined;
@@ -505,18 +516,18 @@ function CollaborationRoomContent({
           )}
           aria-hidden={Boolean(selection)}
         >
-          {state.ready && state.items.length ? (
+          {state.ready && feedItems.length ? (
             <LegendList
               ref={list}
               className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain"
               contentContainerClassName="pt-4"
-              data={state.items}
+              data={feedItems}
               dataKey={roomKey}
               keyExtractor={(item) => item.id}
               renderItem={renderMessage}
               recycleItems={false}
               initialScrollIndex={{
-                index: state.items.length - 1,
+                index: feedItems.length - 1,
                 viewPosition: 1,
               }}
               maintainScrollAtEnd={atEnd}

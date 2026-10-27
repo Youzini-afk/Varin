@@ -828,7 +828,9 @@ impl Storage {
                 &active.grant.host_id,
                 &active.grant.host_generation,
                 "file.materialize",
-                &json!({"workspaceId":active.params.workspace_id}),
+                // Recheck the same materialization, including its admitted path and pinned
+                // source. Workspace-only parameters lose scoped handoff authority.
+                &serde_json::to_value(&active.params)?,
             )?
             .0
         };

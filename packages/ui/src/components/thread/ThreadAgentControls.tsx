@@ -2,7 +2,7 @@ import React from 'react';
 import { WORK_FOCUS_IDS, type WorkFocusId } from '@varin/protocol';
 import { Icon } from '@/components/icon/Icon';
 import type { IconName } from '@/components/icon/icons';
-import { VarinLogo } from '@/components/ui/VarinLogo';
+import { HarnessSelector } from './HarnessSelector';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useI18n } from '@/lib/i18n';
 
@@ -14,20 +14,15 @@ const workFocusIcons: Record<WorkFocusId, IconName> = {
 };
 
 /** Agent identifies the execution backend. Varin is the currently available backend. */
-export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusChange }: {
+export function ThreadAgentControls({ workFocus, disabled, pending, onWorkFocusChange, onHarnessChange }: {
   workFocus: WorkFocusId; disabled: boolean; pending?: boolean;
   onWorkFocusChange(workFocus: WorkFocusId): void;
+  onHarnessChange?(id: string | null): void;
 }) {
   const { t } = useI18n();
   const buttonClass = 'flex min-w-0 items-center gap-1.5 rounded-md px-2 py-1 typography-meta text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40';
   return <>
-    <DropdownMenu><DropdownMenuTrigger asChild>
-      <button type="button" disabled={disabled} className={buttonClass} aria-label={`${t('chat.modelControls.selectAgent')}: Varin`} title="Varin">
-        <VarinLogo decorative width={14} height={14} className="shrink-0" /><span>Varin</span><Icon name="arrow-down-s" className="size-3 shrink-0 opacity-60" />
-      </button>
-    </DropdownMenuTrigger><DropdownMenuContent side="top" align="end" className="min-w-40" portalToBody>
-      <DropdownMenuItem><VarinLogo decorative width={16} height={16} className="shrink-0" /><span className="flex-1">Varin</span><Icon name="check" className="size-3.5" /></DropdownMenuItem>
-    </DropdownMenuContent></DropdownMenu>
+    <HarnessSelector disabled={disabled} onChange={onHarnessChange} />
     <DropdownMenu><DropdownMenuTrigger asChild>
       <button type="button" disabled={disabled} className={buttonClass} aria-label={`${t('workFocus.label')}: ${t(`workFocus.${workFocus}`)}`} title={pending ? t('workFocus.nextTurn') : t(`workFocus.${workFocus}Description`)}>
         <Icon name={workFocusIcons[workFocus]} className="size-3.5 shrink-0" /><span className="whitespace-nowrap">{t(`workFocus.${workFocus}`)}</span><Icon name="arrow-down-s" className="size-3 shrink-0 opacity-60" />

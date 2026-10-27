@@ -1,4 +1,5 @@
 import { dict as enDict, type I18nKey } from './en';
+import { externalAgentZh } from './external-agents';
 import { toolHeadingMessages } from './tool-headings';
 import { toolFailureMessages } from './tool-failures';
 import { chatExperienceMessages } from './chat-experience';
@@ -8,6 +9,7 @@ import { toolMessagesZhCN } from './tool-interactions';
 
 export const dict: Record<I18nKey, string> = {
   ...enDict,
+  ...externalAgentZh,
   "contextManager.resourceVersion": "固定资源版本：{version}",
   "contextManager.checkpointVersion": "上下文检查点：{id} · 修订 {revision}",
   "contextManager.hiddenSkill": "不向模型自动披露",

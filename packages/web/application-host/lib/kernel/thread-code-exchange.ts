@@ -37,7 +37,7 @@ export async function readExchangeJournal(
   const journal = projectIntegrationOperation(id, record);
   const binding = journal.operationBinding;
   if (
-    binding?.kind !== "code_exchange" ||
+    (binding?.kind !== "code_exchange" && binding?.kind !== "external_code_exchange") ||
     binding.operationId !== input.operationId ||
     binding.parentThreadId !== input.threadId ||
     binding.parentRunId !== input.runId ||

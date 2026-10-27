@@ -5,6 +5,14 @@ upstream portions and do not make Varin as a whole available under the MIT Licen
 fonts, icons, and other separately distributed components remain under the licenses shipped with
 their respective packages or source files.
 
+## Claude Agent SDK
+
+The external Claude Code connection uses `@anthropic-ai/claude-agent-sdk` 0.3.310,
+published by Anthropic. Its package declares `SEE LICENSE IN README.md`; the package's
+README and accompanying notices remain with that dependency. The bridge uses the user's
+selected Claude Code executable and its own configuration. Anthropic's SDK documentation
+and terms are available at https://github.com/anthropics/claude-agent-sdk-typescript.
+
 ## OpenChamber-derived product code
 
 Portions of Varin are derived from OpenChamber material carrying these notices:

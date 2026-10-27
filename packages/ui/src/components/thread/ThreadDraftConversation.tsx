@@ -1,4 +1,7 @@
 import React from 'react';
+import { createExternalAgentsHttpAPI, ExternalAgentError } from '@varin/application-client';
+import { useExternalAgents, useExternalAgentStore } from '@/stores/useExternalAgentStore';
+import { HarnessSelector } from './HarnessSelector';
 import { documentMimeType, DOCUMENT_FILE_ACCEPT } from '@varin/protocol';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, type ThreadModelInfo, type ThreadsAPI, type ThreadThinkingLevel } from '@varin/application-client';
 import { ThreadComposer } from './ThreadComposer';
@@ -35,10 +38,14 @@ import { tapHaptic } from '@/lib/motion/haptics';
 
 /** Local composition has no execution identity. The first explicit send creates one. */
 export function ThreadDraftConversation({ api, draftKey, handoff }: { api: ThreadsAPI; draftKey: string; handoff: MessageHandoff }) {
+  const externalSettings = useExternalAgents();
+  const [externalBusy, setExternalBusy] = React.useState(false);
   const { t } = useI18n();
   const draft = useThreadDraftStore(state => state.drafts[draftKey] ?? EMPTY_THREAD_DRAFT);
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath);
   const patch = React.useCallback((value: Parameters<ReturnType<typeof useThreadDraftStore.getState>['patch']>[1]) => useThreadDraftStore.getState().patch(draftKey, value), [draftKey]);
+  const external = draft.harnessId ? externalSettings?.agents.find(v => v.id === draft.harnessId) : undefined;
+  React.useEffect(() => { if (externalSettings && draft.harnessId === undefined && !draft.firstSend) patch({ harnessId: externalSettings.defaultAgent }); }, [externalSettings, draft.harnessId, draft.firstSend, patch]);
   const [models, setModels] = React.useState<ThreadModelInfo[]>([]);
   const [error, setError] = React.useState<string>();
   const [modelError, setModelError] = React.useState<string>();
@@ -96,10 +103,21 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   });
   const inlineDrafts = inlineContext.flatMap(bucket => bucket.drafts);
   const hasInput = Boolean(draft.text.trim() || draft.images.length || draft.pdfs?.length || editorContext.length || inlineDrafts.length);
-  const acceptsImages = models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
-  const sending = draft.firstSend?.status === 'sending';
-  const locked = Boolean(draft.firstSend);
+  const acceptsImages = draft.harnessId ? undefined : models.find(item => item.providerId === model?.providerId && item.modelId === model?.modelId)?.acceptsImages;
+  const sending = externalBusy || draft.firstSend?.status === 'sending';
+  const locked = externalBusy || Boolean(draft.firstSend) || Boolean(draft.externalInput);
   const sourcePath = draft.sourceSelection?.path ?? draft.workspacePath;
+  const changeHarness = (harnessId: string | null) => {
+    if (!draft.externalConversationId) { patch({ harnessId }); return; }
+    setExternalBusy(true);
+    void (async () => {
+      const api = createExternalAgentsHttpAPI(generation), original = await api.read(draft.externalConversationId!);
+      if (original.turns.length) { await useExternalAgentStore.getState().refresh(); useExternalAgentStore.getState().select(original.conversation.id); return; }
+      await api.update(original.conversation.id, original.conversation.revision, { deleted: true });
+      patch({ harnessId, externalConversationId: undefined, externalInput: undefined });
+      await useExternalAgentStore.getState().refresh();
+    })().catch(error => setError(error instanceof Error ? error.message : String(error))).finally(() => setExternalBusy(false));
+  };
   const firstMessage = useFirstMessagePreview(draftKey, false, handoff);
   const addFiles = async (files: File[]) => {
     if (!files.length || reading.current || useThreadDraftStore.getState().drafts[draftKey]?.firstSend) return;
@@ -125,7 +143,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
   const sourceChanged = React.useCallback((sourceSelection: DraftSourceSelection) => patch({ sourceSelection,
     workspacePath: sourceSelection.resourceOwner.kind === 'local' ? sourceSelection.path || undefined : undefined }), [patch]);
   const ignorePrepared = React.useCallback(() => {}, []);
-  const sendDisabled = sending || readingFiles || !hasInput || !model?.providerId || !model.modelId || acceptsImages === false && Boolean(draft.images.length);
+  const sendDisabled = sending || readingFiles || !hasInput || (draft.harnessId ? !external?.enabled : !model?.providerId || !model.modelId) || acceptsImages === false && Boolean(draft.images.length);
   return <section ref={handoff.setRoot} className="regular-chat-view relative flex h-full min-h-0 min-w-0 [container-type:inline-size]" aria-label="Conversation draft">
     <div className="thread-conversation-layout relative flex min-h-0 min-w-0 flex-1">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -140,6 +158,30 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
       </Departure>
       <form className="space-y-2" onSubmit={event => {
         event.preventDefault(); if (sendDisabled || reading.current) return;
+        if (draft.harnessId) {
+          const owner = generation;
+          if (draft.pdfs?.length) { setError(t('external.attachments')); return; }
+          if (draft.sourceSelection && (draft.sourceSelection.resourceOwner.kind !== 'local' || draft.sourceSelection.mode !== 'live_root')) { setError(t('external.sharedSource')); return; }
+          const request = draft.externalInput ?? { key: crypto.randomUUID(), text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext), images: draft.images.map(image => ({ data: image.data, mimeType: image.mimeType })), ...(draft.externalModels?.[draft.harnessId] ? { model: draft.externalModels[draft.harnessId] } : {}) };
+          patch({ externalInput: request }); setExternalBusy(true); setError(undefined);
+          void (async () => {
+            const externalApi = createExternalAgentsHttpAPI(owner);
+            const conversation = draft.externalConversationId ? { id: draft.externalConversationId } : await externalApi.create({ key: draftKey, configurationId: draft.harnessId!, ...(sourcePath ? { cwd: sourcePath } : {}), title: request.text.split('\n')[0]?.slice(0, 120) || external?.name || 'Agent' });
+            patch({ externalConversationId: conversation.id });
+            await externalApi.send(conversation.id, request.key, request);
+            await useExternalAgentStore.getState().refresh();
+            if (owner === getRuntimeEndpointGeneration()) {
+              const current = useThreadDraftStore.getState().drafts[draftKey];
+              useThreadDraftStore.getState().patch(`external-draft:${owner}:${conversation.id}`, { externalModels: current?.externalModels,
+                ...(current?.text !== draft.text ? { text: current?.text ?? '' } : {}), ...(current?.images !== draft.images ? { images: current?.images ?? [] } : {}) });
+              useExternalAgentStore.getState().select(conversation.id); useThreadDraftStore.getState().remove(draftKey);
+            }
+          })().catch(error => { if (owner === getRuntimeEndpointGeneration()) {
+            if (error instanceof ExternalAgentError && error.status >= 400 && error.status < 500 && error.code !== 'host_changed' && error.code !== 'input_changed') patch({ externalInput: undefined });
+            setError(error instanceof Error ? error.message : String(error));
+          } }).finally(() => { if (mounted.current && owner === getRuntimeEndpointGeneration()) setExternalBusy(false); });
+          return;
+        }
         const settings = useUIStore.getState();
         const request: ThreadFirstSend = draft.firstSend ?? { key: crypto.randomUUID(), status: 'sending',
           editorText: draft.text, text: projectEditorContextAttachments(appendInlineComments(draft.text, inlineDrafts), editorContext),
@@ -156,9 +198,10 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
         {(error || modelError || draft.firstSend?.error) && <p role="alert" className="chat-input-column text-sm text-destructive">{error || modelError || draft.firstSend?.error}</p>}
         <input ref={fileInput} type="file" accept="image/*" multiple hidden aria-label="Choose image attachments" onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
         <input ref={pdfInput} type="file" accept={DOCUMENT_FILE_ACCEPT} multiple hidden aria-label={t('chat.fileAttachment.actions.choosePdfs')} onChange={event => { const files = [...(event.target.files ?? [])]; event.target.value = ''; void addFiles(files); }} />
-        {draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
+        {!draft.harnessId && draft.goalArmed && <p className="chat-input-column typography-meta text-primary">{t('thread.composer.goalArmed')}</p>}
         <ThreadComposer editorRef={editor} value={draft.text} onChange={text => patch({ text })} identityKey={draftKey} placement={firstMessage.message ? 'bottom' : 'center'}
-          agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} />}
+          agentControls={<ThreadAgentControls workFocus={workFocus} disabled={locked} onWorkFocusChange={workFocus => patch({ workFocus })} onHarnessChange={changeHarness} />}
+          backendControls={draft.harnessId ? <><input aria-label={t('external.model')} className="w-40 min-w-0 bg-transparent px-2 py-1 typography-meta text-muted-foreground placeholder:text-muted-foreground/60 outline-none" placeholder={t('external.inherit')} disabled={locked} value={draft.externalModels?.[draft.harnessId] ?? ''} onChange={event => patch({ externalModels: { ...draft.externalModels, [draft.harnessId!]: event.target.value } })} /><HarnessSelector value={draft.harnessId} disabled={locked} onChange={changeHarness} /></> : undefined}
           models={models} providerId={model?.providerId ?? ''} modelId={model?.modelId ?? ''} thinkingLevel={model?.thinkingLevel ?? 'off'}
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
           modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}
@@ -183,7 +226,7 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           </div>
         </ThreadComposer>
       </form>
-      <Departure present={!firstMessage.message} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="varin-draft-starters" onSubmit={starter => {
+      <Departure present={!firstMessage.message && !draft.harnessId} exit="sink" stagger=".varin-draft-starters > *" className="conversation-starters"><DraftPresetChips cwd={sourcePath} className="varin-draft-starters" onSubmit={starter => {
         if (starter.ref.type === 'command' && starter.ref.name === 'craft-goal') patch({ goalArmed: true });
         else if (starter.ref.type === 'command' && starter.ref.name === 'schedule-task') useUIStore.getState().setScheduledTasksDialogOpen(true);
         else patch(current => ({ text: [current.text.trimEnd(), starter.submitText].filter(Boolean).join('\n\n') }));

@@ -53,6 +53,10 @@ pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool
     if wait.cancelled {
         return Ok(true);
     }
+    if wait.kind=="external.child_settled" {
+        return Ok(optional_record::<super::external_children::ExternalChild>(db,"external_children",&wait.subject)?.is_some_and(|c|c.receipt_published&&c.report.is_some())
+            || wait.deadline_at_ms.is_some_and(|at|at<=wall_time_ms().unwrap_or(0)));
+    }
     if wait.id.starts_with(super::computer_wait::PREFIX) {
         return super::computer_wait::ready(db, wait);
     }
@@ -69,6 +73,9 @@ pub(super) fn ready(db: &Connection, op: &Operation, wait: &Wait) -> Result<bool
     }
     match op.executor.as_deref() {
         Some(collaboration::WAIT_TOOL) => {
+            if let Some(child)=optional_record::<super::external_children::ExternalChild>(db,"external_children",&wait.subject)? {
+                return Ok(child.receipt_published && child.report.is_some());
+            }
             let child = delegated::execution_task(db, &wait.subject)?;
             Ok(child.report.is_some() && child.code_result.settled())
         }

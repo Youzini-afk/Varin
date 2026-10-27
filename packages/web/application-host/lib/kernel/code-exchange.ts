@@ -19,6 +19,8 @@ import { exchangeManagedCode } from './managed-code-exchange.js';
 import { mapSourcePath, sourcePathMap, type SourcePathMap } from './source-path-map.js';
 import path from 'node:path';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
+import { exchangeExternalCode } from '../external-agents/code-exchange.js';
+import type { ExternalChild } from './protocol.generated.js';
 
 export { CODE_EXCHANGE_CAPABILITY };
 export type CodeSelection = string | { path: string; before: string; after: string };
@@ -31,6 +33,25 @@ export interface CodeExchangeOwners extends IntegrationTargetOwners {
 }
 const validators = new Map(CODE_EXCHANGE_TOOL_DECLARATIONS.map(d => [d.id.slice('varin.code.'.length),
   { tool: d.tool!, validate: compileToolJsonSchema(d.tool!.inputSchema) }]));
+
+/** Publish the existing peer notice after the callback's actual receipt is committed.
+ * Reconciling inside that callback would retire its own invocation before it returns. */
+function publishCodeNoticeAfterSettlement(owners: CodeExchangeOwners, authority: ToolInvocationAuthority) {
+  let disposed = false, reading = false, dirty = false;
+  const inspect = async () => {
+    dirty = true; if (reading || disposed) return; reading = true;
+    try { while (dirty && !disposed) {
+      dirty = false;
+      const op = await owners.runtime.operation(authority.operationId);
+      if (op.phase !== 'terminal' || !op.external_receipt?.executor_stopped) continue;
+      disposed = true; unsubscribe();
+      await owners.runtime.reconcileHostTool({ operationId: authority.operationId, executionOwner: authority.executorOwner });
+    } } catch(error) { disposed = true; unsubscribe(); owners.onCleanupError(authority.operationId, error); }
+    finally { reading = false; }
+  };
+  const unsubscribe = owners.kernel.onAgentRuntimeEvent(event => { if (event.stream === 'durable') void inspect(); });
+  void inspect();
+}
 
 /** Same Host, workspace and actual writable directory: a live root by its registered root, or
  * a materialized execution directory by the Run that owns it. Fixed revisions are never shared. */
@@ -236,7 +257,7 @@ export async function acknowledgedCode(store: WorkingStateRootStore, sourceThrea
   for (const row of rows.filter(r => r.state === 'complete').reverse()) {
     const view = projectIntegrationOperation(String(row.operationId), row);
     const binding = view.operationBinding;
-    if (binding?.kind !== 'code_exchange' || binding.childThreadId !== sourceThread || binding.targetThreadId !== targetThread) continue;
+    if ((binding?.kind !== 'code_exchange' && binding?.kind !== 'external_code_exchange') || binding.childThreadId !== sourceThread || binding.targetThreadId !== targetThread) continue;
     const result=await store.getResult(binding.result.branchId,binding.result.resultRevision);
     if(!result || result.root!==binding.result.root)throw new Error('An acknowledged code snapshot is unavailable');
     for (const [path, state] of Object.entries(result.pathStates)) acknowledged[path] = state;
@@ -262,6 +283,8 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         if (!peerId) throw Object.assign(new Error(method === 'submit'
           ? 'This is a root Agent with no parent to submit to. Set target to a related Agent from threads, or keep the work in this task.'
           : 'This Agent has no parent to update from. Set source to a related Agent from threads.'), { code: method === 'submit' ? 'target_required' : 'source_required' });
+        const external = await owners.kernel.agentRuntimeRequest<ExternalChild | null, 'runtime.external.command'>('runtime.external.command', { command: { action: 'child_target', runId: authority.runId, target: peerId } }, context.signal);
+        if (external) return exchangeExternalCode(owners, authority, self, external, method === 'submit' ? 'send' : 'receive', input.files, context.signal);
         const peer = await participant(owners.runtime, authority.threadId, peerId, context.signal);
         const [source, target] = method === 'submit' ? [self, peer] : [peer, self];
         if (source.member.threadId === target.member.threadId) throw new Error('Select another Agent');
@@ -306,10 +329,9 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
         const notification = { source: { name: source.member.name, agentId: source.member.agentId },
           target: { name: target.member.name, agentId: target.member.agentId }, result:{branchId:result.branchId,resultRevision:result.resultRevision,root:result.root},
           status: merged.status, appliedPaths: merged.appliedPaths, conflictPaths: merged.conflictPaths };
-        // The native journal reader publishes the Agent notice with the original
-        // operation identity, including after a Host interruption.
-        await owners.runtime.reconcileHostTool({ operationId: authority.operationId, executionOwner: authority.executorOwner }, context.signal)
-          .catch(error=>owners.onCleanupError(authority.operationId,error));
+        // The original callback publishes its receipt when it actually returns. Journal
+        // reconciliation recovers interrupted callbacks, not one still executing here.
+        publishCodeNoticeAfterSettlement(owners, authority);
         if (receipt.completion.kind === 'result') receipt.completion.content = { data: parseVarinToolJson({ ...merged, ...notification }), parts: [] };
         return receipt;
       } catch (error) {
@@ -317,8 +339,7 @@ export function createCodeExchangeOwner(owners: CodeExchangeOwners): HostCapabil
           const inspection = { ...integration }; delete inspection.signal;
           const original = await owners.coordinator.inspectIntegration(inspection).catch(() => null);
           if (original) {
-            await owners.runtime.reconcileHostTool({ operationId: authority.operationId, executionOwner: authority.executorOwner }, context.signal)
-              .catch(error=>owners.onCleanupError(authority.operationId,error));
+            publishCodeNoticeAfterSettlement(owners, authority);
             return integrationCompletion(original);
           }
         }

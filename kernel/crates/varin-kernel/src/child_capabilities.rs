@@ -300,6 +300,11 @@ pub(crate) fn discovery(
         )
     });
     let presets = selected.catalog.presets.iter().map(|preset| {
+        if let Some(external)=&preset.external {
+            return json!({"id":preset.id,"name":preset.name,"description":preset.description,"backend":external.harness,
+                "tools_source":"external_harness","work_modes":["shared","isolated_write"],"unavailable":preset.unavailable,
+                "selection":"Uses its own configured model and tools. Omit tools. Its conversationId accepts send; each request returns an operationId for child_status, child_report and wait_child."});
+        }
         let tools = selected.preset_tools(preset);
         let failure = preset.unavailable.clone().or_else(|| {
             let unknown = unsupported(&tools);

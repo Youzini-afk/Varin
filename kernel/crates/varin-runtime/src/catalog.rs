@@ -42,7 +42,7 @@ pub enum RuntimeError {
     Format(i64),
 }
 type Result<T> = std::result::Result<T, RuntimeError>;
-pub(crate) const FORMAT: i64 = 78;
+pub(crate) const FORMAT: i64 = 79;
 fn sql_number(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| RuntimeError::Invalid("integer exceeds catalog range".into()))
 }
@@ -131,6 +131,7 @@ fn inspect_catalog_format(db: &Connection) -> Result<i64> {
         inputs::check_format(db)?;
         followups::check_format(db)?;
         calendar::check_format(db)?;
+        external::check_format(db)?;
         goals::check_format(db)?;
         mcp_interactions::check_format(db)?;
         bot::check_format(db)?;
@@ -184,6 +185,7 @@ fn initialize_metadata(
         collaboration::initialize_new(&tx)?;
         followups::initialize_new(&tx)?;
         calendar::initialize_new(&tx)?;
+        external::initialize_new(&tx)?;
         goals::initialize_new(&tx)?;
         mcp_interactions::initialize_new(&tx)?;
         bot::initialize_new(&tx)?;
@@ -273,6 +275,7 @@ impl Catalog {
         };
         this.install_event_notifier()?;
         this.recover()?;
+        this.recover_external()?;
         this.recover_mcp_interactions()?;
         {
             let mut rows = this
@@ -1700,6 +1703,13 @@ mod tests;
 
 #[path = "catalog_execution.rs"]
 mod execution_persistence;
+
+#[path = "catalog_external.rs"]
+pub mod external;
+#[path = "catalog_external_children.rs"]
+pub mod external_children;
+#[path = "catalog_external_messages.rs"]
+pub mod external_messages;
 
 #[path = "catalog_inputs.rs"]
 pub mod inputs;

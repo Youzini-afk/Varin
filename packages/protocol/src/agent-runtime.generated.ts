@@ -1547,7 +1547,7 @@ export interface ThreadSummary {
   avatar?: string;
 }
 
-export type AgentRuntimeStreamEvent = {v: 66; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
+export type AgentRuntimeStreamEvent = {v: 67; kind: 'runtime-event'; kernelEpoch: string} & ({stream: 'durable'; cursor: number} | {stream: 'progress'; runId: string; threadId: string; branchId: string; requestId: string; streamId: string; sequence: number; event: unknown});
 
 export type SourceMode = 'fixed_branch' | 'materialized' | 'live_root';
 
@@ -2719,6 +2719,7 @@ export interface ChildCapabilityFailure {
 }
 
 export interface ChildPreset {
+  external?: { configuration_id: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; model?: string; launch: { command: string; args: string[] } };
   description?: string;
   tools_source: 'default' | 'explicit';
   id: string;
@@ -2730,6 +2731,33 @@ export interface ChildPreset {
   model_source: 'inherit' | 'selected';
   inherit_base: ChildModelBinding | null;
   avatar?: string;
+}
+
+export interface ExternalChild {
+  operation_id: string;
+  dispatch_operation_id: string | null;
+  message_kind: 'inform' | 'request' | null;
+  parent_run_id: string;
+  parent_thread_id: string;
+  parent_branch_id: string;
+  conversation_id: string;
+  name: string;
+  avatar: string | null;
+  binding: NonNullable<ChildPreset['external']>;
+  work_mode: 'shared' | 'read_only' | 'isolated_write';
+  handoff: ChildSourceHandoff | null;
+  input_ref: unknown;
+  turn_id: string | null;
+  state: string;
+  cancel_requested: boolean;
+  report: unknown;
+  source: unknown;
+  resources_released: boolean;
+  receipt_published: boolean;
+  revision: number;
+  cursor: number;
+  accepted_at_ms: number;
+  finished_at_ms: number | null;
 }
 
 export interface ChildDispatchCatalog {

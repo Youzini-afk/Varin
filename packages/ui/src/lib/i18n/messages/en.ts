@@ -1,4 +1,5 @@
 import { browserMessages } from './browser';
+import { externalAgentEn } from './external-agents';
 import { officeReaderMessages } from './office';
 import { settingsDict } from './en.settings';
 import { followupPanelEn } from './followups';
@@ -8,6 +9,7 @@ import { chatExperienceMessages } from './chat-experience';
 import { toolMessagesEn } from './tool-interactions';
 
 export const dict = {
+  ...externalAgentEn,
   "contextManager.resourceVersion": "Frozen resource version: {version}",
   "contextManager.checkpointVersion": "Context checkpoint: {id} · revision {revision}",
   "contextManager.hiddenSkill": "Hidden from automatic model discovery",

@@ -1,5 +1,6 @@
 import React from 'react';
 import { RetrySettings } from './RetrySettings';
+import { ExternalAgentDefault } from '@/components/sections/external-agents/ExternalAgentsPage';
 import { toast } from '@/components/ui';
 import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -50,6 +51,7 @@ export const DefaultsSettings: React.FC = () => {
     ? { providerId: string(value.providerId), modelId: string(value.modelId) } : { providerId: '', modelId: '' };
   return <>
   <SettingsSection title={t('settings.varin.defaults.title')} description={t('settings.defaults.globalHint')} divider={false} contentClassName="divide-y divide-border/50">
+    <ExternalAgentDefault />
     {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
     <SettingsFieldRow label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}

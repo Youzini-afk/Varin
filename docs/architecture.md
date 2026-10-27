@@ -1,7 +1,8 @@
 # Varin 架构
 
 Varin 由共享工作台、可信 Application Host 和私有 Rust 内核组成。Web、Electron 和移动端使用同一套产品服务。
-对话只通过原生 Agent runtime 执行；Thread、HistoryBranch、Run、请求和 Operation 由 Rust Catalog 持久化。
+Varin 原生对话通过 Agent runtime 执行；Thread、HistoryBranch、Run、请求和 Operation 由 Rust Catalog 持久化。
+外部 Harness 继续执行自己的会话循环，产品绑定、投递与观察记录也由 Catalog 保存，见[外部 Agent](external-agents.md)。
 Workbench Profile 选择 Agent、IDE、Research 或 Bot 外壳，不改变执行身份、来源和权限。
 
 运行机制见[运行时](runtime.md)，文件、进程与恢复见[资源](resources.md)，材料与知识见[检索](retrieval.md)，
@@ -40,6 +41,7 @@ Web / Electron / mobile renderer
 | 状态 | 权威 owner |
 | --- | --- |
 | Thread、HistoryBranch、Run、请求、Operation、Wait、队列和 usage | Rust Catalog 与不可变 ContentStore |
+| 外部会话绑定、输入、观察记录和交办回执 | Rust Catalog / ContentStore；外部原生历史由相应 Harness 拥有 |
 | WorkingState、blob、文件租约、进程回执、Recovery/Integration | Rust Storage |
 | 活跃缓冲和 dirty revision | 客户端 Document Registry；Host Documents 协调物理访问 |
 | 目录登记、文件根准入、版本化文档协调 | Host Documents |
@@ -49,7 +51,7 @@ Web / Electron / mobile renderer
 | 语义向量与索引 | 独立派生存储进程 |
 | 外壳、布局和视图状态 | UI kernel 与选中扩展 |
 
-Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 78；Storage 的 format 为 22，
+Catalog 与 Storage 是不同存储域。当前 Agent Catalog 的 `FORMAT` 为 79；Storage 的 format 为 22，
 SQLite `user_version` 为 16。版本以各自源码为准，不按名称相似混用或自动迁移。
 
 ## 受理、执行与观察

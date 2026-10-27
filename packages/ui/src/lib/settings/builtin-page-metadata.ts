@@ -21,6 +21,7 @@ export type BuiltinSettingsRenderer =
   | 'language-support'
   | 'projects'
   | 'model-connections'
+  | 'external-agents'
   | 'mcp-connections'
   | 'remote-instances'
   | 'skills'
@@ -46,6 +47,7 @@ const spec = (
 ): BuiltinSettingsPageSpec => ({ meta, renderer, ...(availability ? { availability } : {}) });
 
 export const BUILTIN_SETTINGS_PAGE_SPECS: readonly BuiltinSettingsPageSpec[] = [
+  spec({ slug: 'external-agents', title: 'External Agents', titleKey: 'external.title', group: 'harness', kind: 'single', icon: 'terminal', order: 1.5, keywords: ['external', 'harness', 'codex', 'claude', 'pi', 'acp'] }, 'external-agents'),
   spec({ slug: 'history', title: 'History and recovery', titleKey: 'settings.page.history.title', group: 'general', kind: 'single', icon: 'chat-history', order: 8, keywords: ['history and recovery'] }, 'history'),
   spec({ slug: 'storage', title: 'Storage', titleKey: 'settings.page.storage.title', group: 'general', kind: 'single', icon: 'database-2', order: 7, keywords: ['storage'] }, 'storage'),
   spec({ slug: 'editor', title: 'Editor', titleKey: 'settings.page.editor.title', group: 'projects', kind: 'single', icon: 'code-box', order: 1, keywords: ['editor'] }, 'varin:editor'),

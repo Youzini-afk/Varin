@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { useI18n } from '@/lib/i18n';
 import { ThreadDraftConversation } from '@/components/thread/ThreadDraftConversation';
 import { MessageHandoff } from '@/components/conversation/messageHandoff';
+import { ExternalConversationView } from '@/components/thread/ExternalConversation';
+import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
 
 type ChatViewProps = {
   active?: boolean;
@@ -24,6 +26,7 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   React.useLayoutEffect(() => () => handoff.dispose(), [handoff]);
   const { threads: api } = useRuntimeAPIs();
   const identity = useThreadStore(state => state.selectedIdentity);
+  const externalId = useExternalAgentStore(state => state.selectedId);
   const draftKey = useThreadStore(state => state.selectedDraftKey);
   const catalogLoaded = useThreadStore(state => state.catalogLoaded);
   const hostKey = useThreadStore(state => state.hostKey);
@@ -31,11 +34,12 @@ export const ChatView: React.FC<ChatViewProps> = ({ active = true, readOnly = fa
   React.useEffect(() => { setError(undefined); }, [hostKey]);
   const { directory } = useSelectedThreadWorkspace();
   React.useEffect(() => {
-    if (active && autoOpenDraft && api && catalogLoaded && !identity && !draftKey && !error && !readOnly) {
+    if (active && autoOpenDraft && api && catalogLoaded && !identity && !externalId && !draftKey && !error && !readOnly) {
       void startThreadFromNavigation().catch(cause => setError(cause instanceof Error ? cause.message : String(cause)));
     }
-  }, [active, autoOpenDraft, api, identity, draftKey, catalogLoaded, error, readOnly, hostKey]);
+  }, [active, autoOpenDraft, api, identity, externalId, draftKey, catalogLoaded, error, readOnly, hostKey]);
   if (!active) return null;
+  if (externalId) return <ChatErrorBoundary sessionId={externalId}><ExternalConversationView key={`${hostKey}:${externalId}`} id={externalId} readOnly={readOnly} /></ChatErrorBoundary>;
   if (!api) return <p role="alert">Conversation service unavailable</p>;
   if (!identity && draftKey && !readOnly) return <ChatErrorBoundary sessionId={draftKey}>
     {conversationHeader}<ThreadDraftConversation key={draftKey} api={api} draftKey={draftKey} handoff={handoff} />

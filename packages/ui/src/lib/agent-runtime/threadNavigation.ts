@@ -17,6 +17,14 @@ async function selectConversationShell(bot: boolean, assertCurrent: () => void):
   if (bot && current !== VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_BOT_PROFILE_ID, undefined, { enableShell: true, beforeCommit: async () => assertCurrent() });
   else if (!bot && current === VARIN_WORKBENCH_BOT_PROFILE_ID) await selectActiveWorkbenchProfile(VARIN_WORKBENCH_DEFAULT_PROFILE_ID, undefined, { beforeCommit: async () => assertCurrent() });
 }
+export async function openExternalConversationFromNavigation(id: string): Promise<void> {
+  const host = getRuntimeEndpointGeneration(), request = ++navigation;
+  const current = () => { if (host !== getRuntimeEndpointGeneration() || request !== navigation) throw new Error('Conversation navigation was superseded'); };
+  const { useExternalAgentStore } = await import('@/stores/useExternalAgentStore');
+  current(); await selectConversationShell(false, current); current();
+  useExternalAgentStore.getState().select(id);
+  useUIStore.getState().setSettingsDialogOpen(false);
+}
 export async function openThreadFromNavigation(target: { threadId: string; branchId?: string; directory?: string | null }): Promise<ThreadIdentity> {
   const host = getRuntimeEndpointGeneration(); const request = ++navigation;
   const current = () => {

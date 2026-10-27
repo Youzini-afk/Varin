@@ -72,6 +72,7 @@
       "!node_modules/@varin/web/{application-host,cli,scripts,kernel,dist,.application-host-types}/**/*",
       "!node_modules/**/*.{js,cjs,mjs,ts,cts,mts}.map",
       "!node_modules/@vscode/ripgrep-*/bin/**/*",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-*/**/*",
       "!node_modules/**/*.d.{mts,cts}",
       "!node_modules/**/{openai,@anthropic-ai/sdk,typebox}/**/*.d.ts",
       "!node_modules/**/{openai,@anthropic-ai/sdk}/src/**/*"

@@ -1,4 +1,6 @@
 import React from 'react';
+import { ExternalDelegateList } from './ExternalDelegates';
+import { useExternalAgentStore } from '@/stores/useExternalAgentStore';
 import { pendingFollowup } from '@/lib/followupPresentation';
 import { getRuntimeEndpointGeneration, type ThreadIdentity, type ThreadSnapshot, type ThreadsAPI } from '@varin/application-client';
 import { Icon } from '@/components/icon/Icon';
@@ -54,6 +56,7 @@ const emptyPlan: PlanSummary = { items: [], total: 0, done: 0, blocked: 0 };
 export function ThreadOverview({ api, identity, sessionKey, snapshot, request, details, pending, readOnly, workspacePath,
   hasComputer, error, recoveryAttention, onAttention, refresh, act, openProcess }: Props) {
   const { t } = useI18n();
+  const externalChildren = useExternalAgentStore(state => state.children);
   const open = useWorkOverviewStore(state => state.bySession[sessionKey]?.overview ?? false);
   const compact = useWorkOverviewStore(state => state.bySession[sessionKey]?.compact ?? false);
   const disclosure = useWorkOverviewStore(state => state.setDisclosure);
@@ -72,7 +75,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
   const currentChildren = rows.filter(row => snapshot?.childDirectory ? snapshot.childDirectory.members.some(member => member.current && member.threadId === row.child.child_thread_id) : !childEnded(row.state));
   const runningChildren = currentChildren.filter(row => !childEnded(row.state));
   const failedChildren = currentChildren.filter(row => row.state === 'failed' || row.state === 'preparation_failed');
-  const hasChildren = Boolean(rows.length || snapshot?.childDirectory?.members.some(member => member.parentThreadId === identity.threadId));
+  const hasChildren = Boolean(rows.length || snapshot?.childDirectory?.members.some(member => member.parentThreadId === identity.threadId) || externalChildren.some(c => c.parentThreadId === identity.threadId));
   const products = useThreadProducts(api, identity, snapshot, open || compact);
   const { history: productHistory, loadEarlier } = products;
   const currentFiles = products.products.filter(item => item.kind === 'file' && item.runId === run?.id);
@@ -156,7 +159,7 @@ export function ThreadOverview({ api, identity, sessionKey, snapshot, request, d
       summaryView={detail === 'plan' ? undefined : { onInspect: () => show('plan') }} />}</div>
     {!detail && goal && <div className="thread-overview-section">{action('goals', 'target', goal.objective, <ChildState state={goal.state} />)}</div>}
     <section hidden={Boolean(detail && detail !== 'threads')} className="thread-overview-section">
-      {(hasChildren || detail === 'threads') && <>{!detail && <div className="thread-overview-section-heading typography-ui-label font-medium"><span>{t('harness.overview.threads')}</span>{runningChildren.length > 0 && <span className="typography-micro font-normal text-muted-foreground">{t('harness.overview.activeTasks', { count: runningChildren.length })}</span>}</div>}{childTasks}</>}
+      {(hasChildren || detail === 'threads') && <>{!detail && <div className="thread-overview-section-heading typography-ui-label font-medium"><span>{t('harness.overview.threads')}</span>{runningChildren.length > 0 && <span className="typography-micro font-normal text-muted-foreground">{t('harness.overview.activeTasks', { count: runningChildren.length })}</span>}</div>}{childTasks}<ExternalDelegateList parentThreadId={identity.threadId} /></>}
       {detail === 'threads' && details.threads}
     </section>
     <div hidden={Boolean(detail)}>

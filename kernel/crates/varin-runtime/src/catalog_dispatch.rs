@@ -172,6 +172,9 @@ pub enum ChildPresetToolsSource {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildPreset {
+    /// A configured independent harness. Its own model/tools are not Varin model bindings.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<ExternalChildBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -192,6 +195,18 @@ pub struct ChildPreset {
     pub model: Option<ChildModelBinding>,
     pub unavailable: Option<ChildCapabilityFailure>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalChildBinding {
+    pub configuration_id: String,
+    pub harness: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub launch: ExternalLaunch,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ExternalLaunch { pub command: String, pub args: Vec<String> }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildDispatchCatalog {
@@ -234,6 +249,12 @@ impl ChildDispatchCatalog {
                 ));
             }
             validate_names(&preset.tools)?;
+            if let Some(binding) = &preset.external {
+                if binding.configuration_id.trim().is_empty() || !matches!(binding.harness.as_str(), "codex" | "claude" | "pi" | "acp") || !preset.tools.is_empty() || preset.model.is_some() || preset.inherit_base.is_some() {
+                    return Err(RuntimeError::Invalid("external child binding has native model/tool configuration".into()));
+                }
+                continue;
+            }
             if preset.unavailable.is_none() {
                 if let Some(model) = &preset.model {
                     model.connection_identity()?;
@@ -324,7 +345,7 @@ pub struct PreparedChildDispatch {
 }
 
 pub struct ChildDispatchRead {
-    reference: Value,
+    pub(crate) reference: Value,
     content: crate::content::ContentStore,
     _publication: crate::content::ContentPublication,
 }
@@ -434,6 +455,40 @@ impl Catalog {
     }
 }
 impl ChildDispatchSelection {
+    pub fn external_preset(&self, input: &DispatchInput) -> Result<Option<ChildPreset>> {
+        input.validate()?;
+        let Some(preset) = self.catalog.presets.iter().find(|p| input.preset.as_deref() == Some(p.id.as_str()) && p.external.is_some()) else { return Ok(None); };
+        if let Some(reason) = &preset.unavailable { return Err(RuntimeError::Invalid(format!("external Agent unavailable: {}", reason.code))); }
+        if input.tools.is_some() { return Err(RuntimeError::Invalid("External Agents use their own tools; omit tools for this dispatch".into())); }
+        // A prompt is not a read-only boundary. Only advertise this mode after the adapter
+        // implements the harness's actual sandbox/permission capability.
+        if input.work_mode == Some(ChildWorkMode::ReadOnly) { return Err(RuntimeError::Invalid("This external Agent has no configured read-only execution boundary; select shared or isolated_write".into())); }
+        Ok(Some(preset.clone()))
+    }
+    pub fn external_input(&self, input: &DispatchInput, preset: &ChildPreset) -> Result<Value> {
+        let mut text = String::new();
+        if !preset.instructions.trim().is_empty() { text.push_str(&preset.instructions); text.push_str("\n\n"); }
+        if input.inherit_context {
+            let history = self.history.as_ref().ok_or_else(|| RuntimeError::Invalid("dispatch history unavailable".into()))?;
+            let background = crate::context_retention::conversation_background(history);
+            text.push_str("Conversation background supplied by the delegating Agent:\n");
+            for item in background {
+                use crate::execution::{Content, Provenance};
+                let role=match item.provenance {Provenance::UserInstruction{..}=>"User",Provenance::Assistant=>"Assistant",Provenance::AgentMessage{..}=>"Related Agent",_=>continue};
+                let body=match &item.content {
+                    Content::Text{text}=>text.clone(),
+                    Content::Output{output}=>output.parts.iter().filter_map(|p|match p {crate::output::OutputPart::Text{text}=>Some(text.as_str()),_=>None}).collect::<Vec<_>>().join("\n"),
+                    _=>continue,
+                };
+                if !body.is_empty(){text.push_str(role);text.push_str(":\n");text.push_str(&body);text.push_str("\n\n");}
+            }
+            text.push_str("\n\nCurrent delegated task:\n");
+        }
+        text.push_str(&input.task);
+        let mut value = json!({"text":text,"task":input.task,"_launch":preset.external.as_ref().map(|b|&b.launch)});
+        if let Some(model) = preset.external.as_ref().and_then(|b| b.model.as_ref()) { value["model"] = json!(model); }
+        Ok(value)
+    }
     pub fn host_tool(&self, name: &str) -> Option<&ToolSchema> {
         self.extension_bindings
             .iter()

@@ -20,6 +20,7 @@ export type IntegrationOperationBinding = IntegrationBinding & (
   | { kind: "runtime_operation"; childOperationId: string; childExecutionId: string; origin: ToolOrigin; callId: string }
   | { kind: "user_operation"; childOperationId: string; childExecutionId: string; key: string }
   | { kind: "code_exchange"; origin: ToolOrigin; callId: string; sourceRunId: string; targetRunId: string; targetThreadId: string }
+  | { kind: "external_code_exchange"; origin: ToolOrigin; callId: string; externalOperationId: string; direction: 'receive' | 'send'; targetThreadId: string }
 );
 
 /** A failed response is not proof that the durable transition failed. */

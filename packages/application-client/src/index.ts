@@ -44,3 +44,4 @@ export * from "./host-connections.js";
 export * from './model-capabilities.js';
 export * from './interactive-ui.js';
 export * from './content-reference.js';
+export * from './external-agents.js';

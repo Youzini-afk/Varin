@@ -513,6 +513,7 @@
   "ChildModelBinding",
   "ChildCapabilityFailure",
   "ChildPreset",
+  "ExternalChild",
   "ChildDispatchCatalog",
   "ChildSelectedProfile",
   "TreeCancelTarget",
@@ -866,7 +867,7 @@
   "MediaReadChunk",
   "ChildSourceAuthority"
 ],
-  "protocolVersion": 66,
+  "protocolVersion": 67,
   "runtimeStructs": {
     "RunFailure": {"fields": {"runId": {"type": "string"}, "cursor": {"type": "number"}, "code": {"type": "string"}, "message": {"type": "string"}, "toolName": {"type": "string | null", "optional": true}}},"ContentCollectionReport":{"fields":{"status":{"type":"ContentCollectionStatus"},"phase":{"type":"ContentCollectionPhase"},"removedObjects":{"type":"number"},"removedBytes":{"type":"number"},"removedStagingFiles":{"type":"number"},"pendingDeletedThreads":{"type":"number","optional":true},"reason":{"type":"string | null"}}},"ModelSessionConfiguration":{"fields":{"retry":{"type":"unknown","optional":true},"tokenizer":{"type":"TokenizerBinding","optional":true},"catalogModelId":{"type":"string","optional":true},"providerId":{"type":"string","optional":true},"providerFamily":{"type":"string"},"model":{"type":"string"},"endpoint":{"type":"string"},"credentialEnvironment":{"type":"string | null"},"allowAnonymous":{"type":"boolean"},"acceptsImages":{"type":"boolean","optional":true},"toolOutputVisibleBytes":{"type":"number","optional":true},"configurationGeneration":{"type":"number"},"maxOutputTokens":{"type":"number | null"},"azureDeployment":{"type":"string | null","optional":true},"azureApiVersion":{"type":"string | null","optional":true},"legacyMaxTokens":{"type":"boolean","optional":true},"includeStreamUsage":{"type":"boolean","optional":true},"reasoningEffort":{"type":"string | null","optional":true},"anthropicOauth":{"type":"boolean","optional":true},"adapterId":{"type":"string","optional":true},"adapterVersion":{"type":"string","optional":true},"awsRegion":{"type":"string","optional":true},"adapterIdentity":{"type":"string","optional":true},"adapterBindingId":{"type":"string","optional":true},"connection":{"type":"ModelHttpConfiguration","optional":true},"contextWindowTokens":{"type":"number","optional":true},"thinkingLevel":{"type":"string","optional":true},"modelOptions":{"type":"unknown","optional":true}}},"KernelWorkingResultCandidate":{"fields":{"publicationId":{"type":"string"},"candidateOperationId":{"type":"string"},"workspaceId":{"type":"string"},"branchId":{"type":"string"},"root":{"type":"string"},"baseRoot":{"type":"string"},"writeRevision":{"type":"number"},"pinId":{"type":"string"},"basePinId":{"type":"string"}}}},
   "runtimeEnums": {
@@ -1238,6 +1239,7 @@
     "runtime.mcp.interaction.close": "McpInteractionCloseParams",
     "runtime.mcp.interaction.complete": "McpInteractionControlParams",
     "runtime.mcp.interaction.release_source": "RunParams",
+    "runtime.external.command": "KernelExternalCommandParams",
     "runtime.managed_process.pending": "KernelEmptyParams",
     "runtime.managed_process.terminal": "ManagedProcessTerminalParams",
     "runtime.managed_process.cell": "ManagedProcessCellParams",
@@ -2386,10 +2388,11 @@
     "KernelChildEnvironmentSettleParams": {"fields":{"workspaceId":{"type":"string"},"branchId":{"type":"string"},"publicationId":{"type":"string"}}},
     "KernelExecutionViewParams": {"fields":{"workspaceId":{"type":"string"},"branchId":{"type":"string"},"revision":{"type":"number"}}},
     "KernelMaterializedView": {"fields":{"viewId":{"type":"string"},"branchId":{"type":"string"},"revision":{"type":"number"},"sourceRoot":{"type":"string"},"canonicalRoot":{"type":"string"},"kernelEpoch":{"type":"string"}}},
-    "KernelFileMaterializeParams": {"fields": {
+    "KernelFileMaterializeParams": {"serialize": true, "fields": {
       "operationId": {"type": "string"}, "workspaceId": {"type": "string"}, "rootId": {"type": "string"}, "path": {"type": "string"}, "sourceRoot": {"type": "string"}, "leaseId": {"type": "string", "optional": true}
     }},
     "KernelRecordReference": {"fields": {"slot": {"type": "string"}, "objectHash": {"type": "string"}}},
+    "KernelExternalCommandParams": {"fields":{"command":{"type":"unknown"}}},
     "KernelRecordPutParams": {"fields": {
       "operationId": {"type": "string"}, "recordId": {"type": "string"}, "workspaceId": {"type": "string"}, "recordType": {"type": "string"}, "state": {"type": "string"},
       "sessionId": {"type": "string", "optional": true}, "threadId": {"type": "string", "optional": true}, "runId": {"type": "string", "optional": true},
@@ -2685,7 +2688,8 @@
     "ChildWorkMode": {"raw":"export type ChildWorkMode = 'read_only' | 'shared' | 'isolated_write';","rustType":"varin_runtime::catalog::dispatch::ChildWorkMode"},
     "ChildModelBinding": {"fields":{"configuration":{"type":"ModelSessionConfiguration"},"credential_scope":{"type":"CredentialScope | null"}},"rustType":"varin_runtime::catalog::dispatch::ChildModelBinding"},
     "ChildCapabilityFailure": {"fields":{"code":{"type":"string"},"capabilities":{"type":"string[]"}},"rustType":"varin_runtime::catalog::dispatch::ChildCapabilityFailure"},
-    "ChildPreset": {"fields":{"description":{"type":"string","optional":true},"tools_source":{"type":"'default' | 'explicit'"},"id":{"type":"string"},"name":{"type":"string"},"instructions":{"type":"string"},"tools":{"type":"string[]"},"model":{"type":"ChildModelBinding | null"},"unavailable":{"type":"ChildCapabilityFailure | null"},"model_source":{"type":"'inherit' | 'selected'"},"inherit_base":{"type":"ChildModelBinding | null"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildPreset"},
+    "ChildPreset": {"fields":{"external":{"type":"{ configuration_id: string; harness: 'codex' | 'claude' | 'pi' | 'acp'; model?: string; launch: { command: string; args: string[] } }","optional":true},"description":{"type":"string","optional":true},"tools_source":{"type":"'default' | 'explicit'"},"id":{"type":"string"},"name":{"type":"string"},"instructions":{"type":"string"},"tools":{"type":"string[]"},"model":{"type":"ChildModelBinding | null"},"unavailable":{"type":"ChildCapabilityFailure | null"},"model_source":{"type":"'inherit' | 'selected'"},"inherit_base":{"type":"ChildModelBinding | null"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildPreset"},
+    "ExternalChild": {"fields":{"operation_id":{"type":"string"},"dispatch_operation_id":{"type":"string | null"},"message_kind":{"type":"'inform' | 'request' | null"},"parent_run_id":{"type":"string"},"parent_thread_id":{"type":"string"},"parent_branch_id":{"type":"string"},"conversation_id":{"type":"string"},"name":{"type":"string"},"avatar":{"type":"string | null"},"binding":{"type":"NonNullable<ChildPreset['external']>"},"work_mode":{"type":"'shared' | 'read_only' | 'isolated_write'"},"handoff":{"type":"ChildSourceHandoff | null"},"input_ref":{"type":"unknown"},"turn_id":{"type":"string | null"},"state":{"type":"string"},"cancel_requested":{"type":"boolean"},"report":{"type":"unknown"},"source":{"type":"unknown"},"resources_released":{"type":"boolean"},"receipt_published":{"type":"boolean"},"revision":{"type":"number"},"cursor":{"type":"number"},"accepted_at_ms":{"type":"number"},"finished_at_ms":{"type":"number | null"}},"rustType":"varin_runtime::catalog::external_children::ExternalChild"},
     "ChildDispatchCatalog": {"fields":{"native_capabilities":{"type":"ChildCapabilityDescriptor[]"},"identity":{"type":"string"},"presets":{"type":"ChildPreset[]"},"normal_unavailable":{"type":"ChildCapabilityFailure | null"}},"rustType":"varin_runtime::catalog::dispatch::ChildDispatchCatalog"},
     "ChildSelectedProfile": {"fields":{"preset_id":{"type":"string | null"},"catalog_identity":{"type":"string | null"},"work_mode":{"type":"ChildWorkMode"},"tools":{"type":"string[]"},"instructions":{"type":"string"},"avatar":{"type":"string","optional":true}},"rustType":"varin_runtime::catalog::dispatch::ChildSelectedProfile"},
     "TreeCancelTarget": {"raw":"export type TreeCancelTarget = { kind: 'thread'; thread_id: string } | { kind: 'child'; operation_id: string };","rustType":"varin_runtime::catalog::dispatch::TreeCancelTarget"},
@@ -3048,6 +3052,7 @@
     "runtime.mcp.interaction.close": "Trusted original MCP user interaction authority",
     "runtime.mcp.interaction.complete": "Trusted original MCP user interaction authority",
     "runtime.mcp.interaction.release_source": "Trusted original MCP user interaction authority",
+    "runtime.external.command": "Trusted external harness conversation, settings and observation commands",
     "runtime.managed_process.pending": "Trusted managed process projection of the original invocation",
     "runtime.managed_process.terminal": "Trusted managed process projection of the original invocation",
     "runtime.managed_process.cell": "Trusted managed process projection of the original invocation",

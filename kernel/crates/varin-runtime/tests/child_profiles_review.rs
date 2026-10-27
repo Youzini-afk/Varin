@@ -64,6 +64,7 @@ fn install(
 }
 fn preset(id: &str, model: Option<ChildModelBinding>) -> ChildPreset {
     ChildPreset {
+        external: None,
         description: None,
         avatar: None,
         tools_source: varin_runtime::catalog::dispatch::ChildPresetToolsSource::Explicit,

@@ -35,6 +35,14 @@ struct MessageTools {
     catalog: Arc<Mutex<Catalog>>,
 }
 impl MessageTools {
+    fn external(&self, context:&ToolExecutionContext, call:&ToolCall)->Result<Option<varin_runtime::catalog::external_messages::Prepared>,ExecutionError> {
+        let input=input(call)?;
+        let db=self.catalog.lock().map_err(error)?;
+        let Some(target)=input.target_thread_id.as_deref() else{return Ok(None)};
+        if db.external_message_target(&context.run_id,target).map_err(error)?.is_none(){return Ok(None);}
+        let preparation=db.prepare_external_message(context,call.clone(),input).map_err(error)?;
+        drop(db);Ok(Some(preparation.load().map_err(error)?))
+    }
     fn capture(
         &self,
         context: &ToolExecutionContext,
@@ -104,6 +112,9 @@ impl ToolExecutor for MessageTools {
         if cancel.is_cancelled() {
             return Err(error("send cancelled"));
         }
+        if let Some(prepared)=self.external(context,call)? {
+            return self.catalog.lock().map_err(error)?.authorize_external_message(&prepared).map_err(error);
+        }
         let prepared = self.capture(context, call)?.load().map_err(error)?;
         if cancel.is_cancelled() {
             return Err(error("send cancelled"));
@@ -122,6 +133,10 @@ impl ToolExecutor for MessageTools {
         cancel: &CancellationToken,
     ) -> ToolCompletion {
         let result = (|| -> Result<ToolCompletion, ExecutionError> {
+            if let Some(prepared)=self.external(context,call)? {
+                if cancel.is_cancelled(){return Err(error("send cancelled before acceptance"));}
+                return self.catalog.lock().map_err(error)?.admit_external_message(prepared).map_err(error);
+            }
             let prepared = self.capture(context, call)?.load().map_err(error)?;
             let mut catalog = self.catalog.lock().map_err(error)?;
             if cancel.is_cancelled() {

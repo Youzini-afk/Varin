@@ -36,6 +36,7 @@ export function agentPresetTools(capabilities: readonly { name: string; default_
 }
 
 export interface ExecutionPreset {
+  external?: import('./harness-agents.js').HarnessExternalAgent;
   avatar?: import('./agent-runtime.generated.js').AgentAvatarId;
   id: string;
   slot?: HarnessModelRole;
@@ -127,17 +128,18 @@ export function observePresets(
       modelSource: binding?.providerId && binding.modelId ? "selected" : "inherit",
       availability: binding?.enabled === false ? "disabled"
         : focus && definition.workFocus?.length && !definition.workFocus.includes(focus) ? "scope_unavailable"
-          : model ? "available" : "unconfigured" });
+          : definition.external || model ? "available" : "unconfigured" });
   }
   for (const [key, agent] of Object.entries(custom)) {
     const tools = resolveAgentTools(agent.tools, runtime);
     const model = agent.model ?? mainModel;
     const id = `custom:${key}`;
     observations.push({ id, model, modelSource: agent.model ? "selected" : "inherit",
-      availability: !agent.enabled ? "disabled" : tools.source === "unconfigured" ? "runtime_unconfigured"
+      availability: !agent.enabled ? "disabled" : !agent.external && tools.source === "unconfigured" ? "runtime_unconfigured"
         : focus && agent.workFocus.length && !agent.workFocus.includes(focus) ? "scope_unavailable"
-          : model ? "available" : "unconfigured",
+          : agent.external || model ? "available" : "unconfigured",
       definition: { id, tools: tools.names,
+        ...(agent.external ? { external: agent.external } : {}),
         ...(agent.avatar ? { avatar: agent.avatar } : {}),
         systemPromptFragment: agent.instructions, teamDescription: `${agent.name}: ${agent.description}`,
         name: agent.name, workFocus: [...agent.workFocus], ...(agent.modelSettings ? { modelSettings: { ...agent.modelSettings } } : {}) } });

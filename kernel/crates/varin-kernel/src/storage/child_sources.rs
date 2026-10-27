@@ -339,6 +339,25 @@ impl Storage {
                 "preparation grant exceeds the accepted child source handoff".into(),
             )
         };
+        // External harnesses need a real cwd before a native Run exists. Their original
+        // Catalog-checked handoff may materialize only this child's pinned baseline into
+        // its deterministic private directory; it cannot gain general writes to Storage.
+        if grant.thread_id.as_deref()==Some(format!("external:child:{dispatch}").as_str()) {
+            let container=fs::canonicalize(&self.root)?;
+            if method=="file.root.register" && params["canonicalRoot"].as_str()
+                .is_some_and(|p|fs::canonicalize(p).is_ok_and(|path|path==container)) {return Ok(());}
+            if method=="file.materialize" {
+                let key=hex::encode(Sha256::digest(serde_json::to_vec(&json!([handoff.source.workspace_id,format!("external:child:{dispatch}")]))?));
+                let pin_root:Option<String>=self.conn.query_row("SELECT root_hash FROM pins WHERE pin_id=?1 AND branch_id=?2 AND workspace_id=?3 AND revision=0",params![format!("child-source-pin:{dispatch}"),branch,handoff.source.workspace_id],|r|r.get(0)).optional()?;
+                let root_id=params["rootId"].as_str().ok_or_else(deny)?;
+                if params["operationId"]!=format!("external-materialize:{key}") {return Err(KernelError::Authorization("external materialization operation differs from its original child".into()));}
+                if params["path"]!=format!("managed/runs/{key}") {return Err(KernelError::Authorization("external materialization path differs from its owned directory".into()));}
+                if pin_root.is_none() {return Err(KernelError::Authorization("external materialization baseline pin is unavailable".into()));}
+                if pin_root.as_deref()!=params["sourceRoot"].as_str() {return Err(KernelError::Authorization("external materialization baseline differs from its retained pin".into()));}
+                if self.registered_file_root(root_id,grant)?.canonical_root!=container {return Err(KernelError::Authorization("external materialization container differs from its Storage owner".into()));}
+                return Ok(());
+            }
+        }
         let allowed = matches!(
             method,
             "storage.health"
@@ -549,7 +568,7 @@ impl Storage {
         if let Some(result) = receipt["result"].as_object() {
             data.extend(result.clone());
         }
-        let exchange=data.get("operationBinding").and_then(|v|v.get("kind")).and_then(Value::as_str)==Some("code_exchange");
+        let exchange=matches!(data.get("operationBinding").and_then(|v|v.get("kind")).and_then(Value::as_str),Some("code_exchange"|"external_code_exchange"));
         let target=if exchange {serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(data["operationBinding"]["target"].clone())?}else{read.source.clone()};
         let source = &target;
         if source.workspace_id!=read.source.workspace_id || source.resource_owner!=read.source.resource_owner {
@@ -573,12 +592,18 @@ impl Storage {
                     .canonical_root,
             ),
             varin_runtime::SourceMode::Materialized => {
+                let environment=match source.environment_run_id.as_deref() {
+                    Some(id)=>id,
+                    None if exchange=>data["operationBinding"]["targetRunId"].as_str().ok_or_else(||KernelError::Storage("exchange target Run missing".into()))?,
+                    None=>&read.run_id,
+                };
                 let key = hex::encode(Sha256::digest(serde_json::to_vec(&json!([
                     source.workspace_id,
-                    source.environment_run_id.as_deref().unwrap_or(if exchange {data["operationBinding"]["targetRunId"].as_str().ok_or_else(||KernelError::Storage("exchange target Run missing".into()))?}else{&read.run_id})
+                    environment
                 ]))?));
+                let external_target=data["operationBinding"]["kind"]=="external_code_exchange" && data["operationBinding"]["direction"]=="send";
                 let materialization = self
-                    .operation_get(&json!({"operationId":format!("source-materialize:{key}")}))?;
+                    .operation_get(&json!({"operationId":format!("{}:{key}",if external_target{"external-materialize"}else{"source-materialize"})}))?;
                 if materialization["kind"] != "file.materialize"
                     || materialization["state"] != "committed"
                     || materialization["result"]["status"] != "materialized"
@@ -595,7 +620,17 @@ impl Storage {
                 ))
             }
         };
-        if data.get("applyCanonicalRoot").and_then(Value::as_str) != expected.to_str() {
+        let same_root=data.get("applyCanonicalRoot").and_then(Value::as_str).is_some_and(|recorded| {
+            #[cfg(windows)] {
+                // Compare recorded identities without requiring the directory to survive.
+                // Node realpath omits the namespace prefix Rust canonicalize preserves.
+                let plain=|path:&Path| {let text=path.to_string_lossy().replace('/',"\\");
+                    if let Some(rest)=text.strip_prefix("\\\\?\\UNC\\"){format!("\\\\{rest}")}else{text.strip_prefix("\\\\?\\").unwrap_or(&text).to_owned()}};
+                plain(Path::new(recorded))==plain(&expected)
+            }
+            #[cfg(not(windows))] {Path::new(recorded)==expected}
+        });
+        if !same_root {
             return Err(KernelError::Authorization(
                 "Integration journal changed its admitted physical identity".into(),
             ));

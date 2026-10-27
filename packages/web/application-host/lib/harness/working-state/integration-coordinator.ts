@@ -674,7 +674,7 @@ export class IntegrationCoordinator {
         const binding = (row.data as { operationBinding?: IntegrationOperationBinding } | undefined)?.operationBinding, selected = input.operationBinding;
         if (!binding || !selected || binding.parentThreadId !== selected.parentThreadId
           || binding.parentBranchId !== selected.parentBranchId || binding.kind !== selected.kind
-          || (binding.kind !== 'code_exchange' && selected.kind !== 'code_exchange' && binding.childExecutionId !== selected.childExecutionId)
+          || ('childExecutionId' in binding && 'childExecutionId' in selected && binding.childExecutionId !== selected.childExecutionId)
           || !isDeepStrictEqual(binding.result, selected.result) || !isDeepStrictEqual(binding.target, selected.target)) continue;
         const id = String(row.operationId);
         const record = await (this.readIntegrationOperation

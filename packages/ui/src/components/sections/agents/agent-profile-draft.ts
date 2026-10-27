@@ -2,6 +2,8 @@ import type { AgentProfileConfig, AgentProfileView, AgentRuntime, AgentProfileSa
 import type { AgentAvatarId, ThinkingLevel, WorkFocusId } from '@varin/protocol';
 
 export interface AgentProfileDraft {
+  externalAgent: string;
+  externalModel: string;
   avatar: AgentAvatarId | '';
   name: string;
   description: string;
@@ -20,7 +22,9 @@ export const agentProfileDrafts = new Map<string, RetainedAgentProfileDraft>();
 
 export function makeAgentProfileDraft(profile?: AgentProfileView, newTools: readonly string[] = []): AgentProfileDraft {
   const effective = profile?.effective;
+  const external = profile?.config.kind === 'builtin' ? profile.config.binding.agent?.external : profile?.config.agent.external;
   return {
+    externalAgent: external?.configurationId ?? '', externalModel: external?.model ?? '',
     avatar: effective?.avatar ?? '',
     name: effective?.name ?? '', description: effective?.description ?? '', instructions: effective?.instructions ?? '',
     enabled: effective?.enabled ?? true,
@@ -40,9 +44,11 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
     ...(draft.thinkingLevel === 'inherit' ? {} : { thinkingLevel: draft.thinkingLevel }),
   };
   let config: AgentProfileConfig;
+  const external = draft.externalAgent ? { configurationId: draft.externalAgent, ...(draft.externalModel.trim() ? { model: draft.externalModel.trim() } : {}) } : undefined;
   if (profile?.config.kind === 'builtin') {
     const defaults = profile.defaults ? { ...profile.defaults, ...defaultLabels } : null;
     const overrides = {
+      ...(external ? { external } : {}),
       ...(draft.avatar ? { avatar: draft.avatar } : {}),
       ...(draft.name.trim() === defaults?.name ? {} : { name: draft.name.trim() }),
       ...(draft.description === defaults?.description ? {} : { description: draft.description }),
@@ -54,6 +60,7 @@ export function agentProfileSaveRequest(runtime: AgentRuntime, revision: string,
     } };
   } else {
     config = { kind: 'custom', key: profile?.config.kind === 'custom' ? profile.config.key : '', agent: {
+      ...(external ? { external } : {}),
       name: draft.name.trim(), description: draft.description, instructions: draft.instructions, enabled: draft.enabled,
       ...(draft.avatar ? { avatar: draft.avatar } : {}),
       ...(model ? { model } : {}), ...(Object.keys(modelSettings).length ? { modelSettings } : {}),

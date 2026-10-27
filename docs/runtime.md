@@ -1,8 +1,9 @@
 # Agent 运行时
 
-产品对话通过 Rust `varin-runtime` 执行，Thread/branch 历史、输入受理与执行由 Catalog 统一拥有。
+Varin 原生对话通过 Rust `varin-runtime` 执行，Thread/branch 历史、输入受理与执行由 Catalog 统一拥有。
 既有 Application Host 继续承担模型账号、资源、扩展和领域服务。旧 Pi runtime 与产品入口已经移除，
 不自动导入或重写历史用户资产，也不保留第二个对话 writer。
+[外部 Agent](external-agents.md) 使用独立程序的原生协议执行，Varin 产品记录仍由同一 Catalog 保存。
 
 [架构](architecture.md)说明包和进程边界；[资源与恢复](resources.md)说明文件、进程和环境；
 [检索与知识](retrieval.md)说明材料和推理消费者；[扩展](extensions.md)说明作者接口。

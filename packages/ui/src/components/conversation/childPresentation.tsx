@@ -11,6 +11,7 @@ const states: Record<string, I18nKey> = {
   waiting: 'harness.threads.state.waiting', completed: 'harness.threads.state.completed',
   failed: 'harness.threads.state.failed', cancelled: 'harness.threads.state.cancelled',
   settling: 'chat.children.settling',
+  waiting_user: 'external.status.waiting_user', interrupted: 'external.status.interrupted',
 };
 /** A member's state: starting → running → completed change in place. */
 export function ChildState({ state }: { state: string }) {

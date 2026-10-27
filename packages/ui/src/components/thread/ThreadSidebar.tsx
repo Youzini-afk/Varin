@@ -17,22 +17,28 @@ import { invokeDesktop, isDesktopShell } from '@/lib/desktop';
 import type { ThreadSummary } from '@varin/protocol';
 import { ThreadSidebarList } from './ThreadSidebarList';
 import { threadSubtreeIds } from '@/lib/agent-runtime/thread-tree';
+import { useExternalAgents, useExternalAgentStore, openConversationFromNavigation } from '@/stores/useExternalAgentStore';
+import { HarnessIcon } from './HarnessIcon';
 
 function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVariant = false, onNavigate }: { isVisible?: boolean; mobileVariant?: boolean; archived?: boolean; onNavigate?(): void }) {
   const { t } = useI18n();
   const threads = useThreadStore(state => state.threads);
+  useExternalAgents();
+  const external = useExternalAgentStore(state => state.conversations);
   const selected = useThreadStore(state => state.selectedIdentity);
   const loading = useThreadStore(state => state.catalogLoading);
   const error = useThreadStore(state => state.catalogError);
   const projects = useProjectsStore(state => state.projects);
   const confirmDelete = useUIStore(state => state.showDeletionDialog);
   const [query, setQuery] = React.useState('');
+  const externalVisible = external.filter(c => c.archived === archived && c.title.toLocaleLowerCase().includes(query.toLocaleLowerCase()));
   const [rename, setRename] = React.useState<ThreadSummary | null>(null);
   const [title, setTitle] = React.useState('');
   const [deleting, setDeleting] = React.useState<ThreadSummary | null>(null);
+  const [deletingExternal, setDeletingExternal] = React.useState<{id: string; title: string} | null>(null);
   const [pending, setPending] = React.useState(false);
   const hostKey = useThreadStore(state => state.hostKey);
-  React.useEffect(() => { setRename(null); setDeleting(null); setQuery(''); }, [hostKey]);
+  React.useEffect(() => { setRename(null); setDeleting(null); setDeletingExternal(null); setQuery(''); }, [hostKey]);
   const act = async (work: () => Promise<unknown>) => { setPending(true); try { await work(); } catch (error) { toast.error(error instanceof Error ? error.message : String(error)); } finally { setPending(false); } };
   const visible = React.useMemo(() => threads.filter(thread => !thread.bot_id && thread.deleted_at_ms === null && thread.archived === archived), [threads, archived]);
   const navigate = async (threadId?: string, branchId?: string, directory?: string) => {
@@ -64,7 +70,10 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
     {error && <div role="alert" className="text-xs text-destructive">{error}<Button variant="ghost" size="sm" onClick={() => void act(() => useThreadStore.getState().loadCatalog())}>{t('research-workbench.retry')}</Button></div>}
     {loading && !threads.length && <span role="status">{t('common.loading')}</span>}
     <div className="min-h-0 flex-1 overflow-y-auto">
-      {!visible.length && !loading && <p className="p-2 text-sm text-muted-foreground">{t(archived ? 'sessions.archivePage.empty.noArchived' : 'sessions.sidebar.empty.noSessions.title')}</p>}
+      {externalVisible.map(c => <div key={c.id} className="mb-1 flex items-center gap-2 rounded-md px-2 py-2 hover:bg-interactive-hover"><button type="button" className="flex min-w-0 flex-1 items-center gap-2 text-left typography-meta" onClick={() => void act(async () => { await openConversationFromNavigation({threadId:c.id}); onNavigate?.(); })}><HarnessIcon harness={c.harness} /><span className="truncate">{c.title}</span></button>
+        <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={t('header.sessionActions.openAria')}><Icon name="more" className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent><DropdownMenuItem onClick={() => void act(() => useExternalAgentStore.getState().update(c.id, { archived: !c.archived }))}>{t(c.archived ? 'sessions.sidebar.session.menu.restore' : 'sessions.sidebar.bulkActions.archive')}</DropdownMenuItem><DropdownMenuItem onClick={() => { if (confirmDelete) setDeletingExternal(c); else void act(() => useExternalAgentStore.getState().update(c.id, { deleted: true })); }}>{t('sessions.sidebar.bulkActions.delete')}</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+      </div>)}
+      {!visible.length && !externalVisible.length && !loading && <p className="p-2 text-sm text-muted-foreground">{t(archived ? 'sessions.archivePage.empty.noArchived' : 'sessions.sidebar.empty.noSessions.title')}</p>}
       <ThreadSidebarList key={hostKey} threads={visible} query={query} selectedBranchId={selected?.branchId}
         navigate={(threadId, branchId) => void act(() => navigate(threadId, branchId))} createInProject={path => void act(() => navigate(undefined, undefined, path))}
         renderRow={(thread, disclosure) => {
@@ -93,8 +102,8 @@ function ArchiveThreadSidebar({ isVisible = true, archived = false, mobileVarian
       <form onSubmit={event => { event.preventDefault(); if (rename && title.trim()) void act(async () => { await useThreadStore.getState().updateThread(rename.thread_id, { title: title.trim() }); setRename(null); }); }}>
         <Input value={title} onChange={event => setTitle(event.target.value)} autoFocus /><DialogFooter><Button type="submit" disabled={pending || !title.trim()}>{t('inlineComment.actions.save')}</Button></DialogFooter>
       </form></DialogContent></Dialog>
-    <Dialog open={Boolean(deleting)} onOpenChange={open => { if (!open) setDeleting(null); }}><DialogContent><DialogHeader><DialogTitle>{t('sessions.sidebar.bulkActions.delete')}</DialogTitle><DialogDescription>{t(deleteCount > 1 ? 'sessions.sidebar.dialogs.deleteSession.withManySubtasks' : deleteCount ? 'sessions.sidebar.dialogs.deleteSession.withOneSubtask' : 'sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: deleting?.title ?? '', count: deleteCount })}</DialogDescription></DialogHeader>
-      <DialogFooter><Button variant="destructive" disabled={pending} onClick={() => { if (deleting) void act(async () => { await retainTree(deleting.thread_id, 'delete'); setDeleting(null); }); }}>{t('sessions.sidebar.bulkActions.delete')}</Button></DialogFooter>
+    <Dialog open={Boolean(deleting || deletingExternal)} onOpenChange={open => { if (!open) { setDeleting(null); setDeletingExternal(null); } }}><DialogContent><DialogHeader><DialogTitle>{t('sessions.sidebar.bulkActions.delete')}</DialogTitle><DialogDescription>{t(deleteCount > 1 ? 'sessions.sidebar.dialogs.deleteSession.withManySubtasks' : deleteCount ? 'sessions.sidebar.dialogs.deleteSession.withOneSubtask' : 'sessions.sidebar.dialogs.deleteSession.single', { sessionTitle: deleting?.title ?? deletingExternal?.title ?? '', count: deleteCount })}</DialogDescription></DialogHeader>
+      <DialogFooter><Button variant="destructive" disabled={pending} onClick={() => void act(async () => { if (deleting) await retainTree(deleting.thread_id, 'delete'); else if (deletingExternal) await useExternalAgentStore.getState().update(deletingExternal.id,{deleted:true}); setDeleting(null); setDeletingExternal(null); })}>{t('sessions.sidebar.bulkActions.delete')}</Button></DialogFooter>
     </DialogContent></Dialog>
   </nav>;
 }
