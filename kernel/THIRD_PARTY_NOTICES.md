@@ -1,16 +1,41 @@
 # Rust kernel dependency notices
 
 The kernel is distributed with the dependency graph locked in `Cargo.lock`. The direct dependencies
-used by the private executable are distributed under their upstream permissive licenses:
+used by the private executable retain their upstream licenses:
 
 - `rusqlite` / `libsqlite3-sys` — MIT; SQLite itself is public domain.
 - `serde`, `serde_json`, `thiserror`, `uuid`, `sha2`, `hex`, and `base64` — MIT or Apache-2.0.
 - `flate2` and its Rust compression backend `miniz_oxide` — MIT or Apache-2.0.
 - `tree-sitter` — MIT.
 - `wasmtime`, its C API, and Cranelift — Apache-2.0 with LLVM exceptions.
+- Optional native workspace mount prototypes: `winfsp` / `winfsp-sys` — GPL-3.0;
+  `fuser` — MIT. The WinFsp system filesystem component and macFUSE are user-installed
+  prerequisites, not installed or redistributed by enabling this source feature.
+  The capability/lifecycle patch and original MIT text are retained in
+  `kernel/vendor/fuser/VARIN_PATCHES.md` and `kernel/vendor/fuser/LICENSE.md`.
 
 The complete transitive source and license metadata remain available from crates.io using the exact
 versions in `Cargo.lock`; release automation must include this notice beside the staged executable.
+
+### fuser (optional native mount feature)
+
+MIT License. Copyright (c) 2020-present Christopher Berner.
+Copyright (c) 2013-2019 Andreas Neuhaus, https://zargony.com/.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING
+BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 ## Pi model metadata and account protocols
 

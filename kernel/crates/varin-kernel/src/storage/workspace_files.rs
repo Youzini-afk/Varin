@@ -182,6 +182,7 @@ pub(crate) struct FilePublication {
     installed: InstalledFile,
 }
 impl FilePublication {
+    pub(crate) fn committed(&self) -> bool { self.receipt["status"] == "committed" }
     /// Finish on the file worker after the Storage transaction returned. A
     /// backing unlink can involve the native filesystem and stays off control.
     pub(crate) fn finish(self) -> Value {
@@ -809,6 +810,9 @@ impl Storage {
     }
 
     pub(super) fn revoke_private_files(&mut self, grant: &str) {
+        for revoked in self.workspace_revocations.remove(grant).into_iter().flatten().filter_map(|weak| weak.upgrade()) {
+            revoked.store(true, Ordering::Release);
+        }
         for handle in self
             .private_files
             .remove(grant)
@@ -825,6 +829,39 @@ impl Storage {
         candidate: &SealedFile,
     ) -> blob_reads::BlobReadRetention {
         self.blob_read_roots.retain(&candidate.hash)
+    }
+
+    pub(super) fn publish_workspace_checkpoint(
+        &mut self, source: &str, pin: &str, workspace: &str, target: &str, operation: &str,
+        files: &[(String, u32, InstalledFile)], actor: &Grant,
+    ) -> Result<Value, KernelError> {
+        let grant = self.load_grant(&actor.grant_id)?;
+        if grant.state != crate::model::GrantState::Active || grant.kernel_epoch != actor.kernel_epoch
+            || grant.owning_workspace.as_deref() != Some(workspace) || !path_allowed(&grant, "") {
+            return Err(KernelError::Authorization("checkpoint requires its original active workspace owner".into()));
+        }
+        require_capability(&grant,"branch.fork")?;
+        let pinned = self.pin_read(&json!({"pinId":pin,"includeEntries":false}), &actor.grant_id)?;
+        if pinned["branchId"] != source || pinned["workspaceId"] != workspace {
+            return Err(KernelError::Authorization("checkpoint pin belongs to another workspace".into()));
+        }
+        let mut entries = Vec::new();
+        for (path,mode,file) in files {
+            let owner = blob_owner_id(&format!("{operation}:{path}"));
+            entries.push(json!({"path":path,"state":{"kind":"regular-file","objectHash":file.content.hash,"byteLength":file.content.length,"mode":mode},"ownerId":owner}));
+        }
+        let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":pinned["root"],
+            "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[]});
+        super::operations::idempotent(self,"workspace.checkpoint.fork",&input,|s| {
+            for (path,_,file) in files {
+                let content = &file.content;
+                s.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",params![content.hash,i64::try_from(content.length).map_err(|_|KernelError::Operation("content length exceeds Storage range".into()))?])?;
+                s.record_object_owner(&blob_owner_id(&format!("{operation}:{path}")),&content.hash,Some(workspace),Some(operation),&actor.grant_id)?;
+            }
+            let mut creation = input.clone();
+            creation.as_object_mut().unwrap().remove("sourcePinId");
+            s.create_branch(&creation,&actor.grant_id)
+        })
     }
 
     pub(crate) fn publish_private_file(

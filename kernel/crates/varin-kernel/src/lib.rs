@@ -46,6 +46,8 @@ mod storage_schema;
 mod source_resources;
 mod tools;
 mod transport;
+#[cfg(feature = "workspace-mount")]
+mod workspace_mount;
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]

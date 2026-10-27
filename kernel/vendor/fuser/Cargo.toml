@@ -1,0 +1,116 @@
+# Dependency-only manifest from fuser 0.18.0. See VARIN_PATCHES.md.
+
+[package]
+edition = "2024"
+rust-version = "1.85"
+name = "fuser"
+version = "0.18.0"
+authors = ["Christopher Berner <me@cberner.com>"]
+build = "build.rs"
+autolib = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "Filesystem in Userspace (FUSE) for Rust"
+homepage = "https://github.com/cberner/fuser"
+documentation = "https://docs.rs/fuser"
+readme = "VARIN_PATCHES.md"
+keywords = [
+    "fuse",
+    "filesystem",
+    "system",
+    "bindings",
+]
+categories = [
+    "external-ffi-bindings",
+    "api-bindings",
+    "filesystem",
+    "os::unix-apis",
+]
+license = "MIT"
+repository = "https://github.com/cberner/fuser"
+
+[features]
+default = []
+experimental = [
+    "async-trait",
+    "tokio",
+]
+libfuse = []
+libfuse2 = ["libfuse"]
+libfuse3 = ["libfuse"]
+macfuse-4-compat = []
+macos-no-mount = []
+serializable = ["serde"]
+
+[lib]
+name = "fuser"
+path = "src/lib.rs"
+
+[dependencies.async-trait]
+version = "0.1"
+optional = true
+
+[dependencies.bitflags]
+version = "2.9"
+
+[dependencies.libc]
+version = "0.2.51"
+
+[dependencies.log]
+version = "0.4.6"
+
+[dependencies.memchr]
+version = "2.7.2"
+
+[dependencies.nix]
+version = "0.31.0"
+features = [
+    "fs",
+    "user",
+    "poll",
+    "socket",
+    "uio",
+    "mount",
+    "process",
+    "ioctl",
+]
+
+[dependencies.num_enum]
+version = "0.7.5"
+
+[dependencies.page_size]
+version = "0.6.0"
+
+[dependencies.parking_lot]
+version = "0.12"
+
+[dependencies.ref-cast]
+version = "1.0.25"
+
+[dependencies.serde]
+version = "1.0.102"
+features = [
+    "std",
+    "derive",
+]
+optional = true
+
+[dependencies.smallvec]
+version = "1.6.1"
+
+[dependencies.tokio]
+version = "1.48.0"
+features = [
+    "rt",
+    "rt-multi-thread",
+]
+optional = true
+
+[dependencies.zerocopy]
+version = "0.8"
+features = ["derive"]
+
+[build-dependencies.pkg-config]
+version = "0.3.14"

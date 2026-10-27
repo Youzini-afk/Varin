@@ -202,6 +202,8 @@ impl Storage {
             source_capture_cache: HashMap::new(),
             blob_read_roots: Default::default(),
             private_files: HashMap::new(),
+            workspace_revocations: HashMap::new(),
+            workspace_sessions: HashMap::new(),
             private_cleanup: Arc::default(),
             file_roots: HashMap::new(),
             observation_reads: HashMap::new(),

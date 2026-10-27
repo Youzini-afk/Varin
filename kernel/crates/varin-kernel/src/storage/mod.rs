@@ -34,6 +34,7 @@ pub(crate) mod blob_reads;
 mod branches;
 pub(crate) mod branch_namespace;
 pub(crate) mod workspace_files;
+pub(crate) mod workspace_session;
 pub(crate) mod capture_resources;
 mod child_sources;
 mod compute_resources;
@@ -220,6 +221,8 @@ pub(crate) struct Storage {
     source_capture_cache: HashMap<(String, String), capture_resources::CaptureReuse>,
     blob_read_roots: blob_reads::BlobReadRoots,
     private_files: HashMap<String, Vec<std::sync::Weak<workspace_files::PrivateFile>>>,
+    workspace_revocations: HashMap<String, Vec<std::sync::Weak<AtomicBool>>>,
+    workspace_sessions: HashMap<String, std::sync::Weak<workspace_session::Session>>,
     private_cleanup: Arc<workspace_files::StagingCleanup>,
     file_roots: HashMap<String, FileRoot>,
     observation_reads: HashMap<String, file_observations::ActiveRead>,
@@ -242,6 +245,9 @@ impl Drop for Storage {
         // Keep the catalog and storage lock alive through process drainage.
         // Field drop order alone would unlock before native children stop.
         self.process_receipt_wake.take();
+        for tokens in self.workspace_revocations.values() {
+            for token in tokens.iter().filter_map(std::sync::Weak::upgrade) { token.store(true,Ordering::Release); }
+        }
         for handles in self.private_files.values() {
             for handle in handles.iter().filter_map(std::sync::Weak::upgrade) { handle.revoke(); }
         }

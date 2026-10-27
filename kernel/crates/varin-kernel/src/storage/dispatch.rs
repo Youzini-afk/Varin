@@ -38,6 +38,7 @@ impl Storage {
         grant_id: Option<&str>,
         authorized_grant: &Grant,
     ) -> Result<Value, KernelError> {
+        self.admit_workspace_branch_request(method, authorized_params)?;
         self.sweep_compute_readers()?;
         // Ownership is rechecked before idempotent dispatch can return a stored receipt.
         if matches!(method, "storage.record.put" | "storage.record.release" | "working.result.put" | "working.result.release" | "working.draft.put" | "working.draft.release") {

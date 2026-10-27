@@ -5,6 +5,18 @@ upstream portions and do not make Varin as a whole available under the MIT Licen
 fonts, icons, and other separately distributed components remain under the licenses shipped with
 their respective packages or source files.
 
+## Native workspace filesystem bindings
+
+The optional `workspace-mount` source feature uses `winfsp` 0.13.2+winfsp-2.1 and
+`winfsp-sys` 0.12.1+winfsp-2.1 (GPL-3.0), from
+https://github.com/SnowflakePowered/winfsp-rs. WinFsp's installed system component and
+macFUSE are separate prerequisites; this feature does not install or bundle them.
+
+The FUSE adapter uses `fuser` 0.18.0 (MIT), copyright 2020-present Christopher Berner
+and 2013-2019 Andreas Neuhaus. Its library source and full MIT license are preserved
+in `kernel/vendor/fuser`; `VARIN_PATCHES.md` records the macOS capability-handshake
+patch against the exact upstream archive.
+
 ## imbl persistent collections
 
 The native private-file generation engine uses unmodified `imbl` 7.0.2, licensed

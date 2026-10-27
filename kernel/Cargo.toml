@@ -1,6 +1,10 @@
 [workspace]
 members = ["crates/varin-kernel", "crates/varin-runtime"]
+exclude = ["vendor/fuser"]
 resolver = "2"
+
+[patch.crates-io]
+fuser = { path = "vendor/fuser" }
 
 [workspace.package]
 edition = "2021"

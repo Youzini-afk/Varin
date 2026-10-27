@@ -90,9 +90,41 @@ publication reuses path CAS and the original operation transaction. Successful i
 release obsolete ranges while older readers retain their backing; the publication finisher performs
 backing cleanup on the file worker after the Storage transaction returns. Revocation closes original handles,
 and failed temporary-file cleanup remains visible/retryable through Storage cleanup status.
-These primitives have native tests but are not yet connected to runtime mounts or ordinary file tools.
-Mount integration must supply shared inode/handle identities, cache fences and actual flush/drainage;
-durable success follows publication, while an unsealed generation is process-local state.
+Durable success follows publication, while an unsealed generation is process-local state.
+
+`workspace_session.rs` supplies an in-process native filesystem session over that same Storage owner.
+Metadata uses a synchronous typed control port; range reads/writes use the admitted byte handles directly.
+Lookup/stat keeps metadata only. Actual opens retain byte descriptors; clean descriptors end with their
+native readers, while unsaved data retains its backing until publication. Directory walks do not open
+every file or retain an unbounded set of clean content descriptors.
+One branch/owner reuses one session and one set of open identities. Rename retains handles; unlink and
+recreate are different identities. Checkpoints retain the namespace and only dirty range maps, then seal
+individual files on a worker while the parent continues writing. The resulting child root includes those
+dirty bytes in its actual baseline. Normal session closure preserves previously retained checkpoints;
+grant revocation invalidates original access. Generic branch mutations cannot bypass a live session.
+
+The optional `workspace-mount` feature contains WinFsp and Linux/macOS FUSE qualification adapters.
+It does not install OS components or change any production Run's source selection. WinFsp is delay-loaded;
+the original installed DLL is located through its system registration only when starting a mount. Building
+this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
+FUSE device/helper for actual mounts; macOS requires an already-enabled macFUSE component and build SDK.
+The current macOS transport still uses the compat25 mounting API: macFUSE 5.3 changed that API and needs
+the retained-channel/fd ownership adaptation tracked at https://github.com/cberner/fuser/issues/752.
+It is not yet implemented here. `wait_ready` checks the actual mount device/root inode after the dispatcher
+starts, while keeping the mount object available for cancellation and cleanup; this covers the asynchronous
+readiness distinction at https://github.com/cberner/fuser/issues/736.
+`kernel/vendor/fuser/VARIN_PATCHES.md` records the capability and retryable-detach patch. macOS compile-only
+CI uses `fuser/macos-no-mount`, which deliberately cannot start a real mount and installs no extension.
+
+The ignored `workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent`
+test starts a separate ordinary process and two real mount paths. Invoke it explicitly with
+`cargo test -p varin-kernel --lib --features workspace-mount native_workspace_mounts_share_storage_and_keep_fork_independent -- --ignored --nocapture`
+on a machine with that component already enabled. It tests fsynced/closed ordinary handles; it does not
+qualify a dirty mmap/kernel-cache fence. The default Storage suite covers byte and namespace semantics.
+
+Remaining qualification includes persistent inode/ACL/xattr/time/native-name metadata, hardlinks,
+Windows reparse points, cache/mmap fences and application runtime drainage/restart. FSKit is not yet a
+backend. Current file tools, processes, IDE and external harnesses still use their existing source paths.
 
 Root admission queries an index of pending file operations; protocol traffic is not scanned as
 file recovery work. Query indexes are rebuildable and leave the record format unchanged. Ordinary

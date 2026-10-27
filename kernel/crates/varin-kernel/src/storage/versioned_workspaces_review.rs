@@ -6,6 +6,190 @@ struct Fixture {
     storage: Storage,
     directory: PathBuf,
 }
+
+#[test]
+fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping_parent() {
+    use super::workspace_session::{Command, Session, StoragePort};
+    let mut f = Fixture::new();
+    let a = f.blob("session-a", b"original");
+    f.begin("main", None);
+    f.append(
+        "main",
+        0,
+        json!([{"path":"folder/a","state":a["state"],"ownerId":a["ownerId"]}]),
+    )
+    .unwrap();
+    f.finish("main");
+    let actor = f.storage.load_grant("owner").unwrap();
+    f.call("branch.write.begin",json!({"operationId":"preopen-write","builderId":"preopen-write","branchId":"main","expectedWriteRevision":0})).unwrap();
+    let body_path =
+        object_path(&f.storage.root, a["state"]["objectHash"].as_str().unwrap()).unwrap();
+    let deferred_body = f.directory.join("deferred-body");
+    let directory = f.directory;
+    let mut storage = f.storage;
+    let (sender, receiver) = std::sync::mpsc::channel::<Option<Command>>();
+    let stopping = sender.clone();
+    let owner = std::thread::spawn(move || {
+        while let Ok(Some(command)) = receiver.recv() {
+            command(Some(&mut storage));
+        }
+        storage
+    });
+    let port = StoragePort::new(move |command| {
+        sender
+            .send(Some(command))
+            .map_err(|_| KernelError::Storage("test owner stopped".into()))
+    });
+    let session = Session::open(port.clone(), "main".into(), actor.clone()).unwrap();
+    assert!(Arc::ptr_eq(
+        &session,
+        &Session::open(port.clone(), "main".into(), actor.clone()).unwrap()
+    ));
+    let original = actor.clone();
+    let bypass = port.call(move |s| {
+        s.dispatch(
+            "branch.delete",
+            &json!({"operationId":"bypass-live-session","workspaceId":"project","branchId":"main"}),
+            Some("owner"),
+            &original,
+        )
+    });
+    assert!(
+        matches!(bypass,Err(KernelError::Execution(ref error)) if error.code=="workspace_live_boundary_required")
+    );
+    let original = actor.clone();
+    let bypass = port.call(move |s| {
+        s.dispatch(
+            "branch.write.finish",
+            &json!({"operationId":"preopen-write","builderId":"preopen-write"}),
+            Some("owner"),
+            &original,
+        )
+    });
+    assert!(
+        matches!(bypass,Err(KernelError::Execution(ref error)) if error.code=="workspace_live_boundary_required")
+    );
+    // Directory metadata does not open/scan file bodies. A cold unavailable
+    // object is reported only when an actual native byte handle is requested.
+    fs::rename(&body_path, &deferred_body).unwrap();
+    let opened = session.lookup("folder/a").unwrap();
+    assert!(session.open_file(&opened).is_err());
+    fs::rename(&deferred_body, &body_path).unwrap();
+    let opened_file = session.open_file(&opened).unwrap();
+    assert!(Arc::ptr_eq(&opened, &session.lookup("folder/a").unwrap()));
+    session.write(&opened, Some(0), b"changed!").unwrap();
+    let checkpoint = session.checkpoint().unwrap();
+    // The parent continues through the same open handle before child sealing.
+    session.write(&opened, Some(0), b"parent!!").unwrap();
+    session.rename("folder", "moved", false).unwrap();
+    assert!(Arc::ptr_eq(&opened, &session.lookup("moved/a").unwrap()));
+    session.flush(&opened).unwrap();
+    let child = checkpoint
+        .fork("child", "session-fork", &AtomicBool::new(false))
+        .unwrap();
+    assert_eq!(
+        child,
+        checkpoint
+            .fork("child", "session-fork", &AtomicBool::new(false))
+            .unwrap()
+    );
+    let selected = port
+        .call(|s| {
+            let child = s.branch("child")?;
+            assert_eq!(
+                child.base_root, child.head_root,
+                "dirty boundary is the child's actual baseline"
+            );
+            let state = s.root_get(&child.head_root, "folder/a")?.unwrap();
+            Ok(fs::read(object_path(
+                &s.root,
+                state.object_hash().unwrap(),
+            )?)?)
+        })
+        .unwrap();
+    assert_eq!(selected, b"changed!");
+    let child_session = Session::open(port.clone(), "child".into(), actor.clone()).unwrap();
+    let child_node = child_session.lookup("folder/a").unwrap();
+    assert!(session
+        .write(&child_node, Some(0), b"wrong session")
+        .is_err());
+    child_session.close().unwrap();
+    drop((child_node, child_session));
+    checkpoint.release().unwrap();
+    session.remove("moved/a", false).unwrap();
+    assert!(!opened.linked().unwrap());
+    let replacement = session.create_file("moved/a", 0o644).unwrap();
+    assert_ne!(opened.id, replacement.id);
+    session.write(&opened, Some(0), b"unlinked").unwrap();
+    session.write(&replacement, None, b"new file").unwrap();
+    session.flush(&opened).unwrap();
+    session.flush(&replacement).unwrap();
+    let mut bytes = [0; 8];
+    session.read(&opened, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"unlinked");
+    session.read(&replacement, 0, &mut bytes).unwrap();
+    assert_eq!(&bytes, b"new file");
+    session.remove("moved/a", false).unwrap();
+    session.remove("moved", true).unwrap();
+    assert!(session.lookup("moved/a").is_err());
+    let cycled = session.create_file("cycled", 0o644).unwrap();
+    for bytes in [b"one", b"two"] {
+        let handle = session.open_file(&cycled).unwrap();
+        let released = Arc::downgrade(&handle);
+        session.write(&cycled, Some(0), bytes).unwrap();
+        session.flush(&cycled).unwrap();
+        drop(handle);
+        assert!(
+            released.upgrade().is_none(),
+            "clean byte descriptors end with their native readers"
+        );
+    }
+    assert_eq!(
+        port.call(|s| {
+            let state = s.root_get(&s.branch("main")?.head_root, "cycled")?.unwrap();
+            Ok(fs::read(object_path(
+                &s.root,
+                state.object_hash().unwrap(),
+            )?)?)
+        })
+        .unwrap(),
+        b"two"
+    );
+    let retained = session.create_file("retained", 0o644).unwrap();
+    session
+        .write(&retained, None, b"retained across normal detach")
+        .unwrap();
+    let after_close = session.checkpoint().unwrap();
+    session.close().unwrap();
+    after_close
+        .fork("after-close", "fork-after-close", &AtomicBool::new(false))
+        .unwrap();
+    after_close.release().unwrap();
+    assert!(session.read(&opened, 0, &mut bytes).is_err());
+    assert!(session.create_file("after-detach", 0o644).is_err());
+    assert!(session.directory_after("", None, 1).is_err());
+    let directory_only = Session::open(port.clone(), "after-close".into(), actor).unwrap();
+    port.call(|s| s.revoke_grant(&json!({"grantId":"owner"}), "host"))
+        .unwrap();
+    assert!(matches!(
+        directory_only.lookup(""),
+        Err(KernelError::Cancelled)
+    ));
+    assert!(directory_only.directory_page("", None, 1).is_err());
+    drop((
+        opened_file,
+        opened,
+        replacement,
+        cycled,
+        retained,
+        directory_only,
+        session,
+        port,
+    ));
+    stopping.send(None).unwrap();
+    drop(owner.join().unwrap());
+    fs::remove_dir_all(directory).unwrap();
+}
 impl Fixture {
     fn new() -> Self {
         let directory = std::env::temp_dir().join(format!("workspace-tree-{}", Uuid::new_v4()));
