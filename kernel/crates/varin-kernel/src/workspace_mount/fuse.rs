@@ -1,12 +1,29 @@
 //! Linux FUSE / macOS macFUSE adapter. The native session and byte engine are
 //! shared with WinFsp; OS handles, inode replies and mount lifetime stay here.
 use super::*;
+use crate::storage::workspace_metadata::Timestamp;
 use crate::storage::workspace_session::Session as WorkspaceSession;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use fuser::*;
 use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
+
+fn attribute_error(code: &str, message: &str) -> KernelError {
+    KernelError::Execution(varin_runtime::execution::ExecutionError::new(code, message))
+}
+fn attribute_reply(value: Result<Vec<u8>, KernelError>, size: u32, reply: ReplyXattr) {
+    match value {
+        Ok(bytes) if size == 0 => match u32::try_from(bytes.len()) {
+            Ok(length) => reply.size(length),
+            Err(_) => reply.error(Errno::E2BIG),
+        },
+        Ok(bytes) if bytes.len() <= size as usize => reply.data(&bytes),
+        Ok(_) => reply.error(Errno::ERANGE),
+        Err(error) => reply.error(native(error)),
+    }
+}
 
 fn native(error: KernelError) -> Errno {
     match kind_error(&error) {
@@ -19,6 +36,18 @@ fn native(error: KernelError) -> Errno {
         "namespace_not_empty" => Errno::ENOTEMPTY,
         "namespace_conflict" | "namespace_stale_cursor" => Errno::ESTALE,
         "workspace_backend_unsupported" => Errno::ENOTSUP,
+        "namespace_xattr_missing" => {
+            #[cfg(target_os = "macos")]
+            {
+                Errno::from_i32(libc::ENOATTR)
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                Errno::from_i32(libc::ENODATA)
+            }
+        }
+        "namespace_xattr_exists" => Errno::EEXIST,
+        "namespace_xattr_invalid" => Errno::EINVAL,
         _ => Errno::EIO,
     }
 }
@@ -36,12 +65,10 @@ struct Handles {
 struct Backend {
     session: Arc<WorkspaceSession>,
     handles: Mutex<Handles>,
-    created: SystemTime,
-    uid: u32,
-    gid: u32,
 }
 impl Backend {
     fn node(&self, id: INodeNo) -> Result<Arc<Node>, KernelError> {
+        self.session.check_open()?;
         self.handles
             .lock()
             .map_err(|_| unsupported("Native handle registry failed"))?
@@ -71,7 +98,8 @@ impl Backend {
         })
     }
     fn attr(&self, node: &Node) -> Result<FileAttr, KernelError> {
-        let (size, kind, mode) = match node.state()? {
+        self.session.check_open()?;
+        let (size, kind, _mode) = match node.state()? {
             PathState::RegularFile {
                 byte_length, mode, ..
             } => (byte_length, FileType::RegularFile, mode),
@@ -90,22 +118,23 @@ impl Backend {
                 ))
             }
         };
+        let metadata = node.attributes()?;
         Ok(FileAttr {
             ino: INodeNo(node.id),
             size,
             blocks: size.div_ceil(512),
-            atime: self.created,
-            mtime: self.created,
-            ctime: self.created,
-            crtime: self.created,
+            atime: metadata.accessed.time()?,
+            mtime: metadata.modified.time()?,
+            ctime: metadata.changed.time()?,
+            crtime: metadata.created.time()?,
             kind,
-            perm: (mode & 0o7777) as u16,
+            perm: metadata.mode as u16,
             nlink: if node.linked()? { 1 } else { 0 },
-            uid: self.uid,
-            gid: self.gid,
+            uid: metadata.uid,
+            gid: metadata.gid,
             rdev: 0,
             blksize: 4096,
-            flags: 0,
+            flags: metadata.bsd_flags,
         })
     }
     fn handle(&self, node: Arc<Node>, flags: i32) -> Result<FileHandle, KernelError> {
@@ -285,7 +314,7 @@ impl Filesystem for Backend {
     }
     fn create(
         &self,
-        _: &Request,
+        request: &Request,
         parent: INodeNo,
         name: &OsStr,
         mode: u32,
@@ -294,9 +323,15 @@ impl Filesystem for Backend {
         reply: ReplyCreate,
     ) {
         let result = (|| {
-            let node = self
-                .session
-                .create_file(&self.selected(parent, name)?, mode & 0o7777 & !umask)?;
+            let node = self.session.create_file_with_attributes(
+                &self.selected(parent, name)?,
+                mode & 0o7777 & !umask,
+                |attrs| {
+                    attrs.uid = request.uid();
+                    attrs.gid = request.gid();
+                    Ok(())
+                },
+            )?;
             let attr = self.attr(&node)?;
             Ok((attr, self.handle(node, flags)?))
         })();
@@ -313,7 +348,7 @@ impl Filesystem for Backend {
     }
     fn mkdir(
         &self,
-        _: &Request,
+        request: &Request,
         parent: INodeNo,
         name: &OsStr,
         mode: u32,
@@ -321,10 +356,15 @@ impl Filesystem for Backend {
         reply: ReplyEntry,
     ) {
         let result = (|| {
-            let node = self.session.create(
+            let node = self.session.create_with_attributes(
                 &self.selected(parent, name)?,
                 PathState::Directory {
                     mode: Some(mode & 0o7777 & !umask),
+                },
+                |attrs| {
+                    attrs.uid = request.uid();
+                    attrs.gid = request.gid();
+                    Ok(())
                 },
             )?;
             let node = self.remember(node)?;
@@ -393,7 +433,7 @@ impl Filesystem for Backend {
     }
     fn symlink(
         &self,
-        _: &Request,
+        request: &Request,
         parent: INodeNo,
         name: &OsStr,
         target: &Path,
@@ -403,11 +443,16 @@ impl Filesystem for Backend {
             let target = target.to_str().ok_or_else(|| {
                 unsupported("Symlink target cannot be represented by current Storage names")
             })?;
-            let node = self.session.create(
+            let node = self.session.create_with_attributes(
                 &self.selected(parent, name)?,
                 PathState::Symlink {
                     symlink_target: target.into(),
                     mode: Some(0o777),
+                },
+                |attrs| {
+                    attrs.uid = request.uid();
+                    attrs.gid = request.gid();
+                    Ok(())
                 },
             )?;
             let node = self.remember(node)?;
@@ -437,23 +482,6 @@ impl Filesystem for Backend {
         reply: ReplyAttr,
     ) {
         let result = (|| {
-            // Qualification must not claim chmod/chown/utimes were persisted
-            // while the common immutable tree still carries only PathState.
-            if mode.is_some()
-                || uid.is_some()
-                || gid.is_some()
-                || atime.is_some()
-                || mtime.is_some()
-                || ctime.is_some()
-                || crtime.is_some()
-                || chgtime.is_some()
-                || bkuptime.is_some()
-                || flags.is_some()
-            {
-                return Err(unsupported(
-                    "Native metadata persistence is not implemented",
-                ));
-            }
             let node = if let Some(handle) = fh {
                 self.file(handle, true)?.0
             } else {
@@ -462,6 +490,40 @@ impl Filesystem for Backend {
             if let Some(size) = size {
                 self.session.truncate(&node, size)?;
             }
+            self.session.set_attributes(&node, |attrs| {
+                if let Some(value) = mode {
+                    attrs.mode = value & 0o7777;
+                }
+                if let Some(value) = uid {
+                    attrs.uid = value;
+                }
+                if let Some(value) = gid {
+                    attrs.gid = value;
+                }
+                let stamp = |value| match value {
+                    TimeOrNow::SpecificTime(time) => Timestamp::from_time(time),
+                    TimeOrNow::Now => Timestamp::now(),
+                };
+                if let Some(value) = atime {
+                    attrs.accessed = stamp(value);
+                }
+                if let Some(value) = mtime {
+                    attrs.modified = stamp(value);
+                }
+                if let Some(value) = ctime.or(chgtime) {
+                    attrs.changed = Timestamp::from_time(value);
+                }
+                if let Some(value) = crtime {
+                    attrs.created = Timestamp::from_time(value);
+                }
+                if let Some(value) = bkuptime {
+                    attrs.backup = Some(Timestamp::from_time(value));
+                }
+                if let Some(value) = flags {
+                    attrs.bsd_flags = value.bits();
+                }
+                Ok(())
+            })?;
             self.attr(&node)
         })();
         match result {
@@ -483,6 +545,110 @@ impl Filesystem for Backend {
         });
         match result {
             Ok(handle) => reply.opened(handle, FopenFlags::empty()),
+            Err(error) => reply.error(native(error)),
+        }
+    }
+    fn setxattr(
+        &self,
+        _: &Request,
+        ino: INodeNo,
+        name: &OsStr,
+        value: &[u8],
+        flags: i32,
+        position: u32,
+        reply: ReplyEmpty,
+    ) {
+        use std::os::unix::ffi::OsStrExt;
+        let name = URL_SAFE_NO_PAD.encode(name.as_bytes());
+        let result = self.node(ino).and_then(|node| {
+            self.session.set_attributes(&node, |attrs| {
+                if flags & !(libc::XATTR_CREATE | libc::XATTR_REPLACE) != 0
+                    || flags & (libc::XATTR_CREATE | libc::XATTR_REPLACE)
+                        == (libc::XATTR_CREATE | libc::XATTR_REPLACE)
+                {
+                    return Err(attribute_error(
+                        "namespace_xattr_invalid",
+                        "Invalid extended attribute flags",
+                    ));
+                }
+                let exists = attrs.xattrs.contains_key(&name);
+                if exists && flags & libc::XATTR_CREATE != 0 {
+                    return Err(attribute_error(
+                        "namespace_xattr_exists",
+                        "Extended attribute already exists",
+                    ));
+                }
+                if !exists && flags & libc::XATTR_REPLACE != 0 {
+                    return Err(attribute_error(
+                        "namespace_xattr_missing",
+                        "Extended attribute does not exist",
+                    ));
+                }
+                if position != 0 {
+                    return Err(unsupported(
+                        "Positioned resource-fork I/O has not been implemented",
+                    ));
+                }
+                attrs.xattrs.insert(name, value.to_vec());
+                Ok(())
+            })
+        });
+        match result {
+            Ok(()) => reply.ok(),
+            Err(error) => reply.error(native(error)),
+        }
+    }
+    fn getxattr(&self, _: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: ReplyXattr) {
+        use std::os::unix::ffi::OsStrExt;
+        let result = self
+            .node(ino)
+            .and_then(|node| node.attributes())
+            .and_then(|attrs| {
+                attrs
+                    .xattrs
+                    .get(&URL_SAFE_NO_PAD.encode(name.as_bytes()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        attribute_error(
+                            "namespace_xattr_missing",
+                            "Extended attribute does not exist",
+                        )
+                    })
+            });
+        attribute_reply(result, size, reply);
+    }
+    fn listxattr(&self, _: &Request, ino: INodeNo, size: u32, reply: ReplyXattr) {
+        let result = self
+            .node(ino)
+            .and_then(|node| node.attributes())
+            .and_then(|attrs| {
+                let mut names = Vec::new();
+                for key in attrs.xattrs.keys() {
+                    names.extend(URL_SAFE_NO_PAD.decode(key).map_err(|_| {
+                        KernelError::Storage("Invalid stored native attribute name".into())
+                    })?);
+                    names.push(0);
+                }
+                Ok(names)
+            });
+        attribute_reply(result, size, reply);
+    }
+    fn removexattr(&self, _: &Request, ino: INodeNo, name: &OsStr, reply: ReplyEmpty) {
+        use std::os::unix::ffi::OsStrExt;
+        let name = URL_SAFE_NO_PAD.encode(name.as_bytes());
+        let result = self.node(ino).and_then(|node| {
+            self.session.set_attributes(&node, |attrs| {
+                attrs.xattrs.remove(&name).ok_or_else(|| {
+                    attribute_error(
+                        "namespace_xattr_missing",
+                        "Extended attribute does not exist",
+                    )
+                })?;
+                Ok(())
+            })
+        });
+        match result {
+            Ok(()) => reply.ok(),
             Err(error) => reply.error(native(error)),
         }
     }
@@ -613,9 +779,6 @@ impl Mount {
                 nodes: HashMap::from([(root.id, root)]),
                 handles: HashMap::new(),
             }),
-            created: SystemTime::now(),
-            uid: unsafe { libc::geteuid() },
-            gid: unsafe { libc::getegid() },
         };
         let mut options = Config::default();
         options.mount_options = vec![

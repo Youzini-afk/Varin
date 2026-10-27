@@ -110,8 +110,7 @@ const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ.union(InitFlags::FUSE_B
 /// On macOS, advertise only behavior supplied by the filesystem. In particular
 /// case-insensitivity is not a property of the FUSE transport itself.
 #[cfg(target_os = "macos")]
-const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ
-    .union(InitFlags::FUSE_XTIMES);
+const INIT_FLAGS: InitFlags = InitFlags::FUSE_ASYNC_READ.union(InitFlags::FUSE_XTIMES);
 // TODO: Add FUSE_EXPORT_SUPPORT and FUSE_BIG_WRITES (requires ABI 7.10)
 
 fn default_init_flags(capabilities: InitFlags) -> InitFlags {
@@ -806,6 +805,24 @@ pub trait Filesystem: Send + Sync + 'static {
     fn getxattr(&self, _req: &Request, ino: INodeNo, name: &OsStr, size: u32, reply: ReplyXattr) {
         warn!("[Not Implemented] getxattr(ino: {ino:#x?}, name: {name:?}, size: {size})");
         reply.error(Errno::ENOSYS);
+    }
+
+    /// Positioned macOS attribute I/O must be handled explicitly. Silently
+    /// dropping its offset would return a different part of a resource fork.
+    fn getxattr_at(
+        &self,
+        req: &Request,
+        ino: INodeNo,
+        name: &OsStr,
+        size: u32,
+        position: u32,
+        reply: ReplyXattr,
+    ) {
+        if position == 0 {
+            self.getxattr(req, ino, name, size, reply);
+        } else {
+            reply.error(Errno::ENOTSUP);
+        }
     }
 
     /// List extended attribute names.

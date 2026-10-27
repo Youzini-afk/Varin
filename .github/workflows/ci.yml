@@ -131,6 +131,13 @@ jobs:
         working-directory: kernel
         run: cargo check -p varin-kernel --all-targets --features workspace-mount --locked
       - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
+        name: Compile public libfuse3 mount transport
+        working-directory: kernel
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfuse3-dev
+          cargo check -p varin-kernel --lib --features workspace-mount,fuser/libfuse3 --locked
+      - if: ${{ !cancelled() && needs.changes.outputs.rust == 'true' && steps.rust-build.outcome == 'success' }}
         name: Test Rust workspace
         timeout-minutes: 10
         env:

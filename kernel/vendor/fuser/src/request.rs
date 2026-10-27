@@ -342,11 +342,12 @@ impl<'a> RequestWithSender<'a> {
                 );
             }
             ll::Operation::GetXAttr(x) => {
-                filesystem.getxattr(
+                filesystem.getxattr_at(
                     self.request_header(),
                     self.request.nodeid(),
                     x.name(),
                     x.size_u32(),
+                    x.position(),
                     self.reply(),
                 );
             }

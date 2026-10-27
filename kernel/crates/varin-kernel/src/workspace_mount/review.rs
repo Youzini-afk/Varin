@@ -9,6 +9,10 @@ use serde_json::json;
 use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
+fn chosen_time() -> std::time::SystemTime {
+    std::time::UNIX_EPOCH + std::time::Duration::new(1_700_000_000, 123_456_700)
+}
+
 #[test]
 #[ignore = "child process invoked by native_workspace_mounts_share_storage_and_keep_fork_independent"]
 fn native_process_client() {
@@ -20,6 +24,25 @@ fn native_process_client() {
             std::fs::read(root.join("written.txt")).unwrap(),
             b"written in ordinary process"
         );
+        assert_eq!(
+            std::fs::metadata(root.join("written.txt"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            chosen_time()
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(root.join("written.txt"))
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o640
+            );
+        }
         return;
     }
     use std::io::Write;
@@ -33,6 +56,14 @@ fn native_process_client() {
     file.sync_all().unwrap();
     // The descriptor is still open across the namespace replacement.
     std::fs::rename(root.join("writing.tmp"), root.join("written.txt")).unwrap();
+    file.set_times(std::fs::FileTimes::new().set_modified(chosen_time()))
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o640))
+            .unwrap();
+    }
     file.sync_all().unwrap();
     drop(file);
     std::fs::create_dir(root.join("empty-directory")).unwrap();
@@ -40,6 +71,13 @@ fn native_process_client() {
     assert_eq!(
         std::fs::read(root.join("written.txt")).unwrap(),
         b"written in ordinary process"
+    );
+    assert_eq!(
+        std::fs::metadata(root.join("written.txt"))
+            .unwrap()
+            .modified()
+            .unwrap(),
+        chosen_time()
     );
 }
 

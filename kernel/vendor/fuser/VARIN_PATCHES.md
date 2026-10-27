@@ -17,5 +17,17 @@ Unmount retains the original mount object when the OS returns an error. A borrow
 also joins the remaining workers before returning. These changes avoid dropping
 ownership of a still-live filesystem during a failed detach.
 
+macOS SDK selection prefers libfuse3's public session API, retaining an explicit libfuse2 build
+and a fallback for SDKs that only expose `fuse.pc`. This addresses the disabled compat25 mount
+entry point in modern macFUSE: https://github.com/cberner/fuser/issues/752. The libfuse3 transport
+now destroys its owned session on failed construction and after detach; its duplicated fd remains
+owned by `DevFuse`. Linux helper detach checks the actual exit status before releasing ownership.
+Real OS mount qualification remains in the Varin opt-in tests; compile-only macOS CI does not
+exercise the dynamic mount library or an installed system extension.
+
+The macOS getxattr offset is forwarded to an additive `getxattr_at` callback. Its default preserves
+ordinary getxattr dispatch at offset zero and rejects unsupported positioned reads, rather than
+silently returning data from offset zero. Varin does not yet implement positioned resource-fork I/O.
+
 Remove this patch when the upstream release provides the same configurable handshake. Pin and
 review the replacement release; do not modify the global Cargo registry copy.

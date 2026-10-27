@@ -832,6 +832,10 @@ impl Storage {
             .and_then(Value::as_str)
             .filter(|value| !value.is_empty())
             .ok_or_else(|| KernelError::Operation("recordType is required".to_string()))?;
+        if self.conn.query_row("SELECT EXISTS(SELECT 1 FROM domain_records WHERE workspace_id=?1 AND record_id=?2 AND record_type='workspace.filesystem')",params![workspace_id,record_id],|row|row.get::<_,bool>(0))?
+        {
+            return Err(KernelError::Authorization("filesystem metadata is owned by its native branch".into()));
+        }
         const KNOWN_RECORD_TYPES: &[&str] = &[
             "working.draft",
             "working.result",
@@ -1436,6 +1440,9 @@ impl Storage {
             .and_then(Value::as_str)
             .ok_or_else(|| KernelError::Operation("recordId is required".to_string()))?;
         if let Some(value) = self.domain_record_value(&workspace_id, record_id)? {
+            if value["recordType"] == "workspace.filesystem" {
+                return Err(KernelError::Authorization("filesystem metadata is released with its native branch".into()));
+            }
             if !self.grant_can_access_domain_record(&value, grant_id)? {
                 return Err(KernelError::Authorization(
                     "record belongs to another actor".to_string(),

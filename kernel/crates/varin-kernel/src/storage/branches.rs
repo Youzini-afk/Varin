@@ -1418,6 +1418,10 @@ impl Storage {
     }
 
     pub(super) fn branch_delete(&mut self, params: &Value) -> Result<Value, KernelError> {
+        self.filesystem_transaction(|s| s.branch_delete_with_metadata(params))
+    }
+
+    fn branch_delete_with_metadata(&mut self, params: &Value) -> Result<Value, KernelError> {
         let branch_id = params
             .get("branchId")
             .and_then(Value::as_str)
@@ -1431,6 +1435,7 @@ impl Storage {
             )
             .optional()?;
         let released_records = if let Some(workspace_id) = workspace_id.as_deref() {
+            self.release_workspace_metadata(branch_id, workspace_id)?;
             self.conn.execute(
                 "DELETE FROM domain_records WHERE workspace_id = ?1 AND branch_id = ?2 AND record_type LIKE 'working.%'",
                 params![workspace_id, branch_id],

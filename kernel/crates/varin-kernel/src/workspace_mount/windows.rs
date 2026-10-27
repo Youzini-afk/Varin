@@ -1,13 +1,14 @@
 //! WinFsp callback adapter over the native Storage session. The optional DLL is
 //! loaded only when a caller explicitly starts a qualification mount.
 use super::*;
+use crate::storage::workspace_metadata::Timestamp;
 use std::collections::BTreeMap;
 use std::ffi::c_void;
 use std::sync::Mutex;
 use winfsp::{
     filesystem::{
-        DirInfo, DirMarker, FileInfo, FileSecurity, FileSystemContext, OpenFileInfo, VolumeInfo,
-        WideNameInfo,
+        DirInfo, DirMarker, FileInfo, FileSecurity, FileSystemContext, ModificationDescriptor,
+        OpenFileInfo, VolumeInfo, WideNameInfo,
     },
     host::{FileSystemHost, VolumeParams},
     FspError, U16CStr,
@@ -146,31 +147,59 @@ type Pending = Arc<Mutex<BTreeMap<(u64, bool), PendingCleanup>>>;
 pub(super) struct Backend {
     session: Arc<Session>,
     errors: Pending,
-    created: u64,
 }
 impl Backend {
     fn info(&self, node: &Node, out: &mut FileInfo) -> winfsp::Result<()> {
+        self.session.check_open().map_err(native)?;
         let state = node.state().map_err(native)?;
+        let metadata = node.attributes().map_err(native)?;
         *out = FileInfo::default();
         out.index_number = node.id;
-        out.creation_time = self.created;
-        out.last_access_time = self.created;
-        out.last_write_time = self.created;
-        out.change_time = self.created;
+        out.creation_time = metadata.created.filetime().map_err(native)?;
+        out.last_access_time = metadata.accessed.filetime().map_err(native)?;
+        out.last_write_time = metadata.modified.filetime().map_err(native)?;
+        out.change_time = metadata.changed.filetime().map_err(native)?;
+        out.file_attributes = metadata.windows_attributes;
         match state {
             PathState::RegularFile {
                 byte_length, mode, ..
             } => {
-                out.file_attributes = if mode & 0o222 == 0 { 1 } else { 0x20 };
+                out.file_attributes &= !0x10;
+                if mode & 0o222 == 0 {
+                    out.file_attributes |= 1;
+                }
                 out.file_size = byte_length;
                 out.allocation_size = byte_length.div_ceil(4096) * 4096;
             }
-            PathState::Directory { .. } => out.file_attributes = 0x10,
+            PathState::Directory { .. } => out.file_attributes |= 0x10,
             _ => return Err(native(unsupported(
                 "WinFsp reparse/metadata qualification is not implemented for this source entry",
             ))),
         }
         Ok(())
+    }
+    fn security(&self, node: &Node, buffer: Option<&mut [c_void]>) -> winfsp::Result<u64> {
+        self.session.check_open().map_err(native)?;
+        let descriptor = node
+            .attributes()
+            .map_err(native)?
+            .security
+            .unwrap_or_default();
+        if let Some(buffer) = buffer {
+            if buffer.len() < descriptor.len() {
+                return Err(FspError::NTSTATUS(0x80000005u32 as i32));
+            }
+            // Native buffers and the persisted descriptor contain bytes, not
+            // Rust objects. Their size is supplied by the WinFsp callback.
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    descriptor.as_ptr(),
+                    buffer.as_mut_ptr().cast::<u8>(),
+                    descriptor.len(),
+                );
+            }
+        }
+        Ok(descriptor.len() as u64)
     }
     fn directory_path(&self, handle: &Handle) -> winfsp::Result<String> {
         if !handle.node.state().map_err(native)?.is_directory() {
@@ -206,17 +235,15 @@ impl FileSystemContext for Backend {
     fn get_security_by_name(
         &self,
         name: &U16CStr,
-        _descriptor: Option<&mut [c_void]>,
+        descriptor: Option<&mut [c_void]>,
         _resolve: impl FnOnce(&U16CStr) -> Option<FileSecurity>,
     ) -> winfsp::Result<FileSecurity> {
         let node = self.session.lookup(&path(name)?).map_err(native)?;
         let mut info = FileInfo::default();
         self.info(&node, &mut info)?;
-        // The prototype does not advertise persistent ACL support. Do not
-        // manufacture or broaden an original source security descriptor.
         Ok(FileSecurity {
             reparse: false,
-            sz_security_descriptor: 0,
+            sz_security_descriptor: self.security(&node, descriptor)?,
             attributes: info.file_attributes,
         })
     }
@@ -248,8 +275,8 @@ impl FileSystemContext for Backend {
         name: &U16CStr,
         options: u32,
         _access: u32,
-        _attributes: u32,
-        _security: Option<&[c_void]>,
+        attributes: u32,
+        security: Option<&[c_void]>,
         _allocation: u64,
         _extra: Option<&[u8]>,
         reparse: bool,
@@ -260,11 +287,28 @@ impl FileSystemContext for Backend {
                 "Native reparse points require metadata qualification",
             )));
         }
+        let descriptor = security.map(|value| unsafe {
+            std::slice::from_raw_parts(value.as_ptr().cast::<u8>(), value.len()).to_vec()
+        });
+        let configure = |attrs: &mut crate::storage::workspace_metadata::Attributes| {
+            attrs.windows_attributes = attributes;
+            if let Some(descriptor) = descriptor {
+                attrs.security = Some(descriptor);
+            }
+            if attributes & 1 != 0 {
+                attrs.mode &= !0o222;
+            }
+            Ok(())
+        };
         let node = if options & 1 != 0 {
-            self.session
-                .create(&path(name)?, PathState::Directory { mode: Some(0o755) })
+            self.session.create_with_attributes(
+                &path(name)?,
+                PathState::Directory { mode: Some(0o755) },
+                configure,
+            )
         } else {
-            self.session.create_file(&path(name)?, 0o644)
+            self.session
+                .create_file_with_attributes(&path(name)?, 0o644, configure)
         }
         .map_err(native)?;
         self.info(&node, info.as_mut())?;
@@ -308,16 +352,130 @@ impl FileSystemContext for Backend {
     fn get_file_info(&self, context: &Handle, info: &mut FileInfo) -> winfsp::Result<()> {
         self.info(&context.node, info)
     }
+    fn set_basic_info(
+        &self,
+        context: &Handle,
+        attributes: u32,
+        creation: u64,
+        access: u64,
+        write: u64,
+        change: u64,
+        info: &mut FileInfo,
+    ) -> winfsp::Result<()> {
+        self.session
+            .set_attributes(&context.node, |attrs| {
+                if attributes != u32::MAX {
+                    attrs.windows_attributes = attributes;
+                    if attributes & 1 != 0 {
+                        attrs.mode &= !0o222;
+                    } else {
+                        attrs.mode |= 0o200;
+                    }
+                }
+                if creation != 0 {
+                    attrs.created = Timestamp::from_filetime(creation);
+                }
+                if access != 0 {
+                    attrs.accessed = Timestamp::from_filetime(access);
+                }
+                if write != 0 {
+                    attrs.modified = Timestamp::from_filetime(write);
+                }
+                if change != 0 {
+                    attrs.changed = Timestamp::from_filetime(change);
+                }
+                Ok(())
+            })
+            .map_err(native)?;
+        self.info(&context.node, info)
+    }
+    fn get_security(
+        &self,
+        context: &Handle,
+        descriptor: Option<&mut [c_void]>,
+    ) -> winfsp::Result<u64> {
+        self.security(&context.node, descriptor)
+    }
+    fn set_security(
+        &self,
+        context: &Handle,
+        information: u32,
+        modification: ModificationDescriptor,
+    ) -> winfsp::Result<()> {
+        // WinFsp merges the requested owner/group/DACL/SACL portions. Applying
+        // the incoming descriptor wholesale would drop unrelated security data.
+        self.session
+            .set_attributes(&context.node, |attrs| {
+                let input = attrs.security.as_mut().ok_or_else(|| {
+                    unsupported("This source has no captured Windows security descriptor")
+                })?;
+                let mut output = std::ptr::null_mut();
+                let status = unsafe {
+                    winfsp_sys::FspSetSecurityDescriptor(
+                        input.as_mut_ptr().cast(),
+                        information,
+                        modification.as_mut_ptr(),
+                        &mut output,
+                    )
+                };
+                if status < 0 {
+                    return Err(KernelError::Storage(format!(
+                        "Security descriptor update failed: NTSTATUS {status:#x}"
+                    )));
+                }
+                struct Descriptor(*mut c_void);
+                impl Drop for Descriptor {
+                    fn drop(&mut self) {
+                        unsafe {
+                            winfsp_sys::FspDeleteSecurityDescriptor(
+                                self.0,
+                                Some(std::mem::transmute::<
+                                    unsafe extern "C" fn(
+                                        *mut c_void,
+                                        u32,
+                                        *mut c_void,
+                                        *mut *mut c_void,
+                                    )
+                                        -> i32,
+                                    unsafe extern "C" fn() -> i32,
+                                >(
+                                    winfsp_sys::FspSetSecurityDescriptor
+                                )),
+                            );
+                        }
+                    }
+                }
+                let output = Descriptor(output);
+                let length =
+                    unsafe { windows_sys::Win32::Security::GetSecurityDescriptorLength(output.0) }
+                        as usize;
+                attrs.security = Some(unsafe {
+                    std::slice::from_raw_parts(output.0.cast::<u8>(), length).to_vec()
+                });
+                Ok(())
+            })
+            .map_err(native)
+    }
     fn overwrite(
         &self,
         context: &Handle,
-        _attributes: u32,
-        _replace: bool,
+        attributes: u32,
+        replace: bool,
         _allocation: u64,
         _extra: Option<&[u8]>,
         info: &mut FileInfo,
     ) -> winfsp::Result<()> {
         self.session.truncate(&context.node, 0).map_err(native)?;
+        self.session
+            .set_attributes(&context.node, |attrs| {
+                if replace {
+                    attrs.windows_attributes = attributes;
+                } else {
+                    attrs.windows_attributes |= attributes;
+                }
+                Ok(())
+            })
+            .map_err(native)?;
         self.info(&context.node, info)
     }
     fn read(&self, context: &Handle, bytes: &mut [u8], offset: u64) -> winfsp::Result<u32> {
@@ -467,18 +625,11 @@ impl Mount {
             .unicode_on_disk(true)
             .flush_and_purge_on_cleanup(true);
         let errors = Arc::new(Mutex::new(BTreeMap::new()));
-        let created = (std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-            / 100
-            + 116444736000000000) as u64;
         let mut host = FileSystemHost::<Backend>::new(
             params,
             Backend {
                 session: session.clone(),
                 errors: errors.clone(),
-                created,
             },
         )
         .map_err(|e| KernelError::Storage(format!("WinFsp filesystem creation failed: {e}")))?;

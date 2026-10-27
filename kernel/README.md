@@ -96,21 +96,37 @@ Durable success follows publication, while an unsealed generation is process-loc
 Metadata uses a synchronous typed control port; range reads/writes use the admitted byte handles directly.
 Lookup/stat keeps metadata only. Actual opens retain byte descriptors; clean descriptors end with their
 native readers, while unsaved data retains its backing until publication. Directory walks do not open
-every file or retain an unbounded set of clean content descriptors.
+every file or retain an unbounded set of clean content descriptors. Storage selects/retains a base object
+without opening it; the actual native callback opens its read-only descriptor outside the control owner.
 One branch/owner reuses one session and one set of open identities. Rename retains handles; unlink and
 recreate are different identities. Checkpoints retain the namespace and only dirty range maps, then seal
 individual files on a worker while the parent continues writing. The resulting child root includes those
 dirty bytes in its actual baseline. Normal session closure preserves previously retained checkpoints;
 grant revocation invalidates original access. Generic branch mutations cannot bypass a live session.
 
+`workspace_metadata.rs` stores persistent inode identity, permission bits, owners, nanosecond timestamps,
+xattrs and Windows security descriptors in an ordinary private immutable-tree branch. Its typed values
+are encoded in private directory leaves, not separate filesystem objects or project files. The existing
+branch/pin GC graph retains them without a format migration. Namespace bindings preserve lazy descendant
+identities across a directory rename. Creation, chmod and body publication save attributes in the same
+original SQLite transaction. Checkpoints pin both **current** roots, including native namespace changes
+since the last published revision, and fork dirty attributes with the selected bytes. Deleting the data
+branch releases its paired metadata branch; existing pins retain the selected versions. Native metadata
+branch identities (`workspace-metadata:<UUID>`) and control records cannot be overwritten/released through
+generic public branch/record methods. Existing imports have only PathState metadata; until stable source
+adoption captures real attributes, missing times use the branch creation time and owners use the Host user.
+
 The optional `workspace-mount` feature contains WinFsp and Linux/macOS FUSE qualification adapters.
 It does not install OS components or change any production Run's source selection. WinFsp is delay-loaded;
 the original installed DLL is located through its system registration only when starting a mount. Building
 this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
 FUSE device/helper for actual mounts; macOS requires an already-enabled macFUSE component and build SDK.
-The current macOS transport still uses the compat25 mounting API: macFUSE 5.3 changed that API and needs
-the retained-channel/fd ownership adaptation tracked at https://github.com/cberner/fuser/issues/752.
-It is not yet implemented here. `wait_ready` checks the actual mount device/root inode after the dispatcher
+macOS builds now prefer the SDK's libfuse3 session API, avoiding the compat25 break tracked at
+https://github.com/cberner/fuser/issues/752. An explicit `fuser/libfuse2` build or an SDK providing only
+`fuse.pc` retains the legacy path; that path does not support macFUSE 5.3's disabled compat25 API.
+The libfuse3 owner retains the session while native callbacks use a duplicated fd and destroys it on
+setup failure or after detach. Native OS qualification of this selection is still pending.
+`wait_ready` checks the actual mount device/root inode after the dispatcher
 starts, while keeping the mount object available for cancellation and cleanup; this covers the asynchronous
 readiness distinction at https://github.com/cberner/fuser/issues/736.
 `kernel/vendor/fuser/VARIN_PATCHES.md` records the capability and retryable-detach patch. macOS compile-only
@@ -122,7 +138,11 @@ test starts a separate ordinary process and two real mount paths. Invoke it expl
 on a machine with that component already enabled. It tests fsynced/closed ordinary handles; it does not
 qualify a dirty mmap/kernel-cache fence. The default Storage suite covers byte and namespace semantics.
 
-Remaining qualification includes persistent inode/ACL/xattr/time/native-name metadata, hardlinks,
+FUSE callbacks persist chmod/chown/times/xattrs. WinFsp callbacks persist basic attributes and merge
+the requested Windows security information with the original descriptor, preserving unrelated parts.
+These callbacks do not yet qualify complete ACL enforcement. Positioned resource-fork I/O returns
+an explicit unsupported error instead of silently ignoring an offset.
+Remaining qualification includes stable source attribute capture, native names, hardlinks,
 Windows reparse points, cache/mmap fences and application runtime drainage/restart. FSKit is not yet a
 backend. Current file tools, processes, IDE and external harnesses still use their existing source paths.
 

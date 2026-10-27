@@ -1,6 +1,7 @@
 //! The native filesystem session shared by OS callbacks. Metadata is admitted by
 //! the existing Storage owner; range I/O never takes the control thread or wire.
 use super::workspace_files::{FileSnapshot, PrivateFile};
+use super::workspace_metadata::{Attributes, Head, Metadata};
 use super::*;
 use std::sync::{Mutex, RwLock};
 
@@ -56,6 +57,9 @@ struct NodeState {
     path: Option<String>,
     observed: Value,
     clean_generation: u64,
+    metadata: Metadata,
+    metadata_generation: u64,
+    clean_metadata_generation: u64,
 }
 #[derive(Default)]
 struct ContentSlot {
@@ -71,9 +75,20 @@ pub(crate) struct Node {
     publication: Mutex<()>,
 }
 impl Node {
+    pub(crate) fn attributes(&self) -> Result<Attributes, KernelError> {
+        Ok(lock(&self.state)?.metadata.attributes.clone())
+    }
     pub(crate) fn state(&self) -> Result<PathState, KernelError> {
-        let mut state: PathState =
-            serde_json::from_value(lock(&self.state)?.observed["state"].clone())?;
+        let selected = lock(&self.state)?;
+        let mut state: PathState = serde_json::from_value(selected.observed["state"].clone())?;
+        match &mut state {
+            PathState::RegularFile { mode, .. } => *mode = selected.metadata.attributes.mode,
+            PathState::Directory { mode } | PathState::Symlink { mode, .. } => {
+                *mode = Some(selected.metadata.attributes.mode)
+            }
+            _ => {}
+        }
+        drop(selected);
         if let (PathState::RegularFile { byte_length, .. }, Some(content)) =
             (&mut state, self.file()?)
         {
@@ -123,6 +138,9 @@ pub(crate) struct Checkpoint {
     grant: Grant,
     root: PathBuf,
     pin: String,
+    metadata_pin: String,
+    metadata_head: Head,
+    metadata: Vec<(String, Metadata)>,
     files: Vec<(String, u32, FileSnapshot)>,
     released: bool,
 }
@@ -162,6 +180,12 @@ impl Session {
             }
             let workspace = storage.branch(&branch)?.workspace_id;
             let observed = storage.branch_path_inspect(&json!({"branchId":branch,"path":""}))?;
+            let metadata = storage.read_workspace_metadata(
+                &branch,
+                "",
+                &serde_json::from_value(observed["state"].clone())?,
+                &grant,
+            )?;
             let id = Uuid::new_v4();
             let root_node = Arc::new(Node {
                 id: 1,
@@ -170,6 +194,9 @@ impl Session {
                     path: Some(String::new()),
                     observed,
                     clean_generation: 0,
+                    metadata,
+                    metadata_generation: 0,
+                    clean_metadata_generation: 0,
                 }),
                 content: Mutex::new(ContentSlot::default()),
                 publication: Mutex::new(()),
@@ -236,7 +263,14 @@ impl Session {
         if let Some(node) = namespace.paths.get(path) {
             return Ok(node.clone());
         }
-        let observed = self.observe(path, false)?;
+        let (branch, selected, actor) = (self.branch.clone(), path.to_owned(), self.grant.clone());
+        let (observed, metadata) = self.port.call(move |s| {
+            s.admit_workspace_session(&branch, &selected, &actor, false)?;
+            let observed = s.branch_path_inspect(&json!({"branchId":branch,"path":selected}))?;
+            let state = serde_json::from_value(observed["state"].clone())?;
+            let metadata = s.read_workspace_metadata(&branch, &selected, &state, &actor)?;
+            Ok((observed, metadata))
+        })?;
         let state: PathState = serde_json::from_value(observed["state"].clone())?;
         if matches!(state, PathState::Missing) {
             return Err(failure(
@@ -257,6 +291,9 @@ impl Session {
                 path: Some(path.into()),
                 observed,
                 clean_generation: 0,
+                metadata,
+                metadata_generation: 0,
+                clean_metadata_generation: 0,
             }),
             content: Mutex::new(ContentSlot::default()),
             publication: Mutex::new(()),
@@ -302,6 +339,7 @@ impl Session {
                 "File changed while admitting its byte handle",
             ));
         }
+        file.open_base()?;
         state.clean_generation = 0;
         content.open = Arc::downgrade(&file);
         Ok(file)
@@ -331,6 +369,27 @@ impl Session {
     ) -> Result<usize, KernelError> {
         self.open_file(node)?.read(offset, bytes)
     }
+    fn changed(&self, node: &Arc<Node>, file: Arc<PrivateFile>) -> Result<(), KernelError> {
+        let mut state = lock(&node.state)?;
+        state.metadata.attributes.touch();
+        state.metadata_generation = state.metadata_generation.wrapping_add(1);
+        let linked = state.path.is_some();
+        drop(state);
+        if linked {
+            lock(&node.content)?.dirty = Some(file);
+            lock(&self.namespace)?.dirty.insert(node.id, node.clone());
+        }
+        Ok(())
+    }
+    fn touch_parent(&self, namespace: &mut Namespace, selected: &str) -> Result<(), KernelError> {
+        let node = self.load(namespace, parent(selected))?;
+        let mut state = lock(&node.state)?;
+        state.metadata.attributes.touch();
+        state.metadata_generation = state.metadata_generation.wrapping_add(1);
+        drop(state);
+        namespace.dirty.insert(node.id, node);
+        Ok(())
+    }
     pub(crate) fn write(
         &self,
         node: &Arc<Node>,
@@ -344,9 +403,8 @@ impl Session {
         self.owns(node)?;
         let file = self.content_locked(node)?;
         let result = file.write(offset, bytes)?;
-        if result.1 != 0 && node.linked()? {
-            lock(&node.content)?.dirty = Some(file);
-            lock(&self.namespace)?.dirty.insert(node.id, node.clone());
+        if result.1 != 0 {
+            self.changed(node, file)?;
         }
         Ok(result)
     }
@@ -358,10 +416,7 @@ impl Session {
         self.owns(node)?;
         let file = self.content_locked(node)?;
         file.truncate(length)?;
-        if node.linked()? {
-            lock(&node.content)?.dirty = Some(file);
-            lock(&self.namespace)?.dirty.insert(node.id, node.clone());
-        }
+        self.changed(node, file)?;
         Ok(())
     }
     /// No hashing or body I/O while holding the Storage control owner. The inode
@@ -373,14 +428,15 @@ impl Session {
         self.owns(node)?;
         let _publication = lock(&node.publication)?;
         let Some(content) = node.file()? else {
-            return Ok(());
+            return self.flush_metadata(node);
         };
         let snapshot = content.snapshot()?;
         let generation = snapshot.generation();
         {
             let state = lock(&node.state)?;
             if generation == state.clean_generation || state.path.is_none() {
-                return Ok(());
+                drop(state);
+                return self.flush_metadata(node);
             }
         }
         let sealed = snapshot.seal(&self.root.join("staging"), &self.revoked)?;
@@ -399,7 +455,9 @@ impl Session {
             return Ok(());
         };
         let expected = state.observed.clone();
-        let mode = expected["state"]["mode"].as_u64().unwrap_or(0o644) as u32;
+        let metadata = state.metadata.clone();
+        let metadata_generation = state.metadata_generation;
+        let mode = metadata.attributes.mode;
         let (branch, actor, operation) = (
             self.branch.clone(),
             self.grant.clone(),
@@ -407,7 +465,7 @@ impl Session {
         );
         let publishing = content.clone();
         let (publication, updated) = self.port.call(move |storage| {
-            let publication = storage.publish_private_file(
+            let publication = storage.publish_private_file_metadata(
                 &operation,
                 &branch,
                 &path,
@@ -416,6 +474,7 @@ impl Session {
                 &publishing,
                 &installed,
                 &actor,
+                Some(&metadata),
             )?;
             let updated = storage.branch_path_inspect(&json!({"branchId":branch,"path":path}))?;
             Ok((publication, updated))
@@ -428,17 +487,106 @@ impl Session {
         }
         state.observed = updated;
         state.clean_generation = generation;
+        state.clean_metadata_generation = metadata_generation;
         drop(state);
         {
             let mut namespace = lock(&self.namespace)?;
             let mut slot = lock(&node.content)?;
-            if content.snapshot()?.generation() == generation {
+            let state = lock(&node.state)?;
+            if content.snapshot()?.generation() == generation
+                && state.metadata_generation == state.clean_metadata_generation
+            {
                 namespace.dirty.remove(&node.id);
                 slot.dirty = None;
             }
         }
         drop(_boundary);
         publication.finish();
+        Ok(())
+    }
+    fn flush_metadata(&self, node: &Node) -> Result<(), KernelError> {
+        let _boundary = self
+            .boundary
+            .read()
+            .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+        self.owns(node)?;
+        let mut state = lock(&node.state)?;
+        if state.metadata_generation == state.clean_metadata_generation || state.path.is_none() {
+            return Ok(());
+        }
+        let (branch, path, actor, metadata) = (
+            self.branch.clone(),
+            state.path.clone().unwrap(),
+            self.grant.clone(),
+            state.metadata.clone(),
+        );
+        self.port.call(move |s| {
+            s.admit_workspace_session(&branch, &path, &actor, true)?;
+            s.filesystem_transaction(|s| {
+                s.save_workspace_metadata(&branch, &path, &metadata, &actor)
+            })
+        })?;
+        state.clean_metadata_generation = state.metadata_generation;
+        Ok(())
+    }
+    /// Metadata changes are durable at their native callback boundary. They do
+    /// not hash the body, and a concurrent older flush reads these latest attrs
+    /// only after sealing, so chmod/utimes cannot be overwritten by that flush.
+    pub(crate) fn set_attributes(
+        &self,
+        node: &Arc<Node>,
+        update: impl FnOnce(&mut Attributes) -> Result<(), KernelError>,
+    ) -> Result<(), KernelError> {
+        let _boundary = self
+            .boundary
+            .write()
+            .map_err(|_| failure("workspace_failed", "Workspace boundary lock poisoned"))?;
+        self.owns(node)?;
+        let mut state = lock(&node.state)?;
+        let mut metadata = state.metadata.clone();
+        let previous_change = metadata.attributes.changed;
+        update(&mut metadata.attributes)?;
+        metadata.attributes.validate()?;
+        if metadata.attributes.changed == previous_change {
+            metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
+        }
+        if metadata.attributes.file_id != metadata.binding.file_id {
+            return Err(KernelError::Authorization(
+                "Metadata update cannot replace its file identity".into(),
+            ));
+        }
+        if let Some(path) = state.path.clone() {
+            let (branch, actor, expected, selected) = (
+                self.branch.clone(),
+                self.grant.clone(),
+                state.observed.clone(),
+                metadata.clone(),
+            );
+            let observed=self.port.call(move |s|{
+                s.admit_workspace_session(&branch,&path,&actor,true)?;
+                s.filesystem_transaction(|s|{
+                    let mut next:PathState=serde_json::from_value(expected["state"].clone())?;
+                    match &mut next {
+                        PathState::RegularFile{mode,..}=>*mode=selected.attributes.mode,
+                        PathState::Directory{mode}|PathState::Symlink{mode,..}=>*mode=Some(selected.attributes.mode),
+                        _=>{},
+                    }
+                    if !path.is_empty() && serde_json::to_value(&next)?!=expected["state"] {
+                        let mut input=json!({"operationId":format!("workspace-attributes:{}",Uuid::new_v4()),"branchId":branch,"changes":[{"path":path,"expectedNode":expected["node"],"expectedState":expected["state"],"state":next}]});
+                        // Chmod preserves directory children. Cached ancestor
+                        // hashes can legitimately change after any child write.
+                        if next.is_directory(){input["changes"][0].as_object_mut().unwrap().remove("expectedNode");}
+                        if s.branch_path_apply(&input,&actor.grant_id)?["status"]!="committed"{return Err(failure("namespace_conflict","File changed while setting attributes"));}
+                    }
+                    s.save_workspace_metadata(&branch,&path,&selected,&actor)?;
+                    s.branch_path_inspect(&json!({"branchId":branch,"path":path}))
+                })
+            })?;
+            state.observed = observed;
+        }
+        state.metadata = metadata;
+        state.metadata_generation = state.metadata_generation.wrapping_add(1);
+        state.clean_metadata_generation = state.metadata_generation;
         Ok(())
     }
     pub(crate) fn flush_all(&self) -> Result<(), KernelError> {
@@ -458,6 +606,33 @@ impl Session {
         requested: &str,
         state: PathState,
     ) -> Result<Arc<Node>, KernelError> {
+        self.create_with_attributes(requested, state, |_| Ok(()))
+    }
+    pub(crate) fn create_with_attributes(
+        &self,
+        requested: &str,
+        mut state: PathState,
+        configure: impl FnOnce(&mut Attributes) -> Result<(), KernelError>,
+    ) -> Result<Arc<Node>, KernelError> {
+        let mut metadata = Storage::new_workspace_metadata(&state);
+        configure(&mut metadata.attributes)?;
+        metadata.attributes.validate()?;
+        if metadata.attributes.file_id != metadata.binding.file_id {
+            return Err(KernelError::Authorization(
+                "Creation cannot replace its file identity".into(),
+            ));
+        }
+        match &mut state {
+            PathState::Directory { mode } | PathState::Symlink { mode, .. } => {
+                *mode = Some(metadata.attributes.mode)
+            }
+            _ => {
+                return Err(failure(
+                    "namespace_not_directory",
+                    "Use native file creation for a regular file",
+                ))
+            }
+        }
         let requested = path(requested)?;
         if requested.is_empty() {
             return Err(failure("namespace_exists", "Workspace root already exists"));
@@ -490,13 +665,27 @@ impl Session {
         self.port.call(move |storage| {
             storage.admit_workspace_session(&branch, &selected, &actor, true)?;
             let input = json!({"operationId":operation,"workspaceId":actor.owning_workspace,"branchId":branch,"changes":[{"path":selected,"expectedState":before["state"],"state":state}]});
-            let result = super::operations::idempotent(storage, "workspace.namespace.create", &input, |s| s.branch_path_apply(&input, &actor.grant_id))?;
+            let result = super::operations::idempotent(storage, "workspace.namespace.create", &input, |s| {
+                let result=s.branch_path_apply(&input, &actor.grant_id)?;
+                if result["status"]=="committed"{s.save_workspace_metadata(&branch,&selected,&metadata,&actor)?;}
+                Ok(result)
+            })?;
             if result["status"] != "committed" { return Err(failure("namespace_conflict", "Create target changed")); }
             Ok(())
         })?;
-        self.load(&mut namespace, &requested)
+        let node = self.load(&mut namespace, &requested)?;
+        self.touch_parent(&mut namespace, &requested)?;
+        Ok(node)
     }
     pub(crate) fn create_file(&self, requested: &str, mode: u32) -> Result<Arc<Node>, KernelError> {
+        self.create_file_with_attributes(requested, mode, |_| Ok(()))
+    }
+    pub(crate) fn create_file_with_attributes(
+        &self,
+        requested: &str,
+        mode: u32,
+        configure: impl FnOnce(&mut Attributes) -> Result<(), KernelError>,
+    ) -> Result<Arc<Node>, KernelError> {
         // The empty object is shared like any other content object. Installing
         // it uses a worker before the namespace transaction, never a tree copy.
         let requested = path(requested)?;
@@ -540,6 +729,14 @@ impl Session {
             .port
             .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
         let installed = sealed.install(&self.root, retention, &self.revoked)?;
+        let mut metadata = Storage::new_workspace_metadata(&installed.state(mode));
+        configure(&mut metadata.attributes)?;
+        metadata.attributes.validate()?;
+        if metadata.attributes.file_id != metadata.binding.file_id {
+            return Err(KernelError::Authorization(
+                "Creation cannot replace its file identity".into(),
+            ));
+        }
         let (branch, selected, actor, file, expected) = (
             self.branch.clone(),
             requested.clone(),
@@ -550,43 +747,25 @@ impl Session {
         let receipt = self
             .port
             .call(move |s| {
-                s.publish_private_file(
+                s.publish_private_file_metadata(
                     &format!("workspace-create:{}", Uuid::new_v4()),
                     &branch,
                     &selected,
                     &expected,
-                    mode,
+                    metadata.attributes.mode,
                     &file,
                     &installed,
                     &actor,
+                    Some(&metadata),
                 )
             })?
             .finish();
         if receipt["status"] != "committed" {
             return Err(failure("namespace_conflict", "Create target changed"));
         }
-        let observed = self.observe(&requested, false)?;
-        let node = Arc::new(Node {
-            id: namespace.next_id,
-            session: self.id,
-            state: Mutex::new(NodeState {
-                path: Some(requested.clone()),
-                observed,
-                clean_generation: 0,
-            }),
-            content: Mutex::new(ContentSlot {
-                open: Arc::downgrade(&content),
-                dirty: None,
-            }),
-            publication: Mutex::new(()),
-        });
-        namespace.next_id = namespace.next_id.checked_add(1).ok_or_else(|| {
-            failure(
-                "namespace_identity_exhausted",
-                "Native file identity space exhausted",
-            )
-        })?;
-        namespace.paths.insert(requested, node.clone());
+        let node = self.load(&mut namespace, &requested)?;
+        lock(&node.content)?.open = Arc::downgrade(&content);
+        self.touch_parent(&mut namespace, &requested)?;
         Ok(node)
     }
     pub(crate) fn remove(&self, requested: &str, directory: bool) -> Result<(), KernelError> {
@@ -631,14 +810,23 @@ impl Session {
                 changes.push(json!({"path":parent["path"],"expectedState":parent["state"],"state":parent["state"]}));
             }
             let input = json!({"operationId":format!("workspace-unlink:{}", Uuid::new_v4()),"workspaceId":actor.owning_workspace,"branchId":branch,"changes":changes});
-            let receipt = super::operations::idempotent(s,"workspace.namespace.unlink",&input,|s|s.branch_path_apply(&input,&actor.grant_id))?;
+            let receipt = super::operations::idempotent(s,"workspace.namespace.unlink",&input,|s|{
+                let receipt=s.branch_path_apply(&input,&actor.grant_id)?;
+                if receipt["status"]=="committed"{s.remove_workspace_metadata(&branch,&selected,&actor)?;}
+                Ok(receipt)
+            })?;
             if receipt["status"] != "committed" { return Err(failure("namespace_conflict", "Unlink target changed")); }
             Ok(())
         })?;
-        lock(&node.state)?.path = None;
+        {
+            let mut state = lock(&node.state)?;
+            state.path = None;
+            state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
+        }
         namespace.dirty.remove(&node.id);
         let retired = lock(&node.content)?.dirty.take();
         namespace.paths.remove(&requested);
+        self.touch_parent(&mut namespace, &requested)?;
         drop(namespace);
         drop(_boundary);
         drop(retired);
@@ -673,7 +861,13 @@ impl Session {
             require_capability(&actor,"branch.rename")?;
             let input = json!({"operationId":format!("workspace-rename:{}",Uuid::new_v4()),"workspaceId":actor.owning_workspace,"branchId":branch,"sourcePath":a,"path":b,
                 "expectedSourceNode":source["node"],"expectedTargetNode":target["node"],"replace":replace});
-            let receipt = super::operations::idempotent(s,"workspace.namespace.rename",&input,|s|s.branch_rename(&input))?;
+            let receipt = super::operations::idempotent(s,"workspace.namespace.rename",&input,|s|{
+                let receipt=s.branch_rename(&input)?;
+                if receipt["status"]=="committed" && a!=b {
+                    s.rename_workspace_metadata(&branch,&a,&b,&serde_json::from_value(source["state"].clone())?,&serde_json::from_value(target["state"].clone())?,&actor)?;
+                }
+                Ok(receipt)
+            })?;
             if receipt["status"] != "committed" { return Err(failure("namespace_conflict", "Rename source or target changed")); }
             Ok(())
         })?;
@@ -682,7 +876,11 @@ impl Session {
         }
         let mut retired = None;
         if let Some(replaced) = replaced {
-            lock(&replaced.state)?.path = None;
+            {
+                let mut state = lock(&replaced.state)?;
+                state.path = None;
+                state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
+            }
             namespace.dirty.remove(&replaced.id);
             retired = lock(&replaced.content)?.dirty.take();
         }
@@ -698,9 +896,18 @@ impl Session {
             let mut state = lock(&node.state)?;
             state.path = Some(next.clone());
             state.observed["path"] = json!(next);
+            if old == from {
+                state.metadata.attributes.changed = super::workspace_metadata::Timestamp::now();
+                state.metadata_generation = state.metadata_generation.wrapping_add(1);
+                namespace.dirty.insert(node.id, node.clone());
+            }
             drop(state);
             namespace.paths.remove(&old);
             namespace.paths.insert(next, node);
+        }
+        self.touch_parent(&mut namespace, &from)?;
+        if parent(&from) != parent(&to) {
+            self.touch_parent(&mut namespace, &to)?;
         }
         drop(namespace);
         drop(_boundary);
@@ -748,12 +955,20 @@ impl Session {
         self.active()?;
         let namespace = lock(&self.namespace)?;
         let mut files = Vec::new();
+        let mut metadata = Vec::new();
         for node in namespace.dirty.values() {
+            let state = lock(&node.state)?;
+            if let Some(path) = &state.path {
+                if state.metadata_generation != state.clean_metadata_generation {
+                    metadata.push((path.clone(), state.metadata.clone()));
+                }
+            }
+            drop(state);
             if let Some(file) = node.file()? {
                 let snapshot = file.snapshot()?;
                 let state = lock(&node.state)?;
                 if snapshot.generation() != state.clean_generation {
-                    let mode = state.observed["state"]["mode"].as_u64().unwrap_or(0o644) as u32;
+                    let mode = state.metadata.attributes.mode;
                     if let Some(path) = &state.path {
                         files.push((path.clone(), mode, snapshot));
                     }
@@ -766,14 +981,27 @@ impl Session {
             format!("workspace-boundary:{}", Uuid::new_v4()),
         );
         let pinned = pin.clone();
-        self.port.call(move |s| {
+        let metadata_pin = format!("{pin}:filesystem");
+        let pinned_metadata = metadata_pin.clone();
+        let metadata_head = self.port.call(move |s| {
             s.admit_workspace_session(&branch, "", &actor, false)?;
             require_capability(&actor, "branch.pin")?;
-            s.branch_pin(
-                &json!({"branchId":branch,"pinId":pinned}),
-                true,
-                &actor.grant_id,
-            )
+            s.filesystem_transaction(|s| {
+                let data=s.branch(&branch)?;
+                s.branch_pin(
+                    &json!({"branchId":branch,"pinId":pinned,"expectedRoot":data.head_root,"expectedWriteRevision":data.write_revision}),
+                    true,
+                    &actor.grant_id,
+                )?;
+                let head = s.workspace_metadata_head(&branch, &actor)?;
+                let metadata=s.branch(&head.metadata_branch)?;
+                s.branch_pin(
+                    &json!({"branchId":head.metadata_branch,"pinId":pinned_metadata,"expectedRoot":metadata.head_root,"expectedWriteRevision":metadata.write_revision}),
+                    true,
+                    &actor.grant_id,
+                )?;
+                Ok(head)
+            })
         })?;
         Ok(Checkpoint {
             port: self.port.clone(),
@@ -782,6 +1010,9 @@ impl Session {
             grant: self.grant.clone(),
             root: self.root.clone(),
             pin,
+            metadata_pin,
+            metadata_head,
+            metadata,
             files,
             released: false,
         })
@@ -801,24 +1032,39 @@ impl Session {
         let mut clean = Vec::new();
         for (id, node) in &namespace.dirty {
             if let Some(content) = node.file()? {
-                if content.snapshot()?.generation() == lock(&node.state)?.clean_generation {
+                let state = lock(&node.state)?;
+                if content.snapshot()?.generation() == state.clean_generation
+                    && state.metadata_generation == state.clean_metadata_generation
+                {
                     clean.push(*id);
                 }
-            } else {
+            } else if {
+                let state = lock(&node.state)?;
+                state.metadata_generation == state.clean_metadata_generation
+            } {
                 clean.push(*id);
             }
         }
+        let mut retired = Vec::new();
         for id in clean {
             if let Some(node) = namespace.dirty.remove(&id) {
-                lock(&node.content)?.dirty = None;
+                if let Some(file) = lock(&node.content)?.dirty.take() {
+                    retired.push(file);
+                }
             }
         }
         if !namespace.dirty.is_empty() {
+            drop(namespace);
+            drop(_boundary);
+            drop(retired);
             return Err(failure("workspace_still_writing","Workspace received new writes during close; original data and session remain available"));
         }
         // A normal detach closes this session's I/O, not the original grant or
         // already-retained checkpoint ranges. Those may outlive their mount.
         self.closed.store(true, Ordering::Release);
+        drop(namespace);
+        drop(_boundary);
+        drop(retired);
         Ok(())
     }
 }
@@ -852,9 +1098,21 @@ impl Checkpoint {
             target.to_owned(),
             operation.to_owned(),
         );
+        let metadata_head = self.metadata_head.clone();
+        let metadata_pin = self.metadata_pin.clone();
+        let metadata = self.metadata.clone();
         self.port.call(move |s| {
             s.publish_workspace_checkpoint(
-                &source, &pin, &workspace, &target, &operation, &installed, &actor,
+                &source,
+                &pin,
+                &workspace,
+                &target,
+                &operation,
+                &installed,
+                &actor,
+                &metadata_head,
+                &metadata_pin,
+                &metadata,
             )
         })
     }
@@ -864,13 +1122,22 @@ impl Checkpoint {
             self.pin.clone(),
             self.grant.clone(),
         );
+        let metadata_branch = self.metadata_head.metadata_branch.clone();
+        let metadata_pin = self.metadata_pin.clone();
         self.port.call(move |s| {
-            s.branch_pin(
-                &json!({"branchId":branch,"pinId":pin}),
-                false,
-                &actor.grant_id,
-            )
-            .map(|_| ())
+            s.filesystem_transaction(|s| {
+                s.branch_pin(
+                    &json!({"branchId":metadata_branch,"pinId":metadata_pin}),
+                    false,
+                    &actor.grant_id,
+                )?;
+                s.branch_pin(
+                    &json!({"branchId":branch,"pinId":pin}),
+                    false,
+                    &actor.grant_id,
+                )
+                .map(|_| ())
+            })
         })?;
         self.released = true;
         Ok(())
@@ -886,15 +1153,25 @@ impl Drop for Checkpoint {
             self.pin.clone(),
             self.grant.clone(),
         );
+        let metadata_branch = self.metadata_head.metadata_branch.clone();
+        let metadata_pin = self.metadata_pin.clone();
         // Drop never waits on control: native backend teardown may be running
         // during drainage. The original grant still owns a failed release.
         let _ = (self.port.0)(Box::new(move |storage| {
             if let Some(s) = storage {
-                let _ = s.branch_pin(
-                    &json!({"branchId":branch,"pinId":pin}),
-                    false,
-                    &actor.grant_id,
-                );
+                let _ = s.filesystem_transaction(|s| {
+                    s.branch_pin(
+                        &json!({"branchId":metadata_branch,"pinId":metadata_pin}),
+                        false,
+                        &actor.grant_id,
+                    )?;
+                    s.branch_pin(
+                        &json!({"branchId":branch,"pinId":pin}),
+                        false,
+                        &actor.grant_id,
+                    )
+                    .map(|_| ())
+                });
             }
         }));
     }
@@ -906,6 +1183,47 @@ impl Storage {
         method: &str,
         params: &Value,
     ) -> Result<(), KernelError> {
+        // The sidecar root is an internal typed metadata graph, never a user
+        // file branch. Public branch writes must not replace encoded ACL/xattr
+        // values or delete a still-owned metadata root through another method.
+        let mut selected = vec![];
+        for field in ["branchId", "sourceBranchId"] {
+            if let Some(id) = params[field].as_str() {
+                selected.push(id.to_owned());
+            }
+        }
+        for field in ["pinId", "sourcePinId"] {
+            if let Some(id) = params[field].as_str() {
+                if let Some(branch) = self
+                    .conn
+                    .query_row(
+                        "SELECT branch_id FROM pins WHERE pin_id=?1",
+                        params![id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                {
+                    selected.push(branch);
+                }
+            }
+        }
+        if let Some(builder) = params["builderId"]
+            .as_str()
+            .and_then(|id| self.branch_write_builders.get(id))
+        {
+            selected.push(builder.branch_id.clone());
+        }
+        for branch in selected {
+            if branch
+                .strip_prefix("workspace-metadata:")
+                .is_some_and(|id| Uuid::parse_str(id).is_ok())
+            {
+                return Err(KernelError::Authorization(
+                    "Filesystem metadata is accessed through its original native workspace owner"
+                        .into(),
+                ));
+            }
+        }
         let current_boundary = matches!(
             method,
             "branch.write"

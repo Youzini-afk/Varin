@@ -32,6 +32,7 @@ fn ensure_last_os_error() -> io::Error {
 pub(crate) struct MountImpl {
     fuse_session: *mut c_void,
     mountpoint: CString,
+    mounted: bool,
 }
 impl MountImpl {
     pub(crate) fn new(
@@ -54,14 +55,16 @@ impl MountImpl {
             if fuse_session.is_null() {
                 return Err(io::Error::last_os_error());
             }
-            let mount = MountImpl {
+            let mut mount = MountImpl {
                 fuse_session,
                 mountpoint: mnt.clone(),
+                mounted: false,
             };
             let result = unsafe { fuse_session_mount(mount.fuse_session, mnt.as_ptr()) };
             if result != 0 {
                 return Err(ensure_last_os_error());
             }
+            mount.mounted = true;
             let fd = unsafe { fuse_session_fd(mount.fuse_session) };
             if fd < 0 {
                 return Err(io::Error::last_os_error());
@@ -76,20 +79,53 @@ impl MountImpl {
     }
 
     pub(crate) fn umount_impl(&mut self) -> io::Result<()> {
+        if !self.mounted {
+            return Ok(());
+        }
         if let Err(err) = crate::mnt::libc_umount(&self.mountpoint) {
             // Linux always returns EPERM for non-root users.  We have to let the
             // library go through the setuid-root "fusermount -u" to unmount.
             if err == nix::errno::Errno::EPERM {
                 #[cfg(target_os = "linux")]
-                unsafe {
-                    fuse_session_unmount(self.fuse_session);
-                    fuse_session_destroy(self.fuse_session);
+                {
+                    use std::ffi::OsStr;
+                    // The library's void unmount cannot report a refused
+                    // detach. Keep the session until the actual helper succeeds.
+                    let output = std::process::Command::new("fusermount3")
+                        .arg("-u")
+                        .arg("--")
+                        .arg(OsStr::from_bytes(self.mountpoint.as_bytes()))
+                        .output()?;
+                    if !output.status.success() {
+                        return Err(io::Error::other(format!(
+                            "fusermount3 failed: {}",
+                            String::from_utf8_lossy(&output.stderr)
+                        )));
+                    }
+                    self.mounted = false;
                     return Ok(());
                 }
             }
             return Err(err.into());
         }
+        self.mounted = false;
         Ok(())
+    }
+}
+impl Drop for MountImpl {
+    fn drop(&mut self) {
+        // A setup failure may leave an asynchronous native mount in flight.
+        // Its public session API owns cancellation and native callback refs.
+        // On normal detach the OS has already unmounted the exact filesystem;
+        // do not issue another pathname-based unmount against a replacement.
+        if self.mounted {
+            unsafe {
+                fuse_session_unmount(self.fuse_session);
+            }
+        }
+        unsafe {
+            fuse_session_destroy(self.fuse_session);
+        }
     }
 }
 unsafe impl Send for MountImpl {}

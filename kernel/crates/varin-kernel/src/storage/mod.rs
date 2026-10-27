@@ -34,6 +34,7 @@ pub(crate) mod blob_reads;
 mod branches;
 pub(crate) mod branch_namespace;
 pub(crate) mod workspace_files;
+pub(crate) mod workspace_metadata;
 pub(crate) mod workspace_session;
 pub(crate) mod capture_resources;
 mod child_sources;

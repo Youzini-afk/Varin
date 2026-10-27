@@ -17,12 +17,21 @@ fn main() {
         if cfg!(feature = "macos-no-mount") {
             println!("cargo::rustc-cfg=fuser_mount_impl=\"macos-no-mount\"");
         } else {
-            pkg_config::Config::new()
-                .atleast_version("2.6.0")
-                .probe("fuse") // for macFUSE 4.x
-                .map_err(|e| eprintln!("{e}"))
-                .unwrap();
-            println!("cargo::rustc-cfg=fuser_mount_impl=\"libfuse2\"");
+            // Modern macFUSE no longer supplies a usable compat25 mount fd.
+            // Prefer its public session API; preserve an explicit libfuse2
+            // build and SDKs that only provide the older pkg-config contract.
+            if cfg!(feature = "libfuse2") {
+                configure_libfuse2().unwrap();
+            } else if cfg!(feature = "libfuse3") {
+                configure_libfuse3().unwrap();
+            } else {
+                match configure_libfuse3() {
+                    Ok(()) => {}
+                    Err(modern) => configure_libfuse2().unwrap_or_else(|legacy| {
+                        panic!("macFUSE SDK not available: libfuse3: {modern}; libfuse2: {legacy}")
+                    }),
+                }
+            }
             println!("cargo::rustc-cfg=feature=\"macfuse-4-compat\"");
         }
     } else if cfg!(feature = "libfuse3") {

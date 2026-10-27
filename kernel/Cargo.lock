@@ -2811,6 +2811,7 @@ dependencies = [
  "wasmparser 0.262.0",
  "windows-sys 0.61.2",
  "winfsp",
+ "winfsp-sys",
 ]
 
 [[package]]

@@ -99,7 +99,8 @@ struct Extent {
 }
 
 struct ImmutableFile {
-    file: File,
+    path: PathBuf,
+    file: std::sync::OnceLock<File>,
     hash: String,
     length: u64,
     verified: Mutex<bool>,
@@ -175,6 +176,15 @@ pub(crate) struct InstalledFile {
     content: Arc<ImmutableFile>,
     generation: u64,
 }
+impl InstalledFile {
+    pub(super) fn state(&self, mode: u32) -> PathState {
+        PathState::RegularFile {
+            object_hash: self.content.hash.clone(),
+            byte_length: self.content.length,
+            mode,
+        }
+    }
+}
 
 pub(crate) struct FilePublication {
     receipt: Value,
@@ -182,7 +192,9 @@ pub(crate) struct FilePublication {
     installed: InstalledFile,
 }
 impl FilePublication {
-    pub(crate) fn committed(&self) -> bool { self.receipt["status"] == "committed" }
+    pub(crate) fn committed(&self) -> bool {
+        self.receipt["status"] == "committed"
+    }
     /// Finish on the file worker after the Storage transaction returned. A
     /// backing unlink can involve the native filesystem and stays off control.
     pub(crate) fn finish(self) -> Value {
@@ -279,6 +291,20 @@ fn write_at(file: &File, mut offset: u64, mut bytes: &[u8]) -> io::Result<()> {
 }
 
 impl ImmutableFile {
+    fn file(&self) -> Result<&File, KernelError> {
+        if self.file.get().is_none() {
+            // This is reached only by a byte worker. Storage admission retains
+            // the exact object first, so GC cannot remove it before lazy open.
+            let file = File::open(&self.path)?;
+            if !file.metadata()?.is_file() {
+                return Err(KernelError::Storage(
+                    "workspace object is not a regular file".into(),
+                ));
+            }
+            let _ = self.file.set(file);
+        }
+        Ok(self.file.get().expect("opened immutable byte handle"))
+    }
     fn verify(&self, cancellation: &AtomicBool) -> Result<(), KernelError> {
         let mut verified = self
             .verified
@@ -288,7 +314,8 @@ impl ImmutableFile {
             return Ok(());
         }
         check(cancellation)?;
-        if self.file.metadata()?.len() != self.length {
+        let file = self.file()?;
+        if file.metadata()?.len() != self.length {
             return Err(KernelError::Storage(
                 "workspace base object length changed".into(),
             ));
@@ -299,7 +326,7 @@ impl ImmutableFile {
         while offset < self.length {
             check(cancellation)?;
             let length = (self.length - offset).min(bytes.len() as u64) as usize;
-            read_at(&self.file, offset, &mut bytes[..length])?;
+            read_at(file, offset, &mut bytes[..length])?;
             digest.update(&bytes[..length]);
             offset += length as u64;
         }
@@ -388,6 +415,21 @@ impl Generation {
 }
 
 impl PrivateFile {
+    /// Open the retained base on the native callback/byte worker, after its
+    /// control admission has returned. No filesystem I/O runs on Storage here.
+    pub(super) fn open_base(&self) -> Result<(), KernelError> {
+        check(&self.revoked)?;
+        let base = self
+            .generation
+            .lock()
+            .map_err(|_| KernelError::Storage("private file generation lock poisoned".into()))?
+            .base
+            .clone();
+        if let Some(base) = base {
+            base.file()?;
+        }
+        check(&self.revoked)
+    }
     #[cfg(test)]
     pub(super) fn new_for_test(staging: PathBuf) -> Self {
         Self::new(
@@ -587,7 +629,7 @@ impl FileSnapshot {
                     base.verify(cancellation)?;
                     base_verified = true;
                 }
-                read_at(&base.file, from, &mut output[..(to - from) as usize])?;
+                read_at(base.file()?, from, &mut output[..(to - from) as usize])?;
             }
             Ok(())
         };
@@ -729,7 +771,8 @@ impl SealedFile {
             file_id: self.file_id.clone(),
             generation: self.generation,
             content: Arc::new(ImmutableFile {
-                file: File::open(target)?,
+                file: std::sync::OnceLock::from(File::open(&target)?),
+                path: target,
                 hash: self.hash.clone(),
                 length: self.length,
                 verified: Mutex::new(true),
@@ -777,16 +820,14 @@ impl Storage {
                 object_hash,
                 byte_length,
                 ..
-            } => {
-                let file = File::open(object_path(&self.root, &object_hash)?)?;
-                Some(Arc::new(ImmutableFile {
-                    file,
-                    length: byte_length,
-                    verified: Mutex::new(self.verified_objects.contains(&object_hash)),
-                    _retention: self.blob_read_roots.retain(&object_hash),
-                    hash: object_hash,
-                }))
-            }
+            } => Some(Arc::new(ImmutableFile {
+                path: object_path(&self.root, &object_hash)?,
+                file: std::sync::OnceLock::new(),
+                length: byte_length,
+                verified: Mutex::new(self.verified_objects.contains(&object_hash)),
+                _retention: self.blob_read_roots.retain(&object_hash),
+                hash: object_hash,
+            })),
             PathState::Missing => None,
             _ => {
                 return Err(KernelError::Operation(
@@ -810,7 +851,13 @@ impl Storage {
     }
 
     pub(super) fn revoke_private_files(&mut self, grant: &str) {
-        for revoked in self.workspace_revocations.remove(grant).into_iter().flatten().filter_map(|weak| weak.upgrade()) {
+        for revoked in self
+            .workspace_revocations
+            .remove(grant)
+            .into_iter()
+            .flatten()
+            .filter_map(|weak| weak.upgrade())
+        {
             revoked.store(true, Ordering::Release);
         }
         for handle in self
@@ -832,35 +879,89 @@ impl Storage {
     }
 
     pub(super) fn publish_workspace_checkpoint(
-        &mut self, source: &str, pin: &str, workspace: &str, target: &str, operation: &str,
-        files: &[(String, u32, InstalledFile)], actor: &Grant,
+        &mut self,
+        source: &str,
+        pin: &str,
+        workspace: &str,
+        target: &str,
+        operation: &str,
+        files: &[(String, u32, InstalledFile)],
+        actor: &Grant,
+        metadata_head: &super::workspace_metadata::Head,
+        metadata_pin: &str,
+        metadata: &[(String, super::workspace_metadata::Metadata)],
     ) -> Result<Value, KernelError> {
         let grant = self.load_grant(&actor.grant_id)?;
-        if grant.state != crate::model::GrantState::Active || grant.kernel_epoch != actor.kernel_epoch
-            || grant.owning_workspace.as_deref() != Some(workspace) || !path_allowed(&grant, "") {
-            return Err(KernelError::Authorization("checkpoint requires its original active workspace owner".into()));
+        if grant.state != crate::model::GrantState::Active
+            || grant.kernel_epoch != actor.kernel_epoch
+            || grant.owning_workspace.as_deref() != Some(workspace)
+            || !path_allowed(&grant, "")
+        {
+            return Err(KernelError::Authorization(
+                "checkpoint requires its original active workspace owner".into(),
+            ));
         }
-        require_capability(&grant,"branch.fork")?;
-        let pinned = self.pin_read(&json!({"pinId":pin,"includeEntries":false}), &actor.grant_id)?;
+        require_capability(&grant, "branch.fork")?;
+        let pinned = self.pin_read(
+            &json!({"pinId":pin,"includeEntries":false}),
+            &actor.grant_id,
+        )?;
         if pinned["branchId"] != source || pinned["workspaceId"] != workspace {
-            return Err(KernelError::Authorization("checkpoint pin belongs to another workspace".into()));
+            return Err(KernelError::Authorization(
+                "checkpoint pin belongs to another workspace".into(),
+            ));
+        }
+        let pinned_metadata = self.pin_read(
+            &json!({"pinId":metadata_pin,"includeEntries":false}),
+            &actor.grant_id,
+        )?;
+        if metadata_head.branch_id != source
+            || pinned_metadata["branchId"] != metadata_head.metadata_branch
+            || pinned_metadata["workspaceId"] != workspace
+        {
+            return Err(KernelError::Authorization(
+                "filesystem metadata pin belongs to another checkpoint".into(),
+            ));
         }
         let mut entries = Vec::new();
-        for (path,mode,file) in files {
+        for (path, mode, file) in files {
             let owner = blob_owner_id(&format!("{operation}:{path}"));
             entries.push(json!({"path":path,"state":{"kind":"regular-file","objectHash":file.content.hash,"byteLength":file.content.length,"mode":mode},"ownerId":owner}));
         }
         let input = json!({"operationId":operation,"workspaceId":workspace,"branchId":target,"baseRef":pinned["root"],
-            "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[]});
-        super::operations::idempotent(self,"workspace.checkpoint.fork",&input,|s| {
-            for (path,_,file) in files {
+            "sourcePinId":pin,"entries":entries,"draftBasePaths":[],"captureScopes":[],
+            "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata});
+        super::operations::idempotent(self, "workspace.checkpoint.fork", &input, |s| {
+            for (path, _, file) in files {
                 let content = &file.content;
-                s.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",params![content.hash,i64::try_from(content.length).map_err(|_|KernelError::Operation("content length exceeds Storage range".into()))?])?;
-                s.record_object_owner(&blob_owner_id(&format!("{operation}:{path}")),&content.hash,Some(workspace),Some(operation),&actor.grant_id)?;
+                s.conn.execute(
+                    "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
+                    params![
+                        content.hash,
+                        i64::try_from(content.length).map_err(|_| KernelError::Operation(
+                            "content length exceeds Storage range".into()
+                        ))?
+                    ],
+                )?;
+                s.record_object_owner(
+                    &blob_owner_id(&format!("{operation}:{path}")),
+                    &content.hash,
+                    Some(workspace),
+                    Some(operation),
+                    &actor.grant_id,
+                )?;
             }
             let mut creation = input.clone();
             creation.as_object_mut().unwrap().remove("sourcePinId");
-            s.create_branch(&creation,&actor.grant_id)
+            for key in ["filesystemHead", "metadataPin", "metadata"] {
+                creation.as_object_mut().unwrap().remove(key);
+            }
+            let result = s.create_branch(&creation, &actor.grant_id)?;
+            let root = pinned_metadata["root"]
+                .as_str()
+                .ok_or_else(|| KernelError::Storage("metadata checkpoint has no root".into()))?;
+            s.fork_workspace_metadata(metadata_head, target, root, actor, metadata)?;
+            Ok(result)
         })
     }
 
@@ -874,6 +975,30 @@ impl Storage {
         file: &Arc<PrivateFile>,
         installed: &InstalledFile,
         grant: &Grant,
+    ) -> Result<FilePublication, KernelError> {
+        self.publish_private_file_metadata(
+            operation_id,
+            branch_id,
+            path,
+            expected,
+            mode,
+            file,
+            installed,
+            grant,
+            None,
+        )
+    }
+    pub(super) fn publish_private_file_metadata(
+        &mut self,
+        operation_id: &str,
+        branch_id: &str,
+        path: &str,
+        expected: &Value,
+        mode: u32,
+        file: &Arc<PrivateFile>,
+        installed: &InstalledFile,
+        grant: &Grant,
+        metadata: Option<&super::workspace_metadata::Metadata>,
     ) -> Result<FilePublication, KernelError> {
         if file.id != installed.file_id {
             return Err(KernelError::Authorization(
@@ -903,10 +1028,13 @@ impl Storage {
         let owner = blob_owner_id(&format!("private-file:{operation_id}"));
         let content = &installed.content;
         let input = json!({"operationId":operation_id,"workspaceId":branch.workspace_id,"branchId":branch_id,
-            "fileGeneration":installed.generation,"changes":[{"path":path,"expectedState":expected["state"],
+            "fileGeneration":installed.generation,"metadata":metadata,"changes":[{"path":path,"expectedState":expected["state"],
                 "expectedNode":expected["node"],"state":{"kind":"regular-file","objectHash":content.hash,"byteLength":content.length,"mode":mode},"ownerId":owner}]});
         // Optional expectedNode is omitted for a missing target.
         let mut input = input;
+        if metadata.is_none() {
+            input.as_object_mut().unwrap().remove("metadata");
+        }
         if input["changes"][0]["expectedNode"].is_null() {
             input["changes"][0]
                 .as_object_mut()
@@ -933,7 +1061,13 @@ impl Storage {
                 )?;
                 let mut change = input.clone();
                 change.as_object_mut().unwrap().remove("fileGeneration");
+                change.as_object_mut().unwrap().remove("metadata");
                 let result = storage.branch_path_apply(&change, &stored.grant_id)?;
+                if result["status"] == "committed" {
+                    if let Some(metadata) = metadata {
+                        storage.save_workspace_metadata(branch_id, &path, metadata, &stored)?;
+                    }
+                }
                 if result["status"] != "committed" {
                     storage.release_object_owner(
                         &json!({"ownerId":owner}),

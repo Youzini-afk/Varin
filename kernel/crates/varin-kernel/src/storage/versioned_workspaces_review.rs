@@ -16,11 +16,22 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     f.append(
         "main",
         0,
-        json!([{"path":"folder/a","state":a["state"],"ownerId":a["ownerId"]}]),
+        json!([{"path":"folder/a","state":a["state"],"ownerId":a["ownerId"]},{"path":"folder/cold","state":a["state"],"ownerId":a["ownerId"]}]),
     )
     .unwrap();
     f.finish("main");
     let actor = f.storage.load_grant("owner").unwrap();
+    let cold_id = f
+        .storage
+        .read_workspace_metadata(
+            "main",
+            "folder/cold",
+            &serde_json::from_value(a["state"].clone()).unwrap(),
+            &actor,
+        )
+        .unwrap()
+        .attributes
+        .file_id;
     f.call("branch.write.begin",json!({"operationId":"preopen-write","builderId":"preopen-write","branchId":"main","expectedWriteRevision":0})).unwrap();
     let body_path =
         object_path(&f.storage.root, a["state"]["objectHash"].as_str().unwrap()).unwrap();
@@ -41,6 +52,21 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
             .map_err(|_| KernelError::Storage("test owner stopped".into()))
     });
     let session = Session::open(port.clone(), "main".into(), actor.clone()).unwrap();
+    let protected = actor.clone();
+    let result=port.call(move |s|{
+        let head=s.workspace_metadata_head("main",&protected)?;
+        s.dispatch("branch.delete",&json!({"operationId":"bypass-metadata-owner","workspaceId":"project","branchId":head.metadata_branch}),Some("owner"),&protected)
+    });
+    assert!(matches!(result, Err(KernelError::Authorization(_))));
+    assert!(session
+        .create_file_with_attributes("rejected", 0o600, |_| Err(KernelError::Operation(
+            "attribute admission rejected".into()
+        )))
+        .is_err());
+    assert!(
+        session.lookup("rejected").is_err(),
+        "creation and initial metadata have one commit boundary"
+    );
     assert!(Arc::ptr_eq(
         &session,
         &Session::open(port.clone(), "main".into(), actor.clone()).unwrap()
@@ -78,10 +104,42 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     let opened_file = session.open_file(&opened).unwrap();
     assert!(Arc::ptr_eq(&opened, &session.lookup("folder/a").unwrap()));
     session.write(&opened, Some(0), b"changed!").unwrap();
+    use super::workspace_metadata::Timestamp;
+    let chosen = Timestamp {
+        seconds: 1_700_000_000,
+        nanos: 123_456_700,
+    };
+    session
+        .set_attributes(&opened, |attrs| {
+            attrs.mode = 0o640;
+            attrs.modified = chosen;
+            attrs
+                .xattrs
+                .insert("dXNlci5ub3Rl".into(), b"boundary metadata".to_vec());
+            Ok(())
+        })
+        .unwrap();
+    let persistent_id = opened.attributes().unwrap().file_id;
+    // A boundary must include current namespace changes, not merely the last
+    // explicitly published revision. Native create/rename need no publish call.
+    session
+        .create("fresh", PathState::Directory { mode: Some(0o750) })
+        .unwrap();
     let checkpoint = session.checkpoint().unwrap();
     // The parent continues through the same open handle before child sealing.
     session.write(&opened, Some(0), b"parent!!").unwrap();
     session.rename("folder", "moved", false).unwrap();
+    assert_eq!(
+        session
+            .lookup("moved/cold")
+            .unwrap()
+            .attributes()
+            .unwrap()
+            .file_id,
+        cold_id,
+        "renaming an unread subtree preserves its original identities"
+    );
+    session.remove("fresh", true).unwrap();
     assert!(Arc::ptr_eq(&opened, &session.lookup("moved/a").unwrap()));
     session.flush(&opened).unwrap();
     let child = checkpoint
@@ -110,6 +168,17 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     assert_eq!(selected, b"changed!");
     let child_session = Session::open(port.clone(), "child".into(), actor.clone()).unwrap();
     let child_node = child_session.lookup("folder/a").unwrap();
+    let attrs = child_node.attributes().unwrap();
+    assert_eq!(attrs.file_id, persistent_id);
+    assert_eq!(attrs.mode, 0o640);
+    assert_eq!(attrs.modified, chosen);
+    assert_eq!(attrs.xattrs["dXNlci5ub3Rl"], b"boundary metadata");
+    assert!(child_session
+        .lookup("fresh")
+        .unwrap()
+        .state()
+        .unwrap()
+        .is_directory());
     assert!(session
         .write(&child_node, Some(0), b"wrong session")
         .is_err());
@@ -120,6 +189,7 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     assert!(!opened.linked().unwrap());
     let replacement = session.create_file("moved/a", 0o644).unwrap();
     assert_ne!(opened.id, replacement.id);
+    assert_ne!(persistent_id, replacement.attributes().unwrap().file_id);
     session.write(&opened, Some(0), b"unlinked").unwrap();
     session.write(&replacement, None, b"new file").unwrap();
     session.flush(&opened).unwrap();
@@ -130,6 +200,7 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     session.read(&replacement, 0, &mut bytes).unwrap();
     assert_eq!(&bytes, b"new file");
     session.remove("moved/a", false).unwrap();
+    session.remove("moved/cold", false).unwrap();
     session.remove("moved", true).unwrap();
     assert!(session.lookup("moved/a").is_err());
     let cycled = session.create_file("cycled", 0o644).unwrap();
@@ -155,12 +226,35 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
         .unwrap(),
         b"two"
     );
-    let retained = session.create_file("retained", 0o644).unwrap();
+    let retained = session
+        .create_file_with_attributes("retained", 0o644, |attrs| {
+            attrs.created = chosen;
+            attrs.mode = 0o640;
+            Ok(())
+        })
+        .unwrap();
     session
         .write(&retained, None, b"retained across normal detach")
         .unwrap();
     let after_close = session.checkpoint().unwrap();
     session.close().unwrap();
+    let resumed = Session::open(port.clone(), "main".into(), actor.clone()).unwrap();
+    let attrs = resumed.lookup("cycled").unwrap().attributes().unwrap();
+    let cycled_id = attrs.file_id;
+    resumed
+        .set_attributes(&resumed.lookup("cycled").unwrap(), |attrs| {
+            attrs.mode = 0o600;
+            attrs.modified = chosen;
+            Ok(())
+        })
+        .unwrap();
+    resumed.close().unwrap();
+    drop(resumed);
+    // Original pins keep both roots alive even after their source branches are
+    // released. Fork must not consult a newer parent or recreate metadata.
+    port.call(|s| s.branch_delete(&json!({"branchId":"main"})))
+        .unwrap();
+    port.call(|s| s.gc()).unwrap();
     after_close
         .fork("after-close", "fork-after-close", &AtomicBool::new(false))
         .unwrap();
@@ -168,7 +262,33 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     assert!(session.read(&opened, 0, &mut bytes).is_err());
     assert!(session.create_file("after-detach", 0o644).is_err());
     assert!(session.directory_after("", None, 1).is_err());
-    let directory_only = Session::open(port.clone(), "after-close".into(), actor).unwrap();
+    let directory_only = Session::open(port.clone(), "after-close".into(), actor.clone()).unwrap();
+    assert_eq!(
+        directory_only
+            .lookup("cycled")
+            .unwrap()
+            .attributes()
+            .unwrap()
+            .file_id,
+        cycled_id
+    );
+    assert_eq!(
+        directory_only
+            .lookup("cycled")
+            .unwrap()
+            .attributes()
+            .unwrap()
+            .mode,
+        0o644,
+        "fork retains the checkpoint's metadata, not post-boundary chmod"
+    );
+    let restarted_branch = "after-close";
+    let restart_id = directory_only
+        .lookup("retained")
+        .unwrap()
+        .attributes()
+        .unwrap()
+        .file_id;
     port.call(|s| s.revoke_grant(&json!({"grantId":"owner"}), "host"))
         .unwrap();
     assert!(matches!(
@@ -188,6 +308,42 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
     ));
     stopping.send(None).unwrap();
     drop(owner.join().unwrap());
+    let mut restarted = Storage::open(&directory, "host").unwrap();
+    let state = restarted
+        .root_get(
+            &restarted.branch(restarted_branch).unwrap().head_root,
+            "retained",
+        )
+        .unwrap()
+        .unwrap();
+    // Reading durable metadata uses the same native owner and tree graph after
+    // reopening SQLite; no process-local Node cache participates.
+    let metadata = restarted
+        .read_workspace_metadata(restarted_branch, "retained", &state, &actor)
+        .unwrap();
+    assert_eq!(metadata.attributes.file_id, restart_id);
+    assert_eq!(metadata.attributes.created, chosen);
+    assert_eq!(metadata.attributes.mode, 0o640);
+    assert_eq!(
+        restarted
+            .conn
+            .query_row(
+                "SELECT count(*) FROM pins WHERE pin_id LIKE 'workspace-boundary:%'",
+                [],
+                |r| r.get::<_, i64>(0)
+            )
+            .unwrap(),
+        0
+    );
+    let paired = restarted
+        .workspace_metadata_head(restarted_branch, &actor)
+        .unwrap()
+        .metadata_branch;
+    restarted
+        .branch_delete(&json!({"branchId":restarted_branch}))
+        .unwrap();
+    assert!(restarted.branch(&paired).is_err());
+    drop(restarted);
     fs::remove_dir_all(directory).unwrap();
 }
 impl Fixture {

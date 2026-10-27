@@ -885,6 +885,12 @@ mod op {
         Size(NonZeroU32),
     }
     impl<'a> GetXAttr<'a> {
+        pub(crate) fn position(&self) -> u32 {
+            #[cfg(target_os = "macos")]
+            return self.arg.position;
+            #[cfg(not(target_os = "macos"))]
+            0
+        }
         /// Name of the `XAttr`
         pub(crate) fn name(&self) -> &'a OsStr {
             self.name

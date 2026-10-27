@@ -329,7 +329,26 @@ impl Storage {
         node: Option<&str>,
         top: bool,
     ) -> Result<String, KernelError> {
+        self.graft_tree_node(root, segments, node, top, false)
+    }
+
+    /// Reuse a complete immutable subtree. Metadata may create its private
+    /// ancestor directories; user namespace renames still require real parents.
+    pub(super) fn graft_tree_node(
+        &mut self,
+        root: &str,
+        segments: &[String],
+        node: Option<&str>,
+        top: bool,
+        create_parents: bool,
+    ) -> Result<String, KernelError> {
         self.check_cancelled()?;
+        if segments.is_empty() {
+            return match node {
+                Some(node) => Ok(node.to_owned()),
+                None => self.empty_root(),
+            };
+        }
         let TrieNode::Path {
             mut state,
             children,
@@ -350,14 +369,19 @@ impl Storage {
         let replacement = if segments.len() == 1 {
             node.map(str::to_owned)
         } else {
-            let child = self.index_get(children.as_ref(), name)?.ok_or_else(|| {
-                namespace_error(
-                    "namespace_parent_missing",
-                    "Rename destination parent does not exist",
-                    &segments.join("/"),
-                )
-            })?;
-            Some(self.replace_namespace_node(&child, &segments[1..], node, false)?)
+            let child = match self.index_get(children.as_ref(), name)? {
+                Some(child) => child,
+                None if node.is_none() => return Ok(root.to_owned()),
+                None if create_parents => self.empty_root()?,
+                None => {
+                    return Err(namespace_error(
+                        "namespace_parent_missing",
+                        "Rename destination parent does not exist",
+                        &segments.join("/"),
+                    ))
+                }
+            };
+            Some(self.graft_tree_node(&child, &segments[1..], node, false, create_parents)?)
         };
         let next = match replacement {
             Some(child) => Some(self.index_set(children, name.clone(), child)?),
