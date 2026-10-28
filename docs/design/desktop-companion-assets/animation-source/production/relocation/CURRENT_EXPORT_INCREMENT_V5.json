@@ -1,0 +1,67 @@
+{
+  "stage": "motion-candidate",
+  "depends": [
+    "CURRENT_EXPORT_SELECTION.json",
+    "CURRENT_EXPORT_INCREMENT_V2.json",
+    "CURRENT_EXPORT_INCREMENT_V3.json",
+    "CURRENT_EXPORT_INCREMENT_V4.json"
+  ],
+  "files": [
+    {
+      "path": "source/canonical-rapid-pickup-turn70-v1.png",
+      "bytes": 1956589,
+      "sha256": "40f62c8c6179f7a3abff445d671cc78e884b02176bfc87647f9a78456d043525"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-turn70-v1.prompt.txt",
+      "bytes": 671,
+      "sha256": "335f23c8fe57bc758c086ddc6a6b9d6dae571d69949c50b1cab195720c6450c6"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-lid65-v1.png",
+      "bytes": 1991980,
+      "sha256": "3df035462bcea2c97134567ac6b1c64cfce6ac3520bf1297517452fd706769cb"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-lid65-v1.prompt.txt",
+      "bytes": 684,
+      "sha256": "2eb3b6bd57252c7fa5fc01e31c29f417dee95cdd00556b7939ae06de61627c91"
+    },
+    {
+      "path": "derive_rapid_pickup_v4.py",
+      "bytes": 1847,
+      "sha256": "e91d9c61975a1286ab8ff0209e1826c37ed6f2760868785f5e57095d5bbdb12c"
+    },
+    {
+      "path": "derive_rapid_pickup_v5.py",
+      "bytes": 1846,
+      "sha256": "dee87a2398e6fbf17cf3e6a9a1e1963deb62a8f2d8859472ef19b1c77b81fc28"
+    },
+    {
+      "path": "rapid-pickup-v4/turn70.png",
+      "bytes": 307284,
+      "sha256": "726298cd1039ce8ac40015fbdf447966848da4b5639df274ec45b398affbc8ad"
+    },
+    {
+      "path": "rapid-pickup-v5/lid65.png",
+      "bytes": 311009,
+      "sha256": "fa43c3df8176f3f95e6814d2e86261236bf53423e3e9a263065d467ce0d15aaf"
+    },
+    {
+      "path": "build_transition_contract_v3.py",
+      "bytes": 4493,
+      "sha256": "02cc64fa66e10f999070a648d8e89a24e47ff09d8ba83bec5a792e6c885aa967"
+    },
+    {
+      "path": "transition-contract-v3/relocation.source.json",
+      "bytes": 13119,
+      "sha256": "2ab597a310dbf1cb6cc7345bba4b4ea1e1e83aa21fec92b2a3a0ce4198ec583d"
+    },
+    {
+      "path": "build_interactive_relocation_v2.py",
+      "bytes": 6167,
+      "sha256": "76faa06eb44513781ccd0fb31a67695c5825c42120d39d21e5680e4314b95cdd"
+    }
+  ],
+  "bytes": 4595689
+}

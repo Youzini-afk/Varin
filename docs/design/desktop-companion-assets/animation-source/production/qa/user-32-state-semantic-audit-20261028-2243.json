@@ -1,0 +1,418 @@
+{
+  "dateUTC": "2026-10-28T22:43:00Z",
+  "scope": "32 design states semantic audit, not 32 distinct required gestures; accepted inventory currently 32 packages.",
+  "sourceFiles": [
+    "docs/design/desktop-companion.md",
+    "tools/desktop-companion-animation/coverage.json",
+    "packages/ui/src/components/companion/presentation.ts",
+    "packages/ui/src/apps/renderCompanionApp.tsx"
+  ],
+  "states": [
+    {
+      "state": "C01",
+      "label": "待命",
+      "requiredFact": "current snapshot, no active work",
+      "truthfulCurrentVisual": "closed quiet via actual closing; open neutral also truthful",
+      "guard": "Do not infer idle from disconnect.",
+      "directAcceptedActions": [
+        "idle-closed"
+      ],
+      "notDirectlyMapped": [
+        "idle-open"
+      ]
+    },
+    {
+      "state": "C02",
+      "label": "接任务",
+      "requiredFact": "Host accepted run",
+      "truthfulCurrentVisual": "opening + neutral attention; external observe shared fallback",
+      "guard": "Do not replay welcome as task acceptance on a click alone.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "accept-closed",
+        "accept-open"
+      ]
+    },
+    {
+      "state": "C03",
+      "label": "准备",
+      "requiredFact": "preparing/runnable",
+      "truthfulCurrentVisual": "open attentive observation",
+      "guard": "No speculative keyboard activity.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "prepare"
+      ]
+    },
+    {
+      "state": "C04",
+      "label": "思考",
+      "requiredFact": "generating",
+      "truthfulCurrentVisual": "screen observation/chin shared",
+      "guard": "Means generation, not private thoughts.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "think"
+      ]
+    },
+    {
+      "state": "C05",
+      "label": "输出交流",
+      "requiredFact": "public text delta, currently not projected",
+      "truthfulCurrentVisual": "shared observation until admitted public-output event",
+      "guard": "Do not infer output from all generating.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "output"
+      ]
+    },
+    {
+      "state": "C06",
+      "label": "完成",
+      "requiredFact": "observed current-run nonterminal→completed edge",
+      "truthfulCurrentVisual": "completion once then neutral/closed quiet via lid bridge",
+      "guard": "Do not replay on resync; new error/work request must supersede.",
+      "directAcceptedActions": [
+        "completion"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "T01",
+      "label": "阅读",
+      "requiredFact": "admitted active read tool",
+      "truthfulCurrentVisual": "screen/chin observation",
+      "guard": "No private file content inferred.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "reading"
+      ]
+    },
+    {
+      "state": "T02",
+      "label": "编辑",
+      "requiredFact": "admitted active edit tool",
+      "truthfulCurrentVisual": "typing/editing bounded by current activity",
+      "guard": "Once activity ends, no indefinite typing.",
+      "directAcceptedActions": [
+        "editing"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "T03",
+      "label": "编程执行",
+      "requiredFact": "admitted terminal operation",
+      "truthfulCurrentVisual": "execution observation, not blanket typing",
+      "guard": "Long shell runtime is not continuous input or test success.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "coding-input",
+        "execution-observe"
+      ]
+    },
+    {
+      "state": "T04",
+      "label": "浏览搜索",
+      "requiredFact": "admitted active browser/search tool",
+      "truthfulCurrentVisual": "scroll/browsing or shared observation",
+      "guard": "Search completion not overall success.",
+      "directAcceptedActions": [
+        "browsing"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "T05",
+      "label": "计算实验",
+      "requiredFact": "explicit compute activity, currently no specialized classifier",
+      "truthfulCurrentVisual": "shared screen observation",
+      "guard": "Do not label shell as training automatically.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "experiment-observe"
+      ]
+    },
+    {
+      "state": "T06",
+      "label": "整理归档",
+      "requiredFact": "admitted material/export operation",
+      "truthfulCurrentVisual": "shared screen observation",
+      "guard": "No arbitrary physical filing gesture required.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "organizing"
+      ]
+    },
+    {
+      "state": "T07",
+      "label": "检查验证",
+      "requiredFact": "admitted inspect/recovery/render operation",
+      "truthfulCurrentVisual": "screen/chin checking shared",
+      "guard": "Inspecting is not verified correctness.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "checking"
+      ]
+    },
+    {
+      "state": "T08",
+      "label": "协作调度",
+      "requiredFact": "active child activity or admitted retrieval category",
+      "truthfulCurrentVisual": "external-wait shared while children active",
+      "guard": "Parent completed must not hide active children or freeze celebration.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "dispatch",
+        "dispatch-observe"
+      ]
+    },
+    {
+      "state": "W01",
+      "label": "排队",
+      "requiredFact": "queued operation",
+      "truthfulCurrentVisual": "attentive screen wait; queue badge if known",
+      "guard": "Queue does not override simultaneously executing work.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "queued"
+      ]
+    },
+    {
+      "state": "W02",
+      "label": "等授权",
+      "requiredFact": "specific unresolved Host permission",
+      "truthfulCurrentVisual": "ask-enter→hand-lower→relaxed hold; actual result→safe exit",
+      "guard": "No expiry approval; denial no nod/success/resume.",
+      "directAcceptedActions": [
+        "permission"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "W03",
+      "label": "等回答",
+      "requiredFact": "unresolved ask_user operation",
+      "truthfulCurrentVisual": "chin question→relaxed hold; actual answer→release→understood if warranted",
+      "guard": "No timed answer or cancellation understanding nod.",
+      "directAcceptedActions": [
+        "query"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "W04",
+      "label": "等外部",
+      "requiredFact": "waiting/preparing external operation",
+      "truthfulCurrentVisual": "external-wait entry/loop/exit",
+      "guard": "Only label external cause when known.",
+      "directAcceptedActions": [
+        "external-wait"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "W05",
+      "label": "等重试",
+      "requiredFact": "explicit retry scheduling, not currently projected",
+      "truthfulCurrentVisual": "ordinary wait without retry countdown",
+      "guard": "Do not invent retryAt.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "retry-wait"
+      ]
+    },
+    {
+      "state": "E01",
+      "label": "失败",
+      "requiredFact": "current run failed; operation failure scoped separately",
+      "truthfulCurrentVisual": "brief surprise then focused failure",
+      "guard": "No looped surprise or success gesture.",
+      "directAcceptedActions": [
+        "failure"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "E02",
+      "label": "取消收尾",
+      "requiredFact": "cancel requested with unsettled work",
+      "truthfulCurrentVisual": "hand off keyboard focused hold",
+      "guard": "Never equate request with executor stop.",
+      "directAcceptedActions": [
+        "cancel-settling"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "E03",
+      "label": "已停",
+      "requiredFact": "independent scoped actual stop, unavailable in current projector",
+      "truthfulCurrentVisual": "neutral round-cancelled presentation, not stopped declaration",
+      "guard": "No need invent Host stop API; neutral exit remains available.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "stopped"
+      ]
+    },
+    {
+      "state": "E04",
+      "label": "断联未知",
+      "requiredFact": "unknown/stale/unavailable observation",
+      "truthfulCurrentVisual": "disconnected stop-input hold",
+      "guard": "Stop stale typing/celebration; retain unknown badge.",
+      "directAcceptedActions": [
+        "disconnected"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "E05",
+      "label": "重连同步",
+      "requiredFact": "synchronizing snapshot",
+      "truthfulCurrentVisual": "disconnected/neutral observation pending current facts",
+      "guard": "Do not replay stale success or imply resumed execution.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "reconnecting"
+      ]
+    },
+    {
+      "state": "E06",
+      "label": "结果核查",
+      "requiredFact": "unknown effect requiring reconciliation",
+      "truthfulCurrentVisual": "uncertain check then focused hold",
+      "guard": "No auto retry, no generic failure equivalence.",
+      "directAcceptedActions": [
+        "unknown-effect-check"
+      ],
+      "notDirectlyMapped": []
+    },
+    {
+      "state": "L01",
+      "label": "出场欢迎",
+      "requiredFact": "presentation welcome event",
+      "truthfulCurrentVisual": "peer-reviewed closed welcome, not yet in runtime inventory",
+      "guard": "No replay on every Host update.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "welcome-open",
+        "welcome-closed"
+      ]
+    },
+    {
+      "state": "L02",
+      "label": "呼吸眨眼",
+      "requiredFact": "decorative microactivity on current pose",
+      "truthfulCurrentVisual": "existing hold blink/posture inside current family",
+      "guard": "Do not switch pose or change business state for blink.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "hold-seated-closed",
+        "hold-seated-work",
+        "hold-user-attention",
+        "hold-observe-diagnose",
+        "hold-rest",
+        "hold-carry-airborne"
+      ]
+    },
+    {
+      "state": "L03",
+      "label": "轻点回应",
+      "requiredFact": "local tap",
+      "truthfulCurrentVisual": "peer-reviewed closed click, not yet runtime inventory",
+      "guard": "Tap is not task acceptance.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "tap-response"
+      ]
+    },
+    {
+      "state": "L04",
+      "label": "提起拖动",
+      "requiredFact": "actual user drag",
+      "truthfulCurrentVisual": "relocation remains separate acceptance/integration owner",
+      "guard": "Until accepted use native reposition/neutral image, not fake carry contacts.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "lift",
+        "carry-hold",
+        "early-release",
+        "regrab"
+      ]
+    },
+    {
+      "state": "L05",
+      "label": "落位整理",
+      "requiredFact": "actual drag release",
+      "truthfulCurrentVisual": "relocation landing separate acceptance owner",
+      "guard": "No return-to-work action merely because landing ended.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "landing",
+        "settle",
+        "return-laptop",
+        "resume"
+      ]
+    },
+    {
+      "state": "L06",
+      "label": "困倦伸展",
+      "requiredFact": "presentation rest idle eligibility",
+      "truthfulCurrentVisual": "accepted eye-rub/stretch one-shot",
+      "guard": "Do not stretch during permission, critical unknown or active typing.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "sleepy-stretch"
+      ]
+    },
+    {
+      "state": "L07",
+      "label": "安静陪伴",
+      "requiredFact": "no selected branch / quiet presentation",
+      "truthfulCurrentVisual": "closed quiet neutral",
+      "guard": "No selected branch must not assert connected idle work state.",
+      "directAcceptedActions": [],
+      "notDirectlyMapped": [
+        "quiet-company"
+      ]
+    }
+  ],
+  "remaining": [
+    {
+      "id": "active-evidence-fallback",
+      "owner": "integration",
+      "priority": "required",
+      "finding": "consumer hasActiveWork only tests nonterminal activeRun; parent completed + activeChildren (T08), or pending without run, may miss external-wait fallback and freeze obsolete success drawing",
+      "requestedFix": "Derive active fallback from pending operations and active child facts/current working-wait intents, not run alone."
+    },
+    {
+      "id": "accepted-only-fallback",
+      "owner": "integration",
+      "priority": "required",
+      "finding": "visualAction assetList.some sees candidate assets whereas playback filters accepted; mixed review inventory can block natural fallback",
+      "requestedFix": "Determine availability from accepted usable runtime assets."
+    },
+    {
+      "id": "reconnecting",
+      "owner": "integration",
+      "priority": "mapping",
+      "finding": "E05 requires reconnecting but current 32 packages contain sync bridge and disconnected hold, no reconnecting action",
+      "requestedFix": "Explicit neutral/disconnected fallback for synchronization, then current snapshot chooses activity; no old completion replay."
+    },
+    {
+      "id": "local-life-actions",
+      "owner": "parent/integration",
+      "priority": "scoped remaining",
+      "finding": "welcome/click reviewed art exists but not installed runtime actions; relocation separately owned; C05/T05/W05 no dedicated facts",
+      "requestedFix": "Wire only genuine local events/available facts, preserve neutral fallbacks. No additional big actions needed for counts."
+    }
+  ],
+  "positiveChecks": [
+    "Current projector unknown/synchronizing preempts stale activity.",
+    "Run cancelled is not E03 stopped.",
+    "Completion only arms on observed nonterminal→completed edge, not initial/resync completed snapshot.",
+    "USER unresolved loops remain waiting after 90seconds; 370 shared-controller interruption checks pass, including failure/cancel/disconnect/unknown-effect targets."
+  ],
+  "evidence": "user-attention/handoffs/v1/runtime-handoff-qa.json"
+}

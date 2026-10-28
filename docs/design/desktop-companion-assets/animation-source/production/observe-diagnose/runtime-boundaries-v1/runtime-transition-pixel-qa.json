@@ -1,0 +1,509 @@
+{
+  "uniqueEdges": 63,
+  "results": [
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 1100,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-exit-v1-boundary-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 395,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 2380,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 3330,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 6680,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 7430,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 10660,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 11510,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 13310,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.wait-hold-v1-boundary-v1",
+      "to": "observe.wait-exit-v1-boundary-v1",
+      "at": 14110,
+      "pose": "observe-chin-contact",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.quiet-settle-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 1100,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "seated-work.opening-hybrid-v2",
+      "to": "observe.gaze-to-screen-v1-pose-v1",
+      "at": 1950,
+      "pose": "open-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.gaze-to-screen-v1-pose-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 350,
+      "pose": "seated-open-read-screen",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.quiet-settle-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 2395,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.quiet-settle-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 3145,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.quiet-settle-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 7465,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.quiet-settle-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 8665,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-eye-rub-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 500,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-eye-rub-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 1980,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-eye-rub-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 2880,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-stretch-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 450,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-stretch-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 2880,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "rest.closed-stretch-v1-boundary-v1",
+      "to": "seated-work.opening-hybrid-v2",
+      "at": 3780,
+      "pose": "seated-closed-neutral-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 1050,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.neutral-recovery-boundary-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 795,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.neutral-recovery-boundary-v1",
+      "to": "observe.gaze-to-user-v1-pose-v1",
+      "at": 795,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.gaze-to-user-v1-pose-v1",
+      "to": "seated-work.closing-hybrid-v2",
+      "at": 345,
+      "pose": "seated-open-neutral",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "seated-work.closing-hybrid-v2",
+      "to": "rest.quiet-settle-v1-boundary-v1",
+      "at": 1945,
+      "pose": "closed-rest",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.raised-focus-to-unknown-boundary-v1",
+      "at": 1050,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.raised-focus-to-unknown-boundary-v1",
+      "to": "observe.unknown-hold-boundary-v1",
+      "at": 210,
+      "pose": "observe-unknown",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.neutral-recovery-boundary-v1",
+      "to": "observe.uncertain-check-boundary-v1",
+      "at": 795,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 2280,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.raised-focus-to-unknown-boundary-v1",
+      "at": 2280,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 3680,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-hold-boundary-v1",
+      "to": "observe.raised-focus-to-unknown-boundary-v1",
+      "at": 3680,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 35,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.gaze-to-user-v1-pose-v1",
+      "at": 35,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.unknown-entry-boundary-v1",
+      "at": 35,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.unknown-entry-boundary-v1",
+      "to": "observe.unknown-hold-boundary-v1",
+      "at": 430,
+      "pose": "observe-unknown",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.cancel-entry-boundary-v1",
+      "at": 35,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.cancel-entry-boundary-v1",
+      "to": "observe.cancel-hold-boundary-v1",
+      "at": 140,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.uncertain-check-boundary-v1",
+      "at": 35,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 350,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.raised-focus-to-unknown-boundary-v1",
+      "at": 350,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.cancel-hold-boundary-v1",
+      "at": 350,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 600,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.raised-focus-to-unknown-boundary-v1",
+      "at": 600,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.failure-entry-boundary-v1",
+      "to": "observe.cancel-hold-boundary-v1",
+      "at": 600,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.unknown-hold-boundary-v1",
+      "to": "observe.sync-attention-boundary-v1",
+      "at": 1200,
+      "pose": "observe-unknown",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.sync-attention-boundary-v1",
+      "to": "observe.neutral-recovery-boundary-v1",
+      "at": 80,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.sync-attention-boundary-v1",
+      "to": "observe.cancel-hold-boundary-v1",
+      "at": 80,
+      "pose": "observe-raised-focused",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.unknown-hold-boundary-v1",
+      "to": "observe.sync-attention-boundary-v1",
+      "at": 2580,
+      "pose": "observe-unknown",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.unknown-hold-boundary-v1",
+      "to": "observe.sync-attention-boundary-v1",
+      "at": 3880,
+      "pose": "observe-unknown",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 50,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "observe.gaze-to-user-v1-pose-v1",
+      "at": 50,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "observe.unknown-entry-boundary-v1",
+      "at": 50,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "observe.cancel-entry-boundary-v1",
+      "at": 50,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "observe.uncertain-release-boundary-v1",
+      "at": 530,
+      "pose": "observe-check-chin",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-release-boundary-v1",
+      "to": "seated-work.canonical-typing-v2-pose-v1",
+      "at": 655,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-release-boundary-v1",
+      "to": "observe.gaze-to-user-v1-pose-v1",
+      "at": 655,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-release-boundary-v1",
+      "to": "observe.unknown-entry-boundary-v1",
+      "at": 655,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-release-boundary-v1",
+      "to": "observe.cancel-entry-boundary-v1",
+      "at": 655,
+      "pose": "seated-open-screen-keyboard",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    },
+    {
+      "from": "observe.uncertain-check-boundary-v1",
+      "to": "observe.uncertain-release-boundary-v1",
+      "at": 1430,
+      "pose": "observe-check-chin",
+      "differentRgbaPixels": 0,
+      "differentVisiblePixels": 0
+    }
+  ]
+}

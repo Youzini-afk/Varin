@@ -1,0 +1,21 @@
+{
+  "status": "frozen integration evidence, complements visual review",
+  "files": [
+    {
+      "path": "qa/user-32-state-semantic-audit-20261028-2243.json",
+      "bytes": 14456,
+      "sha256": "1db99c88675b903c10344e066d61a1239f7b440dc74c081a565cb0a20983ac55"
+    },
+    {
+      "path": "user-attention/handoffs/v1/verify-runtime-handoffs.mjs",
+      "bytes": 2134,
+      "sha256": "23f0635ef1480401e90b8b947d489fe369e9ecc4f2bab0da1025e9e020dd2095"
+    },
+    {
+      "path": "user-attention/handoffs/v1/runtime-handoff-qa.json",
+      "bytes": 116374,
+      "sha256": "1d9f6bf6698958f0d4d22d79d041b7d5f2b150f43efc140aff3b8c8b87f64476"
+    }
+  ],
+  "pathBase": "production-root"
+}

@@ -2,7 +2,4923 @@
   "implementation": "packages/ui/src/components/companion/playback.mjs",
   "cases": 260,
   "passed": 260,
+  "recoveryCases": 210,
+  "recoveryPassed": 210,
+  "recoveryDetail": [
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3094,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 221,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 1050,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 969,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3247,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 374,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 969,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 901,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3196,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 306,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 901,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 833,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3128,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 238,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 833,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 2280,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3094,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 221,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.cancel-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.cancel-hold-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 3680,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 2295,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 2331,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 442,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 153,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 35,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 1054,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3349,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 476,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 255,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 1054,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 918,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3196,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 323,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 119,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 918,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 350,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3094,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 221,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.raised-focus-to-unknown-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.raised-focus-to-unknown-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 210,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.failure-entry-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.failure-entry-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 600,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 884,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3179,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 85,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 884,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 1200,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 1037,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3332,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 238,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 1037,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 986,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3264,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 187,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 986,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 918,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3196,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 119,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 918,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 2580,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 884,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3179,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 85,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 884,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.unknown-hold-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.unknown-hold-boundary-v1",
+          "to": "observe.sync-attention-boundary-v1",
+          "at": 3880,
+          "pose": "observe-unknown"
+        },
+        {
+          "from": "observe.sync-attention-boundary-v1",
+          "to": "observe.neutral-recovery-boundary-v1",
+          "at": 80,
+          "pose": "observe-raised-focused"
+        },
+        {
+          "from": "observe.neutral-recovery-boundary-v1",
+          "to": "observe.uncertain-check-boundary-v1",
+          "at": 795,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 2295,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 2331,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 442,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 153,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 50,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 0,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 1037,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3332,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1479,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 1190,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 1,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 952,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3247,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1394,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 1105,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 2,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 884,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3179,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3885,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1309,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 1020,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 3,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 3094,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1224,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 935,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 4,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 714,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 2992,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1139,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 850,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 530,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 5,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "editing",
+      "step": 17,
+      "elapsed": 663,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "editing",
+      "step": 777,
+      "elapsed": 777,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "seated-work.canonical-typing-v2-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "idle-closed",
+      "step": 17,
+      "elapsed": 2958,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "idle-closed",
+      "step": 777,
+      "elapsed": 3108,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.gaze-to-user-v1-pose-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.gaze-to-user-v1-pose-v1",
+          "to": "seated-work.closing-hybrid-v2",
+          "at": 345,
+          "pose": "seated-open-neutral"
+        },
+        {
+          "from": "seated-work.closing-hybrid-v2",
+          "to": "rest.quiet-settle-v1-boundary-v1",
+          "at": 1945,
+          "pose": "closed-rest"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "disconnected",
+      "step": 17,
+      "elapsed": 1088,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "disconnected",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.unknown-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.unknown-entry-boundary-v1",
+          "to": "observe.unknown-hold-boundary-v1",
+          "at": 430,
+          "pose": "observe-unknown"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "cancel-settling",
+      "step": 17,
+      "elapsed": 799,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "cancel-settling",
+      "step": 777,
+      "elapsed": 1554,
+      "ok": true,
+      "trace": [
+        {
+          "from": "observe.uncertain-check-boundary-v1",
+          "to": "observe.uncertain-release-boundary-v1",
+          "at": 1430,
+          "pose": "observe-check-chin"
+        },
+        {
+          "from": "observe.uncertain-release-boundary-v1",
+          "to": "observe.cancel-entry-boundary-v1",
+          "at": 655,
+          "pose": "seated-open-screen-keyboard"
+        },
+        {
+          "from": "observe.cancel-entry-boundary-v1",
+          "to": "observe.cancel-hold-boundary-v1",
+          "at": 140,
+          "pose": "observe-raised-focused"
+        }
+      ]
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "unknown-effect-check",
+      "step": 17,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    },
+    {
+      "source": "observe.uncertain-check-boundary-v1",
+      "frame": 6,
+      "targetAction": "unknown-effect-check",
+      "step": 777,
+      "elapsed": 0,
+      "ok": true,
+      "trace": []
+    }
+  ],
   "failures": [],
+  "waitPersistsWithoutNewFact": true,
+  "latestSameIntentCancelsStaleTarget": true,
   "roundTrip": {
     "enteredWait": true,
     "returnedWork": true,
