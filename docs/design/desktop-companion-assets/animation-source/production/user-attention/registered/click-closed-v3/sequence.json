@@ -1,0 +1,87 @@
+{
+  "id": "click-closed-v3",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-closed-neutral-hands-on-lid",
+  "exitPose": "seated-closed-neutral-hands-on-lid",
+  "warning": "Closed-laptop gentle click response candidate. Shared closed hands/laptop held; head and upper shoulders drawn newly, blink restricted to new eye regions. No work, approval or completion semantics. Normal-speed review pending. v2 locally clears visually reviewed new left-hair white background pockets.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 280,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 190,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 220,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 450,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

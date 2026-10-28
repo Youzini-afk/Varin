@@ -1,0 +1,57 @@
+[
+  {
+    "frame": "pose-000.png",
+    "reviewedBackgroundPixelsRemoved": 0,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-001.png",
+    "reviewedBackgroundPixelsRemoved": 0,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-002.png",
+    "reviewedBackgroundPixelsRemoved": 250,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-003.png",
+    "reviewedBackgroundPixelsRemoved": 267,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-004.png",
+    "reviewedBackgroundPixelsRemoved": 267,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-005.png",
+    "reviewedBackgroundPixelsRemoved": 267,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-006.png",
+    "reviewedBackgroundPixelsRemoved": 267,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-007.png",
+    "reviewedBackgroundPixelsRemoved": 267,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-008.png",
+    "reviewedBackgroundPixelsRemoved": 250,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-009.png",
+    "reviewedBackgroundPixelsRemoved": 0,
+    "outsideRegionExact": true
+  },
+  {
+    "frame": "pose-010.png",
+    "reviewedBackgroundPixelsRemoved": 0,
+    "outsideRegionExact": true
+  }
+]

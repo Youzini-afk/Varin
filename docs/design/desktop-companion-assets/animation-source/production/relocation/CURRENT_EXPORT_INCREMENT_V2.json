@@ -1,0 +1,88 @@
+{
+  "dependsOn": "CURRENT_EXPORT_SELECTION.json",
+  "purpose": "actual near-close gap, support release, contact-to-rest hair/skirt bridge; current working v3 world scene reproducible",
+  "stage": "candidate, not motion acceptance",
+  "files": [
+    {
+      "path": "build_scene_review_v3.py",
+      "bytes": 4859,
+      "sha256": "1712ab249afb199031c3f35eaa2f78f20af23df85ef8c9513f1005c3791fce58"
+    },
+    {
+      "path": "canonical-registered-v2/contact-settle-bridge-white-alpha.png",
+      "bytes": 297775,
+      "sha256": "c906acd49b12457ab9a9c8c0c78e62d9ff78d177db027a898be35b3aa0e19a35"
+    },
+    {
+      "path": "canonical-static-v2/close-gap.png",
+      "bytes": 314530,
+      "sha256": "7eddd00120fbbe03dbc62ad1e19d1bc90287fa0d97d7810216cd4a5f1aaf6533"
+    },
+    {
+      "path": "canonical-static-v2/lap-release.png",
+      "bytes": 314054,
+      "sha256": "88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495"
+    },
+    {
+      "path": "canonical-v1/close-gap-white.png",
+      "bytes": 354686,
+      "sha256": "681e121c52037e1a8fa924938ca39929808791200e1f217bb47adadca054b216"
+    },
+    {
+      "path": "canonical-v1/contact-settle-bridge-white.png",
+      "bytes": 334996,
+      "sha256": "383a924d92bb83034e1cd7071f7588c32ab0b2a7a944070b6501524d800dd7d6"
+    },
+    {
+      "path": "canonical-v1/lap-release-white.png",
+      "bytes": 358546,
+      "sha256": "86a568247aa09a23df60bcfb883bbe90c0c843d651ff69fbee4d97251ae915cf"
+    },
+    {
+      "path": "derive_settle_bridge_v2.py",
+      "bytes": 1696,
+      "sha256": "cf3a7803698e1bd2a7f92d53194c335305eebee192980ee405c40c252238c27a"
+    },
+    {
+      "path": "protect_additional_seated_v2.py",
+      "bytes": 697,
+      "sha256": "29b7dd83eac02a37ead44cf594374b5567e7750dec26b914488785680d513ae2"
+    },
+    {
+      "path": "reviews/world-contact-assets-v3.json",
+      "bytes": 1075,
+      "sha256": "5e025f02cf0ec400528f96e241a6308870f98419b7410206e50914cb3473d6c1"
+    },
+    {
+      "path": "source/canonical-close-gap-v2.png",
+      "bytes": 1787942,
+      "sha256": "c9c0a9a3f0f948ca9d17e66a3455f043f1549b6f4bbd52c2b85d50b04a254257"
+    },
+    {
+      "path": "source/canonical-close-gap-v2.prompt.txt",
+      "bytes": 924,
+      "sha256": "4bbea70b736b26e183a0b93f41ac83525538513b26c56b23672de5fb05165a2e"
+    },
+    {
+      "path": "source/canonical-contact-settle-bridge-v1.png",
+      "bytes": 1630877,
+      "sha256": "b84a7d680e7b5a3bee7fdfed70943de9f47ad62d67491e9d637cf67902efe56e"
+    },
+    {
+      "path": "source/canonical-contact-settle-bridge-v1.prompt.txt",
+      "bytes": 974,
+      "sha256": "68c8ae7aa8d88979ab99397116593105ac974005bc1d801fd64de7488eea8229"
+    },
+    {
+      "path": "source/canonical-lap-release-v1.png",
+      "bytes": 1767501,
+      "sha256": "3ae892cfde50fb607fed381e1463d00cdef5133ef385e67f8988bed69440c6cc"
+    },
+    {
+      "path": "source/canonical-lap-release-v1.prompt.txt",
+      "bytes": 902,
+      "sha256": "cc8433e8fcac9b68ed9f49648a0cde8e27ab3e02ac8269bb2a6806510484a426"
+    }
+  ],
+  "bytes": 7172034
+}
