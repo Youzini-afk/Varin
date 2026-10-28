@@ -1,0 +1,360 @@
+{
+  "version": 1,
+  "note": "Visual production coverage only, not Varin business protocol. Required actions are not claims of existing assets.",
+  "states": [
+    {
+      "id": "C01",
+      "label": "待命",
+      "family": "SEATED_CLOSED",
+      "requires": [
+        "idle-closed",
+        "idle-open"
+      ]
+    },
+    {
+      "id": "C02",
+      "label": "接任务",
+      "family": "SEATED_WORK",
+      "requires": [
+        "accept-closed",
+        "accept-open"
+      ]
+    },
+    {
+      "id": "C03",
+      "label": "准备",
+      "family": "SEATED_WORK",
+      "requires": [
+        "prepare"
+      ]
+    },
+    {
+      "id": "C04",
+      "label": "思考",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "think"
+      ]
+    },
+    {
+      "id": "C05",
+      "label": "输出交流",
+      "family": "SEATED_WORK",
+      "requires": [
+        "output"
+      ]
+    },
+    {
+      "id": "C06",
+      "label": "完成",
+      "family": "USER_ATTENTION",
+      "requires": [
+        "completion"
+      ]
+    },
+    {
+      "id": "T01",
+      "label": "阅读",
+      "family": "SEATED_WORK",
+      "requires": [
+        "reading"
+      ]
+    },
+    {
+      "id": "T02",
+      "label": "编辑",
+      "family": "SEATED_WORK",
+      "requires": [
+        "editing"
+      ]
+    },
+    {
+      "id": "T03",
+      "label": "编程执行",
+      "family": "SEATED_WORK",
+      "requires": [
+        "coding-input",
+        "execution-observe"
+      ]
+    },
+    {
+      "id": "T04",
+      "label": "浏览搜索",
+      "family": "SEATED_WORK",
+      "requires": [
+        "browsing"
+      ]
+    },
+    {
+      "id": "T05",
+      "label": "计算实验",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "experiment-observe"
+      ]
+    },
+    {
+      "id": "T06",
+      "label": "整理归档",
+      "family": "SEATED_WORK",
+      "requires": [
+        "organizing"
+      ]
+    },
+    {
+      "id": "T07",
+      "label": "检查验证",
+      "family": "SEATED_WORK",
+      "requires": [
+        "checking"
+      ]
+    },
+    {
+      "id": "T08",
+      "label": "协作调度",
+      "family": "SEATED_WORK",
+      "requires": [
+        "dispatch",
+        "dispatch-observe"
+      ]
+    },
+    {
+      "id": "W01",
+      "label": "排队",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "queued"
+      ]
+    },
+    {
+      "id": "W02",
+      "label": "等授权",
+      "family": "USER_ATTENTION",
+      "requires": [
+        "permission"
+      ]
+    },
+    {
+      "id": "W03",
+      "label": "等回答",
+      "family": "USER_ATTENTION",
+      "requires": [
+        "query"
+      ]
+    },
+    {
+      "id": "W04",
+      "label": "等外部",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "external-wait"
+      ]
+    },
+    {
+      "id": "W05",
+      "label": "等重试",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "retry-wait"
+      ]
+    },
+    {
+      "id": "E01",
+      "label": "失败",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "failure"
+      ]
+    },
+    {
+      "id": "E02",
+      "label": "取消收尾",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "cancel-settling"
+      ]
+    },
+    {
+      "id": "E03",
+      "label": "已停",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "stopped"
+      ]
+    },
+    {
+      "id": "E04",
+      "label": "断联未知",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "disconnected"
+      ]
+    },
+    {
+      "id": "E05",
+      "label": "重连同步",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "reconnecting"
+      ]
+    },
+    {
+      "id": "E06",
+      "label": "结果核查",
+      "family": "OBSERVE_DIAGNOSE",
+      "requires": [
+        "unknown-effect-check"
+      ]
+    },
+    {
+      "id": "L01",
+      "label": "出场欢迎",
+      "family": "USER_ATTENTION",
+      "requires": [
+        "welcome-open",
+        "welcome-closed"
+      ]
+    },
+    {
+      "id": "L02",
+      "label": "呼吸眨眼",
+      "family": "CURRENT_POSE",
+      "requires": [
+        "hold-seated-closed",
+        "hold-seated-work",
+        "hold-user-attention",
+        "hold-observe-diagnose",
+        "hold-rest",
+        "hold-carry-airborne"
+      ]
+    },
+    {
+      "id": "L03",
+      "label": "轻点回应",
+      "family": "USER_ATTENTION",
+      "requires": [
+        "tap-response"
+      ]
+    },
+    {
+      "id": "L04",
+      "label": "提起拖动",
+      "family": "CARRY_AIRBORNE",
+      "requires": [
+        "lift",
+        "carry-hold",
+        "early-release",
+        "regrab"
+      ]
+    },
+    {
+      "id": "L05",
+      "label": "落位整理",
+      "family": "LAND_SETTLE",
+      "requires": [
+        "landing",
+        "settle",
+        "return-laptop",
+        "resume"
+      ]
+    },
+    {
+      "id": "L06",
+      "label": "困倦伸展",
+      "family": "REST",
+      "requires": [
+        "sleepy-stretch"
+      ]
+    },
+    {
+      "id": "L07",
+      "label": "安静陪伴",
+      "family": "REST",
+      "requires": [
+        "quiet-company"
+      ]
+    }
+  ],
+  "requiredBridges": [
+    {
+      "fromFamily": "SEATED_CLOSED",
+      "toFamily": "SEATED_WORK",
+      "action": "open-laptop"
+    },
+    {
+      "fromFamily": "SEATED_WORK",
+      "toFamily": "USER_ATTENTION",
+      "action": "turn-to-user"
+    },
+    {
+      "fromFamily": "USER_ATTENTION",
+      "toFamily": "SEATED_WORK",
+      "action": "return-to-work"
+    },
+    {
+      "fromFamily": "SEATED_WORK",
+      "toFamily": "OBSERVE_DIAGNOSE",
+      "action": "rest-hands-observe"
+    },
+    {
+      "fromFamily": "OBSERVE_DIAGNOSE",
+      "toFamily": "SEATED_WORK",
+      "action": "release-chin-return"
+    },
+    {
+      "fromFamily": "REST",
+      "toFamily": "SEATED_WORK",
+      "action": "finish-stretch-return"
+    },
+    {
+      "fromFamily": "SEATED_WORK",
+      "toFamily": "REST",
+      "action": "relax"
+    },
+    {
+      "fromFamily": "SEATED_CLOSED",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "hug-lift-closed"
+    },
+    {
+      "fromFamily": "SEATED_WORK",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "close-hug-lift"
+    },
+    {
+      "fromFamily": "USER_ATTENTION",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "withdraw-gesture-close-lift"
+    },
+    {
+      "fromFamily": "OBSERVE_DIAGNOSE",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "release-chin-close-lift"
+    },
+    {
+      "fromFamily": "REST",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "withdraw-stretch-close-lift"
+    },
+    {
+      "fromFamily": "CARRY_AIRBORNE",
+      "toFamily": "LAND_SETTLE",
+      "action": "descend-seat-contact"
+    },
+    {
+      "fromFamily": "LAND_SETTLE",
+      "toFamily": "CARRY_AIRBORNE",
+      "action": "regrab-from-contact"
+    },
+    {
+      "fromFamily": "LAND_SETTLE",
+      "toFamily": "SEATED_CLOSED",
+      "action": "put-laptop-on-lap"
+    },
+    {
+      "fromFamily": "LAND_SETTLE",
+      "toFamily": "SEATED_WORK",
+      "action": "put-laptop-open-resume"
+    }
+  ]
+}

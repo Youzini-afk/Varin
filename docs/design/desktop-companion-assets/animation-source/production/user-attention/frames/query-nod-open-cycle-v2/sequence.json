@@ -1,0 +1,67 @@
+{
+  "id": "query-nod-open-cycle-v2",
+  "family": "USER_ATTENTION",
+  "stage": "keyposes",
+  "canvas": [
+    512,
+    512
+  ],
+  "loop": false,
+  "frames": [
+    {
+      "source": "pose-001.png",
+      "durationMs": 240,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 1
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 2
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 3
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 240,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 4
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 5
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 240,
+      "offset": [
+        0,
+        0
+      ],
+      "sourceSheetCell": 6
+    }
+  ],
+  "warning": "KEYPOSE REVIEW ONLY. Not smooth final animation. Per-cell camera/prop registration and cleanup pending."
+}

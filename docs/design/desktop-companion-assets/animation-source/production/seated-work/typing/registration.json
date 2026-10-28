@@ -1,0 +1,53 @@
+{
+  "method": "integer translation only; stable boot ROI, no scaling/warping/parts",
+  "records": [
+    {
+      "frame": 1,
+      "translation": [
+        -52,
+        0
+      ],
+      "bootRoiRgbMse": 0.0
+    },
+    {
+      "frame": 2,
+      "translation": [
+        -20,
+        0
+      ],
+      "bootRoiRgbMse": 36.956
+    },
+    {
+      "frame": 3,
+      "translation": [
+        12,
+        0
+      ],
+      "bootRoiRgbMse": 48.926
+    },
+    {
+      "frame": 4,
+      "translation": [
+        -52,
+        0
+      ],
+      "bootRoiRgbMse": 93.274
+    },
+    {
+      "frame": 5,
+      "translation": [
+        -20,
+        0
+      ],
+      "bootRoiRgbMse": 107.673
+    },
+    {
+      "frame": 6,
+      "translation": [
+        12,
+        0
+      ],
+      "bootRoiRgbMse": 120.923
+    }
+  ]
+}

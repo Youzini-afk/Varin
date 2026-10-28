@@ -80,9 +80,14 @@ def pack(manifest_path, output, max_size=2048, padding=2):
             raise ValueError('loop is a [start, endExclusive] frame range')
     # Shelf packing keeps author order. No source rescaling or in-between generation.
     pages = []
+    placements = {}
     page = Image.new('RGBA', (max_size, max_size))
     x = y = row_height = used_width = used_height = 0
     for image, record in zip(images, output_frames):
+        image_key = (image.size, hashlib.sha256(image.tobytes()).hexdigest())
+        if image_key in placements:
+            record.update(placements[image_key])
+            continue
         cell_width, cell_height = image.width + 2 * padding, image.height + 2 * padding
         if x + cell_width > max_size:
             x, y, row_height = 0, y + row_height, 0
@@ -100,7 +105,9 @@ def pack(manifest_path, output, max_size=2048, padding=2):
             page.paste(strip, (x, y))
             strip = page.crop((x, py + image.height - 1, x + cell_width, py + image.height)).resize((cell_width, padding))
             page.paste(strip, (x, py + image.height))
-        record.update(page=len(pages), rect=[px, py, image.width, image.height])
+        placement = dict(page=len(pages), rect=[px, py, image.width, image.height])
+        placements[image_key] = placement
+        record.update(placement)
         x += cell_width
         row_height = max(row_height, cell_height)
         used_width, used_height = max(used_width, x), max(used_height, y + cell_height)
@@ -114,7 +121,10 @@ def pack(manifest_path, output, max_size=2048, padding=2):
     package = {
         'version': 1, 'id': spec['id'], 'family': spec.get('family'),
         'stage': spec.get('stage'), 'warning': spec.get('warning'),
+        'reviewStatus': spec.get('reviewStatus'), 'kind': spec.get('kind', 'action'),
+        'geometryReference': spec.get('geometryReference'),
         'canvas': [width, height], 'durationMs': total, 'loop': loop,
+        'uniqueImages': len(placements),
         'entryPose': spec.get('entryPose'), 'exitPose': spec.get('exitPose'),
         'pages': page_names, 'frames': output_frames,
     }
@@ -133,7 +143,7 @@ def main():
         result = pack(args.manifest, args.output, args.max_size, args.padding)
     except (ValueError, KeyError, OSError) as error:
         parser.exit(1, f'Cannot package sequence: {error}\n')
-    print(f"{result['id']}: {len(result['frames'])} authored drawings, {result['durationMs']} ms, {len(result['pages'])} atlas pages")
+    print(f"{result['id']}: {len(result['frames'])} exposures / {result['uniqueImages']} unique images, {result['durationMs']} ms, {len(result['pages'])} atlas pages")
 
 
 if __name__ == '__main__':

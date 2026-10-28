@@ -1,0 +1,142 @@
+{
+  "id": "seated-work.typing-v2",
+  "family": "SEATED_WORK",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "seated-work.typing-rest-v2",
+  "exitPose": "seated-work.typing-rest-v2-candidate",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "durationMs": 240,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "rest",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "near-finger-lift",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "near-press",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "release",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "far-press",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing-study",
+      "pose": "rest-return",
+      "contacts": {
+        "seat": [
+          330,
+          314
+        ],
+        "laptopHinge": [
+          232,
+          278
+        ]
+      },
+      "exitTo": []
+    }
+  ],
+  "stage": "keyposes",
+  "reviewStatus": "needs-temporal-review",
+  "warning": "Six generated source cels, integer support registration; contact coordinates estimated. Not an accepted seamless loop. Hand press/release and fixed-prop drift need normal-speed inspection."
+}
