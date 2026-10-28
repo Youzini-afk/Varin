@@ -37,11 +37,19 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
         guard let result = try connection.call(op,fields).0 as? [String: Any] else {throw WireError.malformed}; return result
     }
     func type(_ record: [String: Any]) -> FSItem.ItemType { switch record["kind"] as? String {case "directory":return .directory; case "symlink":return .symlink; default:return .file} }
+    func identifier(_ native:UInt64) throws -> FSItem.Identifier {
+        if native == 1 {return .rootDirectory}
+        guard native < UInt64.max else {throw POSIXError(.EOVERFLOW)}
+        // FSKit reserves invalid / parentOfRoot / rootDirectory. RPC identities
+        // stay unchanged; only the OS-facing inode namespace skips those IDs.
+        return FSItem.Identifier(rawValue:native+1) ?? .invalid
+    }
     func attributes(_ record: [String: Any]) throws -> FSItem.Attributes {
         let value = FSItem.Attributes()
         func uint(_ name: String) throws -> UInt64 {guard let n = record[name] as? UInt64 else {throw WireError.malformed}; return n}
-        value.fileID = FSItem.Identifier(rawValue:try uint("id")) ?? .invalid
-        value.parentID = FSItem.Identifier(rawValue:try uint("parent")) ?? .invalid
+        let native=try uint("id")
+        value.fileID = try identifier(native)
+        value.parentID = native == 1 ? .parentOfRoot : try identifier(uint("parent"))
         value.type = type(record); value.size = try uint("size"); value.allocSize = value.size
         value.mode = UInt32(try uint("mode")); value.uid = UInt32(try uint("uid")); value.gid = UInt32(try uint("gid"))
         value.flags = UInt32(try uint("flags")); value.linkCount = UInt32(try uint("links"))
@@ -133,7 +141,7 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
                     guard let child = record["id"] as? UInt64 else {throw WireError.malformed}
                     let next = directory.names[name] ?? directory.nextCookie
                     guard next < UInt64.max else {throw POSIXError(.EOVERFLOW)}
-                    if !packer.packEntry(name:FSFileName(string:name),itemType:type(record),itemID:FSItem.Identifier(rawValue:child) ?? .invalid,nextCookie:FSDirectoryCookie(next),attributes:attributes == nil ? nil : try self.attributes(record)) {
+                    if !packer.packEntry(name:FSFileName(string:name),itemType:type(record),itemID:try identifier(child),nextCookie:FSDirectoryCookie(next),attributes:attributes == nil ? nil : try self.attributes(record)) {
                         replyHandler(FSDirectoryVerifier(1),nil);return
                     }
                     directory.cookies[next]=name
