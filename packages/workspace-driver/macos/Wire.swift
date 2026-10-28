@@ -54,14 +54,14 @@ final class Channel {
     }
     func call(_ request: [String: Any], body: Data = Data()) throws -> (Any, Data) {
         let json = try JSONSerialization.data(withJSONObject: request, options: [.sortedKeys])
-        guard json.count <= maxFrame, body.count <= maxFrame else { throw POSIXError(.E2BIG) }
+        guard json.count <= maxFrame, body.count <= Int(UInt32.max) else { throw POSIXError(.E2BIG) }
         var header = Data()
         for size in [json.count,body.count] { var v = UInt32(size).littleEndian; withUnsafeBytes(of: &v) {header.append(contentsOf:$0)} }
         try send(header); try send(json); try send(body)
         let lengths = [UInt8](try receive(8))
         func length(_ start: Int) -> Int { (0..<4).reduce(0) { $0 | (Int(lengths[start+$1]) << (8*$1)) } }
         let a = length(0), b = length(4)
-        guard a > 0, a <= maxFrame, b <= maxFrame else { throw WireError.malformed }
+        guard a > 0, a <= maxFrame else { throw WireError.malformed }
         guard let reply = try JSONSerialization.jsonObject(with: receive(a)) as? [String: Any] else { throw WireError.malformed }
         let bytes = try receive(b)
         if let code = reply["errno"] as? Int32 { throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO) }

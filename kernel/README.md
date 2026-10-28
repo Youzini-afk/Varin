@@ -152,8 +152,10 @@ mount admission and does not prevent the ordinary application from starting.
 The ignored `workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent`
 test starts a separate ordinary process and two real mount paths. Invoke it explicitly with
 `cargo test -p varin-kernel --lib --features workspace-mount native_workspace_mounts_share_storage_and_keep_fork_independent -- --ignored --nocapture`
-on a machine with that component already enabled. It tests fsynced/closed ordinary handles; it does not
-qualify a dirty mmap/kernel-cache fence. The default Storage suite covers byte and namespace semantics.
+on a machine with that component already enabled. In addition to ordinary process I/O, Unix backends
+advertising a post-writeback boundary retain a dirty shared mmap across checkpoint/fork and modify it
+again on the parent. No msync/descriptor release substitutes for the native boundary. This opt-in OS
+test remains separate from the default Storage/executor suite and is not run by component-free CI.
 
 FUSE callbacks persist chmod/chown/times/xattrs. WinFsp callbacks persist basic attributes and merge
 the requested Windows security information with the original descriptor, preserving unrelated parts.

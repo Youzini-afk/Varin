@@ -183,7 +183,7 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
     var restrictsOwnershipChanges:Bool {true}
     var truncatesLongNames:Bool {false}
     var maximumFileSizeInBits:Int {64}
-    var maximumXattrSizeInBits:Int {64}
+    var maximumXattrSizeInBits:Int {32}
     var supportedVolumeCapabilities:FSVolume.SupportedCapabilities {
         let value=FSVolume.SupportedCapabilities()
         value.supportsSymbolicLinks=true;value.supportsHardLinks=true;value.supportsHiddenFiles=true

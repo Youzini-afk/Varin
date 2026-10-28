@@ -237,7 +237,7 @@ fn read(stream: &mut UnixStream) -> std::io::Result<(Value, Vec<u8>)> {
     stream.read_exact(&mut header)?;
     let a = u32::from_le_bytes(header[..4].try_into().unwrap()) as usize;
     let b = u32::from_le_bytes(header[4..].try_into().unwrap()) as usize;
-    if a == 0 || a > crate::protocol::MAX_FRAME_BYTES || b > crate::protocol::MAX_FRAME_BYTES {
+    if a == 0 || a > crate::protocol::MAX_FRAME_BYTES {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Native frame exceeds content protocol",
@@ -245,15 +245,19 @@ fn read(stream: &mut UnixStream) -> std::io::Result<(Value, Vec<u8>)> {
     }
     let mut json = vec![0; a];
     stream.read_exact(&mut json)?;
-    let mut body = vec![0; b];
+    // Raw native content is not a control frame. OS xattrs can exceed that
+    // control bound without requiring a giant JSON value.
+    let mut body = Vec::new();
+    body.try_reserve_exact(b).map_err(|error| {
+        std::io::Error::other(format!("Cannot allocate native content: {error}"))
+    })?;
+    body.resize(b, 0);
     stream.read_exact(&mut body)?;
     Ok((serde_json::from_slice(&json)?, body))
 }
 fn write(stream: &mut UnixStream, value: &Value, body: &[u8]) -> std::io::Result<()> {
     let json = serde_json::to_vec(value)?;
-    if json.len() > crate::protocol::MAX_FRAME_BYTES
-        || body.len() > crate::protocol::MAX_FRAME_BYTES
-    {
+    if json.len() > crate::protocol::MAX_FRAME_BYTES || body.len() > u32::MAX as usize {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "Native reply exceeds content protocol",
