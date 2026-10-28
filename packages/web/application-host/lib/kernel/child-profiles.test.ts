@@ -93,6 +93,20 @@ it('normalizes inherited overrides through the actual model owner, retaining ori
   expect(changed).toMatchObject({ model: null, inherit_base: null, unavailable: { code: 'child-model-unavailable' } });
 });
 
+it('freezes quick retrieval thinking independently from the parent for selected and inherited models', async () => {
+  const f = await fixture();
+  let binding: Record<string, unknown> = { providerId: 'provider', modelId: 'model', agent: { modelSettings: { thinkingLevel: 'low' } } };
+  const prepare = createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities,
+    settings: async () => ({ harness: { models: { explore: binding } } }) });
+  const selected = (await prepare({ parent: f.parent })).presets.find(value => value.id === 'code_retrieval')!;
+  expect(selected).toMatchObject({ unavailable: null, model: { configuration: { thinkingLevel: 'low', reasoningEffort: 'low' } } });
+  binding = { inherit: true, agent: { modelSettings: { thinkingLevel: 'low' } } };
+  const inherited = (await prepare({ parent: f.parent })).presets.find(value => value.id === 'code_retrieval')!;
+  expect(inherited.inherit_base).toEqual(f.parent);
+  expect(inherited.model?.configuration).toMatchObject({ thinkingLevel: 'low', reasoningEffort: 'low' });
+  expect(f.parent.configuration.thinkingLevel).toBe('high');
+});
+
 it('keeps missing configuration defaults distinct from invalid or unreadable settings', async () => {
   const f = await fixture();
   const compiler = (settings: () => Promise<unknown>) => createChildProfilePreparer({ models: f.models, capabilities: async () => f.capabilities, settings });

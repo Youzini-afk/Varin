@@ -6,9 +6,10 @@ import { SettingsPageLink } from '@/components/sections/shared/SettingsPageLink'
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { createModelConnectionsHttpAPI, getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, modelThinkingLevels, type AgentSettingsSnapshot } from '@varin/application-client';
 import { useModelCatalogStore } from '@/stores/useModelCatalogStore';
-import type { JsonValue } from '@varin/protocol';
+import type { JsonValue, ThinkingLevel } from '@varin/protocol';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { SettingsSection, SettingsFieldRow, SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
+import { ModelThinkingSelect } from '@/components/sections/shared/ModelThinkingSelect';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { Button } from '@/components/ui/button';
@@ -49,13 +50,19 @@ export const DefaultsSettings: React.FC = () => {
   const string = (value: JsonValue | undefined) => typeof value === 'string' ? value : '';
   const model = (value: JsonValue | undefined) => value && typeof value === 'object' && !Array.isArray(value)
     ? { providerId: string(value.providerId), modelId: string(value.modelId) } : { providerId: '', modelId: '' };
+  const utility = model(settings.utilityModel);
+  const utilityModel = utility.providerId && utility.modelId
+    ? channels.find(channel => channel.id === utility.providerId)?.models.find(model => model.id === utility.modelId) : selectedModel;
+  const utilityLevels = utilityModel ? modelThinkingLevels(utilityModel) : undefined;
+  const defaultThinking = string(settings.defaultThinkingLevel) as ThinkingLevel;
+  const utilityDefault = !utility.modelId && utilityLevels?.includes(defaultThinking) ? defaultThinking : utilityLevels?.[0];
   return <>
   <SettingsSection title={t('settings.varin.defaults.title')} description={t('settings.defaults.globalHint')} divider={false} contentClassName="divide-y divide-border/50">
     <ExternalAgentDefault />
     {!snapshot && !error && <p role="status" className="py-3 typography-meta text-muted-foreground">{t('settings.defaults.loading')}</p>}
     {error && <p role="alert" className="text-destructive text-sm">{error} <Button variant="ghost" onClick={() => void reload()}>{t('assistant.reload')}</Button></p>}
     <SettingsFieldRow label={t('settings.varin.agents.detail.model')}><ModelSelector providerId={string(settings.defaultProvider)} modelId={string(settings.defaultModel)} disabled={!snapshot || saving}
-      onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']); }} /></SettingsFieldRow>
+      onChange={async (providerId, modelId) => { await save(providerId && modelId ? { defaultProvider: providerId, defaultModel: modelId } : {}, [...(providerId && modelId ? ['defaultThinkingLevel'] : ['defaultProvider', 'defaultModel', 'defaultThinkingLevel']), ...(!utility.modelId ? ['utilityThinkingLevel'] : [])]); }} /></SettingsFieldRow>
     <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}><Select value={string(settings.defaultThinkingLevel) || 'inherit'} disabled={!snapshot || saving} onValueChange={value => void save(value !== 'inherit' ? { defaultThinkingLevel: value } : {}, value !== 'inherit' ? [] : ['defaultThinkingLevel'])}>
       <SelectTrigger className="w-48"><SelectValue /></SelectTrigger><SelectContent>
         <SelectItem value="inherit">{t('chat.modelControls.default')}</SelectItem>{thinkingLevels.map(level => <SelectItem key={level} value={level}>{t(`settings.agents.thinking.${level}`)}</SelectItem>)}
@@ -63,7 +70,12 @@ export const DefaultsSettings: React.FC = () => {
     </Select></SettingsFieldRow>
     <SettingsFieldRow label={t('thread.settings.utilityModel')} info={t('settings.varin.defaults.utilityModel.description')} settingsItem="sessions.small-model">
       <ModelSelector {...model(settings.utilityModel)} disabled={!snapshot || saving} placeholder={t('settings.bots.model.inherit')}
-        onChange={async (providerId, modelId) => { await save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? [] : ['utilityModel']); }} />
+        onChange={async (providerId, modelId) => { await save(providerId && modelId ? { utilityModel: { providerId, modelId } } : {}, providerId && modelId ? ['utilityThinkingLevel'] : ['utilityModel', 'utilityThinkingLevel']); }} />
+    </SettingsFieldRow>
+    <SettingsFieldRow label={t('settings.varin.agents.detail.thinking')}>
+      <ModelThinkingSelect value={string(settings.utilityThinkingLevel)} levels={utilityLevels} defaultLevel={utilityDefault}
+        disabled={!snapshot || saving} label={`${t('thread.settings.utilityModel')} · ${t('settings.varin.agents.detail.thinking')}`}
+        onChange={value => void save(value ? { utilityThinkingLevel: value } : {}, value ? [] : ['utilityThinkingLevel'])} />
     </SettingsFieldRow>
     <SettingsPageLink page="projects" description={t('settings.defaults.projectLinkHint')} onNavigate={() => { const id = useProjectsStore.getState().activeProjectId; if (id) useUIStore.getState().setSettingsProjectsSelectedId(id); }}>{t('settings.page.projects.title')}</SettingsPageLink>
   </SettingsSection>

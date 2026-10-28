@@ -53,12 +53,15 @@ function fixture() {
 
 it('uses anchored original exchanges, corrections and optional state without tool/agent/reasoning text; joins and reuses the original request', async () => {
   const f = fixture();
+  f.settings({ harness: { nextStep: { enabled: true }, models: { nextStep: {
+    providerId: 'chosen', modelId: 'fast', agent: { modelSettings: { thinkingLevel: 'high' } },
+  } } } });
   try {
     const [one, two] = await Promise.all([f.service.read(identity, f.run.id, 'answer'), f.service.read(identity, f.run.id, 'answer')]);
     expect(one).toEqual(two); expect(one).toMatchObject({ status: 'ready', text: '好，再看看还有没有问题' });
     expect(f.generate).toHaveBeenCalledOnce();
     const input = f.generate.mock.calls[0]![0];
-    expect(input.model).toEqual({ providerId: 'chosen', modelId: 'fast' });
+    expect(input.model).toEqual({ providerId: 'chosen', modelId: 'fast', thinkingLevel: 'high' });
     const context = JSON.parse(input.prompt);
     expect(context.currentTurn.map((message: { text: string }) => message.text)).toEqual(['好，按这个方向做吧', '暂时不要打包', '已经完成实现，尚未打包']);
     expect(context.previousConversation.map((message: { text: string }) => message.text)).toEqual(['先讨论，别急着实现', '我们先看方案']);

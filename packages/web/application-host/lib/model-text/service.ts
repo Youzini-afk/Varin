@@ -6,9 +6,10 @@ import type { KernelClient } from '../kernel/kernel-client.js';
 import type { createModelAuthority } from '../kernel/model-authority.js';
 import type { ExecutorOwner, ModelTextView, ModelTextStatus, Operation } from '../kernel/protocol.generated.js';
 import { acquireTokenCounter } from '../models/token-count.js';
+import { parseHarnessAgentModelSettings, type HarnessAgentModelSettings } from '@varin/protocol';
 
 export type ModelTextPurpose = 'git-commit' | 'review' | 'title' | 'text';
-export interface ModelTextSelection { providerId: string; modelId: string }
+export interface ModelTextSelection extends HarnessAgentModelSettings { providerId: string; modelId: string }
 export interface ModelTextInput {
   key: string;
   purpose: ModelTextPurpose;
@@ -53,7 +54,12 @@ export function parseModelTextSelection(value: unknown): ModelTextSelection {
   if (typeof selection.providerId !== 'string' || !selection.providerId.trim() || typeof selection.modelId !== 'string' || !selection.modelId.trim()) {
     return fail('model-selection-invalid', 'Choose an explicit provider and model.', 400);
   }
-  return { providerId: selection.providerId.trim(), modelId: selection.modelId.trim() };
+  let settings: HarnessAgentModelSettings;
+  try { settings = parseHarnessAgentModelSettings({
+    ...(selection.thinkingLevel === undefined ? {} : { thinkingLevel: selection.thinkingLevel }),
+    ...(selection.temperature === undefined ? {} : { temperature: selection.temperature }),
+  }); } catch { return fail('model-selection-invalid', 'Choose supported model thinking and sampling settings.', 400); }
+  return { providerId: selection.providerId.trim(), modelId: selection.modelId.trim(), ...settings };
 }
 export function createModelTextService(options: {
   kernel: KernelClient;
@@ -83,11 +89,14 @@ export function createModelTextService(options: {
   async function selection(explicit?: ModelTextSelection) {
     if (explicit) return { ...parseModelTextSelection(explicit), source: 'request' as const };
     const settings = record(await options.readSettings());
-    if (settings.utilityModel !== undefined && settings.utilityModel !== null) return { ...parseModelTextSelection(settings.utilityModel), source: 'utility' as const };
+    if (settings.utilityModel !== undefined && settings.utilityModel !== null) return { ...parseModelTextSelection({
+      ...record(settings.utilityModel), thinkingLevel: settings.utilityThinkingLevel,
+    }), source: 'utility' as const };
     if (typeof settings.defaultProvider !== 'string' || typeof settings.defaultModel !== 'string' || !settings.defaultProvider.trim() || !settings.defaultModel.trim()) {
       return fail('model-not-configured', 'Select a utility model or configure the default provider and model.', 409);
     }
-    return { ...parseModelTextSelection({ providerId: settings.defaultProvider, modelId: settings.defaultModel }), source: 'default' as const };
+    return { ...parseModelTextSelection({ providerId: settings.defaultProvider, modelId: settings.defaultModel,
+      thinkingLevel: settings.utilityThinkingLevel ?? settings.defaultThinkingLevel }), source: 'default' as const };
   }
   const read = (requestId: string, allowMissing = false, signal?: AbortSignal) => options.kernel.agentRuntimeRequest<ModelTextView | null, 'runtime.model_text.read'>('runtime.model_text.read', { requestId, allowMissing }, signal);
   const status = (requestId: string, allowMissing = false, signal?: AbortSignal) => options.kernel.agentRuntimeRequest<ModelTextStatus | null, 'runtime.model_text.status'>('runtime.model_text.status', {requestId,allowMissing}, signal);

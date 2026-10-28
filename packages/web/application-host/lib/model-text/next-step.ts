@@ -1,5 +1,5 @@
 import type { ThreadIdentity, ThreadNextStep } from '@varin/application-client';
-import { resolveHarnessNextStepSettings, parseHarnessModelSlots } from '@varin/protocol';
+import { resolveHarnessNextStepSettings, parseHarnessModelSlots, resolveHarnessModelSlot } from '@varin/protocol';
 import type { AgentRuntimeClient } from '../kernel/agent-runtime-client.js';
 import type { ModelTextService } from './service.js';
 import { buildNextStepContext, NEXT_STEP_SCHEMA, NEXT_STEP_SYSTEM } from './next-step-context.js';
@@ -49,7 +49,7 @@ export function createNextStepService(options: {
         result = await options.modelText.resumeUnsent(key, signal);
         if (!result) return { status: 'unavailable', code: 'next-step-original-unfinished' };
       } else {
-        const model = { providerId: selected.providerId, modelId: selected.modelId };
+        const model = resolveHarnessModelSlot('nextStep', { nextStep: selected }, null)!;
         const budget = await options.modelText.prepareBudget({ model, signal });
         try {
           const inputTokens = budget.contextTokens - (budget.outputTokens ?? 0);

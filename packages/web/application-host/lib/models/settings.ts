@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import {
   mergeHarnessSettings, parseHarnessEmbeddingSettings, parseHarnessRerankSettings, parseHarnessFastDecisionSettings,
   parseHarnessImageSettings, resolveHarnessCodeRetrievalSettings, resolveHarnessDocumentReadingSettings,
-  type HarnessSettingsInput, type JsonValue, parseModelRetrySettings,
+  type HarnessSettingsInput, type JsonValue, parseModelRetrySettings, THINKING_LEVELS, type ThinkingLevel,
 } from '@varin/protocol';
 import type { AgentSettingsSnapshot } from '@varin/application-client';
 import { parseCompactionSettings } from './compaction-settings.js';
@@ -10,6 +10,9 @@ import { readResourceSettings } from '../agent-resources/configuration.js';
 import { ConfigurationFile, ModelConfigurationError, object } from './configuration.js';
 
 export function validateAgentSettings(document: Record<string, unknown>): Record<string, JsonValue> {
+  if (document.utilityThinkingLevel !== undefined && !THINKING_LEVELS.includes(document.utilityThinkingLevel as ThinkingLevel)) {
+    throw new ModelConfigurationError('invalid_settings', 'utilityThinkingLevel must be a supported thinking level');
+  }
   for (const key of ['utilityModel'] as const) {
     const value = document[key];
     if (value !== undefined && (!object(value) || Object.keys(value).some(field => field !== 'providerId' && field !== 'modelId')

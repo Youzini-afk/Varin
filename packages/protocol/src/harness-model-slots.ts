@@ -1,5 +1,5 @@
 import { HarnessSettingsValidationError, type HarnessModelRole, type ModelSelection } from "./harness-settings.js";
-import { parseHarnessAgentOverrides, type HarnessAgentOverrides } from "./harness-agents.js";
+import { parseHarnessAgentOverrides, type HarnessAgentOverrides, type HarnessAgentModelSettings } from "./harness-agents.js";
 
 /** An enabled flag preserves the selected model while the user turns a role off. */
 export interface HarnessModelBinding {
@@ -38,12 +38,13 @@ export const resolveHarnessModelSlot = (
   slot: HarnessModelRole,
   slots: Partial<Record<HarnessModelRole, HarnessModelBinding | null>>,
   mainModel: ModelSelection | null,
-): ModelSelection | null => {
+): (ModelSelection & HarnessAgentModelSettings) | null => {
   const binding = slots[slot];
   if (binding?.enabled === false) return null;
-  return binding?.providerId && binding.modelId
+  const model = binding?.providerId && binding.modelId
     ? { providerId: binding.providerId, modelId: binding.modelId }
     : harnessModelSlotInheritsMain(slot, binding) ? mainModel : null;
+  return model ? { ...model, ...binding?.agent?.modelSettings } : null;
 };
 
 export function parseHarnessModelSlots(value: unknown): HarnessModelSlots {

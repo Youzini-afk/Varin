@@ -879,7 +879,11 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = [
   },
   {
     id: 'sessions.small-model', category: 'model', owner: 'agent-settings',
-    field: { path: 'utilityModel', kind: 'json', scope: 'user', note: '{providerId,modelId}; reset inherits the native default model' },
+    fields: [
+      { path: 'utilityModel', kind: 'json', scope: 'user', note: '{providerId,modelId}; reset inherits the native default model' },
+      { path: 'utilityThinkingLevel', kind: 'string', scope: 'user',
+        note: 'Independent auxiliary-model thinking level; reset uses the selected model default, or defaultThinkingLevel when inheriting the global default model' },
+    ],
     apply: 'next-run',
     ui: { page: 'sessions', titleKey: 'thread.settings.utilityModel',
       descriptionKey: 'settings.varin.defaults.utilityModel.description',

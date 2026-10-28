@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createModelTextService, type ModelTextInput } from './service.js';
+import { createModelTextService, type ModelTextInput, type ModelTextSelection } from './service.js';
 import type { ModelTextView, Operation } from '../kernel/protocol.generated.js';
 
 function fixture() {
@@ -14,7 +14,7 @@ function fixture() {
   const forkRelease = vi.fn();
   const credentialOwner = { scope: async () => ({ reference:'provider:configured',authority:'host',account:'original',generation:1 }), release: vi.fn(),
     fork: () => ({ ...credentialOwner, release: forkRelease }) };
-  const resolveModel = vi.fn(async (selection: {providerId: string;modelId: string}) => ({configuration:{providerId:selection.providerId,providerFamily:'openai-responses',model:selection.modelId,endpoint:'https://native.invalid/v1/responses',configurationGeneration:1,allowAnonymous:false,maxOutputTokens:8192,contextWindowTokens:16000},credentialOwner,acceptsImages:false}));
+  const resolveModel = vi.fn(async (selection: ModelTextSelection) => ({configuration:{providerId:selection.providerId,providerFamily:'openai-responses',model:selection.modelId,endpoint:'https://native.invalid/v1/responses',configurationGeneration:1,allowAnonymous:false,maxOutputTokens:8192,contextWindowTokens:16000,...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {})},credentialOwner,acceptsImages:false}));
   const status = (work: ModelTextView | undefined) => {
     if (!work) return null;
     const op=work.inference;const state=op?.result?.kind==='control'?op.result.value as Record<string,unknown>:{};
@@ -81,9 +81,11 @@ describe('native standalone text owner',()=>{
   });
   it('counts and dispatches with the same captured model after settings change, releasing both leases', async () => {
     const f = fixture();
-    const budget = await f.service.prepareBudget({ model: { providerId: 'chosen', modelId: 'vendor/GPT-4O:free' } });
+    const budget = await f.service.prepareBudget({ model: { providerId: 'chosen', modelId: 'vendor/GPT-4O:free', thinkingLevel: 'high' } });
     expect((await budget.count(['你好😀'])).counts).toEqual([3]);
     const opened = f.kernel.agentRuntimeRequest.mock.calls.find(([method]) => method === 'runtime.tokenizers.open')![1].configuration;
+    expect(opened).toMatchObject({ thinkingLevel: 'high' });
+    expect(f.resolveModel).toHaveBeenCalledWith({ providerId: 'chosen', modelId: 'vendor/GPT-4O:free', thinkingLevel: 'high' });
     f.resolveModel.mockRejectedValue(new Error('The model setting changed'));
     const work = budget.generate({ ...f.input, purpose: 'text' });
     await until(() => f.trace.includes('generated'));
@@ -118,14 +120,25 @@ describe('native standalone text owner',()=>{
   });
   it('generates a title with the configured auxiliary model through native inference', async () => {
     const f = fixture();
-    f.setSettings({ utilityModel: { providerId: 'utility', modelId: 'title-model' }, defaultProvider: 'default', defaultModel: 'main' });
+    f.setSettings({ utilityModel: { providerId: 'utility', modelId: 'title-model' }, utilityThinkingLevel: 'high', defaultProvider: 'default', defaultModel: 'main', defaultThinkingLevel: 'low' });
     const result = f.service.generate({ ...f.input, purpose: 'title' });
     await until(() => f.trace.includes('generated'));
-    expect(f.resolveModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'utility', modelId: 'title-model' }));
+    expect(f.resolveModel).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'utility', modelId: 'title-model', thinkingLevel: 'high' }));
     expect(f.records.get('model-text:original')?.generation.purpose).toBe('title');
+    expect(f.records.get('model-text:original')?.generation.configuration.thinkingLevel).toBe('high');
     f.settle();
     expect(await result).toMatchObject({ providerId: 'utility', modelId: 'title-model' });
     await f.service.close();
+  });
+  it('uses the global default thinking when inheriting its model, with an independent auxiliary override', async () => {
+    for (const override of [undefined, 'low']) {
+      const f = fixture();
+      f.setSettings({ defaultProvider: 'default', defaultModel: 'main', defaultThinkingLevel: 'high', utilityThinkingLevel: override });
+      const result = f.service.generate(f.input);
+      await until(() => f.trace.includes('generated'));
+      expect(f.resolveModel).toHaveBeenCalledWith(expect.objectContaining({ thinkingLevel: override ?? 'high' }));
+      f.settle(); await result; await f.service.close();
+    }
   });
   it('deduplicates an original key and releases credentials only after reading the durable result',async()=>{
     const f=fixture();const first=f.service.generate(f.input);const second=f.service.generate({...f.input});

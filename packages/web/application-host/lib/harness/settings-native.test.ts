@@ -53,6 +53,11 @@ describe('native global/project settings ownership', () => {
     const denied = await f.service.update({ ...f.caller, workspaceId: 'project' }, { id: 'sessions.small-model', scope: 'project', set: { utilityModel: { providerId: 'native', modelId: 'model' } } });
     expect(denied.status).toBe('failed');
     expect((await f.owner.snapshot()).global).toEqual({});
+    await expect(f.service.update(f.caller, { id: 'sessions.small-model', set: { utilityThinkingLevel: 'invented' } })).rejects.toThrow(/thinking level/);
+    expect((await f.service.update(f.caller, { id: 'sessions.small-model', set: {
+      utilityModel: { providerId: 'native', modelId: 'model' }, utilityThinkingLevel: 'high',
+    } })).status).toBe('applied');
+    expect((await f.owner.snapshot()).global).toMatchObject({ utilityThinkingLevel: 'high' });
   });
 
 });
