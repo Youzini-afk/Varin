@@ -1,0 +1,8 @@
+{
+  "sources": [
+    "../canonical-eye-rub-v1/closed-reference.png",
+    "../../observe-diagnose/canonical-settle-v1",
+    "../../observe-diagnose/canonical-chin-v1"
+  ],
+  "method": "Actual authored upper-body and eyelid changes; closed support pixels held. No transform rig or fullframe alpha fade."
+}

@@ -1,0 +1,105 @@
+{
+  "id": "observe.rim-hand-rest-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "observe-chin-contact",
+  "exitPose": "observe-chin-contact",
+  "loop": null,
+  "warning": "Near hand actually moves off keys to casing rim and relaxes. Small index lift/contact needs close-up surface QA; not yet approved as W05 palm-rest-tap. No key activation intended.",
+  "frames": [
+    {
+      "source": "chin.png",
+      "durationMs": 800,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-contact"
+    },
+    {
+      "source": "approach.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "rest.png",
+      "durationMs": 2200,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "lift.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "rest.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "rest.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "approach.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-rim-hand"
+    },
+    {
+      "source": "chin.png",
+      "durationMs": 900,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-contact"
+    }
+  ]
+}

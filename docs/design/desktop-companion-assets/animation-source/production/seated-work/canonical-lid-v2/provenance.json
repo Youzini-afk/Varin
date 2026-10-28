@@ -1,0 +1,348 @@
+{
+  "status": "contact-pose-candidates-not-complete-animation",
+  "sourcePlane": [
+    [
+      101.0,
+      224.0
+    ],
+    [
+      214.0,
+      233.0
+    ],
+    [
+      239.0,
+      319.0
+    ],
+    [
+      130.0,
+      312.0
+    ]
+  ],
+  "baseTextureRepair": "Existing visible canonical keyboard pixels tiled only on newly revealed rigid base plane",
+  "records": [
+    {
+      "angle": 20,
+      "hinge": [
+        [
+          130.0,
+          312.0
+        ],
+        [
+          239.0,
+          319.0
+        ]
+      ],
+      "lidQuad": [
+        [
+          191.92840569531805,
+          264.43792073062025
+        ],
+        [
+          302.3175911166535,
+          272.132513441288
+        ],
+        [
+          239.0,
+          319.0
+        ],
+        [
+          130.0,
+          312.0
+        ]
+      ],
+      "handDrawing": "../canonical-lid-v1/grip-020-source.png",
+      "wristRegistrationShift": [
+        12,
+        0
+      ],
+      "deformation": "Shoulder-pinned cloth displacement; hand moves rigidly with registration, not invented hand shapes",
+      "leftArmContour": [
+        [
+          150,
+          293
+        ],
+        [
+          156,
+          266
+        ],
+        [
+          167,
+          249
+        ],
+        [
+          182,
+          241
+        ],
+        [
+          206,
+          247
+        ],
+        [
+          226,
+          230
+        ],
+        [
+          242,
+          224
+        ],
+        [
+          245,
+          270
+        ],
+        [
+          221,
+          286
+        ],
+        [
+          195,
+          298
+        ]
+      ]
+    },
+    {
+      "angle": 45,
+      "hinge": [
+        [
+          130.0,
+          312.0
+        ],
+        [
+          239.0,
+          319.0
+        ]
+      ],
+      "lidQuad": [
+        [
+          169.06635626772996,
+          234.6742668663931
+        ],
+        [
+          280.9384164399767,
+          243.1102969525165
+        ],
+        [
+          239.0,
+          319.0
+        ],
+        [
+          130.0,
+          312.0
+        ]
+      ],
+      "handDrawing": "../canonical-lid-v1/grip-045-source.png",
+      "wristRegistrationShift": [
+        3,
+        -1
+      ],
+      "deformation": "Shoulder-pinned cloth displacement; hand moves rigidly with registration, not invented hand shapes",
+      "leftArmContour": [
+        [
+          138,
+          295
+        ],
+        [
+          145,
+          254
+        ],
+        [
+          164,
+          225
+        ],
+        [
+          186,
+          222
+        ],
+        [
+          207,
+          230
+        ],
+        [
+          230,
+          216
+        ],
+        [
+          245,
+          226
+        ],
+        [
+          245,
+          270
+        ],
+        [
+          204,
+          282
+        ],
+        [
+          170,
+          300
+        ]
+      ]
+    },
+    {
+      "angle": 70,
+      "hinge": [
+        [
+          130.0,
+          312.0
+        ],
+        [
+          239.0,
+          319.0
+        ]
+      ],
+      "lidQuad": [
+        [
+          138.88388009786536,
+          219.4002511147681
+        ],
+        [
+          251.70063567442006,
+          228.30862890304545
+        ],
+        [
+          239.0,
+          319.0
+        ],
+        [
+          130.0,
+          312.0
+        ]
+      ],
+      "handDrawing": "../canonical-lid-v1/grip-070-source.png",
+      "wristRegistrationShift": [
+        0,
+        0
+      ],
+      "deformation": "Shoulder-pinned cloth displacement; hand moves rigidly with registration, not invented hand shapes",
+      "leftArmContour": [
+        [
+          120,
+          308
+        ],
+        [
+          123,
+          238
+        ],
+        [
+          132,
+          210
+        ],
+        [
+          153,
+          206
+        ],
+        [
+          166,
+          215
+        ],
+        [
+          189,
+          226
+        ],
+        [
+          230,
+          217
+        ],
+        [
+          245,
+          234
+        ],
+        [
+          244,
+          270
+        ],
+        [
+          185,
+          303
+        ]
+      ]
+    },
+    {
+      "angle": 100,
+      "hinge": [
+        [
+          130.0,
+          312.0
+        ],
+        [
+          239.0,
+          319.0
+        ]
+      ],
+      "lidQuad": [
+        [
+          101.0,
+          224.0
+        ],
+        [
+          214.0,
+          233.0
+        ],
+        [
+          239.0,
+          319.0
+        ],
+        [
+          130.0,
+          312.0
+        ]
+      ],
+      "handDrawing": "../canonical-lid-v1/grip-100-source.png",
+      "wristRegistrationShift": [
+        1,
+        -1
+      ],
+      "deformation": "Shoulder-pinned cloth displacement; hand moves rigidly with registration, not invented hand shapes",
+      "leftArmContour": [
+        [
+          115,
+          289
+        ],
+        [
+          112,
+          229
+        ],
+        [
+          114,
+          215
+        ],
+        [
+          132,
+          212
+        ],
+        [
+          152,
+          222
+        ],
+        [
+          184,
+          225
+        ],
+        [
+          230,
+          216
+        ],
+        [
+          245,
+          231
+        ],
+        [
+          244,
+          272
+        ],
+        [
+          176,
+          303
+        ],
+        [
+          146,
+          335
+        ],
+        [
+          123,
+          339
+        ]
+      ]
+    }
+  ]
+}

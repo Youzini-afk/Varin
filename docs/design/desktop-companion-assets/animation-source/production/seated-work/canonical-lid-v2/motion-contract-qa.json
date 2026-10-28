@@ -1,0 +1,285 @@
+{
+  "status": "candidate-technical-checks-only",
+  "reports": [
+    {
+      "sequence": "opening",
+      "firstEndpointExact": true,
+      "lastEndpointExact": true,
+      "durationMs": 1950,
+      "maxChangedPixelsOutsideBroadMotionRegion": 0,
+      "fingerLipMeasurements": [
+        {
+          "frame": 1,
+          "angle": 0,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 2,
+          "angle": 0.4672,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 3,
+          "angle": 1.8175999999999999,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 4,
+          "angle": 3.9743999999999997,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 5,
+          "angle": 6.8608,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 6,
+          "angle": 10.4,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 7,
+          "angle": 14.5152,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 8,
+          "angle": 19.129600000000003,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 9,
+          "angle": 24.1664,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 10,
+          "angle": 29.5488,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 11,
+          "angle": 35.2,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 12,
+          "angle": 41.0432,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 13,
+          "angle": 47.001599999999996,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 14,
+          "angle": 52.9984,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 15,
+          "angle": 58.95680000000001,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 16,
+          "angle": 64.8,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 17,
+          "angle": 70.4512,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 18,
+          "angle": 75.8336,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 19,
+          "angle": 80.8704,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 20,
+          "angle": 85.48479999999999,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 21,
+          "angle": 89.6,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 22,
+          "angle": 93.1392,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 23,
+          "angle": 96.0256,
+          "nearestSkinToTopLipPx": 0.03
+        },
+        {
+          "frame": 24,
+          "angle": 98.18239999999999,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 25,
+          "angle": 99.53280000000001,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 26,
+          "angle": 100.0,
+          "nearestSkinToTopLipPx": 0.01
+        }
+      ],
+      "interpretation": "Nearest skin-to-lip is a geometric diagnostic, not aesthetic or anatomical acceptance."
+    },
+    {
+      "sequence": "closing",
+      "firstEndpointExact": true,
+      "lastEndpointExact": true,
+      "durationMs": 1945,
+      "maxChangedPixelsOutsideBroadMotionRegion": 0,
+      "fingerLipMeasurements": [
+        {
+          "frame": 10,
+          "angle": 100,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 11,
+          "angle": 99.53280000000001,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 12,
+          "angle": 98.18239999999999,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 13,
+          "angle": 96.0256,
+          "nearestSkinToTopLipPx": 0.03
+        },
+        {
+          "frame": 14,
+          "angle": 93.1392,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 15,
+          "angle": 89.6,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 16,
+          "angle": 85.48479999999999,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 17,
+          "angle": 80.8704,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 18,
+          "angle": 75.8336,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 19,
+          "angle": 70.4512,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 20,
+          "angle": 64.8,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 21,
+          "angle": 58.95680000000001,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 22,
+          "angle": 52.9984,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 23,
+          "angle": 47.001599999999996,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 24,
+          "angle": 41.0432,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 25,
+          "angle": 35.2,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 26,
+          "angle": 29.5488,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 27,
+          "angle": 24.1664,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 28,
+          "angle": 19.129600000000003,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 29,
+          "angle": 14.5152,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 30,
+          "angle": 10.4,
+          "nearestSkinToTopLipPx": 0.02
+        },
+        {
+          "frame": 31,
+          "angle": 6.8608,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 32,
+          "angle": 3.9743999999999997,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 33,
+          "angle": 1.8175999999999999,
+          "nearestSkinToTopLipPx": 0.01
+        },
+        {
+          "frame": 34,
+          "angle": 0.4672,
+          "nearestSkinToTopLipPx": 0.0
+        },
+        {
+          "frame": 35,
+          "angle": 0.0,
+          "nearestSkinToTopLipPx": 0.0
+        }
+      ],
+      "interpretation": "Nearest skin-to-lip is a geometric diagnostic, not aesthetic or anatomical acceptance."
+    }
+  ]
+}

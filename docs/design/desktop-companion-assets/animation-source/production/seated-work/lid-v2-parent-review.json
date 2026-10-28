@@ -1,0 +1,35 @@
+{
+  "reviewer": "parent",
+  "method": "Actual browser playback at 320 CSS px, 1x, plus explicit paused inspection; sampled screenshots, not continuous video-perception or native performance measurement.",
+  "scope": "Opening and closing laptop as short seated prop transitions only.",
+  "decision": "accept-short-prop-transition",
+  "observedOpeningMs": [
+    350,
+    385,
+    450,
+    683,
+    897,
+    917,
+    1338,
+    1950
+  ],
+  "observedClosingMs": [
+    367,
+    600,
+    850,
+    1364,
+    1945
+  ],
+  "findings": [
+    "Identity and body/stool registration stable in viewed stages.",
+    "Lid rotates while hand meets upper edge; remaining hand supports keyboard/base.",
+    "No observed third hand or floating triangular screen artifact.",
+    "Return reaches shared seated endpoint."
+  ],
+  "restrictions": [
+    "Do not use as a continuous idle performance.",
+    "Do not delay actual pointer/window dragging until seated closing finishes.",
+    "Frozen source warning remains historical; derive accepted runtime package separately."
+  ],
+  "inventorySha256": "fed1586d3282aec9bbb9e70bff8b46d790fbdf85b441a20bb7d0d3e4b5cdada9"
+}

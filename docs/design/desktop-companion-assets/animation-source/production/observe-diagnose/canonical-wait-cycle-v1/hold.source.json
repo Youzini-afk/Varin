@@ -1,0 +1,234 @@
+{
+  "id": "observe.wait-hold-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "observe-chin-contact",
+  "exitPose": "observe-chin-contact",
+  "loop": [
+    0,
+    17
+  ],
+  "warning": "Continuous attentive wait candidate; small shoulder/hand-supported head settle, hand comfort adjustment, sparse eye contact. No progress/retry/success implied. Normal-speed loop and shoulder seam QA pending.",
+  "frames": [
+    {
+      "source": "pose-005.png",
+      "durationMs": 2200,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "hold-closed.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1900,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    },
+    {
+      "source": "chin-settled.png",
+      "durationMs": 2400,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1500,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    },
+    {
+      "source": "rim-approach.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "rim-rest.png",
+      "durationMs": 2300,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "rim-approach.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1700,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "hold-closed.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "chin-glance-user.png",
+      "durationMs": 700,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "hold-half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "hold-closed.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-wait-variation",
+      "exitTo": []
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1600,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "hold",
+      "pose": "observe-chin-contact",
+      "exitTo": [
+        "observe-chin-contact"
+      ]
+    }
+  ]
+}

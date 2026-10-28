@@ -1,0 +1,8 @@
+{
+  "sources": [
+    "../canonical-stop-v1",
+    "../canonical-gaze-v1",
+    "../canonical-chin-v2"
+  ],
+  "composition": "New same-geometry face/eyes/hand drawings composed through explicit local masks. No fullframe fade, no altered operational state, no synthetic success."
+}

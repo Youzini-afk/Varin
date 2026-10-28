@@ -1,0 +1,103 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/rim-rest.png",
+      "sha256": "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722",
+      "bytes": 309162
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/hold.source.json",
+      "sha256": "d519f2664b6de393339e8908552188c00e160e3022c2d15f191db0c7673b39c9",
+      "bytes": 4597
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/enter.source.json",
+      "sha256": "d780e4c1b87a5ef2c03977bcd45b78788ada9c3176363d8247c442d40beea838",
+      "bytes": 1966
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/chin-glance-user.png",
+      "sha256": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780",
+      "bytes": 308902
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/hold-closed.png",
+      "sha256": "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9",
+      "bytes": 308514
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-003.png",
+      "sha256": "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191",
+      "bytes": 309370
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/build.py",
+      "sha256": "886cdefc3f4246e70944e1fec569b9788c5d7f4a7111375cf343ced69578b91a",
+      "bytes": 2678
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-002.png",
+      "sha256": "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43",
+      "bytes": 309487
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/chin-settle-source.png",
+      "sha256": "e7dea0bcaa2e7c727433480eedb4a20e7ea1048e109e324503057d2df90fa623",
+      "bytes": 1599093
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-004.png",
+      "sha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d",
+      "bytes": 309424
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/chin-settled.png",
+      "sha256": "916e137dc07b3dc9e8e5ff6ce3dc6a80761fdc37d0821d1ffc4e6b728447baf8",
+      "bytes": 315781
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-000.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/rim-approach.png",
+      "sha256": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb",
+      "bytes": 309262
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/prompts.json",
+      "sha256": "6ce33d731827bab77d0bd54ab3d34b54eab601d4264e294bd13f4d8e86aa1adc",
+      "bytes": 749
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/exit.source.json",
+      "sha256": "027ffdf8a45d324718302960fc31fd8a1635e79239c5e22910f1bbbcc99b23ba",
+      "bytes": 1959
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/hold-half.png",
+      "sha256": "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956",
+      "bytes": 308968
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-001.png",
+      "sha256": "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404",
+      "bytes": 309389
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/pose-005.png",
+      "sha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "bytes": 309097
+    },
+    {
+      "path": "observe-diagnose/canonical-wait-cycle-v1/hold-comparison-320.jpg",
+      "sha256": "c6fe46a49fabe18352c3412d9098aaf038767f4db8f5b22635a344fe609431de",
+      "bytes": 54253
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "8456402b940081b5b3683cea75cdb9cf391e7019deab6832ae13047c8407c5c1",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}

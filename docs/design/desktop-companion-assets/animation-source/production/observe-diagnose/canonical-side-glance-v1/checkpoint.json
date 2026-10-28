@@ -1,0 +1,63 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/half.png",
+      "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+      "bytes": 309117
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/eyes-mask.png",
+      "sha256": "5e783d3f91ed3de9777b107ae771df303e54633c244d2db87a1175e2d5f15e37",
+      "bytes": 1533
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/closed.png",
+      "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+      "bytes": 308658
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/eyes-overlay.png",
+      "sha256": "e5ec30be1354e12ac0631a253b334e83d8478f2dac4117bd545519342e13f3ca",
+      "bytes": 324086
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/build.py",
+      "sha256": "ca34036ee33c0ddf2614504014a2284f771866be1abaeea32c96a5ea9b480403",
+      "bytes": 1715
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/glance-source.png",
+      "sha256": "58fb7050c7e75d23b8d3d84d66ec62476bf875434cc0cad8ef662292e05cbe86",
+      "bytes": 1619548
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/side-glance.png",
+      "sha256": "3de6c00e4e47e0d7498ba561239b649cdf13a131023d4393cde1894b20f3eaf8",
+      "bytes": 309213
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/sequence.source.json",
+      "sha256": "507fb2aeaa20ccd0941b2ea31600eac4d1ea9cd2498a7f5a0e2abbf74ae0bb48",
+      "bytes": 1813
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/comparison-320.jpg",
+      "sha256": "4039dce6b797aef1e604c40c5a7d0e92f54dd27c484d50322cc1ad6f5f42e2eb",
+      "bytes": 35797
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/prompts.json",
+      "sha256": "6357785371e7b50ce5d77714c301faf2da587be407eaa4fdeab9285a90caa9a7",
+      "bytes": 574
+    },
+    {
+      "path": "observe-diagnose/canonical-side-glance-v1/read-screen.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "cb051884472905eb2930cb53c8436ba01d0ff7b9172c76c6b9ad72d61b065da3",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}

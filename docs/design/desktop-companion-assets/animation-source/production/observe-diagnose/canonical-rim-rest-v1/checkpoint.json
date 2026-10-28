@@ -1,0 +1,73 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/chin.png",
+      "sha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "bytes": 309097
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/lift.png",
+      "sha256": "fe1aa48461c2577be75c2619fff1a227b0963b85655d5cf88786f093c6d6a640",
+      "bytes": 309360
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/rest.png",
+      "sha256": "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722",
+      "bytes": 309162
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/approach-source.png",
+      "sha256": "47c6da37ee7f1a9b7a4c3b31a2a73320aea568cbe55e4044a03fdea4f3b4c042",
+      "bytes": 1591201
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/build.py",
+      "sha256": "6a9522c58de48451caf5f4561fc593e73144171ba915a6667b833252c1ed792f",
+      "bytes": 1705
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/hand-mask.png",
+      "sha256": "440af531a4ce13d241ad9187ede1e4385d0822a07d534353c365ad22c72e54a3",
+      "bytes": 936
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/rest-source.png",
+      "sha256": "7d483caa90649ecbfa91b5e9d33372b68fc8d0e5827e600e85c0af379d499a0e",
+      "bytes": 1611976
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/sequence.source.json",
+      "sha256": "3fb94a5b79914ebd9eca6ad1fc82deba05c20529f045bf51e2941528613972d9",
+      "bytes": 2148
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/comparison-320.jpg",
+      "sha256": "a26c89446baa23aa619fa627b814380e1933c4343089d1d14e99464fbf3ef7da",
+      "bytes": 71421
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/approach.png",
+      "sha256": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb",
+      "bytes": 309262
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/prompts.json",
+      "sha256": "f8fb104471176f95b97bb6489ef79831d985f28acdc5826b1c416afae1456535",
+      "bytes": 1669
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/rest-reference.png",
+      "sha256": "004815a33dbe7abb53c308e5bb7d1882f5cc12227c24db75b9b6eb66994e37b8",
+      "bytes": 334217
+    },
+    {
+      "path": "observe-diagnose/canonical-rim-rest-v1/lift-source.png",
+      "sha256": "4c3855ae6c2fd161b4da5883a0b7ffb99146d25aae14afdf678a9aca192d9e0a",
+      "bytes": 1595692
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "e031e960aaec28826624c6f6750008cde0164be4704a7d8acf23619003c3eed0",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}

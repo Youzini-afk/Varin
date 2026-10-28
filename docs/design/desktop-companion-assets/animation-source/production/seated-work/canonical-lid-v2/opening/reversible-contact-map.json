@@ -1,0 +1,843 @@
+{
+  "sequence": "seated-work.opening-hybrid-v2",
+  "frames": [
+    {
+      "frameIndex": 0,
+      "phase": "closed-rest",
+      "lidAngleDeg": 0,
+      "gripContact": "closed-lid-rest",
+      "renderedPixelSha256": "b2f516cd8a73bb0c4424d98764e2ca81904242fd6a4b600882fae1adb6bb0955",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 36,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": true,
+      "durationMs": 180,
+      "reverseTailDurationMs": 250,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "endpointSource": "../../canonical-lid-v1/closed-canonical-candidate.png",
+      "renderMethod": "fixed-canonical-endpoint"
+    },
+    {
+      "frameIndex": 1,
+      "phase": "acquire-grip",
+      "lidAngleDeg": 0,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "ba92df7ff9b74372d7520219d691cf846798e1af394002be53611b52779caed5",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 35,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 120,
+      "reverseTailDurationMs": 305,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        22.071594304681952,
+        30.56207926937975
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 2,
+      "phase": "open-lid",
+      "lidAngleDeg": 0.4672,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "2435b89275b7dc2626f8b356b5ffeccd31b498226f55dca20cee3eeae410f64b",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 34,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 360,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        21.932604768220216,
+        29.809572828641762
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 3,
+      "phase": "open-lid",
+      "lidAngleDeg": 1.8175999999999999,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "994f74a276448f8ae444efcdd6fb3cf496ff9ec1d48c5c323b62918c22f57bd9",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 33,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 415,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        21.50403765244471,
+        27.641333446199837
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 4,
+      "phase": "open-lid",
+      "lidAngleDeg": 3.9743999999999997,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "5ca29280f7c239c4b25a8724d11f95edcad813cfaa59fd0c0b16bded0b6741ec",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 32,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 470,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        20.737360957182034,
+        24.20176089399962
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 5,
+      "phase": "open-lid",
+      "lidAngleDeg": 6.8608,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "a36ad40e7173c4f141fc450ef8863b251553a87fcb5763b22085b4c532a55b82",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 31,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 525,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        19.554890903394067,
+        19.651292740252188
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 6,
+      "phase": "open-lid",
+      "lidAngleDeg": 10.4,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "a659ddf0c30001630122c62df0490e229579a370ea17957474e59de21398d3c6",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 30,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 580,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        17.864714326650898,
+        14.169500460515167
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 7,
+      "phase": "open-lid",
+      "lidAngleDeg": 14.5152,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "6aee20158be7c2b855f51956e42da1bed08340ad0e016bf2a5e82be07a308182",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 29,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 635,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        15.57481404235594,
+        7.957109052674809
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 8,
+      "phase": "open-lid",
+      "lidAngleDeg": 19.129600000000003,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "9b4647e83ba2045bd12c0efc9376a6067989319a2274d663fa330868f25014b8",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 28,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 690,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        12.606060094036508,
+        1.2355001340809508
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 9,
+      "phase": "open-lid",
+      "lidAngleDeg": 24.1664,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "480b381183f17b00dd0aca9436ccd0f324153dcccd5449c4b7404efedb8f4a05",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 27,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 730,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        8.90354059000461,
+        -5.757122883869101
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 10,
+      "phase": "open-lid",
+      "lidAngleDeg": 29.5488,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "9b04ae2ccb7e3a6bbf6cc6da261da23fe5ee5f7caca4083e01e86947353f3b0d",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 26,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 770,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 20,
+      "artSource": "../../canonical-lid-v1/grip-020-source.png",
+      "clothRegistrationShift": [
+        4.445573882098955,
+        -12.773105988774091
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 11,
+      "phase": "open-lid",
+      "lidAngleDeg": 35.2,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "e3d69139b75ee23cbd5100d11340292a59ed33ee035b12975348a3f7d3c0de9d",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 25,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 810,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 45,
+      "artSource": "../../canonical-lid-v1/grip-045-source.png",
+      "clothRegistrationShift": [
+        13.111780744793151,
+        9.197805360230973
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 12,
+      "phase": "open-lid",
+      "lidAngleDeg": 41.0432,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "de5510582632c90cb5745d25eacaec042319fcc317c1249e133a7c844b9c6e35",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 24,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 850,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 45,
+      "artSource": "../../canonical-lid-v1/grip-045-source.png",
+      "clothRegistrationShift": [
+        7.237384721201039,
+        2.8611492153790437
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 13,
+      "phase": "open-lid",
+      "lidAngleDeg": 47.001599999999996,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "7278894ba7f3e34b785a40428db13503afcf2491a1d9b111ac761e5720b52e69",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 23,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 890,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 45,
+      "artSource": "../../canonical-lid-v1/grip-045-source.png",
+      "clothRegistrationShift": [
+        0.7842238843599603,
+        -2.813895290311251
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 14,
+      "phase": "open-lid",
+      "lidAngleDeg": 52.9984,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "4423f3b376d9dea52c08e02bb87dfc9a48db66bb9ba8abb17503e6afee7aed71",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 22,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 930,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 45,
+      "artSource": "../../canonical-lid-v1/grip-045-source.png",
+      "clothRegistrationShift": [
+        -6.11239293623413,
+        -7.662012065184314
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 15,
+      "phase": "open-lid",
+      "lidAngleDeg": 58.95680000000001,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "bbf355096d8609050f0eaa6daacecb14c0e55f20685913895d157aeee57bb1f8",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 21,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 970,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 70,
+      "artSource": "../../canonical-lid-v1/grip-070-source.png",
+      "clothRegistrationShift": [
+        13.892772703812767,
+        4.705231686855967
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 16,
+      "phase": "open-lid",
+      "lidAngleDeg": 64.8,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "96c0e29b95b8baf25e5ac651b6237cb5d84243d3415c5cab409ab31398965b43",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 20,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1010,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 70,
+      "artSource": "../../canonical-lid-v1/grip-070-source.png",
+      "clothRegistrationShift": [
+        6.61472071638039,
+        1.7961075467302692
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 17,
+      "phase": "open-lid",
+      "lidAngleDeg": 70.4512,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "75efee5d094da7600a59dc9cf9fb5949bc81ac03a14164d4aaba23ffd5aa2886",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 19,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1050,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 70,
+      "artSource": "../../canonical-lid-v1/grip-070-source.png",
+      "clothRegistrationShift": [
+        -0.5781892658496304,
+        -0.12007499592678528
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 18,
+      "phase": "open-lid",
+      "lidAngleDeg": 75.8336,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "ef8b50907f2433b7b5671da674a969c3dfd5f201642a8dee48dd3117082d3e1f",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 18,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1090,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 70,
+      "artSource": "../../canonical-lid-v1/grip-070-source.png",
+      "clothRegistrationShift": [
+        -7.505074155826776,
+        -1.1073044004245958
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 19,
+      "phase": "open-lid",
+      "lidAngleDeg": 80.8704,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "3d58bf329771cf3d53949046e1bf75b2ce11cf3c913ca41b359e587c5588b0f5",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 17,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1130,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 70,
+      "artSource": "../../canonical-lid-v1/grip-070-source.png",
+      "clothRegistrationShift": [
+        -13.9993889038399,
+        -1.2827529853972521
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 20,
+      "phase": "open-lid",
+      "lidAngleDeg": 85.48479999999999,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "22efc1a6ae56a1557c9a5b48a2d23ef11341f354727e762d4cd3dd3b7ebf76ee",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 16,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1170,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        18.9682571272064,
+        -6.406775616142539
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 21,
+      "phase": "open-lid",
+      "lidAngleDeg": 89.6,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "b7cc20c1bf603905390b0b6510c2952df3ad02f63e745d7f52a86116fab1b6ef",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 15,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1210,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        13.751229838035442,
+        -5.471531314402
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 22,
+      "phase": "open-lid",
+      "lidAngleDeg": 93.1392,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "e9de9345b0e9c15a2c3cd23060db422e25b8f4632707aaac8aef2498a409d0bc",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 14,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1250,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        9.330446322926363,
+        -4.285562465571047
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 23,
+      "phase": "open-lid",
+      "lidAngleDeg": 96.0256,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "496556537a123708304b8e1ebefb33903ce6de5b96834a6bb30a4f9d034f9bcc",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 13,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1290,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        5.782680893898899,
+        -3.060309354198779
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 24,
+      "phase": "open-lid",
+      "lidAngleDeg": 98.18239999999999,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "60ce13adf3457e7967ce44c26324a584215ecf52901305d41a48f1301c5fcede",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 12,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1330,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        3.171312495082475,
+        -1.9954021651631138
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 25,
+      "phase": "open-lid",
+      "lidAngleDeg": 99.53280000000001,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "5f36600dfb5eec48fa627e91f8f81f2a80340aea3b750fabe5962e8f1988628c",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 11,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1370,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        1.5554195287457162,
+        -1.2643574939090172
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 26,
+      "phase": "open-lid",
+      "lidAngleDeg": 100.0,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "934138c0429945ac1e664589dcfeb4e6cf0900ba3f67b0ebc097e0032ad783e2",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 10,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1450,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        1.0,
+        -1.0
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 27,
+      "phase": "open-grip-hold",
+      "lidAngleDeg": 100,
+      "gripContact": "holding-top-lip",
+      "renderedPixelSha256": "934138c0429945ac1e664589dcfeb4e6cf0900ba3f67b0ebc097e0032ad783e2",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 10,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 90,
+      "reverseTailDurationMs": 1450,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "actualGripDrawingReferenceAngle": 100,
+      "artSource": "../../canonical-lid-v1/grip-100-source.png",
+      "clothRegistrationShift": [
+        1,
+        -1
+      ],
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 28,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "9886e067902d1609b1c219e3d3deea4034e213d686d2d4a1c21ad3386b622bbd",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 9,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1485,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.0,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 29,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "25616e37dedefd197039b12bde76d856481b7f52dc090583dc3f959d3f21d7e8",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 8,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1520,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.125,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 30,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "6c52fdd5fc793ba0c7bb136a47c0f9c5131b0ba86ffa6ccbe8a3ae93f1b407fb",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 7,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1555,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.25,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 31,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "32bd5721da4ac7a516176cc174479f839cee7463b850662aa52c48279951c769",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 6,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1590,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.375,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 32,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "906af06dee3a070fa522af81507e4e203676beb6826b9ca67b28d39b6cbbad14",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 5,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1625,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.5,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 33,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "93795be4dd589e00c4d2577074d6a13d174321ad78382ca066d31ac28d9cda87",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 4,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1660,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.625,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 34,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "c3e24018494fb1edb6ac8e698bb19a86a1ecfc6c9bfacfbcd5ce62b6543893db",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 3,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1695,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.75,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 35,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "fa98318fdc2d8d1f35f7661639516b61f3aa37a26fe0e1d666764828b76fb75b",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 2,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1730,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 0.875,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 36,
+      "phase": "release-retract",
+      "lidAngleDeg": 100,
+      "gripContact": "released-reaching",
+      "renderedPixelSha256": "bbcf814116b839dd56da2ca01fa386b6650ba186a5d60691ec64b70c912f14da",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 1,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": false,
+      "durationMs": 40,
+      "reverseTailDurationMs": 1765,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "artSource": "../../canonical-lid-v1/release-100-source.png",
+      "releaseProgress": 1.0,
+      "contactLost": true,
+      "renderMethod": "actual-hand-drawing+fixed-hinge-plane+shoulder-pinned-cloth-registration"
+    },
+    {
+      "frameIndex": 37,
+      "phase": "open-rest",
+      "lidAngleDeg": 100,
+      "gripContact": "keyboard-rest",
+      "renderedPixelSha256": "021c1b72caded40502c9dbaa854f87f69ba7bd0725881a3283c91406e75d8106",
+      "reverseFrom": {
+        "sequence": "seated-work.closing-hybrid-v2",
+        "frameIndex": 0,
+        "match": "exact-rgba-pixels"
+      },
+      "safeEndpoint": true,
+      "durationMs": 200,
+      "reverseTailDurationMs": 1945,
+      "reverseTailEndpoint": "seated-closed-neutral-rest",
+      "endpointSource": "../../../shared/seated-open-canonical-alpha-v1.png",
+      "renderMethod": "fixed-canonical-endpoint"
+    }
+  ],
+  "supportedReverseAtEveryExposure": true
+}

@@ -1,0 +1,53 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "rest/canonical-quiet-v1/half.png",
+      "sha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "bytes": 317376
+    },
+    {
+      "path": "rest/canonical-quiet-v1/between.png",
+      "sha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "bytes": 324455
+    },
+    {
+      "path": "rest/canonical-quiet-v1/closed.png",
+      "sha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "bytes": 316924
+    },
+    {
+      "path": "rest/canonical-quiet-v1/build.py",
+      "sha256": "5fb7e138c5b00abb382abd4b51bbcb306c3ff3c03b58f2ca3c4a0fe4c8b393cc",
+      "bytes": 2190
+    },
+    {
+      "path": "rest/canonical-quiet-v1/neutral.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "rest/canonical-quiet-v1/sequence.source.json",
+      "sha256": "79aec91184baecb1ecde45cc93f022c94f6115b38c5a1c96996ef030da2d0b55",
+      "bytes": 2327
+    },
+    {
+      "path": "rest/canonical-quiet-v1/comparison-320.jpg",
+      "sha256": "16aa78a8aeb69a4f0376275d521c72ef0744e77ff726e0f2b2c12df4c5e70aea",
+      "bytes": 36996
+    },
+    {
+      "path": "rest/canonical-quiet-v1/provenance.json",
+      "sha256": "702909497c2d9f8f175764083300663bac4cc966d6fe5bedc14aaf1f0e36e966",
+      "bytes": 303
+    },
+    {
+      "path": "rest/canonical-quiet-v1/settle.png",
+      "sha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "bytes": 324138
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "e9bb4cec0d3610c1e343aeace0ea05901afeea0b1e3b2d902126db909c2315bc",
+  "publicationNote": "Paths are relative to production/; source bytes and hashes are unchanged."
+}
