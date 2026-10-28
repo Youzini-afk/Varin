@@ -101,6 +101,7 @@ export interface ExperimentInputTransfer {
   cwd?: string;
   entries: Array<{ path: string; state: KernelBranchState }>;
   readObject(objectHash: string, byteLength: number, signal?: AbortSignal): AsyncIterable<Uint8Array>;
+  readVersionPage?(reference: string, offset: number, length: number, fileVersion: import('../kernel/file-content-transfer.js').FileContentReadOptions, signal?: AbortSignal): Promise<KernelObjectSlice>;
 }
 
 interface CapturedEntry {
@@ -150,7 +151,7 @@ const parseState = (value: unknown, relative: string): KernelBranchState => {
   const state = value as Record<string, unknown>;
   switch (state.kind) {
     case "regular-file":
-      if (typeof state.objectHash !== "string" || !state.objectHash.startsWith("sha256-")
+      if (typeof state.objectHash !== "string" || !/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(state.objectHash)
         || !Number.isSafeInteger(state.byteLength) || Number(state.byteLength) < 0
         || !Number.isSafeInteger(state.mode)) {
         throw new Error(`Kernel returned an invalid regular-file state for ${relative}`);
@@ -715,6 +716,18 @@ export async function openExperimentInputTransfer(client: KernelClient, caller: 
       materialId: input.root,
       ...(input.cwd ? { cwd: input.cwd } : {}),
       entries,
+      async readVersionPage(reference, offset, length, fileVersion, signal) {
+        if (closing) throw new Error('Experiment input transfer is closed');
+        const sourcePath = objectPaths.get(reference);
+        if (!sourcePath) throw new Error('File version is not part of this exact experiment snapshot');
+        let finish!: () => void;
+        const reader = new Promise<void>(resolve => { finish = resolve; }); readers.add(reader);
+        try {
+          return await scoped.getBlob(fileVersion.rangeObject ?? reference, { branchId: input.branchId, path: sourcePath },
+            { offset, length, signal, ...(fileVersion.representation ? { representation: fileVersion.representation } : {}),
+              ...(fileVersion.rangeObject ? { rangeRoot: reference } : {}) });
+        } finally { readers.delete(reader); finish(); }
+      },
       readObject: (objectHash, byteLength, signal) => (async function* () {
         if (closing)
           throw new Error("Experiment input transfer is closed");
@@ -786,7 +799,7 @@ export function parseManagedExperimentInput(value: unknown): import('../kernel/m
 export async function installExperimentInput(client: KernelClient, caller: ExperimentWorkspaceCaller,
   input: import('../kernel/managed-research-source.js').ManagedExperimentInput,
   source: LaunchSource, resourceEpoch: string,
-  read: (name: string, offset: number, length: number, signal?: AbortSignal) => Promise<KernelObjectSlice>,
+  read: (name: string, offset: number, length: number, signal?: AbortSignal, fileVersion?: import('../kernel/file-content-transfer.js').FileContentReadOptions) => Promise<KernelObjectSlice>,
   options: PrepareExperimentInputOptions,
 ): Promise<ExperimentInputSnapshot> {
   if (!options.branchId || input.snapshot.workspaceId !== caller.workspaceId || input.snapshot.executionWorkspaceId !== caller.executionWorkspaceId)
@@ -808,6 +821,13 @@ export async function installExperimentInput(client: KernelClient, caller: Exper
     for (const entry of input.entries) {
       if (entry.state.kind !== 'regular-file' || owners.has(entry.state.objectHash)) continue;
       const state = entry.state;
+      if (state.objectHash.startsWith('ranges-')) {
+        const { copyRangeContent } = await import('../kernel/file-content-transfer.js');
+        const blob = await copyRangeContent(grant.scoped, state.objectHash, state.byteLength,
+          (offset, length, fileVersion) => read(entry.path, offset, length, options.signal, fileVersion), options.signal);
+        owners.set(state.objectHash, blob.ownerId);
+        continue;
+      }
       const chunks = (async function* () {
         let offset = 0;
         while (offset < state.byteLength) {

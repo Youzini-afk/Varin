@@ -140,6 +140,29 @@ That runs, in order:
 Build output goes to `packages/electron/dist`. Development sources and the duplicate Web-owned kernel
 are excluded from the desktop dependency tree; desktop uses `resources/kernel`.
 
+### Native workspace components
+
+Normal chats and shared tasks do not require a filesystem component. Explicit independent workspaces
+check the actual execution Host before inventory or content capture. Project settings show that Host's
+backend, platform, architecture and dependency diagnostic, with an explicit refresh action.
+
+Windows setup offers an unchecked optional WinFsp component page. `workspace-component.json` pins the
+unmodified official **WinFsp 2026 Beta5 (2.2.26286)** MSI, SHA-256 and license. The selected preview
+contains the upstream cached-write/concurrent-rename fixes; the installer names that preview explicitly.
+`prepare-workspace-component.mjs` prepares the verified build cache through the existing Windows
+before-pack hook. A matching or newer installed component is reused. User-selected installation asks
+Windows for permission and reports cancellation, failure or a required restart without blocking normal
+Varin use. Silent updates do not install a system component, and uninstall leaves the shared component
+in place. The application ships its license and retains the required attribution in About and notices.
+
+Linux deb/rpm packages declare FUSE3; AppImage users and standalone Hosts provide the system FUSE
+device/helper and mount permission. macOS currently uses a separately installed macFUSE/libfuse3;
+macFUSE is not redistributed by this package. Missing dependencies affect independent workspaces only.
+Actual mount results remain separate from the read-only dependency inspection.
+
+`workspace-component.test.mjs` compiles the real NSIS page and pinned MSI without installing it.
+System installation and real filesystem mounts require separate platform testing.
+
 ### Windows installer payload and performance
 
 Windows setup uses a product-owned, frameless native window for installation, upgrades and uninstall.

@@ -18,9 +18,15 @@ pub(crate) use fuse::Mount;
 pub(crate) use windows::Mount;
 
 pub(crate) fn dependencies()->Result<(),KernelError>{
-    #[cfg(windows)] {windows::initialize()}
+    #[cfg(windows)] {windows::initialize()?; windows::check_driver()}
     #[cfg(any(target_os="linux",target_os="macos"))] {
-        fuser::mount_dependencies().map_err(|error|unsupported(&format!("Native workspace dependency is unavailable: {error}")))
+        fuser::mount_dependencies().map_err(|error| crate::workspace_backend::unavailable(
+            match error.kind() {
+                std::io::ErrorKind::NotFound => "dependency_missing",
+                std::io::ErrorKind::PermissionDenied => "permission_denied",
+                std::io::ErrorKind::Unsupported => "backend_unsupported",
+                _ => "dependency_unavailable",
+            }, format!("Native workspace dependency is unavailable: {error}")))
     }
 }
 

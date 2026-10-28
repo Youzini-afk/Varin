@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "执行 Host 文件系统后端",
+  "settings.projects.workspace.backendReady": "依赖已就绪",
+  "settings.projects.workspace.backendUnavailable": "不可用",
+  "settings.projects.workspace.refreshBackend": "刷新检测",
+  "settings.projects.workspace.backendHelp": "组件安装说明",
   "settings.projects.workspace.title": "独立挂载工作区",
   "settings.projects.workspace.description": "共享未变内容，按需分叉独立工作状态。",
   "settings.projects.workspace.explanation": "可选的系统挂载后端：Windows 使用 WinFsp，macOS 使用 macFUSE，Linux 使用 FUSE。普通项目会话直接使用原目录。启用此后端后，在独立受管目录工作，原文件夹保留为接入来源。",

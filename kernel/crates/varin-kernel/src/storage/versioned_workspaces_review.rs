@@ -8,6 +8,124 @@ struct Fixture {
 }
 
 #[test]
+fn partial_file_fork_keeps_only_changed_ranges_and_survives_reopen_and_collection() {
+    use super::workspace_session::{Command, Session, StoragePort};
+    let mut f = Fixture::new();
+    let bytes = vec![b'a'; 8 * 1024 * 1024];
+    let input = json!({"workspaceId":"project","operationId":"large-base","streamId":"large-base","byteLength":bytes.len()});
+    f.storage.begin_blob_stream(&input, "owner").unwrap();
+    for (sequence, chunk) in bytes.chunks(64*1024).enumerate() {
+        f.storage.stream_blob_bytes("large-base", sequence as u64, chunk, "owner").unwrap();
+    }
+    let blob = f.storage.finish_blob_stream(&input, "owner").unwrap();
+    let original_hash = blob["hash"].as_str().unwrap().to_owned();
+    f.begin("range-main", None);
+    f.append("range-main", 0, json!([{ "path":"large.bin", "state":{"kind":"regular-file","objectHash":original_hash,"byteLength":bytes.len(),"mode":420},"ownerId":blob["ownerId"] }])).unwrap();
+    f.finish("range-main");
+    let grant = f.storage.load_grant("owner").unwrap();
+    let directory = f.directory; let mut storage = f.storage;
+    let (sender, receiver) = std::sync::mpsc::channel::<Option<Command>>();
+    let stop = sender.clone();
+    let worker = std::thread::spawn(move || {
+        while let Ok(Some(command)) = receiver.recv() { command(Some(&mut storage)); }
+        storage
+    });
+    let port = StoragePort::new(move |command| sender.send(Some(command)).map_err(|_| KernelError::Storage("Test Storage stopped".into())));
+    let parent = Session::open(port.clone(), "range-main".into(), grant.clone()).unwrap();
+    let file = parent.lookup("large.bin").unwrap();
+    parent.write(&file, Some(4096), &[b'x';1024]).unwrap();
+    let boundary = parent.checkpoint().unwrap();
+    parent.write(&file, Some(4096), &[b'y';1024]).unwrap();
+    boundary.fork("range-child", "range-child-fork", &AtomicBool::new(false)).unwrap();
+    boundary.release().unwrap();
+    let child = Session::open(port.clone(), "range-child".into(), grant.clone()).unwrap();
+    let child_file = child.lookup("large.bin").unwrap();
+    let mut observed = [0;1024];
+    child.read(&child_file, 4096, &mut observed).unwrap(); assert_eq!(observed, [b'x';1024]);
+    parent.read(&file, 4096, &mut observed).unwrap(); assert_eq!(observed, [b'y';1024]);
+    let selected = port.call(|storage| storage.branch_path_inspect(&json!({"branchId":"range-child","path":"large.bin"}))).unwrap();
+    let reference = selected["state"]["objectHash"].as_str().unwrap().to_owned();
+    assert!(reference.starts_with("ranges-sha256-"));
+    let descriptor = super::file_content::Version::load(&directory, &reference).unwrap();
+    assert_eq!(descriptor.ranges.len(), 3);
+    assert_eq!(descriptor.ranges[0].object_hash, original_hash);
+    assert_eq!(descriptor.ranges[1].object_length, 1024);
+    assert_eq!(descriptor.ranges[2].object_hash, original_hash);
+    assert_eq!(fs::metadata(super::file_content::path(&directory, &descriptor.ranges[1].object_hash).unwrap()).unwrap().len(), 1024);
+    parent.close().unwrap(); child.close().unwrap();
+    drop((parent, child, file, child_file, port));
+    stop.send(None).unwrap(); let storage = worker.join().unwrap(); drop(storage);
+    let mut storage = Storage::open(&directory, "host").unwrap();
+    storage.gc().unwrap();
+    let grant = storage.load_grant("owner").unwrap();
+    let page = storage.read_blob_fixture(&json!({"hash":reference,"branchId":"range-child","path":"large.bin","offset":4096,"length":1024}), &grant).unwrap();
+    assert_eq!(BASE64.decode(page["bytesBase64"].as_str().unwrap()).unwrap(), vec![b'x';1024]);
+    // Physical export/recovery resolves the same immutable version into bytes,
+    // rather than installing its descriptor as the destination file.
+    let physical = super::file_resources::ResolvedFileResource {
+        path: "export.bin".into(), absolute: directory.join("export.bin"), native: None,
+    };
+    let state = serde_json::from_value(selected["state"].clone()).unwrap();
+    super::file_resources::apply_physical_state(&directory, &physical, &state, &AtomicBool::new(false)).unwrap();
+    let mut expected = bytes.clone(); expected[4096..5120].fill(b'x');
+    assert_eq!(fs::read(&physical.absolute).unwrap(), expected);
+    assert!(super::file_content::matches_file(&directory, &reference, bytes.len() as u64,
+        &physical.absolute, &AtomicBool::new(false)).unwrap());
+    let physical_state = super::file_content::physical_state(&directory, &state, &AtomicBool::new(false)).unwrap();
+    let expected_hash = format!("sha256-{}", hex::encode(Sha256::digest(&expected)));
+    assert_eq!(serde_json::to_value(physical_state).unwrap()["objectHash"], expected_hash);
+    for (slot, hash) in [("before", &original_hash), ("after", &reference)] {
+        storage.conn.execute("INSERT INTO recovery_refs(workspace_id,owner_kind,owner_id,slot,object_hash) VALUES('project','change','range-review',?1,?2)",
+            params![slot,hash]).unwrap();
+    }
+    let statistics = storage.recovery_statistics(&json!({"workspaceId":"project"}), &grant).unwrap();
+    assert_eq!(statistics["objectCount"], 3);
+    assert_eq!(statistics["byteLength"], bytes.len() as u64 + 1024 +
+        fs::metadata(super::file_content::path(&directory, &reference).unwrap()).unwrap().len());
+    storage.conn.execute("DELETE FROM recovery_refs WHERE owner_id='range-review'", []).unwrap();
+    assert!(storage.health(&json!({"deep":true})).unwrap()["corruptObjects"].as_array().unwrap().is_empty());
+    // Transfer the exact descriptor and raw dependencies through the production
+    // stream receiver. A second Host keeps the original file and tree identity.
+    let mut target = Fixture::new();
+    let body = serde_json::to_vec(&descriptor).unwrap();
+    let rejected = json!({"workspaceId":"project","operationId":"unowned-version","streamId":"unowned-version","byteLength":body.len(),"expectedHash":reference});
+    target.storage.begin_blob_stream(&rejected, "owner").unwrap();
+    target.storage.stream_blob_bytes("unowned-version", 0, &body, "owner").unwrap();
+    assert!(matches!(target.storage.finish_blob_stream(&rejected, "owner"), Err(KernelError::Authorization(_))));
+    assert_eq!(fs::read_dir(target.directory.join("staging")).unwrap().count(), 0);
+    for (dependency, length) in descriptor.dependencies() {
+        let input = json!({"workspaceId":"project","operationId":dependency,"streamId":dependency,"byteLength":length,"expectedHash":dependency});
+        target.storage.begin_blob_stream(&input, "owner").unwrap();
+        let mut offset = 0; let mut sequence = 0;
+        while offset < length {
+            let page = storage.read_blob_fixture(&json!({"hash":dependency,"rangeRoot":reference,"branchId":"range-child","path":"large.bin","offset":offset,"length":(length-offset).min(64*1024)}), &grant).unwrap();
+            let bytes = BASE64.decode(page["bytesBase64"].as_str().unwrap()).unwrap();
+            target.storage.stream_blob_bytes(&dependency, sequence, &bytes, "owner").unwrap();
+            sequence += 1; offset = page["nextOffset"].as_u64().unwrap();
+        }
+        target.storage.finish_blob_stream(&input, "owner").unwrap();
+    }
+    let descriptor_page = storage.read_blob_fixture(&json!({"hash":reference,"branchId":"range-child","path":"large.bin","representation":"manifest"}), &grant).unwrap();
+    let body = BASE64.decode(descriptor_page["bytesBase64"].as_str().unwrap()).unwrap();
+    let input = json!({"workspaceId":"project","operationId":"received-version","streamId":"received-version","byteLength":body.len(),"expectedHash":reference});
+    target.storage.begin_blob_stream(&input, "owner").unwrap();
+    target.storage.stream_blob_bytes("received-version", 0, &body, "owner").unwrap();
+    let received = target.storage.finish_blob_stream(&input, "owner").unwrap();
+    assert_eq!(received["hash"], reference); assert_eq!(received["byteLength"], bytes.len());
+    target.begin("received-child", None);
+    target.append("received-child", 0, json!([{ "path":"large.bin", "state":selected["state"], "ownerId":received["ownerId"] }])).unwrap();
+    let received_branch = target.finish("received-child");
+    let original_branch = storage.branch_read(&json!({"branchId":"range-child","includeEntries":false})).unwrap();
+    assert_eq!(received_branch["root"], original_branch["root"]);
+    target.close();
+    storage.branch_delete(&json!({"branchId":"range-child"})).unwrap();
+    storage.gc().unwrap();
+    storage.drain_gc_files().unwrap();
+    assert!(!super::file_content::path(&directory, &reference).unwrap().exists());
+    drop(storage); fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn imported_root_attributes_and_directory_identities_follow_replacement_and_exact_rebase() {
     let mut f = Fixture::new();
     let mut attributes = Storage::new_workspace_metadata(&PathState::Directory {mode:Some(0o700)}).attributes.file_metadata();

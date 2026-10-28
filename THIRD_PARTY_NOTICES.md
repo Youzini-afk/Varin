@@ -9,8 +9,17 @@ their respective packages or source files.
 
 The optional `workspace-mount` source feature uses `winfsp` 0.13.2+winfsp-2.1 and
 `winfsp-sys` 0.12.1+winfsp-2.1 (GPL-3.0), from
-https://github.com/SnowflakePowered/winfsp-rs. WinFsp's installed system component and
-macFUSE are separate prerequisites; this feature does not install or bundle them.
+https://github.com/SnowflakePowered/winfsp-rs.
+
+WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos.
+https://github.com/winfsp/winfsp. Windows installers optionally install the unmodified
+official WinFsp 2026 Beta5 MSI (2.2.26286), pinned by SHA-256 in
+`packages/electron/resources/workspace-component.json`. This pre-release includes
+the upstream security and cached-write/concurrent-rename deadlock fixes; its name is
+shown in the component selection page. Compatible installed components are reused;
+Varin uninstall does not remove this shared system component. The upstream GPLv3
+and FLOSS exception accompany the installer in `legal/winfsp/License.txt`.
+macFUSE remains a separately installed optional prerequisite and is not bundled.
 
 The FUSE adapter uses `fuser` 0.18.0 (MIT), copyright 2020-present Christopher Berner
 and 2013-2019 Andreas Neuhaus. Its library source and full MIT license are preserved

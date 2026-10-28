@@ -60,6 +60,7 @@ struct CapturedFile {
     revision: String,
 }
 fn revision_from_object_hash(hash:&str)->Result<String>{
+    let hash=hash.strip_prefix("ranges-").unwrap_or(hash);
     let hex=hash.strip_prefix("sha256-").ok_or("Invalid immutable object identity")?;
     let bytes=hex::decode(hex).map_err(|_|"Invalid immutable object identity")?;
     if bytes.len()!=32{return Err("Invalid immutable object identity".into());}
@@ -124,6 +125,11 @@ impl TreeReader {
     }
 }
 fn load_object(source:ObjectSource,content:bool,shared:&Shared)->Result<Document>{
+    if let Some((root,length,_retention))=source.range {
+        let object_hash=source.hash.ok_or("Immutable file version identity is missing")?;
+        let bytes=if content{Some(crate::storage::file_content::read_all(&root,&object_hash,length,&shared.cancelled).map_err(|error|error.to_string())?)}else{None};
+        return Ok(Document{path:source.path,revision:source.revision,state:PathState::RegularFile{object_hash,byte_length:length,mode:0o644},bytes,metadata:None});
+    }
     if let Some(file)=source.file{
         let (bytes,object_hash,length)=if content{
             let captured=read_capture(file,source.hash.as_deref(),shared)?;
@@ -297,10 +303,15 @@ pub(crate) fn visit(task:&mut Task,shared:&Shared,mut callback:impl FnMut(Docume
                     }}
                     if listing {tree.roots.rotate_left(1);}
                     if shadowed.iter().any(|p|within(&path,p))||!eligible(&path,directory){continue;}
-                    let (bytes,revision)=match &state{PathState::RegularFile{object_hash,..} if content=>{
-                        let file=File::open(object_path(objects,object_hash).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
-                        let captured=read_capture(file,Some(object_hash),shared)?;
-                        (Some(captured.bytes),captured.revision)
+                    let (bytes,revision)=match &state{PathState::RegularFile{object_hash,byte_length,..} if content=>{
+                        if crate::storage::file_content::is_range(object_hash) {
+                            let bytes=crate::storage::file_content::read_all(objects,object_hash,*byte_length,&shared.cancelled).map_err(|e|e.to_string())?;
+                            (Some(bytes),revision_from_object_hash(object_hash)?)
+                        } else {
+                            let file=File::open(object_path(objects,object_hash).map_err(|e|e.to_string())?).map_err(|e|e.to_string())?;
+                            let captured=read_capture(file,Some(object_hash),shared)?;
+                            (Some(captured.bytes),captured.revision)
+                        }
                     },_=>{let revision=if let Some(hash)=state.object_hash(){revision_from_object_hash(hash)?}else{root.clone()};(None,revision)}};
                     let more=callback(Document{path,revision,state,bytes,metadata:None})?;
                     if !more{return Ok(partial);}

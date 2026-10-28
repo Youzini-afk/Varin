@@ -193,11 +193,7 @@ impl Storage {
                     .get("objectHash")
                     .and_then(Value::as_str)
                     .unwrap_or("");
-                if hash.len() != 71
-                    || !hash.starts_with("sha256-")
-                    || !hash[7..]
-                        .bytes()
-                        .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+                if !super::file_content::valid_reference(hash)
                 {
                     return Err(KernelError::Operation(format!(
                         "{label}.objectHash is invalid"
@@ -329,7 +325,7 @@ impl Storage {
                         .and_then(Value::as_str)
                         .unwrap_or("");
                     let byte_length = value.get("byteLength").and_then(Value::as_i64);
-                    if !hash.starts_with("sha256-") || byte_length.is_none_or(|length| length < 0) {
+                    if !super::file_content::valid_reference(hash) || byte_length.is_none_or(|length| length < 0) {
                         return Err(KernelError::Operation(format!(
                             "{field} regular-file state is malformed"
                         )));
@@ -375,7 +371,7 @@ impl Storage {
             let hash = reference
                 .get("objectHash")
                 .and_then(Value::as_str)
-                .filter(|value| value.starts_with("sha256-") && value.len() == 71)
+                .filter(|value| super::file_content::valid_reference(value))
                 .ok_or_else(|| {
                     KernelError::Operation("recovery reference objectHash is malformed".to_string())
                 })?;

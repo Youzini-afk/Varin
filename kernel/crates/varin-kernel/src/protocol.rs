@@ -56,6 +56,10 @@ pub(crate) fn node_hash(node: &TrieNode) -> String {
     format!("sha256-{}", hex::encode(Sha256::digest(bytes)))
 }
 pub(crate) fn object_path(root: &Path, hash: &str) -> Result<PathBuf, KernelError> {
+    if let Some(hash) = hash.strip_prefix("ranges-") {
+        return varin_runtime::content::object_path(&root.join("file-versions"), hash)
+            .map_err(|_| KernelError::Operation("Malformed immutable file version reference".into()));
+    }
     varin_runtime::content::object_path(root, hash)
         .map_err(|_| KernelError::Operation(format!("malformed content hash: {hash}")))
 }

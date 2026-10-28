@@ -784,6 +784,24 @@ export function createManagedRemoteTargetRegistry(options: ManagedRemoteTargetRe
           const probeReceipt = await client.json<ManagedRemoteMaterialProbe>("/materials/probe", manifest, undefined, signal);
           for (const object of probeReceipt.missingObjects) {
             signal?.throwIfAborted();
+            if (object.objectHash.startsWith('ranges-')) {
+              if (!transfer.readVersionPage) throw new Error('Original source cannot transfer immutable file versions');
+              const { copyRangeContent } = await import('../kernel/file-content-transfer.js');
+              const sourceTransfer = transfer;
+              await copyRangeContent({
+                async putBlobStream(body, input, requestSignal) {
+                  const receipt = await client.request<{ objectHash: string; byteLength: number }>(`/objects/${encodeURIComponent(input.expectedHash)}`, {
+                    method: 'PUT', headers: { 'X-Varin-Coordinator-Host': options.coordinatorHostId,
+                      'X-Varin-Object-Length': String(input.byteLength), 'Content-Type': 'application/octet-stream' },
+                    body, ...(requestSignal ? { signal: requestSignal } : {}),
+                  });
+                  return { hash: receipt.objectHash, byteLength: receipt.byteLength, ownerId: '' };
+                },
+                async releaseBlob() { return {}; /* The target's retained material records own these objects. */ },
+              }, object.objectHash, object.byteLength,
+                (offset, length, fileVersion) => sourceTransfer.readVersionPage!(object.objectHash, offset, length, fileVersion, signal), signal);
+              continue;
+            }
             await client.request(`/objects/${encodeURIComponent(object.objectHash)}`, {
               method: "PUT",
               headers: {

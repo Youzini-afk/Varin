@@ -51,6 +51,9 @@ impl Storage {
             return Err(KernelError::Authorization("process delegation requires the frozen configured capability or original parent process authority".into()));
         }
         let source = delegation.agent_source.as_ref().map(|s|s.source.clone()).unwrap_or(binding.source_selection()?);
+        if delegation.work_mode == varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite {
+            crate::workspace_backend::require_isolation(host_id)?;
+        }
         let mut physical = if let Some(stage)=&delegation.agent_source {
             if source.workspace_id!=binding.workspace_id || source.resource_owner!=binding.resource_owner {
                 return Err(KernelError::Authorization("stage source belongs to another resource owner".into()));

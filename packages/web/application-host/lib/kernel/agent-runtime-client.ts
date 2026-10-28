@@ -733,13 +733,15 @@ export class AgentRuntimeClient {
       | 'preparation_failed'
       | SourceFailureCode
       | 'credentials_unavailable'
+      | 'workspace_backend_unavailable'
       | 'binding_changed',
     detail?: string,
     signal?: AbortSignal,
+    error?: import('./protocol.generated.js').ExecutionError,
   ): Promise<DelegatedExecution> {
     return this.kernel.agentRuntimeRequest(
       'runtime.child.fail',
-      { executionId, code, ...(detail ? { detail } : {}) },
+      { executionId, code, ...(detail ? { detail } : {}), ...(error ? { error } : {}) },
       signal,
     );
   }
@@ -1184,6 +1186,7 @@ export class AgentRuntimeClient {
       | 'preparation_failed'
       | SourceFailureCode
       | 'credentials_unavailable'
+      | 'workspace_backend_unavailable'
       | 'binding_changed',
     detail?: string,
     signal?: AbortSignal,

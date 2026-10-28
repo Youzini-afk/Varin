@@ -823,10 +823,7 @@ impl Storage {
         let parsed: PathState = serde_json::from_value(state.clone())
             .map_err(|error| KernelError::Operation(format!("invalid path state: {error}")))?;
         if let PathState::RegularFile { object_hash, .. } = &parsed {
-            if !object_hash.starts_with("sha256-")
-                || object_hash.len() != 71
-                || !object_hash[7..].chars().all(|c| c.is_ascii_hexdigit())
-            {
+            if !super::file_content::valid_reference(object_hash) {
                 return Err(KernelError::Operation(
                     "regular-file.objectHash is malformed".to_string(),
                 ));

@@ -643,8 +643,8 @@ export class ThreadCollaboration {
         const current = await runtime.childExecution(child.execution_id);
         // An admitted Run's unknown effects remain recoverable; preparation failure cannot erase them.
         if (!current.receipt && !current.report) {
-          const { code, detail } = preparationFailure(error, stage);
-          child = await runtime.failChild(child.execution_id, code, detail);
+          const { code, detail, failure } = preparationFailure(error, stage);
+          child = await runtime.failChild(child.execution_id, code, detail, undefined, failure);
         }
       }
       throw error;

@@ -182,6 +182,13 @@
             "LICENSE.txt",
             "COPYING"
           ]
+        },
+        {
+          "from": "resources/workspace-component",
+          "to": "legal/winfsp",
+          "filter": [
+            "License.txt"
+          ]
         }
       ]
     },
@@ -240,6 +247,34 @@
       "provider": "github",
       "owner": "Youzini-afk",
       "repo": "Varin"
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnotify4",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "xdg-utils",
+        "libatspi2.0-0",
+        "libuuid1",
+        "libsecret-1-0",
+        "fuse3"
+      ]
+    },
+    "rpm": {
+      "depends": [
+        "gtk3",
+        "libnotify",
+        "nss",
+        "libXScrnSaver",
+        "libXtst",
+        "xdg-utils",
+        "at-spi2-core",
+        "libuuid",
+        "libsecret",
+        "fuse3"
+      ]
     }
   }
 }

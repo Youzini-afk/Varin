@@ -4,6 +4,29 @@ use std::{fs, path::PathBuf, sync::Mutex};
 const HOST: &str = "tools-host";
 const GENERATION: &str = "tools-generation";
 const EPOCH: &str = "tools-epoch";
+
+#[test]
+fn missing_workspace_backend_rejects_isolation_before_source_receipts_and_keeps_shared() {
+    if crate::workspace_backend::require().is_ok() { return; }
+    let f = Fixture::new();
+    let mut storage = f._storage.lock().unwrap();
+    let (grant, _) = storage.authorize(Some("actor"), EPOCH, HOST, GENERATION,
+        "storage.health", &json!({"workspaceId":"workspace"})).unwrap();
+    let context = ToolExecutionContext { run_id:"run".into(), operation_id:"isolation-preflight".into(),
+        origin:ToolOrigin::ModelStep { request_id:"request".into() } };
+    let mut delegation = varin_runtime::catalog::dispatch::ChildSourceDelegation {
+        source_path:None,agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
+        process:false,configured_preset:true,selection_ref:json!({}) };
+    let failure: varin_runtime::execution::ExecutionError = storage.child_source_handoff(
+        &f.executor.binding, &context, &delegation, &grant, HOST, true).unwrap_err().into();
+    assert_eq!(failure.code, "workspace_backend_unavailable");
+    assert_eq!(failure.details.as_ref().unwrap()["executionStarted"], false);
+    assert_eq!(failure.details.as_ref().unwrap()["hostId"], HOST);
+    assert!(failure.message.contains("workMode=shared"));
+    assert!(storage.dispatch("operation.get", &json!({"operationId":"child-source-handoff:isolation-preflight"}), Some("actor"), &grant).unwrap().is_null());
+    delegation.work_mode = varin_runtime::catalog::dispatch::ChildWorkMode::Shared;
+    assert!(storage.child_source_handoff(&f.executor.binding, &context, &delegation, &grant, HOST, false).is_ok());
+}
 pub(crate) struct TestRoot(PathBuf);
 impl std::ops::Deref for TestRoot {
     type Target = PathBuf;
@@ -194,7 +217,7 @@ fn fixed_source_commands_prepare_once_and_reads_searches_use_the_owned_view() {
 }
 
 #[test]
-fn scoped_deferred_child_reads_without_copy_and_first_write_uses_the_observed_version() {
+fn scoped_fixed_source_reads_without_copy_and_first_write_uses_the_observed_version() {
     let mut f=Fixture::new();
     {
         let mut storage=f._storage.lock().unwrap();
@@ -219,7 +242,7 @@ fn scoped_deferred_child_reads_without_copy_and_first_write_uses_the_observed_ve
         let (grant,_)=storage.authorize(Some("actor"),EPOCH,HOST,GENERATION,"storage.health",&json!({"workspaceId":"workspace"})).unwrap();
         let context=ToolExecutionContext{run_id:"run".into(),operation_id:"scoped-dispatch".into(),origin:ToolOrigin::ModelStep{request_id:"request".into()}};
         let handoff=storage.child_source_handoff(&f.executor.binding,&context,&varin_runtime::catalog::dispatch::ChildSourceDelegation{
-            source_path:Some("sub".into()),agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite,
+            source_path:Some("sub".into()),agent_source:None,work_mode:varin_runtime::catalog::dispatch::ChildWorkMode::Shared,
             process:true,configured_preset:true,selection_ref:json!({})},&grant,HOST,false).unwrap();
         assert_eq!(handoff["source_path"],"sub");
         for (method,params) in [

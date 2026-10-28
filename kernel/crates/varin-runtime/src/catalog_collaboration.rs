@@ -266,6 +266,8 @@ impl ChildCodeResult {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ChildReport {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<crate::execution::ExecutionError>,
     pub outcome: Outcome,
     pub sender_thread_id: String,
     pub run_id: Option<String>,

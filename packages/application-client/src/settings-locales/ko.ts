@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "실행 Host 파일 시스템",
+  "settings.projects.workspace.backendReady": "종속성 준비 완료",
+  "settings.projects.workspace.backendUnavailable": "사용 불가",
+  "settings.projects.workspace.refreshBackend": "새로 확인",
+  "settings.projects.workspace.backendHelp": "구성 요소 안내",
 
   'settings.harness.retrieval.selectOrdinaryModel': 'Select an ordinary model with tool support, or explicitly inherit the current conversation model. The previous decision or rerank selection will not silently switch services.',
 

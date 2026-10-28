@@ -9,6 +9,7 @@ dist-bundle/
 resources/web-dist/
 /resources/kernel/
 /resources/tools/
+/resources/workspace-component/
 resources/sidecar/
 .cache/
 

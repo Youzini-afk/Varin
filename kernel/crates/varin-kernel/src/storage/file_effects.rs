@@ -155,9 +155,19 @@ impl Task {
                     "File resource changed while observing its original state".into(),
                 ));
             }
-            let (task, before, resuming) = (self.clone(), observations.clone(), plan.resuming);
+            let before = observations.iter().map(|state| super::file_content::physical_state(&self.storage_root, state, &self.cancellation))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut comparisons = self.params.clone();
+            for field in ["targetJson", "expectedJson", "expectedFromJson", "expectedToJson"] {
+                if let Some(raw) = self.params[field].as_str() {
+                    let state: FileState = serde_json::from_str(raw)?;
+                    comparisons[field] = json!(serde_json::to_string(&super::file_content::physical_state(&self.storage_root, &state, &self.cancellation)?)?);
+                }
+            }
+            let (task, resuming) = (self.clone(), plan.resuming);
+            let original_states = observations.clone();
             if let Some(value) =
-                owner.call(move |s| s.decide_file_effect(&task, &before, resuming))?
+                owner.call(move |s| s.decide_file_effect(&task, &before, &original_states, &comparisons, resuming))?
             {
                 return Ok(value);
             }
@@ -277,7 +287,9 @@ impl Task {
                     &self.grant,
                     &AtomicBool::new(false),
                 )?;
-                if !Storage::file_state_matches(&observed, &target) {
+                if !Storage::file_state_matches(
+                    &super::file_content::physical_state(&self.storage_root, &observed, &AtomicBool::new(false))?,
+                    &super::file_content::physical_state(&self.storage_root, &target, &AtomicBool::new(false))?) {
                     return Err(KernelError::Storage(format!(
                         "file state did not match target after apply: {}",
                         resource.path
@@ -653,17 +665,19 @@ impl Storage {
         &mut self,
         task: &Task,
         states: &[FileState],
+        original_states: &[FileState],
+        comparisons: &Value,
         resuming: bool,
     ) -> Result<Option<Value>, KernelError> {
         self.validate_file_effect(task)?;
         let result = match task.method {
             "file.apply" => {
-                let params: KernelFileApplyParams = parse_file_params(&task.params)?;
+                let params: KernelFileApplyParams = parse_file_params(comparisons)?;
                 let target: FileState = serde_json::from_str(&params.target_json)?;
                 let current = &states[0];
                 if Self::file_state_matches(current, &target) {
                     Some(
-                        json!({"status":"applied","reconciled":resuming,"stateJson":serde_json::to_string(current)?}),
+                        json!({"status":"applied","reconciled":resuming,"stateJson":serde_json::to_string(&original_states[0])?}),
                     )
                 } else if params
                     .expected_json
@@ -673,13 +687,13 @@ impl Storage {
                     .as_ref()
                     .is_some_and(|expected| !Self::file_state_matches(current, expected))
                 {
-                    Some(json!({"status":"conflict","stateJson":serde_json::to_string(current)?}))
+                    Some(json!({"status":"conflict","stateJson":serde_json::to_string(&original_states[0])?}))
                 } else {
                     None
                 }
             }
             "file.rename" => {
-                let params: KernelFileRenameParams = parse_file_params(&task.params)?;
+                let params: KernelFileRenameParams = parse_file_params(comparisons)?;
                 let (source, target) = (&states[0], &states[1]);
                 if resuming {
                     let stored = self.operation_get(&json!({"operationId":task.operation()}))?;
@@ -716,7 +730,7 @@ impl Storage {
                         .is_some_and(|expected| !Self::file_state_matches(target, expected))
                 {
                     Some(
-                        json!({"status":"conflict","sourceStateJson":serde_json::to_string(source)?,"targetStateJson":serde_json::to_string(target)?}),
+                        json!({"status":"conflict","sourceStateJson":serde_json::to_string(&original_states[0])?,"targetStateJson":serde_json::to_string(&original_states[1])?}),
                     )
                 } else if matches!(source, FileState::Missing) {
                     return Err(KernelError::Operation("rename source is missing".into()));

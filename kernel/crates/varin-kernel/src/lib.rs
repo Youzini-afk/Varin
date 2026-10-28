@@ -47,6 +47,7 @@ mod source_resources;
 mod tools;
 mod transport;
 mod workspace_resources;
+mod workspace_backend;
 mod workspace_handoffs;
 mod workspace_adoption;
 mod native_metadata;

@@ -7,13 +7,18 @@ import type { KernelWorkspaceInspection, LaunchSource, ChildSourceProvenance, Ke
 import { withAncestorDirectories } from '../harness/working-state/workspace-baseline.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { nativeGitRoots } from './native-git-roots.js';
-export class WorkspaceBackendUnavailableError extends Error {
-    readonly code = 'workspace_backend_unavailable';
+import { KernelClientError } from './kernel-error.js';
+export class WorkspaceBackendUnavailableError extends KernelClientError {
+    constructor(backend: import('./protocol.generated.js').KernelWorkspaceBackend & { hostId?: string }) {
+        super({ code: 'workspace_backend_unavailable', message: `Cannot create an independent workspace: ${backend.detail ?? 'the execution Host filesystem backend is unavailable'}. Resolve the component or permission issue on that Host and retry; if shared file changes suit the task, dispatch again with workMode=shared. Help: ${backend.helpUrl}`,
+            details: { stage: 'workspace_preflight', workMode: 'isolated_write', executionStarted: false,
+            backend: backend.backend, platform: backend.platform, architecture: backend.architecture,
+            reason: backend.reason, helpUrl: backend.helpUrl, ...(backend.hostId ? { hostId: backend.hostId } : {}) } });
+    }
 }
 export async function requireNativeWorkspaceBackend(actor: Pick<KernelScopedClient, 'inspectWorkspaceBackend'>, signal?: AbortSignal): Promise<void> {
     const backend = await actor.inspectWorkspaceBackend(signal);
-    if (!backend.dependenciesReady) throw new WorkspaceBackendUnavailableError(
-        `${backend.detail ?? 'Native workspace backend is unavailable'} (${backend.helpUrl})`);
+    if (!backend.dependenciesReady) throw new WorkspaceBackendUnavailableError(backend);
 }
 export function nativeExecutionWorkspaceId(execution: string): string {
     const bytes = createHash('sha256').update(`native-execution\0${execution}`).digest();
@@ -248,10 +253,20 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         }
         return undefined;
     };
+    const inspectBackend = async (projectId: string, signal?: AbortSignal) => {
+        if (!(await owners.projects()).some(project => project.id === projectId)) throw new Error('Project is unavailable');
+        const grant = await owners.kernel.issueGrant({ grantId: `workspace-backend:${randomUUID()}`,
+            capabilities: ['storage.read'], pathScopes: [''] }, signal);
+        try {
+            return await owners.kernel.scoped(grant).inspectWorkspaceBackend(signal);
+        } finally { await owners.kernel.revokeGrant(grant.grantId); }
+    };
     const enableProject = async (projectId: string, signal?: AbortSignal) => {
         const project = (await owners.projects()).find(project => project.id === projectId);
         if (!project)
             throw new Error('Project is unavailable');
+        const backend = await inspectBackend(projectId, signal);
+        if (!backend.dependenciesReady) throw new WorkspaceBackendUnavailableError(backend);
         let ref = project.versionedWorkspace;
         if (!ref) {
             const registered = await owners.documents.resolveWorkspace({ path: project.path });
@@ -267,7 +282,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         try {
             const actor = owners.kernel.scoped(grant);
             const adopted = await actor.getOperation(ref.adoptionOperationId, signal);
-            await requireNativeWorkspaceBackend(actor, signal);
             if (adopted?.state !== 'committed') {
                 const root = await actor.fileRootRegister({ workspaceId: ref.workspaceId, executionWorkspaceId: ref.executionWorkspaceId, canonicalRoot: registration.canonicalPath }, signal);
                 const gitRoots = await nativeGitRoots(registration.canonicalPath, owners.documents, signal);
@@ -595,6 +609,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, acquire, resolveId, resolvePath, enable, disable, inspectProject, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { prepare, acquire, resolveId, resolvePath, enable, disable, inspectProject, inspectBackend, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

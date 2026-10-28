@@ -372,10 +372,15 @@ fn concurrent_preparation_is_one_execution_and_failed_pre_run_intent_does_not_bl
     };
     assert_eq!(member(&f.db).state, "preparing");
     assert_eq!(member(&f.db).task, Some("again".into()));
-    f.db.fail_delegated_preparation(&accepted.execution_id, "source_unavailable", Some("Preparing child source: directory was removed"))
+    let original_error = varin_runtime::execution::ExecutionError::new("workspace_backend_unavailable", "Execution Host requires its filesystem component")
+        .with_details(json!({"stage":"workspace_preflight","reason":"dependency_missing","hostId":"resource-host","executionStarted":false}));
+    f.db.fail_delegated_preparation_with_error(&accepted.execution_id, "workspace_backend_unavailable",
+        Some("Preparing child source: execution Host component missing"), Some(original_error.clone()))
         .unwrap();
     let failure = f.db.delegated_execution(&accepted.execution_id).unwrap();
-    assert_eq!(failure.report.unwrap().detail.as_deref(), Some("Preparing child source: directory was removed (source_unavailable)"));
+    let report = failure.report.unwrap();
+    assert_eq!(report.error, Some(original_error));
+    assert_eq!(report.detail.as_deref(), Some("Preparing child source: execution Host component missing (workspace_backend_unavailable)"));
     assert_eq!(member(&f.db).state, "failed");
     let later = accept(&mut f.db, other);
     assert_ne!(later.execution_id, accepted.execution_id);

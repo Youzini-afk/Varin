@@ -117,7 +117,8 @@ it('records the original context preparation error in the child report', async (
   try {
     await collaboration.recover();
     await vi.waitFor(() => expect(f.runtime.failChild).toHaveBeenCalledWith(f.child.execution_id, 'preparation_failed',
-      'Preparing child context: Cannot read selected instruction file: access denied'));
+      'Preparing child context: Cannot read selected instruction file: access denied', undefined,
+      { code: 'preparation_failed', message: 'Cannot read selected instruction file: access denied', details: { stage: 'Preparing child context' } }));
     expect(f.child.report?.detail).toContain('Cannot read selected instruction file');
     expect(f.child.code_result).toMatchObject({kind:'unavailable',code:'preparation_failed'});
   } finally { collaboration.stop(); }

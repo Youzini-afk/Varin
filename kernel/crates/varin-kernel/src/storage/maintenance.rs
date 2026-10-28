@@ -260,7 +260,7 @@ impl Storage {
             let (hash, raw_path) = row?;
             match object_path(&self.root, &hash) {
                 Ok(derived)
-                    if derived.starts_with(self.root.join("objects"))
+                    if (derived.starts_with(self.root.join("objects")) || derived.starts_with(self.root.join("file-versions").join("objects")))
                         && Path::new(&raw_path) == derived => {}
                 Ok(_) | Err(_) => {
                     errors.push(format!(
@@ -345,7 +345,10 @@ impl Storage {
                     |row| row.get(0),
                 )
                 .optional()?;
-            match (recorded, hash_file(&object_path(&self.root, &hash)?)) {
+            let checked = if super::file_content::is_range(&hash) {
+                super::file_content::Version::load(&self.root, &hash).map(|version| (hash.clone(), version.byte_length))
+            } else { hash_file(&object_path(&self.root, &hash)?) };
+            match (recorded, checked) {
                 (Some(length), Ok((actual_hash, actual_length)))
                     if i64::try_from(actual_length).ok() == Some(length) && actual_hash == hash => {
                 }

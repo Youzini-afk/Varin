@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "Execution Host backend",
+  "settings.projects.workspace.backendReady": "Dependencies ready",
+  "settings.projects.workspace.backendUnavailable": "Unavailable",
+  "settings.projects.workspace.refreshBackend": "Refresh",
+  "settings.projects.workspace.backendHelp": "Component help",
   "settings.projects.workspace.title": "Mounted workspace",
   "settings.projects.workspace.description": "Share unchanged content and fork independent work without copying the project.",
   "settings.projects.workspace.explanation": "An optional OS mount backend: WinFsp on Windows, macFUSE on macOS, and FUSE on Linux. Ordinary project conversations use their original directory. Enabling this backend selects a separate managed directory and retains the original folder as its import source.",

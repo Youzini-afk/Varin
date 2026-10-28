@@ -65,17 +65,23 @@ impl Storage {
             if !path_allowed(grant,&path){return Err(KernelError::Authorization("Overlay path is outside grant scope".into()));}
             if object.missing==Some(true){
                 if object.object_hash.is_some()||object.owner_id.is_some(){return Err(failure("A missing overlay must not include content"));}
-                overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:None,file:None});continue;
+                overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:None,file:None,range:None});continue;
             }
             let owner=object.owner_id.as_deref().ok_or_else(||failure("An explicit object owner is required for fixed text"))?;
             let object_hash=object.object_hash.as_deref().ok_or_else(||failure("A content hash is required for fixed text"))?;
             let exists:bool=self.conn.query_row("SELECT EXISTS(SELECT 1 FROM object_owners WHERE owner_id=?1 AND blob_hash=?2 AND grant_id=?3 AND workspace_id=?4)",
                 params![owner,object_hash,grant.grant_id,params.workspace_id],|row|row.get(0))?;
             if !exists{return Err(KernelError::Authorization("Fixed text object belongs to another owner, actor or workspace".into()));}
+            if super::file_content::is_range(object_hash) {
+                let length:i64=self.conn.query_row("SELECT byte_length FROM blobs WHERE hash=?1",[object_hash],|row|row.get(0))?;
+                overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:None,
+                    range:Some((self.root.clone(),u64::try_from(length).map_err(|_|failure("Invalid file version length"))?,self.blob_read_roots.retain(object_hash)))});
+                continue;
+            }
             // Open before handing the task over. Even explicit owner release
             // cannot invalidate this admitted reader; Windows GC may retry unlink.
             let file=File::open(object_path(&self.root,object_hash)?)?;
-            overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:Some(file)});
+            overlays.push(ObjectSource{path,revision:object.revision.clone(),hash:Some(object_hash.into()),file:Some(file),range:None});
         }
         if [params.pin_id.is_some(), params.root_id.is_some(), params.branch_id.is_some()].into_iter().filter(|present| *present).count() > 1 {
             return Err(failure("A query cannot merge multiple source authorities"));

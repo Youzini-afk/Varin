@@ -1205,6 +1205,7 @@ impl Catalog {
                         };
                     }
                     execution.report = Some(ChildReport {
+                        error: None,
                         outcome: Outcome::Cancelled,
                         sender_thread_id: child.child_thread_id.clone(),
                         run_id: None,

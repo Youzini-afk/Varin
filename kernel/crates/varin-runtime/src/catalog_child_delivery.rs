@@ -117,6 +117,7 @@ impl ChildReportPreparation {
                     _ => Outcome::Failed,
                 };
                 let report = ChildReport {
+                    error: None,
                     outcome,
                     sender_thread_id: child.child_thread_id.clone(),
                     run_id: Some(run.id.clone()),

@@ -83,7 +83,7 @@ const shellRecordId = (principalId: string, coordinatorHostId: string, toolCallI
 
 const validState = (state: KernelBranchState): KernelBranchState => {
   if (state.kind === "regular-file") {
-    if (!/^sha256-[0-9a-f]{64}$/.test(state.objectHash) || !Number.isSafeInteger(state.byteLength) || state.byteLength < 0) {
+    if (!/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(state.objectHash) || !Number.isSafeInteger(state.byteLength) || state.byteLength < 0) {
       throw new Error("Managed material contains an invalid file object");
     }
     return state;
@@ -264,7 +264,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     signal?: AbortSignal,
   ): Promise<{ objectHash: string; byteLength: number; reused: boolean }> => {
     if (!coordinatorHostId.trim()) throw new Error("Coordinator identity is required");
-    if (!/^sha256-[0-9a-f]{64}$/.test(objectHash) || !Number.isSafeInteger(byteLength) || byteLength < 0) {
+    if (!/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(objectHash) || !Number.isSafeInteger(byteLength) || byteLength < 0) {
       throw new Error("Managed object identity is invalid");
     }
     const scoped = await context();
@@ -272,8 +272,8 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
     const existing = await scoped.getRecord(WORKSPACE_ID, recordId);
     if (existing?.state === "available") {
       const payload = recordPayload(existing);
-      if (text(payload.objectHash) !== objectHash || number(payload.byteLength) !== byteLength) throw new Error("Managed object identity conflicts with retained content");
-      return { objectHash, byteLength, reused: true };
+      if (text(payload.objectHash) !== objectHash || !objectHash.startsWith('ranges-') && number(payload.byteLength) !== byteLength) throw new Error("Managed object identity conflicts with retained content");
+      return { objectHash, byteLength: number(payload.byteLength)!, reused: true };
     }
     const blob = await scoped.putBlobStream(body, {
       operationId: `managed-remote-object:${objectHash}`,
@@ -285,7 +285,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
         recordId,
         recordType: "managed.remote.object",
         state: "available",
-        payload: { id: recordId.slice(OBJECT_PREFIX.length), objectHash, byteLength, firstCoordinatorHostId: coordinatorHostId, createdAt: now() },
+        payload: { id: recordId.slice(OBJECT_PREFIX.length), objectHash, byteLength: blob.byteLength, firstCoordinatorHostId: coordinatorHostId, createdAt: now() },
         references: [{ slot: "content", objectHash }],
         ownerIds: [blob.ownerId],
       });
@@ -297,7 +297,7 @@ export function createManagedRemoteExecutionService(options: ManagedRemoteExecut
       }
       await scoped.releaseBlob(blob.ownerId).catch(() => undefined);
     }
-    return { objectHash, byteLength, reused: false };
+    return { objectHash, byteLength: blob.byteLength, reused: false };
   };
 
   const commitMaterial = async (raw: ManagedRemoteMaterialManifest): Promise<ManagedRemoteMaterialReceipt> => {

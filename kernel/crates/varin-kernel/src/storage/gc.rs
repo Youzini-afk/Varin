@@ -47,7 +47,7 @@ impl Storage {
                     continue;
                 }
             };
-            let objects_root = self.root.join("objects");
+            let objects_root = if super::file_content::is_range(&hash) { self.root.join("file-versions").join("objects") } else { self.root.join("objects") };
             if !derived.starts_with(&objects_root) {
                 let message = format!("{hash}: pending object path escaped storage root");
                 self.conn.execute(
@@ -116,9 +116,9 @@ impl Storage {
     }
 
     pub(super) fn sweep_orphan_objects(&mut self) -> Result<(), KernelError> {
-        let objects_root = self.root.join("objects");
+        for (objects_root, prefix) in [(self.root.join("objects"), ""), (self.root.join("file-versions").join("objects"), "ranges-")] {
         let Ok(shards) = fs::read_dir(&objects_root) else {
-            return Ok(());
+            continue;
         };
         for shard in shards.flatten() {
             let shard_path = shard.path();
@@ -138,7 +138,7 @@ impl Storage {
                 if suffix.len() != 62 || !suffix.chars().all(|value| value.is_ascii_hexdigit()) {
                     continue;
                 }
-                let hash = format!("sha256-{shard_name}{suffix}");
+                let hash = format!("{prefix}sha256-{shard_name}{suffix}");
                 let referenced: Option<i64> = self
                     .conn
                     .query_row(
@@ -154,6 +154,7 @@ impl Storage {
                     )?;
                 }
             }
+        }
         }
         Ok(())
     }
@@ -287,6 +288,17 @@ impl Storage {
         {
             blobs.insert(row?);
         }
+        let ranges = blobs.iter().filter(|hash| super::file_content::is_range(hash)).cloned().collect::<Vec<_>>();
+        for reference in ranges {
+            if !super::file_content::path(&self.root, &reference)?.try_exists()? {
+                let recorded: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM blobs WHERE hash=?1)", [&reference], |row|row.get(0))?;
+                // A worker retains its exact descriptor before installing it.
+                // Its raw slices have their own transient roots in this window.
+                if !recorded { continue; }
+            }
+            let version = super::file_content::Version::load(&self.root, &reference)?;
+            blobs.extend(version.dependencies().into_keys());
+        }
         Ok((nodes, blobs))
     }
 
@@ -408,6 +420,9 @@ impl Storage {
                 if let Some(state) = state {
                     if let Some(blob) = state.object_hash() {
                         blobs.insert(blob.to_string());
+                        if super::file_content::is_range(blob) {
+                            blobs.extend(super::file_content::Version::load(&self.root, blob)?.dependencies().into_keys());
+                        }
                     }
                 }
                 if let Some(children) = children {

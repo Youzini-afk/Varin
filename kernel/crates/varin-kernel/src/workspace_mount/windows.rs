@@ -37,10 +37,12 @@ pub(super) fn initialize() -> Result<(), KernelError> {
             .collect()
     }
     let name = wide("InstallDir");
+    let mut installed_library_error = None;
+    let mut registry_error = None;
     for key in ["SOFTWARE\\WinFsp", "SOFTWARE\\WOW6432Node\\WinFsp"] {
         let key = wide(key);
         let mut length = 0;
-        if unsafe {
+        let status = unsafe {
             RegGetValueW(
                 HKEY_LOCAL_MACHINE,
                 key.as_ptr(),
@@ -50,12 +52,13 @@ pub(super) fn initialize() -> Result<(), KernelError> {
                 std::ptr::null_mut(),
                 &mut length,
             )
-        } != 0
-        {
+        };
+        if status != 0 {
+            if !matches!(status, 2 | 3) { registry_error = Some(std::io::Error::from_raw_os_error(status as i32)); }
             continue;
         }
         let mut value = vec![0u16; length as usize / 2];
-        if unsafe {
+        let status = unsafe {
             RegGetValueW(
                 HKEY_LOCAL_MACHINE,
                 key.as_ptr(),
@@ -65,12 +68,16 @@ pub(super) fn initialize() -> Result<(), KernelError> {
                 value.as_mut_ptr().cast(),
                 &mut length,
             )
-        } != 0
-        {
+        };
+        if status != 0 {
+            if !matches!(status, 2 | 3) { registry_error = Some(std::io::Error::from_raw_os_error(status as i32)); }
             continue;
         }
         value.truncate(value.iter().position(|c| *c == 0).unwrap_or(value.len()));
         let mut path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&value));
+        if !path.is_absolute() {
+            return Err(crate::workspace_backend::unavailable("dependency_incompatible", "WinFsp installation registry has no absolute system component directory"));
+        }
         path.push("bin");
         path.push(if cfg!(target_arch = "aarch64") {
             "winfsp-a64.dll"
@@ -96,12 +103,69 @@ pub(super) fn initialize() -> Result<(), KernelError> {
             // The validated installed DLL is now in the module list. The
             // binding's basename initialization reuses this loaded module.
             winfsp::winfsp_init()
-                .map_err(|_| unsupported("Installed WinFsp could not initialize"))?;
+                .map_err(|error| crate::workspace_backend::unavailable("dependency_incompatible", format!("Installed WinFsp could not initialize ({error:?}); repair or update it on this Host")))?;
             let _ = LOADED.set(());
             return Ok(());
         }
+        installed_library_error = Some(std::io::Error::last_os_error());
     }
-    Err(unsupported("WinFsp is not installed or its native library cannot be loaded; no system component was changed"))
+    if let Some(error) = installed_library_error {
+        return Err(crate::workspace_backend::unavailable(
+            if error.kind() == std::io::ErrorKind::PermissionDenied { "permission_denied" } else { "dependency_incompatible" },
+            format!("Installed WinFsp native library could not load: {error}; repair or update the component on this Host")));
+    }
+    if let Some(error) = registry_error {
+        return Err(crate::workspace_backend::unavailable(
+            if error.kind() == std::io::ErrorKind::PermissionDenied { "permission_denied" } else { "dependency_unavailable" },
+            format!("Cannot inspect WinFsp installation on this Host: {error}")));
+    }
+    Err(crate::workspace_backend::unavailable("dependency_missing", "WinFsp is not installed on this Host"))
+}
+
+/// Inspect the driver selected by the loaded library, including SxS installs.
+/// Unlike FspFsctlPreflight this neither starts a service nor waits for it.
+pub(super) fn check_driver() -> Result<(), KernelError> {
+    use windows_sys::Win32::System::Services::*;
+    struct Service(SC_HANDLE);
+    impl Drop for Service {
+        fn drop(&mut self) { if !self.0.is_null() { unsafe { CloseServiceHandle(self.0); } } }
+    }
+    fn failure(error: std::io::Error) -> KernelError {
+        crate::workspace_backend::unavailable(match error.raw_os_error() {
+            Some(5) => "permission_denied",
+            Some(1060) => "dependency_missing",
+            Some(1058) => "dependency_disabled",
+            _ => "dependency_unavailable",
+        }, format!("WinFsp driver is unavailable on this Host: {error}; repair or enable the installed system component"))
+    }
+    let manager = Service(unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) });
+    if manager.0.is_null() { return Err(failure(std::io::Error::last_os_error())); }
+    // FspSxsIdent returns a library-owned, NUL-terminated identifier. The '+'
+    // separator is WinFsp's documented side-by-side service naming contract.
+    let suffix = unsafe { U16CStr::from_ptr_str(winfsp_sys::FspSxsIdent()) }.to_string_lossy();
+    let service = if suffix.is_empty() { "WinFsp".to_string() } else { format!("WinFsp+{suffix}") };
+    let name = service.encode_utf16().chain(Some(0)).collect::<Vec<_>>();
+    // These are the exact rights WinFsp's own StartService path requests,
+    // including when the driver is already running. Do not start it here.
+    let driver = Service(unsafe { OpenServiceW(manager.0, name.as_ptr(), SERVICE_QUERY_STATUS | SERVICE_START) });
+    if driver.0.is_null() { return Err(failure(std::io::Error::last_os_error())); }
+    // Configuration-query rights are additional to mounting. Use them when
+    // available to diagnose disabled drivers without adding another prerequisite.
+    let configuration = Service(unsafe { OpenServiceW(manager.0, name.as_ptr(), SERVICE_QUERY_CONFIG) });
+    if !configuration.0.is_null() {
+        let mut required = 0;
+        unsafe { QueryServiceConfigW(configuration.0, std::ptr::null_mut(), 0, &mut required); }
+        if required > 0 {
+            let mut config = vec![std::mem::MaybeUninit::<QUERY_SERVICE_CONFIGW>::uninit();
+                (required as usize).div_ceil(std::mem::size_of::<QUERY_SERVICE_CONFIGW>())];
+            let config_ptr = config.as_mut_ptr().cast::<QUERY_SERVICE_CONFIGW>();
+            if unsafe { QueryServiceConfigW(configuration.0, config_ptr, required, &mut required) } != 0
+                && unsafe { (*config_ptr).dwStartType } == SERVICE_DISABLED {
+                return Err(failure(std::io::Error::from_raw_os_error(1058)));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn native(error: KernelError) -> FspError {

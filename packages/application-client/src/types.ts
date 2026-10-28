@@ -653,6 +653,19 @@ export interface FilesAPI {
   downloadFile?(path: string, options?: FileReadOptions & { signal?: AbortSignal }): Promise<void>;
 }
 
+/** Read-only capability facts from the resource Host; a mount confirms readiness separately. */
+export interface WorkspaceBackendStatus {
+  backend: string;
+  platform: string;
+  architecture: string;
+  hostId?: string;
+  dependenciesReady: boolean;
+  mountCompiled: boolean;
+  reason: string | null;
+  detail: string | null;
+  helpUrl: string;
+}
+
 export interface VersionedProjectWorkspace {
   workspaceId: string;
   executionWorkspaceId: string;

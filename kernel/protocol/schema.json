@@ -2315,7 +2315,7 @@
     }},
     "KernelHealthParams": {"fields": {"deep": {"type": "boolean", "optional": true}, "gcPreview": {"type": "boolean", "optional": true}}},
     "KernelWorkspaceAdoptParams": {"fields":{"branchId":{"type":"string"},"rootId":{"type":"string"},"operationId":{"type":"string"},"gitRootIds":{"type":"string[]","optional":true}}},
-    "KernelWorkspaceBackend": {"fields":{"backend":{"type":"'winfsp'|'macfuse'|'fuse'"},"dependenciesReady":{"type":"boolean"},"mountCompiled":{"type":"boolean"},"detail":{"type":"string | null"},"helpUrl":{"type":"string"}}},
+    "KernelWorkspaceBackend": {"fields":{"platform":{"type":"string"},"architecture":{"type":"string"},"reason":{"type":"string | null"},"backend":{"type":"'winfsp'|'macfuse'|'fuse'"},"dependenciesReady":{"type":"boolean"},"mountCompiled":{"type":"boolean"},"detail":{"type":"string | null"},"helpUrl":{"type":"string"}}},
     "KernelWorkspaceOpenParams": {"fields":{"branchId":{"type":"string"}}},
     "KernelWorkspaceAddress": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"}}},
     "KernelWorkspaceBindParams": {"fields":{"branchId":{"type":"string"},"generation":{"type":"string"},"sourcePath":{"type":"string","optional":true}}},
@@ -2369,6 +2369,7 @@
       "workspaceId": {"type": "string"}, "ownerId": {"type": "string"}
     }},
     "KernelGetBlobParams": {"fields": {
+      "representation":{"type":"string","optional":true}, "rangeRoot":{"type":"string","optional":true},
       "hash": {"type": "string"}, "branchId": {"type": "string", "optional": true}, "revision": {"type": "number", "optional": true},
       "pinId": {"type": "string", "optional": true}, "ownerId": {"type": "string", "optional": true}, "recordId": {"type": "string", "optional": true}, "slot": {"type": "string", "optional": true}, "path": {"type": "string", "optional": true},
       "offset": {"type": "number", "optional": true}, "length": {"type": "number", "optional": true}
@@ -2751,7 +2752,7 @@
     "ChildPrepareParams": {"fields":{"executionId":{"type":"string"},"source":{"type":"LaunchSourceParams | null"},"context":{"type":"InitialContext"},"expectedContextCheckpoint":{"type":"string | null"},"inputPreparation":{"type":"InputResourcePreparation","optional":true}}},
     "ChildPreparationProgress": {"raw":"export interface ChildPreparationProgress { phase: 'source' | 'source_wait' | 'inventory' | 'capture' | 'verify' | 'publish' | 'context' | 'admission'; completed?: number; total?: number; }","rustType":"varin_runtime::catalog::delegated::ChildPreparationProgress"},
     "ChildProgressParams": {"fields":{"executionId":{"type":"string"},"progress":{"type":"ChildPreparationProgress"}}},
-    "ChildFailParams": {"fields":{"executionId":{"type":"string"},"code":{"type":"string"},"detail":{"type":"string","optional":true}}},
+    "ChildFailParams": {"fields":{"error":{"type":"ExecutionError","optional":true},"executionId":{"type":"string"},"code":{"type":"string"},"detail":{"type":"string","optional":true}}},
     "ChildWaitParams": {"fields": {"waitId": {"type": "string"}}},
     "ChildCapabilityDescriptor": {"fields":{"name":{"type":"string"},"version":{"type":"string"},"source_requirement":{"type":"'none' | 'source' | 'physical' | 'live'"},"default_presets":{"type":"('worker' | 'verifier' | 'retrieval' | 'research_peer')[]"},"process":{"type":"boolean","optional":true}}},
     "ChildWorkMode": {"raw":"export type ChildWorkMode = 'read_only' | 'shared' | 'isolated_write';","rustType":"varin_runtime::catalog::dispatch::ChildWorkMode"},
@@ -2768,7 +2769,7 @@
     "ChildSourcePin": {"fields":{"pin_id":{"type":"string"},"root":{"type":"string"},"source":{"type":"LaunchSource"}},"rustType":"varin_runtime::catalog::collaboration::ChildSourcePin"},
     "ChildReportReadParams": {"fields": {"operationId": {"type": "string"}, "itemId": {"type": "string"}, "offset": {"type": "number", "optional": true}, "maxBytes": {"type": "number", "optional": true}}},
     "ChildReportPage": {"fields":{"format":{"type":"'text' | 'output_body'"},"operation_id":{"type":"string"},"item_id":{"type":"string"},"offset":{"type":"number"},"next_offset":{"type":"number | null"},"total_bytes":{"type":"number"},"text":{"type":"string"},"execution_id":{"type":"string"}}},
-    "ChildReport": {"fields":{"outcome":{"type":"Outcome"},"sender_thread_id":{"type":"string"},"run_id":{"type":"string | null"},"history_ids":{"type":"string[]"},"detail":{"type":"string | null"}}},
+    "ChildReport": {"fields":{"error":{"type":"ExecutionError","optional":true},"outcome":{"type":"Outcome"},"sender_thread_id":{"type":"string"},"run_id":{"type":"string | null"},"history_ids":{"type":"string[]"},"detail":{"type":"string | null"}}},
     "ChildTask": {"fields":{"agent_id":{"type":"string","optional":true},"name":{"type":"string","optional":true},"operation_id":{"type":"string"},"parent_run_id":{"type":"string"},"parent_thread_id":{"type":"string"},"parent_branch_id":{"type":"string"},"origin":{"type":"unknown"},"call_id":{"type":"string"},"child_thread_id":{"type":"string"},"child_branch_id":{"type":"string"},"project_id":{"type":"string | null"},"input":{"type":"ChildInput"},"configuration":{"type":"unknown"},"launch":{"type":"LaunchSelection"},"state":{"type":"string"},"revision":{"type":"number"},"cursor":{"type":"number"},"receipt":{"type":"InputSubmitReceipt | null"},"report":{"type":"ChildReport | null"},"resources_released":{"type":"boolean"},"source":{"type":"ChildSource"},"code_result":{"type":"ChildCodeResult"},"selected_profile":{"type":"ChildSelectedProfile"},"avatar":{"type":"string","optional":true}}},
     "ChildContinuationAcceptParams": {"fields":{"sourceAgent":{"type":"string","optional":true},"name":{"type":"string","optional":true},"key":{"type":"string"},"childOperationId":{"type":"string"},"previousRunId":{"type":"string"},"expectedHead":{"type":"string | null"},"input":{"type":"unknown"}}},
     "ChildExecutionParams": {"fields":{"executionId":{"type":"string"}}},

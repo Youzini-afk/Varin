@@ -204,6 +204,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         <p className="text-center typography-ui text-muted-foreground/60">
           {t('aboutDialog.footerNote')}
         </p>
+        <WinFspNotice />
 
         <UpdateDialog
           open={updateDialogOpen}
@@ -319,6 +320,7 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
         </div>
       </div>
 
+      <WinFspNotice />
       <UpdateDialog
         open={updateDialogOpen}
         onOpenChange={setUpdateDialogOpen}
@@ -335,3 +337,10 @@ export const AboutSettings: React.FC<AboutSettingsProps> = ({ initialUpdateDialo
     </SettingsSection>
   );
 };
+
+function WinFspNotice() {
+  return <a href="https://github.com/winfsp/winfsp" target="_blank" rel="noopener noreferrer"
+    className="block typography-meta text-muted-foreground break-words hover:text-foreground transition-colors">
+    WinFsp - Windows File System Proxy, Copyright (C) Bill Zissimopoulos
+  </a>;
+}

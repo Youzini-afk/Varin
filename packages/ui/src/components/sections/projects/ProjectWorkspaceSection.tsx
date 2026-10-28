@@ -3,7 +3,7 @@ import { RiArrowRightUpLine, RiLoader4Line } from '@remixicon/react';
 import type { ProjectEntry } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { SettingsSection } from '../shared/SettingsSection';
-import { projectWorkspaceRequest, type ProjectWorkspaceStatus } from '@/lib/nativeWorkspace';
+import { projectWorkspaceRequest, inspectWorkspaceBackend, type ProjectWorkspaceStatus, type WorkspaceBackendStatus } from '@/lib/nativeWorkspace';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';
@@ -12,8 +12,20 @@ export function ProjectWorkspaceSection({ project }: {
 }) {
     const { t } = useI18n();
     const [status, setStatus] = React.useState<ProjectWorkspaceStatus | null>(null);
+    const [backend, setBackend] = React.useState<WorkspaceBackendStatus | null>(null);
+    const [checkingBackend, setCheckingBackend] = React.useState(false);
     const [busy, setBusy] = React.useState(false), [error, setError] = React.useState<string | null>(null);
     const pending = React.useRef<AbortController | null>(null);
+    const refreshBackend = React.useCallback(async (signal?: AbortSignal) => {
+        setCheckingBackend(true);
+        try { const next = await inspectWorkspaceBackend(project.id, signal); if (!signal?.aborted) setBackend(next); }
+        catch (reason) { if (!signal?.aborted) setError(reason instanceof Error ? reason.message : String(reason)); }
+        finally { if (!signal?.aborted) setCheckingBackend(false); }
+    }, [project.id]);
+    React.useEffect(() => {
+        const controller = new AbortController(); setBackend(null); void refreshBackend(controller.signal);
+        return () => controller.abort();
+    }, [refreshBackend]);
     React.useEffect(() => {
         const controller = new AbortController();
         setStatus(null);
@@ -70,6 +82,16 @@ export function ProjectWorkspaceSection({ project }: {
     return <SettingsSection title={t('settings.projects.workspace.title')} description={t('settings.projects.workspace.description')}>
     <div className="space-y-3">
       <p className="typography-meta max-w-2xl text-muted-foreground">{t('settings.projects.workspace.explanation')}</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 typography-meta">
+        <span className="text-muted-foreground">{t('settings.projects.workspace.backend')}</span>
+        {backend && <span>{backend.backend} · {backend.platform} {backend.architecture}{backend.hostId ? ` · ${backend.hostId}` : ''}
+          {' · '}{t(backend.dependenciesReady ? 'settings.projects.workspace.backendReady' : 'settings.projects.workspace.backendUnavailable')}</span>}
+        <Button size="sm" variant="ghost" disabled={checkingBackend} onClick={() => void refreshBackend()}>
+          {checkingBackend && <RiLoader4Line className="mr-1 size-3 animate-spin"/>}{t('settings.projects.workspace.refreshBackend')}
+        </Button>
+        {backend?.helpUrl && <a href={backend.helpUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{t('settings.projects.workspace.backendHelp')}</a>}
+      </div>
+      {backend && !backend.dependenciesReady && backend.detail && <p className="typography-meta break-words text-muted-foreground">{backend.detail}</p>}
       <dl className="min-w-0 space-y-2 typography-meta">
         <div className="flex flex-wrap gap-x-3"><dt className="text-muted-foreground">{t('settings.projects.workspace.original')}</dt><dd className="break-all">{project.path}</dd></div>
         {status?.executionPath && <div className="flex flex-wrap gap-x-3"><dt className="text-muted-foreground">{t('settings.projects.workspace.current')}</dt><dd className="break-all text-foreground">{status.executionPath}</dd></div>}

@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "Файлова система Host",
+  "settings.projects.workspace.backendReady": "Залежності готові",
+  "settings.projects.workspace.backendUnavailable": "Недоступно",
+  "settings.projects.workspace.refreshBackend": "Оновити",
+  "settings.projects.workspace.backendHelp": "Довідка компонента",
 
   'settings.harness.retrieval.selectOrdinaryModel': 'Select an ordinary model with tool support, or explicitly inherit the current conversation model. The previous decision or rerank selection will not silently switch services.',
 

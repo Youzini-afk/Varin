@@ -1716,6 +1716,8 @@ pub(crate) struct KernelBlobReleaseBatchParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct KernelGetBlobParams {
+    pub(crate) representation: Option<String>,
+    pub(crate) range_root: Option<String>,
     pub(crate) hash: String,
     pub(crate) branch_id: Option<String>,
     pub(crate) revision: Option<i64>,
@@ -2758,6 +2760,7 @@ pub(crate) struct ChildPrepareParams {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ChildFailParams {
+    pub(crate) error: Option<varin_runtime::execution::ExecutionError>,
     pub(crate) execution_id: String,
     pub(crate) code: String,
     pub(crate) detail: Option<String>,

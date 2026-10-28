@@ -232,7 +232,10 @@ export function createManagedResearchSource(kernel: KernelClient) {
         }
         if (state?.kind !== 'regular-file')
           throw new ManagedSourceDrainedError(new Error('Original experiment input file is unavailable'));
-        const result = await scoped.getBlob(state.objectHash, { branchId: snapshot.branchId, path: request.path }, { offset: request.offset, length: request.length });
+        const result = await scoped.getBlob(request.rangeObject ?? state.objectHash, { branchId: snapshot.branchId, path: request.path },
+          { offset: request.offset, length: request.length, signal,
+            ...(request.representation ? { representation: request.representation } : {}),
+            ...(request.rangeObject ? { rangeRoot: state.objectHash } : {}) });
         if (signal.aborted)
           throw new ManagedSourceDrainedError(signal.reason);
         return result;

@@ -22,7 +22,7 @@ impl Storage {
             let hash = reference
                 .get("objectHash")
                 .and_then(Value::as_str)
-                .filter(|value| value.starts_with("sha256-"))
+                .filter(|value| super::file_content::valid_reference(value))
                 .ok_or_else(|| {
                     KernelError::Operation("working record reference hash is malformed".to_string())
                 })?;
@@ -991,7 +991,7 @@ impl Storage {
             let hash = reference
                 .get("objectHash")
                 .and_then(Value::as_str)
-                .filter(|value| value.starts_with("sha256-"))
+                .filter(|value| super::file_content::valid_reference(value))
                 .ok_or_else(|| {
                     KernelError::Operation("record reference objectHash is malformed".to_string())
                 })?;

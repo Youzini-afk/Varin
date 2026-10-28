@@ -1164,6 +1164,12 @@ impl Catalog {
         reason: &str,
         detail: Option<&str>,
     ) -> Result<DelegatedExecution> {
+        self.fail_delegated_preparation_with_error(id, reason, detail, None)
+    }
+    pub fn fail_delegated_preparation_with_error(
+        &mut self, id: &str, reason: &str, detail: Option<&str>,
+        error: Option<crate::execution::ExecutionError>,
+    ) -> Result<DelegatedExecution> {
         let mut execution = self.delegated_execution(id)?;
         if execution.report.is_some() {
             return Ok(execution);
@@ -1193,6 +1199,7 @@ impl Catalog {
             };
         }
         execution.report = Some(ChildReport {
+            error,
             outcome: Outcome::Failed,
             sender_thread_id: relation.child_thread_id,
             run_id: execution.receipt.as_ref().map(|r| r.run_id.clone()),

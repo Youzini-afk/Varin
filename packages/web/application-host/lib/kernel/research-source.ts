@@ -178,8 +178,8 @@ export function createResearchSourceAuthority(options: {
               || input.snapshot.sourceRoot !== admitted.physicalRoot?.canonicalRoot)) throw new Error('Managed experiment input source changed');
           installing = true;
           return await installExperimentInput(options.kernel, caller, input, admitted.selection, admitted.address.resourceEpoch,
-            (name, offset, length, signal) => service.service({ ...admitted.address, requestId: randomUUID(), operation: {
-              kind: 'experiment_read', operationId, path: name, offset, length } }, signal),
+            (name, offset, length, signal, fileVersion) => service.service({ ...admitted.address, requestId: randomUUID(), operation: {
+              kind: 'experiment_read', operationId, path: name, offset, length, ...fileVersion } }, signal),
             { ...capture, beforeBranchCreate: async value => { await capture.beforeBranchCreate?.(value); dispatched = true; } });
         } catch (error) {
           // A source-side branch create is not the coordinator's input create.

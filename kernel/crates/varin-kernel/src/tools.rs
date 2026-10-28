@@ -1098,7 +1098,7 @@ impl KernelResourceClient {
             authorize_only,
             cancel,
         )
-        .map_err(|failure| ExecutionError::new("collaboration_source", failure.error.to_string()))
+        .map_err(|failure| ExecutionError::from(failure.error))
     }
     pub(crate) fn child_storage_receipt(
         &self,
@@ -2928,6 +2928,9 @@ pub(crate) fn prepare_resource(
                 let (method,params)=request.operation.params(&request.binding,&request.context);
                 let (grant,_)=storage.authorize(Some(&request.binding.grant_id),epoch,host_id,host_generation,method,&params)?;
                 validate_binding(&grant,&request.binding,&request.context)?;
+                if delegation.work_mode == varin_runtime::catalog::dispatch::ChildWorkMode::IsolatedWrite {
+                    crate::workspace_backend::require_isolation(host_id)?;
+                }
                 if request.authorize_only{return Ok(ResourceWork::Ready(Value::Null));}
                 Ok(ResourceWork::NativeHandoff(crate::workspace_handoffs::Task{binding:request.binding.clone(),context:request.context.clone(),
                     delegation:delegation.clone(),source,grant,cancellation:request.cancellation.shared_flag()}))

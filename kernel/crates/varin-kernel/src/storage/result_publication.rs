@@ -478,14 +478,12 @@ impl ResultPublicationTask {
                 else {
                     return Ok(Some(String::new()));
                 };
-                let bytes = std::fs::read(crate::protocol::object_path(
-                    self.database
-                        .parent()
-                        .ok_or_else(|| KernelError::Storage("object root missing".into()))?,
-                    object_hash,
-                )?)?;
+                let storage = self.database.parent().ok_or_else(|| KernelError::Storage("object root missing".into()))?;
+                let ranged = super::file_content::is_range(object_hash);
+                let bytes = if ranged { super::file_content::read_all(storage, object_hash, *byte_length, &self.cancellation)? }
+                    else { std::fs::read(crate::protocol::object_path(storage, object_hash)?)? };
                 if bytes.len() as u64 != *byte_length
-                    || format!("sha256-{}", hex::encode(Sha256::digest(&bytes))) != *object_hash
+                    || (!ranged && format!("sha256-{}", hex::encode(Sha256::digest(&bytes))) != *object_hash)
                 {
                     return Err(KernelError::Storage(
                         "result object content differs from captured identity".into(),

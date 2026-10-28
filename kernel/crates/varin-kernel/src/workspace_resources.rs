@@ -1,5 +1,5 @@
 //! Runtime ownership of native workspaces. Metadata commands return to the one
-//! Storage owner; mount startup, callbacks, file sealing and detach never run on
+//! Storage owner; mount startup, callbacks, range persistence and detach never run on
 //! that owner's thread. A workspace owner is project-lived, while execution
 //! leases retain their own original Run/Operation authority.
 use crate::error::KernelError;
@@ -45,6 +45,19 @@ struct Entry {
     mount: Mutex<Option<MountWorker>>,
     view: Mutex<Option<Value>>,
     directory: PathBuf,
+}
+fn mount_failure(failure: KernelError, entry: &Entry, grant: &Grant) -> KernelError {
+    let mut failure = varin_runtime::execution::ExecutionError::from(failure);
+    let details = failure.details.get_or_insert_with(|| json!({}));
+    details["stage"] = json!("workspace_mount");
+    details["backend"] = json!(backend());
+    details["hostId"] = json!(grant.host_id);
+    details["workspaceId"] = json!(entry.binding.workspace_id);
+    details["branchId"] = json!(entry.binding.branch_id);
+    details["platform"] = json!(std::env::consts::OS);
+    details["architecture"] = json!(std::env::consts::ARCH);
+    details["helpUrl"] = json!(crate::workspace_backend::help_url());
+    KernelError::Execution(failure)
 }
 #[derive(Default)]
 pub(crate) struct Workspaces {
@@ -160,12 +173,7 @@ impl Workspaces {
             return Err(KernelError::Cancelled);
         }
         if method=="workspace.backend.inspect"{
-            #[cfg(feature="workspace-mount")]
-            let readiness=crate::workspace_mount::dependencies();
-            #[cfg(not(feature="workspace-mount"))]
-            let readiness:Result<(),KernelError>=Err(error("workspace_backend_unavailable","This kernel was built without native mount support"));
-            return Ok(json!({"backend":backend(),"mountCompiled":cfg!(feature="workspace-mount"),"dependenciesReady":readiness.is_ok(),
-                "detail":readiness.err().map(|error|error.to_string()),"helpUrl":if cfg!(windows){"https://winfsp.dev/rel/"}else if cfg!(target_os="macos"){"https://macfuse.github.io/"}else{"https://github.com/libfuse/libfuse"}}));
+            return Ok(crate::workspace_backend::inspect());
         }
         if method == "workspace.adopt" {
             if self.stopping.load(Ordering::Acquire) {
@@ -309,6 +317,7 @@ impl Workspaces {
                     let (worker, startup_error) = match started {
                         Ok(started) => started,
                         Err(failure) => {
+                            let failure = mount_failure(failure, &entry, &grant);
                             *locked(&entry.view)? = Some(
                                 json!({"mountId":id,"path":null,"backend":backend(),"state":"failed","error":failure.to_string()}),
                             );
@@ -320,7 +329,7 @@ impl Workspaces {
                     );
                     *mounted = Some(worker);
                     if let Some(failure) = startup_error {
-                        return Err(failure);
+                        return Err(mount_failure(failure, &entry, &grant));
                     }
                 }
                 if !mounted.as_ref().is_some_and(|mount| mount.ready) {

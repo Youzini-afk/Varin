@@ -390,7 +390,37 @@ impl Storage {
             let _ = fs::remove_file(&stream.staging);
             return Err(error);
         }
-        let (hash, byte_length) = hash_file(&stream.staging)?;
+        let (mut hash, mut byte_length) = hash_file(&stream.staging)?;
+        if let Some(expected) = stream.expected_hash.as_deref().filter(|hash| super::file_content::is_range(hash)) {
+            if expected.strip_prefix("ranges-") != Some(hash.as_str()) {
+                let _ = fs::remove_file(&stream.staging);
+                return Err(KernelError::Operation("File version descriptor does not match expectedHash".into()));
+            }
+            let installed = (|| -> Result<(String, u64), KernelError> {
+                let version: super::file_content::Version = serde_json::from_slice(&fs::read(&stream.staging)?)?;
+                version.validate()?;
+                let grant = self.load_grant(grant_id)?;
+                for (dependency, length) in version.dependencies() {
+                    let owned: bool = self.conn.query_row("SELECT EXISTS(SELECT 1 FROM object_owners WHERE blob_hash=?1 AND grant_id=?2)",
+                        params![dependency,grant_id],|row|row.get(0))?;
+                    if !owned && !(grant.path_scopes.iter().any(String::is_empty) && self.blob_owned(&dependency, stream.workspace_id.as_deref())?) {
+                        return Err(KernelError::Authorization("A file version range has no admitted content owner".into()));
+                    }
+                    self.validate_blob_metadata(&PathState::RegularFile { object_hash:dependency, byte_length:length, mode:0 })?;
+                }
+                let reference = version.install(&self.root, self.cancellation.as_deref().unwrap_or(&AtomicBool::new(false)))?;
+                Ok((reference, version.byte_length))
+            })();
+            match installed {
+                Ok((reference, length)) => { hash = reference; byte_length = length; }
+                Err(error) => {
+                    let _ = fs::remove_file(&stream.staging);
+                    return Err(error);
+                }
+            }
+            fs::remove_file(&stream.staging)?;
+            sync_directory(&self.root.join("staging"))?;
+        }
         if stream
             .expected_hash
             .as_deref()
@@ -402,7 +432,10 @@ impl Storage {
             ));
         }
         let target = object_path(&self.root, &hash)?;
-        if target.exists() {
+        if super::file_content::is_range(&hash) {
+            // The descriptor was durably installed above. Metadata and its
+            // owner are published by the same path as ordinary content below.
+        } else if target.exists() {
             let (existing_hash, existing_length) = hash_file(&target)?;
             if existing_hash != hash || existing_length != byte_length {
                 let _ = fs::remove_file(&stream.staging);
@@ -508,6 +541,17 @@ impl Storage {
         grant_id: &str,
         storage_admin: bool,
     ) -> Result<(), KernelError> {
+        if let Some(parent) = params.get("rangeRoot").and_then(Value::as_str) {
+            if !super::file_content::is_range(parent) || super::file_content::is_range(hash) {
+                return Err(KernelError::Authorization("Invalid file-version range selection".into()));
+            }
+            let mut selected = params.clone(); selected.as_object_mut().unwrap().remove("rangeRoot");
+            self.validate_blob_read_source(&selected, parent, grant_id, storage_admin)?;
+            if !super::file_content::Version::load(&self.root, parent)?.dependencies().contains_key(hash) {
+                return Err(KernelError::Authorization("Content object is not part of the admitted file version".into()));
+            }
+            return Ok(());
+        }
         let branch_id = params.get("branchId").and_then(Value::as_str);
         let pin_id = params.get("pinId").and_then(Value::as_str);
         let owner_id = params.get("ownerId").and_then(Value::as_str);

@@ -22,6 +22,7 @@ fn record_id(view: &str) -> String {
 
 #[derive(Clone)]
 pub(crate) struct CleanupTask {
+    storage_root: PathBuf,
     pub(crate) workspace_id: String,
     pub(crate) view_id: String,
     operation_id: String,
@@ -59,7 +60,8 @@ impl CleanupTask {
                 let metadata = fs::symlink_metadata(&file)?;
                 let same = match state {
                     PathState::RegularFile { object_hash, byte_length, mode } => metadata.is_file() && !metadata.file_type().is_symlink()
-                        && super::file_resources::file_mode(&metadata) == *mode && hash_file(&file)? == (object_hash.clone(), *byte_length),
+                        && super::file_resources::file_mode(&metadata) == *mode
+                        && super::file_content::matches_file(&self.storage_root, object_hash, *byte_length, &file, &AtomicBool::new(false))?,
                     PathState::Directory { mode } => metadata.is_dir() && !metadata.file_type().is_symlink()
                         && mode.is_none_or(|mode| super::file_resources::file_mode(&metadata) == mode),
                     PathState::Symlink { symlink_target, .. } => metadata.file_type().is_symlink() && fs::read_link(&file)?.to_string_lossy() == *symlink_target,
@@ -443,6 +445,7 @@ impl Storage {
         record["cleanupPaths"] = serde_json::to_value(&paths)?;
         self.save_materialized_view_record(&record)?;
         Ok(Some(CleanupTask {
+            storage_root: self.root.clone(),
             expected: record.get("cleanupRoot").and_then(Value::as_str).map(|root| {
                 self.root_entries(root).map(|entries| (self.root.join(&path), entries))
             }).transpose()?,

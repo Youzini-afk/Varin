@@ -3853,6 +3853,9 @@ export interface KernelWorkspaceAdoptParams {
 }
 
 export interface KernelWorkspaceBackend {
+  platform: string;
+  architecture: string;
+  reason: string | null;
   backend: 'winfsp'|'macfuse'|'fuse';
   dependenciesReady: boolean;
   mountCompiled: boolean;
@@ -4004,6 +4007,8 @@ export interface KernelObjectOwnerRebindParams {
 }
 
 export interface KernelGetBlobParams {
+  representation?: string;
+  rangeRoot?: string;
   hash: string;
   branchId?: string;
   revision?: number;
@@ -5219,6 +5224,7 @@ export interface ChildProgressParams {
 }
 
 export interface ChildFailParams {
+  error?: ExecutionError;
   executionId: string;
   code: string;
   detail?: string;
@@ -5357,6 +5363,7 @@ export interface ChildReportPage {
 }
 
 export interface ChildReport {
+  error?: ExecutionError;
   outcome: Outcome;
   sender_thread_id: string;
   run_id: string | null;

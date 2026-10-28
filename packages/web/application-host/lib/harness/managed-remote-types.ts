@@ -110,7 +110,7 @@ export type SourceServiceOperation =
   | { kind: 'package_read'; captureId: string; path: string; offset: number; length: number }
   | { kind: 'experiment_admit'; operationId: string; cwd?: string }
   | { kind: 'experiment_capture'; operationId: string; cwd: string; captureScopes: string[] }
-  | { kind: 'experiment_read'; operationId: string; path: string; offset: number; length: number }
+  | { kind: 'experiment_read'; operationId: string; path: string; offset: number; length: number; representation?: 'manifest'; rangeObject?: string }
   | { kind: 'check_path'; path: string }
   | { kind: 'routing_workspace' }
   | { kind: 'resources_prepare'; identity: import('@varin/application-client').ThreadIdentity;

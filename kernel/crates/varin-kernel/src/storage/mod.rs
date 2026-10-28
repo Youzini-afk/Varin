@@ -64,6 +64,7 @@ pub(crate) mod materialization;
 pub(crate) mod materialized_views;
 mod execution_views;
 mod objects;
+pub(crate) mod file_content;
 mod operations;
 #[cfg(test)]
 mod native_authority_tests;
@@ -229,7 +230,7 @@ pub(crate) struct Storage {
     streams: HashMap<String, BlobStream>,
     branch_builders: HashMap<String, BranchBuilder>,
     branch_write_builders: HashMap<String, BranchWriteBuilder>,
-    verified_objects: BTreeSet<String>,
+    verified_objects: file_content::VerifiedObjects,
     source_capture_cache: HashMap<(String, String), capture_resources::CaptureReuse>,
     blob_read_roots: blob_reads::BlobReadRoots,
     private_files: HashMap<String, Vec<std::sync::Weak<workspace_files::PrivateFile>>>,

@@ -972,19 +972,26 @@ pub(super) fn apply_physical_state(storage_root: &Path, resource: &ResolvedFileR
                 let temporary = resource.absolute.with_file_name(format!(".varin-kernel-{}", Uuid::new_v4()));
                 let mut installed = OpenOptions::new().read(true).write(true).create_new(true).open(&temporary)?;
                 let mut owned = EffectTemporary(Some(temporary.clone()));
-                let mut input = File::open(object)?;
+                let ranged = super::file_content::is_range(object_hash);
+                let mut ranged_input = if ranged {
+                    Some(super::file_content::Reader::open(storage_root, object_hash, *byte_length,
+                        Arc::new(AtomicBool::new(false)))?)
+                } else { None };
+                let mut input = if ranged { None } else { Some(File::open(object)?) };
                 let mut hash = Sha256::new();
                 let mut length = 0u64;
                 let mut buffer = [0u8; 64 * 1024];
                 loop {
                     if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
-                    let read = input.read(&mut buffer)?;
+                    let read = if let Some(reader) = &mut ranged_input {
+                        reader.read_at_cancellable(length, &mut buffer, cancellation)?
+                    } else { input.as_mut().expect("raw content object").read(&mut buffer)? };
                     if read == 0 { break; }
                     hash.update(&buffer[..read]);
                     installed.write_all(&buffer[..read])?;
                     length += read as u64;
                 }
-                if format!("sha256-{}", hex::encode(hash.finalize())) != *object_hash || length != *byte_length {
+                if (!ranged && format!("sha256-{}", hex::encode(hash.finalize())) != *object_hash) || length != *byte_length {
                     return Err(KernelError::Storage(format!("content object is corrupt: {object_hash}")));
                 }
                 // The existing open handle can flush readonly files on every platform.

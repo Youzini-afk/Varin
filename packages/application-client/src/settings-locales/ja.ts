@@ -2,6 +2,11 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.projects.workspace.backend": "実行 Host のファイルシステム",
+  "settings.projects.workspace.backendReady": "依存関係の準備完了",
+  "settings.projects.workspace.backendUnavailable": "利用不可",
+  "settings.projects.workspace.refreshBackend": "再確認",
+  "settings.projects.workspace.backendHelp": "コンポーネントの案内",
   "assistant.scope.thread": "スレッド",
   "settings.varin.recovery.native.description": "Varin は各ターンで変更されたファイルを記録し、ネイティブの会話復旧と連携して復元します。ワークスペース全体はリセットしません。",
   "settings.projectTrust.title": "プロジェクトの信頼",

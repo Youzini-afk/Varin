@@ -39,7 +39,7 @@ wasmparser.workspace = true
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true, features = ["Win32_System_Registry", "Win32_System_LibraryLoader"] }
+windows-sys = { workspace = true, features = ["Win32_System_Registry", "Win32_System_LibraryLoader", "Win32_System_Services"] }
 winfsp = { version = "0.13.2", default-features = false, features = ["delayload"], optional = true }
 winfsp-sys = { version = "0.12.1", optional = true }
 

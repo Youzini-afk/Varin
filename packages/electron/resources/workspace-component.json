@@ -1,0 +1,11 @@
+{
+  "name": "WinFsp",
+  "version": "2.2.26286",
+  "release": "2026 Beta5",
+  "file": "winfsp-2.2.26286.msi",
+  "url": "https://github.com/winfsp/winfsp/releases/download/v2.2B5/winfsp-2.2.26286.msi",
+  "sha256": "293ffb9bcc0b625c85079fe85fa77f8fe98170aba51a02ac9c83d58f6c3b0e2f",
+  "source": "https://github.com/winfsp/winfsp/tree/v2.2B5",
+  "licenseUrl": "https://raw.githubusercontent.com/winfsp/winfsp/v2.2B5/License.txt",
+  "licenseSha256": "68ae2fa9d8e6110ebdc9a236beecf118e279f8a26530daf09c9e682c231f7879"
+}

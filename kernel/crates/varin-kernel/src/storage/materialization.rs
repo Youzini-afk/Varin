@@ -350,10 +350,16 @@ impl Task {
                     mode: Some(file_mode(&metadata)),
                 }
             } else if metadata.is_file() {
-                let (object_hash, byte_length) = digest(
+                let selected = if let PathState::RegularFile { object_hash, byte_length, .. } = state {
+                    if super::file_content::is_range(object_hash) && super::file_content::matches_file(
+                        &self.storage_root, object_hash, *byte_length, &child.absolute, &self.cancellation)? {
+                        Some((object_hash.clone(), *byte_length))
+                    } else { None }
+                } else { None };
+                let (object_hash, byte_length) = if let Some(selected) = selected { selected } else { digest(
                     &child.absolute,
                     cancellable.then_some(self.cancellation.as_ref()),
-                )?;
+                )? };
                 let after = fs::symlink_metadata(&child.absolute)?;
                 if !after.is_file()
                     || after.file_type().is_symlink()
@@ -435,7 +441,12 @@ impl Task {
                 } => {
                     let source = object_path(&self.storage_root, object_hash)?;
                     check(&self.cancellation)?;
-                    match copy_verified_object_to(&source, &target, &self.cancellation, object_hash, *byte_length)? {
+                    let method = if super::file_content::is_range(object_hash) {
+                        let mut output = OpenOptions::new().create_new(true).write(true).open(&target)?;
+                        super::file_content::copy_to(&self.storage_root, object_hash, *byte_length, &mut output, &self.cancellation)?;
+                        output.sync_all()?; "copy"
+                    } else { copy_verified_object_to(&source, &target, &self.cancellation, object_hash, *byte_length)? };
+                    match method {
                         "reflink" => reflink += 1,
                         _ => copy += 1,
                     }

@@ -62,10 +62,22 @@ impl Storage {
         grant: &Grant,
     ) -> Result<Value, KernelError> {
         let workspace = self.recovery_workspace(input, &grant.grant_id)?;
-        let (objects,bytes):(i64,i64)=self.conn.query_row(
-            "SELECT COUNT(*),COALESCE(SUM(byte_length),0) FROM blobs WHERE hash IN (SELECT DISTINCT object_hash FROM recovery_refs WHERE workspace_id=?1)",
-            [&workspace],|r|Ok((r.get(0)?,r.get(1)?)))?;
-        Ok(json!({"objectCount":objects,"byteLength":bytes,"scope":"workspace"}))
+        let mut retained = BTreeMap::new();
+        let mut statement = self.conn.prepare("SELECT hash,byte_length FROM blobs WHERE hash IN (SELECT DISTINCT object_hash FROM recovery_refs WHERE workspace_id=?1)")?;
+        for row in statement.query_map([&workspace], |row| Ok((row.get::<_,String>(0)?,row.get::<_,i64>(1)?)))? {
+            let (hash, length) = row?;
+            let length = u64::try_from(length).map_err(|_| KernelError::Storage("Invalid retained content length".into()))?;
+            if super::file_content::is_range(&hash) {
+                let version = super::file_content::Version::load(&self.root, &hash)?;
+                // Count shared backing objects once, and descriptor bytes rather
+                // than charging a complete logical file for every small edit.
+                retained.extend(version.dependencies());
+                retained.insert(hash.clone(), fs::metadata(super::file_content::path(&self.root, &hash)?)?.len());
+            } else { retained.insert(hash, length); }
+        }
+        let bytes = retained.values().try_fold(0u64, |sum, length| sum.checked_add(*length))
+            .ok_or_else(|| KernelError::Storage("Retained content size overflow".into()))?;
+        Ok(json!({"objectCount":retained.len(),"byteLength":bytes,"scope":"workspace"}))
     }
     pub(crate) fn dispatch_file_recovery(
         &mut self,

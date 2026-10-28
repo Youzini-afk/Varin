@@ -148,8 +148,10 @@ interface InternalGrantHandle extends KernelGrantHandle {
 }
 
 export class KernelScopedClient {
-  inspectWorkspaceBackend(signal?:AbortSignal){
-    return this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceBackend>('workspace.backend.inspect',{},this.grant,signal);
+  async inspectWorkspaceBackend(signal?:AbortSignal){
+    const hostId = this.owner.handshake?.hostId;
+    const backend = await this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceBackend>('workspace.backend.inspect',{},this.grant,signal);
+    return { ...backend, ...(hostId ? { hostId } : {}) };
   }
   adoptWorkspace(params: KernelMethodParams['workspace.adopt'], signal?: AbortSignal) {
     return this.owner.workspaceRequest<Record<string, unknown>>('workspace.adopt', params, this.grant, signal);
@@ -274,7 +276,7 @@ export class KernelScopedClient {
     return this.owner.putBlobStream(chunks, input, this.grant, signal);
   }
 
-  getBlob(hash: string, source: KernelBlobReadSource, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
+  getBlob(hash: string, source: KernelBlobReadSource, options: { offset?: number; length?: number; signal?: AbortSignal | undefined; representation?: 'manifest'; rangeRoot?: string } = {}): Promise<KernelObjectSlice> {
     return this.owner.getBlob(hash, source, this.grant, options);
   }
 
@@ -1322,13 +1324,14 @@ export class KernelClient {
     if (!Number.isSafeInteger(input.byteLength) || input.byteLength < 0) {
       throw new Error("Blob stream byteLength must be a non-negative safe integer");
     }
-    if (!/^sha256-[0-9a-f]{64}$/.test(input.expectedHash)) {
-      throw new Error("Blob stream expectedHash must be a sha256 object identity");
+    const ranged = input.expectedHash.startsWith('ranges-');
+    if (!/^(?:ranges-)?sha256-[0-9a-f]{64}$/.test(input.expectedHash)) {
+      throw new Error("Blob stream expectedHash must identify a content object or immutable file version");
     }
     const existing = await this.getOperation(input.operationId, scoped, signal).catch(() => null);
     if (existing?.state === "committed" && existing.result && typeof existing.result === "object") {
       const result = existing.result as Partial<KernelPutBlobResult>;
-      if (result.hash === input.expectedHash && result.byteLength === input.byteLength && typeof result.ownerId === "string") {
+      if (result.hash === input.expectedHash && (ranged || result.byteLength === input.byteLength) && typeof result.ownerId === "string") {
         return result as KernelPutBlobResult;
       }
     }
@@ -1361,7 +1364,7 @@ export class KernelClient {
         }
       }
       const actualHash = `sha256-${digest.digest("hex")}`;
-      if (received !== input.byteLength || actualHash !== input.expectedHash) {
+      if (received !== input.byteLength || actualHash !== (ranged ? input.expectedHash.slice('ranges-'.length) : input.expectedHash)) {
         throw new Error("Blob stream content did not match its declared identity");
       }
       return await this.requestRaw<KernelPutBlobResult>("storage.putBlob.finish", {
@@ -1380,8 +1383,8 @@ export class KernelClient {
     }
   }
 
-  async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined } = {}): Promise<KernelObjectSlice> {
-    const params: KernelGetBlobParams = { hash, ...source, ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) };
+  async getBlob(hash: string, source: KernelBlobReadSource, grant: KernelGrantHandle, options: { offset?: number; length?: number; signal?: AbortSignal | undefined; representation?: 'manifest'; rangeRoot?: string } = {}): Promise<KernelObjectSlice> {
+    const params: KernelGetBlobParams = { hash, ...source, ...(options.representation ? { representation: options.representation } : {}), ...(options.rangeRoot ? { rangeRoot: options.rangeRoot } : {}), ...(options.offset === undefined ? {} : { offset: options.offset }), ...(options.length === undefined ? {} : { length: options.length }) };
     return this.requestRaw<KernelObjectSlice>("storage.getBlob", params, { signal: options.signal, grant, settleCancellation: true });
   }
 

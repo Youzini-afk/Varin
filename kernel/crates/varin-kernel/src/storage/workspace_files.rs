@@ -99,6 +99,11 @@ struct Extent {
 }
 
 struct ImmutableFile {
+    verification: super::file_content::VerifiedObjects,
+    root: PathBuf,
+    reader: Mutex<Option<super::file_content::Reader>>,
+    dependencies: BTreeMap<String, u64>,
+    _range_retention: Vec<blob_reads::BlobReadRetention>,
     path: PathBuf,
     file: std::sync::OnceLock<File>,
     hash: String,
@@ -178,6 +183,17 @@ pub(crate) struct InstalledFile {
     generation: u64,
 }
 impl InstalledFile {
+    pub(super) fn record(&self, storage: &mut Storage) -> Result<(), KernelError> {
+        if self.content.verified.try_lock().is_ok_and(|verified| *verified) {
+            storage.verified_objects.insert(self.content.hash.clone());
+        }
+        for (hash, length) in self.content.dependencies.iter().map(|(hash, length)| (hash.as_str(), *length))
+            .chain(std::iter::once((self.content.hash.as_str(), self.content.length))) {
+            storage.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
+                params![hash, i64::try_from(length).map_err(|_| KernelError::Operation("Content length exceeds Storage range".into()))?])?;
+        }
+        Ok(())
+    }
     pub(super) fn state(&self, mode: u32) -> PathState {
         PathState::RegularFile {
             object_hash: self.content.hash.clone(),
@@ -294,6 +310,18 @@ fn write_at(file: &File, mut offset: u64, mut bytes: &[u8]) -> io::Result<()> {
 }
 
 impl ImmutableFile {
+    fn read_at(&self, offset: u64, output: &mut [u8], cancellation: &AtomicBool) -> Result<(), KernelError> {
+        if super::file_content::is_range(&self.hash) {
+            let mut reader = self.reader.lock().map_err(|_| KernelError::Storage("Immutable range reader lock failed".into()))?;
+            if reader.is_none() {
+                *reader = Some(super::file_content::Reader::open(&self.root, &self.hash, self.length, Arc::new(AtomicBool::new(false)))?.with_verification(self.verification.clone()));
+            }
+            if reader.as_mut().unwrap().read_at_cancellable(offset, output, cancellation)? != output.len() {
+                return Err(KernelError::Storage("Immutable file range was truncated".into()));
+            }
+            Ok(())
+        } else { self.verify(cancellation)?; Ok(read_at(self.file()?, offset, output)?) }
+    }
     fn file(&self) -> Result<&File, KernelError> {
         if self.file.get().is_none() {
             // This is reached only by a byte worker. Storage admission retains
@@ -317,6 +345,11 @@ impl ImmutableFile {
             return Ok(());
         }
         check(cancellation)?;
+        if super::file_content::is_range(&self.hash) {
+            super::file_content::Version::load(&self.root, &self.hash)?;
+            *verified = true;
+            return Ok(());
+        }
         let file = self.file()?;
         if file.metadata()?.len() != self.length {
             return Err(KernelError::Storage(
@@ -602,6 +635,66 @@ impl PrivateFile {
 }
 
 impl FileSnapshot {
+    /// Persist only changed ranges. Existing slices are flattened by descriptor,
+    /// never reconstructed or hashed as a complete file at a fork boundary.
+    pub(crate) fn freeze(&self, root: &Path, port: &super::workspace_session::StoragePort,
+        cancellation: &AtomicBool) -> Result<InstalledFile, KernelError> {
+        use super::file_content::{Range, Version};
+        check(cancellation)?; check(&self.revoked)?;
+        if self.extents.is_empty() {
+            if let Some(base) = &self.base {
+                if self.length == base.length && self.base_length == base.length {
+                    return Ok(InstalledFile { file_id: self.file_id.clone(), content: base.clone(), generation: self.generation });
+                }
+            }
+        }
+        // New/empty files already contain only new bytes. Keep the ordinary
+        // blob representation when no old file ranges would be copied.
+        if self.base.is_none() || self.length == 0 || self.extents.get(&0).is_some_and(|extent| extent.length == self.length) {
+            let sealed = self.seal(&root.join("staging"), cancellation)?;
+            let (retention, sealed) = port.call(move |storage| Ok((storage.retain_private_file(&sealed), sealed)))?;
+            return sealed.install(root, retention, cancellation);
+        }
+        let base = self.base.as_ref().unwrap();
+        let previous = Version::base(root, &base.hash, base.length)?;
+        let base_end = self.base_length.min(self.length);
+        let mut ranges = Vec::new(); let mut position = 0;
+        let mut changed = Vec::new();
+        struct Input<'a> { snapshot: &'a FileSnapshot, position: u64, end: u64, cancellation: &'a AtomicBool }
+        impl Read for Input<'_> {
+            fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+                let count = (self.end-self.position).min(output.len() as u64) as usize;
+                if count == 0 { return Ok(0); }
+                let read = self.snapshot.read(self.position, &mut output[..count], self.cancellation).map_err(io::Error::other)?;
+                self.position += read as u64; Ok(read)
+            }
+        }
+        for (&offset, extent) in &self.extents {
+            check(cancellation)?;
+            ranges.extend(previous.slice(position.min(base_end), offset.min(base_end)));
+            let sealed = SealedFile::capture(&root.join("staging"), Input { snapshot: self, position: offset,
+                end: offset + extent.length, cancellation }, self.revoked.clone(), self.cleanup.clone(), cancellation, |_| Ok(()))?;
+            let (retention, sealed) = port.call(move |storage| Ok((storage.retain_private_file(&sealed), sealed)))?;
+            let installed = sealed.install(root, retention, cancellation)?;
+            ranges.push(Range { offset, length: extent.length, object_hash: installed.content.hash.clone(),
+                object_offset: 0, object_length: installed.content.length });
+            changed.push(installed); position = offset + extent.length;
+        }
+        ranges.extend(previous.slice(position.min(base_end), base_end));
+        let version = Version { format: 1, byte_length: self.length, ranges };
+        version.validate()?;
+        let hash = format!("ranges-sha256-{}", hex::encode(Sha256::digest(serde_json::to_vec(&version)?)));
+        let dependencies = version.dependencies();
+        let kept = hash.clone(); let chunks = dependencies.keys().cloned().collect::<Vec<_>>();
+        let (retention, range_retention, verification) = port.call(move |storage| Ok((storage.blob_read_roots.retain(&kept),
+            chunks.iter().map(|hash| storage.blob_read_roots.retain(hash)).collect::<Vec<_>>(), storage.verified_objects.clone())))?;
+        version.install(root, cancellation)?;
+        check(&self.revoked)?;
+        Ok(InstalledFile { file_id: self.file_id.clone(), generation: self.generation,
+            content: Arc::new(ImmutableFile { root: root.into(), reader: Mutex::new(None), dependencies, verification,
+                _range_retention: range_retention, path: super::file_content::path(root, &hash)?,
+                file: std::sync::OnceLock::new(), hash, length: self.length, verified: Mutex::new(true), _retention: retention }) })
+    }
     pub(super) fn empty(revoked: Arc<AtomicBool>, cleanup: Arc<StagingCleanup>) -> Self {
         Self {
             file_id: Uuid::new_v4().to_string(),
@@ -645,7 +738,7 @@ impl FileSnapshot {
                     base.verify(cancellation)?;
                     base_verified = true;
                 }
-                read_at(base.file()?, from, &mut output[..(to - from) as usize])?;
+                base.read_at(from, &mut output[..(to - from) as usize], cancellation)?;
             }
             Ok(())
         };
@@ -834,6 +927,8 @@ impl SealedFile {
             file_id: self.file_id.clone(),
             generation: self.generation,
             content: Arc::new(ImmutableFile {
+                verification: super::file_content::VerifiedObjects::default(),
+                root: storage.into(), reader: Mutex::new(None), dependencies: BTreeMap::new(), _range_retention: vec![],
                 file: std::sync::OnceLock::from(File::open(&target)?),
                 path: target,
                 hash: self.hash.clone(),
@@ -850,8 +945,7 @@ impl Storage {
     /// read retention is held. The branch consumes this ordinary blob owner.
     pub(super) fn admit_imported_file(&mut self, operation: &str, file: &InstalledFile, actor: &Grant) -> Result<String, KernelError> {
         let owner = blob_owner_id(&format!("workspace-import:{operation}"));
-        self.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
-            params![file.content.hash, i64::try_from(file.content.length).map_err(|_| KernelError::Operation("content length exceeds the Storage range".into()))?])?;
+        file.record(self)?;
         self.record_object_owner(&owner, &file.content.hash, actor.owning_workspace.as_deref(), Some(operation), &actor.grant_id)?;
         Ok(owner)
     }
@@ -893,7 +987,9 @@ impl Storage {
                 byte_length,
                 ..
             } => Some(Arc::new(ImmutableFile {
-                path: object_path(&self.root, &object_hash)?,
+                verification: self.verified_objects.clone(),
+                root: self.root.clone(), reader: Mutex::new(None), dependencies: BTreeMap::new(), _range_retention: vec![],
+                path: super::file_content::path(&self.root, &object_hash)?,
                 file: std::sync::OnceLock::new(),
                 length: byte_length,
                 verified: Mutex::new(self.verified_objects.contains(&object_hash)),
@@ -1048,16 +1144,7 @@ impl Storage {
             "filesystemHead":metadata_head,"metadataPin":metadata_pin,"metadata":metadata,"sessionId":session_id,"requestGrantId":request_grant_id});
         super::operations::idempotent(self, "workspace.checkpoint.fork", &input, |s| {
             for (_, _, file) in files {
-                let content = &file.content;
-                s.conn.execute(
-                    "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
-                    params![
-                        content.hash,
-                        i64::try_from(content.length).map_err(|_| KernelError::Operation(
-                            "content length exceeds Storage range".into()
-                        ))?
-                    ],
-                )?;
+                file.record(s)?;
             }
             let root = s.root_apply(&base, &entries)?;
             s.record_root_blob_hashes(
@@ -1193,15 +1280,7 @@ impl Storage {
             input.as_object_mut().unwrap().remove("metadata");
         }
         let apply = |storage: &mut Storage| {
-            storage.conn.execute(
-                "INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
-                params![
-                    content.hash,
-                    i64::try_from(content.length).map_err(|_| KernelError::Operation(
-                        "content length exceeds the Storage range".into()
-                    ))?
-                ],
-            )?;
+            installed.record(storage)?;
             storage.record_object_owner(
                 &owner,
                 &content.hash,

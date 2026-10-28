@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "Sistema de arquivos do Host",
+  "settings.projects.workspace.backendReady": "Dependências disponíveis",
+  "settings.projects.workspace.backendUnavailable": "Indisponível",
+  "settings.projects.workspace.refreshBackend": "Atualizar",
+  "settings.projects.workspace.backendHelp": "Ajuda do componente",
 
   'settings.harness.retrieval.selectOrdinaryModel': 'Select an ordinary model with tool support, or explicitly inherit the current conversation model. The previous decision or rerank selection will not silently switch services.',
 

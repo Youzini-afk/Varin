@@ -60,7 +60,7 @@ impl SourceFailureCode {
 pub fn valid_preparation_failure(code: &str) -> bool {
     matches!(
         code,
-        "preparation_failed" | "credentials_unavailable" | "binding_changed"
+        "preparation_failed" | "credentials_unavailable" | "binding_changed" | "workspace_backend_unavailable"
     ) || SourceFailureCode::parse(code).is_some()
 }
 

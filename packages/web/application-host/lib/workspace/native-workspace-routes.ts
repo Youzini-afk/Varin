@@ -10,8 +10,12 @@ export function registerNativeWorkspaceRoutes(app: Express, owner: NativeWorkspa
         response.once('close', close);
         try {
             const id = String(request.params.projectId), action = String(request.params.action);
-            if (!['inspect', 'enable', 'disable'].includes(action)) {
+            if (!['inspect', 'enable', 'disable', 'backend'].includes(action)) {
                 response.status(400).json({ message: 'Unknown workspace action' });
+                return;
+            }
+            if (action === 'backend') {
+                response.json(await owner.inspectBackend(id, controller.signal));
                 return;
             }
             if (action === 'enable')
@@ -27,7 +31,8 @@ export function registerNativeWorkspaceRoutes(app: Express, owner: NativeWorkspa
             if (!response.destroyed)
                 response.status(409).json({ code: (error as {
                         code?: string;
-                    }).code ?? 'native_workspace_unavailable', message: error instanceof Error ? error.message : 'Workspace is unavailable' });
+                    }).code ?? 'native_workspace_unavailable', message: error instanceof Error ? error.message : 'Workspace is unavailable',
+                    ...(error && typeof error === 'object' && 'details' in error ? { details: error.details } : {}) });
         }
         finally {
             response.removeListener('close', close);

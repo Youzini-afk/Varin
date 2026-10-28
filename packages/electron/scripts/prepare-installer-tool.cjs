@@ -14,6 +14,7 @@ const TOOLSET = {
 };
 
 async function prepare(projectDir = path.resolve(__dirname, '..')) {
+  await (await import('./prepare-workspace-component.mjs')).prepareWorkspaceComponent();
   const builderRequire = createRequire(require.resolve('electron-builder'));
   const library = createRequire(builderRequire.resolve('app-builder-lib'));
   const source = await library('./util/electronGet').downloadBuilderToolset(TOOLSET);

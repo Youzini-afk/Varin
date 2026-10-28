@@ -1,4 +1,5 @@
-import { runtimeFetch, projectPathKey, type ProjectEntry, type VersionedProjectWorkspace } from '@varin/application-client';
+import { runtimeFetch, projectPathKey, type ProjectEntry, type VersionedProjectWorkspace, type WorkspaceBackendStatus } from '@varin/application-client';
+export type { WorkspaceBackendStatus } from '@varin/application-client';
 export interface ProjectWorkspaceStatus {
     preparing: boolean;
     workspace: VersionedProjectWorkspace | null;
@@ -16,6 +17,12 @@ export interface ProjectWorkspaceStatus {
         symlinks: boolean;
         xattrs: boolean;
     } | null;
+}
+export async function inspectWorkspaceBackend(id: string, signal?: AbortSignal): Promise<WorkspaceBackendStatus> {
+    const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/workspace/backend`, { method: 'POST', signal });
+    const value = await response.json() as WorkspaceBackendStatus & { message?: string };
+    if (!response.ok) throw new Error(value.message ?? 'Workspace backend inspection failed');
+    return value;
 }
 export async function projectWorkspaceRequest(id: string, action: 'enable' | 'disable' | 'inspect', signal?: AbortSignal): Promise<ProjectWorkspaceStatus> {
     const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/workspace/${action}`, { method: 'POST', signal });

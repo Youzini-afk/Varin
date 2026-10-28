@@ -146,11 +146,14 @@ Var VarinProgressDescription
 !include "${__FILEDIR__}\installer-install.nsh"
 !include "${__FILEDIR__}\installer-uninstall.nsh"
 !include "${__FILEDIR__}\installer-upgrade.nsh"
+!include "${__FILEDIR__}\installer-workspace.nsh"
 !macro customAssistedPages
   !ifndef BUILD_UNINSTALLER
     !insertmacro VarinThemeFunctions ""
     !insertmacro VarinInstallFunctions
     Page custom VarinReadyCreate VarinReadyLeave
+    !insertmacro VarinWorkspaceFunctions
+    Page custom VarinWorkspaceCreate VarinWorkspaceLeave
     !define MUI_PAGE_CUSTOMFUNCTION_SHOW VarinProgressShow
     !define MUI_PAGE_CUSTOMFUNCTION_LEAVE VarinProgressLeave
     !insertmacro MUI_PAGE_INSTFILES

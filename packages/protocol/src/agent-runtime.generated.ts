@@ -2704,6 +2704,7 @@ export interface ChildProgressParams {
 }
 
 export interface ChildFailParams {
+  error?: ExecutionError;
   executionId: string;
   code: string;
   detail?: string;
@@ -2842,6 +2843,7 @@ export interface ChildReportPage {
 }
 
 export interface ChildReport {
+  error?: ExecutionError;
   outcome: Outcome;
   sender_thread_id: string;
   run_id: string | null;

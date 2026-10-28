@@ -32,6 +32,10 @@ pub(crate) enum BlobReadPhase {
     Encoded,
 }
 pub(crate) struct ImmutableReadTask {
+    storage_root: PathBuf,
+    recorded_length: u64,
+    stored_representation: bool,
+    verification: super::file_content::VerifiedObjects,
     params: Value,
     hash: String,
     path: PathBuf,
@@ -114,14 +118,21 @@ impl ImmutableReadTask {
     }
     pub(crate) fn run(&self) -> Result<PreparedImmutableRead, KernelError> {
         self.check_cancelled()?;
-        let mut file = File::open(&self.path)?;
-        if file.metadata()?.len() != self.byte_length {
+        trait ReadSeek: Read + Seek {}
+        impl<T: Read + Seek> ReadSeek for T {}
+        let ranged = super::file_content::is_range(&self.hash) && !self.stored_representation;
+        let mut file: Box<dyn ReadSeek> = if ranged {
+            // `path` for a version is its descriptor; the resource root remains
+            // separate so no consumer mistakes descriptor bytes for file bytes.
+            Box::new(super::file_content::Reader::open(&self.storage_root, &self.hash, self.byte_length, self.cancellation.clone())?.with_verification(self.verification.clone()))
+        } else { Box::new(File::open(&self.path)?) };
+        if !ranged && fs::metadata(&self.path)?.len() != self.byte_length {
             return Err(KernelError::Storage(format!(
                 "content object metadata is missing or corrupt: {}",
                 self.hash
             )));
         }
-        if self.verify {
+        if self.verify && !ranged {
             self.checkpoint(BlobReadPhase::Verify)?;
             let mut digest = Sha256::new();
             let mut length = 0u64;
@@ -138,7 +149,7 @@ impl ImmutableReadTask {
                     .ok_or_else(|| KernelError::Storage("content length overflow".into()))?;
             }
             if length != self.byte_length
-                || format!("sha256-{}", hex::encode(digest.finalize())) != self.hash
+                || format!("sha256-{}", hex::encode(digest.finalize())) != self.hash.strip_prefix("ranges-").unwrap_or(&self.hash)
             {
                 return Err(KernelError::Storage(format!(
                     "content object is corrupt: {}",
@@ -224,7 +235,7 @@ impl Storage {
             &grant.grant_id,
             grant.capabilities.contains("storage.admin"),
         )?;
-        let path = object_path(&self.root, hash)?;
+        let path = super::file_content::path(&self.root, hash)?;
         let recorded: Option<i64> = self
             .conn
             .query_row(
@@ -240,6 +251,15 @@ impl Storage {
                     "content object metadata is missing or corrupt: {hash}"
                 ))
             })?;
+        let recorded_length = byte_length;
+        if params.get("representation").is_some_and(|value| value.as_str() != Some("manifest")) {
+            return Err(KernelError::Operation("Unknown immutable content representation".into()));
+        }
+        let stored_representation = params.get("representation").and_then(Value::as_str) == Some("manifest");
+        if stored_representation && !super::file_content::is_range(hash) {
+            return Err(KernelError::Operation("Only an immutable range version has a manifest representation".into()));
+        }
+        let byte_length = if stored_representation { fs::metadata(&path)?.len() } else { byte_length };
         let offset = match params.get("offset") {
             Some(value) => value.as_u64().ok_or_else(|| {
                 KernelError::Operation("offset must be a non-negative integer".into())
@@ -271,6 +291,10 @@ impl Storage {
             params: params.clone(),
             hash: hash.into(),
             path,
+            storage_root: self.root.clone(),
+            recorded_length,
+            verification: self.verified_objects.clone(),
+            stored_representation,
             byte_length,
             offset: start,
             length,
@@ -310,7 +334,7 @@ impl Storage {
                 |row| row.get(0),
             )
             .optional()?;
-        if recorded.and_then(|length| u64::try_from(length).ok()) != Some(task.byte_length) {
+        if recorded.and_then(|length| u64::try_from(length).ok()) != Some(task.recorded_length) {
             return Err(KernelError::Storage(
                 "content object metadata changed during read".into(),
             ));

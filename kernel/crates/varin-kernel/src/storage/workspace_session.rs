@@ -138,7 +138,7 @@ pub(crate) struct Session {
     mount_state: std::sync::atomic::AtomicU8,
     native_idle: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Namespace mutations use the exclusive boundary. A flush owns only its
-    /// file publication lock during sealing, and joins the shared boundary for
+    /// file publication lock during range persistence, and joins the shared boundary for
     /// its short metadata commit. Checkpoints never acquire publication locks.
     boundary: RwLock<()>,
     namespace: Mutex<Namespace>,
@@ -723,13 +723,7 @@ impl Session {
                 return self.flush_metadata(node);
             }
         }
-        let sealed = snapshot.seal(&self.root.join("staging"), &self.revoked)?;
-        let retention = self
-            .port
-            .call(move |storage| Ok((storage.retain_private_file(&sealed), sealed)))?;
-        let installed = retention
-            .1
-            .install(&self.root, retention.0, &self.revoked)?;
+        let installed = snapshot.freeze(&self.root, &self.port, &self.revoked)?;
         let _boundary = self
             .boundary
             .read()
@@ -823,7 +817,7 @@ impl Session {
     }
     /// Metadata changes are durable at their native callback boundary. They do
     /// not hash the body, and a concurrent older flush reads these latest attrs
-    /// only after sealing, so chmod/utimes cannot be overwritten by that flush.
+    /// only after freezing, so chmod/utimes cannot be overwritten by that flush.
     pub(crate) fn set_attributes(
         &self,
         node: &Arc<Node>,
@@ -1858,14 +1852,10 @@ impl Checkpoint {
             if paths.is_empty() {
                 continue;
             }
-            let sealed = snapshot.seal(&self.root.join("staging"), cancelled)?;
-            let (retention, sealed) = self
-                .port
-                .call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
             installed.push((
                 paths,
                 *mode,
-                sealed.install(&self.root, retention, cancelled)?,
+                snapshot.freeze(&self.root, &self.port, cancelled)?,
             ));
         }
         Ok(installed)

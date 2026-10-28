@@ -434,6 +434,7 @@ fn cancel_unlaunched_trigger(
             };
         }
         execution.report = Some(ChildReport {
+            error: None,
             outcome: Outcome::Cancelled,
             sender_thread_id: child.child_thread_id,
             run_id: None,

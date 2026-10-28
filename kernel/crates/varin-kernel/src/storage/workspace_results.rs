@@ -142,6 +142,7 @@ impl Storage {
         let identity = json!({"operationId":operation,"publicationId":publication,"workspaceId":branch.workspace_id,
             "branchId":branch_id,"sourcePinId":pin,"metadataPinId":metadata_pin,"sessionId":session,"grantId":grant.grant_id});
         super::operations::idempotent(self, "working.result.prepare", &identity, |storage| {
+            for (_, _, file) in files { file.record(storage)?; }
             for (_, state) in &entries {
                 if let PathState::RegularFile {
                     object_hash,

@@ -1,4 +1,9 @@
 export const settingsDict = {
+  "settings.projects.workspace.backend": "執行 Host 檔案系統後端",
+  "settings.projects.workspace.backendReady": "依賴已就緒",
+  "settings.projects.workspace.backendUnavailable": "無法使用",
+  "settings.projects.workspace.refreshBackend": "重新偵測",
+  "settings.projects.workspace.backendHelp": "元件安裝說明",
   "settings.chat.dialogue": "對話優先",
   "settings.chat.dialogueHint": "保留每段發言，段落間用一條可展開的動態列顯示目前動作，結束後彙整；子 Agent 單獨顯示。",
   "settings.chat.dialogueDetailsHint": "過程預設收合。思考和工具的展開偏好在開啟過程後生效。",

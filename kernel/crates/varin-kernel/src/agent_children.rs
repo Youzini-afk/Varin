@@ -131,7 +131,7 @@ pub(super) fn execute(
                     "unknown child preparation failure".into(),
                 ));
             }
-            (p.execution_id, Some((p.code, p.detail)))
+            (p.execution_id, Some((p.code, p.detail, p.error)))
         } else {
             let p: ChildExecutionParams = serde_json::from_value(params)?;
             (p.execution_id, None)
@@ -140,8 +140,8 @@ pub(super) fn execute(
             let mut catalog = owner
                 .lock()
                 .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
-            let execution = if let Some((code, detail)) = failure {
-                catalog.fail_delegated_preparation(&execution_id, &code, detail.as_deref())
+            let execution = if let Some((code, detail, error)) = failure {
+                catalog.fail_delegated_preparation_with_error(&execution_id, &code, detail.as_deref(), error)
             } else if method == "runtime.child.release" {
                 catalog.release_delegated_resources(&execution_id)
             } else {
