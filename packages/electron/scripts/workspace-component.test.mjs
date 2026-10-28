@@ -16,6 +16,10 @@ test('optional workspace component page compiles against the actual pinned MSI w
   builder('app-builder-lib');
   const library = createRequire(builder.resolve('app-builder-lib'));
   const { getMakeNsisPath } = library('./toolsets/windows');
+  const { bundledLanguages } = library('./util/langs');
+  const { createAddLangsMacro } = library('./targets/nsis/nsisLang');
+  let languageLines;
+  createAddLangsMacro({ macro: (_name, lines) => { languageLines = lines; } }, { langs: bundledLanguages });
   const compiler = await getMakeNsisPath();
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'varin-workspace-component-'));
   const native = value => value.replaceAll('/', '\\').replaceAll('$', '$$');
@@ -26,12 +30,12 @@ test('optional workspace component page compiles against the actual pinned MSI w
     await writeFile(script, '\uFEFF' + [
       'Unicode true', 'RequestExecutionLevel user', 'SetCompress off', 'Name "Varin component compile check"',
       `OutFile "${native(output)}"`, '!include "MUI2.nsh"', '!include "LogicLib.nsh"', '!include "FileFunc.nsh"', '!include "nsDialogs.nsh"',
-      'Var VarinPage', '!macro VarinPageHeader TITLE SUBTITLE', 'nsDialogs::Create 1018', 'Pop $VarinPage', '!macroend',
+      'Var VarinPage', '!macro VarinPageHeader TITLE SUBTITLE', 'nsDialogs::Create 1018', 'Pop $VarinPage', '${NSD_CreateLabel} 0 0 100% 12% "${TITLE}"', 'Pop $0', '!macroend',
       'Function VarinStylePage', 'FunctionEnd', `!include "${native(include)}"`, '!insertmacro VarinWorkspaceFunctions',
-      'Page custom VarinWorkspaceCreate VarinWorkspaceLeave', 'Section', 'SectionEnd',
-      '!insertmacro MUI_LANGUAGE "English"', '!insertmacro MUI_LANGUAGE "SimpChinese"', '!insertmacro MUI_LANGUAGE "TradChinese"', '',
+      'Page custom VarinWorkspaceCreate VarinWorkspaceLeave', '!insertmacro MUI_PAGE_INSTFILES', 'Section', 'SectionEnd',
+      ...languageLines, '',
     ].join('\n'));
-    await promisify(execFile)(compiler.path, ['/V2', script], { env: { ...process.env, ...compiler.env }, windowsHide: true });
+    await promisify(execFile)(compiler.path, ['/WX', '/V2', script], { env: { ...process.env, ...compiler.env }, windowsHide: true });
     assert((await stat(output)).size > 0);
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });

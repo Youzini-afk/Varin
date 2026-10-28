@@ -9,24 +9,7 @@ Var VarinWorkspaceChoice
 Var VarinWorkspaceCheckbox
 Var VarinWorkspaceResult
 Var VarinWorkspaceInstalled
-LangString VarinWorkspaceTitle 1033 "Independent workspaces"
-LangString VarinWorkspaceTitle 2052 "独立工作区"
-LangString VarinWorkspaceTitle 1028 "獨立工作區"
-LangString VarinWorkspaceHint 1033 "Optional WinFsp enables isolated Agent workspaces. Normal chats and shared tasks work without it. Installing this system component asks for Windows permission."
-LangString VarinWorkspaceHint 2052 "可选的 WinFsp 为 Agent 提供独立工作区。普通会话和共享任务无需安装；安装此系统组件时 Windows 会请求授权。"
-LangString VarinWorkspaceHint 1028 "選用的 WinFsp 為 Agent 提供獨立工作區。一般對話和共用任務無需安裝；安裝此系統元件時 Windows 會請求授權。"
-LangString VarinWorkspaceCheck 1033 "Install or update WinFsp (${VARIN_WINFSP_RELEASE})"
-LangString VarinWorkspaceCheck 2052 "安装或更新 WinFsp（${VARIN_WINFSP_RELEASE}）"
-LangString VarinWorkspaceCheck 1028 "安裝或更新 WinFsp（${VARIN_WINFSP_RELEASE}）"
-LangString VarinWorkspaceReuse 1033 "A compatible WinFsp is already installed and will be reused."
-LangString VarinWorkspaceReuse 2052 "已检测到兼容的 WinFsp，将复用现有组件。"
-LangString VarinWorkspaceReuse 1028 "已偵測到相容的 WinFsp，將使用現有元件。"
-LangString VarinWorkspaceSkipped 1033 "WinFsp was not installed (result $VarinWorkspaceResult). Varin remains usable; install the component later to enable independent workspaces."
-LangString VarinWorkspaceSkipped 2052 "WinFsp 未完成安装（结果 $VarinWorkspaceResult）。Varin 仍可正常使用，之后安装组件即可启用独立工作区。"
-LangString VarinWorkspaceSkipped 1028 "WinFsp 未完成安裝（結果 $VarinWorkspaceResult）。Varin 仍可正常使用，之後安裝元件即可啟用獨立工作區。"
-LangString VarinWorkspaceRestart 1033 "WinFsp requires a Windows restart. Varin is installed; independent workspaces become available after restarting Windows."
-LangString VarinWorkspaceRestart 2052 "WinFsp 需要重启 Windows。Varin 已安装，重启 Windows 后可使用独立工作区。"
-LangString VarinWorkspaceRestart 1028 "WinFsp 需要重新啟動 Windows。Varin 已安裝，重新啟動 Windows 後可使用獨立工作區。"
+!include "${__FILEDIR__}\workspace-component\strings.nsh"
 
 !macro VarinWorkspaceFunctions
 Function VarinWorkspaceCreate

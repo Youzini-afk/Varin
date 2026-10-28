@@ -2,6 +2,29 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const messages = {
+  VarinWorkspaceTitle: ['Independent workspaces', '独立工作区', '獨立工作區'],
+  VarinWorkspaceHint: [
+    'Optional WinFsp enables isolated Agent workspaces. Normal chats and shared tasks work without it. Installing this system component asks for Windows permission.',
+    '可选的 WinFsp 为 Agent 提供独立工作区。普通会话和共享任务无需安装；安装此系统组件时 Windows 会请求授权。',
+    '選用的 WinFsp 為 Agent 提供獨立工作區。一般對話和共用任務無需安裝；安裝此系統元件時 Windows 會請求授權。',
+  ],
+  VarinWorkspaceCheck: ['Install or update WinFsp ({release})', '安装或更新 WinFsp（{release}）', '安裝或更新 WinFsp（{release}）'],
+  VarinWorkspaceReuse: ['A compatible WinFsp is already installed and will be reused.', '已检测到兼容的 WinFsp，将复用现有组件。', '已偵測到相容的 WinFsp，將使用現有元件。'],
+  VarinWorkspaceSkipped: [
+    'WinFsp was not installed (result {result}). Varin remains usable; install the component later to enable independent workspaces.',
+    'WinFsp 未完成安装（结果 {result}）。Varin 仍可正常使用，之后安装组件即可启用独立工作区。',
+    'WinFsp 未完成安裝（結果 {result}）。Varin 仍可正常使用，之後安裝元件即可啟用獨立工作區。',
+  ],
+  VarinWorkspaceRestart: [
+    'WinFsp requires a Windows restart. Varin is installed; independent workspaces become available after restarting Windows.',
+    'WinFsp 需要重启 Windows。Varin 已安装，重启 Windows 后可使用独立工作区。',
+    'WinFsp 需要重新啟動 Windows。Varin 已安裝，重新啟動 Windows 後可使用獨立工作區。',
+  ],
+};
 
 const resources = fileURLToPath(new URL('../resources/', import.meta.url));
 export async function prepareWorkspaceComponent() {
@@ -34,6 +57,21 @@ export async function prepareWorkspaceComponent() {
     `!define VARIN_WINFSP_VERSION "${component.version}.0"`,
     `!define VARIN_WINFSP_RELEASE "${component.release}"`, '',
   ].join('\n'));
+  // Follow the builder's actual language list, as the main installer does.
+  // NSIS requires a value in every enabled table, including English fallback.
+  const builder = createRequire(require.resolve('electron-builder'));
+  const library = createRequire(builder.resolve('app-builder-lib'));
+  const { bundledLanguages, lcid } = library('./util/langs');
+  const strings = [];
+  for (const [key, translations] of Object.entries(messages)) {
+    for (const lang of bundledLanguages) {
+      const text = translations[lang === 'zh_CN' ? 1 : lang === 'zh_TW' ? 2 : 0]
+        .replaceAll('$', '$$').replaceAll('"', '$\\"')
+        .replaceAll('{release}', '${VARIN_WINFSP_RELEASE}').replaceAll('{result}', '$VarinWorkspaceResult');
+      strings.push(`LangString ${key} ${lcid[lang]} "${text}"`);
+    }
+  }
+  await writeFile(path.join(directory, 'strings.nsh'), '\uFEFF' + strings.join('\n') + '\n');
   console.log(`[electron] Prepared unmodified WinFsp ${component.release} (${component.sha256})`);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await prepareWorkspaceComponent();
