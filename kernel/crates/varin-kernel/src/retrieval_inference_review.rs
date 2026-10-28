@@ -63,7 +63,7 @@ fn run_investigation(stop:bool) {
     let child=f.db.prepare_child(&child.operation_id,source,proposal,basis).unwrap();
     let receipt=child.receipt.as_ref().unwrap();
     let launch=f.db.launch_intent(&receipt.run_id).unwrap().unwrap().selection;
-    let binding=RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,provider_id:Some("fixture".into()),tokenizer:None,request_context:None,child_dispatch:None,goal:None,
+    let binding=RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,provider_id:Some("fixture".into()),tokenizer:None,request_context:None,child_dispatch:None,goal:None,
         resource_activations:vec![],resource_checkpoint_id:None,connection_identity:launch.connection_identity,provider_family:launch.provider_family,
         model:launch.model,credential_ref:Some("credential-ref".into()),configuration_generation:launch.configuration_generation,
         tool_schema_generation:launch.tool_schema_generation,tools:launch.tools,instruction_sources:vec!["fixture:retrieval".into()],memory_checkpoint:None,

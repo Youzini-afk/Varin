@@ -189,6 +189,10 @@ Varin Host tool service 的同一 manifest `tool` descriptor 用于发现、激�
 绑定到原 Run/Operation 的权限及资源事实。Host-only invocation scope 只以 opaque token 跨 broker；
 扩展不能提交一个 scope object 给自己授予另一调用方的权限。
 
+同一 `tool` 声明可附带 `disclosure`：简短用途、搜索别名、导航分组，以及原参数 schema 中明确分支的阅读路径。
+Host 随原 descriptor 固定这些说明和版本，不建立另一张注册表。操作视图保留原共同约束、引用与互斥关系，
+不会替换实际执行 schema。未提供披露描述的扩展仍可按原名称、描述和完整契约被发现；导航分组不授予权限。
+
 Result callback 返回 JSON，可追加有序 text/media part；null/empty 是合法数据。
 非法 output 或 callback failure 保留已受理 part 和失败回执。长得像图片或 receipt 的 JSON 仍只是数据。
 Job declaration 必须声明 thread/environment lifetime，并有可信 domain adapter 持久受理和管理；

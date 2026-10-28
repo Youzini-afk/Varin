@@ -29,6 +29,7 @@ import type { McpTaskRuntime } from './mcp-task-runtime.js';
 import type { McpResourceRuntime } from './mcp-resource-runtime.js';
 import { HostToolAdmissionError } from './tool-admission.js';
 import { KernelClientError } from './kernel-error.js';
+import { createMcpDiscoveryReader, McpDiscoveryError, mcpDiscoverySelection, type McpDiscoveryQuery } from './mcp-discovery.js';
 
 const builtins = new Map(MCP_CAPABILITIES.map(value => [value.name, { ...value, validate: compileToolJsonSchema(value.schema) }]));
 export const MCP_DISCOVER = MCP_CAPABILITIES.find(value => value.operation === 'discover')!.name;
@@ -66,7 +67,7 @@ type Selection =
   | {kind:'unsubscribe';operationId:string}
   | {kind:'subscribe';args:Record<string,unknown>}
   | { kind: 'control'; action:import('./protocol.generated.js').McpTaskAction; operationId:string }
-  | { kind: 'discover'; server?: string; query: string }
+  | ({ kind: 'discover' } & McpDiscoveryQuery)
   | {
       kind: 'deferred';
       server: string;
@@ -80,6 +81,7 @@ type Selection =
   | { kind: 'direct'; target: Target };
 export function createMcpLease(options: McpOwnerOptions): McpToolLease {
   const { lease } = options;
+  const discovery = createMcpDiscoveryReader();
   const entries = new Map(lease.binding.tools.map((tool) => [tool.name, tool]));
   const aliases = new Map<string, string>();
   const targetName = (name: string, version: string) => aliases.get(JSON.stringify([name, version])) ?? name;
@@ -190,7 +192,15 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
       if(builtin.route.kind==='resource_subscribe')return {kind:'subscribe',args};
       if(builtin.route.kind==='resource_unsubscribe')return {kind:'unsubscribe',operationId:args[builtin.route.argument] as string};
       if (builtin.route.kind === 'task_control') return {kind:'control',action:builtin.route.action,operationId:args[builtin.route.argument] as string};
-      if (builtin.operation === 'discover') return { kind: 'discover', ...(typeof args.server === 'string' ? {server:args.server} : {}), query: String(args.query ?? '') };
+      if (builtin.operation === 'discover') {
+        let selected:McpDiscoveryQuery;
+        try {selected=mcpDiscoverySelection(args);} catch(error) {
+          if(error instanceof McpDiscoveryError)throw new HostToolAdmissionError(error.code);
+          throw error;
+        }
+        if(selected.server && !servers.has(selected.server))throw new HostToolAdmissionError('mcp_arguments_invalid');
+        return {kind:'discover',...selected};
+      }
       if (builtin.operation === 'call' || builtin.operation === 'start_task') return { kind: 'deferred', server: args.server as string, tool: args.tool as string,
         schemaVersion: args.schemaVersion as string, args: args.arguments as Record<string, unknown>,task:builtin.route.kind === 'server_task_argument',...(typeof args.ttl === 'number'?{ttl:args.ttl}:{}) };
       return { kind: 'service', operation: builtin.operation as Extract<Selection,{kind:'service'}>['operation'], args };
@@ -336,54 +346,28 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
     async execute(call, signal, owner) {
       let target: Target;
       let policyGeneration: string;
+      let discoverySelection: Extract<Selection,{kind:'discover'}> | undefined;
       try {
         signal.throwIfAborted();
         const selected = selection(call);
         if (selected.kind === 'discover') {
+          discoverySelection=selected;
           const tools = selected.server
             ? await lease.discover(selected.server, signal)
             : lease.binding.tools;
           const services = selected.server ? await lease.discoverServices(selected.server, signal) : [];
           const cached = selected.server ? [] : await lease.cachedTools(signal);
           const liveNames = new Set(tools.map(tool => `${tool.server}\u0000${tool.tool}`));
-          const query = selected.query.toLocaleLowerCase();
           const readiness = lease.inspect();
-          return receipt(
-            {
-              kind: 'result',
-              outcome: 'succeeded',
-              effect: selected.server ? 'confirmed' : 'none',
-              content: { data: {
-                servers: readiness.servers,
-                services,
-                readiness,
-                ...(options.unavailableWorkspaceScope
-                  ? {
-                      unavailableWorkspaceScope:
-                        options.unavailableWorkspaceScope,
-                    }
-                  : {}),
-                tools: [...tools
-                  .filter((tool) =>
-                    `${tool.name} ${tool.description}`
-                      .toLocaleLowerCase()
-                      .includes(query),
-                  )
-                  .map((tool) => ({
-                    server: tool.server,
-                    tool: tool.tool,
-                    name: tool.name,
-                    description: tool.description,
-                    inputSchema: tool.inputSchema,
-                    schemaVersion: tool.schemaVersion,
-                    ...(tool.problem ? { problem: tool.problem } : {}),
-                    taskSupport: tool.taskSupport, taskCapable: tool.taskCapable,
-                  })), ...cached.filter(tool => !liveNames.has(`${tool.server}\u0000${tool.tool}`)
-                    && `${tool.name} ${tool.description}`.toLocaleLowerCase().includes(query))],
-              }, parts: [] },
-            },
-            true,
-          );
+          const data = discovery({
+            args:call.arguments as Record<string,unknown>,
+            tools:[...tools,...cached.filter(tool=>!liveNames.has(`${tool.server}\u0000${tool.tool}`))],
+            servers:readiness.servers,services,provenance:binding.provenance,budget:call.outputVisibleBytes,
+            readiness:{configErrorCount:readiness.configErrorCount,configuredServerCount:readiness.configuredServerCount,
+              connectedServerCount:readiness.connectedServerCount,cachedToolCount:readiness.cachedToolCount},
+            unavailableWorkspaceScope:options.unavailableWorkspaceScope,
+          });
+          return receipt({kind:'result',outcome:'succeeded',effect:selected.server?'confirmed':'none',content:{data,parts:[]}},true);
         }
         const approval = approved.get(call.operationId);
         approved.delete(call.operationId);
@@ -399,22 +383,20 @@ export function createMcpLease(options: McpOwnerOptions): McpToolLease {
         policyGeneration = approval.policy;
         signal.throwIfAborted();
         validateTarget(target);
-      } catch {
+      } catch (error) {
+        if(error instanceof McpDiscoveryError)return receipt({kind:'result',outcome:'failed',effect:'none',
+          content:{data:{error:{code:error.code,message:'Read the exact tool contract from path "", or repeat the original discovery query.'}},parts:[]}},true);
         // This receipt describes the capability-preparation operation, not tools/call. A definitive
         // preparation failure is settled; an aborted outstanding preparation remains uncertain.
-        if (
-          call.name === MCP_DISCOVER &&
-          object(call.arguments) &&
-          call.arguments.server !== undefined
-        )
+        if (discoverySelection)
           return receipt(
             {
               kind: 'result',
-              outcome: signal.aborted ? 'indeterminate' : 'failed',
-              effect: signal.aborted ? 'unknown' : 'confirmed',
+              outcome: signal.aborted ? discoverySelection.server ? 'indeterminate' : 'cancelled' : 'failed',
+              effect: discoverySelection.server ? signal.aborted ? 'unknown' : 'confirmed' : 'none',
               content: { data: { error: 'mcp_discovery_failed' }, parts: [] },
             },
-            !signal.aborted,
+            !discoverySelection.server || !signal.aborted,
           );
         return noEffect('mcp_dispatch_rejected');
       }

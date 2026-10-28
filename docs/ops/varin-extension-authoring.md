@@ -872,14 +872,26 @@ credential for each run, and npm attaches provenance automatically.
 ## Runtime contract discovery
 
 Common tools are declared directly, including common capabilities implemented by extensions.
-Additional tool documentation uses native `tool_describe`: `{}` lists available deferred namespaces,
+Additional tool documentation uses native `tool_describe`: `{}` lists available namespaces,
 `{ "namespace": "development" }` reads a capability group, and `{ "name": "runtime_contract" }`
-reads one exact tool. Results include parameters and a version reference. The model may call the
-tool directly by name with those parameters, or use `tool_invoke({ reference, arguments })`.
+reads one exact tool. Search returns concise candidates by default. Simple tool details include complete
+parameters and a version reference; compound tools expose their original operations, selectable directly
+with `operation`. A model calls an already declared function directly, and otherwise uses
+`tool_invoke({ reference, arguments })`.
 Both use the original frozen capability directory, validation and permissions.
 Documentation is appended as tool-result data; the
 provider's function list stays fixed. Unavailable tools are absent, and discovery grants no
 execution permission. SDK callers can still use their original `call.tools.list/describe/invoke`.
+
+Tool declarations may supply `disclosure: { summary, aliases?, namespace?, operations? }` beside their
+original input/output schema. Each operation supplies `name`, `description`, and `paths` pointing to
+existing `oneOf`/`anyOf` branches, for example `/oneOf/0`. Paths may also select referenced definitions,
+such as `/$defs/content/oneOf/1`; all remaining root constraints and definitions are retained. These
+paths are navigation over the same validator contract, not new execution endpoints or task templates.
+Unknown tools retain discovery through their original name/description/schema. Full descriptions are
+paged as whole entries using the original request's visible-output budget. Follow `next` on the discovery
+entrypoint; oversized contracts provide an explicit `path` reader over exact original JSON structure.
+Internal service/scheduling metadata stays in the existing contract inspection interfaces.
 
 The ordinary `runtime_contract` tool provides the current service/UI contract and immutable-source views:
 

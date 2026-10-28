@@ -684,7 +684,7 @@ impl ToolInvocationRead {
                 let binding = snapshot.view.binding;
                 (
                     binding.history_range,
-                    crate::execution::FrozenToolContext { execution_environment: binding.execution_environment, direct_tools: binding.direct_tools,
+                    crate::execution::FrozenToolContext { tool_output_visible_bytes: binding.tool_output_visible_bytes, execution_environment: binding.execution_environment, direct_tools: binding.direct_tools,
                         run_id: self.context.run_id.clone(),
                         origin: self.context.origin.clone(),
                         tools: std::sync::Arc::new(binding.tools),

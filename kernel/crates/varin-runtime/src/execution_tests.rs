@@ -73,7 +73,7 @@ fn input_with_frozen_context(
     ExecutionInput {
         run_id: receipt.run_id,
         owner_generation: db.epoch(),
-        binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -185,7 +185,7 @@ fn policy_graph_validates_the_exact_available_cut_of_the_frozen_launch() {
             nodes: vec![PolicyAdmittedNode {
                 node: PolicyToolNode { id: "read-node".into(), depends_on: vec![], call: ToolCall {
                     call_id: "read-node".into(), name: "read".into(), schema_version: "1".into(), arguments: json!({}) } },
-                context: FrozenToolContext { execution_environment: None, direct_tools: None,
+                context: FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                     run_id: original.run_id.clone(), origin: ToolOrigin::PolicyAction { action_id: action_id.clone(), node_id: "read-node".into() },
                     tools: Arc::new(selected), tool_schema_generation: original.binding.tool_schema_generation,
                     child_dispatch: None, resource_activations: vec![], resource_checkpoint_id: boundary.resource_checkpoint_id.clone(), source: boundary.source.clone(),

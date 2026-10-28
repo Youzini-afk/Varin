@@ -550,7 +550,7 @@ export type ModelContent = {kind:'text'|'reasoning_summary';text:string} | {kind
 
 export interface ModelConversationItem { resource_activation?:ResourceActivation; id:string; provenance:ContentProvenance; content:ModelContent; opaque:ModelOpaqueItem|null }
 
-export interface RequestBinding {execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
+export interface RequestBinding {tool_output_visible_bytes?:number|null;execution_environment?:unknown;direct_tools?:string[]|null; provider_id?:string|null; tokenizer?:TokenizerBinding; request_context?:{session_id:string;workspace_id:string|null}|null; child_dispatch:unknown|null; goal:{id:string;generation:number}|null; resource_activations:ResourceActivation[]; resource_checkpoint_id:string|null; connection_identity:string; provider_family:string; model:string; credential_ref:string|null; configuration_generation:number; tool_schema_generation:number; tools:LaunchTool[]; instruction_sources:string[]; memory_checkpoint:string|null; attachment_refs:string[]; environment_cursor:number; history_range:HistoryRange }
 
 export type RequestOrigin = {kind:'auxiliary_inference';operation_id:string;parent_operation_id:string;purpose:string} | {kind:'mcp_sampling';interaction_id:string;operation_id:string;parent_operation_id:string} | {kind:'conversation';compaction:{planHash:string;nodeId:string}|null;step:number;history_range:HistoryRange} | {kind:'policy_model_job';action_id:string;purpose:string;boundary_id:string};
 
@@ -2619,7 +2619,7 @@ export interface LaunchSource {
   resource_owner: SourceResourceOwner;
 }
 
-export interface ToolMetadata { always_declared?: boolean; service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+export interface ToolMetadata { disclosure?: {summary:string;aliases?:string[];namespace?:string;operations?:{name:string;description:string;paths:string[]}[]}; always_declared?: boolean; service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
 
 export interface NestedToolInspectParams {
   parentOperationId: string;
@@ -2656,6 +2656,7 @@ export interface NestedToolInvokeParams {
 }
 
 export interface HostToolCall {
+  outputVisibleBytes?: number | null;
   runId: string;
   operationId: string;
   origin: ToolOrigin;
@@ -5982,13 +5983,32 @@ export const MCP_CAPABILITIES: readonly (LaunchTool & { route: McpRoute; operati
     "name": "mcp_discover",
     "operation": "discover",
     "version": "1",
-    "description": "List configured MCP servers without connecting. Set server to prepare just that server and discover its exact tool schemas and negotiated resource/prompt services.",
+    "description": "Browse configured MCP servers and known tool summaries without connecting. Set server to discover only that server; tool reads one exact contract. query returns concise candidates, detail: full reads complete contracts, path reads exact contract structure and next/cursor continue whole entries. Unprepared server contents remain undiscovered. Direct tools stay callable; otherwise use mcp_call with the original schemaVersion.",
     "schema": {
       "type": "object",
       "properties": {
         "server": {
           "type": "string",
           "minLength": 1
+        },
+        "tool": {
+          "type": "string",
+          "minLength": 1
+        },
+        "detail": {
+          "type": "string",
+          "enum": [
+            "summary",
+            "full"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Use alone to continue the same retained directory and query."
         },
         "query": {
           "type": "string"

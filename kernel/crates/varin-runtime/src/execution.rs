@@ -326,6 +326,8 @@ impl ToolRequirements {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ToolMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disclosure: Option<crate::tool_documentation::ToolDisclosure>,
     /// Host-selected presentation for the frozen work focus, independent of availability.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub always_declared: bool,
@@ -378,6 +380,9 @@ pub struct ModelRequestContext {
 /// No keys, tokens, or authorization headers belong in a request snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RequestBinding {
+    /// The original model's visible output budget, also used by structured discovery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_output_visible_bytes: Option<usize>,
     /// Tool origin from this exact admitted selection, retained with the immutable request.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mcp_tools: Vec<String>,
@@ -1037,6 +1042,8 @@ impl ToolOrigin {
 #[serde(deny_unknown_fields)]
 pub struct FrozenToolContext {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_output_visible_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_environment: Option<Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub direct_tools: Option<Vec<String>>,
@@ -1101,6 +1108,10 @@ struct ExecutorCall<T: ?Sized> {
     executor: Arc<T>,
     call: ToolCall,
     context: FrozenToolContext,
+}
+/// Bind the standard lifecycle after an owner has captured request-local presentation settings.
+pub fn bind_tool_executor<T: ToolExecutor + ?Sized>(executor: Arc<T>, call: &ToolCall, context: &FrozenToolContext) -> Box<dyn PreparedToolCall> {
+    Box::new(ExecutorCall { executor, call: call.clone(), context: context.clone() })
 }
 impl<T: ToolExecutor + ?Sized> PreparedToolCall for ExecutorCall<T> {
     fn receipt_persisted(&self, context: &ToolExecutionContext) {
@@ -1202,11 +1213,7 @@ pub trait ToolExecutor: Send + Sync + 'static {
         context: &FrozenToolContext,
         _: &CancellationToken,
     ) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
-        Ok(Box::new(ExecutorCall {
-            executor: self,
-            call: call.clone(),
-            context: context.clone(),
-        }))
+        Ok(bind_tool_executor(self, call, context))
     }
     /// Establish ordering before any owner lookup. This must be local and nonblocking: no I/O,
     /// service preparation, credentials or permission waits. Wrappers forward calls they do not own.
@@ -2512,6 +2519,7 @@ impl<
                         Err(error) => finish!('agent,RunState::Failed,None,Some(error)),
                     };
                     if let Some(selected) = &selected_model {
+                        input.binding.tool_output_visible_bytes = selected.binding.tool_output_visible_bytes;
                         input.binding.child_dispatch = selected.binding.child_dispatch.clone();
                         input.binding.connection_identity =
                             selected.binding.connection_identity.clone();
@@ -3087,7 +3095,7 @@ impl<
         cached: &BTreeMap<String, ToolResult>,
         tools: Option<Arc<dyn ToolExecutor>>,
     ) -> Result<Vec<ToolResult>, ExecutionError> {
-        let frozen = FrozenToolContext {
+        let frozen = FrozenToolContext { tool_output_visible_bytes: snapshot.view.binding.tool_output_visible_bytes,
             execution_environment: snapshot.view.binding.execution_environment.clone(),
             direct_tools: snapshot.view.binding.direct_tools.clone(),
             child_dispatch: snapshot.view.binding.child_dispatch.clone(),

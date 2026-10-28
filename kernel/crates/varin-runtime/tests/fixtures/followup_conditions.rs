@@ -68,7 +68,7 @@ fn second_process(f: &mut Fixture) -> String {
                     compaction: None, step: 2,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,

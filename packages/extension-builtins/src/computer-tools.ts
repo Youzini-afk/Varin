@@ -22,7 +22,15 @@ const action = schema({ kind: { enum: ['click', 'type', 'key', 'scroll', 'drag',
 }, ['kind', 'app']);
 const declaration = (method: string, operation: 'read' | 'effect', description: string, inputSchema: JsonObject, job = false): VarinExtensionServiceProvision => ({
   id: `varin.computer.${method}`, version: 1,
-  tool: { name: `computer_${method}`, description, completion: job ? 'job' : 'result', ...(job ? { lifetime: 'thread' as const } : {}), operation, inputSchema, outputSchema: { type: 'object' } },
+  tool: { name: `computer_${method}`, description, completion: job ? 'job' : 'result', ...(job ? { lifetime: 'thread' as const } : {}), operation, inputSchema, outputSchema: { type: 'object' },
+    disclosure:{summary:({observe:'Observe an assigned application window, accessibility tree and optional screenshot.',act:'Send input to an assigned application using its observation and automation epoch.',browser_read:'Read assigned Chromium tabs, snapshots or screenshots.',browser:'Launch or operate assigned Chromium.',office_read:'Read live LibreOffice documents and unsaved content.',office:'Launch, open or operate live LibreOffice documents.'} as Record<string,string>)[method] ?? description,
+      aliases:['桌面','应用',...(method==='observe'||method==='browser_read'?['截图','屏幕']:[])],
+      namespace:method.startsWith('browser')?'browser':method.startsWith('office')?'office':['prepare','install','desktop_lifecycle'].includes(method)?'environment':'desktop',
+      ...(Array.isArray(inputSchema.oneOf)?{operations:(inputSchema.oneOf as JsonObject[]).flatMap((branch,index)=>{
+        const op=(branch.properties as JsonObject).op as JsonObject;
+        return (typeof op.const==='string'?[op.const]:op.enum as string[]).map(name=>({name,description:`${name} in the assigned application.`,paths:[`/oneOf/${index}`]}));
+      })}:{})},
+  },
 });
 /** Product manifest, Host decoder and Tool directory consume this same declaration. */
 export const COMPUTER_TOOL_DECLARATIONS = [

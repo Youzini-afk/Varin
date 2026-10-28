@@ -154,6 +154,7 @@ impl ToolBridge {
         context: &ToolExecutionContext,
         call: &ToolCall,
         cancel: &CancellationToken,
+        output_visible_bytes: Option<usize>,
     ) -> Result<Reply, ExecutionError> {
         let epoch = &generation.epoch;
         let holder = &generation.holder;
@@ -184,7 +185,8 @@ impl ToolBridge {
             self.send(json!({"v":1,"kind":"host-tool-request","id":id,"kernelEpoch":epoch,"phase":phase,
                 "binding":{"ownerId":generation.owner_id,"reference":binding.reference(),"generation":binding.generation(),"holderId":holder},
                 "call":{"runId":context.run_id,"origin":context.origin,"operationId":context.operation_id,
-                    "callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments}}))
+                    "callId":call.call_id,"name":call.name,"schemaVersion":call.schema_version,"arguments":call.arguments,
+                    "outputVisibleBytes":output_visible_bytes}}))
                 .map_err(|_| failed("host_tool_not_dispatched"))?;
             let mut cancellation_sent = false;
             loop {
@@ -535,6 +537,7 @@ impl ToolGeneration {
                         schema.version
                     ),
                     implementation: Arc::new(HostTools {
+                        output_visible_bytes: None,
                         generation: self.clone(),
                         schema: schema.clone(),
                     }),
@@ -565,6 +568,7 @@ impl Drop for ToolGeneration {
     }
 }
 struct HostTools {
+    output_visible_bytes: Option<usize>,
     generation: Arc<ToolGeneration>,
     schema: ToolSchema,
 }
@@ -700,6 +704,10 @@ impl HostTools {
     }
 }
 impl ToolExecutor for HostTools {
+    fn bind_call(self: Arc<Self>, call: &ToolCall, frozen: &FrozenToolContext, _: &CancellationToken) -> Result<Box<dyn PreparedToolCall>, ExecutionError> {
+        Ok(bind_tool_executor(Arc::new(Self { generation:self.generation.clone(), schema:self.schema.clone(),
+            output_visible_bytes:frozen.tool_output_visible_bytes }),call,frozen))
+    }
     fn receipt_persisted(&self, context: &ToolExecutionContext, call: &ToolCall) {
         if self.generation.binding.extension().is_none() || !matches!(call.name.as_str(), "extension_package" | "scheduled_task") {
             return;
@@ -743,7 +751,7 @@ impl ToolExecutor for HostTools {
         let reply =
             self.generation
                 .bridge
-                .call(&self.generation, "authorize", context, call, cancel)?;
+                .call(&self.generation, "authorize", context, call, cancel, self.output_visible_bytes)?;
         if !reply.ok || reply.completion.is_some() {
             if let Some(error) = reply.error.filter(|error| {
                 error.admission == Some(true)
@@ -819,7 +827,7 @@ impl ToolExecutor for HostTools {
         match self
             .generation
             .bridge
-            .call(&self.generation, "execute", context, call, cancel)
+            .call(&self.generation, "execute", context, call, cancel, self.output_visible_bytes)
         {
             Ok(reply) if reply.ok => match (reply.completion, reply.executor_stopped) {
                 (
@@ -1018,7 +1026,7 @@ mod tests {
                 holder: "holder".into(),
                 owner_id: "owner-id".into(),
             };
-            let _ = done.send(bridge.call(&generation, "execute", &context, &call, &cancel));
+            let _ = done.send(bridge.call(&generation, "execute", &context, &call, &cancel, None));
         });
         result
     }
@@ -1118,7 +1126,7 @@ mod tests {
                 description: "Original helper".into(),
                 schema: json!({"type":"object"}),
                 output_schema: None,
-                metadata: Some(ToolMetadata {
+                metadata: Some(ToolMetadata { disclosure: None,
                     always_declared: false,
                     lifetime: None,
                     service_id: "helper.service".into(),
@@ -1279,7 +1287,7 @@ mod tests {
                 servers: Default::default(),
             },
         };
-        let executor = HostTools {
+        let executor = HostTools { output_visible_bytes: None,
             schema,
             generation: Arc::new(ToolGeneration {
                 run_id: context.run_id.clone(),

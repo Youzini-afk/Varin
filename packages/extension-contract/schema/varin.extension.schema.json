@@ -160,9 +160,21 @@
               },
               {
                 "type": "object",
-                "required": ["realms"],
+                "required": [
+                  "realms"
+                ],
                 "properties": {
-                  "realms": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["host", "surface"]}},
+                  "realms": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "host",
+                        "surface"
+                      ]
+                    }
+                  },
                   "optional": {
                     "type": "boolean"
                   },
@@ -699,6 +711,29 @@
             "thread",
             "environment"
           ]
+        },
+        "disclosure": {
+          "$ref": "#/$defs/toolDisclosure"
+        },
+        "requirements": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "process"
+          ],
+          "properties": {
+            "source": {
+              "enum": [
+                "source",
+                "physical",
+                "live"
+              ]
+            },
+            "process": {
+              "type": "boolean"
+            }
+          }
         }
       },
       "allOf": [
@@ -1089,7 +1124,11 @@
         "methods"
       ],
       "properties": {
-        "composition": { "enum": ["ordered"] },
+        "composition": {
+          "enum": [
+            "ordered"
+          ]
+        },
         "participation": {
           "enum": [
             "provider",
@@ -1116,6 +1155,60 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/serviceEventContract"
+          }
+        }
+      }
+    },
+    "toolDisclosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary"
+      ],
+      "properties": {
+        "summary": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "\\S"
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "\\S"
+          }
+        },
+        "operations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "description",
+              "paths"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "description": {
+                "type": "string",
+                "pattern": "\\S"
+              },
+              "paths": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "pattern": "^/.*(oneOf|anyOf)/[0-9]+$"
+                }
+              }
+            }
           }
         }
       }

@@ -123,7 +123,7 @@ fn available_family_capabilities_do_not_enter_unselected_child_or_restore() {
     let f = family_fixture(vec!["helper".into()]);
     f.prepare_policy(0, "http://127.0.0.1:1/unused");
     let start = f.start(0);
-    let context = FrozenToolContext { execution_environment: None, direct_tools: None,
+    let context = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
         run_id: f.run.id.clone(),
         origin: ToolOrigin::ModelStep {
             request_id: "not-admitted".into(),

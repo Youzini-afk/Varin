@@ -70,6 +70,7 @@ export function extensionToolSchema(
     schema: structuredClone(tool.inputSchema),
     output_schema: structuredClone(tool.outputSchema),
     metadata: {
+      ...(tool.disclosure ? { disclosure: structuredClone(tool.disclosure) } : {}),
       service_id: descriptor.id,
       service_version: descriptor.version,
       completion: tool.completion,

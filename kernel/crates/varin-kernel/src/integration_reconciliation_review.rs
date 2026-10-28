@@ -191,7 +191,7 @@ fn replay_scenario(tail_phase: Option<&str>,exchange:bool) {
         ancestor_id: None,
         leaf_id: Some(run.input_id.clone()),
     };
-    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

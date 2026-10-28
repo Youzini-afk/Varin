@@ -439,7 +439,7 @@ fn request_snapshot(receipt: &Receipt) -> crate::execution::RequestSnapshot {
                     leaf_id: Some(receipt.input_id.clone()),
                 },
             },
-            binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+            binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                 provider_id: None,
                 tokenizer: None,
                 request_context: None,
@@ -4130,7 +4130,7 @@ fn admitted_native_query(
         .register(
             context.clone(),
             ExecutorOwner::Kernel,
-            Arc::new(FrozenToolContext { execution_environment: None, direct_tools: None,
+            Arc::new(FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                 run_id: r.run_id,
                 origin: context.origin.clone(),
                 child_dispatch: None,

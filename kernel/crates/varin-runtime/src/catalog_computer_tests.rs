@@ -106,7 +106,7 @@ fn computer_scope_checks_original_model_and_policy_tool_origins_without_a_file_s
                 action_id: action_id.clone(),
                 node_id: call.call_id.clone(),
             };
-            let context = FrozenToolContext { execution_environment: None, direct_tools: None,
+            let context = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: vec![],
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

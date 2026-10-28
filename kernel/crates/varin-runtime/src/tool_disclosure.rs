@@ -31,6 +31,7 @@ pub const GROUPS: &[(&str, &str)] = &[
         "Inspect Varin contracts and develop extensions",
     ),
     ("extensions", "Other installed extension capabilities"),
+    ("mcp", "Configured MCP services and already declared tools; mcp_discover explores selected servers"),
 ];
 
 pub fn schemas() -> Vec<ToolSchema> {
@@ -49,10 +50,11 @@ fn build_schemas() -> Vec<ToolSchema> {
         .collect::<Vec<_>>()
         .join("; ");
     [
-        (DESCRIBE, format!("查询工具的用途、参数和版本。已知名称用 name，多个名称用 names 一次取得完整说明；不知道名称可用 query 搜索名称与用途，直接返回匹配工具的参数和调用模板。namespace 按分组浏览，detail: full 可一次读取该组完整说明；省略参数列出分组。查询不会新增模型函数：未在本次 tools 中声明的目标经 tool_invoke 调用。分组索引：{index}。"),
+        (DESCRIBE, format!("查询当前目录中的真实工具。省略参数浏览分组；query 搜索简短候选，namespace 浏览分组。已知名称用 name 或 names；复合工具展示真实操作，operation 可直接读取该操作的完整契约，detail: full 读取原契约。结果中的 next 可继续读取完整条目，path 读取原说明的 JSON 结构。已有有效引用可复用。查询不会新增模型函数；未直接声明的目标用 tool_invoke({{reference,arguments:目标参数}})，不要再次嵌套 arguments。脚本中使用 tools.invoke({{name,arguments:目标参数}})，读取 result.completion.kind、result.completion.content.data 和 parts。分组是导航，模型可自由组合文件、程序、脚本、应用和服务；MCP 沿 mcp_discover/mcp_call。分组索引：{index}。"),
          json!({"type":"object","additionalProperties":false,"properties":{"namespace":{"type":"string","minLength":1},"name":{"type":"string","minLength":1},
              "names":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string","minLength":1}},
-             "query":{"type":"string","minLength":1},"detail":{"type":"string","enum":["summary","full"]}}})),
+             "query":{"type":"string","minLength":1},"detail":{"type":"string","enum":["summary","full"]},
+             "operation":{"type":"string","minLength":1},"path":{"type":"string"},"cursor":{"type":"string","minLength":1,"description":"Use alone; continues the same frozen directory and query."}}})),
         (INVOKE, "使用工具的 reference（名称和版本）及符合其参数定义的 arguments 调用当前目录中的能力。reference 可从 tool_describe 取得并在有效时复用。未在本次 tools 中单独声明的工具通过本入口调用；可用范围与原工具权限保持一致。".into(),
          json!({"type":"object","additionalProperties":false,"required":["reference","arguments"],"properties":{
              "reference":{"type":"object","additionalProperties":false,"required":["name","version"],"properties":{"name":{"type":"string","minLength":1},"version":{"type":"string","minLength":1}}},
@@ -73,7 +75,9 @@ pub fn is_gateway(tool: &ToolSchema) -> bool {
 }
 
 pub fn enabled(tools: &[ToolSchema]) -> bool {
-    definitions().iter().all(|owned| tools.iter().any(|tool| tool.name == owned.name && is_gateway(tool)))
+    // A retained gateway with a stale contract must not expose every deferred function.
+    // Its actual invocation still requires is_gateway and the original directory's exact pin.
+    definitions().iter().all(|owned| tools.iter().any(|tool| tool.name == owned.name))
 }
 
 /// Included in every provider declaration list; deferred tools require the registered gateway.
@@ -252,7 +256,8 @@ pub fn request_tools(tools: &[ToolSchema], has_goal: bool, allowed: Option<&[Str
 
 /// This is an explicit API classification, not keyword matching of user requests.
 pub fn namespace(name: &str) -> Option<&'static str> {
-    if name.starts_with("mcp_") || matches!(name, DESCRIBE | INVOKE) { return None; }
+    if matches!(name, DESCRIBE | INVOKE) { return None; }
+    if name.starts_with("mcp_") { return Some("mcp"); }
     Some(match name {
         "file_read" | "file_write" | "file_edit" | "file_search" | "file_list" | "file_restore" | "recovery_points" => "files",
         "process_spawn" | "process_read" | "process_write" | "process_inspect" | "process_stop" | "process_resize" | "wait_process"

@@ -6,6 +6,43 @@ use varin_runtime::{RunState, SubmitInput};
 mod admission;
 use admission::InputAdmission;
 
+#[test]
+fn discovery_pages_whole_entries_and_reads_exact_operations_without_changing_execution_schema() {
+    use varin_runtime::tool_documentation::{self as docs, ToolDisclosure, ToolDocumentationOperation};
+    let root=std::env::temp_dir().join(format!("varin-discovery-pages-{}",uuid::Uuid::new_v4()));
+    let owner=Arc::new(Capabilities {catalog:Arc::new(Mutex::new(Catalog::open(&root).unwrap())),index:Mutex::new(None)});
+    let mut tools=(0..80).map(|i|ToolSchema {name:format!("external_{i:03}"),version:"v1".into(),description:"Inspect a retained external object.".into(),schema:json!({"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}),requirements:None,metadata:None,output_schema:None}).collect::<Vec<_>>();
+    tools.push(ToolSchema {name:"viewer".into(),version:"original".into(),description:"Observe application images.".into(),requirements:None,output_schema:None,
+        schema:json!({"type":"object","required":["application"],"properties":{"application":{"type":"string"},"view":{"enum":["capture","tree"]}},"oneOf":[{"properties":{"view":{"const":"capture"}},"required":["view"]},{"properties":{"view":{"const":"tree"}},"required":["view"]}]}),
+        metadata:Some(ToolMetadata {disclosure:Some(ToolDisclosure {summary:"Observe application state.".into(),aliases:vec!["截图".into()],namespace:Some("desktop".into()),operations:vec![ToolDocumentationOperation {name:"capture".into(),description:"Capture the selected window.".into(),paths:vec!["/oneOf/0".into()]}]}),always_declared:false,service_id:"private-service".into(),service_version:1,completion:RegisteredToolCompletion::Result,lifetime:None,operation:ToolOperation::Read,examples:None,source:None})});
+    let frozen=FrozenToolContext {tool_output_visible_bytes:Some(1800),execution_environment:None,direct_tools:None,child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None,run_id:"run".into(),origin:ToolOrigin::ModelStep {request_id:"request".into()},tool_schema_generation:1,tools:Arc::new(tools),source:None};
+    let call=Call {owner:owner.clone(),frozen:frozen.clone(),name:disclosure::DESCRIBE.into(),request:Request::Describe(Describe::default())};
+    let index=owner.index(&frozen).unwrap();assert!(Arc::ptr_eq(&index,&owner.index(&frozen).unwrap()));
+    let mut args:Describe=serde_json::from_value(json!({"namespace":"extensions","detail":"full"})).unwrap();
+    let mut names=Vec::new();let mut first_cursor=None;
+    loop {
+        let page=call.describe(&args).unwrap();assert!(docs::bytes(&page)<=1800,"{page}");
+        for entry in page["tools"].as_array().unwrap(){assert_eq!(entry["parameters"]["required"],json!(["id"]));names.push(entry["name"].as_str().unwrap().to_string());}
+        let Some(cursor)=page["next"]["arguments"]["cursor"].as_str() else {break};
+        first_cursor.get_or_insert(cursor.to_string());args=serde_json::from_value(json!({"cursor":cursor})).unwrap();
+    }
+    assert_eq!(names.len(),80);assert_eq!(names.iter().collect::<std::collections::HashSet<_>>().len(),80);
+    let search=call.describe(&serde_json::from_value(json!({"query":"截图 屏幕"})).unwrap()).unwrap();assert_eq!(search["tools"][0]["name"],"viewer");assert!(search["tools"][0].get("parameters").is_none());
+    let exact=call.describe(&serde_json::from_value(json!({"name":"viewer","operation":"capture"})).unwrap()).unwrap();
+    assert_eq!(exact["parameters"]["required"],json!(["application"]));assert!(exact.get("metadata").is_none());assert!(exact.get("scriptInvocation").is_none());
+    assert_eq!(exact["reference"]["version"],"original");assert_eq!(frozen.tools.last().unwrap().schema["oneOf"].as_array().unwrap().len(),2);
+    let mut large=frozen.clone();Arc::make_mut(&mut large.tools)[0].description="文本😀".repeat(600);
+    let large_call=Call {owner:owner.clone(),frozen:large.clone(),name:disclosure::DESCRIBE.into(),request:Request::Describe(Describe::default())};
+    let mut args:Describe=serde_json::from_value(json!({"name":"external_000","path":"/description"})).unwrap();let mut text=String::new();
+    loop {let page=large_call.describe(&args).unwrap();assert!(docs::bytes(&page)<=1800);assert_eq!(page["view"],"json_text_fragment");text.push_str(page["text"].as_str().unwrap());
+        let Some(cursor)=page["next"]["arguments"]["cursor"].as_str() else {break};args=serde_json::from_value(json!({"cursor":cursor})).unwrap();}
+    assert_eq!(serde_json::from_str::<String>(&text).unwrap(),large.tools[0].description);
+    let mut changed=call.frozen.clone();Arc::make_mut(&mut changed.tools)[0].version="v2".into();
+    let changed_call=Call {owner:owner.clone(),frozen:changed,name:disclosure::DESCRIBE.into(),request:Request::Describe(Describe::default())};
+    assert_eq!(changed_call.describe(&serde_json::from_value(json!({"cursor":first_cursor.unwrap()})).unwrap()).unwrap()["status"],"directory_changed");
+    drop(large_call);drop(changed_call);drop(call);drop(owner);std::fs::remove_dir_all(root).unwrap();
+}
+
 struct Provider {
     step: AtomicUsize,
     mode: &'static str,
@@ -48,7 +85,7 @@ impl ModelProvider for Provider {
             0 if self.mode == "success" => {
                 for (id, arguments) in [
                     ("batch-describe", json!({"names":["fixture_effect","ask_user","missing"]})),
-                    ("search-describe", json!({"query":"FIXTURE_EFFECT"})),
+                    ("search-describe", json!({"query":"Controlled"})),
                     ("full-group", json!({"namespace":"extensions","detail":"full"})),
                 ] {
                     emit(ProviderEvent::ItemCompleted { item: ProviderItem {
@@ -75,8 +112,11 @@ impl ModelProvider for Provider {
                             }, _ => None,
                         }).unwrap();
                         let target = data["tools"].as_array().unwrap().iter().find(|tool| tool["name"] == "fixture_effect").unwrap();
-                        assert_eq!(target["parameters"]["required"], json!(["mode"]));
-                        assert_eq!(target["invocation"]["tool"], disclosure::INVOKE);
+                        if id=="search-describe" {assert!(target.get("parameters").is_none());}
+                        else {
+                            assert_eq!(target["parameters"]["required"], json!(["mode"]));
+                            assert_eq!(target["invocation"]["tool"], disclosure::INVOKE);
+                        }
                         assert_eq!(target["directlyCallable"], false);
                     }
                 }

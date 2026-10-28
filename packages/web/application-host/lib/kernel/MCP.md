@@ -31,6 +31,19 @@ concrete target's complete input schema is validated by the retained owner befor
 again before transport dispatch. Hidden tools are absent. Remote annotations do not grant permissions
 or prove independent/read-only effects.
 
+Discovery returns concise candidates by default. `server` scopes preparation to one dependency;
+`tool` reads an exact tool contract directly, `query` ranks known names, descriptions and schema terms,
+and `detail: full` requests original contracts. Multiple same-named tools remain candidates until their
+server is selected. Offline cached descriptions identify their unprepared state and carry no executable
+schema version. Unprepared server contents are explicitly outside the search coverage.
+
+The original request's visible-output budget travels through the private Host call. Discovery pages
+whole tool/server/service entries and returns `next` through `mcp_discover`; a cursor binds the original
+selection and directory identity. It never mixes versions after a catalog change. A single oversized
+contract returns an explicit overview and a `path` reader over its original JSON structure; large scalar
+values continue as exact JSON text fragments. Projection never becomes a replacement execution schema.
+Search terms are reused for the retained declarations; the lease owns and releases these derived views.
+
 ## Execution and permission
 
 Agent scopes read trusted project settings through the native Host settings owner and the common

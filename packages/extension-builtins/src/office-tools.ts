@@ -38,6 +38,16 @@ const exactlyOneSource = { oneOf: [{ required: ['path'], not: { required: ['snap
 const declaration = (method: string, description: string, inputSchema: JsonObject, operation: 'read' | 'effect' = 'read', physical = false): VarinExtensionServiceProvision => ({
   id: `varin.office.${method}`, version: 1,
   tool: { name: `office_${method}`, description, inputSchema, operation, completion: 'result', outputSchema: { type: 'object' },
+    disclosure: { summary: ({read:'Read Office structure, paragraphs, cells, shapes and revision-bound objects.',write:'Create, replace or edit DOCX, XLSX and PPTX files.',render:'Render Office files through the available LibreOffice engine.',export:'Convert Office formats and recalculate spreadsheets through LibreOffice.',environment:'Inspect Office libraries, renderer availability and supported operations.'} as Record<string,string>)[method]!,
+      aliases:['Office','办公','文档','表格','演示'], namespace:'office',
+      ...(method === 'write' ? { operations: [
+        ...['create','replace'].flatMap((action,index) => [
+          {name:action, description:`${action} an Office file; all content formats.`, paths:[`/oneOf/${index}`]},
+          ...['docx','xlsx','pptx'].map((format,formatIndex) => ({name:`${action}.${format}`,description:`${action} ${format.toUpperCase()} content.`,paths:[`/oneOf/${index}`,`/$defs/content/oneOf/${formatIndex}`]})),
+        ]),
+        {name:'edit',description:'Edit an existing revision; all supported edit actions.',paths:['/oneOf/2']},
+        ...['replace_text','set_text','insert_paragraph','set_cells','add_sheet','move_shape'].map((action,index) => ({name:`edit.${action}`,description:`Edit action ${action}.`,paths:['/oneOf/2',`/$defs/edits/items/oneOf/${index}`]})),
+      ] } : {}) },
     ...(physical ? { requirements: { source: 'physical' as const, process: false } } : {}) },
 });
 
@@ -45,10 +55,10 @@ export const OFFICE_TOOL_DECLARATIONS = [
   declaration('read', 'Read DOCX, XLSX or PPTX structure from a source-relative path or a fixed snapshotId. Overview lists sections; content returns paragraphs, cells, shapes and notes with revision-bound object IDs. Select a section, objectId, worksheet range or query; offset/limit continue results. Formulas and cached values are distinct; a stored cache is not a new calculation. Use document_read for PDF pages.', {
     ...object({ ...source, view: { enum: ['overview', 'content', 'find'] }, section: text, objectId: text, range: text, query: text, offset: integer, limit: { type: 'integer', minimum: 1 } }), ...exactlyOneSource,
   }),
-  declaration('write', 'Create an editable Office file or edit an existing revision in place. edit requires expectedRevision from office_read; object IDs belong to that revision. Text edits preserve surrounding runs and unrelated package parts. Worksheet edits clear stale formula caches and request recalculation; office_export through LibreOffice performs actual recalculation. PPTX coordinates are inches, DOCX font sizes are points. create only writes a missing path; replace explicitly replaces a known revision with new content.', { oneOf: [
-    object({ action: { const: 'create' }, path: text, content: create }, ['action', 'path', 'content']),
-    object({ action: { const: 'replace' }, path: text, expectedRevision: text, content: create }, ['action', 'path', 'expectedRevision', 'content']),
-    object({ action: { const: 'edit' }, path: text, expectedRevision: text, edits }, ['action', 'path', 'expectedRevision', 'edits']),
+  declaration('write', 'Create an editable Office file or edit an existing revision in place. edit requires expectedRevision from office_read; object IDs belong to that revision. Text edits preserve surrounding runs and unrelated package parts. Worksheet edits clear stale formula caches and request recalculation; office_export through LibreOffice performs actual recalculation. PPTX coordinates are inches, DOCX font sizes are points. create only writes a missing path; replace explicitly replaces a known revision with new content.', { $defs:{content:create,edits}, oneOf: [
+    object({ action: { const: 'create' }, path: text, content: {$ref:'#/$defs/content'} }, ['action', 'path', 'content']),
+    object({ action: { const: 'replace' }, path: text, expectedRevision: text, content: {$ref:'#/$defs/content'} }, ['action', 'path', 'expectedRevision', 'content']),
+    object({ action: { const: 'edit' }, path: text, expectedRevision: text, edits:{$ref:'#/$defs/edits'} }, ['action', 'path', 'expectedRevision', 'edits']),
   ] }, 'effect', true),
   declaration('render', 'Render real Office pages through the Host’s available LibreOffice engine and return a PDF snapshot or actual page images. Reuse the returned PDF snapshotId with document_read for additional pages. Rendering availability is independent of structure reading and local edits; office_environment reports the installed engine.', {
     ...object({ ...source, page: { type: 'integer', minimum: 1 }, scale: positive }), ...exactlyOneSource,

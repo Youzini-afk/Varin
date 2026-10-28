@@ -47,7 +47,7 @@ impl Fixture {
             arguments:json!({"question":"tail marker","paths":["allowed"]})};
         let origin = ToolOrigin::PolicyAction { action_id:"policy".into(),node_id:"retrieve".into() };
         let context = execution_context("run", &call, &origin);
-        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(schemas),tool_schema_generation:1,
+        let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,run_id:"run".into(),origin,tools:Arc::new(schemas),tool_schema_generation:1,
             source:Some(binding.source_selection().unwrap()),child_dispatch:None,resource_activations:vec![],resource_checkpoint_id:None};
         let executor = Arc::new(KernelToolExecutor::new(binding, resources).unwrap());
         Self {root,storage,executor,context,frozen,call}

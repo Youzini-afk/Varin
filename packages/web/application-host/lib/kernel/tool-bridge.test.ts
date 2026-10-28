@@ -19,6 +19,7 @@ const schema = {
 };
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 const call: HostToolCall = {
+  outputVisibleBytes: 32768,
   runId: 'run',
   origin: { kind: 'model_step', request_id: 'request' },
   operationId: 'request:tool:call',

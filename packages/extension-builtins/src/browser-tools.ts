@@ -8,7 +8,16 @@ const point = object({ x: { type: 'number' }, y: { type: 'number' } }, ['x', 'y'
 const page = { pageId: text };
 const effect = (method: string, description: string, inputSchema: JsonObject, operation: 'read' | 'effect' = 'effect'): VarinExtensionServiceProvision => ({
   id: `varin.browser.${method}`, version: 1,
-  tool: { name: `browser_${method}`, description, inputSchema, operation, completion: 'result', outputSchema: { type: 'object' } },
+  tool: { name: `browser_${method}`, description, inputSchema, operation, completion: 'result', outputSchema: { type: 'object' },
+    disclosure: {namespace:'browser',aliases:['浏览器','网页',...(method==='read'?['截图','截屏','屏幕']:[])],
+      summary:({tabs:'List browser pages and their actual state.',open:'Open or navigate a retained browser page.',read:'Read page text, structure, elements or a screenshot.',act:'Operate browser navigation, elements, native input or page JavaScript.',files:'Read, save or upload browser files and downloads.'} as Record<string,string>)[method]!,
+      ...((method==='act'||method==='files') ? {operations:(inputSchema.oneOf as JsonObject[]).flatMap((branch,index) => {
+        const spec=(branch.properties as JsonObject).action as JsonObject;
+        const names=typeof spec.const==='string'?[spec.const]:spec.enum as string[];
+        const suffix=method==='act'&&[2,3].includes(index)?index===2?'.ref':'.point':'';
+        return names.map(name=>({name:name+suffix,description:`${name}${suffix ? suffix==='.ref'?' using an element ref.':' using screenshot coordinates.':'.'}`,paths:[`/oneOf/${index}`]}));
+      })}:{}),
+    } },
 });
 const action = (name: string | string[], properties: JsonObject = {}, required: string[] = []): JsonObject => object({
   ...page, action: typeof name === 'string' ? { const: name } : { enum: name }, ...properties,

@@ -33,7 +33,10 @@ const documentReadSchema: JsonObject = {
 };
 const declaration = (method: string, name: string, description: string, inputSchema: JsonObject, operation: 'read' | 'effect' = 'read'): VarinExtensionServiceProvision => ({
   id: `varin.web.${method}`, version: 1,
-  tool: { name, description, completion: 'result', operation, inputSchema, outputSchema: { type: 'object' } },
+  tool: { name, description, completion: 'result', operation, inputSchema, outputSchema: { type: 'object' },
+    disclosure:{namespace:'documents',aliases:['文档','网页','材料','阅读'],summary:({websearch:'Search web sources and return located matches.',webfetch:'Fetch and read pages or retained web snapshots.',document_read:'Read PDF or Office text, structure, objects and page images.',materials:'Create, search, share and manage retained material collections.'} as Record<string,string>)[name]!,
+      ...(method==='collections'?{operations:['create','list','search','remove','share.collection','share.snapshot','add'].map((name,index)=>({name,description:`Material collection operation ${name}.`,paths:[`/oneOf/${index}`]}))}:{})},
+  },
 });
 
 /** This one declaration feeds installation, discovery, admission and Host decoding. */

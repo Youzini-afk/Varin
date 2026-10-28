@@ -137,7 +137,7 @@ fn view(family: &str) -> RequestView {
                 leaf_id: None,
             },
         },
-        binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -783,13 +783,17 @@ fn disclosure_rejects_direct_deferred_calls_and_preserves_declared_schema_author
     unavailable.view.binding.tools.retain(|tool| tool.name != "settings_search");
     assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "unknown_tool_schema");
     let mut declared = snapshot.view.binding.tools.last().unwrap().clone();
-    declared.metadata = Some(ToolMetadata { always_declared: true, service_id: "settings".into(), service_version: 1,
+    declared.metadata = Some(ToolMetadata { disclosure: None, always_declared: true, service_id: "settings".into(), service_version: 1,
         completion: RegisteredToolCompletion::Result, lifetime: None, operation: ToolOperation::Read, examples: None, source: None });
     unavailable.view.binding.tools.push(declared);
     let declared_calls = crate::execution::validate_model_items(&items, &unavailable).unwrap();
     assert!(declared_calls.iter().any(|call| call.name == "settings_search" && call.schema_version == "settings-v2"));
     unavailable.view.binding.tools.last_mut().unwrap().version = "different".into();
     assert_eq!(crate::execution::validate_model_items(&items, &unavailable).unwrap_err().code, "stale_tool_schema");
+    let mut retained=snapshot.view.binding.tools.clone();
+    retained.iter_mut().find(|tool|tool.name==crate::tool_disclosure::DESCRIBE).unwrap().schema["properties"].as_object_mut().unwrap().remove("cursor");
+    let declared=crate::tool_disclosure::model_tools(&retained).unwrap();
+    assert!(!declared.iter().any(|tool|tool.name=="settings_search"),"an outdated gateway contract never broadens the model's direct tool set");
 }
 
 #[test]
@@ -1825,7 +1829,7 @@ fn disclosure_keeps_every_protocol_tool_prefix_stable_when_hidden_capabilities_c
             let mut common = hidden.clone();
             common.name = name.into();
             if matches!(name, "code_retrieval" | "websearch" | "image_generate" | "image_edit") {
-                common.metadata = Some(ToolMetadata {
+                common.metadata = Some(ToolMetadata { disclosure: None,
                     always_declared: false,
                     service_id: format!("fixture.{name}"), service_version: 1,
                     completion: RegisteredToolCompletion::Result, lifetime: None,

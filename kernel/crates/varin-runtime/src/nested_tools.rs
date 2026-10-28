@@ -462,7 +462,7 @@ mod tests {
                     origin: origin.clone(),
                 },
                 ExecutorOwner::Kernel,
-                Arc::new(FrozenToolContext { execution_environment: None, direct_tools: None,
+                Arc::new(FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                     run_id: "run".into(),
                     origin,
                     child_dispatch: None,

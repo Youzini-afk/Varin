@@ -603,7 +603,7 @@ pub fn text_compaction_launch(
 pub fn text_compaction_start(selection: &crate::catalog::launches::LaunchSelection) -> RunStart {
     RunStart {
         context_preparation: Arc::new(NoopContextPreparation),
-        binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

@@ -1602,7 +1602,7 @@ export interface LaunchSource {
   resource_owner: SourceResourceOwner;
 }
 
-export interface ToolMetadata { always_declared?: boolean; service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
+export interface ToolMetadata { disclosure?: {summary:string;aliases?:string[];namespace?:string;operations?:{name:string;description:string;paths:string[]}[]}; always_declared?: boolean; service_id: string; service_version: number; completion: 'result' | 'job'; lifetime?: 'thread' | 'environment'; operation: 'read' | 'effect'; examples?: unknown[]; source?: {path: string; line?: number}; }
 
 export interface NestedToolSummary {
   name: string;
@@ -1627,6 +1627,7 @@ export interface NestedToolReceipt {
 }
 
 export interface HostToolCall {
+  outputVisibleBytes?: number | null;
   runId: string;
   operationId: string;
   origin: ToolOrigin;

@@ -11,6 +11,7 @@ pub mod execution;
 pub mod request_body;
 pub mod nested_tools;
 pub mod tool_disclosure;
+pub mod tool_documentation;
 
 pub mod providers;
 

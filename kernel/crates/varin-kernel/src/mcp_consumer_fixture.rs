@@ -102,7 +102,7 @@ pub(super) fn prepare_child(
         )
         .unwrap(),
     );
-    let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
+    let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
         run_id: context.run_id.clone(),
         origin: context.origin.clone(),
         tools: Arc::new(vec![dispatch_schema.clone()]),
@@ -245,7 +245,7 @@ pub(super) fn prepare_child(
         .selection;
     assert!(launch.source.is_none());
     assert_eq!(launch.tools.len(), count);
-    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

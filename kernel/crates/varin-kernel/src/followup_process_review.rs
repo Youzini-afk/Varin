@@ -58,7 +58,7 @@ fn model_call(
             waiting_on: None,
         },
     );
-    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,
@@ -131,7 +131,7 @@ fn model_call(
             operation_id: format!("{request}:tool:{}", call.call_id),
             origin: origin.clone(),
         },
-        FrozenToolContext { execution_environment: None, direct_tools: None,
+        FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,

@@ -504,7 +504,7 @@ mod tests {
             schema_version: "first".into(),
             arguments: json!({}),
         };
-        let context = FrozenToolContext { execution_environment: None, direct_tools: None,
+        let context = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,
@@ -532,7 +532,7 @@ mod tests {
             matches!(old_call.execute(&execution, &contract, &cancelled).completion, ToolCompletion::Result {content, ..} if content.data == "first")
         );
         let next_token = CancellationToken::default();
-        let next_context = FrozenToolContext { execution_environment: None, direct_tools: None,
+        let next_context = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: Vec::new(),
             resource_checkpoint_id: None,

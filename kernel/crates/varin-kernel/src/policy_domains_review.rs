@@ -927,7 +927,7 @@ fn accepted_question_before_graph_receipt_reopen_consumes_original_job_once() {
             schema_version: crate::questions::schema().version,
             arguments: json!({"questions":[{"id":"question","question":"Original question"}]}),
         };
-        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
+        let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),
@@ -1059,7 +1059,7 @@ fn policy_todo_committed_before_tool_settlement_reconciles_original_epoch_and_he
             action_id: action_id.clone(),
             node_id: "plan".into(),
         };
-        let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
+        let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: None,
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

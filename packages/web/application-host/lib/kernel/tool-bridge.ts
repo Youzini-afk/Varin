@@ -197,11 +197,13 @@ function callValid(v: unknown): v is HostToolCall {
       'name',
       'schemaVersion',
       'arguments',
+      'outputVisibleBytes',
     ]) ||
     !['runId', 'operationId', 'callId', 'name', 'schemaVersion'].every((key) =>
       text(v[key]),
     ) ||
     !('arguments' in v) ||
+    (v.outputVisibleBytes != null && (!Number.isSafeInteger(v.outputVisibleBytes) || (v.outputVisibleBytes as number) < 0)) ||
     !record(v.origin)
   )
     return false;

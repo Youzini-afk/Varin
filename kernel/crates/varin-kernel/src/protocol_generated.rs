@@ -3309,6 +3309,7 @@ pub(crate) struct LaunchSource {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct HostToolCall {
+    pub(crate) output_visible_bytes: Option<RequiredNullable<i64>>,
     pub(crate) run_id: String,
     pub(crate) operation_id: String,
     pub(crate) origin: varin_runtime::execution::ToolOrigin,

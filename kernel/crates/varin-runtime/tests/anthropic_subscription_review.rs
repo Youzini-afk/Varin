@@ -68,7 +68,7 @@ fn subscription_tool_names_roundtrip_without_rewriting_signed_thinking_or_api_ke
                 leaf_id: None,
             },
         },
-        binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,

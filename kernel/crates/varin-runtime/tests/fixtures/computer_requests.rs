@@ -241,7 +241,7 @@ pub fn admit_call(
             action_id: action_id.clone(),
             node_id: unique,
         };
-        let context = FrozenToolContext { execution_environment: None, direct_tools: None,
+        let context = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
             child_dispatch: child_dispatch.clone(),
             resource_activations: vec![],
             resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

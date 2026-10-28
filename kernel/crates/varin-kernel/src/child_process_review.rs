@@ -139,7 +139,7 @@ impl Harness {
             .unwrap()
             .bind_child_dispatch(&run.id, prepared)
             .unwrap();
-        let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -208,7 +208,7 @@ impl Harness {
                 ),
                 origin: origin.clone(),
             },
-            FrozenToolContext { execution_environment: None, direct_tools: None,
+            FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                 child_dispatch: dispatch_ref,
                 resource_activations: vec![],
                 resource_checkpoint_id: None,

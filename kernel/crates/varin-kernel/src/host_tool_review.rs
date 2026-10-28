@@ -107,7 +107,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             varin_runtime::composition::tools::ToolDirectory::assemble(generation.declarations())
                 .unwrap(),
         );
-        let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+        let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
             provider_id: None,
             tokenizer: None,
             request_context: None,
@@ -176,7 +176,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
                 action_id: action_id.clone(),
                 node_id: call.call_id.clone(),
             };
-            let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
+            let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
@@ -252,7 +252,7 @@ fn ordinary_service_model_and_policy_share_real_directory_permission_dispatch_an
             )
             .unwrap();
             let origin = ToolOrigin::ModelStep { request_id };
-            let frozen = FrozenToolContext { execution_environment: None, direct_tools: None,
+            let frozen = FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                 child_dispatch: None,
                 resource_activations: Vec::new(),
                 resource_checkpoint_id: None,
@@ -540,7 +540,7 @@ fn rejected_newer_candidate_can_restore_the_prior_ready_directory_before_next_re
         .admit_submission(preparation.load(None, false).unwrap())
         .unwrap();
     let run = submitted.run_id.clone();
-    let binding = RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+    let binding = RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
         provider_id: None,
         tokenizer: None,
         request_context: None,

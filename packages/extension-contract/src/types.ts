@@ -54,6 +54,8 @@ export interface VarinExtensionServiceRequirement {
 
 /** One service declaration also supplies its tool projection; read is a claim, never a grant. */
 export interface VarinExtensionToolDeclaration {
+  /** Optional read-only navigation over the original input schema. */
+  disclosure?: VarinToolDisclosure;
   /** Execution dependency declaration; actual source and process grants remain Host-owned. */
   requirements?: { source: 'source' | 'physical' | 'live'; process: boolean };
   name: string;
@@ -66,6 +68,13 @@ export interface VarinExtensionToolDeclaration {
   operation: "read" | "effect";
   examples?: JsonValue[];
   source?: import("./runtime-source.js").VarinContractSource;
+}
+
+export interface VarinToolDisclosure {
+  summary: string;
+  aliases?: string[];
+  namespace?: string;
+  operations?: Array<{ name: string; description: string; paths: string[] }>;
 }
 
 export interface VarinExtensionServiceProvision {

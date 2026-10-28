@@ -7,14 +7,25 @@ use varin_runtime::{
     tool_disclosure as disclosure,
 };
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize, serde::Serialize, Default)]
 #[serde(deny_unknown_fields)]
 struct Describe {
+    #[serde(skip_serializing_if = "Option::is_none")]
     namespace: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     names: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     query: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    operation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cursor: Option<String>,
 }
 #[derive(Clone, Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
@@ -49,7 +60,10 @@ pub(crate) fn definitions() -> Vec<crate::run_tools::BuiltinSchema> {
 pub(crate) fn declarations(
     catalog: Arc<Mutex<Catalog>>,
 ) -> Vec<varin_runtime::composition::tools::ToolDeclaration> {
-    let owner = Arc::new(Capabilities { catalog });
+    let owner = Arc::new(Capabilities {
+        catalog,
+        index: Mutex::new(None),
+    });
     disclosure::schemas()
         .into_iter()
         .map(|schema| {
@@ -59,6 +73,55 @@ pub(crate) fn declarations(
 }
 struct Capabilities {
     catalog: Arc<Mutex<Catalog>>,
+    // Derived data for the last frozen directory; replacement releases the old projection.
+    index: Mutex<Option<Arc<DocumentationIndex>>>,
+}
+struct DocumentationIndex {
+    tools: Arc<Vec<ToolSchema>>,
+    identity: String,
+    search: Vec<(usize, String, Vec<String>)>,
+    operation_views: Mutex<std::collections::HashMap<(String, String), Value>>,
+}
+impl Capabilities {
+    fn index(&self, frozen: &FrozenToolContext) -> Result<Arc<DocumentationIndex>, ExecutionError> {
+        let mut held = self.index.lock().map_err(error)?;
+        if let Some(index) = held.as_ref().filter(|index| index.tools == frozen.tools) {
+            return Ok(index.clone());
+        }
+        let index = Arc::new(DocumentationIndex {
+            operation_views: Mutex::new(std::collections::HashMap::new()),
+            identity: varin_runtime::tool_documentation::identity(&frozen.tools),
+            search: frozen
+                .tools
+                .iter()
+                .enumerate()
+                .map(|(i, tool)| {
+                    let declaration = varin_runtime::tool_documentation::declaration(tool);
+                    let group = varin_runtime::tool_documentation::namespace(tool).unwrap_or("");
+                    (
+                        i,
+                        format!(
+                            "{} {group} {} {}",
+                            tool.description,
+                            varin_runtime::tool_documentation::schema_terms(&tool.schema),
+                            declaration
+                                .map(|d| d
+                                    .operations
+                                    .iter()
+                                    .map(|op| format!("{} {}", op.name, op.description))
+                                    .collect::<Vec<_>>()
+                                    .join(" "))
+                                .unwrap_or_default()
+                        ),
+                        declaration.map(|d| d.aliases.clone()).unwrap_or_default(),
+                    )
+                })
+                .collect(),
+            tools: frozen.tools.clone(),
+        });
+        *held = Some(index.clone());
+        Ok(index)
+    }
 }
 struct Call {
     owner: Arc<Capabilities>,
@@ -77,33 +140,63 @@ fn parse(call: &ToolCall, frozen: &FrozenToolContext) -> Result<Request, Executi
     match call.name.as_str() {
         disclosure::DESCRIBE => {
             let args: Describe = serde_json::from_value(call.arguments.clone()).map_err(error)?;
-            if (args.name.is_some() || args.names.is_some()) && (args.namespace.is_some() || args.query.is_some())
+            if args.cursor.is_some() {
+                if call
+                    .arguments
+                    .as_object()
+                    .is_none_or(|fields| fields.len() != 1)
+                {
+                    return Err(error("Use cursor alone to continue the original query."));
+                }
+                varin_runtime::tool_documentation::Continuation::decode(
+                    args.cursor.as_deref().unwrap(),
+                )?;
+                return Ok(Request::Describe(args));
+            }
+            if (args.name.is_some() || args.names.is_some())
+                && (args.namespace.is_some() || args.query.is_some())
                 || args.name.is_some() && args.names.is_some()
                 || args.name.as_ref().is_some_and(|v| v.trim().is_empty())
-                || args.names.as_ref().is_some_and(|names| names.is_empty() || names.iter().any(|name| name.trim().is_empty()))
+                || args.names.as_ref().is_some_and(|names| {
+                    names.is_empty() || names.iter().any(|name| name.trim().is_empty())
+                })
                 || args.query.as_ref().is_some_and(|v| v.trim().is_empty())
-                || args.detail.as_deref().is_some_and(|value| !matches!(value, "summary" | "full"))
                 || args
-                    .namespace
-                    .as_ref()
-                    .is_some_and(|v| !disclosure::GROUPS.iter().any(|(id, _)| id == v))
+                    .detail
+                    .as_deref()
+                    .is_some_and(|value| !matches!(value, "summary" | "full"))
+                || (args.operation.is_some() || args.path.is_some()) && args.name.is_none()
+                || args
+                    .path
+                    .as_deref()
+                    .is_some_and(|path| !path.is_empty() && !path.starts_with('/'))
+                || args.operation.as_ref().is_some_and(|v| v.trim().is_empty())
             {
-                return Err(error("Choose name, names, or a namespace/query filter. detail is summary or full."));
+                return Err(error(
+                    "Choose name, names, or a namespace/query filter. detail is summary or full.",
+                ));
             }
             Ok(Request::Describe(args))
         }
         disclosure::INVOKE => {
             let args: Invoke = serde_json::from_value(call.arguments.clone()).map_err(error)?;
             if !args.arguments.is_object() {
-                return Err(error("tool_invoke.arguments must be an object matching the target parameters returned by tool_describe"));
+                return Err(error(
+                    "tool_invoke.arguments must be an object matching the target parameters returned by tool_describe",
+                ));
             }
             let target = frozen.tools.iter().find(|tool| tool.name == args.reference.name)
                 .ok_or_else(|| error(format!("Tool {:?} is not available to this request. Use tool_describe to check the selected capabilities; tool_invoke does not enable unavailable tools.", args.reference.name)))?;
             if disclosure::is_gateway(target) {
-                return Err(error("Call the registered tool_describe or tool_invoke function directly; a gateway cannot invoke another gateway."));
+                return Err(error(
+                    "Call the registered tool_describe or tool_invoke function directly; a gateway cannot invoke another gateway.",
+                ));
             }
             if target.version != args.reference.version {
-                return Err(error(format!("The reference for tool {:?} does not match this request's version. Call tool_describe with this name and use the returned reference unchanged.", target.name)));
+                return Err(error(format!(
+                    "The reference for tool {:?} does not match this request's version. Call tool_describe with this name and use the returned reference unchanged.",
+                    target.name
+                )));
             }
             Ok(Request::Invoke(args))
         }
@@ -177,87 +270,355 @@ impl ToolExecutor for Capabilities {
     }
 }
 impl Call {
-    fn describe(&self, args: &Describe) -> Result<Value, ExecutionError> {
-        let tools = self
-            .frozen
+    fn describe(&self, supplied: &Describe) -> Result<Value, ExecutionError> {
+        use varin_runtime::tool_documentation as docs;
+        let index = self.owner.index(&self.frozen)?;
+        let directory = docs::identity(&(
+            &index.identity,
+            &self.frozen.direct_tools,
+            &self.frozen.child_dispatch,
+        ));
+        let (args, offset) = if let Some(cursor) = &supplied.cursor {
+            let continuation = docs::Continuation::decode(cursor)?;
+            if continuation.directory != directory {
+                return Ok(
+                    json!({"status":"directory_changed","message":"The frozen tool directory changed. Repeat the original query.","query":continuation.selection}),
+                );
+            }
+            (
+                serde_json::from_value::<Describe>(continuation.selection).map_err(error)?,
+                continuation.offset,
+            )
+        } else {
+            (supplied.clone(), 0)
+        };
+        let selection = serde_json::to_value(&args).map_err(error)?;
+        let budget = self.frozen.tool_output_visible_bytes;
+        let tools = index
             .tools
             .iter()
             .filter(|tool| !disclosure::is_gateway(tool))
             .collect::<Vec<_>>();
+        let read = |key: &str, entries: Vec<Value>, envelope: Value| {
+            docs::page(
+                envelope,
+                key,
+                &entries,
+                &directory,
+                &selection,
+                offset,
+                budget,
+                disclosure::DESCRIBE,
+            )
+        };
         if let Some(name) = &args.name {
-            return Ok(match tools.iter().find(|tool| &tool.name == name) {
-                Some(tool) => {
-                    let mut value = json!({"status":"available","name":tool.name,"reference":{"name":tool.name,"version":tool.version},
-                        "namespace":disclosure::namespace(&tool.name),"description":tool.description,"parameters":tool.schema,
-                        "outputSchema":tool.output_schema,"metadata":tool.metadata,
-                        "requirements":tool.requirements,
-                        "related":self.related(&tool.name),
-                        "directlyCallable":disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()),
-                        "scriptInvocation":{"function":"tools.invoke","arguments":{"name":tool.name,"arguments":{}},
-                            "instruction":"Inside script_run, call tools.invoke({name: targetName, arguments: targetParameters}). Put the target parameters directly in this arguments object. Do not add another arguments wrapper or copy tool_invoke's reference wrapper. Read result.completion.kind first; result completion data is at result.completion.content.data, and media at result.completion.content.parts."},
-                        "invocation":if disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()) {
-                            json!({"tool":tool.name,"arguments":{},"instruction":"Fill arguments using parameters. This function is declared in the current model request."})
-                        } else {
-                            json!({"tool":disclosure::INVOKE,"arguments":{"reference":{"name":tool.name,"version":tool.version},"arguments":{}},
-                                "instruction":"Call tool_invoke with {reference: the reference shown here, arguments: the target parameters}. Put target parameters directly in tool_invoke.arguments; do not wrap them in another arguments object. This description does not register a model function. Call tool_invoke, never the target name directly."})
-                        }});
-                    if name == "dispatch" {
-                        value["dispatch"] = self.dispatch()?;
-                    }
-                    value
+            let Some(tool) = tools.iter().find(|tool| tool.name == *name) else {
+                return Ok(
+                    json!({"status":"unavailable","name":name,"message":"This tool is not in the current frozen directory."}),
+                );
+            };
+            let mut entry = self.detail(tool, &args)?;
+            if let Some(path) = &args.path {
+                let value = entry
+                    .pointer(path)
+                    .ok_or_else(|| error("contract path does not exist"))?
+                    .clone();
+                let fragment = json!({"name":name,"view":"fragment","path":path,"value":value});
+                if offset == 0 && budget.is_none_or(|budget| docs::bytes(&fragment) <= budget) {
+                    return Ok(fragment);
                 }
-                None => json!({"status":"unavailable","name":name,"message":"This tool is not available to the current request. Check the selected tools or query an available namespace; tool_invoke does not bypass selection or permissions."}),
-            });
+                entry = docs::structure(
+                    &entry,
+                    path,
+                    name,
+                    disclosure::DESCRIBE,
+                    &json!({"name":name,"detail":"full","operation":args.operation}),
+                )?;
+                if let Some(nodes) = entry["nodes"].as_array().cloned() {
+                    entry.as_object_mut().unwrap().remove("nodes");
+                    return Ok(read("nodes", nodes, entry));
+                }
+                return Ok(
+                    self.text_fragment(name, path, &value, offset, budget, &directory, &selection)
+                );
+            }
+            if offset > 0 || budget.is_some_and(|budget| docs::bytes(&entry) > budget) {
+                if let Some(operations) = entry["operations"].as_array().cloned() {
+                    return Ok(read(
+                        "operations",
+                        operations,
+                        json!({"name":name,"view":"operations","description":docs::summary(tool),"reference":entry["reference"],"full":entry["full"]}),
+                    ));
+                }
+            }
+            self.fit_detail(&mut entry, tool, budget);
+            return Ok(entry);
         }
-        if let Some(names) = &args.names {
+        let selected = if let Some(names) = &args.names {
             let mut seen = std::collections::HashSet::new();
-            let descriptions = names.iter().filter(|name| seen.insert(*name)).map(|name|
-                self.describe(&Describe { name:Some(name.clone()), namespace:None, names:None, query:None, detail:None }))
-                .collect::<Result<Vec<_>, _>>()?;
-            return Ok(json!({"tools":descriptions}));
-        }
-        if args.namespace.is_some() || args.query.is_some() {
-            let terms = args.query.as_deref().unwrap_or("").split_whitespace().map(str::to_lowercase).collect::<Vec<_>>();
-            let selected = tools
+            names
                 .iter()
-                .filter(|tool| args.namespace.as_deref().is_none_or(|group| disclosure::namespace(&tool.name) == Some(group)))
-                .filter(|tool| {
-                    let group = disclosure::namespace(&tool.name).unwrap_or("");
-                    let purpose = disclosure::GROUPS.iter().find(|(id,_)| *id == group).map_or("", |(_,purpose)| *purpose);
-                    let text = format!("{} {} {group} {purpose}",tool.name,tool.description).to_lowercase();
-                    terms.iter().all(|term| text.contains(term))
-                })
-                .map(|tool| {
-                    if args.detail.as_deref() == Some("full") || args.query.is_some() && args.detail.as_deref() != Some("summary") {
-                        return self.describe(&Describe { name:Some(tool.name.clone()), namespace:None, names:None, query:None, detail:None });
+                .filter(|name| seen.insert(*name))
+                .map(|name| match tools.iter().find(|tool| tool.name == *name) {
+                    Some(tool) => {
+                        let entry = self.detail(
+                            tool,
+                            &Describe {
+                                name: Some(name.clone()),
+                                detail: args.detail.clone(),
+                                ..Default::default()
+                            },
+                        )?;
+                        Ok(entry)
                     }
-                    Ok(json!({"name":tool.name,"description":tool.description,
-                    "reference":{"name":tool.name,"version":tool.version},"requirements":tool.requirements,
-                    "directlyCallable":disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref()),
-                    "describe":{"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name}},
-                    "related":self.related(&tool.name).iter().map(|related| related["name"].clone()).collect::<Vec<_>>()}))
+                    None => Ok(json!({"status":"unavailable","name":name})),
                 })
-                .collect::<Result<Vec<_>, _>>()?;
-            return Ok(
-                json!({"namespace":args.namespace,"query":args.query,"status":if selected.is_empty(){if args.query.is_some(){"no_matches"}else{"unavailable"}}else{"available"},
-                "tools":selected}),
-            );
+                .collect::<Result<Vec<_>, ExecutionError>>()?
+        } else if args.namespace.is_some() || args.query.is_some() {
+            if args.namespace.is_none() && args.detail.as_deref() != Some("summary") {
+                if let Some(tool) = tools.iter().find(|tool| {
+                    args.query
+                        .as_ref()
+                        .is_some_and(|q| tool.name.eq_ignore_ascii_case(q.trim()))
+                }) {
+                    let mut entry = self.detail(
+                        tool,
+                        &Describe {
+                            name: Some(tool.name.clone()),
+                            detail: args.detail.clone(),
+                            ..Default::default()
+                        },
+                    )?;
+                    self.fit_detail(&mut entry, tool, budget);
+                    entry["match"] = "exact_name".into();
+                    return Ok(entry);
+                }
+            }
+            let mut matches = index
+                .search
+                .iter()
+                .filter_map(|(i, text, aliases)| {
+                    let tool = &index.tools[*i];
+                    if disclosure::is_gateway(tool)
+                        || args
+                            .namespace
+                            .as_deref()
+                            .is_some_and(|group| docs::namespace(tool) != Some(group))
+                    {
+                        return None;
+                    }
+                    let score = args.query.as_ref().map_or(1, |query| {
+                        docs::search_score(query, &tool.name, text, aliases)
+                    });
+                    (score > 0).then_some((score, tool))
+                })
+                .collect::<Vec<_>>();
+            matches.sort_by(|(sa, a), (sb, b)| sb.cmp(sa).then_with(|| a.name.cmp(&b.name)));
+            matches
+                .into_iter()
+                .map(|(_, tool)| {
+                    let entry = if args.detail.as_deref() == Some("full") {
+                        self.detail(
+                            tool,
+                            &Describe {
+                                name: Some(tool.name.clone()),
+                                detail: Some("full".into()),
+                                ..Default::default()
+                            },
+                        )?
+                    } else {
+                        self.summary(tool)
+                    };
+                    Ok(entry)
+                })
+                .collect::<Result<Vec<_>, ExecutionError>>()?
+        } else {
+            let mut groups = std::collections::BTreeMap::<String, Vec<&ToolSchema>>::new();
+            for tool in tools {
+                if let Some(group) = docs::namespace(tool) {
+                    groups.entry(group.into()).or_default().push(tool);
+                }
+            }
+            let entries=groups.into_iter().map(|(id,members)|json!({"namespace":id,
+                "description":disclosure::GROUPS.iter().find(|(group,_)|*group==id).map_or(id.as_str(),|(_,description)|*description),
+                "toolCount":members.len(),"directToolCount":members.iter().filter(|tool|disclosure::is_declared_for(tool,self.frozen.direct_tools.as_deref())).count()})).collect();
+            let mut envelope = json!({"scope":"current_frozen_directory"});
+            if self
+                .frozen
+                .tools
+                .iter()
+                .any(|tool| tool.name == "mcp_discover")
+            {
+                envelope["mcp"] = json!({"tool":"mcp_discover","scope":"Configured services and already discovered tools; undiscovered server contents are not searched here."});
+            }
+            return Ok(read("groups", entries, envelope));
+        };
+        let envelope = json!({"scope":"current_frozen_directory","namespace":args.namespace,"query":args.query,
+            "status":if selected.is_empty(){"no_matches"}else{"available"},"matchScope":"Matches in this directory; browse groups or change the query to explore other capabilities."});
+        let mut selected = selected;
+        let allowance = docs::entry_budget(
+            &envelope,
+            "tools",
+            &directory,
+            &selection,
+            selected.len(),
+            budget,
+            disclosure::DESCRIBE,
+        );
+        for entry in &mut selected {
+            if let Some(tool) = entry["name"]
+                .as_str()
+                .and_then(|name| index.tools.iter().find(|tool| tool.name == name))
+            {
+                self.fit_detail(entry, tool, allowance);
+            }
         }
-        Ok(
-            json!({"groups":disclosure::GROUPS.iter().filter_map(|(id, description)| {
-            let members = tools.iter().filter(|tool| disclosure::namespace(&tool.name) == Some(*id)).collect::<Vec<_>>();
-            let direct = members.iter().filter(|tool| disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref())).count();
-            (!members.is_empty()).then(|| json!({"namespace":id,"description":description,"toolCount":members.len(),"directToolCount":direct}))
-        }).collect::<Vec<_>>()}),
-        )
+        Ok(read("tools", selected, envelope))
     }
-    fn related(&self, name: &str) -> Vec<Value> {
-        disclosure::related(name).iter().filter(|candidate| **candidate != name)
-            .filter_map(|candidate| self.frozen.tools.iter().find(|tool| tool.name == *candidate))
-            .map(|tool| json!({"name":tool.name,"description":tool.description,
-                "reference":{"name":tool.name,"version":tool.version},
-                "directlyCallable":disclosure::is_declared_for(tool, self.frozen.direct_tools.as_deref())}))
-            .collect()
+    fn summary(&self, tool: &ToolSchema) -> Value {
+        use varin_runtime::tool_documentation as docs;
+        json!({"name":tool.name,"description":docs::summary(tool),"namespace":docs::namespace(tool),
+            "reference":{"name":tool.name,"version":tool.version},"requirements":tool.requirements,
+            "directlyCallable":disclosure::is_declared_for(tool,self.frozen.direct_tools.as_deref()),
+            "describe":{"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name}}})
+    }
+    fn detail(&self, tool: &ToolSchema, args: &Describe) -> Result<Value, ExecutionError> {
+        use varin_runtime::tool_documentation as docs;
+        let mut value = self.summary(tool);
+        if args.detail.as_deref() == Some("summary") {
+            return Ok(value);
+        }
+        value["status"] = "available".into();
+        value["description"] = tool.description.clone().into();
+        value["invocation"] = if disclosure::is_declared_for(
+            tool,
+            self.frozen.direct_tools.as_deref(),
+        ) {
+            json!({"tool":tool.name})
+        } else {
+            json!({"tool":disclosure::INVOKE,"arguments":{"reference":{"name":tool.name,"version":tool.version},"arguments":{}}})
+        };
+        value["related"] = json!(
+            disclosure::related(&tool.name)
+                .iter()
+                .filter(|name| **name != tool.name
+                    && self.frozen.tools.iter().any(|tool| tool.name == **name))
+                .collect::<Vec<_>>()
+        );
+        if let Some(metadata) = &tool.metadata {
+            value["completion"] = json!(metadata.completion);
+            if let Some(lifetime) = metadata.lifetime {
+                value["lifetime"] = json!(lifetime);
+            }
+            if let Some(examples) = &metadata.examples {
+                value["examples"] = json!(examples);
+            }
+        }
+        let operations = docs::declaration(tool)
+            .map(|d| d.operations.as_slice())
+            .unwrap_or(&[]);
+        if let Some(operation) = &args.operation {
+            let Some(selected) = operations.iter().find(|entry| entry.name == *operation) else {
+                return Err(error(
+                    "Unknown operation. Read this tool's operation directory.",
+                ));
+            };
+            value["operation"] = operation.clone().into();
+            let index = self.owner.index(&self.frozen)?;
+            let mut views = index.operation_views.lock().map_err(error)?;
+            let key = (tool.name.clone(), operation.clone());
+            if !views.contains_key(&key) {
+                views.insert(key.clone(), docs::operation_schema(&tool.schema, selected)?);
+            }
+            value["parameters"] = views[&key].clone();
+            value["view"] = if value["parameters"] == tool.schema {
+                "complete"
+            } else {
+                "complete_operation"
+            }
+            .into();
+        } else if !operations.is_empty()
+            && args.detail.as_deref() != Some("full")
+            && args.path.is_none()
+        {
+            value["view"] = "operations".into();
+            value["operations"]=json!(operations.iter().map(|op|json!({"name":op.name,"description":op.description,
+                "read":{"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name,"operation":op.name}}})).collect::<Vec<_>>());
+            value["full"] =
+                json!({"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name,"detail":"full"}});
+        } else {
+            value["parameters"] = tool.schema.clone();
+            value["view"] = "complete".into();
+        }
+        if value.get("parameters").is_some() {
+            if let Some(output) = &tool.output_schema {
+                value["outputSchema"] = output.clone();
+            }
+        }
+        if tool.name == "dispatch" {
+            value["dispatch"] = self.dispatch()?;
+        }
+        Ok(value)
+    }
+    fn fit_detail(&self, value: &mut Value, tool: &ToolSchema, budget: Option<usize>) {
+        use varin_runtime::tool_documentation as docs;
+        if budget.is_none_or(|budget| docs::bytes(value) <= budget) {
+            return;
+        }
+        let operation = value.get("operation").cloned();
+        *value = self.summary(tool);
+        value["view"] = "overview".into();
+        value["message"] =
+            "Read a named operation or an exact contract path for the complete contract.".into();
+        value["contract"] = json!({"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name,"detail":"full","operation":operation,"path":""}});
+        if budget.is_some_and(|budget| docs::bytes(value) > budget) {
+            value.as_object_mut().unwrap().remove("description");
+            value["descriptionRead"] = json!({"tool":disclosure::DESCRIBE,"arguments":{"name":tool.name,"detail":"full","path":"/description"}});
+        }
+    }
+    fn text_fragment(
+        &self,
+        name: &str,
+        path: &str,
+        value: &Value,
+        offset: usize,
+        budget: Option<usize>,
+        directory: &str,
+        selection: &Value,
+    ) -> Value {
+        use varin_runtime::tool_documentation as docs;
+        // Exact JSON text, with UTF-8 boundaries and discovery continuation, not a truncated schema.
+        let text = serde_json::to_string(value).expect("contract JSON");
+        if !text.is_char_boundary(offset) || offset > text.len() {
+            return json!({"status":"cursor_out_of_range"});
+        }
+        let boundaries = std::iter::once(offset)
+            .chain(
+                text[offset..]
+                    .char_indices()
+                    .map(|(i, c)| offset + i + c.len_utf8()),
+            )
+            .collect::<Vec<_>>();
+        let fragment = |end: usize| {
+            let mut value = json!({"name":name,"view":"json_text_fragment","path":path,"offset":offset,"text":text[offset..end]});
+            if end < text.len() {
+                value["next"] = json!({"tool":disclosure::DESCRIBE,"arguments":{"cursor":docs::Continuation {directory:directory.into(),selection:selection.clone(),offset:end}.encode()}});
+            }
+            value
+        };
+        let (mut lo, mut hi) = (0, boundaries.len() - 1);
+        while lo < hi {
+            let mid = (lo + hi + 1) / 2;
+            if budget.is_none_or(|budget| docs::bytes(&fragment(boundaries[mid])) <= budget) {
+                lo = mid;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        if lo == 0 {
+            return json!({"status":"budget_too_small","message":"The contract fragment and its continuation exceed the visible output budget."});
+        }
+        fragment(boundaries[lo])
     }
     fn dispatch(&self) -> Result<Value, ExecutionError> {
         let Some(reference) = &self.frozen.child_dispatch else {
@@ -314,13 +675,19 @@ impl Call {
                         content.unwrap_or_else(|| Value::Null.into()),
                     ),
                     ToolCompletion::NotDispatched { reason, .. } => (
-                        if reason == "cancelled" { Outcome::Cancelled } else { Outcome::Failed },
+                        if reason == "cancelled" {
+                            Outcome::Cancelled
+                        } else {
+                            Outcome::Failed
+                        },
                         json!({"kind":"not_dispatched","reason":reason}),
                         Value::Null.into(),
                     ),
                 };
                 let mut data = json!({"reference":args.reference,"operationId":receipt.operation_id,"completion":completion,"result":output.data});
-                if let Some(error) = failure { data["error"] = json!(error); }
+                if let Some(error) = failure {
+                    data["error"] = json!(error);
+                }
                 Ok(ToolCompletion::Result {
                     outcome,
                     effect: Effect::None,

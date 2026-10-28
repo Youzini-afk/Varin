@@ -295,7 +295,7 @@ impl<
                     "policy tool is absent from the frozen schema",
                 ));
             }
-            let context = FrozenToolContext { execution_environment: input.binding.execution_environment.clone(), direct_tools: input.binding.direct_tools.clone(),
+            let context = FrozenToolContext { tool_output_visible_bytes: input.binding.tool_output_visible_bytes, execution_environment: input.binding.execution_environment.clone(), direct_tools: input.binding.direct_tools.clone(),
                 child_dispatch: input.binding.child_dispatch.clone(),
                 resource_activations: resource_activations.clone(),
                 resource_checkpoint_id: boundary.resource_checkpoint_id.clone(),

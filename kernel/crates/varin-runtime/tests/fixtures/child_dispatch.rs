@@ -517,7 +517,7 @@ impl Fixture {
                     compaction: None, step: 1,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -717,7 +717,7 @@ impl Fixture {
                     compaction: None, step: 2,
                     history_range: range.clone(),
                 },
-                binding: RequestBinding { mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
+                binding: RequestBinding { tool_output_visible_bytes: None, mcp_tools: Vec::new(), execution_environment: None, direct_tools: None,
                     provider_id: None,
                     tokenizer: None,
                     request_context: None,
@@ -922,7 +922,7 @@ impl Fixture {
             identity: launch.policy,
             state: json!({"stage": 1}),
             nodes: vec![PolicyAdmittedNode {
-                context: FrozenToolContext { execution_environment: None, direct_tools: None,
+                context: FrozenToolContext { tool_output_visible_bytes: None, execution_environment: None, direct_tools: None,
                     child_dispatch: self
                         .db
                         .launch_metadata(&run_id)
