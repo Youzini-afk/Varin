@@ -1047,12 +1047,25 @@ impl RunSupervisor {
             ) {
                 return Ok(());
             }
-            let worker = {
+            let (worker, operation_workers) = {
                 // Launch admission reads both registries under this same lock.
                 // It must see either the original worker or its active drain.
                 let _entries = self.quiescence.lock().map_err(error)?;
+                let mut workers = self.workers.lock().map_err(error)?;
+                let mut operation_registry = if operations {
+                    Some(self.operation_workers.lock().map_err(error)?)
+                } else { None };
+                let worker = workers.remove(run_id);
+                let operation_workers = if let Some(workers) = operation_registry.as_mut() {
+                    let ids: Vec<_> = workers.iter().filter(|(_, worker)| worker.run_id == run_id)
+                        .map(|(id, _)| id.clone()).collect();
+                    ids.into_iter().filter_map(|id| workers.remove(&id)).collect::<Vec<_>>()
+                } else { Vec::new() };
+                // Maintenance also inspects already-drained terminal Runs. An empty
+                // inspection owns no teardown and must not wake maintenance again.
+                if worker.is_none() && operation_workers.is_empty() { return Ok(()); }
                 serial.active.store(true, Ordering::Release);
-                self.workers.lock().map_err(error)?.remove(run_id)
+                (worker, operation_workers)
             };
             if let Some(mut worker) = worker {
                 if let Some(join) = worker.join.take() {
@@ -1063,13 +1076,10 @@ impl RunSupervisor {
                     let _ = pending.completion.send(Ok(ExecutionReport { state:run.state, history:vec![], policy_state:pending.policy_state, model_steps:0, waiting_on:run.waiting_on, failure:None }));
                 }
             }
-            if operations {
-                let joins = {
-                    let mut workers = self.operation_workers.lock().map_err(error)?;
-                    let ids: Vec<_> = workers.iter().filter(|(_,worker)|worker.run_id==run_id).map(|(id,_)|id.clone()).collect();
-                    ids.into_iter().filter_map(|id|workers.remove(&id).and_then(|worker|worker.join)).collect::<Vec<_>>()
-                };
-                for join in joins { join.join().map_err(|_| error("Operation suspension teardown failed"))?; }
+            for operation in operation_workers {
+                if let Some(join) = operation.join {
+                    join.join().map_err(|_| error("Operation suspension teardown failed"))?;
+                }
             }
             Ok(())
         })();

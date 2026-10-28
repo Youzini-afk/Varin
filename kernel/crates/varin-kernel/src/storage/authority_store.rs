@@ -2,6 +2,8 @@
 use super::*;
 use crate::model::GrantState;
 
+const RUN_GRANTS_QUERY: &str = "SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 AND json_extract(grant_json,'$.operation_id') IS NULL ORDER BY grant_id";
+
 impl Storage {
     pub(super) fn load_grant(&self, grant_id: &str) -> Result<Grant, KernelError> {
         let json: String = self
@@ -280,7 +282,7 @@ impl Storage {
                 if run_id.is_empty() {
                     return Err(KernelError::Protocol("runId is required".into()));
                 }
-                let mut q=self.conn.prepare("SELECT grant_id FROM grants WHERE host_id=?1 AND json_extract(grant_json,'$.run_id')=?2 AND json_extract(grant_json,'$.operation_id') IS NULL ORDER BY grant_id")?;
+                let mut q = self.conn.prepare(RUN_GRANTS_QUERY)?;
                 let rows = q.query_map(params![host_id, run_id], |r| r.get::<_, String>(0))?;
                 rows.collect::<Result<Vec<_>, _>>()?
             }
@@ -790,6 +792,24 @@ mod operation_lifetime_tests {
             ("other-grant", Some("other-operation")),
         ] {
             storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","threadId":"child-thread","runId":"source-run","operationId":operation,"owningWorkspace":"workspace","executionWorkspace":"execution","capabilities":["storage.read"],"pathScopes":[""]}),"host","generation",&storage.root.to_string_lossy().into_owned(),"epoch").unwrap();
+        }
+        // Unrelated short-lived Host reads must not turn a Run's teardown into
+        // a scan of every grant ever created. Count SQLite work, not wall time.
+        storage.conn.execute_batch("BEGIN IMMEDIATE").unwrap();
+        for index in 0..2048 {
+            let id = format!("material:{index}");
+            storage.issue_grant(&json!({"grantId":id,"hostGeneration":"generation","threadId":"unrelated",
+                "owningWorkspace":"materials","executionWorkspace":"materials","capabilities":["storage.read"],"pathScopes":[]}),
+                "host","generation",&storage.root.to_string_lossy().into_owned(),"epoch").unwrap();
+        }
+        storage.conn.execute_batch("COMMIT").unwrap();
+        {
+            let mut query = storage.conn.prepare(RUN_GRANTS_QUERY).unwrap();
+            let ids = query.query_map(params!["host", "source-run"], |row| row.get::<_, String>(0))
+                .unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+            assert_eq!(ids, ["run-grant"]);
+            assert_eq!(query.get_status(rusqlite::StatementStatus::FullscanStep), 0,
+                "Run retirement must only visit that Run's grants");
         }
         let retired = storage
             .retire_grants(

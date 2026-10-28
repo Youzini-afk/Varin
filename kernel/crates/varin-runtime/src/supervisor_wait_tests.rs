@@ -4,6 +4,38 @@ use serde_json::json;
 use std::time::{Duration, Instant};
 
 #[test]
+fn deleted_material_maintenance_does_not_wake_itself_after_workers_are_drained() {
+    let root = std::env::temp_dir().join(format!("varin-maintenance-drain-{}", uuid::Uuid::new_v4()));
+    let mut catalog = Catalog::open(&root).unwrap();
+    catalog.create_thread("deleted", "branch").unwrap();
+    let receipt = catalog.submit(&crate::SubmitInput {
+        key: "input".into(), thread_id: "deleted".into(), branch_id: "branch".into(),
+        expected_head: None, input: json!("finished"), configuration: json!({}),
+    }).unwrap();
+    for state in [RunState::Runnable, RunState::Completed] {
+        let run = catalog.run(&receipt.run_id).unwrap();
+        catalog.transition_run(&run.id, catalog.epoch(), run.revision, state).unwrap();
+    }
+    catalog.delete_thread(&crate::catalog::threads::ThreadDelete {
+        thread_id: "deleted".into(), key: "delete".into(),
+        expected_revision: catalog.inspect_thread("deleted").unwrap()["revision"].as_u64().unwrap(),
+    }).unwrap();
+    let supervisor = RunSupervisor::new(catalog);
+    let (wake, wakes) = mpsc::channel();
+    supervisor.set_wake_sender(wake).unwrap();
+    for _ in 0..2 {
+        let plan = supervisor.material_retention(None).unwrap();
+        assert!(plan.threads.iter().any(|thread| thread.thread_id == "deleted" && thread.release));
+        assert!(matches!(wakes.try_recv(), Err(mpsc::TryRecvError::Empty)),
+            "an inspection with no original worker must not schedule another maintenance pass");
+    }
+    supervisor.retire_deleted_threads().unwrap();
+    assert!(matches!(wakes.try_recv(), Err(mpsc::TryRecvError::Empty)));
+    drop(supervisor);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn completion_wake_waits_for_the_original_worker_before_releasing_launch_ownership() {
     let root = std::env::temp_dir().join(format!("varin-completion-drain-{}", uuid::Uuid::new_v4()));
     let mut catalog = Catalog::open(&root).unwrap();

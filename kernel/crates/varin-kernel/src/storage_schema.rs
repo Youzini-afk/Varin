@@ -48,7 +48,12 @@ pub(crate) const CATALOG_USER_VERSION: i64 = 16;
 
 // Rebuildable query accelerators do not change stored records or their format.
 // Root admission must visit pending file work, not every historical pipe write.
+// Run retirement addresses that Run's grants, excluding the unrelated Host-read
+// ledger from its index and from the shared Storage control path.
 pub(crate) const CATALOG_QUERY_INDEXES: &str = "
+    CREATE INDEX IF NOT EXISTS grants_run_lifetime
+    ON grants(json_extract(grant_json,'$.run_id'), host_id, grant_id)
+    WHERE json_extract(grant_json,'$.run_id') IS NOT NULL;
     CREATE INDEX IF NOT EXISTS operations_kind_state ON operations(kind, state);
     CREATE INDEX IF NOT EXISTS operations_pending_files
     ON operations(created_at, operation_id)
