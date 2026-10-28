@@ -3,6 +3,7 @@ import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 
 /** Pointer ownership is local presentation; never sends cancellation or permission commands. */
 export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | null>) {
+  const [tapRevision, setTapRevision] = React.useState(0);
   const [phase, setPhase] = React.useState<'rest' | 'lifting' | 'landing'>('rest');
   const [pinned, setPinned] = React.useState(false);
   const [passthrough, setPassthrough] = React.useState(false);
@@ -10,6 +11,14 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
   const reevaluatePointer = React.useRef<() => void>(() => {});
   const lastMouse = React.useRef<{ x: number; y: number } | null>(null);
   const ignored = React.useRef(false);
+  const stoolQueue = React.useRef<Promise<unknown>>(Promise.resolve());
+  const worldStool = React.useCallback((phase: 'lift' | 'landing' | 'clear') => {
+    if (!isElectronShell()) return;
+    const rect = canvas.current?.getBoundingClientRect();
+    if (phase !== 'clear' && !rect) return;
+    const args = phase === 'clear' ? { phase } as const : { phase, viewport: { x: rect!.x, y: rect!.y, width: rect!.width, height: rect!.height, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight } };
+    stoolQueue.current = stoolQueue.current.catch(() => {}).then(() => invokeDesktop('desktop_companion_stool', args)).catch(error => setNotice(String(error)));
+  }, [canvas]);
   const passthroughQueue = React.useRef<Promise<unknown>>(Promise.resolve());
   const resetPassthrough = React.useCallback(() => {
     ignored.current = false;
@@ -42,13 +51,14 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     if (!current) return;
     if (canvas.current?.hasPointerCapture(current.id)) canvas.current.releasePointerCapture(current.id);
     setPhase(current.moving ? 'landing' : 'rest');
+    if (!current.moving) setTapRevision(value => value + 1);
   }, [canvas, send, resetPassthrough]);
   React.useEffect(() => {
     window.addEventListener('blur', end);
     const hidden = () => { if (document.hidden) end(); };
     document.addEventListener('visibilitychange', hidden);
-    return () => { window.removeEventListener('blur', end); document.removeEventListener('visibilitychange', hidden); end(); };
-  }, [end]);
+    return () => { window.removeEventListener('blur', end); document.removeEventListener('visibilitychange', hidden); end(); worldStool('clear'); };
+  }, [end, worldStool]);
   React.useEffect(() => {
     if (!passthrough || !isElectronShell()) return;
     let active = true;
@@ -70,7 +80,7 @@ export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | n
     window.addEventListener('mousemove', move); reconcile();
     return () => { active = false; reevaluatePointer.current = () => {}; window.removeEventListener('mousemove', move); resetPassthrough(); };
   }, [hit, passthrough, resetPassthrough]);
-  return { phase, notice, pinned, passthrough, setPassthrough, refreshHitMask,
+  return { phase, tapRevision, notice, pinned, worldStool, passthrough, setPassthrough, refreshHitMask,
     settle: () => setPhase('rest'),
     togglePinned: async () => { try { const result = await invokeDesktop('desktop_set_window_pinned', { pinned: !pinned }); setPinned(result?.pinned ?? false); } catch(error) { setNotice(String(error)); } },
     handlers: {

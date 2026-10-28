@@ -268,5 +268,28 @@
       }
     ]
   },
-  "scope": "32 packages, not a claim of 32 fully implemented business states; relocation integration still in production."
+  "scope": "35 accepted packages, not 32 complete semantic states. Native relocation still in production.",
+  "localEvents": {
+    "packages": [
+      {
+        "id": "user.welcome-closed-v2",
+        "source": "user-attention/local-events-v1/welcome-closed-v2/sequence.source.json",
+        "sourceSha256": "3be68e910aa260ab0d05b172c3ec9cbc4d1e2976dfcd1220138c7a161c240370",
+        "evidence": "observe-diagnose/peer-review/qa.json"
+      },
+      {
+        "id": "user.click-closed-v5",
+        "source": "user-attention/local-events-v1/click-closed-v5/sequence.source.json",
+        "sourceSha256": "b526f37469cbc9dc893d59b5b98b0d790f2b74a399119b584c42d90a229464f7",
+        "evidence": "observe-diagnose/peer-review/qa.json"
+      },
+      {
+        "id": "user.tap-open-v1",
+        "source": "user-attention/local-events-v1/tap-open-v1/sequence.source.json",
+        "sourceSha256": "223a72efbfc8c3c8808f586de15451e000fc9fc2589067e07b004bcd9e875b3d",
+        "evidence": "user-attention/local-events-v1/tap-open-v1/provenance.json",
+        "scope": "OBSERVE independent tab17,320px1x; local tap only"
+      }
+    ]
+  }
 }

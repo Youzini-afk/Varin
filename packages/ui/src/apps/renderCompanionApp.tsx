@@ -7,9 +7,11 @@ import { readCompanionPackage, type CompanionPackage } from '@/components/compan
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
 import { projectCompanionIntent, newlyAnsweredQuestion, type ObservationHealth } from '@/components/companion/presentation';
+import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
 import catalog from '../../../../tools/desktop-companion-animation/coverage.json';
 
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
+  const { t } = useI18n();
   const review = new URLSearchParams(window.location.search).get('review') === '1';
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const [threads, setThreads] = React.useState<ThreadSummary[]>([]);
@@ -34,6 +36,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [presentation, setPresentation] = React.useState('C01');
   const [reviewRoute, setReviewRoute] = React.useState(false);
   const [controlsOpen, setControlsOpen] = React.useState(false);
+  const [localAction, setLocalAction] = React.useState<'welcome' | 'tap-response' | null>(review ? null : 'welcome');
   const intent = projectCompanionIntent(snapshot, health);
   const visualIntent = review && reviewRoute ? { state: presentation, reason: 'Explicit presentation review, not Host facts' } : intent;
   // Shared neutral/attentive performances are visual fallbacks, not invented tool categories.
@@ -48,14 +51,26 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const preferredAction = visualIntent.state === 'E05' ? 'disconnected' : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
   const visualAction = preferredAction && assetList.some(item => item.action === preferredAction && item.reviewStatus === 'accepted' && item.stage === 'motion-candidate' && item.geometryReference && item.entryPose && item.exitPose) ? preferredAction
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
-  const automatic = useCompanionPlayback(assetList, visualAction, playing || manualReview, Object.keys(imageLibrary));
+  const localAllowed = !reviewRoute && !manualReview && !['W02','W03','E01','E02','E04','E05','E06'].includes(intent.state ?? '');
+  const displayAction = localAction && localAllowed && assetList.some(item => item.action === localAction && item.reviewStatus === 'accepted') ? localAction : visualAction;
+  const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary));
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
-  }, [automatic.finished, automatic.packageId, assetList]);
+    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
+  }, [automatic.finished, automatic.packageId, assetList, localAction]);
   const canvas = React.useRef<HTMLCanvasElement>(null);
   const companionWindow = useCompanionWindow(canvas);
+  const seenTap = React.useRef(0);
+  React.useEffect(() => {
+    if (!companionWindow.tapRevision || seenTap.current === companionWindow.tapRevision) return;
+    seenTap.current = companionWindow.tapRevision;
+    const current = assetList.find(item => item.id === automatic.packageId);
+    const posture = current?.exitPose?.startsWith('seated-open-') ? 'seated-open-' : current?.exitPose?.startsWith('seated-closed-') ? 'seated-closed-' : null;
+    if (posture && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.entryPose?.startsWith(posture))) setLocalAction('tap-response');
+  }, [companionWindow.tapRevision, assetList, automatic.packageId]);
   const pictures = asset ? imageLibrary[asset.id] ?? [] : [];
+  const displayedExposure = !playing && !manualReview && automatic.packageId === asset?.id ? automatic.exposure : exposure;
   const loadGeneration = React.useRef(0);
   React.useEffect(() => {
     const abort = new AbortController();
@@ -65,6 +80,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     return () => abort.abort();
   }, [apis.threads, generation]);
   React.useEffect(() => {
+    if (selected) setLocalAction(null);
     setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
     if (!apis.threads || !selected || selected.generation !== generation) { setConnection('No thread selected'); setHealth('unselected'); return; }
     let closed = false;
@@ -174,12 +190,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const node = canvas.current, context = node?.getContext('2d');
     if (!node || !context) return;
     [node.width, node.height] = asset.canvas;
-    const shownExposure = !playing && !manualReview && automatic.packageId === asset.id ? automatic.exposure : exposure;
-    const frame = asset.frames[shownExposure] ?? asset.frames[0]!;
+    const frame = asset.frames[displayedExposure] ?? asset.frames[0]!;
     context.clearRect(0, 0, node.width, node.height);
     context.drawImage(pictures[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
     companionWindow.refreshHitMask();
-  }, [asset, pictures, exposure, playing, manualReview, automatic]);
+  }, [asset, pictures, displayedExposure, companionWindow.refreshHitMask]);
   React.useEffect(() => {
     if (!playing || !asset) return;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -201,18 +216,20 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const run = snapshot?.activeRun;
   const pending = snapshot?.operations.filter(operation => operation.phase !== 'terminal') ?? [];
   const unknownEffects = snapshot?.operations.filter(operation => operation.effect === 'unknown') ?? [];
+  const statusKeys: Record<string, I18nKey> = { C01: 'companion.idle', C06: 'companion.completed', W02: 'companion.permission', W03: 'companion.question', E01: 'companion.failed', E02: 'companion.cancelling', E04: 'companion.unknown', E05: 'companion.sync', E06: 'companion.uncertain' };
+  const shortStatus = health === 'unselected' ? t('companion.quiet') : t(statusKeys[intent.state ?? ''] ?? (run?.state === 'cancelled' ? 'companion.cancelled' : intent.state?.startsWith('W') ? 'companion.waiting' : 'companion.working'));
   const panel: React.CSSProperties = { background: '#20242bed', color: '#edf0f6', borderRadius: 10, padding: 10, font: '12px system-ui', margin: 5 };
   return <main style={{ width: '100%', position: 'relative', background: 'transparent', font: '12px system-ui' }}>
     {review ? <header style={{ ...panel, WebkitAppRegion: 'drag' } as React.CSSProperties}>
       <strong>{review ? 'Varin companion · development review' : 'Varin'}</strong>
       <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isElectronShell()}
         onClick={() => void invokeDesktop('desktop_close_current_window')}>Close</button>
-    </header> : <button aria-label="Companion controls" aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
+    </header> : <button aria-label={t('companion.controls')} aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
     <canvas ref={canvas} {...companionWindow.handlers} style={{ width: 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
     {error && !review && <p role="alert" style={panel}>{error}</p>}
-    {!asset && <p style={panel}>{assetList.length ? 'Loading companion artwork…' : 'No visually accepted artwork package installed.'}</p>}
-    {!review && <p role="status" style={{ ...panel, textAlign: 'center', margin: '0 auto', width: 'fit-content', maxWidth: '90%' }}>{health === 'unselected' ? 'Quiet company · choose a conversation in ⋯' : intent.reason}</p>}
-    {(review || controlsOpen) && <section style={panel}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? 'Unpin' : 'Keep on top'}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />Transparent pointer pass-through</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{companionWindow.notice && <p>{companionWindow.notice}</p>}{!review && <button onClick={() => void invokeDesktop('desktop_close_current_window')}>Close companion</button>}</section>}
+    {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
+    {!review && <p role="status" style={{ ...panel, textAlign: 'center', margin: '0 auto', width: 'fit-content', maxWidth: '90%' }}>{shortStatus}</p>}
+    {(review || controlsOpen) && <section style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 90, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{companionWindow.notice && <p>{companionWindow.notice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
     {review && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>
         {catalog.states.map(state => <option key={state.id} value={state.id}>{state.id} {state.label}</option>)}
@@ -221,21 +238,21 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       {assetList.length > 1 && <select aria-label="Review an actual package in the bundle" value={asset?.id ?? ''} onChange={event => { setManualReview(true); setPlaying(false); setExposure(0); setAsset(assetList.find(item => item.id === event.target.value)); }}>{assetList.map(item => <option key={item.id} value={item.id}>{item.id}</option>)}</select>}
       {asset && <><p>{asset.id} · {asset.stage ?? 'unstated stage'} · {asset.warning}</p>
         <button onClick={() => { setManualReview(true); setExposure(0); setPlaying(value => !value); }}>{playing ? 'Stop' : 'Replay authored timing'}</button>
-        <button onClick={() => { setManualReview(true); setPlaying(false); setExposure(value => Math.min(asset.frames.length - 1, value + 1)); }}>Next exposure</button>
-        <span> {exposure + 1}/{asset.frames.length} exposures</span><button onClick={() => { setPlaying(false); setManualReview(false); setReviewRoute(false); }}>Follow actual Host presentation</button></>}
+        <button onClick={() => { setManualReview(true); setPlaying(false); setExposure(Math.min(asset.frames.length - 1, displayedExposure + 1)); }}>Next exposure</button>
+        <span> {displayedExposure + 1}/{asset.frames.length} exposures</span><button onClick={() => { setPlaying(false); setManualReview(false); setReviewRoute(false); }}>Follow actual Host presentation</button></>}
       {error && <p role="alert">{error}</p>}
     </section>}
-    {(review || controlsOpen) && <section style={panel} aria-label="Actual Host facts">
-      <strong>{review ? 'Actual Host facts — independent of review target' : 'Observe a conversation'}</strong>
+    {(review || controlsOpen) && <section style={{ ...panel, ...(!review ? { position: 'absolute', top: 145, left: 4, right: 4, zIndex: 20, maxHeight: 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
+      <strong>{review ? 'Actual Host facts — independent of review target' : t('companion.observe')}</strong>
       <select aria-label="Observe an existing thread branch" value={identity ? JSON.stringify(identity) : ''} onChange={event => {
         setSelected(event.target.value ? { generation, identity: JSON.parse(event.target.value) as ThreadIdentity } : null);
-      }}><option value="">No thread selected</option>{threads.flatMap(thread => thread.branches.map(branch => {
+      }}><option value="">{t('companion.noThread')}</option>{threads.flatMap(thread => thread.branches.map(branch => {
         const value: ThreadIdentity = { runtime: 'agent', threadId: thread.thread_id, branchId: branch.branch_id };
         return <option key={JSON.stringify(value)} value={JSON.stringify(value)}>{thread.title || thread.thread_id} / {branch.branch_id}</option>;
       }))}</select>
-      <p role="status">{connection}</p>{automatic.blocker && <p>Artwork: {automatic.blocker}</p>}<p>Host presentation: {intent.state ?? 'Unclassified execution'} · {intent.reason}</p>
+      <p role="status">{review ? connection : health === 'current' ? t('companion.observing') : health === 'unknown' || connection.includes('Error') ? t('companion.unavailable') : t('companion.noThread')}</p>{review && automatic.blocker && <p>Artwork: {automatic.blocker}</p>}{review && <p>Host presentation: {intent.state ?? 'Unclassified execution'} · {intent.reason}</p>}
       {review && snapshot && <p>Run: {run?.state ?? 'No active run'} · cancellation requested: {String(run?.cancel_requested ?? false)} · nonterminal operations: {pending.length} · unknown effects: {unknownEffects.length}</p>}
-      <button disabled={!identity || !isElectronShell()} onClick={() => { if (identity) void invokeDesktop('desktop_focus_main_window', identity); }}>Open original conversation</button>
+      <button disabled={!identity || !isElectronShell()} onClick={() => { if (identity) void invokeDesktop('desktop_focus_main_window', identity); }}>{t('companion.openThread')}</button>
       {review && <small>Observation does not create a thread, mark it read, approve, cancel or restart work. Host intent is read-only. Candidate review remains separate; automatic playback requires accepted, compatible artwork.</small>}
     </section>}
   </main>;
@@ -244,5 +261,6 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
 export function renderCompanionApp(apis: RuntimeAPIs) {
   const root = document.getElementById('root');
   if (!root) throw new Error('Companion root not found');
-  createRoot(root).render(<CompanionApp apis={apis} />);
+  initializeLocale();
+  createRoot(root).render(<I18nProvider><CompanionApp apis={apis} /></I18nProvider>);
 }

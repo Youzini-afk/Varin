@@ -41,3 +41,15 @@ export function applyCompanionPassthrough(owner: CompanionWindowOwner, enabled: 
   owner.setIgnoreMouseEvents(next, next ? { forward: true } : undefined);
   return { supported, enabled: next };
 }
+
+/** Renderer viewport coordinates are converted using the owner's actual native content DIP bounds. */
+export function companionWorldRect(content: Bounds, value: unknown): Bounds {
+  if (!value || typeof value !== 'object') throw new Error('Missing companion viewport');
+  const input = value as Record<string, unknown>;
+  const fields = ['x','y','width','height','viewportWidth','viewportHeight'] as const;
+  if (!fields.every(key => typeof input[key] === 'number' && Number.isFinite(input[key]))) throw new Error('Invalid companion viewport');
+  const { x, y, width, height, viewportWidth, viewportHeight } = input as Record<typeof fields[number], number>;
+  if (x < 0 || y < 0 || width <= 0 || height <= 0 || viewportWidth <= 0 || viewportHeight <= 0 || x + width > viewportWidth || y + height > viewportHeight) throw new Error('Companion viewport escapes its sender');
+  const sx = content.width / viewportWidth, sy = content.height / viewportHeight;
+  return { x: Math.round(content.x + x*sx), y: Math.round(content.y + y*sy), width: Math.max(1,Math.round(width*sx)), height: Math.max(1,Math.round(height*sy)) };
+}

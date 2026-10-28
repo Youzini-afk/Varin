@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CompanionPackage } from './sequencePackage';
-import { CompanionPlayback, frameAt, type PlaybackAsset } from './playback.mjs';
+import { CompanionPlayback, frameAt, route, type PlaybackAsset } from './playback.mjs';
 
 /** Only accepted art may follow real Host intent; file-review candidates are not promoted. */
 export function useCompanionPlayback(packages: CompanionPackage[], requestedAction: string | null, paused = false, readyIds: string[] = []) {
@@ -16,7 +16,9 @@ export function useCompanionPlayback(packages: CompanionPackage[], requestedActi
       setView({ packageId: null, exposure: 0, blocker: 'No visually accepted artwork installed for automatic playback', finished: false, neededPackageId: null });
       return;
     }
-    const target = accepted.find(asset => asset.action === requestedAction);
+    const candidates = accepted.filter(asset => asset.action === requestedAction);
+    const target = candidates.map(asset => ({ asset, path: route(controller.current, asset, accepted) }))
+      .filter(item => item.path.status === 'ready').sort((a,b) => a.path.clips.length-b.path.clips.length)[0]?.asset ?? candidates[0];
     controller.request(target?.id ?? 'missing-current-intent', { urgent: requestedAction === null });
     let request = 0, previous: number | undefined;
     const reduced = matchMedia('(prefers-reduced-motion: reduce)');

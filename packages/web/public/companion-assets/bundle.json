@@ -9361,6 +9361,711 @@
           ]
         }
       ]
+    },
+    {
+      "version": 1,
+      "id": "user.welcome-closed-v2",
+      "family": "USER_ATTENTION",
+      "stage": "motion-candidate",
+      "warning": "Peer-reviewed bounded local greeting/tap response; no permission, task acceptance or success meaning.",
+      "reviewStatus": "accepted",
+      "kind": "action",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": "welcome",
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 1650,
+      "loop": null,
+      "uniqueImages": 7,
+      "entryPose": "seated-closed-neutral-rest",
+      "exitPose": "seated-closed-neutral-rest",
+      "pages": [
+        {
+          "file": "action-032-atlas-000.png",
+          "size": [
+            1816,
+            1000
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "pose-000.png",
+          "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+          "startMs": 0,
+          "durationMs": 320,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-closed-neutral-rest",
+          "exitTo": [
+            "seated-closed-neutral-rest"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-001.png",
+          "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+          "startMs": 320,
+          "durationMs": 75,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-002.png",
+          "sha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf",
+          "startMs": 395,
+          "durationMs": 80,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-003.png",
+          "sha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a",
+          "startMs": 475,
+          "durationMs": 85,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-004.png",
+          "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+          "startMs": 560,
+          "durationMs": 140,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            502,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-005.png",
+          "sha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae",
+          "startMs": 700,
+          "durationMs": 170,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            502,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-006.png",
+          "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+          "startMs": 870,
+          "durationMs": 130,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            502,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-007.png",
+          "sha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78",
+          "startMs": 1000,
+          "durationMs": 110,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            502,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-008.png",
+          "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+          "startMs": 1110,
+          "durationMs": 90,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "welcome-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-009.png",
+          "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+          "startMs": 1200,
+          "durationMs": 450,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-closed-neutral-rest",
+          "exitTo": [
+            "seated-closed-neutral-rest"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "user.click-closed-v5",
+      "family": "USER_ATTENTION",
+      "stage": "motion-candidate",
+      "warning": "Peer-reviewed bounded local greeting/tap response; no permission, task acceptance or success meaning.",
+      "reviewStatus": "accepted",
+      "kind": "action",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": "tap-response",
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 1670,
+      "loop": null,
+      "uniqueImages": 6,
+      "entryPose": "seated-closed-neutral-rest",
+      "exitPose": "seated-closed-neutral-rest",
+      "pages": [
+        {
+          "file": "action-033-atlas-000.png",
+          "size": [
+            1816,
+            1004
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "pose-000.png",
+          "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+          "startMs": 0,
+          "durationMs": 280,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-closed-neutral-rest",
+          "exitTo": [
+            "seated-closed-neutral-rest"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-001.png",
+          "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+          "startMs": 280,
+          "durationMs": 70,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-002.png",
+          "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+          "startMs": 350,
+          "durationMs": 70,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-003.png",
+          "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+          "startMs": 420,
+          "durationMs": 190,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-004.png",
+          "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+          "startMs": 610,
+          "durationMs": 55,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            504,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-005.png",
+          "sha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e",
+          "startMs": 665,
+          "durationMs": 85,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            504,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-006.png",
+          "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+          "startMs": 750,
+          "durationMs": 65,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            504,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-007.png",
+          "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+          "startMs": 815,
+          "durationMs": 220,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-008.png",
+          "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+          "startMs": 1035,
+          "durationMs": 95,
+          "offset": [
+            45,
+            5
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            498
+          ]
+        },
+        {
+          "source": "pose-009.png",
+          "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+          "startMs": 1130,
+          "durationMs": 90,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "tap-response-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-010.png",
+          "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+          "startMs": 1220,
+          "durationMs": 450,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-closed-neutral-rest",
+          "exitTo": [
+            "seated-closed-neutral-rest"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "user.tap-open-v1",
+      "family": "USER_ATTENTION",
+      "stage": "motion-candidate",
+      "warning": "Finite independently reviewed open-laptop tap response, presentation only.",
+      "reviewStatus": "accepted",
+      "kind": "action",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": "tap-response",
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 2460,
+      "loop": null,
+      "uniqueImages": 5,
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-neutral-keyboard",
+      "pages": [
+        {
+          "file": "action-034-atlas-000.png",
+          "size": [
+            1816,
+            1000
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "pose-000.png",
+          "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5",
+          "startMs": 0,
+          "durationMs": 500,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-open-neutral-keyboard",
+          "exitTo": [
+            "seated-open-neutral-keyboard"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-001.png",
+          "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048",
+          "startMs": 500,
+          "durationMs": 80,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-002.png",
+          "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5",
+          "startMs": 580,
+          "durationMs": 600,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-003.png",
+          "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55",
+          "startMs": 1180,
+          "durationMs": 50,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-004.png",
+          "sha256": "d696a98820bb12ce672bf3899769d2a21c2708bd756aaf6840b1a743d74c5122",
+          "startMs": 1230,
+          "durationMs": 70,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            502,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-003.png",
+          "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55",
+          "startMs": 1300,
+          "durationMs": 70,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-002.png",
+          "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5",
+          "startMs": 1370,
+          "durationMs": 500,
+          "offset": [
+            45,
+            7
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            496
+          ]
+        },
+        {
+          "source": "pose-001.png",
+          "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048",
+          "startMs": 1870,
+          "durationMs": 90,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "tap-open-moving",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "pose-000.png",
+          "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5",
+          "startMs": 1960,
+          "durationMs": 500,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "pose": "seated-open-neutral-keyboard",
+          "exitTo": [
+            "seated-open-neutral-keyboard"
+          ],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
     }
   ]
 }

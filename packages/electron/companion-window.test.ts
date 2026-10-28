@@ -33,3 +33,10 @@ it('rejects main-window senders and preserves Linux interaction or captured drag
   expect(applyCompanionPassthrough(owner, true, 'darwin', false).enabled).toBe(true);
   expect(() => applyCompanionPassthrough(owner, 'true', 'darwin', false)).toThrow(/boolean/);
 });
+
+import { companionWorldRect } from './companion-window';
+it('anchors the world prop in sender content DIP space without assuming CSS pixels are physical pixels', () => {
+  expect(companionWorldRect({ x: 900, y: 100, width: 400, height: 500 }, { x: 20, y: 10, width: 160, height: 160, viewportWidth: 200, viewportHeight: 250 }))
+    .toEqual({ x: 940, y: 120, width: 320, height: 320 });
+  expect(() => companionWorldRect({ x: 0, y: 0, width: 400, height: 500 }, { x: 180, y: 0, width: 160, height: 160, viewportWidth: 200, viewportHeight: 250 })).toThrow();
+});
