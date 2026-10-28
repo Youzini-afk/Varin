@@ -1,0 +1,6 @@
+{
+  "sha256": "fde8b3f8710b8deed3d8b197eb92a3b8d296c522acf78c51ecc9159a7232a44b",
+  "status": "Historical intermediate before manually reviewed empty hair-loop removal. Do not use as current matte. Retained for source candidate reproduction.",
+  "currentAlphaSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "reproduce": "Run derive_alpha with reviewed_holes=[] in an isolated copy, never overwrite the current shared matte."
+}
