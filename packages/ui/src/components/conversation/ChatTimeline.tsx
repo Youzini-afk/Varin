@@ -251,6 +251,8 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   const scrollWriteRef = React.useRef<number | null>(null);
   const followViewportRef = React.useRef(0);
   const followInstantRef = React.useRef(false);
+  const followGrowthRef = React.useRef(false);
+  const followContentRef = React.useRef({ leafId: props.leafId, assistant: props.liveAssistant, user: props.liveUser });
   /** `generation:turnId` of the sent turn once it has arrived at the top. */
   const anchorSettledRef = React.useRef<string | null>(null);
   const settleScrollMotionRef = React.useRef<(motion: TimelineScrollMotion) => void>(() => undefined);
@@ -425,8 +427,11 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     if (followEndFrameRef.current !== null) return;
     followEndFrameRef.current = requestAnimationFrame(() => {
       followEndFrameRef.current = null;
-      const instantFollow = followInstantRef.current;
+      // Measuring already-present history is placement, not new output. Only
+      // actual content arriving (or a spring already following it) animates.
+      const instantFollow = followInstantRef.current || !(followGrowthRef.current || scrollSpringRef.current?.active);
       followInstantRef.current = false;
+      followGrowthRef.current = false;
       if (!listLoadedRef.current) return;
       const motion = scrollMotionRef.current;
       // Travel in flight chases its measured destination as rows settle.
@@ -446,9 +451,14 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
   }, [followContentEnd, props.sessionId, returnTarget, startScrollMotion]);
 
   React.useLayoutEffect(() => {
+    const previous = followContentRef.current;
+    followContentRef.current = { leafId: props.leafId, assistant: props.liveAssistant, user: props.liveUser };
     if (!listLoadedRef.current) return;
+    if (previous.leafId !== props.leafId || previous.assistant !== props.liveAssistant || previous.user !== props.liveUser) {
+      followGrowthRef.current = true;
+    }
     scheduleFollowEnd();
-  }, [projection.items, props.entries, props.liveAssistant, props.liveUser, props.toolExecutions, scheduleFollowEnd]);
+  }, [projection.items, props.entries, props.leafId, props.liveAssistant, props.liveUser, props.toolExecutions, scheduleFollowEnd]);
 
   const applyEntryIntent = React.useCallback(() => {
     const list = listRef.current;
@@ -472,7 +482,17 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
       observedLeafIdRef.current = props.leafId;
       // Opening a Thread places its end. A return that has just handed over
       // to following keeps the spring it is already riding.
-      followContentEnd(scrollSpringRef.current?.active !== true);
+      if (entryWasApplied || scrollSpringRef.current?.active) followContentEnd(!scrollSpringRef.current?.active);
+      else {
+        haltScrollMotion();
+        const state = list.getState();
+        // Own the exact first placement, even if initial estimates put the
+        // viewport beyond the reading edge. This also releases the virtual
+        // list's preserved bootstrap target before later size measurements.
+        void list.scrollToOffset({ animated: false, offset: getChatTimelineFollowOffset(
+          state.contentLength, 0, state.scrollLength, endSpaceHeight(),
+        ) });
+      }
       return;
     }
     const index = blocks.items.findIndex((item) => item.id === target.itemId);
@@ -493,7 +513,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     });
   }, [
     completeTimelineReturn,
+    endSpaceHeight,
     followContentEnd,
+    haltScrollMotion,
     blocks.items,
     props.leafId,
     props.sessionId,
@@ -502,7 +524,7 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
     timelineView.entry.epoch,
   ]);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (listLoadedRef.current) applyEntryIntent();
   }, [applyEntryIntent, timelineView.entry.epoch]);
 
@@ -927,6 +949,9 @@ export const ChatTimeline: React.FC<ChatTimelineProps> = (props) => {
         initialScrollIndex={initialScrollAtEnd ? (blocks.items.length ? {
           index: blocks.items.length - 1,
           viewPosition: 1,
+          // Explicitly align the last row, without letting footer/bottom
+          // padding retarget bootstrap to the end of the breathing space.
+          viewOffset: 0,
         } : undefined) : {
           index: entryTargetIndex,
           viewOffset: timelineView.entry.target.kind === 'turn'

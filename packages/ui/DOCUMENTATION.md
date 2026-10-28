@@ -82,6 +82,12 @@ idle and remains visible during hover, focus or dragging. Pointer/keyboard scrol
 timeline's follow spring through its existing scroll-intent event; changing conversation/history cuts
 rebinds the viewport without letting a departing scene clear the new binding.
 
+Conversation entry prepares its saved viewport before mounting the virtual list. The initial
+last-row target excludes the footer's breathing space, and the timeline takes over exact placement
+before later size measurements. Layout-only changes settle without starting a follow animation;
+new messages and streaming growth retain the interruptible follow spring. Resuming following after
+entry still preserves end space the user manually revealed.
+
 Child file review binds an immutable publication to its original parent source. Explicit User apply/undo
 commands use native user Operations and the existing Integration journal. Preview refresh reads those
 records; it does not repeat writes. Dirty editor buffers keep their Documents revision checks.

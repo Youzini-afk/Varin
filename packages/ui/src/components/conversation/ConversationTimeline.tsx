@@ -114,13 +114,22 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   ].sort((left, right) => (left.order ?? 0) - (right.order ?? 0)), snapshot?.modelSelection.active?.configuration ?? snapshot?.activeRun?.configuration, working || progress.length > 0), runId: snapshot?.activeRun?.id } : undefined,
     [progress, streamingTools, working, snapshot?.modelSelection.active?.configuration, snapshot?.activeRun?.configuration, snapshot?.activeRun?.id, key]);
   const entering = React.useRef<string | undefined>(undefined);
+  const entryKey = `${timelineKey}:${historyReset}`;
+  const [preparedEntry, setPreparedEntry] = React.useState<string>();
   React.useLayoutEffect(() => {
-    const entryKey = `${timelineKey}:${historyReset}`;
-    if (!snapshot && !historyReady || entering.current === entryKey) return;
+    if (!snapshot && !historyReady) {
+      if (liveUser) setPreparedEntry(entryKey);
+      return;
+    }
+    if (entering.current === entryKey) return;
     const preserveReading = entering.current === undefined && Boolean(historyReady);
     entering.current = entryKey;
     useTimelineViewStore.getState().enter(timelineKey, head, working, preserveReading);
-  }, [snapshot, historyReady, historyReset, timelineKey, head, working]);
+    // The virtual list captures its initial target when it mounts. Prepare the
+    // saved reading position before mounting it, rather than correcting a
+    // different initial scroll after the first rows have already appeared.
+    setPreparedEntry(entryKey);
+  }, [snapshot, historyReady, entryKey, timelineKey, head, working, liveUser]);
   const nativeItems = React.useMemo(() => new Map(history.map(item => [item.id, item])), [history]);
   const renderExtras = React.useCallback((itemId: string, options?: { hideImages?: boolean }) => {
     const item = nativeItems.get(itemId); if (!item) return null;
@@ -158,11 +167,11 @@ export function ConversationTimeline({ api, identity, snapshot, history, runUsag
   }, [fileTarget, identity]);
   const context = React.useMemo(() => ({ api, identity, head, readOnly, quote: onQuote, revealQuestion: onQuestion, openFile, fileTarget, openContext, memory, followups: snapshot?.followups, toolExecutions: view.toolExecutions, uiCards, sourceEntry, renderExtras }),
     [api, identity, head, readOnly, onQuote, onQuestion, openFile, fileTarget, openContext, memory, snapshot?.followups, view.toolExecutions, uiCards, sourceEntry, renderExtras]);
-  return <ConversationContext.Provider value={context}><ChatTimeline key={`${timelineKey}:${historyReset}`} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
+  return <ConversationContext.Provider value={context}>{preparedEntry === entryKey && <ChatTimeline key={entryKey} sessionId={timelineKey} cwd={cwd} earlierHistory={earlierHistory} navigation={navigation}
     onScrollContainerChange={onScrollContainerChange}
     entries={entries} toolExecutions={view.toolExecutions} liveAssistant={liveAssistant} liveUser={liveUser} liveUserStatus={liveUserStatus} leafId={head}
     activeRunId={working ? snapshot?.activeRun?.id : undefined}
     assistantWaiting={working && !snapshot?.activeRun?.waiting_on?.startsWith('context-wait:') ? { retry: progress.find(part => part.type === 'retry') } : undefined} onFork={onFork ? entry => onFork(entry.id) : undefined}
-    onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />
+    onRecover={onRecover ? entry => onRecover(entry.id) : undefined} header={header} footer={footer} />}
   </ConversationContext.Provider>;
 }
