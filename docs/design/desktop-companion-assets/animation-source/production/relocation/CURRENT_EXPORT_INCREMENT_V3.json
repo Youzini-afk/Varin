@@ -1,0 +1,125 @@
+{
+  "stage": "rapid-pickup-motion-candidate",
+  "depends": [
+    "CURRENT_EXPORT_SELECTION.json",
+    "CURRENT_EXPORT_INCREMENT_V2.json"
+  ],
+  "external": [
+    "../shared/seated-open-canonical-alpha-v1.png",
+    "../seated-work/canonical-lid-v1/closed-canonical-candidate.png"
+  ],
+  "files": [
+    {
+      "path": "source/canonical-rapid-pickup-closed-v1.png",
+      "bytes": 2000887,
+      "sha256": "c62cde1a78d9e490c463d9b5c2705b2fc72b0790b218b2be8d7a4e7878b7fd1f"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-closed-v1.prompt.txt",
+      "bytes": 672,
+      "sha256": "98b4cf171ca8f5b340783ce9dc7b0506c2be66905dfd740d267b101b39367c36"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-half-v1.png",
+      "bytes": 1772999,
+      "sha256": "748840f4d9025e603234906ffa1ed6bf874e4b3bd4da59dc76ad8d88c8221ca6"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-half-v1.prompt.txt",
+      "bytes": 1230,
+      "sha256": "d8c1202bcb62aa715ee76c12358fd511fd0a5d6efd03691b1d3844a02024d825"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-hug-v1.png",
+      "bytes": 1953500,
+      "sha256": "57641b08190e9f1cbc85164290fcaaa1a4a438dbe56d7b03085ea4c9f74c7ed7"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-hug-v1.prompt.txt",
+      "bytes": 700,
+      "sha256": "eb40a9c713e37a3ff3e63af882222b1dac41d0387b069cc8482ce2bec28204f1"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-open-v1.png",
+      "bytes": 1997050,
+      "sha256": "e14c2d8e6d150378e95430abf3631769ed03d12550c4f077b320933cc40a11cb"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-open-v1.prompt.txt",
+      "bytes": 723,
+      "sha256": "e9fcd2e9953d6e9b9337b155d3447bb5535a1ded44e88e8fdd3d397e159779c4"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-precontact-v1.png",
+      "bytes": 1941767,
+      "sha256": "e0562523ab90f92b5ade3f6381c688bddfead6f275fb0f68d699368f409ac6c8"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-precontact-v1.prompt.txt",
+      "bytes": 855,
+      "sha256": "76efa975e99dcda65b8af5e78e993fb308dc712f510e13db3816dfa21697c7d0"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-turn-v1.png",
+      "bytes": 1985654,
+      "sha256": "4df97ee0637ab9c76a91b2c08489c94d113b2c0faba5d863243eed6fb5f2b879"
+    },
+    {
+      "path": "source/canonical-rapid-pickup-turn-v1.prompt.txt",
+      "bytes": 795,
+      "sha256": "179dc498a0c6ec46d3d4f7663bb8704349dcfbe13cdb0df966c190d643097b5b"
+    },
+    {
+      "path": "derive_rapid_pickup_v1.py",
+      "bytes": 1887,
+      "sha256": "a40eae97b0d210ac9e422734190289cada46847f706f69b68d4d137f6ca63687"
+    },
+    {
+      "path": "build_scene_review_v4.py",
+      "bytes": 5126,
+      "sha256": "d487ed380e4d22555ecc480ee4151bc6d6a520062279bdf42c8493e638859944"
+    },
+    {
+      "path": "rapid-pickup-v1/closed.png",
+      "bytes": 314238,
+      "sha256": "ca135e539b6621f8f4245a5359cc3e3ed98cbae07aafb64e28eac45edac7a55e"
+    },
+    {
+      "path": "rapid-pickup-v1/half.png",
+      "bytes": 314015,
+      "sha256": "50ff730ed917d9326049257a61532b29ec7de9310bce9c7374151fc51b2fcdca"
+    },
+    {
+      "path": "rapid-pickup-v1/hug.png",
+      "bytes": 305548,
+      "sha256": "c2cb7b48ddb11d1b7a9a877f1847675e891b9f2fcf9121b6db3859012af50469"
+    },
+    {
+      "path": "rapid-pickup-v1/open.png",
+      "bytes": 308853,
+      "sha256": "3af122cea75c3533699dd7fa6c26441005fc43db937baa0018a41b19225957fb"
+    },
+    {
+      "path": "rapid-pickup-v1/precontact.png",
+      "bytes": 316421,
+      "sha256": "1a79c7021408738cd5e2fc8bea5806695e9f2c6b33e378bed7a6a2b4334a0e3a"
+    },
+    {
+      "path": "rapid-pickup-v1/turn.png",
+      "bytes": 311862,
+      "sha256": "77ca66133cb5be06fa457d6819c786aeec1e6c2a887e6015df48840e0f59cf79"
+    },
+    {
+      "path": "rapid-pickup-v1/provenance.json",
+      "bytes": 225,
+      "sha256": "56dbf0b7ba92072b6c6ccaed8c19dfdff2d3ca03aead6b6f1d1a1f6ab0483ab2"
+    }
+  ],
+  "bytes": 13535007,
+  "knownGaps": [
+    "precontact boot scale needs correction",
+    "lap-release to shared-closed needs real hand intermediate",
+    "fast angular transitions need additional exposures and visual review",
+    "direction and all regrab branches not complete"
+  ]
+}

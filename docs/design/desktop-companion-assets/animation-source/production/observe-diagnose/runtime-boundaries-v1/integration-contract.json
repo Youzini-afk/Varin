@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "pixelBoundaryChecks": [
+    {
+      "id": "screen-to-wait",
+      "left": "observe-diagnose/canonical-gaze-v1/read-screen.png",
+      "right": "observe-diagnose/canonical-wait-cycle-v1/pose-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "rightSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+    },
+    {
+      "id": "wait-enter-hold",
+      "left": "observe-diagnose/canonical-wait-cycle-v1/pose-005.png",
+      "right": "observe-diagnose/canonical-wait-cycle-v1/pose-005.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "rightSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87"
+    },
+    {
+      "id": "wait-hold-exit",
+      "left": "observe-diagnose/canonical-wait-cycle-v1/pose-005.png",
+      "right": "observe-diagnose/canonical-wait-cycle-v1/pose-005.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "rightSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87"
+    },
+    {
+      "id": "wait-exit-screen",
+      "left": "observe-diagnose/canonical-wait-cycle-v1/pose-000.png",
+      "right": "observe-diagnose/canonical-gaze-v1/read-screen.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "rightSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+    },
+    {
+      "id": "quiet-entry",
+      "left": "rest/canonical-quiet-v1/neutral.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "id": "quiet-exit",
+      "left": "rest/canonical-quiet-v1/neutral.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "id": "eye-rub-entry",
+      "left": "rest/canonical-eye-rub-v1/pose-000.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "id": "eye-rub-exit",
+      "left": "rest/canonical-eye-rub-v1/pose-000.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "id": "stretch-entry",
+      "left": "rest/canonical-stretch-v1/pose-000.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    },
+    {
+      "id": "stretch-exit",
+      "left": "rest/canonical-stretch-v1/pose-000.png",
+      "right": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "differentRgbaPixels": 0,
+      "leftSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "rightSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7"
+    }
+  ],
+  "safeExitSemantics": {
+    "required": [
+      "The currently displayed frame itself has explicit exitTo permitting the exact target bridge entry pose.",
+      "Bridge entry drawing matches current drawing, not merely a generic pose label.",
+      "Geometry reference and canvas match."
+    ],
+    "ifUnsafe": "Continue existing authored contact recovery until a matching safe frame is actually displayed; never seek forward or freeze forever merely because urgent has no bridge.",
+    "ifSafe": "Route immediately or at the chosen exposure boundary without jumping pose.",
+    "newerIntent": "Replace obsolete pending artistic target, preserve current contact recovery.",
+    "factLatency": "Host status label updates immediately; safe art recovery does not delay or fabricate facts."
+  },
+  "safePoints": {
+    "wait-hold": [
+      0,
+      4,
+      6,
+      10,
+      16
+    ],
+    "quiet": [
+      0,
+      4,
+      8
+    ],
+    "eye-rub": [
+      0,
+      8
+    ],
+    "stretch": [
+      0,
+      16
+    ]
+  },
+  "longestAuthoredRecoveryToSafeMs": {
+    "wait-hold": 2480,
+    "quiet": 3570,
+    "eye-rub": 980,
+    "stretch": 1980
+  },
+  "facts": {
+    "cancelIntent": "E02 while pending work or active children remain; no stopped confirmation.",
+    "cancelledRunWithoutExecutorReceipt": "Neutral cancelled presentation/recovery; never infer E03 from run.cancelled or from animation end.",
+    "unknownObservation": "E04 immediately; keep safe art living/holding, no success/failure guess.",
+    "unknownOperationEffect": "E06 requires reconciliation, distinct from known failure.",
+    "synchronizing": "E05; synchronization alone does not mean completed.",
+    "knownFailure": "E01 only actual failed run; one entry surprise then serious hold, not repeated surprise."
+  },
+  "remainingIntegrationWork": [
+    "Consume exitTo and phase rather than discard them in decoder.",
+    "Route via actual safe drawing, not current.exitPose before reaching it.",
+    "Register wait E/X as bridges and H as action; aliases standardized in adjacent manifests.",
+    "Closed wake must use accepted lid opening then neutral-to-screen gaze bridge before work.",
+    "Register presentation-neutral cancellation recovery without asserting executor stop."
+  ],
+  "artChangesRequired": []
+}
