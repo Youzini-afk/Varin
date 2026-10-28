@@ -4,8 +4,8 @@ import { runtimeFetch } from './transport/runtime-fetch.js';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointWillChange } from './transport/runtime-switch.js';
 
 export class ThreadRequestError extends Error {
-  constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started') {
-    super(threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
+  constructor(readonly status: number, readonly code: string, readonly admission?: 'not_started', detail?: string) {
+    super(code === 'workspace_backend_unavailable' && detail ? detail : threadSourceFailureMessage(code) ?? `Thread request failed (${status})`);
     this.name = 'ThreadRequestError';
   }
 }
@@ -24,12 +24,12 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
     if (!response.ok) {
       const body: unknown = await response.json().catch(() => undefined);
-      const failure = body && typeof body === 'object' ? body as { code?: unknown; admission?: unknown } : {};
+      const failure = body && typeof body === 'object' ? body as { code?: unknown; admission?: unknown; error?: unknown } : {};
       signal?.throwIfAborted();
       if (generation !== getRuntimeEndpointGeneration()) throw new Error('Application Host changed during thread request');
       throw new ThreadRequestError(response.status, typeof failure.code === 'string' ? failure.code
         : response.status === 413 ? 'http-body-too-large' : 'thread-request-failed',
-      failure.admission === 'not_started' ? 'not_started' : undefined);
+      failure.admission === 'not_started' ? 'not_started' : undefined, typeof failure.error === 'string' ? failure.error : undefined);
     }
     const result = await response.json() as T;
     signal?.throwIfAborted();

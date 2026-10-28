@@ -741,6 +741,34 @@ impl FileSnapshot {
 }
 
 impl SealedFile {
+    /// Import already-existing bytes directly into their immutable object. There
+    /// is no live writable inode yet, so an empty file and range log add no value.
+    pub(super) fn capture(
+        staging: &Path, mut source: impl Read, revoked: Arc<AtomicBool>,
+        cleanup: Arc<StagingCleanup>, cancellation: &AtomicBool,
+        mut progress: impl FnMut(u64) -> Result<(), KernelError>,
+    ) -> Result<Self, KernelError> {
+        let mut candidate = Self { file_id: Uuid::new_v4().to_string(),
+            staging: staging.join(format!("{}.sealed", Uuid::new_v4())), staged: false,
+            hash: String::new(), length: 0, generation: 0, revoked, cleanup };
+        let mut file = OpenOptions::new().create_new(true).write(true).open(&candidate.staging)?;
+        candidate.staged = true;
+        prepare_sparse_file(&file)?;
+        let mut digest = Sha256::new();
+        let mut bytes = [0; 128 * 1024];
+        loop {
+            check(cancellation)?; check(&candidate.revoked)?;
+            let count = source.read(&mut bytes)?;
+            if count == 0 { break; }
+            if bytes[..count].iter().all(|byte| *byte == 0) { file.seek(SeekFrom::Current(count as i64))?; }
+            else { file.write_all(&bytes[..count])?; }
+            digest.update(&bytes[..count]); candidate.length += count as u64;
+            progress(count as u64)?;
+        }
+        file.set_len(candidate.length)?; file.sync_all()?;
+        candidate.hash = format!("sha256-{}", hex::encode(digest.finalize()));
+        Ok(candidate)
+    }
     /// Call only after Storage retained this exact hash. Installation does no
     /// catalog mutation and can run while the original owner handles controls.
     pub(crate) fn install(
@@ -818,6 +846,15 @@ impl SealedFile {
 }
 
 impl Storage {
+    /// Called in the namespace creation transaction while the installed object's
+    /// read retention is held. The branch consumes this ordinary blob owner.
+    pub(super) fn admit_imported_file(&mut self, operation: &str, file: &InstalledFile, actor: &Grant) -> Result<String, KernelError> {
+        let owner = blob_owner_id(&format!("workspace-import:{operation}"));
+        self.conn.execute("INSERT OR IGNORE INTO blobs(hash,byte_length) VALUES(?1,?2)",
+            params![file.content.hash, i64::try_from(file.content.length).map_err(|_| KernelError::Operation("content length exceeds the Storage range".into()))?])?;
+        self.record_object_owner(&owner, &file.content.hash, actor.owning_workspace.as_deref(), Some(operation), &actor.grant_id)?;
+        Ok(owner)
+    }
     /// The source is selected by the native Storage owner. Backends receive a
     /// scoped byte handle, never an authority-bearing arbitrary object path.
     pub(crate) fn open_private_file(

@@ -1,7 +1,9 @@
 export const settingsDict = {
   "settings.projects.workspace.title": "版本化工作区",
   "settings.projects.workspace.description": "共享未变内容，按需分叉独立工作状态。",
-  "settings.projects.workspace.explanation": "启用后，在独立的受管目录继续工作。原文件夹保留为接入来源。新会话、编辑器和命令使用受管目录，已有会话保留原来源。",
+  "settings.projects.workspace.explanation": "首次使用项目执行任务时自动接入，之后会话、编辑器和命令使用同一受管目录，子任务共享已有版本。原文件夹保留为接入来源；运行中的任务在下一轮交接来源。",
+  "settings.projects.workspace.automatic": "首次执行任务时自动准备，无需手动启用。",
+  "settings.projects.workspace.ready": "已就绪 · 后续任务复用当前工作区",
   "settings.projects.workspace.original": "接入来源",
   "settings.projects.workspace.current": "当前工作目录",
   "settings.projects.workspace.preparing": "正在准备工作区…",

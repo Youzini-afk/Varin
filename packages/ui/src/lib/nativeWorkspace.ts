@@ -1,5 +1,6 @@
 import { runtimeFetch, projectPathKey, type ProjectEntry, type VersionedProjectWorkspace } from '@varin/application-client';
 export interface ProjectWorkspaceStatus {
+    preparing: boolean;
     workspace: VersionedProjectWorkspace | null;
     executionPath: string | null;
     mountState: string | null;

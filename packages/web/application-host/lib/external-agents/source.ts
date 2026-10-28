@@ -10,6 +10,7 @@ import type { StableSourcePreparationOwners } from '../harness/working-state/sou
 import type { DocumentAuthority } from '../documents/authority.js';
 import { record, text } from './transport.js';
 import { createPhysicalSourceCapture } from '../kernel/child-source-capture.js';
+import { requireNativeWorkspaceBackend } from '../kernel/native-workspaces.js';
 
 export function createExternalSourceOwner(deps: {
   kernel: KernelClient;
@@ -103,6 +104,7 @@ export function createExternalSourceOwner(deps: {
         const cwd = await admitMaterializedRoot(text(existing.cwd), signal);
         return { ...existing, cwd, workspaceId, executionWorkspaceId };
       }
+      if (child.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(deps.kernel.scoped(grant), signal);
       if(child.work_mode==='isolated_write'&&deps.kernel.nativeWorkspaces)await deps.kernel.nativeWorkspaces.retainPrepared({...handoff.source,branch_id:`child-source:${child.operation_id}`},child.parent_thread_id,false,signal);
       const prepared = await prepareDispatchSourceStore(
         {

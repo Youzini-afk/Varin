@@ -1,6 +1,6 @@
 //! The native filesystem session shared by OS callbacks. Metadata is admitted by
 //! the existing Storage owner; range I/O never takes the control thread or wire.
-use super::workspace_files::{FileSnapshot, PrivateFile};
+use super::workspace_files::{FileSnapshot, PrivateFile, SealedFile, InstalledFile};
 use super::workspace_metadata::{Attributes, Head, Metadata};
 use super::*;
 use std::sync::{Mutex, RwLock};
@@ -1099,6 +1099,27 @@ impl Session {
                 ))
             }
         }
+        self.create_entry(requested, state, metadata, None)
+    }
+    /// Source adoption owns the stable reader and never exposes this private
+    /// candidate to programs. Install bytes once, then publish namespace+metadata.
+    pub(crate) fn import_file(
+        &self, requested: &str, source: impl std::io::Read, mut attributes: Attributes,
+        cancellation: &AtomicBool, progress: impl FnMut(u64) -> Result<(), KernelError>,
+    ) -> Result<Arc<Node>, KernelError> {
+        let cleanup = self.port.call(|s| Ok(s.private_cleanup.clone()))?;
+        let sealed = SealedFile::capture(&self.root.join("staging"), source,
+            self.revoked.clone(), cleanup, cancellation, progress)?;
+        let (retained, sealed) = self.port.call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
+        let installed = sealed.install(&self.root, retained, cancellation)?;
+        let state = installed.state(attributes.mode);
+        let mut metadata = Storage::new_workspace_metadata(&state);
+        attributes.file_id = metadata.binding.file_id;
+        attributes.validate()?;
+        metadata.attributes = attributes;
+        self.create_entry(requested, state, metadata, Some(installed))
+    }
+    fn create_entry(&self, requested: &str, state: PathState, metadata: Metadata, installed: Option<InstalledFile>) -> Result<Arc<Node>, KernelError> {
         let requested = path(requested)?;
         if requested.is_empty() {
             return Err(failure("namespace_exists", "Workspace root already exists"));
@@ -1130,13 +1151,16 @@ impl Session {
         let operation = format!("workspace-create:{}", Uuid::new_v4());
         self.port.call(move |storage| {
             storage.admit_workspace_session(&branch, &selected, &actor, true)?;
-            let input = json!({"operationId":operation,"workspaceId":actor.owning_workspace,"branchId":branch,"changes":[{"path":selected,"expectedState":before["state"],"state":state}]});
-            let result = storage.filesystem_transaction(|s| {
+            let mut input = json!({"operationId":operation,"workspaceId":actor.owning_workspace,"branchId":branch,"changes":[{"path":selected,"expectedState":before["state"],"state":state}]});
+            storage.filesystem_transaction(|s| {
+                if let Some(file) = &installed {
+                    input["changes"][0]["ownerId"] = json!(s.admit_imported_file(&operation, file, &actor)?);
+                }
                 let result=s.branch_path_apply(&input, &actor.grant_id)?;
-                if result["status"]=="committed"{s.save_workspace_metadata(&branch,&selected,&metadata,&actor)?;}
-                Ok(result)
+                if result["status"] != "committed" { return Err(failure("namespace_conflict", "Create target changed")); }
+                s.save_workspace_metadata(&branch,&selected,&metadata,&actor)?;
+                Ok(())
             })?;
-            if result["status"] != "committed" { return Err(failure("namespace_conflict", "Create target changed")); }
             Ok(())
         })?;
         let node = self.load(&mut namespace, &requested)?;
@@ -1733,7 +1757,7 @@ impl Session {
         let actor = self.grant.grant_id.clone();
         self.port.call(move|s| {
             if !branch.starts_with("workspace-adoption:"){return Err(KernelError::Authorization("Only an unpublished source adoption may discard private bytes".into()));}
-            let owned:bool=s.conn.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE kind='workspace.adopt' AND state='started' AND json_extract(result_json,'$.temporaryBranchId')=?1 AND json_extract(result_json,'$.identity.grantId')=?2)",params![branch,actor],|row|row.get(0))?;
+            let owned:bool=s.conn.query_row("SELECT EXISTS(SELECT 1 FROM operations WHERE kind='workspace.adopt' AND state='started' AND json_extract(result_json,'$.temporaryBranchId')=?1 AND json_extract(result_json,'$.grantId')=?2)",params![branch,actor],|row|row.get(0))?;
             if !owned{return Err(KernelError::Authorization("The original unpublished adoption owner is unavailable".into()));}
             Ok(())
         })?;

@@ -25,6 +25,7 @@ import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
 import { useComputerAutomation } from '@/stores/useComputerAutomation';
 import { ThreadExecutions } from './ThreadExecutions';
+import { ChildPreparation, ChildState } from '../conversation/childPresentation';
 import { attachProcessTerminal } from '@/lib/attachProcessTerminal';
 import { ThreadGoal } from './ThreadGoal';
 import { ThreadFollowups } from './ThreadFollowups';
@@ -221,7 +222,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const computer = useComputerAutomation(identity, api.computer, branch?.active_run_id);
   const hasComputer = Boolean(computer.error || computer.state?.active || computer.state && computer.state.status !== 'enabled' || computer.state?.cleanups.length || computer.state?.leases.length || computer.state?.requests.length || computer.activities.length);
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
-  const preparingDelegation = snapshot?.delegatedExecutions?.some(execution => !execution.receipt && !execution.report && !execution.cancel_requested) ?? false;
+  const preparingExecution = snapshot?.delegatedExecutions?.find(execution => execution.state === 'preparing' && !execution.cancel_requested);
+  const preparingDelegation = Boolean(preparingExecution);
   React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode, setInputMode]);
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot));
@@ -475,7 +477,10 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       onQuestion={operationId => { setQuestionOperation(operationId); setQuestionReveal(value => value + 1); }}
       onFork={!readOnly && snapshot && !history.connecting && !pending && onBranchCreated ? id => void forkFrom(id) : undefined}
       onRecover={!readOnly && !history.connecting && !pending && !active && snapshot ? id => { showOverview('recovery'); void recovery.recover(id); } : undefined}
-      footer={<><div ref={permissions}>{snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
+      footer={<>{preparingExecution && <div role="status" className="mx-auto w-full max-w-3xl space-y-2 px-4 py-4">
+        <div className="flex items-center gap-3 text-sm"><span>{preparingExecution.name ?? loadingTitle}</span><ChildState state={preparingExecution.state} /></div>
+        <ChildPreparation progress={preparingExecution.preparation ?? { phase: 'source' }} />
+      </div>}<div ref={permissions}>{snapshot?.operations.filter(operation => operation.id !== pause?.action_id).map(operation => <div key={operation.id} className="mx-auto max-w-3xl">
         <ThreadPermission operation={operation} enabled={!readOnly && !history.connecting && operation.run_id === run?.id && !run?.cancel_requested} onDecide={(permissionId, decision) => api.decidePermission({ ...identity, operationId: operation.id, permissionId, decision })} />
       </div>)}</div>
       {!readOnly && snapshot && <ThreadMcpInteractions key={`mcp:${host}:${identity.threadId}:${identity.branchId}`} api={api} identity={identity} eventCursor={snapshot.eventCursor}
@@ -526,11 +531,15 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       void act(async () => {
         const fingerprint = submissionFingerprint();
         if (!pendingInput.current) {
-          // A new conversation opened in a workspace starts there. Reopened conversations
-          // use their original source; a later sidebar selection is only a navigation hint.
+          // New inputs re-enter the original project's workspace preparation. This
+          // moves an old physical conversation at a Run boundary, never mid-execution
+          // or according to an unrelated sidebar selection. Retries retain this source.
           let sourceForInput = preparedSource;
-          if (!active && !delegated && !run && !sourceForInput && draft.workspacePath) {
-            const workspace = await api.sources.resolve(identity, { resourceOwner: { kind: 'local' }, path: draft.workspacePath });
+          const previousSource = launch?.selection.source;
+          const physicalSource = previousSource?.mode === 'live_root' ? previousSource : undefined;
+          if (!active && !delegated && !sourceForInput && (physicalSource || !run && draft.workspacePath)) {
+            const workspace = physicalSource ? { resourceOwner: physicalSource.resource_owner, workspaceId: physicalSource.workspace_id }
+              : await api.sources.resolve(identity, { resourceOwner: { kind: 'local' }, path: draft.workspacePath! });
             if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
             sourceForInput = await api.prepareSource({ ...identity, key: crypto.randomUUID(), resourceOwner: workspace.resourceOwner,
               workspaceId: workspace.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] });
@@ -573,9 +582,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         }
       });
     }}>
-      {delegated && !active && preparingDelegation && <p role="status" className="text-sm text-muted-foreground">{preparingDelegation
-        ? 'A delegated execution is preparing. Its original input remains accepted.'
-        : 'Continue in a new Run using this child’s exact previous configuration and source selection. Previous reports and file results remain separate.'}</p>}
       {sourceCannotBeApplied && <p role="status" className="text-sm text-muted-foreground">The prepared workspace needs a new run. Keep the current workspace to queue this message, or wait for this run to finish.</p>}
       {pause && <p role="status" aria-label="Policy pause" className="text-sm text-muted-foreground">Paused: {pause.reason || 'Waiting for your explicit resume.'} Messages can be queued while paused.</p>}
       {policy?.preparation && <p role="status" aria-label="Strategy preparation" className="text-sm text-muted-foreground">{policy.preparation.status === 'preparing' ? 'The Host is preparing a strategy candidate.' : `The Host could not prepare the strategy candidate: ${policy.preparation.code ?? 'preparation failed'}`}</p>}

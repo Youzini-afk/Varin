@@ -91,3 +91,15 @@ it('preserves explicit admission evidence without inferring it from status, code
     }
   } finally { globalThis.fetch = original; }
 });
+
+it('shows the typed workspace dependency failure while keeping generic upstream bodies private', async () => {
+  const original = globalThis.fetch;
+  const request = { runtime: 'agent' as const, threadId: 'thread', branchId: 'branch', key: 'prepare', resourceOwner: { kind: 'local' as const },
+    workspaceId: 'workspace', mode: 'live_root' as const, content: { mode: 'saved-files' as const }, captureScopes: [] };
+  try {
+    globalThis.fetch = async () => Response.json({ code: 'workspace_backend_unavailable', error: 'WinFsp is not installed', admission: 'not_started' }, { status: 503 });
+    await assert.rejects(createThreadsHttpAPI().prepareSource(request), { message: 'WinFsp is not installed' });
+    globalThis.fetch = async () => Response.json({ code: 'upstream-error', error: 'private provider body' }, { status: 503 });
+    await assert.rejects(createThreadsHttpAPI().prepareSource(request), { message: 'Thread request failed (503)' });
+  } finally { globalThis.fetch = original; }
+});

@@ -170,7 +170,7 @@ impl Storage {
             s.operation_begin(&input.operation_id,"workspace.adopt",&params_hash)?;
             s.record_operation_workspace(&input.operation_id,Some(&root.owning_workspace_id))?;
             s.create_branch(&json!({"operationId":format!("{temporary}:create"),"branchId":temporary,"workspaceId":root.owning_workspace_id,"entries":[],"draftBasePaths":[],"captureScopes":[]}),&grant.grant_id)?;
-            s.conn.execute("UPDATE operations SET result_json=?2 WHERE operation_id=?1",params![input.operation_id,serde_json::to_string(&json!({"phase":"inventory","temporaryBranchId":temporary,"identity":identity,"entries":0,"bytes":0}))?])?;
+            s.conn.execute("UPDATE operations SET result_json=?2 WHERE operation_id=?1",params![input.operation_id,serde_json::to_string(&json!({"phase":"inventory","temporaryBranchId":temporary,"grantId":grant.grant_id,"identity":identity,"entries":0,"bytes":0}))?])?;
             Ok(())
         })?;
         Ok(Admission::Work(Adoption {

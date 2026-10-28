@@ -7,6 +7,14 @@ import type { KernelWorkspaceInspection, LaunchSource, ChildSourceProvenance, Ke
 import { withAncestorDirectories } from '../harness/working-state/workspace-baseline.js';
 import { normalizePathIdentity } from '../workspace/path-safety.js';
 import { nativeGitRoots } from './native-git-roots.js';
+export class WorkspaceBackendUnavailableError extends Error {
+    readonly code = 'workspace_backend_unavailable';
+}
+export async function requireNativeWorkspaceBackend(actor: Pick<KernelScopedClient, 'inspectWorkspaceBackend'>, signal?: AbortSignal): Promise<void> {
+    const backend = await actor.inspectWorkspaceBackend(signal);
+    if (!backend.dependenciesReady) throw new WorkspaceBackendUnavailableError(
+        `${backend.detail ?? 'Native workspace backend is unavailable'} (${backend.helpUrl})`);
+}
 export function nativeExecutionWorkspaceId(execution: string): string {
     const bytes = createHash('sha256').update(`native-execution\0${execution}`).digest();
     bytes[6] = (bytes[6]! & 15) | 64;
@@ -179,7 +187,18 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         source: ThreadSource;
         path: string;
     } | undefined> => {
-        const project = await projectFor(workspaceId);
+        let project = await projectFor(workspaceId);
+        // Resolve the registered project only at execution preparation. Browsing a
+        // directory does not import it, and a child/subdirectory keeps its own source.
+        if (!project && !documentViews.has(workspaceId) && !known.has(workspaceId)) {
+            const registration = await owners.documents.admitWorkspaceRegistration(workspaceId, signal);
+            project = (await owners.projects()).find(candidate =>
+                normalizePathIdentity(candidate.path) === normalizePathIdentity(registration.canonicalPath));
+            if (project) {
+                const prepared = await enable(project.id, signal);
+                project = { ...project, versionedWorkspace: prepared.workspace };
+            }
+        }
         const ref = project?.versionedWorkspace;
         const selected = ref ? sourceOf(ref) : documentViews.get(workspaceId) ?? known.get(workspaceId);
         if (!selected)
@@ -257,9 +276,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         try {
             const actor = owners.kernel.scoped(grant);
             const adopted = await actor.getOperation(ref.adoptionOperationId, signal);
-            const backend = await actor.inspectWorkspaceBackend(signal);
-            if (!backend.dependenciesReady)
-                throw new Error(`${backend.detail ?? 'Native workspace backend is unavailable'} (${backend.helpUrl})`);
+            await requireNativeWorkspaceBackend(actor, signal);
             if (adopted?.state !== 'committed') {
                 const root = await actor.fileRootRegister({ workspaceId: ref.workspaceId, executionWorkspaceId: ref.executionWorkspaceId, canonicalRoot: registration.canonicalPath }, signal);
                 const gitRoots = await nativeGitRoots(registration.canonicalPath, owners.documents, signal);
@@ -342,11 +359,11 @@ export function createNativeWorkspaceOwner(owners: Owners) {
                     await owners.kernel.revokeGrant(grant.grantId);
                 }
             }
-            return { workspace: ref ?? null, view: null, progress };
+            return { workspace: ref ?? null, view: null, progress, preparing: enabling.has(projectId) };
         }
         const entry = await open(sourceOf(ref), signal);
         entry.view = await owners.kernel.scoped(entry.grant).inspectWorkspace({ branchId: ref.branchId, generation: entry.view.binding.generation }, signal);
-        return { workspace: ref, view: entry.view, progress: null };
+        return { workspace: ref, view: entry.view, progress: null, preparing: false };
     };
     const retainPrepared = async (source: Source, threadId: string, release = false, signal?: AbortSignal) => {
         if (!source.branch_id)

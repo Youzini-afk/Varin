@@ -402,6 +402,30 @@ it('sends a new conversation from its captured project workspace, independent of
   expect(useThreadDraftStore.getState().drafts[key]?.text).toBe('');
 });
 
+it('prepares an old physical conversation at its next Run boundary and retains the source across uncertain submission', async () => {
+  const f = fixture(true); pauseView(f.view);
+  const previous = { ...f.view.activeRun!, state: 'completed' as const };
+  f.view.activeRun = null;
+  f.view.thread.branches[0]!.active_run_id = null;
+  f.view.thread.branches[0]!.latest_run = previous;
+  f.view.launch!.selection.source = { resource_owner: { kind: 'local' }, mode: 'live_root', workspace_id: 'original', execution_workspace_id: 'original',
+    branch_id: null, revision: null, live_root: { hostId: 'host-a', canonicalRoot: '/original-project', rootId: 'original-root' } };
+  const prepared = { path: '/managed-project', source: { resourceOwner: { kind: 'local' as const }, mode: 'native_workspace' as const,
+    workspaceId: 'original', executionWorkspaceId: 'managed', branchId: 'project-workspace', tools: ['file_read'] } };
+  f.api.prepareSource = vi.fn().mockResolvedValue(prepared);
+  f.api.sources.resolve = vi.fn();
+  f.submit.mockRejectedValueOnce(new Error('Reply disconnected'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} initialWorkspacePath="/unrelated-navigation" />));
+  await edit('[aria-label="Message thread"]', 'Continue working');
+  await submitForm(composerForm());
+  await submitForm(composerForm());
+  expect(f.api.prepareSource).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspaceId: 'original', mode: 'live_root' }));
+  expect(f.api.sources.resolve).not.toHaveBeenCalled();
+  expect(f.submit).toHaveBeenCalledTimes(2);
+  expect(f.submit.mock.calls[1]![0]).toEqual(f.submit.mock.calls[0]![0]);
+  expect(f.submit.mock.calls[0]![0].source).toEqual(prepared.source);
+});
+
 it('an explicitly armed goal retains its accepted Run and budget when Goal registration needs retry', async () => {
   const f = fixture();
   const key = threadComposerKey(threadHostKey(), identity);

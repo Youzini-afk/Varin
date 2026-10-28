@@ -21,7 +21,7 @@ export function registerNativeWorkspaceRoutes(app: Express, owner: NativeWorkspa
             const latest = await owner.inspectProject(id, controller.signal);
             const view = latest?.view;
             response.json({ workspace: latest?.workspace ?? null, executionPath: view?.mount?.path ?? null, mountState: view?.mount?.state ?? null,
-                leases: view?.leases ?? 0, capabilities: view?.capabilities ?? null, progress: latest.progress });
+                leases: view?.leases ?? 0, capabilities: view?.capabilities ?? null, progress: latest.progress, preparing: latest.preparing });
         }
         catch (error) {
             if (!response.destroyed)

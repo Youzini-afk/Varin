@@ -43,6 +43,10 @@ fn changed(path: &Path) -> KernelError {
         ),
     )
 }
+fn verify_observation(path: &Path, before: &Observation) -> Result<(), KernelError> {
+    if !before.same(&native_metadata::observe(path)?) { return Err(changed(path)); }
+    Ok(())
+}
 #[derive(Clone)]
 struct Entry {
     absolute: PathBuf,
@@ -51,6 +55,7 @@ struct Entry {
 }
 struct Inventory {
     files: BTreeMap<String, Entry>,
+    directories: BTreeMap<PathBuf, Observation>,
     controls: BTreeMap<PathBuf, (Observation, String)>,
     git_configs: BTreeSet<String>,
     progress: StoragePort,
@@ -66,6 +71,7 @@ impl Inventory {
     ) -> Result<Self, KernelError> {
         let mut result = Self {
             files: BTreeMap::new(),
+            directories: BTreeMap::new(),
             controls: BTreeMap::new(),
             git_configs: BTreeSet::new(),
             progress: port.clone(),
@@ -96,10 +102,7 @@ impl Inventory {
         if !before.same(&native_metadata::observe(path)?) {
             return Err(changed(path));
         }
-        self.controls.insert(
-            path.into(),
-            (before, hex::encode(Sha256::digest(value.as_bytes()))),
-        );
+        self.controls.entry(path.into()).or_insert((before, hex::encode(Sha256::digest(value.as_bytes()))));
         Ok(value)
     }
     fn walk(
@@ -115,6 +118,9 @@ impl Inventory {
             check(cancel)?;
             let observed = native_metadata::observe(&absolute)?;
             let directory = matches!(observed.kind, Kind::Directory);
+            if directory {
+                self.directories.entry(absolute.clone()).or_insert_with(|| observed.clone());
+            }
             if self.files.contains_key(&relative) && !directory {
                 continue;
             }
@@ -205,6 +211,7 @@ impl Inventory {
         // Worktree-private entries win. Pointer files are replaced by a private
         // standalone .git directory; other worktrees keep their original files.
         for root in roots {
+            self.directories.entry(root.clone()).or_insert(native_metadata::observe(&root)?);
             if !self.files.contains_key(prefix) {
                 self.files.insert(
                     prefix.into(),
@@ -262,20 +269,25 @@ impl Inventory {
         }
         Ok(())
     }
-    fn same(&self, other: &Self) -> bool {
-        self.files.len() == other.files.len()
-            && self.controls.len() == other.controls.len()
-            && self.files.iter().all(|(path, before)| {
-                other.files.get(path).is_some_and(|after| {
-                    before.absolute == after.absolute && before.observed.same(&after.observed)
-                })
-            })
-            && self.controls.iter().all(|(path, (before, hash))| {
-                other
-                    .controls
-                    .get(path)
-                    .is_some_and(|(after, next)| before.same(after) && hash == next)
-            })
+    fn verify(&self, cancel: &AtomicBool) -> Result<(), KernelError> {
+        // These are native file identities and change times (ctime / ChangeTime),
+        // including attributes, not just size+mtime. Reads ignore access time.
+        // A directory change detects insertion/removal without walking its children
+        // again. Keep physical Git admin directories too, even when flattened.
+        for (path, before) in self.directories.iter().chain(self.files.values()
+            .filter(|entry| !matches!(entry.observed.kind, Kind::Directory))
+            .map(|entry| (&entry.absolute, &entry.observed))) {
+            check(cancel)?;
+            verify_observation(path, before)?;
+        }
+        for (path, (before, hash)) in &self.controls {
+            check(cancel)?;
+            if !before.same(&native_metadata::observe(path)?)
+                || hex::encode(Sha256::digest(fs::read(path)?)) != *hash {
+                return Err(changed(path));
+            }
+        }
+        Ok(())
     }
 }
 fn open(path: &Path) -> Result<File, KernelError> {
@@ -332,7 +344,6 @@ pub(crate) fn adopt(
         let workspace = Session::open(port.clone(), plan.temporary.clone(), plan.grant.clone())?;
         session = Some(workspace.clone());
         let mut links = BTreeMap::<String, Arc<crate::storage::workspace_session::Node>>::new();
-        let mut hashes = BTreeMap::new();
         let mut bytes = 0u64;
         let mut completed = 0u64;
         let mut last = Instant::now();
@@ -340,12 +351,6 @@ pub(crate) fn adopt(
         // its source body and native metadata have been observed successfully.
         for (path, entry) in &inventory.files {
             check(&cancel)?;
-            if !entry
-                .observed
-                .same(&native_metadata::observe(&entry.absolute)?)
-            {
-                return Err(changed(&entry.absolute));
-            }
             let node = match &entry.observed.kind {
                 Kind::Directory if path.is_empty() => workspace.lookup("")?,
                 Kind::Directory => workspace.create(
@@ -367,65 +372,43 @@ pub(crate) fn adopt(
                         // share an imported object's transformed byte stream.
                         if !entry.config {
                             workspace.link(node, path)?;
-                            hashes.insert(path.clone(), hash_file(&entry.absolute, &cancel)?);
                             workspace.import_attributes(node, entry.observed.attributes.clone())?;
                             completed += 1;
                             continue;
                         }
                     }
-                    let node = workspace.create_file(path, entry.observed.attributes.mode)?;
-                    let mut source = open(&entry.absolute)?;
-                    let mut digest = Sha256::new();
+                    let source = open(&entry.absolute)?;
+                    let suffix = if entry.config { PRIVATE_GIT_CONFIG } else { &[] };
                     let mut offset = 0;
-                    let mut buffer = [0u8; 128 * 1024];
-                    loop {
-                        check(&cancel)?;
-                        let count = source.read(&mut buffer)?;
-                        if count == 0 {
-                            break;
-                        }
-                        workspace.write(&node, Some(offset), &buffer[..count])?;
-                        digest.update(&buffer[..count]);
-                        offset += count as u64;
-                        bytes += count as u64;
+                    let node = workspace.import_file(path, source.chain(suffix), entry.observed.attributes.clone(), &cancel, |count| {
+                        offset += count;
+                        bytes += count;
                         if last.elapsed() >= Duration::from_millis(100) {
                             progress(&port, &plan, "capture", completed, bytes)?;
                             last = Instant::now();
                         }
-                    }
-                    if offset != entry.observed.length
+                        Ok(())
+                    })?;
+                    if offset != entry.observed.length + suffix.len() as u64
                         || !entry
                             .observed
                             .same(&native_metadata::observe(&entry.absolute)?)
                     {
                         return Err(changed(&entry.absolute));
                     }
-                    hashes.insert(path.clone(), hex::encode(digest.finalize()));
-                    if entry.config {
-                        workspace.write(&node, Some(offset), PRIVATE_GIT_CONFIG)?;
-                    }
-                    workspace.flush(&node)?;
                     if !entry.config {
                         links.insert(entry.observed.identity.clone(), node.clone());
                     }
                     node
                 }
             };
-            workspace.import_attributes(&node, entry.observed.attributes.clone())?;
+            if !matches!(entry.observed.kind, Kind::File) {
+                workspace.import_attributes(&node, entry.observed.attributes.clone())?;
+            }
             completed += 1;
         }
         progress(&port, &plan, "verify", completed, bytes)?;
-        for (path, hash) in &hashes {
-            check(&cancel)?;
-            let entry = &inventory.files[path];
-            if hash_file(&entry.absolute, &cancel)? != *hash {
-                return Err(changed(&entry.absolute));
-            }
-        }
-        let verified = Inventory::read(&plan, &cancel, &port, "verify")?;
-        if !inventory.same(&verified) {
-            return Err(changed(&plan.source));
-        }
+        inventory.verify(&cancel)?;
         // Child creation changed parent times; restore the source attributes
         // after the namespace is complete, without inventing a new change time.
         for (path, entry) in inventory.files.iter().rev() {
@@ -460,23 +443,30 @@ pub(crate) fn adopt(
     }
     result
 }
-fn hash_file(path: &Path, cancel: &AtomicBool) -> Result<String, KernelError> {
-    let before = native_metadata::observe(path)?;
-    let mut file = open(path)?;
-    let mut digest = Sha256::new();
-    let mut bytes = [0; 128 * 1024];
-    let mut length = 0;
-    loop {
-        check(cancel)?;
-        let count = file.read(&mut bytes)?;
-        if count == 0 {
-            break;
-        }
-        digest.update(&bytes[..count]);
-        length += count as u64;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_adoption_verifies_changes_without_reading_the_source_again() {
+        let root = std::env::temp_dir().join(format!("varin-adoption-observe-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let file = root.join("file");
+        fs::write(&file, b"before").unwrap();
+        let before = native_metadata::observe(&file).unwrap();
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        fs::read(&file).unwrap();
+        verify_observation(&file, &before).unwrap(); // access-time changes are harmless
+        fs::write(&file, b"after!").unwrap();
+        File::options().write(true).open(&file).unwrap().set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        assert!(verify_observation(&file, &before).is_err(), "same size and restored mtime must still detect the native change time");
+        let directory = native_metadata::observe(&root).unwrap();
+        fs::write(root.join("new"), b"new member").unwrap();
+        assert!(verify_observation(&root, &directory).is_err(), "namespace insertion changes its observed directory");
+        let before = native_metadata::observe(&file).unwrap();
+        fs::rename(&file, root.join("old")).unwrap();
+        fs::write(&file, b"after!").unwrap();
+        assert!(verify_observation(&file, &before).is_err(), "a replaced inode is a different source");
+        fs::remove_dir_all(root).unwrap();
     }
-    if before.length != length || !before.same(&native_metadata::observe(path)?) {
-        return Err(changed(path));
-    }
-    Ok(hex::encode(digest.finalize()))
 }

@@ -7,6 +7,7 @@ import { KernelWorkingStateRootStore, type KernelStorageAdapter } from './storag
 import { captureContinuationStage, prepareChildSourceStore, prepareContinuationSourceStore, prepareRefreshedContinuationSourceStore, releaseRefreshScratch, type ChildSourcePreparation } from './child-source-store.js';
 import type { StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { createChildPhysicalCapture } from './child-source-capture.js';
+import { requireNativeWorkspaceBackend } from './native-workspaces.js';
 import type { ManagedSourceClient } from '../harness/managed-remote-client.js';
 import type { ManagedSourceAddress, ManagedSourceLocalScope, ManagedSourceServiceHandler } from '../harness/managed-remote-types.js';
 
@@ -130,6 +131,7 @@ export function createManagedChildSourceService(options: {
         owningWorkspace:scope.source.workspace_id,executionWorkspace:scope.source.execution_workspace_id,
         threadId:child.child_thread_id,capabilities:['storage.read','storage.write'],pathScopes:['']},signal);
       try {
+        if (child.selected_profile.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(options.storage.client.scoped(grant), signal);
         const store = new KernelWorkingStateRootStore(await options.storage.contextFromBranchGrant({grant,
           owningWorkspaceId:scope.source.workspace_id,executionWorkspaceId:scope.source.execution_workspace_id}));
         await captureContinuationStage(child, { store, capture: options.capture,nativeWorkspaces:options.storage.client.nativeWorkspaces,
@@ -162,6 +164,7 @@ export function createManagedChildSourceService(options: {
     if (operation.kind === 'child_prepare') {
       const source = childPreparationSource(operation.execution);
       if (!isDeepStrictEqual(scope.source, source)) throw new Error('Child preparation differs from its admitted source');
+      if (operation.execution.selected_profile.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(options.storage.client.scoped(scope.grant), signal);
       const store = new KernelWorkingStateRootStore(await context(scope));
       if (operation.execution.trigger.kind !== 'dispatch') {
         const child = operation.execution, basis = child.source_basis;

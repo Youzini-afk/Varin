@@ -25,7 +25,7 @@ export function ProjectWorkspaceSection({ project }: {
     }, [project.id, project.versionedWorkspace?.state]);
     React.useEffect(() => () => pending.current?.abort(), []);
     React.useEffect(() => {
-        if (!busy)
+        if (!busy && !status?.preparing)
             return;
         const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout>;
@@ -43,14 +43,14 @@ export function ProjectWorkspaceSection({ project }: {
         };
         void refresh();
         return () => { controller.abort(); clearTimeout(timer); };
-    }, [busy, project.id]);
-    const apply = async (action: 'enable' | 'disable') => {
+    }, [busy, status?.preparing, project.id]);
+    const apply = async () => {
         const controller = new AbortController();
         pending.current = controller;
         setBusy(true);
         setError(null);
         try {
-            const next = await projectWorkspaceRequest(project.id, action, controller.signal);
+            const next = await projectWorkspaceRequest(project.id, 'enable', controller.signal);
             setStatus(next);
             const store = useProjectsStore.getState();
             const projects = store.projects.map(entry => entry.id === project.id ? { ...entry, ...(next.workspace ? { versionedWorkspace: next.workspace } : {}) } : entry);
@@ -75,15 +75,16 @@ export function ProjectWorkspaceSection({ project }: {
         {status?.executionPath && <div className="flex flex-wrap gap-x-3"><dt className="text-muted-foreground">{t('settings.projects.workspace.current')}</dt><dd className="break-all text-foreground">{status.executionPath}</dd></div>}
       </dl>
       {error && <p role="alert" className="typography-meta text-destructive break-words">{error}</p>}
-      {busy && status?.progress && <p role="status" className="typography-meta text-muted-foreground tabular-nums">
+      {status?.progress && <p role="status" className="typography-meta text-muted-foreground tabular-nums">
         {t(status.progress.phase === 'capture' ? 'settings.projects.workspace.capture' : status.progress.phase === 'verify' ? 'settings.projects.workspace.verify' : 'settings.projects.workspace.inventory')}
         {' · '}{status.progress.entries.toLocaleString()}{' · '}{(status.progress.bytes / 1048576).toFixed(1)} MiB
       </p>}
+      {!status?.progress && <p role="status" className="typography-meta text-muted-foreground">{t(busy || status?.preparing ? 'settings.projects.workspace.preparing' : enabled ? 'settings.projects.workspace.ready' : 'settings.projects.workspace.automatic')}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" variant={enabled ? 'outline' : 'default'} disabled={busy} onClick={() => void apply(enabled ? 'disable' : 'enable')}>
-          {busy ? <RiLoader4Line className="mr-2 h-4 w-4 animate-spin"/> : <RiArrowRightUpLine className="mr-2 h-4 w-4"/>}
-          {t(busy ? 'settings.projects.workspace.preparing' : enabled ? 'settings.projects.workspace.disable' : project.versionedWorkspace?.state === 'preparing' ? 'settings.projects.workspace.resume' : 'settings.projects.workspace.enable')}
-        </Button>
+        {!enabled && project.versionedWorkspace && <Button size="sm" variant="outline" disabled={busy || status?.preparing} onClick={() => void apply()}>
+          {busy || status?.preparing ? <RiLoader4Line className="mr-2 h-4 w-4 animate-spin"/> : <RiArrowRightUpLine className="mr-2 h-4 w-4"/>}
+          {t(busy || status?.preparing ? 'settings.projects.workspace.preparing' : 'settings.projects.workspace.resume')}
+        </Button>}
         {busy && <Button variant="ghost" size="sm" onClick={() => pending.current?.abort()}>{t('settings.common.actions.cancel')}</Button>}
       </div>
       {status?.leases ? <p className="typography-meta text-muted-foreground">{t('settings.projects.workspace.inUse')}</p> : null}

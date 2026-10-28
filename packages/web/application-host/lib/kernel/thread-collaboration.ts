@@ -15,6 +15,7 @@ import type { LiveSourceResolver } from './live-source.js';
 import { type StableSourcePreparationOwners } from '../harness/working-state/source-preparation.js';
 import { waitWithSignal } from '../cancellation.js';
 import { createChildPhysicalCapture, type ChildPhysicalCapture } from './child-source-capture.js';
+import { requireNativeWorkspaceBackend } from './native-workspaces.js';
 import type { ThreadIdentity, ThreadSource } from '@varin/application-client';
 import type { DocumentAuthority } from '../documents/authority.js';
 import type { ContextPreparer } from './thread-context.js';
@@ -335,6 +336,7 @@ export class ThreadCollaboration {
     const grant = await kernel.claimChildSource({ handoffOperationId: handoff.operation_id, grantId: `child-source:${randomUUID()}`,
       childThreadId: child.child_thread_id, childBranchId: child.child_branch_id }, signal);
     try {
+      if (child.selected_profile.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(kernel.scoped(grant), signal);
       const context = await storageAdapter.contextFromBranchGrant({ grant, owningWorkspaceId: workspace, executionWorkspaceId: handoff.source.execution_workspace_id });
       const prepared = await prepareChildSourceStore(child, {
         store: new KernelWorkingStateRootStore(context), capture: sourceCaptureOwners, capturePhysical: this.capturePhysical, ...(onProgress ? { onProgress } : {}),
@@ -369,6 +371,7 @@ export class ThreadCollaboration {
           { signal, resolveLiveSource: this.owners.resolveLiveSource });
         try {
           if (admitted.kind !== 'local') throw new Error('Selected source changed resource Host');
+          if (child.selected_profile.work_mode === 'isolated_write') await requireNativeWorkspaceBackend(this.owners.kernel.scoped(admitted.grant), signal);
           await captureContinuationStage(child, { store, capture: this.owners.sourceCaptureOwners,nativeWorkspaces:this.owners.kernel.nativeWorkspaces,
             physical: async root => new KernelWorkingStateRootStore(await this.owners.storageAdapter.contextFromSourceGrant({
               grant: admitted.grant, owningWorkspaceId: incoming.source.workspace_id, executionWorkspaceId: incoming.source.execution_workspace_id,

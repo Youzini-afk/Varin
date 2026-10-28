@@ -16,6 +16,7 @@ import { ComputerError } from '../computer/computer-error.js';
 import { HarnessServiceError } from '../harness/service-error.js';
 import { KernelClientError } from './kernel-client.js';
 import { ThreadAdapter, ThreadPreAdmissionError } from './thread-adapter.js';
+import { WorkspaceBackendUnavailableError } from './native-workspaces.js';
 import { listThreadFollowupJobs, pendingThreadFollowupRegistrations, cancelThreadFollowupRegistration, controlThreadFollowup, getThreadFollowup, getThreadFollowupOccurrence, listThreadFollowupOccurrences, listThreadFollowups, registerThreadFollowup } from './thread-followups.js';
 import { controlThreadGoal, listThreadGoals, startThreadGoal, updateThreadGoal } from './thread-goals.js';
 
@@ -198,6 +199,10 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
       }
       catch (error) {
         // Errors from credentials/model services can contain upstream bodies. Do not echo them.
+        const reason = error instanceof ThreadPreAdmissionError ? error.reason : error;
+        if (reason instanceof WorkspaceBackendUnavailableError) {
+          response.status(503).json({ code: reason.code, error: reason.message, admission: 'not_started' }); return;
+        }
         const sourceCode = sourceFailureCode(error instanceof ThreadPreAdmissionError ? error.reason : error);
         const admission = error instanceof ThreadPreAdmissionError ? { admission: 'not_started' as const } : {};
         if (sourceCode) { response.status(sourceCode === 'source_authority_denied' ? 403 : sourceCode === 'source_registration_missing' ? 404 : 409).json({ code: sourceCode, error: threadSourceFailureMessage(sourceCode), ...admission }); return; }

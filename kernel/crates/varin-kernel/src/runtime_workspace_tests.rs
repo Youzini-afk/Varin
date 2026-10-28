@@ -250,6 +250,9 @@ fn native_adoption_preserves_source_attributes_links_git_and_operation_replay() 
             let file = session.lookup("目录/code.txt")?;
             let alias = session.lookup("alias.txt")?;
             assert!(Arc::ptr_eq(&file, &alias));
+            let mut imported = [0u8; 64];
+            let count = session.read(&file, 0, &mut imported)?;
+            assert_eq!(&imported[..count], "source 中文\n".as_bytes());
             let observed = file.attributes()?;
             assert_eq!(observed.modified, before.attributes.modified);
             assert_eq!(observed.changed, before.attributes.changed);
@@ -371,6 +374,40 @@ fn native_adoption_preserves_source_attributes_links_git_and_operation_replay() 
         .handle(&request, Arc::new(AtomicBool::new(false)), &fixture.tx)
         .unwrap();
     fixture.workspace_finish().unwrap();
+}
+
+#[test]
+fn native_adoption_cancel_after_session_open_releases_candidate_and_can_retry() {
+    let mut fixture = Fixture::new();
+    fs::write(fixture.work().join("file"), b"original").unwrap();
+    let input = json!({"branchId":"retry-import","rootId":fixture.root_id,"operationId":"cancel-import"});
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let connection = rusqlite::Connection::open_with_flags(fixture.kernel.storage.as_ref().unwrap().root().join("catalog.sqlite"), rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+    let request = Fixture::request("workspace.adopt", input.clone(), Some("writer"));
+    fixture.kernel.handle(&request, cancelled.clone(), &fixture.tx).unwrap();
+    let result = loop {
+        match fixture.rx.recv_timeout(WAIT).unwrap() {
+            WorkerRequest::Workspace(command) => {
+                let opened: bool = connection.query_row("SELECT EXISTS(SELECT 1 FROM branches WHERE branch_id LIKE 'workspace-metadata:%')", [], |r| r.get(0)).unwrap();
+                if opened {
+                    cancelled.store(true, Ordering::Release);
+                }
+                command(fixture.kernel.storage.as_mut());
+            }
+            WorkerRequest::WorkspaceIdle => {},
+            WorkerRequest::WorkspaceDone { request: Some(request), result } => {
+                fixture.kernel.workspace_tasks.remove(request["id"].as_str().unwrap()); break result;
+            },
+            _ => panic!("unexpected import continuation"),
+        }
+    };
+    assert!(cancelled.load(Ordering::Acquire));
+    assert!(matches!(result, Err(KernelError::Cancelled)), "original cancellation must survive cleanup: {result:?}");
+    let count: i64 = connection.query_row(
+        "SELECT count(*) FROM branches WHERE branch_id LIKE 'workspace-adoption:%'", [], |r| r.get(0)).unwrap();
+    assert_eq!(count, 0);
+    fixture.workspace("workspace.adopt", input, "writer").unwrap();
+    assert_eq!(fs::read(fixture.work().join("file")).unwrap(), b"original");
 }
 
 #[test]
