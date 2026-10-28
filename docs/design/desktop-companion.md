@@ -166,6 +166,10 @@ CompanionAsset {
 
 人物暂不键入或合上电脑不意味着runtime暂停、取消或重启，也不触发权限确认。实际任务继续；落位按最新状态恢复，不回放旧状态。炭灰外裙与浅蓝内裙在提起过程中保持完整。
 
+### 连续动画技术检查点
+
+[独立motion lab](../../tools/desktop-companion-motion-lab/README.md)保存连续时间、C2重定向、两段IK、拖放衔接与接触约束的debug rig、19项Node测试和关键离屏证据。它不接入Host或根CI，不引入生产依赖，也不是最终人物动画；raw PNG profile仅覆盖8秒坐姿研究。MP4为一次播放的离屏预览，不能当作无缝循环资产或浏览器60fps性能证据。真实分层美术、绑定/遮挡与浏览器/Electron验收继续独立推进。
+
 ## 11. 桌面入口、多窗口与生命周期
 
 桌宠是共享 Application Host 的呈现客户端，不是新的会话 backend。对话、队列、授权、实际执行和耐久历史继续归原 owner；职责遵循[架构](../architecture.md)及[Electron 模块说明](../../packages/electron/README.md)。

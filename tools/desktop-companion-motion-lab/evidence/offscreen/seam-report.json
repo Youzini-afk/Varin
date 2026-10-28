@@ -1,0 +1,171 @@
+{
+  "secondaryDelta": {
+    "breath": {
+      "x": 1.7183236297129916,
+      "v": -1.6602064256592932,
+      "a": -4.9659552898705455
+    },
+    "hair": {
+      "x": 0.01763054832387233,
+      "v": 0.004015592411337251,
+      "a": -0.05095228465599104
+    },
+    "skirt": {
+      "x": 0.010501128384348399,
+      "v": 0.009366298504510444,
+      "a": -0.030348261030766873
+    }
+  },
+  "kind": "one-shot event preview; not a seamless looping video",
+  "duration": 8,
+  "lastEncodedTime": 7.983333333333333,
+  "channelDeltaAtExactEnd": {
+    "head": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "gaze": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "lean": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "ask": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "type": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "lid": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "carry": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "grip": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "holdTilt": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    }
+  },
+  "channelDeltaAtLastEncodedFrame": {
+    "head": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "gaze": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "lean": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "ask": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "type": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "lid": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "carry": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "grip": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    },
+    "holdTilt": {
+      "position": 0,
+      "velocity": 0,
+      "acceleration": 0
+    }
+  },
+  "start": {
+    "breath": 0,
+    "hair": -0.018593355303248713,
+    "skirt": -0.010097651817694758,
+    "blink": 0,
+    "torso": {
+      "x": 500,
+      "y": 470
+    },
+    "leftHand": {
+      "x": 441.38,
+      "y": 602.2
+    },
+    "rightHand": {
+      "x": 538.62,
+      "y": 602.2
+    }
+  },
+  "last": {
+    "breath": 1.6886412797442096,
+    "hair": -0.001438377036696737,
+    "skirt": 0.00006355233060119637,
+    "blink": 0,
+    "torso": {
+      "x": 500,
+      "y": 471.6886412797442
+    },
+    "leftHand": {
+      "x": 441.38,
+      "y": 602.2
+    },
+    "rightHand": {
+      "x": 538.62,
+      "y": 602.2
+    }
+  },
+  "exactEnd": {
+    "breath": 1.7183236297129916,
+    "hair": -0.0009628069793763804,
+    "skirt": 0.00040347656665364035,
+    "blink": 0,
+    "torso": {
+      "x": 500,
+      "y": 471.718323629713
+    },
+    "leftHand": {
+      "x": 441.38,
+      "y": 602.2
+    },
+    "rightHand": {
+      "x": 538.62,
+      "y": 602.2
+    }
+  },
+  "interpretation": "Authored target channels settle by 8s, but independent breath/hair phases do not return to zero. MP4 must play once. Live repeat continues Motion.time and phase rather than resetting pose. Idle/typing are continuous procedural motion, not pre-rendered seamless-loop assets."
+}
