@@ -43,6 +43,9 @@ Function VarinWorkspaceCreate
   Pop $0
   ${NSD_CreateCheckbox} 0 59% 100% 10% "$(VarinWorkspaceCheck)"
   Pop $VarinWorkspaceCheckbox
+  ${If} $VarinWorkspaceChoice == ""
+    StrCpy $VarinWorkspaceChoice ${BST_CHECKED}
+  ${EndIf}
   StrCpy $VarinWorkspaceInstalled ""
   SetRegView 64
   ReadRegStr $0 HKLM "SOFTWARE\WinFsp" "InstallDir"
