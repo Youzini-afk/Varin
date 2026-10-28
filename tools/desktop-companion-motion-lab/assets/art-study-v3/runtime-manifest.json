@@ -1,0 +1,143 @@
+{
+  "status": "NORMAL_RANGE_ART_INTEGRATION_STUDY_NOT_FINAL",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "source": "canonical-seated-clean-v3.png",
+  "zOrder": [
+    "hairBack",
+    "lowerBody",
+    "torso",
+    "upperArmL",
+    "upperArmR",
+    "forearmL",
+    "forearmR",
+    "handL",
+    "handR",
+    "head",
+    "hairFront"
+  ],
+  "assets": [
+    {
+      "node": "neckBacking",
+      "path": "neck-backing.png"
+    },
+    {
+      "node": "hairBack",
+      "path": "layers-underlap-v3/hairBack.png",
+      "addedUnderlapPixels": 45836,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "lowerBody",
+      "path": "layers-underlap-v3/lowerBody.png",
+      "addedUnderlapPixels": 14025,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "torso",
+      "path": "torso-hidden.png",
+      "addedUnderlapPixels": 20499,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "upperArmL",
+      "path": "layers-underlap-v3/upperArmL.png",
+      "addedUnderlapPixels": 3309,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "upperArmR",
+      "path": "layers-underlap-v3/upperArmR.png",
+      "addedUnderlapPixels": 3134,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "forearmL",
+      "path": "layers-underlap-v3/forearmL.png",
+      "addedUnderlapPixels": 2914,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "forearmR",
+      "path": "layers-underlap-v3/forearmR.png",
+      "addedUnderlapPixels": 1188,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "handL",
+      "path": "layers-underlap-v3/handL.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "handR",
+      "path": "layers-underlap-v3/handR.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "head",
+      "path": "layers-underlap-v3/head.png",
+      "addedUnderlapPixels": 3094,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "hairFront",
+      "path": "layers-underlap-v3/hairFront.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false,
+      "bounds": [
+        752,
+        345,
+        830,
+        636
+      ]
+    }
+  ],
+  "opaqueNeutralMaxError": 4,
+  "allNeutralMaxError": 5,
+  "limitations": [
+    "24px edge extensions are local hidden overlap only, not full newly painted limbs",
+    "No large motion approval; measure seam visibility in runtime",
+    "hairBack semantic remainder still needs detail refinement",
+    "Face layers separate pending QA"
+  ],
+  "headAttachmentBand": {
+    "fullUntilY": 550,
+    "fixedFromY": 850
+  },
+  "frontAttachmentBand": {
+    "fullUntilY": 490,
+    "fixedFromY": 680
+  },
+  "corrections": {
+    "hairFromTorsoPixels": 2868,
+    "garmentFromHairPixels": 728,
+    "source": "Generated neck/shoulder backing; not nearest-color hidden anatomy",
+    "remaining": "Normal-range seams and torso/arm overlap need full clip review. Source underlap counts apply before these semantic corrections."
+  }
+}

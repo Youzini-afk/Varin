@@ -1,0 +1,6 @@
+{
+  "neutralMaxRGBA": 117,
+  "changedPixelsAbove5": 1929,
+  "newOpaqueOutsideOriginalAlpha0": 0,
+  "note": "Generated backing and corrected semantic masks intentionally change some overlap colors; not exact static reconstruction. v1 original partition test remains separate."
+}

@@ -2,7 +2,7 @@ import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { readFile, writeFile } from "node:fs/promises";
 import { ArtRenderer } from "../src/art-renderer.mjs";
 import { sampleStudy } from "../src/motion.mjs";
-const root = "assets/art-study-v1/",
+const root = (process.env.ART_ROOT??"assets/art-study-v1/"),
   manifest = JSON.parse(
     await readFile(root + (process.env.ART_MANIFEST??"underlap-manifest.json"), "utf8"),
   ),

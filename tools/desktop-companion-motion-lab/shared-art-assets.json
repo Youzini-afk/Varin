@@ -188,5 +188,65 @@
     "target": "assets/art-study-v1/layers-partition-v2/forearmR.png",
     "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmR.png",
     "sha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/forearmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmL.png",
+    "sha256": "eef3ab7eb89589909d5b6b17fd1055d04f6882754822fa919d375b6497afcf39"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/forearmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmR.png",
+    "sha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/handL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handL.png",
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/handR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handR.png",
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/lowerBody.png",
+    "source": "assets/art-study-v1/layers-underlap-v2/lowerBody.png",
+    "sha256": "f96fd0ed691515081155c5a4139dad33431edcc0e0138129da508c3b4bada9ff"
+  },
+  {
+    "target": "assets/art-study-v3/layers-underlap-v3/upperArmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/upperArmL.png",
+    "sha256": "4b2d3708a68f9d715e9f265e6365ec733d2faa7dad61099e3aec870ccfd51679"
+  },
+  {
+    "target": "assets/art-study-v3/props/chair-atlas.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/chair-atlas.png",
+    "sha256": "0bfe2375071cc6b7d24c49ca96d35952c780e26c1abcd7a21b4de339c7ca90bc"
+  },
+  {
+    "target": "assets/art-study-v3/props/chair.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/chair.png",
+    "sha256": "6054da667efe98c5b0acca06ed5f419503014ce60f4bd0dd9d8cd9fb737214ca"
+  },
+  {
+    "target": "assets/art-study-v3/props/laptopBase-atlas.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopBase-atlas.png",
+    "sha256": "93754fddbafd0fb6984b03b8d29815dc8be3a8d76ee9fdba7ee8f7f3eb03ba24"
+  },
+  {
+    "target": "assets/art-study-v3/props/laptopBase.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopBase.png",
+    "sha256": "20baab15b481a202b97d1486a58db2c6d4d8a3fe43a592b1dd7ab66721e1dc0d"
+  },
+  {
+    "target": "assets/art-study-v3/props/laptopLid-atlas.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopLid-atlas.png",
+    "sha256": "8dee1fb67a0405da7a0401fefd2d7536e162ab5856bfb10d193377a95e0c8ac1"
+  },
+  {
+    "target": "assets/art-study-v3/props/laptopLid.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopLid.png",
+    "sha256": "c90b5fccd9efa8ab1e042a8a1b0c91145814186f7c07987fd535e6a3e7250de5"
   }
 ]

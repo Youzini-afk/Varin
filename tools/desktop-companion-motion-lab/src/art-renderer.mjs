@@ -1,3 +1,5 @@
+import { drawTyping } from './art-typing.mjs';
+import { drawBlinkMorph } from './art-blink-morph.mjs';
 import { drawBlink } from "./art-face.mjs";
 import { drawDeformed, handVertex, attachedHairVertex } from "./art-deform.mjs";
 // Stage 2: real same-origin partitions. No default debug anchors or inferred complete rig.
@@ -37,6 +39,7 @@ export class ArtRenderer {
   setProps(props) {
     this.props = props;
   }
+  setTyping(resources) { this.typing = resources; }
   setFace(face) {
     this.face = face;
     this.faceSurface = this.makeCanvas(...this.sourceSize);
@@ -65,9 +68,12 @@ export class ArtRenderer {
       for (const a of this.assets)
         if (!only || a.node === only) {
           if (this.props && !only && !baseDrawn && a.node === "handL") {
+            if(this.typing && pose) { this.typing.pass="replacement"; drawTyping(c,this.typing,pose); }
             c.drawImage(this.props.laptopBase, 0, 0);
+            if(this.typing && pose) { this.typing.pass="skin"; drawTyping(c,this.typing,pose); }
             baseDrawn = true;
           }
+          if(this.typing && pose && a.node === "handR") continue;
           c.save();
           if (pose && motionMode === "limited-cutout") {
             const neck = [738, 510];
@@ -93,12 +99,12 @@ export class ArtRenderer {
             }
           }
           if (pose && motionMode === "limited-cutout" && this.rigMeta.headAttachmentBand && (a.node === "hairBack" || a.node === "hairFront")) {
-            drawDeformed(c,a.image,pose,48,a.bounds??null,(x,y,p)=>attachedHairVertex(x,y,p,tuning,this.rigMeta.headAttachmentBand));
+            drawDeformed(c,a.image,pose,48,a.bounds??null,(x,y,p)=>attachedHairVertex(x,y,p,tuning,a.node === "hairFront" ? this.rigMeta.frontAttachmentBand : this.rigMeta.headAttachmentBand));
           } else if (a.node === "head" && this.face && pose?.blink > 0) {
             const fc = this.faceSurface.getContext("2d");
             fc.clearRect(0, 0, ...this.sourceSize);
             fc.drawImage(a.image, 0, 0);
-            drawBlink(fc, this.face, pose.blink);
+            if(this.face.morphMeta) drawBlinkMorph(fc, this.face, pose.blink); else drawBlink(fc, this.face, pose.blink);
             c.drawImage(this.faceSurface, 0, 0);
           } else if (
             pose?.type > 0 &&

@@ -1,0 +1,364 @@
+{
+  "status": "APPROXIMATE_VISUAL_LANDMARKS_NOT_TRACKER_GROUND_TRUTH",
+  "coordinateNote": "Input normalized crop680x600; source global offset350,100. Individual points are hand-inspected estimates with roughly5-10px uncertainty, to be refined during rigging. No measured pitch angle. Exact source crop and canonical rig pivot separately recorded.",
+  "exactCanonicalRigPivot": [
+    738,
+    510
+  ],
+  "exactCropBox": [
+    350,
+    100,
+    1030,
+    700
+  ],
+  "poses": {
+    "canonical": {
+      "normalizedCropApproximate": {
+        "eye_viewer_left_outer": [
+          218,
+          341
+        ],
+        "eye_viewer_left_inner": [
+          282,
+          323
+        ],
+        "eye_viewer_right_inner": [
+          343,
+          288
+        ],
+        "eye_viewer_right_outer": [
+          411,
+          263
+        ],
+        "nose": [
+          309,
+          346
+        ],
+        "mouth_center": [
+          330,
+          370
+        ],
+        "chin": [
+          315,
+          407
+        ],
+        "ear_center": [
+          463,
+          279
+        ],
+        "neck_ring_center": [
+          388,
+          410
+        ]
+      },
+      "registeredCropApproximate": {
+        "eye_viewer_left_outer": [
+          218,
+          341
+        ],
+        "eye_viewer_left_inner": [
+          282,
+          323
+        ],
+        "eye_viewer_right_inner": [
+          343,
+          288
+        ],
+        "eye_viewer_right_outer": [
+          411,
+          263
+        ],
+        "nose": [
+          309,
+          346
+        ],
+        "mouth_center": [
+          330,
+          370
+        ],
+        "chin": [
+          315,
+          407
+        ],
+        "ear_center": [
+          463,
+          279
+        ],
+        "neck_ring_center": [
+          388,
+          410
+        ]
+      },
+      "registeredFullCanvasApproximate": {
+        "eye_viewer_left_outer": [
+          568,
+          441
+        ],
+        "eye_viewer_left_inner": [
+          632,
+          423
+        ],
+        "eye_viewer_right_inner": [
+          693,
+          388
+        ],
+        "eye_viewer_right_outer": [
+          761,
+          363
+        ],
+        "nose": [
+          659,
+          446
+        ],
+        "mouth_center": [
+          680,
+          470
+        ],
+        "chin": [
+          665,
+          507
+        ],
+        "ear_center": [
+          813,
+          379
+        ],
+        "neck_ring_center": [
+          738,
+          510
+        ]
+      }
+    },
+    "up": {
+      "normalizedCropApproximate": {
+        "eye_viewer_left_outer": [
+          227,
+          286
+        ],
+        "eye_viewer_left_inner": [
+          289,
+          265
+        ],
+        "eye_viewer_right_inner": [
+          341,
+          235
+        ],
+        "eye_viewer_right_outer": [
+          420,
+          225
+        ],
+        "nose": [
+          310,
+          283
+        ],
+        "mouth_center": [
+          332,
+          314
+        ],
+        "chin": [
+          336,
+          373
+        ],
+        "ear_center": [
+          473,
+          263
+        ],
+        "neck_ring_center": [
+          382,
+          392
+        ]
+      },
+      "registeredCropApproximate": {
+        "eye_viewer_left_outer": [
+          227.3305475293947,
+          287.15894695322805
+        ],
+        "eye_viewer_left_inner": [
+          289.20751042172105,
+          266.0821050662166
+        ],
+        "eye_viewer_right_inner": [
+          341.0830764468788,
+          236.03504412482826
+        ],
+        "eye_viewer_right_outer": [
+          419.95504031493203,
+          225.9136103059887
+        ],
+        "nose": [
+          310.20890051053937,
+          284.020828361375
+        ],
+        "mouth_center": [
+          332.23117953057766,
+          314.9395894511922
+        ],
+        "chin": [
+          336.32673895062464,
+          373.8499151111954
+        ],
+        "ear_center": [
+          472.94581001905124,
+          263.7693866557193
+        ],
+        "neck_ring_center": [
+          382.29475271506556,
+          392.7443644209523
+        ]
+      },
+      "registeredFullCanvasApproximate": {
+        "eye_viewer_left_outer": [
+          577.3305475293947,
+          387.15894695322805
+        ],
+        "eye_viewer_left_inner": [
+          639.207510421721,
+          366.0821050662166
+        ],
+        "eye_viewer_right_inner": [
+          691.0830764468787,
+          336.03504412482823
+        ],
+        "eye_viewer_right_outer": [
+          769.955040314932,
+          325.9136103059887
+        ],
+        "nose": [
+          660.2089005105394,
+          384.020828361375
+        ],
+        "mouth_center": [
+          682.2311795305777,
+          414.9395894511922
+        ],
+        "chin": [
+          686.3267389506246,
+          473.8499151111954
+        ],
+        "ear_center": [
+          822.9458100190512,
+          363.7693866557193
+        ],
+        "neck_ring_center": [
+          732.2947527150656,
+          492.7443644209523
+        ]
+      }
+    },
+    "down": {
+      "normalizedCropApproximate": {
+        "eye_viewer_left_outer": [
+          222,
+          359
+        ],
+        "eye_viewer_left_inner": [
+          290,
+          338
+        ],
+        "eye_viewer_right_inner": [
+          336,
+          313
+        ],
+        "eye_viewer_right_outer": [
+          412,
+          289
+        ],
+        "nose": [
+          310,
+          363
+        ],
+        "mouth_center": [
+          332,
+          386
+        ],
+        "chin": [
+          344,
+          411
+        ],
+        "ear_center": [
+          469,
+          290
+        ],
+        "neck_ring_center": [
+          388,
+          408
+        ]
+      },
+      "registeredCropApproximate": {
+        "eye_viewer_left_outer": [
+          221.5499176919254,
+          361.14029638056087
+        ],
+        "eye_viewer_left_inner": [
+          289.7669740671771,
+          340.438096811762
+        ],
+        "eye_viewer_right_inner": [
+          335.9666764275515,
+          315.6214226944359
+        ],
+        "eye_viewer_right_outer": [
+          412.21186193119433,
+          291.95336939063816
+        ],
+        "nose": [
+          309.678110327629,
+          365.5780420981563
+        ],
+        "mouth_center": [
+          331.6024014301988,
+          388.72442473449723
+        ],
+        "chin": [
+          343.50010270630816,
+          413.82518563676194
+        ],
+        "ear_center": [
+          469.302688146619,
+          293.2342375006034
+        ],
+        "neck_ring_center": [
+          387.5886892642408,
+          411.03566163034554
+        ]
+      },
+      "registeredFullCanvasApproximate": {
+        "eye_viewer_left_outer": [
+          571.5499176919254,
+          461.14029638056087
+        ],
+        "eye_viewer_left_inner": [
+          639.7669740671771,
+          440.438096811762
+        ],
+        "eye_viewer_right_inner": [
+          685.9666764275514,
+          415.6214226944359
+        ],
+        "eye_viewer_right_outer": [
+          762.2118619311943,
+          391.95336939063816
+        ],
+        "nose": [
+          659.6781103276289,
+          465.5780420981563
+        ],
+        "mouth_center": [
+          681.6024014301988,
+          488.72442473449723
+        ],
+        "chin": [
+          693.5001027063081,
+          513.825185636762
+        ],
+        "ear_center": [
+          819.302688146619,
+          393.2342375006034
+        ],
+        "neck_ring_center": [
+          737.5886892642409,
+          511.03566163034554
+        ]
+      }
+    }
+  }
+}

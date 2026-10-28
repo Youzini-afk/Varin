@@ -1,0 +1,210 @@
+{
+  "halfL": {
+    "curve6": [
+      [
+        574,
+        452.0
+      ],
+      [
+        585,
+        448.5
+      ],
+      [
+        596,
+        440.5
+      ],
+      [
+        607,
+        435.5
+      ],
+      [
+        618,
+        432.0
+      ],
+      [
+        629,
+        431.5
+      ]
+    ],
+    "bounds": [
+      551,
+      411,
+      638,
+      464
+    ]
+  },
+  "halfR": {
+    "curve6": [
+      [
+        696,
+        392.0
+      ],
+      [
+        707,
+        386.0
+      ],
+      [
+        718,
+        380.5
+      ],
+      [
+        729,
+        376.5
+      ],
+      [
+        740,
+        372.5
+      ],
+      [
+        752,
+        372.5
+      ]
+    ],
+    "bounds": [
+      678,
+      352,
+      774,
+      406
+    ]
+  },
+  "closedL": {
+    "curve6": [
+      [
+        574,
+        454.5
+      ],
+      [
+        585,
+        453.0
+      ],
+      [
+        596,
+        451.5
+      ],
+      [
+        607,
+        448.5
+      ],
+      [
+        618,
+        442.0
+      ],
+      [
+        629,
+        437.0
+      ]
+    ],
+    "bounds": [
+      551,
+      411,
+      638,
+      464
+    ]
+  },
+  "closedR": {
+    "curve6": [
+      [
+        696,
+        398.5
+      ],
+      [
+        707,
+        398.0
+      ],
+      [
+        718,
+        394.0
+      ],
+      [
+        729,
+        389.0
+      ],
+      [
+        740,
+        382.0
+      ],
+      [
+        752,
+        375.5
+      ]
+    ],
+    "bounds": [
+      678,
+      352,
+      774,
+      406
+    ]
+  },
+  "status": "ART_REFERENCES_FOR_CONTINUOUS_BLINK_CALIBRATION",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "origin": [
+    0,
+    0
+  ],
+  "outsideOriginalEyeMasksChangedPixels": 0,
+  "geometry": "uniform scale registration only; original jaw/hair/brows/mouth remain unchanged outside eye masks",
+  "runtime": "Use closed reference for terminal line, half reference as shape guidance. Not a frame-swap animation; runtime interpolates eye-local lid contours/occlusion.",
+  "warnings": [
+    "Check eye-mask edge on brows/bangs before final signoff",
+    "Local new patches opaque; open neutral source-over remains original cutout+original features, zero error."
+  ],
+  "openL": {
+    "curve6": [
+      [
+        574,
+        440.5
+      ],
+      [
+        585,
+        431.5
+      ],
+      [
+        596,
+        424.5
+      ],
+      [
+        607,
+        423.0
+      ],
+      [
+        618,
+        423.0
+      ],
+      [
+        629,
+        426.5
+      ]
+    ]
+  },
+  "openR": {
+    "curve6": [
+      [
+        696,
+        378.0
+      ],
+      [
+        707,
+        371.0
+      ],
+      [
+        718,
+        366.5
+      ],
+      [
+        729,
+        363.5
+      ],
+      [
+        740,
+        363.5
+      ],
+      [
+        752,
+        363.0
+      ]
+    ]
+  }
+}

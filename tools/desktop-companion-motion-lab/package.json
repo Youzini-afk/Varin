@@ -10,7 +10,9 @@
     "test:art-static": "node test/art-static.mjs",
     "test:art-integrity": "node test/art-integrity.mjs",
     "render:art": "node test/art-record.mjs",
-    "prepare:art": "node prepare-art.mjs"
+    "prepare:art": "node prepare-art.mjs",
+    "render:art-v3": "node test/art-v3-record.mjs",
+    "check:art-v3-neutral": "node test/art-v3-neutral.mjs"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.13",

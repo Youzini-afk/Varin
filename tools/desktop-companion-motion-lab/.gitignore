@@ -43,3 +43,19 @@ evidence/frame-*.png
 /assets/art-study-v1/layers-partition-v2/forearmR.png
 evidence/art-study/frames/
 evidence/art-study/cutout-frames/
+
+# Shared files used by the v3 seated study.
+/assets/art-study-v3/layers-underlap-v3/forearmL.png
+/assets/art-study-v3/layers-underlap-v3/forearmR.png
+/assets/art-study-v3/layers-underlap-v3/handL.png
+/assets/art-study-v3/layers-underlap-v3/handR.png
+/assets/art-study-v3/layers-underlap-v3/lowerBody.png
+/assets/art-study-v3/layers-underlap-v3/upperArmL.png
+/assets/art-study-v3/props/chair-atlas.png
+/assets/art-study-v3/props/chair.png
+/assets/art-study-v3/props/laptopBase-atlas.png
+/assets/art-study-v3/props/laptopBase.png
+/assets/art-study-v3/props/laptopLid-atlas.png
+/assets/art-study-v3/props/laptopLid.png
+evidence/art-study/v3-frames/*
+!evidence/art-study/v3-frames/0231.png
