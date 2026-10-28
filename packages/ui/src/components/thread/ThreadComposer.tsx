@@ -377,10 +377,10 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
           />
 
           <div className="conversation-composer-hints" data-empty={!value.trim()} data-suggestion={availableSuggestion || suggestionError ? 'true' : undefined}>
-            <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro text-muted-foreground">
-              <p className="text-muted-foreground/65">{backendControls === undefined ? t('chat.composer.hint') : t('external.inputHint')}</p>
+            <div className="conversation-composer-hint-row min-h-0 overflow-hidden px-3 typography-micro">
+              <p>{backendControls === undefined ? t('chat.composer.hint') : t('external.inputHint')}</p>
               <p aria-live="polite">
-              {availableSuggestion && !autocomplete ? <button type="button" className="text-muted-foreground/65 transition-colors hover:text-muted-foreground"
+              {availableSuggestion && !autocomplete ? <button type="button" className="text-inherit transition-colors hover:text-primary"
                 title={availableSuggestion} aria-label={`${t('chat.suggestion.applyAria')}: ${availableSuggestion}`}
                 onMouseDown={event => event.preventDefault()} onClick={() => { acceptSuggestion(); inputRef.current?.focus(); }}>
                 {isMobile ? t('chat.suggestion.applyAria') : t(ghostSuggestion ? 'chat.suggestion.acceptAndSendHint' : 'chat.suggestion.insertHint')}

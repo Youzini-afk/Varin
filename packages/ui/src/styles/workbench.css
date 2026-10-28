@@ -162,7 +162,10 @@
   transition: opacity var(--wb-state-duration) var(--wb-ease);
 }
 .conversation-composer-hints p { margin: 0; }
-.conversation-composer-hint-row { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 16px; row-gap: 3px; }
+.conversation-composer-hint-row {
+  display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 16px; row-gap: 3px;
+  color: color-mix(in oklab, var(--primary) 65%, var(--surface-muted-foreground));
+}
 .conversation-composer-hint-row > p:empty { display: none; }
 .conversation-composer-hint-row button { text-align: start; }
 [data-chat-input][data-composer-suggestion="true"] .cm-placeholder {
