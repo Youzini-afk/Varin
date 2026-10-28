@@ -12,9 +12,12 @@ function frameRuntime() {
   let resolveFile: (from: string, ref: string) => string = (_from, ref) => ref;
   window.fetch = (input, options) => originalFetch(typeof input === 'string' ? resolveFile(currentEntry, input) : input, options);
   const dom = () => document.getElementById('work')!;
-  let sizeFrame = 0, measuredHeight = -1, measuredWidth = -1;
+  let sizeFrame = 0, measuredHeight = -1, measuredWidth = -1, hasContent = false;
   const measure = () => {
-    if (sizeFrame) return;
+    // A fresh frame is empty while its work/state arrives. Keep the parent's
+    // retained height until actual content (including an intentional empty work)
+    // has been installed, rather than publishing a temporary zero on remount.
+    if (!hasContent || sizeFrame) return;
     sizeFrame = requestAnimationFrame(() => {
       sizeFrame = 0;
       const work = dom(), bounds = work.getBoundingClientRect();
@@ -159,6 +162,7 @@ function frameRuntime() {
     const incoming = document.createElement('div'); incoming.id = 'work';
     incoming.append(...parsed.head.childNodes, ...parsed.body.childNodes);
     sync(dom(), incoming);
+    hasContent = true;
     displayedSource = message.source;
     if (message.committed) {
       const imports: Record<string, string> = { d3: 'https://cdn.jsdelivr.net/npm/d3@7.9.0/+esm', 'chart.js/auto': 'https://cdn.jsdelivr.net/npm/chart.js@4.4.8/auto/+esm' };
@@ -257,6 +261,11 @@ function frameRuntime() {
 export function uiFrameDocument(channel: string, inline = false) {
   const layout = inline ? `
     html,body{width:100%!important;min-width:0!important;max-width:100%!important;height:auto!important;min-height:0!important;max-height:none!important;margin:0!important;padding:0!important;overflow:visible!important}
+    /* Chat owns document scrolling. Growing content can outpace the async
+       resize receipt for a frame; a viewport scrollbar would narrow the work,
+       change its wrapping and trigger another resize. Local widgets still own
+       their scrollports, and #work stays unclipped for content measurement. */
+    html[data-channel]{overflow:hidden!important;scrollbar-gutter:auto!important}
     /* Transparency is a default, not a palette override. An authored dark
        surface must stay paired with its light text when the host is light. */
     :where(html,body){background:transparent}

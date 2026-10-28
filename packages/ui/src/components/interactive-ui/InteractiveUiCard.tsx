@@ -59,7 +59,8 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
   const [viewInitialized, setViewInitialized] = React.useState(false);
   const [fullView, setFullView] = React.useState(false);
   const mobile = useUIStore(value => value.isMobile);
-  const [height, setHeight] = React.useState(session.inlineSize?.height ?? 0), [error, setError] = React.useState('');
+  const height = React.useRef(session.inlineSize?.height ?? 0);
+  const [error, setError] = React.useState('');
   const [connectionError, setConnectionError] = React.useState('');
   const [persistenceError, setPersistenceError] = React.useState('');
   const [selectedText, setSelectedText] = React.useState<string>();
@@ -127,10 +128,14 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
       if (event.source !== iframe.current?.contentWindow || event.data?.channel !== channel) return;
       const message = event.data;
       if (message.type === 'ready') setReady(true);
-      if (message.type === 'resize' && Number.isFinite(message.height) && message.height >= 0) {
+      if (!panel && message.type === 'resize' && Number.isFinite(message.height) && message.height >= 0) {
         const measured = Math.ceil(message.height);
-        if (!panel) session.inlineSize = { width: message.width, height: measured };
-        setHeight(measured);
+        session.inlineSize = { width: message.width, height: measured };
+        height.current = measured;
+        // The frame already coalesces layout measurements to a paint. Apply its
+        // height in this receipt, without another React render/scheduling turn.
+        // The timeline's existing ResizeObserver handles the resulting growth.
+        iframe.current!.style.height = `${measured}px`;
       }
       if (message.type === 'error') setError(t('ui.content.scriptFailed'));
       if (!panel && message.type === 'scroll-intent' && (message.intent === 'away-from-end' || message.intent === 'toward-end')) {
@@ -312,7 +317,7 @@ export function UiWorkView({ session, source, files, assets = {}, entry, title, 
             if (frameLoad.current.channel !== channel) { frameLoad.current = { channel, loaded: true }; return; }
             setReady(false); setError(t('ui.content.navigated'));
             for (const pending of captures.current.values()) pending.reject(new Error(t('ui.content.navigated'))); captures.current.clear();
-          }} className="block w-full border-0 bg-transparent" style={{ height: panel ? '100%' : height }} />
+          }} className="block w-full border-0 bg-transparent" style={{ height: panel ? '100%' : height.current }} />
         {regionImage?.image && <div className="absolute inset-0 z-10 touch-none overflow-hidden bg-background" onPointerDown={event => { origin.current = regionPoint(event); setRectangle(undefined); event.currentTarget.setPointerCapture(event.pointerId); }}
           onPointerMove={event => { if (!origin.current) return; const { x, y } = regionPoint(event); setRectangle({ x: Math.min(origin.current.x, x), y: Math.min(origin.current.y, y), width: Math.abs(x - origin.current.x), height: Math.abs(y - origin.current.y) }); }} onPointerUp={() => { origin.current = undefined; }} onPointerCancel={() => { origin.current = undefined; }}>
           <img src={`data:${regionImage.image.mimeType};base64,${regionImage.image.data}`} alt="选择要引用的区域" className="absolute" style={regionImage.image.bounds ? { left: regionImage.image.bounds.x, top: regionImage.image.bounds.y, width: regionImage.image.bounds.width, height: regionImage.image.bounds.height } : { width: '100%', height: '100%' }} draggable={false} />
