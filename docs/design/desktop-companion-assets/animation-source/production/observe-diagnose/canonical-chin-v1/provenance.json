@@ -1,0 +1,6 @@
+{
+  "method": "fixed full-canvas isotropic 1254-to-512 generation normalization; no bounding-box registration; generated arm/sleeve through explicit mask, all other pixels canonical",
+  "protectedPixelCount": 257174,
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "status": "motion construction, face holds unchanged; no full-animation acceptance"
+}

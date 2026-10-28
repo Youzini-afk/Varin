@@ -1,0 +1,61 @@
+{
+  "sharedAlpha": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "normalization": "fixed full viewport only",
+  "frames": [
+    {
+      "sourceDrawing": "click-open-single-master-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    },
+    {
+      "sourceDrawing": "attention-eye-lead-single-v1.png",
+      "region": "head",
+      "protectedRgbaPixelsExact": 188896
+    },
+    {
+      "sourceDrawing": "wave-rise20-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-rise50-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-rise80-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-endpoint-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-sweep-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-endpoint-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-return-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "wave-rise20-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 183567
+    },
+    {
+      "sourceDrawing": "click-open-single-master-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    }
+  ]
+}

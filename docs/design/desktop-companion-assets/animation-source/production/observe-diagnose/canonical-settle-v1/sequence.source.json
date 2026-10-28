@@ -1,0 +1,116 @@
+{
+  "id": "observe.attentive-settle-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-open-read-screen",
+  "exitPose": "seated-open-read-screen",
+  "loop": null,
+  "warning": "Sparse attentive hold with newly drawn upper-body settle and inbetween. Not rhythmic wiggle; normal-speed motion/edges need review.",
+  "frames": [
+    {
+      "source": "read-neutral.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-open-read-screen"
+    },
+    {
+      "source": "between.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hold-transition"
+    },
+    {
+      "source": "settled.png",
+      "durationMs": 2600,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-settled"
+    },
+    {
+      "source": "between.png",
+      "durationMs": 170,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hold-transition"
+    },
+    {
+      "source": "read-neutral.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-open-read-screen"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hold-transition"
+    },
+    {
+      "source": "closed.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hold-transition"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "observe-hold-transition"
+    },
+    {
+      "source": "read-neutral.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "hold",
+      "contacts": {},
+      "pose": "seated-open-read-screen"
+    }
+  ]
+}

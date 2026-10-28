@@ -1,0 +1,28 @@
+{
+  "sourceSha256": "316699a006d0614bd965824dc87ae088af0c6dd6376e16f1c46088994643e5ca",
+  "reviewedHoleIds": [
+    38,
+    84,
+    90,
+    97,
+    108,
+    128,
+    154,
+    170,
+    172,
+    178,
+    224,
+    230,
+    233,
+    252,
+    253,
+    280,
+    281,
+    283,
+    287,
+    291
+  ],
+  "source": "opaque authored edge cleanup, no pose warps",
+  "method": "border white extraction and boundary unmatting",
+  "status": "candidate pending parent visual review"
+}

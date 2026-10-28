@@ -1,0 +1,148 @@
+{
+  "id": "seated-work.canonical-typing-v2",
+  "family": "SEATED_WORK",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "seated-open-screen-keyboard",
+  "exitPose": "seated-open-screen-keyboard",
+  "loop": null,
+  "stage": "motion-candidate",
+  "reviewStatus": "needs-normal-speed-review-with-screen-gaze",
+  "warning": "Protected common full-body pixels; generated actual six hand drawings registered locally. Keyboard contact and patch edge need review. Not final accepted.",
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "durationMs": 240,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "index-lift",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "index-press",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "middle-lift",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 140,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "middle-press",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 280,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "typing",
+      "pose": "rest-return",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ],
+        "seat": [
+          307,
+          361
+        ]
+      },
+      "exitTo": []
+    }
+  ],
+  "gaze": "screen",
+  "sourceReuse": {
+    "handMotion": "../canonical-typing-v1",
+    "eyes": "../../observe-diagnose/canonical-gaze-v1/read-screen.png",
+    "method": "Latest shared-alpha read-screen full-frame baseline; copy only already-baked hand-context pixels from earlier actual drawing sequence, not stale outer alpha edges."
+  }
+}

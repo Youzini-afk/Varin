@@ -1,0 +1,87 @@
+{
+  "id": "attention-sequence-v2",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "warning": "Authored attention+blink candidate; v2 preserves lifted head outside authored eyelid redraw regions. Not accepted smooth fullfamily animation.",
+  "entryPose": "seated-open-gaze-screen",
+  "exitPose": "seated-open-gaze-screen",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 600,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-000.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

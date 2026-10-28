@@ -1,0 +1,293 @@
+{
+  "status": "phase3-new-art-candidates-not-motion-approved",
+  "files": [
+    {
+      "path": "metadata/prompt-query-attentive-face.txt",
+      "bytes": 611,
+      "sha256": "ece9a522b66e7aeb0f9ccd2ee9db44e61ac575e8f830e71123695d4d9a77b4fe"
+    },
+    {
+      "path": "metadata/prompt-understand-nod-bottom.txt",
+      "bytes": 719,
+      "sha256": "8d7c4964cc4b642f8afe25dbf373d89cd5d3ac8bed8be89a50eab820182131b3"
+    },
+    {
+      "path": "metadata/prompt-understand-nod-middle.txt",
+      "bytes": 711,
+      "sha256": "8c5fbc4ba0883cdbc7533cd21fb75a844121a51595d609afb2adbe5cb7e2eba1"
+    },
+    {
+      "path": "metadata/prompt-wait-relaxed-closedblink.txt",
+      "bytes": 435,
+      "sha256": "ee24c98f98798096f66025cda82d0b41abbdbe2fbcfbfd6770eb71c73852ee2b"
+    },
+    {
+      "path": "metadata/prompt-wait-relaxed-halfblink.txt",
+      "bytes": 429,
+      "sha256": "a347835c0b26527612d2dad922d7a38a2cf2f222de4d81facda08907c6afec30"
+    },
+    {
+      "path": "metadata/prompt-wait-relaxed-settle.txt",
+      "bytes": 708,
+      "sha256": "b4e8faca7f8ae20e01be963d6f9fb7cb6980029815bb1e3f56559db5dad123bc"
+    },
+    {
+      "path": "metadata/prompt-wait-relaxed.txt",
+      "bytes": 894,
+      "sha256": "99b49cd3e3867b55acbb8c07751a98cb1f370ca253e2b03456158d814a31f534"
+    },
+    {
+      "path": "register_query_understand_v1.py",
+      "bytes": 4538,
+      "sha256": "75d3ec4c409ed3b24559d385b801fbe392b3ee4406cae4c9ba3cd1016d6d9110"
+    },
+    {
+      "path": "register_wait_relaxed_v1.py",
+      "bytes": 4572,
+      "sha256": "a0d68f4433f6b64f13f7d2d4ba424f5b0ffb3d018c4bc6f2569cc21e958dd784"
+    },
+    {
+      "path": "registered/query-understand-v1/dependencies.json",
+      "bytes": 2134,
+      "sha256": "6d002e3fcc19a56eef2a731b99e189cb0aa8f57c4650fa9f6694daeaa3972879"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-000.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-001.png",
+      "bytes": 309187,
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-002.png",
+      "bytes": 309912,
+      "sha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-003.png",
+      "bytes": 309705,
+      "sha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-004.png",
+      "bytes": 309828,
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-005.png",
+      "bytes": 309444,
+      "sha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-006.png",
+      "bytes": 309828,
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-007.png",
+      "bytes": 309106,
+      "sha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-008.png",
+      "bytes": 309274,
+      "sha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-009.png",
+      "bytes": 309187,
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-010.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-011.png",
+      "bytes": 324365,
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-012.png",
+      "bytes": 324360,
+      "sha256": "a82f21fc77c882592e89f6f318abd1888db691569db353f40e23961e519f7788"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-013.png",
+      "bytes": 324365,
+      "sha256": "0eb6022cbb4b5f2011ccea2208359fb178309fbf96d9a716f37a60769406f7a5"
+    },
+    {
+      "path": "registered/query-understand-v1/pose-014.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "registered/query-understand-v1/question-expression-region.png",
+      "bytes": 1815,
+      "sha256": "8dc9253cb230951af3b9a64a55365e7f798ac5b032233bf963d9cbf0f7a61a47"
+    },
+    {
+      "path": "registered/query-understand-v1/sequence.json",
+      "bytes": 2282,
+      "sha256": "ef93c0b2a18a5f9735da62f3134b146af509c56c44bd8d3bb1cbe9e10a64be48"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-000.png",
+      "bytes": 324427,
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-001.png",
+      "bytes": 323968,
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-002.png",
+      "bytes": 323184,
+      "sha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-003.png",
+      "bytes": 323968,
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-004.png",
+      "bytes": 324427,
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-005.png",
+      "bytes": 329729,
+      "sha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/pose-006.png",
+      "bytes": 324427,
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/provenance.json",
+      "bytes": 1108,
+      "sha256": "393766484489afad84b6cf2c857181f5aebc5fb80cea7647130f6c4e16cfe782"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/sequence.json",
+      "bytes": 1338,
+      "sha256": "1953866cb1f7be53847bac1e948cbf482b3971ab2b13cbb3dcc9497696a6b28b"
+    },
+    {
+      "path": "registered/wait-relaxed-v1/whole-upper-redraw-mask.png",
+      "bytes": 4089,
+      "sha256": "7806c211334e85cdafd264decfdfb461fa20b8526147622ee04f3bcaf4055ff0"
+    },
+    {
+      "path": "sources/query-attentive-face-single-v1.png",
+      "bytes": 1657106,
+      "sha256": "c1c4a3f0d36668c7b6d0adb0c92b648fabe4157d6ab1a9b77af79e5bf8b260e1"
+    },
+    {
+      "path": "sources/query-chin-shared-reference-v1.png",
+      "bytes": 271772,
+      "sha256": "1fa469bf9a2aba80185f660afc76ac066d14c08f0f482f4ace731cf1f439ba47"
+    },
+    {
+      "path": "sources/understand-nod-bottom-single-v1.png",
+      "bytes": 1705938,
+      "sha256": "ed3f9d063bf744f1b1ae9d0dea226ac11ea4ead7a0cec5928d4a34211e89926d"
+    },
+    {
+      "path": "sources/understand-nod-middle-single-v1.png",
+      "bytes": 1679751,
+      "sha256": "85df1584fdcef874e50270ea52fe00b774decc84248eaa8e625840630d94fc3c"
+    },
+    {
+      "path": "sources/wait-relaxed-closedblink-single-v1.png",
+      "bytes": 1897044,
+      "sha256": "aa6710205b474fc8c2b9f9fc6c8798ed3e43ad2aeec2d644be3d868d0c50f318"
+    },
+    {
+      "path": "sources/wait-relaxed-halfblink-single-v1.png",
+      "bytes": 1792334,
+      "sha256": "fabe40ce99cccd4ce3aaf18507912e7b7502a42bfdb200a6fc9663364d01cce6"
+    },
+    {
+      "path": "sources/wait-relaxed-settle-single-v1.png",
+      "bytes": 1910186,
+      "sha256": "0c784916933581982fbacf0f543d1f79bcb29e78f2644c1a1bd43d03a2ec3397"
+    },
+    {
+      "path": "sources/wait-relaxed-single-v1.png",
+      "bytes": 1705802,
+      "sha256": "1185510e1fd96ca3d232f8a1e48f18bdd7861c84d7d3eb531d6dcf58b34e44ba"
+    }
+  ],
+  "existingCheckpointDependencies": [
+    {
+      "path": "shared/seated-open-canonical-alpha-v1.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "user-attention/sources/click-open-single-master-v1.png",
+      "bytes": 272827,
+      "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b"
+    },
+    {
+      "path": "user-attention/registered/permission-lift-v1/arm-occlusion-redraw-mask.png",
+      "bytes": 2390,
+      "sha256": "394d256c2d5dbb13edfbad87308046239a4b45d567bc3d054fba736151c39392"
+    },
+    {
+      "path": "user-attention/registered/attention-lift-v1/edit-region-mask.png",
+      "bytes": 2923,
+      "sha256": "a702229ebcc09467172c5ad9683d41af4e6607cdb3cd2ec615cfbd30f96f13cb"
+    },
+    {
+      "path": "user-attention/registered/attention-sequence-v2/blink-redraw-region.png",
+      "bytes": 1665,
+      "sha256": "8334f060d7ea92843de39ec04441e33bb57e880d9ef8ebbf5d5fa9b50133a5ff"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-000.png",
+      "bytes": 309034,
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-001.png",
+      "bytes": 309188,
+      "sha256": "838da04ae1177dcf46274ad7825670b0e6bb993d8c2862a279aad375a4ef8ab2"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-002.png",
+      "bytes": 309277,
+      "sha256": "24ad1115db6f725dc8cc9354ae185b42cc678d64deb61be850b98b3278916bb9"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-003.png",
+      "bytes": 309151,
+      "sha256": "bcebbd7589649310c4f6b2fd8a851d62746210eddbf17ca5e66ac1944815222e"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-004.png",
+      "bytes": 309217,
+      "sha256": "709c0e4fb0ad29c4ccbf0223f86849d5629fab24cf46c2d7db345354bb4ad1c2"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/pose-005.png",
+      "bytes": 308885,
+      "sha256": "d6057ed870889fb10d6a6af24264ff5753aa083e6de8cbb87ac9bc5f2d951f45"
+    },
+    {
+      "path": "observe-diagnose/canonical-chin-v1/editable-arm-mask.png",
+      "bytes": 1548,
+      "sha256": "dda14bbe8cab2f18cfec3927228b08ce9a27de1a65c57113d5957209d7e89343"
+    }
+  ],
+  "note": "No duplicate old GIF/HTML/contact PNGs. New scripts regenerate previews. Runtime wait phases require real events, no autoapproval. Shared arm drawings credited to observation family."
+}

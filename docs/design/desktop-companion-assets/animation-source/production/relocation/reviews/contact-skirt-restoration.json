@@ -1,0 +1,55 @@
+{
+  "source": "original authored contact drawing",
+  "mask": [
+    [
+      330,
+      347
+    ],
+    [
+      345,
+      355
+    ],
+    [
+      356,
+      378
+    ],
+    [
+      372,
+      410
+    ],
+    [
+      387,
+      436
+    ],
+    [
+      407,
+      454
+    ],
+    [
+      396,
+      465
+    ],
+    [
+      406,
+      481
+    ],
+    [
+      357,
+      476
+    ],
+    [
+      315,
+      459
+    ],
+    [
+      310,
+      430
+    ],
+    [
+      319,
+      400
+    ]
+  ],
+  "method": "restore actual garment pixels selectively after model furniture removal erroneously removed skirt; no invented vector garment",
+  "status": "candidate trace requires review"
+}

@@ -1,0 +1,103 @@
+{
+  "id": "completion-wave-v2",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-open-neutral",
+  "exitPose": "seated-open-neutral",
+  "warning": "Authored completion wave candidate, not smooth-final approved. Completion performance only after actual success; never infer completion from animation. Neutral baseline gaze is not confirmed reading-screen. v2 locally clears visually reviewed new left-hair white background pockets.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 170,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 150,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 130,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-009.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-010.png",
+      "durationMs": 400,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

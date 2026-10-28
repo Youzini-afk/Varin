@@ -1,0 +1,90 @@
+{
+  "id": "seated-work.canonical-key-tap-v2",
+  "family": "SEATED_WORK",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "motion-candidate",
+  "reviewStatus": "needs-normal-speed-review-with-screen-gaze",
+  "entryPose": "seated-open-screen-keyboard",
+  "exitPose": "seated-open-screen-keyboard",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-001.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "rest",
+      "pose": "rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "finger-lift",
+      "pose": "finger-lift",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 110,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "key-contact",
+      "pose": "key-contact",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 320,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "release-rest",
+      "pose": "release-rest",
+      "contacts": {
+        "wrist": [
+          309,
+          295
+        ]
+      },
+      "exitTo": []
+    }
+  ],
+  "warning": "Single visual key-tap only. Does not emit input or assert task execution/completion; may be triggered by a real existing state transition.",
+  "sourceReuse": {
+    "handMotion": "../canonical-key-tap-v1",
+    "eyes": "../../observe-diagnose/canonical-gaze-v1/read-screen.png",
+    "method": "Latest shared-alpha read-screen full-frame baseline; copy only already-baked hand-context pixels from earlier actual drawing sequence, not stale outer alpha edges."
+  },
+  "gaze": "screen"
+}

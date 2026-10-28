@@ -1,0 +1,71 @@
+{
+  "sharedAlpha": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "normalization": "fixed full viewport only",
+  "frames": [
+    {
+      "sourceDrawing": "click-open-single-master-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    },
+    {
+      "sourceDrawing": "attention-eye-lead-single-v1.png",
+      "region": "head",
+      "protectedRgbaPixelsExact": 188896
+    },
+    {
+      "sourceDrawing": "permission-lift10-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-lift30-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-lift60-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-lift70-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-lift80-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-endpoint-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "permission-settle-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "permission-attentive-face-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "permission-return-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "permission-lift10-single-v1.png",
+      "region": "arm",
+      "protectedRgbaPixelsExact": 168073
+    },
+    {
+      "sourceDrawing": "click-open-single-master-v1.png",
+      "region": "base",
+      "protectedRgbaPixelsExact": 262144
+    }
+  ]
+}

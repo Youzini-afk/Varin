@@ -1,0 +1,394 @@
+{
+  "selectionVersion": 1,
+  "purpose": "Current recoverable production candidate, omit superseded grid studies and duplicate previews",
+  "status": "not final motion/contact acceptance",
+  "root": "relocation",
+  "externalDependencies": [
+    {
+      "path": "../shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "path": "../shared/seated-open-canonical-v1.png",
+      "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b"
+    }
+  ],
+  "files": [
+    {
+      "path": "relocation/STATUS.md",
+      "bytes": 5819,
+      "sha256": "342b50829c3605d17d71a5d4576d58b1df429b5cf719e5be0736ba2d0a32a9ff"
+    },
+    {
+      "path": "relocation/build_scene_review.py",
+      "bytes": 4153,
+      "sha256": "4eca821aff66f8566e6dcc97145ba3ca61b750364dd1a6b7c7f6576507de7b83"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/airborne-clean-v2.png",
+      "bytes": 307292,
+      "sha256": "3a150a7013810a9c27307f4ebe33c1224307075470f1277961c546c1b73909b3"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/airborne.png",
+      "bytes": 301382,
+      "sha256": "71796e1339d0823b62a4d386434623719a3ae5eb11bb7b97cbf6f597bc853ea2"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/contact-no-stool-white-alpha.png",
+      "bytes": 304439,
+      "sha256": "f8fd9014db88155c9565d888908b34eacae3866e1e58efabed4c7efe3a0a9263"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/contact-skirt-restored-v3.png",
+      "bytes": 308692,
+      "sha256": "e1cdf1ed6ad2331d6e88cc032d95b1ff38f95da402b8e84a9d682ba4fbd4e35b"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/preland-no-stool-white-alpha.png",
+      "bytes": 300521,
+      "sha256": "71051eb5d9c66298446f420aba3c428aa152466319bbedd9a00e940e4ef31673"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/stool-registration-candidate.json",
+      "bytes": 612,
+      "sha256": "ada5e2708865607b6870bbf4986cba38b934f8f1b86ff6b7d0f6bcd2aa835b5c"
+    },
+    {
+      "path": "relocation/canonical-registered-v1/stool-world-candidate-v2.png",
+      "bytes": 32035,
+      "sha256": "96892bead7bcc77e1fb568b0f7f02df62bcc890d15bb6cee760bd05e4a1c63c5"
+    },
+    {
+      "path": "relocation/canonical-static-v1/authored-edit-mask.png",
+      "bytes": 2364,
+      "sha256": "d589997a7bd98f2b38b08906f366e42d3bacd9237190f3301009340247571d63"
+    },
+    {
+      "path": "relocation/canonical-static-v1/close-half.png",
+      "bytes": 316964,
+      "sha256": "349fc845fc224a9b53c7059d5032aab9b07e7e65f1e7e4cc10aa793831c6003c"
+    },
+    {
+      "path": "relocation/canonical-static-v1/close-start.png",
+      "bytes": 315957,
+      "sha256": "f44eb4de246e5f300f19ed397114c1d1b7bb9f81bd742046673cef83eba418f8"
+    },
+    {
+      "path": "relocation/canonical-static-v1/close70-white.png",
+      "bytes": 312183,
+      "sha256": "3bf76b71e123df389f26a4347140b058973e078139e928363200a3198fc16479"
+    },
+    {
+      "path": "relocation/canonical-static-v1/closed.png",
+      "bytes": 316880,
+      "sha256": "43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f"
+    },
+    {
+      "path": "relocation/canonical-static-v1/grip-lift-white.png",
+      "bytes": 314566,
+      "sha256": "f57d5e3ff63474aa2319b093cfd3e96eb8fb7f25d6e36f7d3c3260b4c9cd9cc9"
+    },
+    {
+      "path": "relocation/canonical-static-v1/hug.png",
+      "bytes": 309285,
+      "sha256": "c6899d1960bb41138879c08f5ae173b7a7b9f7d2bf691b247d3f557269746598"
+    },
+    {
+      "path": "relocation/canonical-static-v1/provenance.json",
+      "bytes": 583,
+      "sha256": "556984e17d816aba34fdf4469e9af65654c127cfd5e16485b06fa4df390abb13"
+    },
+    {
+      "path": "relocation/canonical-static-v1/sequence.source.json",
+      "bytes": 1249,
+      "sha256": "c5f73e894c434d4f66949c10a502689ac485ccdd2b0adf1415767b8420e8649e"
+    },
+    {
+      "path": "relocation/canonical-static-v1/turn.png",
+      "bytes": 313772,
+      "sha256": "f442fb7b7e7a438d2f22eeae204c6e4333708cdad544736b4e6f4a80ffdd8fae"
+    },
+    {
+      "path": "relocation/canonical-v1/airborne-clean-white-v2.png",
+      "bytes": 331056,
+      "sha256": "316699a006d0614bd965824dc87ae088af0c6dd6376e16f1c46088994643e5ca"
+    },
+    {
+      "path": "relocation/canonical-v1/airborne.png",
+      "bytes": 325547,
+      "sha256": "b2da983e9d1a71767e0af41ae21ddcef4f76c06322316d10228d6aa5bd4ad541"
+    },
+    {
+      "path": "relocation/canonical-v1/close-half.png",
+      "bytes": 341327,
+      "sha256": "516369c6a4856dc06e1aa8a896ed5f36fbba782fdfa63e3410082a48e50d8693"
+    },
+    {
+      "path": "relocation/canonical-v1/close-start.png",
+      "bytes": 336343,
+      "sha256": "9861a6933088ddddbb4afb73a9e1171875e8928632e8d44c1baeac5398fbafd0"
+    },
+    {
+      "path": "relocation/canonical-v1/close70-white.png",
+      "bytes": 352902,
+      "sha256": "5f72a5a9b8a2fba96e96e128c5cde08d119fa81fb3bf69c5aa406ec72761160a"
+    },
+    {
+      "path": "relocation/canonical-v1/closed.png",
+      "bytes": 341311,
+      "sha256": "204c6b57a62330b215f06197e9bb411a18ee33476e311bfb02572ff9b2d84697"
+    },
+    {
+      "path": "relocation/canonical-v1/contact-no-stool-white.png",
+      "bytes": 340262,
+      "sha256": "4b5a179cb271a0e4a4edc68154cdb3037956b05b2c40a3d7579d2e15ad52a882"
+    },
+    {
+      "path": "relocation/canonical-v1/grip-lift-white.png",
+      "bytes": 366058,
+      "sha256": "385c2594fbd5138edc9e88540aff164a2bb563ab6a9392db6ec63d5badf55e50"
+    },
+    {
+      "path": "relocation/canonical-v1/hug.png",
+      "bytes": 332490,
+      "sha256": "ea88aa929b377720924d5905ec8e9b011bd62b9f50ab2446149ca8de3c7aa4f0"
+    },
+    {
+      "path": "relocation/canonical-v1/landing-contact-white.png",
+      "bytes": 340459,
+      "sha256": "d46e624da1c0747137d52fbebea042e64e95fa150d0ac4d9d75605f48f2590a7"
+    },
+    {
+      "path": "relocation/canonical-v1/lift-mid.png",
+      "bytes": 326296,
+      "sha256": "5b176cae0d37b008003c4c505a6ab7d5176b3f57f89ef08367cb1eae1d5f024d"
+    },
+    {
+      "path": "relocation/canonical-v1/preland-no-stool-white.png",
+      "bytes": 337917,
+      "sha256": "3a7b0524199c52b5925a803dbe45d67215c98f383acecb478dea9e1231bef2aa"
+    },
+    {
+      "path": "relocation/canonical-v1/stool-plate-v2.png",
+      "bytes": 42213,
+      "sha256": "15abb4135d7e736325e3fd19d875066f6ffefa5a2aa592097c1709a4334dfc2f"
+    },
+    {
+      "path": "relocation/canonical-v1/turn.png",
+      "bytes": 337204,
+      "sha256": "0a2c948d6060fe2ae2c2fd1b01ded04ff4de3bb24c7a9894b69d5df72328a48b"
+    },
+    {
+      "path": "relocation/derive_clean_airborne.py",
+      "bytes": 1766,
+      "sha256": "59a8a3153d4481ba5ce2e541b1d1b8e76454070e1572feace6b3a4a70b11b0ef"
+    },
+    {
+      "path": "relocation/derive_landing_candidates.py",
+      "bytes": 1716,
+      "sha256": "abf1d4eb6e7d1eebc3371799d2e9c50b0a07acfd3f1c87badd362371bf1fb066"
+    },
+    {
+      "path": "relocation/preserve_static.py",
+      "bytes": 2520,
+      "sha256": "95abe522701bac2d07f2ed90a46317798ad6a8607116df038af27600cdc95109"
+    },
+    {
+      "path": "relocation/protect_seated_static.py",
+      "bytes": 1955,
+      "sha256": "72dd450e1c020462d898216721b47e71e9fc14e1a8a62b0fbebac75268df13f9"
+    },
+    {
+      "path": "relocation/register_stool.py",
+      "bytes": 917,
+      "sha256": "3e190dcff83df2d8a68bef73e5b5df1b5bcbe73f46fdfd22055c0860ecbd458e"
+    },
+    {
+      "path": "relocation/relocation-route-candidates.json",
+      "bytes": 2852,
+      "sha256": "a694f3d9dd0906b96cd4183447e793974ba8692cb44b6b1cce8dc77cce50ab9d"
+    },
+    {
+      "path": "relocation/restore_contact_skirt.py",
+      "bytes": 1300,
+      "sha256": "41ca3e2f036979ac3e2ccd934bd9cb57c9e697d9f0711c053ab6648808d41462"
+    },
+    {
+      "path": "relocation/reviews/airborne-clean-v2-alpha-provenance.json",
+      "bytes": 466,
+      "sha256": "5246607773e7fef7c12927094e79da738b2b5710c891a01b8afb4451069ff7ba"
+    },
+    {
+      "path": "relocation/reviews/contact-skirt-restoration.json",
+      "bytes": 663,
+      "sha256": "9d2c98b6e61ef99ca90199cc5ab1539768a38bb0e9abf372e8f21f492265681e"
+    },
+    {
+      "path": "relocation/reviews/world-contact-assets.json",
+      "bytes": 877,
+      "sha256": "87764d73429348a809ea080668c032ed90d0c2843cea83b3b5edf643b193ef3d"
+    },
+    {
+      "path": "relocation/source/canonical-airborne-clean-white-v2.png",
+      "bytes": 1743309,
+      "sha256": "1e983d397da5f38a759f0008703dd532e082c1bbdee5c4b52a1d9a896241ccca"
+    },
+    {
+      "path": "relocation/source/canonical-airborne-clean-white-v2.prompt.txt",
+      "bytes": 1008,
+      "sha256": "cad72c4336899d6772c49d008aef91a39b7a759fabc6872bd2004a5c0976d465"
+    },
+    {
+      "path": "relocation/source/canonical-airborne-v1.png",
+      "bytes": 1576776,
+      "sha256": "3b2e5931050f9634ff2061292ae1c7ce8357a6141ea0c148bab129f6e9aab494"
+    },
+    {
+      "path": "relocation/source/canonical-airborne-v1.prompt.txt",
+      "bytes": 1428,
+      "sha256": "ec3a9b9b53c1a2365f0a31cce2a845059d21de6232b3c4e3680b462b29fd86e7"
+    },
+    {
+      "path": "relocation/source/canonical-close-half-v1.png",
+      "bytes": 1660948,
+      "sha256": "8cb684db3250d4170a5eb512f5feca3398125afbf4d75ce8bf8ed3c72d3d0a96"
+    },
+    {
+      "path": "relocation/source/canonical-close-half-v1.prompt.txt",
+      "bytes": 1155,
+      "sha256": "181fb3385a848425a742fc9c1ce75f0936f5361729f75e277b424547074829cd"
+    },
+    {
+      "path": "relocation/source/canonical-close-start-v1.png",
+      "bytes": 1600534,
+      "sha256": "2ef12137ceb43eea9f4d1e0b77434fd6e05599fbc3a008229e241213938d113b"
+    },
+    {
+      "path": "relocation/source/canonical-close-start-v1.prompt.txt",
+      "bytes": 975,
+      "sha256": "8f083b5a3a0fed8d6a356e4246cd727b52f19ab241a07319719eb2695beefe09"
+    },
+    {
+      "path": "relocation/source/canonical-close70-v1.png",
+      "bytes": 1758307,
+      "sha256": "def17c00de055a0b6f8ccafb8e6fc6b9e255a40d43f4a35299500febad09dad7"
+    },
+    {
+      "path": "relocation/source/canonical-close70-v1.prompt.txt",
+      "bytes": 933,
+      "sha256": "c88258b06894408d46d4cdbc9c50c19950f3ea60694162e00afa87d49c5b5544"
+    },
+    {
+      "path": "relocation/source/canonical-closed-v1.png",
+      "bytes": 1648820,
+      "sha256": "74cff791b354b6473e80b961447d3fee91dbbedd91edbab173b9792d654e7745"
+    },
+    {
+      "path": "relocation/source/canonical-closed-v1.prompt.txt",
+      "bytes": 971,
+      "sha256": "a5c8686286bf0aedf32faae9f5724b15548d3638cb4ed5449167133f37fa4d23"
+    },
+    {
+      "path": "relocation/source/canonical-contact-no-stool-v2.png",
+      "bytes": 1690135,
+      "sha256": "03b4c3c07c0ca3c04d74f1f921d851b58846c2b6f934685aecfc786635af1b5e"
+    },
+    {
+      "path": "relocation/source/canonical-contact-no-stool-v2.prompt.txt",
+      "bytes": 751,
+      "sha256": "01430bc0cc681c8ccd5615409f781066aec663e9eb6a31c893430cc21ac753ce"
+    },
+    {
+      "path": "relocation/source/canonical-grip-lift-v1.png",
+      "bytes": 1779206,
+      "sha256": "aed6b324d4502e0d026f1aa3a1d5207989d37f7151efd8fb0b6155c6737b4515"
+    },
+    {
+      "path": "relocation/source/canonical-grip-lift-v1.prompt.txt",
+      "bytes": 1055,
+      "sha256": "0f08db96920e7b11d30e77ced9b73ec262cdcf3267fbe366f9c6bb0ed2a8a258"
+    },
+    {
+      "path": "relocation/source/canonical-hug-v1.png",
+      "bytes": 1598130,
+      "sha256": "b22eaa102c2ce071995fa63663cd463521e1e7cdd61eb0c7b639ee72214794c7"
+    },
+    {
+      "path": "relocation/source/canonical-hug-v1.prompt.txt",
+      "bytes": 995,
+      "sha256": "4d9987e73cd1edff169886795fe6f420f9dde9c5bb4e50aad4bf18807a458978"
+    },
+    {
+      "path": "relocation/source/canonical-landing-contact-v1.png",
+      "bytes": 1672914,
+      "sha256": "cfc77e3a69582ae8a294af2367ff25b29149a96fffe9c8d74f1b1405162c04f9"
+    },
+    {
+      "path": "relocation/source/canonical-landing-contact-v1.prompt.txt",
+      "bytes": 1277,
+      "sha256": "efe7e0602ec2fba6fabbce0de6f55f129e9ea0ca2085c262bc86045e75fb06c6"
+    },
+    {
+      "path": "relocation/source/canonical-lift-mid-v1.png",
+      "bytes": 1562719,
+      "sha256": "e21f517b3a9fc5e0a786913848f1425925cd6ce66d7ae1b9b21eb30027459e59"
+    },
+    {
+      "path": "relocation/source/canonical-lift-mid-v1.prompt.txt",
+      "bytes": 1215,
+      "sha256": "5d8005b9b83274155bfb69a0b0e5737cc1e99b7da456fa8b7ff293ee520e5c8a"
+    },
+    {
+      "path": "relocation/source/canonical-preland-no-stool-v2.png",
+      "bytes": 1674747,
+      "sha256": "563b906f79ff86394b80cc1e4e4df87e60a78cb8f873f204ebfa463e49df9c86"
+    },
+    {
+      "path": "relocation/source/canonical-preland-no-stool-v2.prompt.txt",
+      "bytes": 796,
+      "sha256": "137929bf4905e01d86b8e1d44faa3b3f73fa583cc0b4726bf79b967549d441c9"
+    },
+    {
+      "path": "relocation/source/canonical-stool-plate-v1.png",
+      "bytes": 263199,
+      "sha256": "900d96ceaf81446c90920dc91af3c4b8ea766772194d384ab704c96b02b545ab"
+    },
+    {
+      "path": "relocation/source/canonical-stool-plate-v1.prompt.txt",
+      "bytes": 1087,
+      "sha256": "1f62cfed6c843644fd963132c2f690e957e0c31288340f6c7ee7b7837b939459"
+    },
+    {
+      "path": "relocation/source/canonical-stool-plate-v2.png",
+      "bytes": 248869,
+      "sha256": "4f13220fdcd368c9683909abc0263c12388194841aefcc29fa78b0ad1cd93943"
+    },
+    {
+      "path": "relocation/source/canonical-stool-plate-v2.prompt.txt",
+      "bytes": 1147,
+      "sha256": "57a5bfe5a9ff5dbd836e21eecacfc524e669f80d5e32059ad50febbe144c54b2"
+    },
+    {
+      "path": "relocation/source/canonical-turn-v1.png",
+      "bytes": 1630415,
+      "sha256": "2b6449e73b999beb43e4728ad5aa2d085d851edc96003775a4cdc00d7f0878b3"
+    },
+    {
+      "path": "relocation/source/canonical-turn-v1.prompt.txt",
+      "bytes": 1132,
+      "sha256": "305fabdc05da27a9b89db244b7d7b558c5e7ccd4c2362ecb7b19ae31731486f0"
+    }
+  ],
+  "bytes": 30360118,
+  "reproduceOrder": [
+    "preserve_static.py (historical static-head intermediate; not newest clean airborne)",
+    "protect_seated_static.py",
+    "derive_clean_airborne.py",
+    "register_stool.py",
+    "derive_landing_candidates.py",
+    "restore_contact_skirt.py",
+    "build_scene_review.py"
+  ],
+  "pathBase": "production-root"
+}

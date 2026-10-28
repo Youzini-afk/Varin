@@ -1,0 +1,40 @@
+{
+  "baselineFileSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "pixelChecks": [
+    {
+      "frame": 1,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 0
+    },
+    {
+      "frame": 2,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 2294
+    },
+    {
+      "frame": 3,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 2297
+    },
+    {
+      "frame": 4,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 2294
+    },
+    {
+      "frame": 5,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 2285
+    },
+    {
+      "frame": 6,
+      "outsideMaskChangedPixels": 0,
+      "totalChangedPixels": 0
+    }
+  ],
+  "accepted": false,
+  "pending": [
+    "normal speed review",
+    "hand contact and seam review"
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "derivedFrom": [
+    "../canonical-chin-v1",
+    "../canonical-gaze-v1"
+  ],
+  "change": "Real eyes-only pixel replacement shifts irises toward laptop, not metadata-only rename."
+}

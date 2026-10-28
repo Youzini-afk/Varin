@@ -1,0 +1,96 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "rest/canonical-eye-rub-v1/approach-source.png",
+      "sha256": "aa79c578c78de3697325426a8e3bef9231b6582a2c867c5ed4386a98181795bf",
+      "bytes": 1592945
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/pose-003.png",
+      "sha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "bytes": 316216
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/build.py",
+      "sha256": "8c463d8718578f6c17ae3e62f965656128764e31d532eb0a056dfa0ab78df9e4",
+      "bytes": 2159
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/rub-source.png",
+      "sha256": "ed250df28af3358f32a0977b0e0a506330df3d3cf62b011ed44292472a9c7738",
+      "bytes": 1592398
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/strip-320.jpg",
+      "sha256": "4ef9ba30ee70357d037008cddbf6f48fafcc46a26cc5470abb4438d93a4d23c8",
+      "bytes": 92324
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/pose-002.png",
+      "sha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "bytes": 316865
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/pose-004.png",
+      "sha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce",
+      "bytes": 315125
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/closed-reference.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/sequence.source.json",
+      "sha256": "9e46052b882504b7887788130e07573594656248a12b6024b0c1141d374f75b3",
+      "bytes": 2365
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/closed-low-source.png",
+      "sha256": "cb2e20199ae1a8c957c25528812b7f54d8b800c6950d319d699fb0880a28e567",
+      "bytes": 1623103
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/prompts.json",
+      "sha256": "4e1d8aa18791580abfbeda0fe668dea727a0206643991c87d50f7492ea261369",
+      "bytes": 1607
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/closed-rub-source.png",
+      "sha256": "5f579704571a313e745b968bc005bbd02cc8b74b315cfa85d58af3030f78def9",
+      "bytes": 1605847
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/pose-001.png",
+      "sha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "bytes": 317379
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/closed-near-source.png",
+      "sha256": "cd8e01e17f3de8dc593f6d56db0a0c3ad2c09b1e6379ecb10dd2a933cf056cc8",
+      "bytes": 1618198
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/arm-mask.png",
+      "sha256": "21ad32fd1aba7d7a6aa6e5cb7ce5eba3b6980df07375ea95d98ed9f547a7375f",
+      "bytes": 1766
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/mouth-mask.png",
+      "sha256": "54a81c0ad0f028f92224ea879778c42586edaf8acc932dbea05197eb4c0fddfa",
+      "bytes": 599
+    },
+    {
+      "path": "rest/canonical-eye-rub-v1/closed-middle-source.png",
+      "sha256": "f279c006950d55539969c0e1fb7a6052e512f7b07fc49750fe99b3336c8ee814",
+      "bytes": 1614002
+    }
+  ],
+  "pathBase": "production-root"
+}

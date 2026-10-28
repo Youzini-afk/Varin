@@ -1,0 +1,76 @@
+{
+  "stage": "motion-candidate",
+  "files": [
+    {
+      "path": "observe-diagnose/canonical-settle-v1/half.png",
+      "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+      "bytes": 309117
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/between.png",
+      "sha256": "ed37bf86bd09fd110fa3830494c706e969d00c793baeeba87230a7b081c8bd73",
+      "bytes": 316152
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/settle-reference.png",
+      "sha256": "565ef9682d43fa667f51e759c3ff1568bd94dca3b4ed6fa8a340b8f0fa4cd51a",
+      "bytes": 332886
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/closed.png",
+      "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+      "bytes": 308658
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/settled.png",
+      "sha256": "91ee29e1eb3a4f928ee43a117c5716fbcc57a6d2d55534b573850096e44f8e70",
+      "bytes": 315761
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/body-comparison-320.jpg",
+      "sha256": "2307c74f78aae338c3e6f72d4d69cf26db90360302a581f55110a741a2bc0d98",
+      "bytes": 55803
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/build.py",
+      "sha256": "330f40c05efdeb9ad4c9623f584c9204556d529d758dd5f640218ec69a065069",
+      "bytes": 2478
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/sequence.source.json",
+      "sha256": "69ab2e23a4b8094fad9735f46cf25c72f641c5eac0d78bc476e56dd48af02003",
+      "bytes": 2347
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/upper-settle-mask.png",
+      "sha256": "e1447b8f3360c52d0ae541bdbb92c5e88ba515e1f8be4f5e805d2b75828a5a09",
+      "bytes": 1853
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/prompts.json",
+      "sha256": "80081f759e9b87423a657bd2214ad44dd558555837e859be0d36829af31dc12f",
+      "bytes": 1571
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/settle-source.png",
+      "sha256": "66d8b0f0c78de040115aede077d4eaa0717be6e6fcdaf58a0c9013ddb16e92a6",
+      "bytes": 1594110
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/between-source.png",
+      "sha256": "2468d9a45100278eb69c5e401e92f91caa00a74e91befca60c881086acf52b64",
+      "bytes": 1595022
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/provenance.json",
+      "sha256": "418cd981c5ce194cfc3e778f400d3049192951dad4758514f50724981b11d389",
+      "bytes": 341
+    },
+    {
+      "path": "observe-diagnose/canonical-settle-v1/read-neutral.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    }
+  ],
+  "pathBase": "production-root"
+}

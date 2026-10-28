@@ -1,0 +1,41 @@
+{
+  "sharedAlpha": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+  "normalization": "fixed full viewport only",
+  "frames": [
+    {
+      "sourceDrawing": "wait-relaxed-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-halfblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-closedblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-halfblink-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-settle-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    },
+    {
+      "sourceDrawing": "wait-relaxed-single-v1.png",
+      "region": "full",
+      "protectedRgbaPixelsExact": 168030
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "source": "shared canonical geometry/alpha plus genuine authored action regions",
+  "points": [
+    [
+      90,
+      207
+    ],
+    [
+      210,
+      188
+    ],
+    [
+      319,
+      190
+    ],
+    [
+      370,
+      224
+    ],
+    [
+      389,
+      292
+    ],
+    [
+      375,
+      367
+    ],
+    [
+      320,
+      371
+    ],
+    [
+      286,
+      335
+    ],
+    [
+      90,
+      345
+    ],
+    [
+      90,
+      287
+    ]
+  ],
+  "edgeFeatherPx": 1.2,
+  "notAnimationInterpolation": true,
+  "status": "candidate; inspect mask boundaries and all moving sleeve coverage"
+}

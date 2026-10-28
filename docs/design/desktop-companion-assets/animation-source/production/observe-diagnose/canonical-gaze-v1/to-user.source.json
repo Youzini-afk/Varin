@@ -1,0 +1,61 @@
+{
+  "id": "observe.gaze-to-user-v1",
+  "family": "OBSERVE_DIAGNOSE",
+  "kind": "bridge",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "entryPose": "seated-open-read-screen",
+  "exitPose": "seated-open-neutral",
+  "loop": null,
+  "frames": [
+    {
+      "source": "read-screen.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "bridge",
+      "pose": "seated-open-read-screen"
+    },
+    {
+      "source": "half.png",
+      "durationMs": 40,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "bridge",
+      "pose": "eyelids-transition"
+    },
+    {
+      "source": "closed.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "bridge",
+      "pose": "eyelids-transition"
+    },
+    {
+      "source": "neutral.png",
+      "durationMs": 160,
+      "offset": [
+        0,
+        0
+      ],
+      "contacts": {},
+      "phase": "bridge",
+      "pose": "seated-open-neutral"
+    }
+  ]
+}

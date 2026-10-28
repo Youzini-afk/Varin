@@ -1,0 +1,71 @@
+{
+  "id": "wait-relaxed-v1",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-open-watch-user-relaxed",
+  "exitPose": "seated-open-watch-user-relaxed",
+  "warning": "Long wait artwork candidate, no approval/resume semantics. Hands rest while pendingbadge remains; keep pose0 steady, occasional authored blink1-4, optional one posture readjustment5-6. Do not repeatedly loop all gestures. Normal-speed quality pending.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 1800,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 1500,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 1600,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 1000,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

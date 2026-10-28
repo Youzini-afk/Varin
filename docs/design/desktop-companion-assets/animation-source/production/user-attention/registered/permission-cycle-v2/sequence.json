@@ -1,0 +1,119 @@
+{
+  "id": "permission-cycle-v2",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "keyposes",
+  "loop": false,
+  "entryPose": "seated-open-keyboard-contact",
+  "exitPose": "seated-open-keyboard-contact",
+  "warning": "Complete authored permission entry/hold/return candidate, NOT accepted smooth production animation. Hold in this review is timed only; real W02 holds until actual response, does not grant automatically.",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 300,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-005.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-006.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-007.png",
+      "durationMs": 170,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-008.png",
+      "durationMs": 250,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-009.png",
+      "durationMs": 700,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-010.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-011.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ]
+    },
+    {
+      "source": "pose-012.png",
+      "durationMs": 400,
+      "offset": [
+        0,
+        0
+      ]
+    }
+  ]
+}

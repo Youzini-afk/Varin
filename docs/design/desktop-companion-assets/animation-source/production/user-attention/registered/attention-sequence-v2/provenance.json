@@ -1,0 +1,7 @@
+{
+  "technique": "hand-authored/generated eyelid cels assembled into full raster frames; no geometric transform animation",
+  "parent": "attention-sequence-v1",
+  "purpose": "eliminate unintended wholehead redraw shimmer duringblink",
+  "mask": "blink-redraw-region.png",
+  "status": "visual-review-candidate"
+}

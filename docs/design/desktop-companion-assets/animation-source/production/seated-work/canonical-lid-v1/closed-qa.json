@@ -1,0 +1,10 @@
+{
+  "stage": "closed-endpoint-candidate",
+  "outsideMaskChangedPixels": 0,
+  "unresolved": [
+    "Fixed hinge/base registration",
+    "Resting hand contact after exact prop registration",
+    "Boundary seam and native-size review"
+  ],
+  "technique": "Newly generated concealed torso, sleeve, hands and lid; protected canonical face/body outside explicit edit mask"
+}

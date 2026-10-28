@@ -1,0 +1,33 @@
+{
+  "stage": "motion-candidate",
+  "firstMatchesReadScreenPixels": true,
+  "lastMatchesReadScreenPixels": true,
+  "frames": [
+    {
+      "frame": "frame-001.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    },
+    {
+      "frame": "frame-002.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    },
+    {
+      "frame": "frame-003.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    },
+    {
+      "frame": "frame-004.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    },
+    {
+      "frame": "frame-005.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    },
+    {
+      "frame": "frame-006.png",
+      "outsideHandMaskVsReadScreenChangedPixels": 0
+    }
+  ],
+  "eyeSourceSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+  "handMaskSource": "seated-work/canonical-scroll-v1/hand-context-mask.png"
+}

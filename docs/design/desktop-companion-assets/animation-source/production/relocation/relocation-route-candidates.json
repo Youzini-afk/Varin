@@ -1,0 +1,70 @@
+{
+  "schema": 1,
+  "status": "candidate authored-route specification, not motion acceptance",
+  "bodyStateFields": [
+    "displayedFrame",
+    "lidProgress",
+    "gripStage",
+    "seatContact",
+    "stoolWorldAnchor",
+    "pendingIntent"
+  ],
+  "invariants": [
+    "Actual agent execution unaffected",
+    "Latest intent replaces stale intent, no celebration queue",
+    "Stool worldAnchor never follows pointer during departure",
+    "No fullbody crossfade or synthetic interpolated pose",
+    "Only traverse real drawings registered to current grip/contact"
+  ],
+  "routes": {
+    "normalLift": {
+      "frames": [
+        "close-start",
+        "close70-white",
+        "close-half",
+        "closed",
+        "grip-lift-white",
+        "turn",
+        "hug",
+        "lift-mid",
+        "airborne-clean-v2"
+      ],
+      "missing": "additional registered hip departure inbetweens and world stool plate integration"
+    },
+    "normalLand": {
+      "frames": [
+        "airborne-clean-v2",
+        "preland-no-stool-white",
+        "contact-no-stool-white",
+        "hug",
+        "turn",
+        "grip-lift-white",
+        "closed"
+      ],
+      "missing": "contact skirt correction, clean source alpha, stool seat registration, settle/hand release drawing"
+    },
+    "earlyReleaseBeforeLift": {
+      "rule": "Reverse only the already displayed closure/grip path to matching source pose; do not run lift or force full hug",
+      "resume": "If latest intent needs open laptop, return through authored opening path; otherwise remain closed supported on lap."
+    },
+    "regrabBeforeContact": {
+      "rule": "Use current preland pose as first frame; reverse prepared-leg movement to airborne. Fade target stool at its fixed world anchor."
+    },
+    "regrabAfterContactWhileHugging": {
+      "rule": "Seated-hug/contact -> departing hips -> airborne; retain closed laptop and current two-hand grip, do not return laptop to lap."
+    },
+    "regrabDuringTransfer": {
+      "rule": "Traverse current transfer pose toward hug, then departure. Never teleport laptop from diagonal to chest."
+    },
+    "directionReversal": {
+      "rule": "Require canonical-direction response drawings; old six-frame noncanonical study is not eligible",
+      "status": "remaining canonical artwork"
+    }
+  },
+  "runtimePolicy": {
+    "pointerFeedback": "Position responds immediately while physical close/grip preparation proceeds; root motion does not alter task state",
+    "stoolArrival": "Place new stool at validated destination world anchor before contact; root-relative body animation is separate",
+    "invalidDrop": "Window layer selects valid destination, then same landing route; animation does not define screen/work-area rules",
+    "hidden": "Do not replay accumulated motion; restore current stable supported pose from latest semantic state"
+  }
+}
