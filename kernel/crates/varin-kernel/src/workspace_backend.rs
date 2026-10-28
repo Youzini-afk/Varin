@@ -17,7 +17,7 @@ pub(crate) fn help_url() -> &'static str {
     if cfg!(windows) {
         "https://winfsp.dev/rel/"
     } else if cfg!(target_os = "macos") {
-        "https://macfuse.github.io/"
+        "https://github.com/Youzini-afk/Varin/blob/main/packages/workspace-driver/macos/README.md"
     } else {
         "https://github.com/libfuse/libfuse"
     }
@@ -61,6 +61,6 @@ pub(crate) fn inspect() -> Value {
         "helpUrl":help_url()});
     #[cfg(all(target_os="macos",feature="workspace-mount"))]
     { let facts=crate::workspace_mount::macos::facts();if facts["ready"]==true{value["backend"]=json!("fskit");}
-      value["builtInExtension"]=facts;value["canOpenSettings"]=json!(crate::workspace_mount::macos::helper().is_ok_and(|p|p.is_file())); }
+      value["canOpenSettings"]=json!(facts["reason"]!="os_unsupported" && crate::workspace_mount::macos::helper().is_ok_and(|p|p.is_file()));value["builtInExtension"]=facts; }
     value
 }

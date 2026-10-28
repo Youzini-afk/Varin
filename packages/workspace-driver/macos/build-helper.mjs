@@ -31,6 +31,9 @@ export function buildMacWorkspaceHelper({ destination, architecture = process.ar
       '-framework', 'FSKit', '-o', module], { stdio: 'inherit' });
     run('xcrun', [...common, '-target', `${arch}-apple-macosx13.0`, path.join(source, 'Control.swift'),
       '-framework', 'AppKit', '-Xlinker', '-weak_framework', '-Xlinker', 'FSKit', '-o', executable], { stdio: 'inherit' });
+    const linkage = run('otool', ['-l', executable], { encoding: 'utf8' });
+    const framework = linkage.split(/Load command \d+/).find(block => block.includes('FSKit.framework/'));
+    if (!framework?.includes('LC_LOAD_WEAK_DYLIB')) throw new Error('The control executable must weak-link FSKit to preserve macOS 13 support');
     const base = id => entry('CFBundleIdentifier', id) + entry('CFBundleExecutable', 'VarinWorkspace') + entry('CFBundleName', 'Varin Workspace')
       + entry('CFBundleVersion', version) + entry('CFBundleShortVersionString', version);
     fs.writeFileSync(path.join(candidate, 'Contents', 'Info.plist'), plist(base('com.varin.workspace') + entry('CFBundlePackageType', 'APPL')

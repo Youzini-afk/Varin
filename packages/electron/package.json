@@ -112,7 +112,8 @@
         "filter": [
           "manifest.json",
           "varin-kernel",
-          "varin-kernel.exe"
+          "varin-kernel.exe",
+          "VarinWorkspace.app/**/*"
         ]
       },
       {

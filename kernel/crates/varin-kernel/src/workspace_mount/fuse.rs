@@ -936,7 +936,9 @@ impl Mount {
             );
         }
         let native = spawn_mount(backend, target, &options).map_err(|error| {
-            KernelError::Storage(format!("Workspace FUSE mount failed: {error}"))
+            KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_mount_failed",format!("Workspace FUSE mount failed: {error}"))
+                .with_details(serde_json::json!({"stage":"workspace_mount","backend":if cfg!(target_os="macos"){"macfuse"}else{"fuse"},
+                    "reason":match error.kind(){std::io::ErrorKind::PermissionDenied=>"permission_denied",std::io::ErrorKind::NotFound=>"dependency_missing",_=>"mount_refused"}})))
         })?;
         Ok(Self {
             native: Some(native),

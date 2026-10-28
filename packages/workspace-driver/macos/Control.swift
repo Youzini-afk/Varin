@@ -9,8 +9,9 @@ import FSKit
     @available(macOS 26.0, *) static func inspect() {
         FSClient.shared.fetchInstalledExtensions { identities,error in
             if let error=error {emit(["ready":false,"reason":"extension_inspection_failed","detail":error.localizedDescription]);exit(0)}
-            let own=identities?.first{$0.bundleIdentifier==moduleID}
             let expected=Bundle.main.bundleURL.appendingPathComponent("Contents/PlugIns/VarinWorkspace.appex").resolvingSymlinksInPath()
+            let own=identities?.first{$0.bundleIdentifier==moduleID && $0.url.resolvingSymlinksInPath()==expected}
+                ?? identities?.first{$0.bundleIdentifier==moduleID}
             let selected=own?.url.resolvingSymlinksInPath()
             let ready=own?.isEnabled==true && selected==expected
             emit(["ready":ready,"reason":ready ? "ready" : own == nil ? "extension_not_registered" : own?.isEnabled != true ? "extension_disabled" : "extension_generation_changed",

@@ -224,9 +224,13 @@ jobs:
           XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
           if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
           node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace" "$(node -p process.arch)"
+          node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace-intel" x64
       - name: Verify workspace tree publication on macOS
         working-directory: kernel
         run: cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked
+      - name: Verify native executor bytes, cache boundaries and admitted-inode import
+        working-directory: kernel
+        run: cargo test -p varin-kernel --lib workspace_mount::review --locked
       # Compile callback contracts without installing a filesystem component or
       # changing the runner's system-extension policy. Actual mount tests remain
       # explicit qualification on a machine with an already-enabled component.

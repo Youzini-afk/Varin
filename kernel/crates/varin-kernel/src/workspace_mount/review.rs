@@ -67,6 +67,30 @@ struct ExecutorFixture {
     directory:std::path::PathBuf,session:Arc<Session>,port:StoragePort,
     stop:std::sync::mpsc::Sender<Option<Command>>,worker:std::thread::JoinHandle<Storage>,
 }
+
+#[test]
+fn native_import_uses_the_admitted_inode_and_keeps_its_private_version() {
+    let f=ExecutorFixture::new();
+    let physical=f.directory.join("physical");std::fs::create_dir(&physical).unwrap();
+    let source=physical.join("source");let old=physical.join("original");
+    let bytes=vec![0xa7;384*1024];std::fs::write(&source,&bytes).unwrap();
+    #[cfg(unix)] {use std::os::unix::fs::PermissionsExt;std::fs::set_permissions(&source,std::fs::Permissions::from_mode(0o444)).unwrap();}
+    let observation=crate::native_metadata::observe(&source).unwrap();
+    let admitted=std::fs::File::open(&source).unwrap();
+    std::fs::rename(&source,&old).unwrap();std::fs::write(&source,b"replacement at original name").unwrap();
+    let mut captured=0;
+    let node=f.session.import_open_file("imported.bin",admitted,observation.attributes.clone(),&AtomicBool::new(false),|count|{captured+=count;Ok(())}).unwrap();
+    assert_eq!(captured,bytes.len() as u64);
+    let mut actual=vec![0;bytes.len()];f.session.read(&node,0,&mut actual).unwrap();assert_eq!(actual,bytes);
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(node.attributes().unwrap().mode,0o444);
+        std::fs::set_permissions(&old,std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    std::fs::write(&old,b"changed original inode").unwrap();
+    f.session.read(&node,0,&mut actual).unwrap();assert_eq!(actual,bytes);
+    drop(node);f.finish();
+}
 impl ExecutorFixture {
     fn new()->Self{
         let directory=std::env::temp_dir().join(format!("varin-native-executor-{}",Uuid::new_v4()));

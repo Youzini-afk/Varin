@@ -17,10 +17,16 @@ pub(super) struct CacheFence {
 impl CacheFence {
     pub(super) fn synchronize(&self, session: &Session, origin: u32) -> Result<(), KernelError> {
         let synced = session.flush_all();
-        let mut pending = self.pending.lock().map_err(|_| unsupported("Native cache boundary lock failed"))?;
+        let mut pending = self
+            .pending
+            .lock()
+            .map_err(|_| unsupported("Native cache boundary lock failed"))?;
         let result = synced.and_then(|_| {
-            pending.as_ref().filter(|request| request.origin == origin && request.result.is_none())
-                .map(|request| session.checkpoint_native(&request.selected, &[], &[])).transpose()
+            pending
+                .as_ref()
+                .filter(|request| request.origin == origin && request.result.is_none())
+                .map(|request| session.checkpoint_native(&request.selected, &[], &[]))
+                .transpose()
         });
         match result {
             Ok(snapshot) => {
@@ -31,7 +37,10 @@ impl CacheFence {
             }
             Err(error) => {
                 let failure = varin_runtime::execution::ExecutionError::from(error);
-                if let Some(request) = pending.as_mut().filter(|request| request.origin == origin && request.result.is_none()) {
+                if let Some(request) = pending
+                    .as_mut()
+                    .filter(|request| request.origin == origin && request.result.is_none())
+                {
                     request.result = Some(Err(KernelError::Execution(failure.clone())));
                 }
                 Err(KernelError::Execution(failure))
@@ -39,10 +48,22 @@ impl CacheFence {
         }
     }
     pub(super) fn request(&self, selected: &str, origin: u32) -> Result<Request<'_>, KernelError> {
-        let serial = self.serial.lock().map_err(|_| unsupported("Native cache boundary lock failed"))?;
-        *self.pending.lock().map_err(|_| unsupported("Native cache boundary lock failed"))? =
-            Some(Pending { selected: selected.into(), origin, result: None });
-        Ok(Request { fence: self, _serial: serial })
+        let serial = self
+            .serial
+            .lock()
+            .map_err(|_| unsupported("Native cache boundary lock failed"))?;
+        *self
+            .pending
+            .lock()
+            .map_err(|_| unsupported("Native cache boundary lock failed"))? = Some(Pending {
+            selected: selected.into(),
+            origin,
+            result: None,
+        });
+        Ok(Request {
+            fence: self,
+            _serial: serial,
+        })
     }
 }
 pub(super) struct Request<'a> {
@@ -50,23 +71,49 @@ pub(super) struct Request<'a> {
     _serial: MutexGuard<'a, ()>,
 }
 impl Request<'_> {
-    pub(super) fn finish(self, synchronized: std::io::Result<()>) -> Result<Checkpoint, KernelError> {
-        let snapshot = self.fence.pending.lock().map_err(|_| unsupported("Native cache boundary lock failed"))?
-            .take().and_then(|request| request.result);
-        if let Some(Err(error)) = snapshot { return Err(error); }
-        synchronized.map_err(|error| KernelError::Execution(varin_runtime::execution::ExecutionError::new(
-            "workspace_cache_sync_failed", format!("Native cache synchronization failed: {error}"))
-            .with_details(serde_json::json!({"stage":"workspace_cache_sync","parentAvailable":true}))))?;
+    pub(super) fn finish(
+        self,
+        synchronized: std::io::Result<()>,
+    ) -> Result<Checkpoint, KernelError> {
+        let snapshot = self
+            .fence
+            .pending
+            .lock()
+            .map_err(|_| unsupported("Native cache boundary lock failed"))?
+            .take()
+            .and_then(|request| request.result);
+        if let Some(Err(error)) = snapshot {
+            return Err(error);
+        }
+        synchronized.map_err(|error| {
+            KernelError::Execution(
+                varin_runtime::execution::ExecutionError::new(
+                    "workspace_cache_sync_failed",
+                    format!("Native cache synchronization failed: {error}"),
+                )
+                .with_details(
+                    serde_json::json!({"stage":"workspace_cache_sync","parentAvailable":true}),
+                ),
+            )
+        })?;
         match snapshot {
             Some(Ok(snapshot)) => Ok(snapshot),
-            _ => Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new(
-                "workspace_cache_fence_unavailable", "The backend did not acknowledge a post-writeback filesystem boundary")
-                .with_details(serde_json::json!({"stage":"workspace_cache_sync","parentAvailable":true})))),
+            _ => Err(KernelError::Execution(
+                varin_runtime::execution::ExecutionError::new(
+                    "workspace_cache_fence_unavailable",
+                    "The backend did not acknowledge a post-writeback filesystem boundary",
+                )
+                .with_details(
+                    serde_json::json!({"stage":"workspace_cache_sync","parentAvailable":true}),
+                ),
+            )),
         }
     }
 }
 impl Drop for Request<'_> {
     fn drop(&mut self) {
-        if let Ok(mut pending) = self.fence.pending.lock() { pending.take(); }
+        if let Ok(mut pending) = self.fence.pending.lock() {
+            pending.take();
+        }
     }
 }

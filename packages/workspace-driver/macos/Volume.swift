@@ -5,6 +5,7 @@ import Darwin
 final class WorkspaceItem: FSItem {
     let id: UInt64
     var cookies: [UInt64: String] = [:]
+    var names: [String: UInt64] = [:]
     var nextCookie: UInt64 = 1
     var verifier: String?
     let enumeration = NSLock()
@@ -117,22 +118,27 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
         directory.enumeration.lock(); defer {directory.enumeration.unlock()}
         do {
             var after:String? = cookie.rawValue == 0 ? nil : directory.cookies[cookie.rawValue]
+            var observedRevision:String?
             if cookie.rawValue != 0 && after == nil {throw POSIXError(.ESTALE)}
             while true {
                 var fields:[String:Any] = ["id":directory.id]; if let after = after {fields["after"]=after}
                 let page = try record("directory",fields)
                 guard let revision = page["revision"] as? String, let entries = page["entries"] as? [[String:Any]] else {throw WireError.malformed}
+                if let observed = observedRevision, observed != revision {throw POSIXError(.ESTALE)}
+                observedRevision=revision
                 if cookie.rawValue != 0 && directory.verifier != revision {throw POSIXError(.ESTALE)}
-                if cookie.rawValue == 0 && directory.verifier != revision {directory.cookies.removeAll();directory.verifier=revision}
+                if cookie.rawValue == 0 && directory.verifier != revision {directory.cookies.removeAll();directory.names.removeAll();directory.verifier=revision}
                 for entry in entries {
                     guard let name = entry["name"] as? String, let record = entry["attributes"] as? [String:Any] else {throw WireError.malformed}
                     guard let child = record["id"] as? UInt64 else {throw WireError.malformed}
-                    let next = directory.nextCookie
+                    let next = directory.names[name] ?? directory.nextCookie
                     guard next < UInt64.max else {throw POSIXError(.EOVERFLOW)}
                     if !packer.packEntry(name:FSFileName(string:name),itemType:type(record),itemID:FSItem.Identifier(rawValue:child) ?? .invalid,nextCookie:FSDirectoryCookie(next),attributes:attributes == nil ? nil : try self.attributes(record)) {
                         replyHandler(FSDirectoryVerifier(1),nil);return
                     }
-                    directory.cookies[next]=name;directory.nextCookie+=1;after=name
+                    directory.cookies[next]=name
+                    if directory.names[name] == nil {directory.names[name]=next;directory.nextCookie+=1}
+                    after=name
                 }
                 if page["next"] is NSNull || entries.isEmpty {break}
             }
@@ -144,7 +150,8 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
         do {guard offset>=0 && length>=0 else {throw POSIXError(.EINVAL)}
             try buffer.withUnsafeMutableBytes { pointer in
                 guard length<=pointer.count else {throw POSIXError(.EINVAL)}
-                while count<length {let size=min(length-count,65536);let data=try connection.call("read",["id":id(item),"offset":offset+Int64(count),"length":size]).1
+                while count<length {let size=min(length-count,65536);let position=offset.addingReportingOverflow(Int64(count));guard !position.overflow else {throw POSIXError(.EFBIG)}
+                    let data=try connection.call("read",["id":id(item),"offset":position.partialValue,"length":size]).1
                     data.withUnsafeBytes {if let p=$0.baseAddress {pointer.baseAddress!.advanced(by:count).copyMemory(from:p,byteCount:data.count)}}
                     count+=data.count;if data.count<size {break}
                 }
@@ -154,7 +161,8 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
     func write(contents:Data,to item:FSItem,at offset:off_t,replyHandler:@escaping(Int,Error?)->Void) {
         var count=0
         do {guard offset>=0 else {throw POSIXError(.EINVAL)}
-            while count<contents.count {let end=min(contents.count,count+65536);let reply=try connection.call("write",["id":id(item),"offset":offset+Int64(count)],body:contents.subdata(in:count..<end)).0
+            while count<contents.count {let end=count+min(contents.count-count,65536);let position=offset.addingReportingOverflow(Int64(count));guard !position.overflow else {throw POSIXError(.EFBIG)}
+                let reply=try connection.call("write",["id":id(item),"offset":position.partialValue],body:contents.subdata(in:count..<end)).0
                 guard let wrote=reply as? Int,wrote>0,wrote<=end-count else {throw POSIXError(.EIO)};count+=wrote
             };replyHandler(count,nil)
         }catch{replyHandler(count,error)}

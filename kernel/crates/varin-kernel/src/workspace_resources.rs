@@ -50,7 +50,7 @@ fn mount_failure(failure: KernelError, entry: &Entry, grant: &Grant) -> KernelEr
     let mut failure = varin_runtime::execution::ExecutionError::from(failure);
     let details = failure.details.get_or_insert_with(|| json!({}));
     details["stage"] = json!("workspace_mount");
-    details["backend"] = json!(backend());
+    if details.get("backend").is_none() {details["backend"] = json!(backend());}
     details["hostId"] = json!(grant.host_id);
     details["workspaceId"] = json!(entry.binding.workspace_id);
     details["branchId"] = json!(entry.binding.branch_id);

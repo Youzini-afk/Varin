@@ -284,7 +284,7 @@ pub(super) fn clone_open_file(source_file: &File, destination: &Path) -> Result<
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 18 | 22 | 25 | 38 | 95));
+    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 16 | 18 | 22 | 25 | 26 | 38 | 95));
     drop(target_file);
     let _ = fs::remove_file(destination);
     if unsupported {
@@ -322,7 +322,7 @@ pub(super) fn clone_open_file(source: &File, destination: &Path) -> Result<bool,
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 18 | 22 | 45 | 78));
+    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 16 | 18 | 22 | 26 | 45 | 78));
     if unsupported {
         return Ok(false);
     }
