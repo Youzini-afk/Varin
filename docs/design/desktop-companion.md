@@ -153,7 +153,11 @@ CompanionAsset {
 - 角色窗是独立presentation；拥有自己的观察订阅，不依赖主窗必须常开。preload/desktop typed catalog/main sender校验和本地凭据边界沿用。关闭桌宠不取消工作。
 - 原生窗口必须另外验证穿透、焦点、多屏/DPI、退出/托盘恢复。透明像素不自动原生穿透；Wayland定位/置顶有限制。具体支持范围以目标平台验收为准。[Electron交互](https://www.electronjs.org/docs/latest/tutorial/custom-window-interactions)、[窗口API](https://www.electronjs.org/docs/latest/api/base-window)、[screen](https://www.electronjs.org/docs/latest/api/screen)。
 
-## 10. 设计交付顺序（不删减目录）
+## 10. 完整动画制作（不删减目录）
+
+后续生产以[完整动画与制作方案](desktop-companion-animation-production.md)为总蓝图：先完整设计32类表现、姿态族、连接网络、资源与工具链，再按依赖分批制作；不是做完一段样片才临时设计余下动作。已有连续试样仍是技术与美术研究，不能作为整体动作质量已通过的依据。
+
+### 既有参考与覆盖关系
 
 1. 已保存原三视图/角色文档、已选Q版母版，以及8张默认色故事板。第一版工作闭环是表演基准；未选两稿仅供回溯。
 2. 按32类目录检查覆盖与识别度，继续整理单状态关键帧。8板包含分支/重复/替代帧，不等于32类生产差分均已完成；04实际排列及07/08替代规则见资产索引。

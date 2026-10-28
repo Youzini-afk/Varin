@@ -1,0 +1,140 @@
+#!/usr/bin/env python3
+"""Pack authored RGBA drawings without generating, tweening or retiming motion."""
+import argparse
+import hashlib
+import json
+import math
+from pathlib import Path
+
+from PIL import Image
+
+
+def positive_number(value, label):
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+        raise ValueError(f'{label} must be a finite positive number')
+    return value
+
+
+def pair(value, label):
+    if not isinstance(value, list) or len(value) != 2 or any(isinstance(v, bool) or not isinstance(v, int) for v in value):
+        raise ValueError(f'{label} must contain two integers')
+    return value
+
+
+def pack(manifest_path, output, max_size=2048, padding=2):
+    manifest_path = manifest_path.resolve()
+    spec = json.loads(manifest_path.read_text())
+    width, height = pair(spec['canvas'], 'canvas')
+    if min(width, height) <= 0 or max_size <= padding * 2 or padding < 0:
+        raise ValueError('canvas, atlas size and padding must be valid positive dimensions')
+    frames = spec.get('frames')
+    if not isinstance(frames, list) or not frames:
+        raise ValueError('frames must be a non-empty authored sequence')
+    if not isinstance(spec.get('id'), str) or not spec['id']:
+        raise ValueError('id must identify the authored action')
+    images = []
+    output_frames = []
+    total = 0
+    root = manifest_path.parent
+    for index, frame in enumerate(frames):
+        duration = positive_number(frame['durationMs'], f'frames[{index}].durationMs')
+        source = (root / frame['source']).resolve()
+        if not source.is_relative_to(root):
+            raise ValueError(f'frames[{index}] source escapes the action directory')
+        offset = pair(frame.get('offset', [0, 0]), f'frames[{index}].offset')
+        with Image.open(source) as opened:
+            image = opened.convert('RGBA')
+        if min(offset) < 0 or offset[0] + image.width > width or offset[1] + image.height > height:
+            raise ValueError(f'frames[{index}] source exceeds the registered canvas; register explicitly, do not silently scale')
+        bounds = image.getchannel('A').getbbox()
+        if bounds is None:
+            raise ValueError(f'frames[{index}] is entirely transparent')
+        trimmed = image.crop(bounds)
+        if trimmed.width + 2 * padding > max_size or trimmed.height + 2 * padding > max_size:
+            raise ValueError(f'frames[{index}] cannot fit atlas; choose a larger --max-size, not smaller art')
+        contacts = frame.get('contacts', {})
+        if not isinstance(contacts, dict):
+            raise ValueError(f'frames[{index}].contacts must be an object')
+        for name, point in contacts.items():
+            x, y = pair(point, f'frames[{index}].contacts.{name}')
+            if not 0 <= x <= width or not 0 <= y <= height:
+                raise ValueError(f'frames[{index}] contact {name} exceeds canvas')
+        images.append(trimmed)
+        record = {
+            'source': frame['source'], 'sha256': hashlib.sha256(source.read_bytes()).hexdigest(),
+            'startMs': total, 'durationMs': duration,
+            'offset': [offset[0] + bounds[0], offset[1] + bounds[1]],
+            'contacts': contacts,
+        }
+        for field in ('phase', 'pose', 'exitTo'):
+            if field in frame:
+                record[field] = frame[field]
+        output_frames.append(record)
+        total += duration
+    loop = spec.get('loop')
+    if loop is False:
+        loop = None
+    if loop is not None:
+        start, end = pair(loop, 'loop')
+        if not 0 <= start < end <= len(frames):
+            raise ValueError('loop is a [start, endExclusive] frame range')
+    # Shelf packing keeps author order. No source rescaling or in-between generation.
+    pages = []
+    page = Image.new('RGBA', (max_size, max_size))
+    x = y = row_height = used_width = used_height = 0
+    for image, record in zip(images, output_frames):
+        cell_width, cell_height = image.width + 2 * padding, image.height + 2 * padding
+        if x + cell_width > max_size:
+            x, y, row_height = 0, y + row_height, 0
+        if y + cell_height > max_size:
+            pages.append(page.crop((0, 0, used_width, used_height)))
+            page = Image.new('RGBA', (max_size, max_size))
+            x = y = row_height = used_width = used_height = 0
+        px, py = x + padding, y + padding
+        page.paste(image, (px, py))
+        # Extrude edge texels into gutters to prevent linear-sampling atlas seams.
+        if padding:
+            page.paste(image.crop((0, 0, 1, image.height)).resize((padding, image.height)), (x, py))
+            page.paste(image.crop((image.width - 1, 0, image.width, image.height)).resize((padding, image.height)), (px + image.width, py))
+            strip = page.crop((x, py, x + cell_width, py + 1)).resize((cell_width, padding))
+            page.paste(strip, (x, y))
+            strip = page.crop((x, py + image.height - 1, x + cell_width, py + image.height)).resize((cell_width, padding))
+            page.paste(strip, (x, py + image.height))
+        record.update(page=len(pages), rect=[px, py, image.width, image.height])
+        x += cell_width
+        row_height = max(row_height, cell_height)
+        used_width, used_height = max(used_width, x), max(used_height, y + cell_height)
+    pages.append(page.crop((0, 0, used_width, used_height)))
+    output.mkdir(parents=True, exist_ok=True)
+    page_names = []
+    for index, page in enumerate(pages):
+        name = f'atlas-{index:03d}.png'
+        page.save(output / name)
+        page_names.append({'file': name, 'size': list(page.size)})
+    package = {
+        'version': 1, 'id': spec['id'], 'family': spec.get('family'),
+        'stage': spec.get('stage'), 'warning': spec.get('warning'),
+        'canvas': [width, height], 'durationMs': total, 'loop': loop,
+        'entryPose': spec.get('entryPose'), 'exitPose': spec.get('exitPose'),
+        'pages': page_names, 'frames': output_frames,
+    }
+    (output / 'sequence.json').write_text(json.dumps(package, ensure_ascii=False, indent=2) + '\n')
+    return package
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('manifest', type=Path)
+    parser.add_argument('output', type=Path)
+    parser.add_argument('--max-size', type=int, default=2048, help='Atlas page dimension; increase for larger source art')
+    parser.add_argument('--padding', type=int, default=2)
+    args = parser.parse_args()
+    try:
+        result = pack(args.manifest, args.output, args.max_size, args.padding)
+    except (ValueError, KeyError, OSError) as error:
+        parser.exit(1, f'Cannot package sequence: {error}\n')
+    print(f"{result['id']}: {len(result['frames'])} authored drawings, {result['durationMs']} ms, {len(result['pages'])} atlas pages")
+
+
+if __name__ == '__main__':
+    main()
