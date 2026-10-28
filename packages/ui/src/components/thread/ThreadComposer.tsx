@@ -28,16 +28,15 @@ import { WorkbenchContributionSlot } from '@/lib/extensions/workbench-registry';
 import { ThreadPermissionControl } from './ThreadPermissionControl';
 
 export function ThreadComposer({ editorRef, value, onChange, models, providerId, modelId, thinkingLevel, onModelChange,
-  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, delivery, onDeliveryChange, suggestion, suggestionError, onSuggestionDismiss,
-  allowNextRun, onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls }: {
+  modelDisabled, attachmentDisabled, imageDisabled, sendDisabled, pending, active, retrying, suggestion, suggestionError, onSuggestionDismiss,
+  onFiles, onAttachImages, onAttachPdfs, onStop, onGoal, goalArmed, children, attachmentNames, skills, hasInput, onWorkspace, workspaceLabel, workspacePath, permissionWorkspacePath, identityKey, messageHistory: sentMessageHistory = [], placement = 'bottom', queue, onCompact, onOpenHistory, agentControls, backendControls }: {
   editorRef: React.Ref<ComposerEditorHandle>; value: string; onChange(value: string): void;
   suggestion?: string; suggestionError?: string; onSuggestionDismiss?(): void;
   identityKey?: string; messageHistory?: readonly string[]; placement?: 'center' | 'bottom'; queue?: React.ReactNode; onCompact?(): void; onOpenHistory?(): void;
   models: ThreadModelInfo[]; providerId: string; modelId: string; thinkingLevel: ThreadThinkingLevel;
   onModelChange(provider: string, model: string, thinking: ThreadThinkingLevel): void;
   modelDisabled: boolean; attachmentDisabled: boolean; imageDisabled: boolean; sendDisabled: boolean;
-  pending: boolean; active: boolean; retrying: boolean; allowNextRun: boolean;
-  delivery: 'boundary' | 'interrupt' | 'next_run'; onDeliveryChange(value: 'boundary' | 'interrupt' | 'next_run'): void;
+  pending: boolean; active: boolean; retrying: boolean;
   onFiles(files: File[]): void; onAttachImages(): void; onAttachPdfs(): void; onStop?(): void; onGoal(): void;
   hasInput: boolean; onWorkspace(): void; workspaceLabel: string;
   goalArmed?: boolean;
@@ -84,7 +83,6 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
   }, [identityKey, resetHistory]);
   const sending = pending;
   const loading = false;
-  const busy = active;
   const aborting = false;
   const [insertedSuggestion, setInsertedSuggestion] = React.useState<{ text: string; identity?: string }>();
   React.useEffect(() => {
@@ -459,33 +457,6 @@ export function ThreadComposer({ editorRef, value, onChange, models, providerId,
             </div>
 
             {!isMobile ? <div className="conversation-composer-models">{modelControls}</div> : null}
-            {busy ? <div className="conversation-composer-send-mode">
-              <DropdownMenu modal={false}>
-                <DropdownMenuTrigger asChild>
-                  <button type="button" disabled={sending} title={t('settings.varin.visual.field.followUpBehaviorDescription')}
-                    className="flex min-w-0 items-center gap-1 rounded-md px-1.5 py-1 typography-micro text-muted-foreground hover:bg-interactive-hover hover:text-foreground disabled:opacity-40"
-                    aria-label={t('settings.chat.busySend')}>
-                    <SwapIcon swapKey={delivery === 'next_run' ? 'time' : 'arrow-up'} className="shrink-0">
-                      <Icon name={delivery === 'next_run' ? 'time' : 'arrow-up'} className="size-3" />
-                    </SwapIcon>
-                    <SwapText text={t(delivery === 'next_run' ? 'thread.composer.afterRun' : delivery === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')} hold={0} resize />
-
-                    <Icon name="arrow-down-s" className="size-3 shrink-0" />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="end" className="w-64" portalToBody>
-                  {(['boundary', 'interrupt', ...(allowNextRun ? ['next_run'] : [])] as const).map(mode => <DropdownMenuItem key={mode}
-                    onSelect={() => onDeliveryChange(mode as typeof delivery)} className="gap-2">
-                    <Icon name={mode === 'next_run' ? 'time' : 'arrow-up'} className="size-3.5 shrink-0" />
-                    <span className="flex-1">{t(mode === 'next_run' ? 'thread.composer.afterRun' : mode === 'interrupt' ? 'thread.composer.interrupt' : 'thread.composer.boundary')}</span>
-                    {mode === delivery ? <Icon name="check" className="size-3.5" /> : null}
-                  </DropdownMenuItem>)}
-                  <p className="border-t border-border/50 px-2 py-2 typography-micro text-muted-foreground">
-                    {t('settings.varin.visual.field.followUpBehaviorDescription')}
-                  </p>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div> : null}
             <div className="conversation-composer-actions">
               <WorkbenchContributionSlot kind="composer-action" slot="chat.composer.actions.trailing" props={{ identityKey, workspacePath, text: value, onChange, onSend: submit }} />
               <ComposerDictation

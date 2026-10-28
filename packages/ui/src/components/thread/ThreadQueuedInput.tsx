@@ -13,10 +13,11 @@ import { isIMECompositionEvent } from '@/lib/ime';
 import { Icon } from '@/components/icon/Icon';
 
 /** The edit draft retains its original revision even if the Catalog changes or delivers it. */
-export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCancel }: {
+export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCancel, onSendNow }: {
   api: Pick<ThreadsAPI, 'mediaRead'>; identity: ThreadIdentity; inputs: QueuedInput[]; pending: boolean;
   onSave(input: QueuedInput, text: string, images?: ImageAttachment[]): Promise<boolean>;
   onCancel(input: QueuedInput): Promise<void>;
+  onSendNow?(input: QueuedInput): Promise<void>;
 }) {
   const { t } = useI18n();
   const [editing, setEditing] = React.useState<{ input: QueuedInput; text: string } | null>(null);
@@ -92,8 +93,11 @@ export function ThreadInputQueue({ api, identity, inputs, pending, onSave, onCan
   return <section aria-label={t('chat.queuedMessage.title')} className="max-h-[40vh] space-y-2 overflow-y-auto overscroll-contain">
     {queued.map(input => <div key={input.id} data-queued-input={input.id} className="mx-auto max-w-3xl rounded-xl border border-border/60 px-3 py-2 text-sm">
       <div className="flex items-center gap-2 text-muted-foreground">
-        <Icon name="time" className="size-3.5 shrink-0" />
+        <Icon name={input.mode === 'next_run' ? 'time' : 'arrow-up'} className="size-3.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate" title={inputText(input.content)}>{inputText(input.content) || t('chat.queuedMessage.empty')}</span>
+        {input.mode === 'next_run' && onSendNow && <button type="button" disabled={pending || Boolean(editing)}
+          title={t('chat.queuedMessage.sendHint')} className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 typography-micro text-primary transition-colors hover:bg-primary/10 disabled:opacity-40"
+          onClick={() => void onSendNow(input)}><Icon name="arrow-up" className="size-3.5" />{t('chat.queuedMessage.sendNow')}</button>}
         <button type="button" disabled={pending || Boolean(editing)} aria-label={t('chat.queuedMessage.edit')} aria-expanded={editing?.input.id === input.id} className="rounded p-1 hover:bg-interactive-hover" onClick={() => begin(input)}><Icon name="edit" className="size-3.5" /></button>
         <button type="button" disabled={pending || Boolean(editing)} aria-label={t('chat.queuedMessage.removeAria')} className="rounded p-1 hover:bg-interactive-hover" onClick={() => void onCancel(input)}><Icon name="close" className="size-3.5" /></button>
       </div>

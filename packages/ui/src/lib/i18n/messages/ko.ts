@@ -2780,7 +2780,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.empty': '(비어 있음)',
   'chat.queuedMessage.title': 'Queued messages',
   "chat.queuedMessage.sendNow": "지금 보내기",
-  "chat.queuedMessage.sendHint": "다음 입력 시점에 현재 작업에 추가합니다. 실행 중인 도구는 계속됩니다.",
+  "chat.queuedMessage.sendHint": "현재 작업에 즉시 추가합니다. 모델 생성은 중단되지만 실행 중인 도구는 계속됩니다.",
   "chat.queuedMessage.clearAll": "모두 지우기",
   "chat.queuedMessage.waiting": "현재 작업 완료 대기",
   "chat.queuedMessage.steering": "현재 작업에 추가 대기",

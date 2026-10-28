@@ -132,6 +132,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
     async resumeContext(identity, runId) { await post('context/resume', { ...identity, runId }); },
     editInput: (inputId, expectedRevision, text, images) => post('input/edit', { inputId, expectedRevision, text, ...(images === undefined ? {} : { images }) }),
     cancelInput: (inputId, expectedRevision) => post('input/cancel', { inputId, expectedRevision }),
+    sendInputNow: (inputId, expectedRevision, expectedRunId) => post('input/send-now', { inputId, expectedRevision, expectedRunId }),
     mediaRead: (input, signal) => post('media/read', input, signal),
     historyPage: (identity, cursor, signal) => post('history/page', { ...identity, ...cursor }, signal),
     historyRuns: (identity, cursor, signal) => post('history/runs', { ...identity, ...cursor }, signal),

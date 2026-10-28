@@ -182,8 +182,6 @@
   align-items: end;
   gap: 6px;
 }
-.conversation-composer-send-mode { grid-column: 1 / -1; grid-row: 1; justify-self: end; min-width: 0; max-width: 100%; }
-.conversation-composer-send-mode button { max-width: 100%; }
 
 /* Turn navigation sits beside the conversation; it has no streaming-content subscriptions. */
 .conversation-timeline-surface { container: conversation-timeline / inline-size; }
@@ -210,9 +208,6 @@
 @media (prefers-reduced-motion: reduce) {
   .conversation-turn-marker-stroke, .conversation-turn-preview { transition: none; }
 }
-.conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-options { grid-column: 1; grid-row: 2; }
-.conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-models { grid-column: 2; grid-row: 2; }
-.conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-actions { grid-column: 3; grid-row: 2; }
 .conversation-composer-options,
 .conversation-composer-models,
 .conversation-composer-actions { display: flex; min-width: 0; align-items: center; gap: 2px; }
@@ -235,9 +230,6 @@
   .conversation-composer-models { grid-column: 1 / -1; grid-row: 1; justify-content: flex-start; }
   .conversation-composer-options { grid-column: 1; grid-row: 2; }
   .conversation-composer-actions { grid-column: 2; grid-row: 2; }
-  .conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-models { grid-column: 1 / -1; grid-row: 2; }
-  .conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-options { grid-column: 1; grid-row: 3; }
-  .conversation-composer-footer:has(.conversation-composer-send-mode) .conversation-composer-actions { grid-column: 2; grid-row: 3; }
   .conversation-composer-models button { max-width: 100%; }
 }
 @container composer (max-width: 360px) {

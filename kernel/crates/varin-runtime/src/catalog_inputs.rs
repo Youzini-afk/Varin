@@ -142,6 +142,10 @@ pub struct QueuedInputAdmission {
     pub receipt: InputReceipt,
     pub accepted: bool,
 }
+pub struct InputPromotion {
+    pub read: QueuedInputRead,
+    pub accepted: bool,
+}
 
 /// This additive user-content domain is installed atomically. Existing unrecognized tables,
 /// partial domains and future versions are preserved and rejected, never replaced with empty data.
@@ -245,12 +249,13 @@ pub(super) fn check_format(db: &Connection) -> Result<()> {
 }
 pub(super) fn write_input(tx: &Transaction<'_>, input: &QueuedInputMetadata) -> Result<()> {
     tx.execute(
-        "UPDATE input_queue SET state=?2,body=?3,run_id=?4 WHERE id=?1",
+        "UPDATE input_queue SET state=?2,body=?3,run_id=?4,mode=?5 WHERE id=?1",
         params![
             input.id,
             encode(&input.state)?.trim_matches('"'),
             encode(input)?,
-            input.run_id
+            input.run_id,
+            encode(&input.mode)?.trim_matches('"')
         ],
     )?;
     Ok(())
@@ -546,6 +551,67 @@ impl Catalog {
             accepted: true,
         })
     }
+    /// Move the original accepted input into the current Run at its next input
+    /// boundary. Its retained content is unchanged; the unstarted successor is
+    /// retired in the same transaction, so it cannot deliver the message again.
+    pub fn send_input_now(
+        &mut self,
+        id: &str,
+        revision: u64,
+        expected_run: &str,
+    ) -> Result<InputPromotion> {
+        let tx = self.db.transaction()?;
+        let mut input: QueuedInputMetadata = record(&tx, "input_queue", id)?;
+        if !input.origin.is_user_ingress() {
+            return Err(RuntimeError::Invalid("only user inputs can be sent from the queue".into()));
+        }
+        super::threads::require_available(&tx, &input.thread_id)?;
+        super::threads::require_public(&tx, &input.thread_id)?;
+        // A delivery or the same promotion may win a retry. Neither requires a
+        // second mutation, even when the response to the first click was lost.
+        if input.state == InputState::Delivered
+            || input.state == InputState::Queued
+                && input.mode != InputMode::NextRun
+                && input.run_id.as_deref() == Some(expected_run)
+        {
+            drop(tx);
+            return Ok(InputPromotion { read: self.capture_queued_input(id)?, accepted: false });
+        }
+        if input.state != InputState::Queued || input.revision != revision {
+            return Err(RuntimeError::Conflict("input has changed or was already cancelled".into()));
+        }
+        let active: Option<String> = tx.query_row(
+            "SELECT active_run FROM branches WHERE id=?1", [&input.branch_id], |row| row.get(0),
+        )?;
+        if active.as_deref() != Some(expected_run) {
+            return Err(RuntimeError::Conflict("the current task has changed".into()));
+        }
+        let current: Run = record(&tx, "runs", expected_run)?;
+        if current.cancel_requested || current.state.terminal() {
+            return Err(RuntimeError::Conflict("the current task is closing".into()));
+        }
+        let successor_id = input.run_id.as_deref()
+            .ok_or_else(|| RuntimeError::Invalid("queued input Run is missing".into()))?;
+        let mut successor: Run = record(&tx, "runs", successor_id)?;
+        if input.mode != InputMode::NextRun || successor.id == current.id
+            || successor.state.terminal() || successor.cancel_requested
+        {
+            return Err(RuntimeError::Conflict("the queued task is closing".into()));
+        }
+        super::policy_switch::close_run_candidate(&tx, &successor.id, successor.revision + 1)?;
+        successor.state = RunState::Cancelled;
+        successor.cancel_requested = true;
+        successor.revision += 1;
+        put(&tx, "runs", &successor.id, &successor)?;
+        input.run_id = Some(current.id.clone());
+        input.mode = InputMode::Interrupt;
+        input.revision += 1;
+        write_input(&tx, &input)?;
+        event(&tx, id, input.revision, "input.promoted", json!({"run_id":current.id,"previous_run_id":successor.id}))?;
+        tx.commit()?;
+        Ok(InputPromotion { read: self.capture_queued_input(id)?, accepted: true })
+    }
+
     pub fn cancel_input(&mut self, id: &str, revision: u64) -> Result<QueuedInputRead> {
         let tx = self.db.transaction()?;
         let mut input: QueuedInputMetadata = record(&tx, "input_queue", id)?;

@@ -21,6 +21,7 @@ import { dict as zhCN } from '@/lib/i18n/messages/zh-CN';
 import { followupPanelEn } from '@/lib/i18n/messages/followups';
 import { useQuestionDraftStore } from '@/stores/useQuestionDraftStore';
 import { useThreadDraftStore } from '@/stores/useThreadDraftStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { bindThreadStore, threadHostKey, threadComposerKey, useThreadStore } from '@/stores/useThreadStore';
 import { ChatView } from '@/components/views/ChatView';
 import { AgentWorkspaceShell } from '@/workbenches/agent/AgentWorkspaceShell';
@@ -83,9 +84,6 @@ vi.mock('./ThreadComposer', () => ({ ThreadComposer: (props: React.ComponentProp
   </select>
   <select aria-label="Thinking level" disabled={props.modelDisabled} value={props.thinkingLevel} onChange={event => props.onModelChange(props.providerId, props.modelId, event.currentTarget.value as typeof props.thinkingLevel)}>
     {(props.models.find(model => model.providerId === props.providerId && model.modelId === props.modelId)?.thinkingLevels ?? ['off']).map(level => <option key={level}>{level}</option>)}
-  </select>
-  <select aria-label="Input delivery" value={props.delivery} onChange={event => props.onDeliveryChange(event.currentTarget.value as typeof props.delivery)}>
-    <option value="boundary">At next model boundary</option><option value="interrupt">Interrupt current generation</option>{props.allowNextRun && <option value="next_run">After current run</option>}
   </select>
   <textarea aria-label="Message thread" ref={element => {
     const insertAt = (from: number, to: number, text: string) => {
@@ -196,6 +194,10 @@ function fixture(active = false) {
     listMcpInteractions: vi.fn(async () => ({ items: [], nextCursor: null })), readMcpInteraction: unused, respondMcpInteraction: unused,
     reviewMcpSamplingRequest: unused, reviewMcpSamplingOutput: unused,
     snapshot: async () => structuredClone(view), submit, enqueue, editInput, cancelInput, cancelRun,
+    sendInputNow: vi.fn(async (inputId, revision, runId) => {
+      const input = view.inputs.find(value => value.id === inputId)!;
+      input.mode = 'interrupt'; input.run_id = runId; input.revision = revision + 1; return input;
+    }),
     contextInspection: async (_identity, { headId }) => ({ head: headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     sources: { list: async () => ({ targets: [{ resourceOwner: { kind: 'local' }, label: 'This Host', capabilities: [] }], unavailable: [] }),
       resolve: async (_identity, request) => ({ resourceOwner: request.resourceOwner, path: request.path, workspaceId: (await getRegisteredRuntimeAPIs()!.documents.resolveWorkspace({ path: request.path })).workspaceId }) },
@@ -213,6 +215,7 @@ beforeEach(() => {
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:test-image');
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
   useThreadDraftStore.setState({ drafts: {} });
+  useMessageQueueStore.setState({ followUpBehavior: 'queue' });
   useTimelineViewStore.setState({ views: {} });
   useWorkOverviewStore.setState({ bySession: {} });
   timelineList.scrollToIndex.mockClear();
@@ -359,7 +362,7 @@ it('waits for the original snapshot before choosing submit or enqueue for a rest
   let finish!: (snapshot: ThreadSnapshot) => void;
   f.api.snapshot = vi.fn().mockImplementationOnce(() => new Promise(resolve => { finish = resolve; })).mockImplementation(async () => structuredClone(f.view));
   const key = threadComposerKey(threadHostKey(), identity);
-  useThreadDraftStore.getState().patch(key, { text: 'Restored draft', inputMode: 'boundary', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
+  useThreadDraftStore.getState().patch(key, { text: 'Restored draft', model: { providerId: 'fixture-provider', modelId: 'fixture-model' } });
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
   expect(button('Send').disabled).toBe(true);
   await submitForm(composerForm());
@@ -367,7 +370,7 @@ it('waits for the original snapshot before choosing submit or enqueue for a rest
   await act(async () => finish(structuredClone(f.view)));
   expect(button('Queue message').disabled).toBe(false);
   await submitForm(composerForm());
-  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ text: 'Restored draft', mode: 'boundary' }));
+  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ text: 'Restored draft', mode: 'next_run' }));
   expect(f.submit).not.toHaveBeenCalled();
 });
 
@@ -543,10 +546,10 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await act(async () => { button('Cancel observation wait').click(); });
   expect(cancelOperation.mock.calls).toEqual([[observation.id]]);
   expect(job.cancel_requested).toBe(false);
-  await edit('[aria-label="Input delivery"]', 'interrupt', 'change');
+  await act(async () => useMessageQueueStore.setState({ followUpBehavior: 'steer' }));
   await edit('[aria-label="Message thread"]', 'new queued instructions');
   await submitForm(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.closest('form')!);
-  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, mode: 'interrupt', text: 'new queued instructions' }));
+  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ ...identity, mode: 'boundary', text: 'new queued instructions' }));
   await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="chat.queuedMessage.edit"]')!.click());
   await edit('textarea[aria-label="chat.queuedMessage.edit"]', 'edited queued text');
   await submitForm(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="chat.queuedMessage.edit"]')!.closest('form')!);
@@ -557,6 +560,65 @@ it('active-thread controls queue the chosen mode, save/cancel queued text, and s
   await act(async () => { button('Stop run').click(); });
   expect(f.cancelRun).toHaveBeenCalledWith('ui-run');
   expect(button('Stop run')).toBeUndefined();
+});
+
+it('sends an original queued message now without resubmitting attachments, changing the draft, or cancelling tools', async () => {
+  const f = fixture(true);
+  const content = { text: 'Use the original [图片3]', imageReferences: [3], attachments: [storedImage] };
+  f.view.inputs = [{ id: 'send-now-input', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'queued-run',
+    mode: 'next_run', state: 'queued', revision: 4, content, cursor: 5 }];
+  let complete!: () => void;
+  f.api.sendInputNow = vi.fn<ThreadsAPI['sendInputNow']>((id, revision, runId) => new Promise(resolve => { complete = () => {
+    const input = f.view.inputs.find(input => input.id === id)!;
+    input.mode = 'interrupt'; input.run_id = runId; input.revision = revision + 1; resolve(input);
+  }; }));
+  f.api.cancelOperation = vi.fn();
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'A separate unsent draft');
+  const sendNow = () => [...container.querySelectorAll<HTMLButtonElement>('[data-queued-input="send-now-input"] button')]
+    .find(button => button.textContent === 'chat.queuedMessage.sendNow')!;
+  await act(async () => { sendNow().click(); sendNow().click(); });
+  expect(f.api.sendInputNow).toHaveBeenCalledExactlyOnceWith('send-now-input', 4, 'ui-run');
+  expect(sendNow().disabled).toBe(true);
+  await act(async () => complete());
+  expect(sendNow()).toBeUndefined();
+  expect(f.view.inputs[0]!.content).toBe(content);
+  expect(container.querySelector<HTMLTextAreaElement>('[aria-label="Message thread"]')!.value).toBe('A separate unsent draft');
+  expect(f.enqueue).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled();
+  expect(f.cancelInput).not.toHaveBeenCalled(); expect(f.cancelRun).not.toHaveBeenCalled();
+  expect(f.api.cancelOperation).not.toHaveBeenCalled();
+});
+
+it('keeps the original queued-send mode when the default changes after a lost receipt', async () => {
+  const f = fixture(true);
+  f.enqueue.mockRejectedValueOnce(new Error('Lost queued input receipt'));
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  await edit('[aria-label="Message thread"]', 'Keep this original request');
+  await submitForm(composerForm());
+  expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ mode: 'next_run' }));
+  await act(async () => useMessageQueueStore.setState({ followUpBehavior: 'steer' }));
+  await submitForm(composerForm());
+  expect(f.enqueue).toHaveBeenCalledTimes(2);
+  expect(f.enqueue.mock.calls[1]).toEqual(f.enqueue.mock.calls[0]);
+});
+
+it('refreshes a changed queued message after send-now conflict and retries its current revision', async () => {
+  const f = fixture(true);
+  f.view.inputs = [{ id: 'send-now-stale', thread_id: identity.threadId, branch_id: identity.branchId, run_id: 'queued-run',
+    mode: 'next_run', state: 'queued', revision: 1, content: { text: 'Original text' }, cursor: 2 }];
+  const sendInputNow = vi.mocked(f.api.sendInputNow);
+  sendInputNow.mockImplementationOnce(async () => {
+    f.view.inputs[0]!.revision = 2; f.view.inputs[0]!.content = { text: 'Edited elsewhere' };
+    throw new ThreadRequestError(409, 'thread-conflict');
+  });
+  await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
+  const sendNow = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'chat.queuedMessage.sendNow')!;
+  await act(async () => sendNow().click());
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain('409');
+  expect(container.querySelector('[data-queued-input="send-now-stale"]')?.textContent).toContain('Edited elsewhere');
+  await act(async () => sendNow().click());
+  expect(sendInputNow).toHaveBeenLastCalledWith('send-now-stale', 2, 'ui-run');
+  expect(f.cancelInput).not.toHaveBeenCalled(); expect(f.enqueue).not.toHaveBeenCalled();
 });
 
 it.each(['file-backed', 'source-free'] as const)('keeps the original report, wait and subtree stop for a %s child without inferring file or effect completion', async sourceKind => {
@@ -1132,12 +1194,12 @@ it.each(['thread', 'branch', 'host', 'unmount'] as const)('discards a late PDF u
   expect(upload).toHaveBeenCalledTimes(2); expect(f.submit).not.toHaveBeenCalled();
 });
 
-it.each(['boundary', 'interrupt', 'next_run'] as const)('queues retained PDF input in %s mode without sending upload bytes to the model request', async mode => {
+it.each(['steer', 'queue'] as const)('queues retained PDF input using the %s setting without sending upload bytes to the model request', async behavior => {
   const f = fixture(true); const upload = vi.mocked(f.api.materials.upload).mockResolvedValue(uploadedPdf());
   await act(async () => root.render(<ThreadConversation api={f.api} identity={identity} />));
-  await edit('[aria-label="Input delivery"]', mode, 'change'); await choosePdfs(pdfFile());
+  await act(async () => useMessageQueueStore.setState({ followUpBehavior: behavior })); await choosePdfs(pdfFile());
   await submitForm(composerForm());
-  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: '', images: [], mode, materials: [{ snapshotId: 'retained-original' }] }));
+  expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ ...identity, text: '', images: [], mode: behavior === 'queue' ? 'next_run' : 'boundary', materials: [{ snapshotId: 'retained-original' }] }));
   expect(upload).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="chat.fileAttachment.pdfAttachments"]')).toBeNull();
 });

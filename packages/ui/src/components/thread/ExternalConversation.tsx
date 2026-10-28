@@ -888,9 +888,6 @@ export function ExternalConversationView({ id, readOnly = false }: { id: string;
                   pending={pending}
                   active={Boolean(active)}
                   retrying={false}
-                  allowNextRun
-                  delivery="next_run"
-                  onDeliveryChange={() => {}}
                   onFiles={(files) => void addFiles(files)}
                   onAttachImages={() => fileInput.current?.click()}
                   onAttachPdfs={() => setError(t('external.attachments'))}

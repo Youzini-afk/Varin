@@ -3164,7 +3164,7 @@ export const dict = {
   'chat.queuedMessage.empty': '(empty)',
   'chat.queuedMessage.title': 'Queued messages',
   "chat.queuedMessage.sendNow": "Send now",
-  "chat.queuedMessage.sendHint": "Add to the current task at its next input boundary. Running tools continue.",
+  "chat.queuedMessage.sendHint": "Add to the current task now. Current model generation is interrupted; running tools continue.",
   "chat.queuedMessage.clearAll": "Clear all",
   "chat.queuedMessage.waiting": "Waiting for this task to finish",
   "chat.queuedMessage.steering": "Adding to current task",

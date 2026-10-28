@@ -1936,6 +1936,12 @@ export interface InputCancelParams {
   expectedRevision: number;
 }
 
+export interface InputSendNowParams {
+  inputId: string;
+  expectedRevision: number;
+  expectedRunId: string;
+}
+
 export interface InputHandleParams {
   inputId: string;
 }

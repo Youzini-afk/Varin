@@ -41,6 +41,13 @@ An idle root Thread uses `submit` with a stable command key and expected head. A
 `collaboration.continueChild` with its exact previous Run and expected head; active delegated children
 use boundary/interrupt input. Queuing input does not resume an explicit policy Pause.
 
+While a task runs, new messages follow the Queue / Add to current task setting. The composer has
+no per-message delivery selector. A queued next-Run message can be sent now from its queue row:
+native admission moves that same input to the current Run, preserves its captured media/materials,
+and retires its unstarted successor atomically. Only the newly accepted promotion interrupts the
+current model generation; running tools continue. Retries retain the input identity and cannot
+interrupt another generation again. Changing the default does not alter an outstanding send receipt.
+
 `deliverThreadInput` joins an already-running observation for the same original command. An uncertain
 response retains the exact input, model, source, media and key. Explicit retry uses that intent; it does
 not capture a newer draft or resend under a new key. Only an explicit first-attempt `not_started`

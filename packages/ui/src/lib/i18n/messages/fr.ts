@@ -2594,7 +2594,7 @@ export const dict = {
   'chat.queuedMessage.empty': '(vide)',
   'chat.queuedMessage.title': 'Messages en file d\'attente',
   "chat.queuedMessage.sendNow": "Envoyer maintenant",
-  "chat.queuedMessage.sendHint": "Ajouter à la tâche au prochain point de réception. Les outils en cours continuent.",
+  "chat.queuedMessage.sendHint": "Ajouter maintenant à la tâche en cours. La génération du modèle est interrompue ; les outils en cours continuent.",
   "chat.queuedMessage.clearAll": "Tout effacer",
   "chat.queuedMessage.waiting": "En attente de la fin de la tâche",
   "chat.queuedMessage.steering": "Ajout à la tâche en attente",

@@ -61,7 +61,7 @@ function Harness({ initial = '' }: { initial?: string }) {
     <ThreadComposer editorRef={null} value={value} onChange={setValue} suggestion={suggestion} onSuggestionDismiss={() => setSuggestion(undefined)}
       models={[]} providerId="provider" modelId="model" thinkingLevel="off" onModelChange={() => {}}
       modelDisabled={false} attachmentDisabled={false} imageDisabled={false} sendDisabled={false} pending={false} active={false} retrying={false}
-      delivery="boundary" onDeliveryChange={() => {}} allowNextRun onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
+      onFiles={() => {}} onAttachImages={() => {}} onAttachPdfs={() => {}}
       onGoal={() => {}} hasInput={Boolean(value.trim())} onWorkspace={() => {}} workspaceLabel="Project" attachmentNames={[]} skills={[]} />
   </form>;
 }

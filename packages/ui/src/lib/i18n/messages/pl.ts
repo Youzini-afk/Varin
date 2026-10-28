@@ -1492,7 +1492,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.empty': '(puste)',
   'chat.queuedMessage.title': 'Queued messages',
   "chat.queuedMessage.sendNow": "Wyślij teraz",
-  "chat.queuedMessage.sendHint": "Dodaj do bieżącego zadania przy następnej okazji. Uruchomione narzędzia będą kontynuowane.",
+  "chat.queuedMessage.sendHint": "Dodaj teraz do bieżącego zadania. Generowanie modelu zostanie przerwane, a uruchomione narzędzia będą kontynuowane.",
   "chat.queuedMessage.clearAll": "Wyczyść kolejkę",
   "chat.queuedMessage.waiting": "Oczekiwanie na koniec zadania",
   "chat.queuedMessage.steering": "Oczekiwanie na dodanie do zadania",

@@ -63,6 +63,7 @@ async function fixture() {
     inputReceipt: vi.fn<AgentRuntimeClient['inputReceipt']>(async () => null), enqueueReceipt: vi.fn<AgentRuntimeClient['enqueueReceipt']>(async () => null),
     submit: vi.fn<AgentRuntimeClient['submit']>(async () => submitReceipt), enqueue: vi.fn<AgentRuntimeClient['enqueue']>(async () => enqueueReceipt),
     editInput: vi.fn<AgentRuntimeClient['editInput']>(async () => ({ ...queued, revision: queued.revision + 1 })),
+    sendInputNow: vi.fn<AgentRuntimeClient['sendInputNow']>(async () => ({ ...queued, run_id: run.id, mode: 'interrupt', revision: queued.revision + 1 })),
   };
   const unexpectedRead = vi.fn(async () => { throw new Error('Input preparation cannot reopen resources'); });
   const scope = createThreadResourceScope({ dataDirectory: root, workingStates: { withBranchStore: unexpectedRead },
@@ -85,6 +86,27 @@ async function fixture() {
 }
 
 describe('ThreadAdapter explicit skill input composition', () => {
+  it('sends the original queued input to the current task without rebuilding its captured content', async () => {
+    const f = await fixture();
+    const content = structuredClone(f.queued.content);
+    const moved = await f.adapter.sendInputNow(f.queued.id, f.queued.revision, f.run.id);
+    expect(f.runtime.sendInputNow).toHaveBeenCalledExactlyOnceWith(f.queued.id, f.queued.revision, f.run.id, undefined);
+    expect(moved.content).toEqual(content);
+    expect(moved.mode).toBe('interrupt');
+    expect(f.prepareContext.main).not.toHaveBeenCalled();
+    expect(f.prepareSkill).not.toHaveBeenCalled();
+    expect(f.runtime.enqueue).not.toHaveBeenCalled();
+    expect(f.continueLaunch).toHaveBeenCalledWith(f.run.id, {});
+  });
+
+  it('keeps queued images in place when the target task model cannot receive them', async () => {
+    const f = await fixture();
+    f.run.configuration = { ...(f.run.configuration as ModelSessionConfiguration), acceptsImages: false };
+    await expect(f.adapter.sendInputNow(f.queued.id, f.queued.revision, f.run.id)).rejects.toMatchObject({ code: 'model-images-unsupported' });
+    expect(f.runtime.sendInputNow).not.toHaveBeenCalled();
+    expect(f.runtime.enqueue).not.toHaveBeenCalled();
+  });
+
   it('keeps raw text/media separate from hidden skill material and binds initial or replaced context in the same submit', async () => {
     const f = await fixture();
     f.runtime.context.mockResolvedValue(null);

@@ -166,6 +166,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     'history/runs': ['runtime', 'threadId', 'branchId', 'headId'], 'history/run-preview': ['runtime', 'threadId', 'branchId', 'headId', 'runId'],
     'history/usage': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'], enqueue: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'mode', 'clientTime'],
     'input/edit': ['inputId', 'expectedRevision', 'text', 'images'], 'input/cancel': ['inputId', 'expectedRevision'],
+    'input/send-now': ['inputId', 'expectedRevision', 'expectedRunId'],
     run: ['runId'], 'run/cancel': ['runId'], 'run/resume': ['runId', 'waitId'], 'run/retry-preparation': ['runId'], operation: ['operationId'], 'operation/cancel': ['operationId'], events: ['cursor'],
   };
   fields['operation/calls'] = ['operationId'];
@@ -544,6 +545,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     return adapter.editInput(text(body.inputId), revision(body.expectedRevision), body.text, parseThreadImages(body.images), signal);
   });
   post('input/cancel', async body => { await adapter.requireInput(text(body.inputId)); return adapter.runtime.cancelInput(text(body.inputId), revision(body.expectedRevision)); });
+  post('input/send-now', (body, signal) => adapter.sendInputNow(text(body.inputId), revision(body.expectedRevision), text(body.expectedRunId), signal));
   post('run', body => adapter.requireRun(text(body.runId))); 
   post('run/cancel', async body => { await adapter.requireRun(text(body.runId)); return adapter.runtime.cancelRun(text(body.runId)); });
   post('run/resume', body => adapter.resume(text(body.runId), text(body.waitId)));

@@ -2708,7 +2708,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.empty': '（空）',
   'chat.queuedMessage.title': 'キューされたメッセージ',
   "chat.queuedMessage.sendNow": "今すぐ送信",
-  "chat.queuedMessage.sendHint": "次の入力受付時に現在のタスクへ追加します。実行中のツールは継続します。",
+  "chat.queuedMessage.sendHint": "現在のタスクにすぐ追加します。モデルの生成は中断しますが、実行中のツールは継続します。",
   "chat.queuedMessage.clearAll": "すべて消去",
   "chat.queuedMessage.waiting": "現在のタスクの完了待ち",
   "chat.queuedMessage.steering": "現在のタスクへの追加待ち",

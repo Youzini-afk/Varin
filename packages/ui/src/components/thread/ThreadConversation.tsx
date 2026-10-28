@@ -20,6 +20,7 @@ import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore'
 import { appendInlineComments } from '@/lib/messages/inlineComments';
 import { useThreadStore, threadHostKey, threadComposerKey } from '@/stores/useThreadStore';
 import { useThreadDraftStore, EMPTY_THREAD_DRAFT, type ThreadPendingInput, type ThreadMaterialAttachment } from '@/stores/useThreadDraftStore';
+import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { ThreadMaterials } from './ThreadMaterials';
 import { ThreadMaterialAttachments } from './ThreadMaterialAttachments';
 import { ComputerAutomationSection } from '@/components/thread/ComputerAutomationSection';
@@ -95,8 +96,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const setImages = React.useCallback((value: React.SetStateAction<ImageAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ images: typeof value === 'function' ? value(current.images) : value })), [draftKey]);
   const setMaterials = React.useCallback((value: React.SetStateAction<ThreadMaterialAttachment[]>) => useThreadDraftStore.getState().patch(draftKey, current => ({ materials: typeof value === 'function' ? value(current.materials) : value })), [draftKey]);
   const setPreparedSource = React.useCallback((preparedSource: ThreadPreparedSource | null) => useThreadDraftStore.getState().patch(draftKey, { preparedSource }), [draftKey]);
-  const setInputMode = React.useCallback((inputMode: 'boundary' | 'interrupt' | 'next_run') => useThreadDraftStore.getState().patch(draftKey, { inputMode }), [draftKey]);
-  const { text, images, materials, preparedSource, inputMode } = draft;
+  const followUpBehavior = useMessageQueueStore(state => state.followUpBehavior);
+  const { text, images, materials, preparedSource } = draft;
   React.useSyncExternalStore(subscribeEditorContextAttachments, getEditorContextAttachmentsRevision, () => 0);
   const editorContext = listEditorContextAttachments(threadHostKey(), draftKey);
   const inlineBuckets = useInlineCommentDraftStore(state => state.drafts);
@@ -224,7 +225,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const delegated = Boolean(snapshot?.delegatedExecutions?.length);
   const preparingExecution = snapshot?.delegatedExecutions?.find(execution => execution.state === 'preparing' && !execution.cancel_requested);
   const preparingDelegation = Boolean(preparingExecution);
-  React.useEffect(() => { if (delegated && inputMode === 'next_run') setInputMode('boundary'); }, [delegated, inputMode, setInputMode]);
+  const inputMode = !delegated && followUpBehavior === 'queue' ? 'next_run' as const : 'boundary' as const;
   const launch = snapshot?.launch?.run_id === run?.id ? snapshot?.launch : null;
   const workFocus = useThreadWorkFocus(draftKey, draft.workspacePath ?? launch?.selection.source?.live_root?.canonicalRoot ?? initialWorkspacePath, launch?.selection.agent?.workFocus, Boolean(snapshot));
   const agent = { profileId: null, workFocus };
@@ -383,7 +384,7 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
   const visibleHistory = history.items;
   const firstMessage = useFirstMessagePreview(draftKey, Boolean(snapshot?.historyPage.head), handoff);
   const memorySelection = getRegisteredRuntimeAPIs()?.bots?.selection;
-  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, inputMode, preparedSource?.source, agent]);
+  const submissionFingerprint = () => JSON.stringify([identity.threadId, identity.branchId, projectedText, requestImages, materials, providerId, modelId, thinkingLevel, preparedSource?.source, agent]);
   const sourceCannotBeApplied = active && Boolean(preparedSource) && !pendingInput.current;
   const sendBlocked = pending || (!draft.pendingInput && (!snapshot || preparingDelegation || preparingSource || sourceCannotBeApplied || readingFiles
     || (images.length > 0 && acceptsImages === false)
@@ -507,7 +508,8 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
           saved = true;
         });
         return saved;
-      }} onCancel={input => act(() => api.cancelInput(input.id, input.revision), true)} />}</div>
+      }} onCancel={input => act(() => api.cancelInput(input.id, input.revision), true)}
+      onSendNow={active && run ? input => act(() => api.sendInputNow(input.id, input.revision, run.id)) : undefined} />}</div>
     <form className="space-y-2" onSubmit={event => {
       event.preventDefault();
       if (draft.firstSend || draft.identity && !run && (draft.sourceSelection || draft.pdfs?.length)) {
@@ -611,7 +613,6 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
         providerId={providerId} modelId={modelId} thinkingLevel={thinkingLevel} onModelChange={selectModel}
         modelDisabled={pending || Boolean(draft.firstSend) || (delegated && !active)} attachmentDisabled={pending || Boolean(draft.firstSend || draft.pendingInput) || readingFiles}
         imageDisabled={acceptsImages === false} sendDisabled={draft.firstSend ? pending : nextStep.text && text.length === 0 && !hasComposerInput ? sendBlocked : sendDisabled} pending={pending} active={active} retrying={Boolean(draft.firstSend || draft.pendingInput)}
-        delivery={inputMode} onDeliveryChange={setInputMode} allowNextRun={!delegated}
         onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
         goalArmed={draft.goalArmed} onGoal={() => {
           if (active || delegated || snapshot?.goals.some(goal => goal.control !== 'complete' && goal.control !== 'cancelled')) showOverview('goals');

@@ -1124,6 +1124,9 @@ export class AgentRuntimeClient {
   editInput(input: InputEditParams, signal?: AbortSignal): Promise<QueuedInput> {
     return this.kernel.agentRuntimeRequest('runtime.input.edit', input, signal);
   }
+  sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string, signal?: AbortSignal): Promise<QueuedInput> {
+    return this.kernel.agentRuntimeRequest('runtime.input.sendNow', { inputId, expectedRevision, expectedRunId }, signal);
+  }
   cancelInput(
     inputId: string,
     expectedRevision: number,

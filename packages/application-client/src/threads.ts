@@ -446,6 +446,7 @@ export interface ThreadsAPI {
   enqueue(input: ThreadIdentity & { key: string; text: string; images?: ImageAttachment[]; materials?: ThreadMaterialAttachment[]; mode: InputMode; clientTime?: import('@varin/protocol').MessageTimeObservation }): Promise<InputReceipt>;
   editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[]): Promise<QueuedInput>;
   cancelInput(inputId: string, expectedRevision: number): Promise<QueuedInput>;
+  sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string): Promise<QueuedInput>;
   /** Read one original-holder media chunk; the expected reference is identity, never authority. */
   mediaRead(input: ThreadIdentity & Omit<MediaReadParams, 'threadId' | 'branchId'>, signal?: AbortSignal): Promise<MediaReadChunk>;
   historyPage(identity: ThreadIdentity, cursor: { headId: string; beforeId: string; limit?: number }, signal?: AbortSignal): Promise<ThreadHistoryPage>;

@@ -3,7 +3,6 @@ import type { EditorContextAttachment } from '@/lib/agent-editor/types';
 import type { InlineCommentDraft } from './useInlineCommentDraftStore';
 import type { ImageAttachment } from '@varin/protocol';
 import type { ThreadAgentChoice, ThreadIdentity, ThreadModel, ThreadPrepareSource, ThreadPreparedSource, ThreadsAPI } from '@varin/application-client';
-import { useMessageQueueStore } from './messageQueueStore';
 
 export type ThreadPendingInput = {
   fingerprint: string;
@@ -64,7 +63,6 @@ export interface ThreadDraft {
   materials: ThreadMaterialAttachment[];
   model?: ThreadModel;
   workFocus?: import('@varin/protocol').WorkFocusId;
-  inputMode: 'boundary' | 'interrupt' | 'next_run';
   preparedSource: ThreadPreparedSource | null;
   workspacePath?: string;
   goalArmed?: boolean;
@@ -84,7 +82,7 @@ export interface ThreadDraft {
     sending?: boolean;
   };
 }
-export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], inputMode: 'boundary', preparedSource: null });
+export const EMPTY_THREAD_DRAFT: ThreadDraft = Object.freeze({ text: '', images: [], materials: [], preparedSource: null });
 /** Composer state only; accepted execution and history remain with the native Catalog. Never persisted. */
 export const useThreadDraftStore = create<{
   drafts: Record<string, ThreadDraft>;
@@ -93,8 +91,7 @@ export const useThreadDraftStore = create<{
 }>((set) => ({
   drafts: {},
   patch: (key, patch) => set(state => {
-    const draft = state.drafts[key] ?? { ...EMPTY_THREAD_DRAFT,
-      inputMode: useMessageQueueStore.getState().followUpBehavior === 'queue' ? 'next_run' as const : 'boundary' as const };
+    const draft = state.drafts[key] ?? EMPTY_THREAD_DRAFT;
     const change = typeof patch === 'function' ? patch(draft) : patch;
     const next = { ...draft, ...change };
     if (change.images) {

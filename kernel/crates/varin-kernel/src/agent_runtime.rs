@@ -1264,6 +1264,7 @@ pub(crate) fn spawn(
                                 | "runtime.input.enqueue"
                                 | "runtime.input.edit"
                                 | "runtime.input.cancel"
+                                | "runtime.input.sendNow"
                                 | "runtime.input.inspect"
                                 | "runtime.input.list"
                                 | "runtime.messages.send"

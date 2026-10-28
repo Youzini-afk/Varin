@@ -2911,7 +2911,7 @@ export const dict: Record<I18nKey, string> = {
   "chat.queuedMessage.empty": "(порожній)",
   "chat.queuedMessage.title": "Повідомлення в черзі",
   "chat.queuedMessage.sendNow": "Надіслати зараз",
-  "chat.queuedMessage.sendHint": "Додати до поточного завдання при наступному прийманні вводу. Запущені інструменти продовжать роботу.",
+  "chat.queuedMessage.sendHint": "Додати до поточного завдання зараз. Генерування моделі буде перервано; запущені інструменти продовжать роботу.",
   "chat.queuedMessage.clearAll": "Очистити чергу",
   "chat.queuedMessage.waiting": "Очікування завершення завдання",
   "chat.queuedMessage.steering": "Очікування додавання до завдання",

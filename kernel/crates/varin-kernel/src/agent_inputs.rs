@@ -412,6 +412,26 @@ pub(super) fn execute(
             };
             Ok(serde_json::to_value(read.load().map_err(domain)?)?)
         }
+        "runtime.input.sendNow" => {
+            let p: InputSendNowParams = serde_json::from_value(params)?;
+            let revision = u64::try_from(p.expected_revision)
+                .map_err(|_| KernelError::Protocol("input revision must be nonnegative".into()))?;
+            let _order = await_input_order(order)?;
+            let promotion = {
+                let mut owner = catalog
+                    .lock()
+                    .map_err(|_| KernelError::Storage("catalog owner failed".into()))?;
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(KernelError::Cancelled);
+                }
+                owner.send_input_now(&p.input_id, revision, &p.expected_run_id).map_err(domain)?
+            };
+            if promotion.accepted {
+                runtime.interrupt_generation(&p.expected_run_id);
+            }
+            runtime.advance_pending().map_err(|error| KernelError::Operation(error.to_string()))?;
+            Ok(serde_json::to_value(promotion.read.load().map_err(domain)?)?)
+        }
         "runtime.input.cancel" => {
             let p: InputCancelParams = serde_json::from_value(params)?;
             let revision = u64::try_from(p.expected_revision)

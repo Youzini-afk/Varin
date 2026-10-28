@@ -916,6 +916,25 @@ export class ThreadAdapter {
     await this.requireIdentity(identity, signal);
     return this.runtime.mediaRead({ ...request, threadId: identity.threadId, branchId: identity.branchId }, signal);
   }
+  async sendInputNow(inputId: string, expectedRevision: number, expectedRunId: string, signal?: AbortSignal) {
+    const queued = await this.requireInput(inputId);
+    const current = await this.requireRun(expectedRunId);
+    if (queued.thread_id !== current.thread_id || queued.branch_id !== current.branch_id) {
+      throw Object.assign(new Error('Queued input belongs to another task branch'), { code: 'thread-conflict' });
+    }
+    if (queued.state === 'queued' && queued.mode === 'next_run') {
+      const attachments = (queued.content as { attachments?: Array<{ media_type?: string }> } | null)?.attachments;
+      const images = attachments?.filter(part => part.media_type?.startsWith('image/'));
+      if (images?.length) {
+        const selected = await this.runtime.modelSelections(current.id, signal);
+        this.assertImagesSupported(images, selected.desired?.configuration ?? current.configuration);
+      }
+    }
+    const result = await this.runtime.sendInputNow(inputId, expectedRevision, expectedRunId, signal);
+    await this.continueQueuedLaunch(result.run_id, result.run_id);
+    return result;
+  }
+
   async editInput(inputId: string, expectedRevision: number, text: string, images?: ImageAttachment[], signal?: AbortSignal) {
     const queued = await this.requireInput(inputId);
     if (queued.state !== 'queued' || queued.revision !== expectedRevision) {
@@ -963,7 +982,7 @@ export class ThreadAdapter {
     } finally { model.credentialOwner.release(); }
   }
 
-  assertImagesSupported(images: readonly ImageAttachment[] | undefined, configuration: unknown): void {
+  assertImagesSupported(images: readonly unknown[] | undefined, configuration: unknown): void {
     if (images?.length && (configuration as { acceptsImages?: boolean }).acceptsImages === false) {
       throw Object.assign(new Error('Selected model does not accept images'), { code: 'model-images-unsupported' });
     }

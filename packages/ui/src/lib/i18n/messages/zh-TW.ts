@@ -3106,7 +3106,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.queuedMessage.empty': '（空）',
   'chat.queuedMessage.title': '待傳送訊息',
   "chat.queuedMessage.sendNow": "立即傳送",
-  "chat.queuedMessage.sendHint": "在下一個可接收時機補充至目前任務，正在執行的工具會繼續。",
+  "chat.queuedMessage.sendHint": "立即補充至目前任務；若模型正在生成，將中斷本次生成，正在執行的工具會繼續。",
   "chat.queuedMessage.clearAll": "清空佇列",
   "chat.queuedMessage.waiting": "等待目前任務結束",
   "chat.queuedMessage.steering": "待補充目前任務",

@@ -206,7 +206,6 @@ export function ThreadDraftConversation({ api, draftKey, handoff }: { api: Threa
           onModelChange={(providerId, modelId, thinkingLevel) => patch({ model: { providerId, modelId, thinkingLevel } })}
           modelDisabled={locked} attachmentDisabled={locked || readingFiles} imageDisabled={acceptsImages === false}
           sendDisabled={sendDisabled} pending={sending} active={false} retrying={locked} hasInput={hasInput}
-          delivery={draft.inputMode} onDeliveryChange={inputMode => patch({ inputMode })} allowNextRun
           onFiles={files => void addFiles(files)} onAttachImages={() => fileInput.current?.click()} onAttachPdfs={() => pdfInput.current?.click()}
           onGoal={() => { if (!locked) patch({ goalArmed: !draft.goalArmed }); }} goalArmed={draft.goalArmed}
           onWorkspace={() => setWorkspaceOpen(true)} workspaceLabel={sourcePath ? formatDirectoryName(sourcePath) : t('thread.composer.chatOnly')}

@@ -1493,6 +1493,91 @@ fn boundary_input_cannot_be_lost_to_run_completion_and_next_run_skips_cancelled_
 }
 
 #[test]
+fn send_queued_input_now_preserves_original_media_and_delivers_only_once() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let original = submit(&mut db);
+    let epoch = db.epoch();
+    db.transition_run(&original.run_id, epoch, 1, RunState::Runnable).unwrap();
+    let command = EnqueueInput {
+        key: "send-now-original".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::NextRun,
+        input: json!({"text":"Use [图片3]", "imageReferences":[3],
+            "attachments":[{"media_type":"image/png","data_base64":"b3JpZ2luYWw="}]}),
+        configuration: None,
+    };
+    let queued = db.enqueue_input(&command).unwrap();
+    let before = db.queued_input(&queued.input_id).unwrap();
+    let promotion = db.send_input_now(&queued.input_id, before.revision, &original.run_id).unwrap();
+    assert!(promotion.accepted);
+    let moved = promotion.read.load().unwrap();
+    assert_eq!(moved.id, before.id);
+    assert_eq!(moved.content, before.content);
+    assert_eq!(moved.run_id, original.run_id);
+    assert_eq!(moved.mode, InputMode::Interrupt);
+    assert_eq!(moved.state, InputState::Queued);
+    assert_eq!(moved.revision, before.revision + 1);
+    assert_eq!(db.run(&queued.run_id).unwrap().state, RunState::Cancelled);
+    assert!(!db.is_queued_run(&queued.run_id).unwrap());
+    // A lost response retries the same identity, without creating another Run.
+    let retry = db.send_input_now(&queued.input_id, before.revision, &original.run_id).unwrap();
+    assert!(!retry.accepted);
+    assert_eq!(retry.read.load().unwrap(), moved);
+    assert_eq!(db.enqueue_input(&command).unwrap(), queued);
+    let run = db.run(&original.run_id).unwrap();
+    assert!(db.transition_run(&run.id, epoch, run.revision, RunState::Completed).is_err());
+    db.consume_inputs(&original.run_id, epoch, Some(&original.input_id)).unwrap();
+    let delivered = db.queued_input(&queued.input_id).unwrap();
+    assert_eq!(delivered.state, InputState::Delivered);
+    assert_eq!(delivered.content, before.content);
+    let retry = db.send_input_now(&queued.input_id, before.revision, &original.run_id).unwrap();
+    assert!(!retry.accepted);
+    assert_eq!(retry.read.load().unwrap(), delivered);
+    let remaining = db.enqueue_input(&EnqueueInput {
+        key: "remaining-queued-message".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::NextRun, input: json!({"text":"Keep this for later"}), configuration: None,
+    }).unwrap();
+    let run = db.run(&original.run_id).unwrap();
+    db.transition_run(&run.id, epoch, run.revision, RunState::Completed).unwrap();
+    // The unrelated queued successor still starts normally. If automatic
+    // delivery wins a send-now click, observe it without interrupting it again.
+    let remaining_input = db.queued_input(&remaining.input_id).unwrap();
+    assert_eq!(remaining_input.state, InputState::Delivered);
+    let delivered_race = db.send_input_now(&remaining.input_id, 1, &original.run_id).unwrap();
+    assert!(!delivered_race.accepted);
+    assert_eq!(delivered_race.read.load().unwrap(), remaining_input);
+    assert_eq!(db.history("main").unwrap().iter().filter(|item| item.id == queued.input_id).count(), 1);
+    assert_eq!(db.run(&queued.run_id).unwrap().state, RunState::Cancelled);
+    drop(db);
+    let db = f.open();
+    assert_eq!(db.queued_input(&queued.input_id).unwrap().content, before.content);
+}
+
+#[test]
+fn send_queued_input_now_checks_original_revision_and_current_task_before_moving() {
+    use crate::catalog::inputs::EnqueueInput;
+    let f = Fixture::new();
+    let mut db = f.open();
+    let original = submit(&mut db);
+    let queued = db.enqueue_input(&EnqueueInput {
+        key: "send-now-races".into(), thread_id: "thread".into(), branch_id: "main".into(),
+        mode: InputMode::NextRun, input: json!({"text":"Original queued text"}), configuration: None,
+    }).unwrap();
+    let before = db.queued_input(&queued.input_id).unwrap();
+    assert!(matches!(db.send_input_now(&queued.input_id, 1, "another-task"), Err(RuntimeError::Conflict(_))));
+    assert_eq!(db.queued_input(&queued.input_id).unwrap(), before);
+    assert_eq!(db.run(&queued.run_id).unwrap().state, RunState::Accepted);
+    db.edit_queued_input(&queued.input_id, 1, json!({"text":"Edited elsewhere"})).unwrap();
+    assert!(matches!(db.send_input_now(&queued.input_id, 1, &original.run_id), Err(RuntimeError::Conflict(_))));
+    let edited = db.queued_input(&queued.input_id).unwrap();
+    assert_eq!(edited.mode, InputMode::NextRun);
+    assert_eq!(edited.content["text"], "Edited elsewhere");
+    db.cancel_queued_input(&queued.input_id, edited.revision).unwrap();
+    assert!(matches!(db.send_input_now(&queued.input_id, edited.revision, &original.run_id), Err(RuntimeError::Conflict(_))));
+}
+
+#[test]
 fn content_backed_request_stays_compact_across_phases_and_reopens_exactly() {
     let f = Fixture::new();
     let mut db = f.open();

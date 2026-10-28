@@ -83,6 +83,7 @@ pub(crate) const KERNEL_CONTROL_METHODS: &[&str] = &[
     "runtime.process.access",
     "process.interaction.inspect",
     "runtime.input.cancel",
+    "runtime.input.sendNow",
     "runtime.input.inspect",
     "runtime.admission.inspect",
     "process.inspect",
@@ -193,6 +194,7 @@ pub(crate) const KERNEL_INPUT_ORDER_PARAMS: &[(&str, &str)] = &[
     ("runtime.input.submit", "branchId"),
     ("runtime.input.enqueue", "branchId"),
     ("runtime.input.edit", "inputId"),
+    ("runtime.input.sendNow", "inputId"),
 ];
 pub(crate) const KERNEL_RUNTIME_DATA_METHODS: &[&str] = &[
     "runtime.context.observations.admit",
@@ -1219,6 +1221,14 @@ pub(crate) struct InputEditParams {
     pub(crate) input_id: String,
     pub(crate) expected_revision: i64,
     pub(crate) content: Value,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InputSendNowParams {
+    pub(crate) input_id: String,
+    pub(crate) expected_revision: i64,
+    pub(crate) expected_run_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -4296,6 +4306,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
                 .map_err(|error| error.to_string())
         }
         "runtime.input.edit" => serde_json::from_value::<InputEditParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
+        "runtime.input.sendNow" => serde_json::from_value::<InputSendNowParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
         "runtime.input.cancel" => serde_json::from_value::<InputCancelParams>(params.clone())
