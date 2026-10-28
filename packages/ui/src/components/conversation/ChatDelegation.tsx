@@ -5,6 +5,7 @@ import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
+import { useThreadStore } from '@/stores/useThreadStore';
 import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer';
 import { useOptionalConversationPresentation } from './ConversationContext';
 import { ToolDisclosure, ToolStatus } from './ToolDisclosure';
@@ -36,6 +37,9 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   const exact = original ?? (loaded?.id === owner ? loaded.execution : undefined);
   const child = execution?.child?.task;
   const threadId = exact?.child_thread_id ?? child?.child_thread_id ?? toolText(receipt.threadId);
+  // Settled children leave the current-task snapshot. Their persisted avatar is
+  // still in the same Thread directory the sidebar uses, including after remount.
+  const savedAvatar = useThreadStore(state => state.threads.find(thread => thread.thread_id === threadId)?.avatar);
   const branchId = exact?.child_branch_id ?? child?.child_branch_id ?? toolText(receipt.branchId);
   const name = exact?.name || child?.name || toolText(receipt.name) || toolText(args.name) || t('chat.tools.delegatedTask');
   const task = toolText(args.task);
@@ -69,7 +73,7 @@ export function ChatDelegation({ call, execution, result, status, generating, cw
   if (external) return <ExternalDelegationMessage child={external} />;
   return <ToolDisclosure id={'tool:' + call.id} className="tool-delegation group" onExpanded={setExpanded}>
     <summary className="tool-member-line" data-arrive={arrives || undefined}>
-      {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar} size={23} />
+      {threadId ? <AgentAvatar identity={threadId} avatar={child?.avatar ?? exact?.avatar ?? execution?.agent?.avatar ?? savedAvatar} size={23} />
         : <Icon name="ai-agent" className="size-4 text-muted-foreground" />}
       <span className="typography-meta font-medium truncate">{name}</span>
       <span className="tool-member-purpose typography-micro text-muted-foreground" title={task}>{task}</span>
