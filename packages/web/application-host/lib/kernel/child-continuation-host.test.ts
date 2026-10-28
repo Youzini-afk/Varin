@@ -185,9 +185,12 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       pinId: 'child-source-pin:execution:new', revision: 0 }), expect.any(AbortSignal));
     expect(scoped.readBranch.mock.calls.every(([input]) => input.includeEntries === false)).toBe(true);
     expect(runtime.readyChildSource).toHaveBeenCalledOnce();
+    const executionWorkspaceId = runtime.readyChildSource.mock.calls[0]![0].source.executionWorkspaceId;
+    expect(executionWorkspaceId).toEqual(expect.any(String));
+    expect(executionWorkspaceId).not.toBe('workspace');
     expect(runtime.readyChildSource).toHaveBeenCalledWith({ executionId: child.execution_id,
-      source: { mode: 'materialized', liveRoot: null, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId: 'workspace', branchId: 'child-source:execution:new', revision: 0 },
-      pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, branch_id: 'child-source:execution:new', revision: 0 } },
+      source: { mode: 'native_workspace', liveRoot: null, resourceOwner: { kind: 'local' as const }, workspaceId: 'workspace', executionWorkspaceId, branchId: 'child-source:execution:new', revision: null },
+      pin: { pin_id: 'child-source-pin:execution:new', root: 'fixed-result-root', source: { ...source, execution_workspace_id: executionWorkspaceId, branch_id: 'child-source:execution:new', revision: 0 } },
       provenance: child.source_basis!.provenance }, expect.any(AbortSignal));
     expect(runtime.prepareChild).toHaveBeenCalledWith(expect.objectContaining({ executionId: child.execution_id,
       expectedContextCheckpoint: checkpoint.id, context, ...(kind === 'user_continuation' ? { inputPreparation: { expectedContextCheckpoint: null, skill } } : {}) }), expect.any(AbortSignal));
@@ -195,7 +198,7 @@ it.each(['user_continuation', 'message_request', 'followup', 'calendar'] as cons
       expect(prepareSkillInput).not.toHaveBeenCalled();
       expect(runtime.prepareChild.mock.calls[0]![0]).not.toHaveProperty('inputPreparation');
     }
-    expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ branchId: 'child-source:execution:new', revision: 0 }), expect.any(AbortSignal));
+    expect(prepareContext.forSource).toHaveBeenCalledWith(checkpoint, expect.objectContaining({ mode: 'native_workspace', branchId: 'child-source:execution:new', executionWorkspaceId }), expect.any(AbortSignal));
     expect(continueRun).toHaveBeenCalledWith('new-run', expect.any(AbortSignal));
     expect(kernel.claimChildSource).not.toHaveBeenCalled(); expect(kernel.releaseChildToolHandoff).not.toHaveBeenCalled();
     expect(runtime.releaseMcpResourceSource).not.toHaveBeenCalled();

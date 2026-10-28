@@ -1000,7 +1000,11 @@ mod tests {
             let work = base.join("work");
             fs::create_dir_all(&work).unwrap();
             let work = fs::canonicalize(work).unwrap();
-            let storage = Storage::open(&base.join("store"), "host").unwrap();
+            // Match the runtime handshake: Storage receives a canonical root.
+            // Windows temp paths can contain short names or junction spellings.
+            let store = base.join("store");
+            fs::create_dir_all(&store).unwrap();
+            let storage = Storage::open(&fs::canonicalize(store).unwrap(), "host").unwrap();
             let mut f = Self {
                 base,
                 work,

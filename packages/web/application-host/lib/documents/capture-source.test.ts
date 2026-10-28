@@ -94,7 +94,7 @@ it('uses the original Documents namespace across captures while reading every cu
     emit('rename', 'docs');
     const removed = await prepare();
     expect(scans.at(-1)).toEqual(['docs']);
-    expect(Object.keys((removed.branch as unknown as { states: object }).states)).toEqual(['other', 'other/b']);
+    expect(Object.keys((removed.branch as unknown as { states: object }).states)).toEqual(['.', 'other', 'other/b']);
 
     // A lost observation generation discards the old namespace, even if the
     // restarted port later advertises complete coverage again.

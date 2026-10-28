@@ -85,7 +85,7 @@ it('deduplicates repeated launch clicks and does not override newer user navigat
   const api = fixture(); const input = params(); let resolve!: () => void;
   worktrees.check.mockImplementationOnce(() => new Promise<boolean>(done => { resolve = () => done(false); }));
   const first = useMultiRunStore.getState().createMultiRun(input); const second = useMultiRunStore.getState().createMultiRun(input);
-  expect(first).toBe(second); navigation.selectedIdentity = { runtime: 'agent', threadId: 'thread:user-choice', branchId: 'branch:user-choice' }; resolve();
+  expect(first).toBe(second); await vi.waitFor(() => expect(worktrees.check).toHaveBeenCalledOnce()); navigation.selectedIdentity = { runtime: 'agent', threadId: 'thread:user-choice', branchId: 'branch:user-choice' }; resolve();
   await first; expect(api.create).toHaveBeenCalledTimes(2); expect(navigation.selectThread).not.toHaveBeenCalled();
 });
 it('stops future launches without removing already created threads or worktrees', async () => {

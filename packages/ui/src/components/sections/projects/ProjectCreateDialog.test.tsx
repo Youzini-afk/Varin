@@ -1,10 +1,11 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
+import type { ProjectEntry } from '@varin/application-client';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 const fixture = vi.hoisted(() => ({
   host: 1, listeners: new Set<() => void>(), resolve: vi.fn(), fetch: vi.fn(), add: vi.fn(), start: vi.fn(), close: vi.fn(),
-  decisions: new Map<string, boolean>(), revision: 1, calls: [] as string[],
+  projects: [] as ProjectEntry[], decisions: new Map<string, boolean>(), revision: 1, calls: [] as string[],
 }));
 vi.mock('@varin/application-client', async original => ({
   ...await original<typeof import('@varin/application-client')>(),
@@ -13,7 +14,10 @@ vi.mock('@varin/application-client', async original => ({
 }));
 vi.mock('@/lib/varinEvents', () => ({ subscribeVarinEvents: () => () => {} }));
 vi.mock('@/hooks/useRuntimeAPIs', () => ({ useRuntimeAPIs: () => ({ documents: { resolveWorkspace: fixture.resolve } }) }));
-vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: (select: (store: unknown) => unknown) => select({ addProject: fixture.add }) }));
+vi.mock('@/stores/useProjectsStore', () => ({ useProjectsStore: Object.assign(
+  (select: (store: unknown) => unknown) => select({ addProject: fixture.add }),
+  { getState: () => ({ projects: fixture.projects }) },
+) }));
 vi.mock('@/lib/agent-runtime/threadNavigation', () => ({ startThreadFromNavigation: fixture.start }));
 vi.mock('@/lib/i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/icon/Icon', () => ({ Icon: () => null }));
@@ -33,7 +37,7 @@ let root: Root, container: HTMLElement;
 const read = (workspaceId: string) => ({ workspaceId, path: '/canonical' + workspaceId.slice(3),
   decision: fixture.decisions.get(workspaceId) ?? null, directDecision: fixture.decisions.get(workspaceId) ?? null, revision: String(fixture.revision) });
 beforeEach(async () => {
-  fixture.host++; fixture.revision = 1; fixture.decisions.clear(); fixture.calls = [];
+  fixture.projects = []; fixture.host++; fixture.revision = 1; fixture.decisions.clear(); fixture.calls = [];
   vi.clearAllMocks();
   fixture.resolve.mockImplementation(async ({ path }) => ({ workspaceId: 'ws:' + path }));
   fixture.fetch.mockImplementation(async (url: string, options: RequestInit) => {
@@ -45,7 +49,10 @@ beforeEach(async () => {
     }
     return Response.json(read(body.workspaceId));
   });
-  fixture.add.mockImplementation(async (path, options) => { fixture.calls.push('create'); return { id: 'project:one', path, ...options }; });
+  fixture.add.mockImplementation(async (path, options) => {
+    fixture.calls.push('create');
+    const project = { id: 'project:one', path, ...options }; fixture.projects.push(project); return project;
+  });
   fixture.start.mockImplementation(async () => { fixture.calls.push('open'); return 'draft'; });
   const { window, document } = parseHTML('<html><body></body></html>');
   vi.stubGlobal('window', window); vi.stubGlobal('document', document); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);

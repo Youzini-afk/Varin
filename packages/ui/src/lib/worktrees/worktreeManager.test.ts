@@ -66,15 +66,9 @@ const {
   worktreeMapsEqual,
 } = await import('./worktreeManager');
 
-const waitForListCallCount = async (count: number): Promise<void> => {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    if (listCalls.length >= count) {
-      return;
-    }
-    await Promise.resolve();
-  }
-  throw new Error(`Expected ${count} worktree list calls, got ${listCalls.length}`);
-};
+const waitForListCallCount = (count: number) => vi.waitFor(() => {
+  expect(listCalls).toHaveLength(count);
+});
 
 describe('worktreeManager list invalidation', () => {
   beforeEach(() => {

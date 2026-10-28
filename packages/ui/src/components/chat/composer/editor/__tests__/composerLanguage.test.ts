@@ -17,52 +17,21 @@ const context = (overrides: Partial<ComposerLanguageContext> = {}): ComposerLang
 const stateWith = (doc: string, ctx = context()) =>
     EditorState.create({ doc, extensions: composerLanguage(ctx) });
 
-/** Every decorated stretch as [text, class]. */
-const decorations = (state: EditorState) => {
-    const found: Array<[string, string]> = [];
+/** Read the installed editor decorations, without binding tests to CSS classes. */
+const decoratedText = (state: EditorState) => {
+    const found: string[] = [];
     const set = state.facet(EditorView.decorations)
         .map((source) => (typeof source === 'function' ? null : source))
         .find(Boolean);
     if (!set) return found;
     const iterator = set.iter();
     while (iterator.value) {
-        const spec = iterator.value.spec as { class?: string };
-        found.push([state.doc.sliceString(iterator.from, iterator.to), spec.class ?? '']);
+        found.push(state.doc.sliceString(iterator.from, iterator.to));
         iterator.next();
     }
     return found;
 };
 
-const decoratedText = (state: EditorState) => decorations(state).map(([text]) => text);
-
-describe('composerLanguage — initial decorations', () => {
-    test('decorates the references it knows about', () => {
-        expect(decoratedText(stateWith('ask @build to /review'))).toEqual(['@build', '/review']);
-    });
-
-    test('leaves unknown tokens undecorated', () => {
-        expect(decoratedText(stateWith('ask @stranger to /nothing'))).toEqual([]);
-    });
-
-    test('decorates markdown structure', () => {
-        expect(decoratedText(stateWith('# Title'))).toEqual(['#', 'Title']);
-    });
-
-    test('plain prose gets no decorations at all', () => {
-        expect(decoratedText(stateWith('just a sentence'))).toEqual([]);
-    });
-
-    test('an empty document is fine', () => {
-        expect(decoratedText(stateWith(''))).toEqual([]);
-    });
-
-    test('shell mode disables the language', () => {
-        expect(decoratedText(stateWith('@build /review', context({ inputMode: 'shell' }))))
-            .toEqual([]);
-    });
-
-
-});
 
 describe('composerLanguage — updates', () => {
     test('editing the document retokenizes', () => {
@@ -75,6 +44,7 @@ describe('composerLanguage — updates', () => {
 
     test('deleting a reference removes its decoration', () => {
         const state = stateWith('@build hi');
+        expect(decoratedText(state)).toEqual(['@build']);
         const next = state.update({ changes: { from: 0, to: 7 } }).state;
         expect(decoratedText(next)).toEqual([]);
     });
@@ -88,16 +58,8 @@ describe('composerLanguage — updates', () => {
         }).state;
         expect(decoratedText(next)).toEqual(['@deploy']);
         expect(next.doc.toString()).toBe('ask @deploy');
-    });
-
-    test('a transaction that changes neither keeps the same decoration set', () => {
-        const state = stateWith('@build');
-        const next = state.update({ selection: { anchor: 0 } }).state;
-        expect(decoratedText(next)).toEqual(['@build']);
-    });
-
-    test('the document stays the plain string that gets sent', () => {
-        const state = stateWith('# Title\n@build /review #sig');
-        expect(state.doc.toString()).toBe('# Title\n@build /review #sig');
+        const disabled = next.update({ effects: setLanguageContext.of(context({ inputMode: 'shell' })) }).state;
+        expect(decoratedText(disabled)).toEqual([]);
+        expect(disabled.doc.toString()).toBe(next.doc.toString());
     });
 });

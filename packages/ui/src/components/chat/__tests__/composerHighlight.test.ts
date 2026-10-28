@@ -1,352 +1,60 @@
-import { describe, expect, test } from 'vitest';
+import { expect, test } from 'vitest';
+import { resolveHighlightSegments, tokenizeMarkdown, type HighlightRange } from '../composerHighlight';
 
-import {
-    isFenceClose,
-    matchFenceOpen,
-    mentionRangesToHighlightRanges,
-    resolveHighlightSegments,
-    tokenizeMarkdown,
-    type HighlightRange,
-} from '../composerHighlight';
+const spans = (text: string) => tokenizeMarkdown(text).map(range => [text.slice(range.start, range.end), range.style]);
 
-// The shared grammar and range resolver feed the live CodeMirror composer.
-
-/** Compact view of a range: the exact substring it covers, plus its style. */
-const spans = (text: string, ranges: HighlightRange[]) =>
-    ranges.map((range) => [text.slice(range.start, range.end), range.style] as const);
-
-const tokenize = (text: string) => spans(text, tokenizeMarkdown(text));
-
-describe('tokenizeMarkdown — block constructs', () => {
-    test('headings split into marker and content', () => {
-        expect(tokenize('## Title')).toEqual([
-            ['##', 'marker'],
-            ['Title', 'heading'],
-        ]);
-    });
-
-    test('heading requires a space after the hashes', () => {
-        expect(tokenize('##Title')).toEqual([]);
-    });
-
-    test('seven hashes is not a heading', () => {
-        expect(tokenize('####### too deep')).toEqual([]);
-    });
-
-    test('blockquote marker is dimmed and content styled', () => {
-        expect(tokenize('> quoted')).toEqual([
-            ['>', 'marker'],
-            ['quoted', 'blockquote'],
-        ]);
-    });
-
-    test('nested blockquote markers collapse into one marker range', () => {
-        expect(tokenize('>> deep')).toEqual([
-            ['>>', 'marker'],
-            ['deep', 'blockquote'],
-        ]);
-    });
-
-    test('bullet and ordered list markers', () => {
-        expect(tokenize('- one')).toEqual([['-', 'listMarker']]);
-        expect(tokenize('* one')).toEqual([['*', 'listMarker']]);
-        expect(tokenize('+ one')).toEqual([['+', 'listMarker']]);
-        expect(tokenize('1. one')).toEqual([['1.', 'listMarker']]);
-        expect(tokenize('2) two')).toEqual([['2)', 'listMarker']]);
-    });
-
-    test('indented list markers keep their offset', () => {
-        expect(tokenize('  - nested')).toEqual([['-', 'listMarker']]);
-    });
-
-    test('a list marker needs trailing whitespace', () => {
-        expect(tokenize('-nodash')).toEqual([]);
-    });
+// Grammar examples live at the tokenizer boundary. Scanner helper return shapes,
+// marker enumeration and CSS class spellings are not independent contracts.
+test.each([
+    ['# Title\n> quoted\n- item', [['#', 'marker'], ['Title', 'heading'], ['>', 'marker'], ['quoted', 'blockquote'], ['-', 'listMarker']]],
+    ['run ``a ` b`` now', [['``a ` b``', 'code']]],
+    ['[docs](https://example.test)', [['[', 'marker'], ['docs', 'link'], ['](', 'marker'], ['https://example.test', 'linkUrl'], [')', 'marker']]],
+    ['***both***', [['***', 'marker'], ['both', 'strong'], ['both', 'emphasis'], ['***', 'marker']]],
+    ['_slanted_ __bold__', [['_', 'marker'], ['slanted', 'emphasis'], ['_', 'marker'], ['__', 'marker'], ['bold', 'strong'], ['__', 'marker']]],
+    ['!!! check `this`', [['!!!', 'marker'], ['check `this`', 'attention'], ['`this`', 'code']]],
+])('highlights source text without hiding delimiters: %s', (text, expected) => {
+    expect(spans(text as string)).toEqual(expected);
 });
 
-describe('tokenizeMarkdown — fenced code', () => {
-    test('every line of a fence is codeFence, including the delimiters', () => {
-        const text = '```ts\nconst a = 1;\n```';
-        expect(tokenize(text)).toEqual([
-            ['```ts', 'codeFence'],
-            ['const a = 1;', 'codeFence'],
-            ['```', 'codeFence'],
-        ]);
-    });
+test.each([
+    '', '##Title', '####### too deep', '-nodash', '2 * 3 * 4', 'foo_bar_baz',
+    'trailing * ', '*never closed', '*open\nclose*', 'a ` b', '!!!important', 'that is wild!!!',
+])('leaves prose and incomplete syntax alone: %s', text => expect(spans(text)).toEqual([]));
 
-    test('tilde fences work the same way', () => {
-        expect(tokenize('~~~\nbody\n~~~')).toEqual([
-            ['~~~', 'codeFence'],
-            ['body', 'codeFence'],
-            ['~~~', 'codeFence'],
-        ]);
-    });
-
-    test('markdown inside a fence is not tokenized', () => {
-        expect(tokenize('```\n# not a heading\n- not a list\n```')).toEqual([
-            ['```', 'codeFence'],
-            ['# not a heading', 'codeFence'],
-            ['- not a list', 'codeFence'],
-            ['```', 'codeFence'],
-        ]);
-    });
-
-    test('an unterminated fence swallows the rest of the text', () => {
-        expect(tokenize('```\nstill open\n# nope')).toEqual([
-            ['```', 'codeFence'],
-            ['still open', 'codeFence'],
-            ['# nope', 'codeFence'],
-        ]);
-    });
-
-    test('an info-string line does not close its own fence', () => {
-        expect(isFenceClose('```js', '```')).toBe(false);
-        expect(isFenceClose('```', '```')).toBe(true);
-        expect(isFenceClose('  ```  ', '```')).toBe(true);
-    });
-
-    test('a closing fence may be longer than the opening run', () => {
-        expect(isFenceClose('````', '```')).toBe(true);
-        expect(isFenceClose('``', '```')).toBe(false);
-    });
-
-    test('matchFenceOpen reports marker and language', () => {
-        expect(matchFenceOpen('```ts')).toEqual({ marker: '```', lang: 'ts' });
-        expect(matchFenceOpen('~~~~')).toEqual({ marker: '~~~~', lang: '' });
-        expect(matchFenceOpen('``')).toBeNull();
-    });
+test.each(['```', '~~~'])('keeps fenced markdown literal until a matching close: %s', fence => {
+    const text = `${fence}\n# not a heading\n- not a list\n${fence}\n# Heading`;
+    expect(spans(text)).toEqual([
+        [fence, 'codeFence'], ['# not a heading', 'codeFence'], ['- not a list', 'codeFence'],
+        [fence, 'codeFence'], ['#', 'marker'], ['Heading', 'heading'],
+    ]);
+    expect(spans(`${fence}\n# still open`)).toEqual([[fence, 'codeFence'], ['# still open', 'codeFence']]);
 });
 
-describe('tokenizeMarkdown — inline spans', () => {
-    test('inline code covers the backticks as well as the content', () => {
-        expect(tokenize('run `bun test` now')).toEqual([['`bun test`', 'code']]);
-    });
-
-    test('a double-backtick run is closed by a matching run', () => {
-        expect(tokenize('``a ` b``')).toEqual([['``a ` b``', 'code']]);
-    });
-
-    test('an unclosed backtick is left as plain text', () => {
-        expect(tokenize('a ` b')).toEqual([]);
-    });
-
-    test('links split into markers, text and url', () => {
-        expect(tokenize('[docs](https://x.dev)')).toEqual([
-            ['[', 'marker'],
-            ['docs', 'link'],
-            ['](', 'marker'],
-            ['https://x.dev', 'linkUrl'],
-            [')', 'marker'],
-        ]);
-    });
-
-    test('an empty link text emits no link range', () => {
-        expect(tokenize('[](url)')).toEqual([
-            ['[', 'marker'],
-            ['](', 'marker'],
-            ['url', 'linkUrl'],
-            [')', 'marker'],
-        ]);
-    });
-
-    test('inline spans are scanned inside headings, quotes and list items', () => {
-        expect(tokenize('# see `code`')).toEqual([
-            ['#', 'marker'],
-            ['see `code`', 'heading'],
-            ['`code`', 'code'],
-        ]);
-        expect(tokenize('> see `code`')).toEqual([
-            ['>', 'marker'],
-            ['see `code`', 'blockquote'],
-            ['`code`', 'code'],
-        ]);
-        expect(tokenize('- see `code`')).toEqual([
-            ['-', 'listMarker'],
-            ['`code`', 'code'],
-        ]);
-    });
-
-    test('a bare ~path is not markdown — the language layer owns it', () => {
-        expect(tokenize('~/repos/ocb/README.md')).toEqual([]);
-    });
+test('a fence info string cannot close a block, but a longer matching fence can', () => {
+    expect(spans('```\n```js\n# code\n````\n# heading')).toEqual([
+        ['```', 'codeFence'], ['```js', 'codeFence'], ['# code', 'codeFence'], ['````', 'codeFence'],
+        ['#', 'marker'], ['heading', 'heading'],
+    ]);
 });
 
-describe('tokenizeMarkdown — emphasis', () => {
-    test('double delimiters are strong, single are emphasis', () => {
-        expect(tokenize('**bold**')).toEqual([
-            ['**', 'marker'],
-            ['bold', 'strong'],
-            ['**', 'marker'],
-        ]);
-        expect(tokenize('*slanted*')).toEqual([
-            ['*', 'marker'],
-            ['slanted', 'emphasis'],
-            ['*', 'marker'],
-        ]);
-    });
-
-    test('triple delimiters are strong AND emphasis over the same span', () => {
-        expect(tokenize('***both***')).toEqual([
-            ['***', 'marker'],
-            ['both', 'strong'],
-            ['both', 'emphasis'],
-            ['***', 'marker'],
-        ]);
-        expect(tokenize('___both___').map(([, style]) => style))
-            .toEqual(['marker', 'strong', 'emphasis', 'marker']);
-    });
-
-    test('the underscore spellings work too', () => {
-        expect(tokenize('_slanted_').map(([, style]) => style))
-            .toEqual(['marker', 'emphasis', 'marker']);
-        expect(tokenize('__bold__').map(([, style]) => style))
-            .toEqual(['marker', 'strong', 'marker']);
-    });
-
-    test('arithmetic is not emphasis', () => {
-        expect(tokenize('2 * 3 * 4')).toEqual([]);
-        expect(tokenize('a * b')).toEqual([]);
-    });
-
-    test('an identifier is not emphasis', () => {
-        expect(tokenize('foo_bar_baz')).toEqual([]);
-        expect(tokenize('SCREAMING_SNAKE_CASE')).toEqual([]);
-    });
-
-    test('an underscore span still works between words', () => {
-        expect(tokenize('say _this_ loudly').map(([text]) => text))
-            .toEqual(['_', 'this', '_']);
-    });
-
-    test('a delimiter with nothing after it opens nothing', () => {
-        expect(tokenize('trailing * ')).toEqual([]);
-        expect(tokenize('ends with *')).toEqual([]);
-    });
-
-    test('an unclosed delimiter is left as plain text', () => {
-        expect(tokenize('*never closed')).toEqual([]);
-    });
-
-    test('emphasis does not span lines', () => {
-        expect(tokenize('*open\nclose*')).toEqual([]);
-    });
-
-    test('inline spans inside emphasis are still scanned', () => {
-        expect(tokenize('**see `code`**').map(([text, style]) => `${text}:${style}`))
-            .toContain('`code`:code');
-    });
-
-    test('a list marker is not read as emphasis', () => {
-        expect(tokenize('* item')).toEqual([['*', 'listMarker']]);
-    });
-
-    test('emphasis inside a heading keeps both', () => {
-        const text = '# A **strong** title';
-        const styles = tokenize(text).map(([, style]) => style);
-        expect(styles).toContain('heading');
-        expect(styles).toContain('strong');
-    });
+test('preserves text and overlapping emphasis when resolving decorations', () => {
+    const text = '# A **strong** title\nsee `code`';
+    const ranges = tokenizeMarkdown(text);
+    expect(ranges.some(range => range.style === 'heading')).toBe(true);
+    expect(ranges.some(range => range.style === 'strong')).toBe(true);
+    const segments = resolveHighlightSegments(text, ranges);
+    expect(segments.map(segment => text.slice(segment.start, segment.end)).join('')).toBe(text);
+    const strong = segments.find(segment => text.slice(segment.start, segment.end) === 'strong')!;
+    const heading = resolveHighlightSegments('strong', [{ start: 0, end: 6, style: 'heading' }])[0]!;
+    expect(strong.className).toContain(heading.className);
+    expect(strong.className).not.toBe(heading.className);
 });
 
-describe('tokenizeMarkdown — attention', () => {
-    test('a !!! line marks its content', () => {
-        expect(tokenize('!!! important')).toEqual([
-            ['!!!', 'marker'],
-            ['important', 'attention'],
-        ]);
-    });
-
-    test('it needs a space after the marks', () => {
-        expect(tokenize('!!!important')).toEqual([]);
-    });
-
-    test('an emphatic sentence is not an attention line', () => {
-        expect(tokenize('that is wild!!!')).toEqual([]);
-        expect(tokenize('!! close')).toEqual([]);
-    });
-
-    test('inline spans inside an attention line are scanned', () => {
-        expect(tokenize('!!! check `this`').map(([, style]) => style))
-            .toContain('code');
-    });
-});
-
-describe('tokenizeMarkdown — offsets across lines', () => {
-    test('ranges are absolute offsets into the whole text', () => {
-        const text = 'intro\n# Head\n- item';
-        const ranges = tokenizeMarkdown(text);
-        for (const range of ranges) {
-            expect(text.slice(range.start, range.end).length).toBe(range.end - range.start);
-        }
-        expect(spans(text, ranges)).toEqual([
-            ['#', 'marker'],
-            ['Head', 'heading'],
-            ['-', 'listMarker'],
-        ]);
-    });
-
-    test('empty input yields no ranges', () => {
-        expect(tokenizeMarkdown('')).toEqual([]);
-    });
-});
-
-describe('mentionRangesToHighlightRanges', () => {
-    test('file and agent mentions map to their own styles', () => {
-        expect(mentionRangesToHighlightRanges([
-            { start: 0, end: 5, kind: 'file' },
-            { start: 6, end: 9, kind: 'agent' },
-        ])).toEqual([
-            { start: 0, end: 5, style: 'mentionFile' },
-            { start: 6, end: 9, style: 'mentionAgent' },
-        ]);
-    });
-});
-
-describe('resolveHighlightSegments', () => {
-    test('segments tile the whole text without gaps or overlap', () => {
-        const text = '# Title\nsee `code` and more';
-        const segments = resolveHighlightSegments(text, tokenizeMarkdown(text));
-        expect(segments[0].start).toBe(0);
-        expect(segments[segments.length - 1].end).toBe(text.length);
-        for (let i = 1; i < segments.length; i += 1) {
-            expect(segments[i].start).toBe(segments[i - 1].end);
-        }
-    });
-
-    test('no text and no ranges resolve to nothing', () => {
-        expect(resolveHighlightSegments('', [{ start: 0, end: 1, style: 'code' }])).toEqual([]);
-        expect(resolveHighlightSegments('abc', [])).toEqual([]);
-    });
-
-    test('adjacent same-class stretches are merged into one segment', () => {
-        const segments = resolveHighlightSegments('abcdef', [
-            { start: 0, end: 3, style: 'code' },
-            { start: 3, end: 6, style: 'code' },
-        ]);
-        expect(segments).toHaveLength(1);
-        expect(segments[0].start).toBe(0);
-        expect(segments[0].end).toBe(6);
-    });
-
-    test('preserves delimiters and reference spans when ranges overlap', () => {
-        const text = '`@a/b.ts`';
-        const segments = resolveHighlightSegments(text, [
-            { start: 0, end: text.length, style: 'code' },
-            { start: 1, end: text.length - 1, style: 'mentionFile' },
-        ]);
-        expect(segments.map(segment => text.slice(segment.start, segment.end))).toEqual(['`', '@a/b.ts', '`']);
-    });
-
-    test('resolves tied ranges in input order and honors explicit priority', () => {
-        const first: HighlightRange = { start: 0, end: 4, style: 'code', className: 'first' };
-        const second: HighlightRange = { ...first, className: 'second' };
-        expect(resolveHighlightSegments('abcd', [first, second])).toEqual([{ start: 0, end: 4, className: 'first' }]);
-        expect(resolveHighlightSegments('abcd', [first, { ...second, priority: 999 }])).toEqual([{ start: 0, end: 4, className: 'second' }]);
-    });
-
-    test('ignores zero-width ranges without dropping input text', () => {
-        const text = 'abcd';
-        const segments = resolveHighlightSegments(text, [{ start: 2, end: 2, style: 'code' }]);
-        expect(segments.map(segment => text.slice(segment.start, segment.end))).toEqual([text]);
-    });
+test('resolves explicit priority without losing text around empty or overlapping ranges', () => {
+    const first: HighlightRange = { start: 1, end: 4, style: 'code', className: 'first' };
+    const ranges: HighlightRange[] = [first, { ...first, className: 'second', priority: 999 }, { start: 2, end: 2, style: 'code' }];
+    const segments = resolveHighlightSegments('abcdef', ranges);
+    expect(segments.map(segment => 'abcdef'.slice(segment.start, segment.end)).join('')).toBe('abcdef');
+    expect(segments.find(segment => segment.start === 1)?.className).toBe('second');
+    expect(resolveHighlightSegments('', ranges)).toEqual([]);
 });

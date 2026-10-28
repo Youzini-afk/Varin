@@ -1,7 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { createAuthoredPanelConsumer } from './authored-surface-consumer.test-support';
+import { createAuthoredPanelConsumer, createAuthoredPanelTestContainer as createContainer } from './authored-surface-consumer.test-support';
 import { SurfaceExtensionRuntime } from '../../../../extension-surface/src/index';
 import type { VarinExtensionCatalogSnapshot, VarinExtensionHostStateSnapshot, VarinExtensionManifest, VarinSurfaceServiceLeaseRequest } from '@varin/extension-contract';
 import type { JsonObject } from '@varin/extension-contract';
@@ -11,46 +11,6 @@ import {
   getWorkbenchCompositionInspectorSnapshot,
   type WorkbenchCompositionHostOptions,
 } from './workbench-composition-host';
-
-type StubElement = HTMLElement & {
-  children: StubElement[];
-  __setParent?(next: StubElement): void;
-};
-
-const createDocumentStub = (): Document => {
-  const documentStub = {} as Document;
-  documentStub.createElement = (() => createContainer(documentStub)) as Document['createElement'];
-  return documentStub;
-};
-
-const createContainer = (ownerDocument = createDocumentStub()): StubElement => {
-  const children: StubElement[] = [];
-  let parent: StubElement | null = null;
-  const element = {
-    dataset: {},
-    className: '',
-    textContent: '',
-    ownerDocument,
-    style: {},
-    addEventListener() {},
-    removeEventListener() {},
-    get children() { return children; },
-    appendChild(child: StubElement) {
-      child.remove();
-      children.push(child);
-      child.__setParent?.(element as StubElement);
-      return child;
-    },
-    remove() {
-      if (!parent) return;
-      const index = parent.children.indexOf(element as StubElement);
-      if (index >= 0) parent.children.splice(index, 1);
-      parent = null;
-    },
-    __setParent(next: StubElement) { parent = next; },
-  } as unknown as StubElement & { __setParent(next: StubElement): void };
-  return element;
-};
 
 const childOwner = (generation = 1) => ({
   desiredRevision: generation,
@@ -359,7 +319,7 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     expect(originalLeases.map((lease) => lease.request.owner.entrypointId).sort()).toEqual([`${manifest.id}.manifest`, 'panel']);
     expect(container.children).toHaveLength(1);
     const oldMount = container.children[0]!;
-    const oldPanel = oldMount.children[0]!;
+    const oldPanel = oldMount.children[0]! as HTMLElement;
     expect(oldPanel.children[1]?.textContent).toBe('Agent-authored text counter · 1.0.0');
     expect(styleCount()).toBe(1);
     catalog = { ...catalog, revision: catalog.revision + 1, extensions: [{ ...catalog.extensions[0]!, candidate: {
@@ -377,7 +337,7 @@ test('a generated ordinary module follows the real loader watch and rolls back f
     await until(() => leasesFor(failedIntegrity).length === 2 && leasesFor(failedIntegrity).every((lease) => lease.signal.aborted));
     expect(originalLeases.every((lease) => !lease.signal.aborted)).toBe(true);
     expect(closedServiceLeases.sort()).toEqual(leasesFor(failedIntegrity).map((lease) => leaseKey(lease.request)).sort());
-    expect(container.children).toEqual([oldMount]);
+    expect([...container.children]).toEqual([oldMount]);
     expect(oldPanel.dataset.closed).toBeUndefined();
     expect(styleCount()).toBe(1);
     expect(revoked).toHaveLength(1);
@@ -449,11 +409,11 @@ test('an unrelated slot owner can publish while a candidate mount is pending, wi
   }));
   await started;
   await runtime.activate({ owner: owner('dev.example.fast', 1) }, (context) => context.contribute(descriptor('dev.example.fast'), mount('fast')));
-  expect(container.children.filter((child) => !child.hidden).map((child) => child.textContent).sort()).toEqual(['fast', 'old']);
+  expect([...container.children].filter((child) => !(child as HTMLElement).hidden).map((child) => child.textContent).sort()).toEqual(['fast', 'old']);
   expect(container.children).toContain(retained);
   expect(disposals).toEqual([]);
   release(); await slow;
-  expect(container.children.filter((child) => !child.hidden).map((child) => child.textContent).sort()).toEqual(['fast', 'new']);
+  expect([...container.children].filter((child) => !(child as HTMLElement).hidden).map((child) => child.textContent).sort()).toEqual(['fast', 'new']);
   expect(disposals).toEqual(['old']);
   await host.dispose();
   expect(disposals.sort()).toEqual(['fast', 'new', 'old']);

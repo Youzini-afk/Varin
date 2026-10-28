@@ -6,7 +6,7 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { createKernelClient, KernelClient } from "./kernel-client.js";
 import type { KernelGrantHandle } from "./kernel-client.js";
-import { KERNEL_PROTOCOL_VERSION, type ThreadSummary } from "./protocol.generated.js";
+import { KERNEL_PROTOCOL_VERSION, type KernelCreateEntry, type ThreadSummary } from "./protocol.generated.js";
 import { KernelStorageAdapter } from "./storage-adapter.js";
 import { KernelRecoveryContentStore, KernelRecoveryStore, createKernelRecoveryDirectFacade } from "./kernel-recovery-store.js";
 import { createWorkspaceRecoveryEngine } from "../recovery/journal-engine.js";
@@ -105,6 +105,16 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
   assert.deepEqual(initial.captureScopes, ["vendor/cache"]);
   assert.equal(Number.isSafeInteger(initial.createdAt), true);
   assert.equal(Number.isSafeInteger(initial.updatedAt), true);
+  // Knowing a hash does not authorize reusing content, even for an idempotent retry.
+  await assert.rejects(client.createBranch({
+    operationId: "op-create-unbound-retry",
+    branchId: "branch-test",
+    workspaceId: "workspace-test",
+    parentRef: "workspace-head:1",
+    draftBasePaths: ["src/file.txt"],
+    captureScopes: ["vendor/cache"],
+    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } }],
+  }), /not bound to an authorized source/i);
   const reopenedCreate = await client.createBranch({
     operationId: "op-create-semantic-retry",
     branchId: "branch-test",
@@ -112,7 +122,7 @@ test("real Rust kernel persists roots, CAS revisions, pins, and objects", { time
     parentRef: "workspace-head:1",
     draftBasePaths: ["src/file.txt"],
     captureScopes: ["vendor/cache"],
-    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 } }],
+    entries: [{ path: "src/file.txt", state: { kind: "regular-file", byteLength: first.byteLength, objectHash: first.hash, mode: 0o644 }, sourceRef: String(created.root) }],
   });
   assert.equal(reopenedCreate.created, false);
   assert.equal(reopenedCreate.root, created.root);
@@ -1128,8 +1138,9 @@ test("branch creation streams a normal input larger than one control frame", { t
   clients.push(host);
   await host.start();
   const client = host.scoped(await issueActor(host, "large-branch-actor", "large-branch-workspace"));
-  const target = "x".repeat(1_024);
-  const entries = Array.from({ length: 17_000 }, (_, index) => ({
+  // Exercise the frame boundary, not per-entry database throughput on CI disks.
+  const target = `${"segment/".repeat(384)}target`;
+  const entries = Array.from({ length: 5_600 }, (_, index) => ({
     path: `wide/${String(index).padStart(6, "0")}`,
     state: { kind: "symlink" as const, symlinkTarget: target },
   }));
@@ -1601,7 +1612,7 @@ test("kernel scans a fixed workspace view and materializes an immutable root wit
   } while (cursor !== undefined);
   assert.deepEqual(scanned, ["nested", "nested/b.txt", "plain.txt"]);
 
-  const entries: Array<{ path: string; state: Record<string, unknown>; ownerId?: string }> = [];
+  const entries: KernelCreateEntry[] = [];
   for (const relative of scanned) {
     const captured = await client.fileCapture({
       operationId: `r3-capture:${relative}`,
@@ -1610,9 +1621,12 @@ test("kernel scans a fixed workspace view and materializes an immutable root wit
       path: relative,
       store: true,
     });
+    // Capture uses RecoveryState; the branch wire carries native metadata separately.
+    const { native, ...state } = JSON.parse(String(captured.stateJson)) as KernelCreateEntry["state"] & { native?: unknown };
     entries.push({
       path: relative,
-      state: JSON.parse(String(captured.stateJson)),
+      state,
+      ...(native === undefined ? {} : { nativeJson: JSON.stringify(native) }),
       ...(typeof captured.ownerId === "string" ? { ownerId: captured.ownerId } : {}),
     });
   }
@@ -1622,9 +1636,14 @@ test("kernel scans a fixed workspace view and materializes an immutable root wit
     workspaceId: "r3-materialize-workspace",
     draftBasePaths: [],
     captureScopes: [],
-    entries: entries as never,
+    entries,
   });
   const immutableRoot = String(branch.root);
+  const capturedBranch = await client.readBranch({ branchId: "r3-branch", includeEntries: true });
+  assert.deepEqual(
+    capturedBranch.entries.map(({ path, nativeJson }) => [path, nativeJson ? JSON.parse(nativeJson) : undefined]),
+    entries.map(({ path, nativeJson }) => [path, nativeJson ? JSON.parse(nativeJson) : undefined]),
+  );
 
   const managedRegistration = await client.fileRootRegister({
     workspaceId: "r3-materialize-workspace",

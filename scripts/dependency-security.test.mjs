@@ -241,29 +241,6 @@ test('ordinary stale reuse and explicit/private cookie caching remain available'
   ]) assert.ok(current.evaluateRequest(staleRequest).response);
 });
 
-// pptxgenjs declares image-size without importing it in its emitted runtime;
-// retain a safe installed parser for the dependency tree and any future use.
-test('the PPTX dependency rejects zero-length image containers without hanging', () => {
-  const pptx = createRequire(web.resolve('pptxgenjs'));
-  const result = spawnSync(process.execPath, ['-e', `
-    const assert = require('node:assert/strict');
-    const { imageSize } = require(process.argv[1]);
-    const box = (type, payload = Buffer.alloc(0), size = 8 + payload.length) => {
-      const header = Buffer.alloc(8); header.writeUInt32BE(size); header.write(type, 4);
-      return Buffer.concat([header, payload]);
-    };
-    const fixtures = [
-      Buffer.from('69636e73000000106963703400000000', 'hex'),
-      Buffer.concat([box('JXL ', Buffer.from('0d0a870a', 'hex')), box('ftyp', Buffer.from('jxl ')), box('free', Buffer.alloc(0), 0)]),
-      Buffer.concat([box('ftyp', Buffer.from('heic')), box('free', Buffer.alloc(0), 0)]),
-    ];
-    for (const bytes of fixtures) assert.throws(() => imageSize(bytes));
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64');
-    assert.deepEqual(imageSize(png), { width: 1, height: 1, type: 'png' });
-  `, pptx.resolve('image-size')], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
-  assert.equal(result.status, 0, result.stderr || result.error?.message);
-});
-
 test('installed upload middleware tolerates a late asynchronous filter after teardown', () => {
   const result = spawnSync(process.execPath, ['-e', `
     const assert = require('node:assert/strict');

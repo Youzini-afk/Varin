@@ -78,5 +78,8 @@ Thread/branch composer.
 
 `ThreadConversation.behavior.test.tsx` covers native composition and delivery behavior;
 `ThreadMaterials.behavior.test.tsx` covers material integration. Use focused helper tests when changing
-this directory. Rendering, focus, IME, mobile keyboards and real clipboard/drop behavior still require
+this directory. Reference grammar is verified at `tokenizeComposer` / `tokenizeMentions`; markdown
+syntax at `tokenizeMarkdown`; the CodeMirror adapter tests only document/context transactions. Avoid
+repeating the same grammar examples for each scanner, mapper and editor layer. Autocomplete has its
+own caret/paste behavior. Rendering, focus, IME, mobile keyboards and real clipboard/drop behavior still require
 a browser or shell check; type-checking alone does not establish them.

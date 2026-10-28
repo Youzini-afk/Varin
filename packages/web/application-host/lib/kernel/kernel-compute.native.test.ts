@@ -314,7 +314,10 @@ it("R5 structure provider analyzes and chunks a disk file directly through nativ
 it("R5 refuses root replacement and does not report failed traversal as successful empty",async()=>{
   const f=await fixture();const outside=path.join(f.root,"outside");await fs.mkdir(outside);await fs.writeFile(path.join(outside,"secret.txt"),"needle");
   await fs.rename(f.workspace,f.workspace+"-saved");await fs.symlink(outside,f.workspace,process.platform==="win32"?"junction":"dir");
-  await assert.rejects(runKernelCompute(f.client,{...f.address,lane:"foreground",operation:"search",query:"needle"}),/root|identity|changed/i);
+  const result = await runKernelCompute(f.client,{...f.address,lane:"foreground",operation:"search",query:"needle"});
+  assert.equal(result.status, "failed");
+  assert.match(result.message ?? "", /root.*identity.*changed/i);
+  assert.deepEqual(result.records, []);
 });
 
 it('uses captured byte identities for live, pinned and opaque-revision structure inputs', async () => {

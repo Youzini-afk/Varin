@@ -26,6 +26,7 @@ import { createPlanOwner } from './plan-owner.js';
 import { PlanService } from './plan-service.js';
 import { registerCommonRequestMiddleware } from '../platform/core-routes.js';
 import { createKernelClient } from './kernel-client.js';
+import { createNativeWorkspaceOwner, type NativeWorkspaceOwner } from './native-workspaces.js';
 import { ExistingHostCredentialOwner } from './credential-owner.js';
 import { modelCredentialBindingIdentity } from './model-binding-lifetime.js';
 import { AgentRuntimeClient } from './agent-runtime-client.js';
@@ -163,8 +164,20 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
       if (selected.grantId.startsWith('source:') && selected.runId) grants.push({ runId: selected.runId, grantId: grant.grantId, pathScopes: selected.pathScopes });
       return grant;
     };
+    // Documents and the native owner share the production deferred ports.
+    // eslint-disable-next-line prefer-const -- Documents callbacks resolve the owner after construction.
+    let nativeWorkspaces: NativeWorkspaceOwner | undefined;
     const documents = createDocumentAuthority({ hostId: 'child-review-host', dataDir: path.join(root, 'documents'),
-      isAllowedRoot: async () => true, isTrusted: async () => trusted });
+      isAllowedRoot: async () => true, isTrusted: async () => trusted,
+      nativeWorkspaces: {
+        resolveId: (id, signal, reference) => nativeWorkspaces?.resolveId(id, signal, reference) ?? Promise.resolve(undefined),
+        resolvePath: (value, containing) => nativeWorkspaces?.resolvePath(value, containing) ?? Promise.resolve(undefined),
+        retainReference: (source, key) => nativeWorkspaces!.retainReference(source, key),
+        releaseReference: key => nativeWorkspaces!.releaseReference(key),
+      } });
+    nativeWorkspaces = createNativeWorkspaceOwner({ kernel, documents, projects: async () => [],
+      update: async () => { throw new Error('This fixture has no versioned project settings'); } });
+    kernel.nativeWorkspaces = nativeWorkspaces;
     const storage = new KernelStorageAdapter({ client: kernel, hostId: 'child-review-host', storageRoot: root,
       resolveWorkspaceRoot: async id => (await documents.inspectWorkspace(id)).root });
     let workingStates = createKernelWorkspaceWorkingStateAccess(storage);
@@ -184,7 +197,14 @@ async function fixture(reply: (request: RecordedRequest, index: number) => void 
     const liveSources = createLiveSourceOwner({ documents, kernel });
     const personalization = createAgentPersonalization({ client: kernel,
       context: async () => ({ bot: false, projectId }) });
-    const resources = resourceScopeFixture(root, workingStates, documents, liveSources.validate, (input, consume) => storage.withResourceRead(input, consume));
+    const resources = resourceScopeFixture(root, workingStates, documents, liveSources.validate,
+      (input, consume) => storage.withResourceRead(input, consume), async (source, signal) => {
+        const reference = { workspace_id: source.workspaceId, execution_workspace_id: source.executionWorkspaceId,
+          branch_id: source.branchId, ...(source.nativeScope ? { native_scope: source.nativeScope } : {}) };
+        const entry = await nativeWorkspaces!.open(reference, signal);
+        const actual = await nativeWorkspaces!.acquire(reference, entry.grant, signal);
+        return { hostId: actual.hostId, rootId: actual.rootId, canonicalRoot: actual.path };
+      });
     const originalContext = identifyFixtureContext(createThreadContext({ personalization, resources,
       projectForWorkspace: async () => projectId }));
     const prepareContext = options.context?.(originalContext) ?? originalContext;
@@ -287,7 +307,7 @@ send({method:'turn/completed',params:{threadId:'external-native-session',turn:{i
       external.startChildren(createExternalSourceOwner({ kernel, storage, capture: { documents, prepareResources: resources.prepareSourceCapture, inspectInventory: async () => ({ kind: 'directory' }) } }));
     }
     const profiles = createAgentProfilesAPI({ settings, contextAgentDefinition: signal => runtime.contextAgentDefinition(signal), capabilities: signal => runtime.childCapabilities(signal) });
-    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
+    const adapter = new ThreadAdapter(runtime, models, createThreadSourceAdmission({ documents, liveSources, nativeWorkspaces, withSourceRead: (input, consume) => storage.withResourceRead(input, consume), runtime }), (_runId, error) => { errors.push(error); }, createThreadSourcePreparer({ inspectInventory: async () => ({ kind: 'directory' }), sourceTools: mode => kernel.agentRuntimeRequest('runtime.source.tools', { mode }),  documents, workingStates, liveSources, nativeWorkspaces, prepareResources: resources.prepareSourceCapture }), prepareContext, plans, undefined, undefined,
       createChildProfilePreparer({ settings: async () => (await settings.read()).document, capabilities: signal => runtime.childCapabilities(signal), models, ...(external ? { externalAgents: () => external.settings() } : {}) }));
     const prepareSource = adapter.prepareSource.bind(adapter);
     adapter.prepareSource = async (...args) => {
@@ -399,7 +419,7 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
   const conversation = view.conversation;
   expect(conversation.sessionId).toBe('external-native-session');
   expect(await fs.readFile(path.join(conversation.cwd, 'external-result.txt'), 'utf8')).toBe('External harness wrote this');
-  if (workMode === 'shared') expect(conversation.cwd).toBe(f.workspace);
+  if (workMode === 'shared') expect(await fs.realpath(conversation.cwd)).toBe(await fs.realpath(f.workspace));
   else { expect(conversation.cwd).not.toBe(f.workspace); expect(await fs.readFile(path.join(f.workspace, 'external-result.txt'), 'utf8')).toBe('External harness wrote this'); }
   expect(await fs.readFile(path.join(conversation.cwd, 'parent-result.txt'), 'utf8')).toBe('Parent result for external peer');
   if (workMode === 'isolated_write') {

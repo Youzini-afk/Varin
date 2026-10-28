@@ -264,7 +264,7 @@ it('prepares mounts against candidate-owned context and preserves old mounts and
   }, () => { externalCommit = true; })).rejects.toThrow('new-mount-failed');
   expect(externalCommit).toBe(false);
   expect(getWorkbenchContextKey('dev.example.context.view')).toBe('old');
-  expect(container.children.filter((child) => !child.hidden)).toEqual([oldMount]);
+  expect([...container.children].filter((child) => !(child as HTMLElement).hidden)).toEqual([oldMount]);
   expect(events).toEqual(['old-mounted', 'new-mount-attempt']);
   expect(runtime.getSnapshot().actual[0]?.generation).toBe(1);
   expect(runtime.getSnapshot().actual[0]?.diagnostics[0]?.code).toBe('candidate_activation_failed');
@@ -289,7 +289,7 @@ it('withdraws mounts depending on a different owner context before retiring that
     context.context.set('ready', true);
     context.onDispose(() => { events.push('owner-resources-disposed'); });
   });
-  expect(container.children.filter((child) => !child.hidden)).toHaveLength(1);
+  expect([...container.children].filter((child) => !(child as HTMLElement).hidden)).toHaveLength(1);
   expect(events).toEqual(['dependent-mounted']);
   await runtime.deactivate(runtimeOwner('dev.example.context', 2));
   expect(getWorkbenchContextKey('dev.example.context.ready')).toBeUndefined();

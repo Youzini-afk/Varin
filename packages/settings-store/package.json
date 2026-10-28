@@ -17,6 +17,6 @@
     "type-check": "tsc --noEmit -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "lint": "eslint \"./src/**/*.ts\" --config ../../eslint.config.js",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
   }
 }

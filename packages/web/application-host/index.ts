@@ -993,6 +993,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
     : undefined;
   let observeKnowledgeDocumentMutation = (_event: DocumentMutationObservation): void => {};
   let observeThreadIntegrationParentChange = (_workspaceId: string, _resourceIds?: readonly string[]): void => {};
+  // eslint-disable-next-line prefer-const -- Deferred port: early document callbacks must observe undefined until wiring completes.
   let nativeWorkspaces:NativeWorkspaceOwner|undefined;
   let requestSourceMaintenance=()=>{};
   let releaseSourcePreparations=async(_threads:readonly string[])=>{};
@@ -1022,6 +1023,7 @@ async function main(options: StartWebUiServerOptions = {}): Promise<WebUiServerC
   kernelClient.nativeWorkspaces=nativeWorkspaces;
   registerNativeWorkspaceRoutes(app,nativeWorkspaces,uiAuthController.requireAuth);
   const workspaceRecoveryEngines = new Map<string, WorkspaceRecoveryEngine>();
+  // eslint-disable-next-line prefer-const -- Deferred port: early recovery callbacks must observe undefined until wiring completes.
   let recoveryFileTargetResolver:((target:import('@varin/extension-contract').RecoveryFileTarget)=>Promise<import('@varin/extension-contract').RecoveryFileTarget>)|undefined;
   let threadRecoveryReady = false;
   const managedRecoveryOwner: { current?: ManagedRecoveryPort } = {};

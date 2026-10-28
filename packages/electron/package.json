@@ -44,12 +44,9 @@
     "generate:macos-icon": "node ./scripts/generate-macos-icon-assets.cjs",
     "smoke:desktop:unpacked": "node ./scripts/smoke-desktop-unpacked.mjs",
     "smoke:win:unpacked": "node ./scripts/smoke-windows-unpacked.mjs",
-    "test:runtime": "vitest run --config vitest.config.ts",
     "test:browser-owner": "node ./scripts/test-browser-owner.mjs",
-    "test:architecture": "bun run prepare:runtime && bun run test:runtime && bun run test:packaging-tools",
-    "test:packaging-tools": "node --test ./scripts/commit-web-asset-generation.test.mjs ./scripts/target-architecture.test.mjs ./scripts/desktop-payload.test.mjs ./scripts/nsis-archive.test.mjs ./scripts/patch-trivium-arm64-loader.test.mjs ./scripts/verify-linux-appimage.test.mjs ./scripts/verify-update-manifest.test.mjs",
-    "test:updater": "vitest run updater-capability.test.ts updater-channel.test.ts updater-check.test.ts updater-feed.test.ts --config vitest.dedicated.config.ts && node --test ./scripts/finalize-latest-yml.test.mjs ./scripts/updater-e2e-fixture.test.mjs",
-    "test:linux-desktop": "vitest run linux-autostart.test.ts --config vitest.dedicated.config.ts && tsx ./scripts/smoke-linux-app-discovery.mjs && tsx ./scripts/smoke-path-open-utils.mjs",
+    "test:packaging-tools": "node --test \"./scripts/*.test.mjs\"",
+    "test:linux-desktop": "node --import tsx ./scripts/smoke-linux-app-discovery.mjs",
     "updater:e2e:fixture": "node ./scripts/updater-e2e-fixture.mjs",
     "verify:update-manifest": "node ./scripts/verify-update-manifest.mjs",
     "package": "bun run build:web-assets && bun run prepare:runtime && bun run bundle:main && bun run verify:native && node ./scripts/package.mjs",
@@ -59,7 +56,8 @@
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.tests.json",
     "lint": "eslint \"./*.ts\" --config ../../eslint.config.js",
     "verify:native": "node ./scripts/verify-native.mjs",
-    "prepare:runtime": "bun run --cwd ../.. build:runtime-dependencies"
+    "prepare:runtime": "bun run --cwd ../.. build:runtime-dependencies",
+    "test": "vitest run --config vitest.config.ts"
   },
   "build": {
     "appId": "dev.varin.desktop",

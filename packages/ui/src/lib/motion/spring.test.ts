@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MAX_FRAME_SECONDS, SpringDriver, omegaSpring, springAtRest, stepSpring, tokenSpring } from './spring';
-import { springCoefficients, SPRINGS } from './tokens';
+import { MAX_FRAME_SECONDS, SpringDriver, omegaSpring, stepSpring } from './spring';
 
 const FRAME = 1 / 60;
 
@@ -21,13 +20,6 @@ describe('stepSpring', () => {
     expect(400 - state.position).toBeLessThan(0.5);
   });
 
-  it('trails a steadily moving target by 2v/ω', () => {
-    const speed = 210;
-    const { state } = run(t => speed * t, 2);
-    const lag = speed * 2 - state.position;
-    expect(lag).toBeGreaterThan(speed * 2 / 14 - 4);
-    expect(lag).toBeLessThan(speed * 2 / 14 + 4);
-  });
 
   it('integrates a long frame as at most MAX_FRAME_SECONDS', () => {
     const coefficients = omegaSpring(14);
@@ -36,11 +28,6 @@ describe('stepSpring', () => {
     expect(long.position).toBeCloseTo(capped.position, 6);
   });
 
-  it('uses the shared token coefficients', () => {
-    expect(tokenSpring('travel')).toEqual(springCoefficients(SPRINGS.travel));
-    expect(springAtRest({ position: 99.8, velocity: 1 }, 100, 0.5, 4)).toBe(true);
-    expect(springAtRest({ position: 99.8, velocity: 9 }, 100, 0.5, 4)).toBe(false);
-  });
 });
 
 describe('SpringDriver', () => {

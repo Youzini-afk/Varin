@@ -463,7 +463,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         if (!entry || entry.epoch !== owners.kernel.handshake?.kernelEpoch)
             return;
         const actor = owners.kernel.scoped(entry.grant);
-        const view = await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation });
+        await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation });
         try {
             await actor.closeWorkspace({ branchId: branch, generation: entry.view.binding.generation });
         }

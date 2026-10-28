@@ -2138,7 +2138,7 @@ for (const action of ["close", "render failure"] as const) test(`connected ${act
   const work = h.loader.reconcile();
   await selecting;
   assert.equal(container.children[0]?.textContent, h.candidateIntegrity);
-  assert.equal(container.children[0]?.hidden, true);
+  assert.equal((container.children[0] as HTMLElement | undefined)?.hidden, true);
   const closing = action === "close" ? composition.dispose(new Error("Window closed before Catalog commit")) : Promise.resolve();
   if (action === "render failure") h.failMount("main", new Error("Candidate render failed before Catalog commit"));
   assert.equal(observedSignal?.aborted, true);
@@ -2232,12 +2232,12 @@ test("publishing an unrelated owner in the same slot preserves a prepared owner'
     bSignal = signal; entered(); await gate; signal.throwIfAborted();
   });
   await selecting;
-  assert.equal(container.children.some((child) => child.textContent === "b2" && child.hidden), true);
+  assert.equal(Array.from(container.children).some((child) => child.textContent === "b2" && (child as HTMLElement).hidden), true);
   await activate("a", 2);
   const abortedByUnrelatedOwner = bSignal?.aborted;
   release();
   const bError = await bUpdate.then(() => undefined, (error: unknown) => error);
-  const visible = container.children.filter((child) => !child.hidden).map((child) => child.textContent).sort();
+  const visible = Array.from(container.children).filter((child) => !(child as HTMLElement).hidden).map((child) => child.textContent).sort();
   await composition.dispose();
   assert.equal(abortedByUnrelatedOwner, false, String(bError));
   assert.equal(bError, undefined);

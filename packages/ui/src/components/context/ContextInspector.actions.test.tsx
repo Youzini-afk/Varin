@@ -85,7 +85,7 @@ it('preserves the mutation conflict when snapshot reconciliation also fails', as
 });
 
 it('binds reconciliation to the original projection owner after navigation', async () => {
-  const read = vi.fn(async (target: ThreadIdentity) => ({ ...snapshot(), identity: target }));
+  const read = vi.fn<ThreadsAPI['snapshot']>(async (target: ThreadIdentity) => ({ ...snapshot(), identity: target }));
   runtime.api = { snapshot: read, contextInspection: async (_target: ThreadIdentity, input: { headId: string | null }) => ({ head: input.headId, counts: { total: 0, user: 0, assistant: 0, tool: 0 }, latestRequest: null, contextRequest: null }),
     observe: async (_cursor: number, _next: unknown, { signal }: { signal: AbortSignal }) => new Promise<void>(resolve => signal.addEventListener('abort', () => resolve(), { once: true })) } as unknown as ThreadsAPI;
   const callbacks = new Map<string, () => Promise<void>>();
@@ -102,5 +102,6 @@ it('binds reconciliation to the original projection owner after navigation', asy
   expect(read).toHaveBeenCalledTimes(count);
   await act(async () => callbacks.get(next.branchId)!());
   expect(read).toHaveBeenCalledTimes(count + 1);
-  expect(read).toHaveBeenLastCalledWith(next);
+  expect(read).toHaveBeenLastCalledWith(next, expect.any(AbortSignal));
+  expect(read.mock.calls.at(-1)![1]?.aborted).toBe(false);
 });
