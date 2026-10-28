@@ -23,6 +23,7 @@ use std::os::unix::io::RawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -93,8 +94,7 @@ impl MountImpl {
             if err == nix::errno::Errno::EPERM {
                 // Linux always returns EPERM for non-root users.  We have to let the
                 // library go through the setuid-root "fusermount -u" to unmount.
-                fuse_unmount_pure(&self.mountpoint);
-                return Ok(());
+                return fuse_unmount_pure(&self.mountpoint);
             } else {
                 return Err(err.into());
             }
@@ -129,61 +129,91 @@ fn fuse_mount_pure(
     fuse_mount_fusermount(mountpoint, options, acl)
 }
 
-fn fuse_unmount_pure(mountpoint: &CStr) {
-    #[cfg(target_os = "linux")]
-    {
-        if nix::mount::umount2(mountpoint, nix::mount::MntFlags::MNT_DETACH).is_ok() {
-            return;
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if nix::mount::unmount(mountpoint, nix::mount::MntFlags::MNT_FORCE).is_ok() {
-            return;
-        }
-    }
-
-    let mut builder = Command::new(detect_fusermount_bin());
+fn fuse_unmount_pure(mountpoint: &CStr) -> io::Result<()> {
+    let helper = detect_fusermount_bin()?;
+    let mut builder = Command::new(helper);
     builder.stdout(Stdio::piped()).stderr(Stdio::piped());
     builder
         .arg("-u")
         .arg("-q")
-        .arg("-z")
         .arg("--")
-        .arg(OsStr::new(&mountpoint.to_string_lossy().into_owned()));
+        .arg(OsStr::from_bytes(mountpoint.to_bytes()));
 
-    if let Ok(output) = builder.output() {
+    let output = builder.output()?;
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stdout));
         debug!("fusermount: {}", String::from_utf8_lossy(&output.stderr));
-    }
+    if output.status.success() { Ok(()) }
+    else { Err(io::Error::other(format!("FUSE detach refused: {}",String::from_utf8_lossy(&output.stderr)))) }
 }
 
-fn detect_fusermount_bin() -> String {
-    if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
-        return fusermount
-            .to_str()
-            .expect("FUSERMOUNT_PATH is not UTF-8")
-            .to_owned();
+/// Check the route used by a normal mount without executing a helper or
+/// requesting privilege. A helper may open the device with its own OS rights.
+pub(super) fn dependencies() -> io::Result<()> {
+    use std::os::unix::fs::FileTypeExt;
+    match std::fs::metadata("/dev/fuse") {
+        Ok(metadata) if !metadata.file_type().is_char_device() =>
+            return Err(Error::new(ErrorKind::Unsupported, "/dev/fuse is not a FUSE character device")),
+        Err(error) if error.kind() == ErrorKind::NotFound =>
+            return Err(Error::new(ErrorKind::NotFound, "FUSE device /dev/fuse is missing on this Host; install/enable FUSE or expose the device through the Host's container configuration")),
+        Err(error) if error.kind() != ErrorKind::PermissionDenied => return Err(error),
+        _ => {}
     }
-
-    for name in [
-        FUSERMOUNT3_BIN.to_string(),
-        FUSERMOUNT_BIN.to_string(),
-        MOUNT_FUSEFS_BIN.to_string(),
-        format!("/sbin/{FUSERMOUNT3_BIN}"),
-        format!("/sbin/{FUSERMOUNT_BIN}"),
-        format!("/sbin/{MOUNT_FUSEFS_BIN}"),
-        format!("/bin/{FUSERMOUNT3_BIN}"),
-        format!("/bin/{FUSERMOUNT_BIN}"),
-    ]
-    .iter()
+    #[cfg(target_os = "linux")]
     {
-        if Command::new(name).arg("-h").output().is_ok() {
-            return name.to_string();
+        // UID 0 alone does not imply mount permission in a container.
+        let direct = std::fs::read_to_string("/proc/self/status").ok().and_then(|status| {
+            status.lines().find_map(|line| line.strip_prefix("CapEff:")
+                .and_then(|bits| u64::from_str_radix(bits.trim(),16).ok()))
+        }).is_some_and(|bits| bits & (1 << 21) != 0); // CAP_SYS_ADMIN
+        if direct {
+            return std::fs::OpenOptions::new().read(true).write(true).open("/dev/fuse").map(|_|());
         }
     }
-    // Default to fusermount3
-    FUSERMOUNT3_BIN.to_string()
+    detect_fusermount_bin().map(|_| ())
+}
+
+fn executable(candidate: &Path) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let metadata = std::fs::metadata(candidate)?;
+    if !metadata.is_file() || metadata.permissions().mode() & 0o111 == 0 {
+        return Err(Error::new(ErrorKind::PermissionDenied, "FUSE mount helper is not an executable file"));
+    }
+    let name = CString::new(candidate.as_os_str().as_bytes())
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "FUSE helper path contains NUL"))?;
+    if unsafe { libc::access(name.as_ptr(), libc::X_OK) } != 0 { return Err(Error::last_os_error()); }
+    Ok(())
+}
+fn detect_fusermount_bin() -> io::Result<PathBuf> {
+    if let Some(fusermount) = env::var_os("FUSERMOUNT_PATH") {
+        let candidate = PathBuf::from(fusermount);
+        if candidate.components().count() > 1 || candidate.is_absolute() {
+            executable(&candidate).map_err(|error| Error::new(error.kind(), format!("Configured FUSE helper {} is unavailable: {error}",candidate.display())))?;
+            return Ok(candidate);
+        }
+        let mut denied = false;
+        for directory in env::split_paths(&env::var_os("PATH").unwrap_or_default()) {
+            let path = directory.join(&candidate);
+            match executable(&path) {
+                Ok(()) => return Ok(path),
+                Err(error) => denied |= error.kind() == ErrorKind::PermissionDenied,
+            }
+        }
+        return Err(Error::new(if denied {ErrorKind::PermissionDenied}else{ErrorKind::NotFound},"The configured FUSERMOUNT_PATH helper is not executable in PATH"));
+    }
+    let mut denied = false;
+    let paths = env::split_paths(&env::var_os("PATH").unwrap_or_default())
+        .chain([PathBuf::from("/usr/bin"),PathBuf::from("/bin"),PathBuf::from("/sbin")]).collect::<Vec<_>>();
+    for name in [FUSERMOUNT3_BIN,FUSERMOUNT_BIN,MOUNT_FUSEFS_BIN] {
+        for directory in &paths {
+            let candidate = directory.join(name);
+            match executable(&candidate) {
+                Ok(()) => return Ok(candidate),
+                Err(error) => denied |= error.kind()==ErrorKind::PermissionDenied,
+            }
+        }
+    }
+    Err(Error::new(if denied {ErrorKind::PermissionDenied}else{ErrorKind::NotFound},
+        "No executable FUSE mount helper was found; install fuse3/fusermount3 on the execution Host or correct FUSERMOUNT_PATH"))
 }
 
 fn receive_fusermount_message(socket: &UnixStream) -> Result<DevFuse, Error> {
@@ -262,9 +292,9 @@ fn fuse_mount_fusermount(
     options: &[MountOption],
     acl: SessionACL,
 ) -> Result<(DevFuse, Option<UnixStream>), Error> {
-    let fusermount_bin = detect_fusermount_bin();
+    let fusermount_bin = detect_fusermount_bin()?;
 
-    if fusermount_bin.ends_with(MOUNT_FUSEFS_BIN) {
+    if fusermount_bin.file_name() == Some(OsStr::new(MOUNT_FUSEFS_BIN)) {
         return fuse_mount_mount_fusefs(&fusermount_bin, mountpoint, options, acl);
     }
 
@@ -346,7 +376,7 @@ fn fuse_mount_fusermount(
 }
 
 fn fuse_mount_mount_fusefs(
-    fusermount_bin: &str,
+    fusermount_bin: &Path,
     mountpoint: &OsStr,
     options: &[MountOption],
     acl: SessionACL,

@@ -2,6 +2,7 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.projects.workspace.extensionSettings": "Host の内蔵機能拡張を有効にする",
   "settings.projects.workspace.backend": "実行 Host のファイルシステム",
   "settings.projects.workspace.backendReady": "依存関係の準備完了",
   "settings.projects.workspace.backendUnavailable": "利用不可",

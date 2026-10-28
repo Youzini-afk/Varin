@@ -23,7 +23,7 @@ pub(crate) fn dependencies()->io::Result<()>{
     #[cfg(fuser_mount_impl="libfuse3")] {fuse3_loader::Api::load().map(|_|())}
     #[cfg(fuser_mount_impl="libfuse2")] {Ok(())}
     #[cfg(fuser_mount_impl="pure-rust")] {
-        std::fs::OpenOptions::new().read(true).write(true).open("/dev/fuse").map(|_|())
+        fuse_pure::dependencies()
     }
     #[cfg(fuser_mount_impl="macos-no-mount")] {Err(io::Error::new(io::ErrorKind::Unsupported,"This build does not include a native mount transport"))}
 }

@@ -9,17 +9,26 @@ use std::sync::Arc;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fuse;
+#[cfg(any(target_os = "linux", target_os = "macos", test))]
+mod cache_fence;
+#[cfg(any(target_os = "macos", test))]
+mod native_service;
+#[cfg(target_os = "macos")]
+pub(crate) mod macos;
 #[cfg(windows)]
 mod windows;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 pub(crate) use fuse::Mount;
+#[cfg(target_os = "macos")]
+pub(crate) use macos::Mount;
 #[cfg(windows)]
 pub(crate) use windows::Mount;
 
 pub(crate) fn dependencies()->Result<(),KernelError>{
     #[cfg(windows)] {windows::initialize()?; windows::check_driver()}
-    #[cfg(any(target_os="linux",target_os="macos"))] {
+    #[cfg(target_os="macos")] {macos::select().map(|_|())}
+    #[cfg(target_os="linux")] {
         fuser::mount_dependencies().map_err(|error| crate::workspace_backend::unavailable(
             match error.kind() {
                 std::io::ErrorKind::NotFound => "dependency_missing",
@@ -28,6 +37,20 @@ pub(crate) fn dependencies()->Result<(),KernelError>{
                 _ => "dependency_unavailable",
             }, format!("Native workspace dependency is unavailable: {error}")))
     }
+}
+
+#[cfg(target_os="macos")]
+fn darwin_cache_fence(target:&Path)->Result<(),KernelError>{
+    use std::os::fd::AsRawFd;
+    unsafe extern "C"{fn fsync_volume_np(fd:libc::c_int,flags:libc::c_int)->libc::c_int;}
+    let root=std::fs::File::open(target)?;
+    // SYNC_VOLUME_WAIT: drain data and metadata without holding any file service
+    // lock needed by the kernel's writeback callbacks.
+    let result=unsafe{fsync_volume_np(root.as_raw_fd(),0x02)};
+    if result==0{return Ok(());}
+    let error=if result>0{std::io::Error::from_raw_os_error(result)}else{std::io::Error::last_os_error()};
+    Err(KernelError::Execution(varin_runtime::execution::ExecutionError::new("workspace_cache_sync_failed",format!("macOS volume synchronization failed: {error}"))
+        .with_details(serde_json::json!({"stage":"workspace_cache_sync","parentAvailable":true}))))
 }
 
 fn unsupported(message: &str) -> KernelError {

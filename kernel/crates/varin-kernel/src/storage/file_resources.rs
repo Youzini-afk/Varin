@@ -263,7 +263,7 @@ pub(super) fn materialized_expected_state(state: &PathState) -> FileState {
 }
 
 #[cfg(target_os = "linux")]
-fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
+pub(super) fn clone_open_file(source_file: &File, destination: &Path) -> Result<bool, KernelError> {
     use std::os::fd::AsRawFd;
     const FICLONE: std::os::raw::c_ulong = 0x4004_9409;
     unsafe extern "C" {
@@ -273,7 +273,6 @@ fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
             ...
         ) -> std::os::raw::c_int;
     }
-    let source_file = File::open(source)?;
     let target_file = OpenOptions::new()
         .create_new(true)
         .read(true)
@@ -281,11 +280,11 @@ fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
         .open(destination)?;
     let result = unsafe { ioctl(target_file.as_raw_fd(), FICLONE, source_file.as_raw_fd()) };
     if result == 0 {
-        target_file.sync_all()?;
+        if let Err(error) = target_file.sync_all() {drop(target_file);let _=fs::remove_file(destination);return Err(error.into());}
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    let unsupported = matches!(error.raw_os_error(), Some(18 | 22 | 25 | 38 | 95));
+    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 18 | 22 | 25 | 38 | 95));
     drop(target_file);
     let _ = fs::remove_file(destination);
     if unsupported {
@@ -295,32 +294,35 @@ fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
 }
 
 #[cfg(target_os = "macos")]
-fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
+pub(super) fn clone_open_file(source: &File, destination: &Path) -> Result<bool, KernelError> {
     use std::ffi::CString;
     use std::os::unix::ffi::OsStrExt;
+    use std::os::fd::AsRawFd;
     unsafe extern "C" {
-        fn clonefile(
-            source: *const std::os::raw::c_char,
+        fn fclonefileat(
+            source: std::os::raw::c_int,
+            directory: std::os::raw::c_int,
             target: *const std::os::raw::c_char,
             flags: u32,
         ) -> i32;
     }
-    let source_c = CString::new(source.as_os_str().as_bytes())
-        .map_err(|_| KernelError::Operation("materialize source contains NUL".to_string()))?;
     let target_c = CString::new(destination.as_os_str().as_bytes())
         .map_err(|_| KernelError::Operation("materialize destination contains NUL".to_string()))?;
-    let result = unsafe { clonefile(source_c.as_ptr(), target_c.as_ptr(), 0) };
+    let result = unsafe { fclonefileat(source.as_raw_fd(), libc::AT_FDCWD, target_c.as_ptr(), 0) };
     if result == 0 {
-        OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(destination)?
-            .sync_all()?;
+        let durable = (|| -> io::Result<()> {
+            use std::os::unix::fs::PermissionsExt;
+            let file=File::open(destination)?;
+            // Source mode/ACL belongs to the paired metadata tree. A private
+            // body object must remain readable/cleanable by its Storage owner.
+            file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+            file.sync_all()
+        })();
+        if let Err(error)=durable{let _=fs::remove_file(destination);return Err(error.into());}
         return Ok(true);
     }
     let error = io::Error::last_os_error();
-    let unsupported = matches!(error.raw_os_error(), Some(18 | 22 | 45 | 78));
-    let _ = fs::remove_file(destination);
+    let unsupported = matches!(error.raw_os_error(), Some(1 | 13 | 18 | 22 | 45 | 78));
     if unsupported {
         return Ok(false);
     }
@@ -328,7 +330,7 @@ fn clone_file(source: &Path, destination: &Path) -> Result<bool, KernelError> {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-fn clone_file(_source: &Path, _destination: &Path) -> Result<bool, KernelError> {
+pub(super) fn clone_open_file(_source: &File, _destination: &Path) -> Result<bool, KernelError> {
     Ok(false)
 }
 
@@ -336,7 +338,7 @@ fn clone_file(_source: &Path, _destination: &Path) -> Result<bool, KernelError> 
 /// read once; writable files never share a hard link with the immutable object.
 pub(super) fn copy_verified_object_to(source: &Path, destination: &Path, cancellation: &AtomicBool,
     expected_hash: &str, expected_length: u64) -> Result<&'static str, KernelError> {
-    let cloned = clone_file(source, destination)?;
+    let cloned = clone_open_file(&File::open(source)?, destination)?;
     let mut reader = File::open(if cloned { destination } else { source })?;
     let mut target = if cloned { None } else { Some(OpenOptions::new().create_new(true).write(true).open(destination)?) };
     let mut digest = Sha256::new(); let mut length = 0u64; let mut bytes = [0u8; 128 * 1024];

@@ -12,6 +12,20 @@ https://github.com/cberner/fuser/issues/749. It also exposes `remove_capabilitie
 can accurately negotiate supported behavior rather than relying on transport defaults.
 Linux defaults are unchanged. This does not disable mmap or data caching.
 
+The request decoder now handles FUSE_SYNCFS (ABI 7.36), including its fixed input
+payload, ACL admission and filesystem callback. Advertising a newer ABI must not
+make a legitimate syncfs request terminate the dispatcher. Varin negotiates
+writeback cache only with this boundary and freezes its selected Session inside
+the matching requesting thread's post-writeback callback; unrelated syncs cannot
+consume the boundary. O_WRONLY cache-fill reads are admitted only in that mode.
+
+Pure-Rust Linux dependency checks inspect the actual FUSE device and mounting
+route. A direct mount needs CAP_SYS_ADMIN in the current namespace; otherwise an
+executable helper is resolved through FUSERMOUNT_PATH/PATH and installed system
+locations. Checks never execute helpers or elevate the Host. The helper detach
+path propagates its actual result and does not request lazy/forced unmount before
+releasing the original owner.
+
 Unmount retains the original mount object when the OS returns an error. A borrowing
 `BackgroundSession::unmount` lets Varin retry it before joining; an event-loop panic
 also joins the remaining workers before returning. These changes avoid dropping

@@ -380,7 +380,7 @@ pub(crate) fn adopt(
                     let source = open(&entry.absolute)?;
                     let suffix = if entry.config { PRIVATE_GIT_CONFIG } else { &[] };
                     let mut offset = 0;
-                    let node = workspace.import_file(path, source.chain(suffix), entry.observed.attributes.clone(), &cancel, |count| {
+                    let mut captured = |count| {
                         offset += count;
                         bytes += count;
                         if last.elapsed() >= Duration::from_millis(100) {
@@ -388,7 +388,12 @@ pub(crate) fn adopt(
                             last = Instant::now();
                         }
                         Ok(())
-                    })?;
+                    };
+                    let node = if entry.config {
+                        workspace.import_file(path, source.chain(suffix), entry.observed.attributes.clone(), &cancel, &mut captured)?
+                    } else {
+                        workspace.import_open_file(path, source, entry.observed.attributes.clone(), &cancel, &mut captured)?
+                    };
                     if offset != entry.observed.length + suffix.len() as u64
                         || !entry
                             .observed

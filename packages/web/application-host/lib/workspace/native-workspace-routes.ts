@@ -10,12 +10,16 @@ export function registerNativeWorkspaceRoutes(app: Express, owner: NativeWorkspa
         response.once('close', close);
         try {
             const id = String(request.params.projectId), action = String(request.params.action);
-            if (!['inspect', 'enable', 'disable', 'backend'].includes(action)) {
+            if (!['inspect', 'enable', 'disable', 'backend', 'backend-settings'].includes(action)) {
                 response.status(400).json({ message: 'Unknown workspace action' });
                 return;
             }
             if (action === 'backend') {
                 response.json(await owner.inspectBackend(id, controller.signal));
+                return;
+            }
+            if (action === 'backend-settings') {
+                response.json(await owner.openBackendSettings(id, controller.signal));
                 return;
             }
             if (action === 'enable')

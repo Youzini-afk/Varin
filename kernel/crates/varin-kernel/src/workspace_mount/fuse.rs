@@ -68,6 +68,9 @@ struct Backend {
     handles: Arc<Mutex<Handles>>,
     open_boundary: Arc<std::sync::RwLock<()>>,
     closing: Arc<std::sync::atomic::AtomicBool>,
+    cache_fence: Arc<super::cache_fence::CacheFence>,
+    syncfs_available: Arc<std::sync::atomic::AtomicBool>,
+    writeback: bool,
 }
 impl Backend {
     fn node(&self, id: INodeNo) -> Result<Arc<Node>, KernelError> {
@@ -225,7 +228,9 @@ impl Backend {
             .get(&handle.0)
             .ok_or_else(|| crate::error::KernelError::NotFound("native open handle".into()))?;
         let access = handle.flags & libc::O_ACCMODE;
-        if (write && access == libc::O_RDONLY) || (!write && access == libc::O_WRONLY) {
+        // A writeback-cache partial-page update may legitimately ask the daemon
+        // to read through an O_WRONLY handle; the kernel still enforces user I/O.
+        if (write && access == libc::O_RDONLY) || (!write && access == libc::O_WRONLY && !self.writeback) {
             return Err(KernelError::Authorization(
                 "native handle has different access".into(),
             ));
@@ -258,6 +263,14 @@ impl Filesystem for Backend {
         self.session.notify_native_idle();
     }
     fn init(&mut self, _: &Request, config: &mut KernelConfig) -> std::io::Result<()> {
+        #[cfg(target_os = "linux")]
+        {
+            let syncfs = config.kernel_abi() >= Version(7, 36);
+            self.syncfs_available.store(syncfs, std::sync::atomic::Ordering::Release);
+            if syncfs {
+                self.writeback = config.add_capabilities(InitFlags::FUSE_WRITEBACK_CACHE).is_ok();
+            }
+        }
         #[cfg(target_os = "macos")]
         config.remove_capabilities(
             InitFlags::FUSE_CASE_INSENSITIVE | InitFlags::FUSE_VOL_RENAME | InitFlags::FUSE_XTIMES,
@@ -265,6 +278,12 @@ impl Filesystem for Backend {
         #[cfg(not(target_os = "macos"))]
         let _ = config;
         Ok(())
+    }
+    fn syncfs(&self, request: &Request, reply: ReplyEmpty) {
+        match self.cache_fence.synchronize(&self.session, request.pid()) {
+            Ok(()) => reply.ok(),
+            Err(error) => reply.error(native(error)),
+        }
     }
     fn lookup(&self, _: &Request, parent: INodeNo, name: &OsStr, reply: ReplyEntry) {
         let result = self
@@ -870,6 +889,8 @@ pub(crate) struct Mount {
     handles: Arc<Mutex<Handles>>,
     open_boundary: Arc<std::sync::RwLock<()>>,
     closing: Arc<std::sync::atomic::AtomicBool>,
+    cache_fence: Arc<super::cache_fence::CacheFence>,
+    syncfs_available: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Mount {
     pub(crate) fn start(
@@ -889,11 +910,16 @@ impl Mount {
         }));
         let open_boundary = Arc::new(std::sync::RwLock::new(()));
         let closing = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cache_fence = Arc::new(super::cache_fence::CacheFence::default());
+        let syncfs_available = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let backend = Backend {
             session: session.clone(),
             handles: handles.clone(),
             open_boundary: open_boundary.clone(),
             closing: closing.clone(),
+            cache_fence: cache_fence.clone(),
+            syncfs_available: syncfs_available.clone(),
+            writeback: false,
         };
         let mut options = Config::default();
         options.mount_options = vec![
@@ -920,6 +946,8 @@ impl Mount {
             handles,
             open_boundary,
             closing,
+            cache_fence,
+            syncfs_available,
         })
     }
     /// A running dispatcher is not yet a ready macOS mount. Keep the Mount
@@ -961,9 +989,15 @@ impl Mount {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
-    /// FUSE does not identify which writable opens still own an mmap. A final
-    /// release drains that file reference, including its mappings. Reject an
-    /// unfenceable active writer explicitly; cached reads and mmap stay enabled.
+    pub(crate) fn capabilities(&self) -> serde_json::Value {
+        let fenced = cfg!(target_os="macos") || self.syncfs_available.load(std::sync::atomic::Ordering::Acquire);
+        serde_json::json!({"backend":if cfg!(target_os="macos"){"macfuse"}else{"fuse"},
+            "transport":if cfg!(target_os="macos"){"vfs"}else{"kernel"},
+            "cacheFence":if cfg!(target_os="macos"){"darwin_volume_wait"}else if fenced{"fuse_syncfs"}else{"closed_writers"},
+            "activeWritableMappingFork":fenced})
+    }
+    /// Freeze at the actual native writeback boundary. Old Linux ABIs without
+    /// SYNCFS retain the explicit scoped writer obstacle; mmap stays enabled.
     pub(crate) fn checkpoint(
         &self,
     ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
@@ -973,6 +1007,23 @@ impl Mount {
         &self,
         selected: &str,
     ) -> Result<crate::storage::workspace_session::Checkpoint, KernelError> {
+        #[cfg(target_os = "linux")]
+        if self.syncfs_available.load(std::sync::atomic::Ordering::Acquire) {
+            use std::os::fd::AsRawFd;
+            // Opening the mount and entering the syscall must precede taking
+            // any callback/Session boundary lock: writeback uses those workers.
+            let root = std::fs::File::open(&self.target)?;
+            let request = self.cache_fence.request(selected, unsafe { libc::syscall(libc::SYS_gettid) } as u32)?;
+            let result = unsafe { libc::syncfs(root.as_raw_fd()) };
+            return request.finish(if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) });
+        }
+        #[cfg(target_os = "macos")]
+        {
+            super::darwin_cache_fence(&self.target)?;
+            return self.session.checkpoint_native(selected, &[], &[]);
+        }
+        #[cfg(target_os = "linux")]
+        {
         let _opens = self
             .open_boundary
             .write()
@@ -994,6 +1045,7 @@ impl Mount {
         }
         drop(handles);
         self.session.checkpoint_native(selected, &writers, &[])
+        }
     }
 
     pub(crate) fn stop(&mut self) -> Result<(), KernelError> {

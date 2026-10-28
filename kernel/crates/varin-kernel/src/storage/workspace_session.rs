@@ -1098,12 +1098,25 @@ impl Session {
     /// Source adoption owns the stable reader and never exposes this private
     /// candidate to programs. Install bytes once, then publish namespace+metadata.
     pub(crate) fn import_file(
-        &self, requested: &str, source: impl std::io::Read, mut attributes: Attributes,
+        &self, requested: &str, source: impl std::io::Read, attributes: Attributes,
         cancellation: &AtomicBool, progress: impl FnMut(u64) -> Result<(), KernelError>,
     ) -> Result<Arc<Node>, KernelError> {
         let cleanup = self.port.call(|s| Ok(s.private_cleanup.clone()))?;
         let sealed = SealedFile::capture(&self.root.join("staging"), source,
             self.revoked.clone(), cleanup, cancellation, progress)?;
+        self.install_imported_file(requested, sealed, attributes, cancellation)
+    }
+    pub(crate) fn import_open_file(
+        &self, requested: &str, source: std::fs::File, attributes: Attributes,
+        cancellation: &AtomicBool, progress: impl FnMut(u64) -> Result<(), KernelError>,
+    ) -> Result<Arc<Node>, KernelError> {
+        let cleanup = self.port.call(|s| Ok(s.private_cleanup.clone()))?;
+        let sealed = SealedFile::capture_open_file(&self.root.join("staging"), source,
+            self.revoked.clone(), cleanup, cancellation, progress)?;
+        self.install_imported_file(requested, sealed, attributes, cancellation)
+    }
+    fn install_imported_file(&self, requested: &str, sealed: SealedFile, mut attributes: Attributes,
+        cancellation: &AtomicBool) -> Result<Arc<Node>, KernelError> {
         let (retained, sealed) = self.port.call(move |s| Ok((s.retain_private_file(&sealed), sealed)))?;
         let installed = sealed.install(&self.root, retained, cancellation)?;
         let state = installed.state(attributes.mode);

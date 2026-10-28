@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { buildMacWorkspaceHelper } from '../packages/workspace-driver/macos/build-helper.mjs';
 
 const require = createRequire(import.meta.url);
 const { defaultKernelTargetTriple, detectKernelBinaryIdentity, normalizeKernelArchitecture } = require('./kernel-binary-identity.cjs');
@@ -88,6 +89,7 @@ if (!stage) {
 fs.mkdirSync(stage, { recursive: true });
 const destination = path.join(stage, executable);
 fs.copyFileSync(source, destination);
+if (platform === 'darwin') buildMacWorkspaceHelper({ destination: stage, architecture: arch, version: packageVersion });
 if (process.platform !== 'win32') fs.chmodSync(destination, 0o755);
 const digest = crypto.createHash('sha256').update(fs.readFileSync(destination)).digest('hex');
 fs.writeFileSync(path.join(stage, 'manifest.json'), JSON.stringify({

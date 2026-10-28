@@ -1,4 +1,8 @@
 import { runtimeFetch, projectPathKey, type ProjectEntry, type VersionedProjectWorkspace, type WorkspaceBackendStatus } from '@varin/application-client';
+export async function openWorkspaceBackendSettings(id: string): Promise<void> {
+    const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/workspace/backend-settings`, { method: 'POST' });
+    if (!response.ok) { const value = await response.json() as { message?: string }; throw new Error(value.message ?? 'Cannot open Host extension settings'); }
+}
 export type { WorkspaceBackendStatus } from '@varin/application-client';
 export interface ProjectWorkspaceStatus {
     preparing: boolean;

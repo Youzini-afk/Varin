@@ -834,6 +834,31 @@ impl FileSnapshot {
 }
 
 impl SealedFile {
+    /// Clone the admitted open inode on a capable volume. This fixes its bytes
+    /// independently of the live name and avoids a complete physical copy.
+    pub(super) fn capture_open_file(
+        staging: &Path, source: File, revoked: Arc<AtomicBool>,
+        cleanup: Arc<StagingCleanup>, cancellation: &AtomicBool,
+        mut progress: impl FnMut(u64) -> Result<(), KernelError>,
+    ) -> Result<Self, KernelError> {
+        check(cancellation)?; check(&revoked)?;
+        let mut candidate = Self { file_id: Uuid::new_v4().to_string(),
+            staging: staging.join(format!("{}.sealed", Uuid::new_v4())), staged: false,
+            hash: String::new(), length: 0, generation: 0, revoked: revoked.clone(), cleanup: cleanup.clone() };
+        if !super::file_resources::clone_open_file(&source, &candidate.staging)? {
+            return Self::capture(staging, source, revoked, cleanup, cancellation, progress);
+        }
+        candidate.staged = true;
+        let mut input = File::open(&candidate.staging)?;
+        let mut digest = Sha256::new(); let mut bytes = [0;128*1024];
+        loop {
+            check(cancellation)?; check(&candidate.revoked)?;
+            let count = input.read(&mut bytes)?; if count == 0 { break; }
+            digest.update(&bytes[..count]); candidate.length += count as u64; progress(count as u64)?;
+        }
+        candidate.hash = format!("sha256-{}", hex::encode(digest.finalize()));
+        Ok(candidate)
+    }
     /// Import already-existing bytes directly into their immutable object. There
     /// is no live writable inode yet, so an empty file and range log add no value.
     pub(super) fn capture(

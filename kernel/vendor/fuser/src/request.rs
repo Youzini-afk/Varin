@@ -87,6 +87,7 @@ impl<'a> RequestWithSender<'a> {
                     | ll::Operation::Write(_)
                     | ll::Operation::FSync(_)
                     | ll::Operation::FSyncDir(_)
+                    | ll::Operation::SyncFs
                     | ll::Operation::Release(_)
                     | ll::Operation::ReleaseDir(_) => {}
                     ll::Operation::ReadDirPlus(_) => {}
@@ -288,6 +289,7 @@ impl<'a> RequestWithSender<'a> {
                     self.reply(),
                 );
             }
+            ll::Operation::SyncFs => filesystem.syncfs(self.request_header(), self.reply()),
             ll::Operation::OpenDir(x) => {
                 filesystem.opendir(
                     self.request_header(),

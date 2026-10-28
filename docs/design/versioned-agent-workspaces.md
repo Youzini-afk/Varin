@@ -9,12 +9,12 @@
 | 文件引擎 | 持久树、私有区间写入、固定区间描述与原正文引用 | 父子独立、重启、精确传输及 GC 有原生回归；实际 mmap／缓存边界沿后端资格处理 |
 | 子任务准备 | 固定／native 来源按引用分叉；普通目录首次捕获 | Git 原始目录仍走稳定捕获；Git 对象懒来源和原生 OS 快照属于后续来源适配 |
 | 后端检查 | 实际资源 Host 在来源交接前检查，原始 code／details 进入报告 | Shared 不探测；实际挂载另行确认并保留失败阶段 |
-| 平台交付 | Windows 可选官方 MSI、兼容版本复用；deb/rpm 声明 FUSE3；macOS 复用已安装 macFUSE | Windows 安装页已用实际 NSIS 编译；三端真实安装／挂载尚未验收 |
+| 平台交付 | Windows 可选官方 MSI；deb/rpm 声明 FUSE3；macOS 随包 FSKit 执行扩展及已安装 macFUSE 接入 | 扩展有独立构建、签名及启用检查；三端真实安装／挂载尚未验收 |
 | 内容消费者 | 固定读取、原生句柄、搜索／计算、导出、恢复、成果与跨 Host 传输解析同一版本 | 普通导出生成真实正文；跨 Host 保留原文件及树身份 |
 
 Source 保存逻辑 workspace、branch 和可选子目录；mount generation、实际路径及当前 grant 属于本次连接。重启按保存的 Source 重开，旧路径不复用。文件工具、Documents、编辑器、终端、script、workspace MCP、扩展、Office 和外部 Harness 使用同一来源，已有会话保留原选择。显式 FixedBranch 的旧命令物化合同仍保留为独立能力，Native workspace 失败不会回退到它。
 
-当前项目启用先检查实际 Host 后端，再在 worker 完成一次稳定捕获，保留实际属性及 Git 管理状态；进度来自原操作的阶段、条目和字节。原项目不搬移、不覆盖、不双向同步。Windows 安装器集成官方 WinFsp 2026 Beta5（`2.2.26286`，版本与 SHA 固定），明确显示预览版本且默认不勾选；静默更新不安装新系统组件。运行时不安装驱动。项目设置提供实际 Host 状态、帮助和手动刷新。macOS 当前加载已安装的 libfuse3，不随包分发 macFUSE；最低 macOS 13 不变。
+当前项目启用先检查实际 Host 后端，再在 worker 完成一次稳定捕获，保留实际属性及 Git 管理状态；进度来自原操作的阶段、条目和字节。原项目不搬移、不覆盖、不双向同步。Windows 安装器集成官方 WinFsp 2026 Beta5（`2.2.26286`，版本与 SHA 固定），明确显示预览版本且默认不勾选；静默更新不安装新系统组件。运行时不安装驱动。项目设置提供实际 Host 状态、帮助和手动刷新。macOS 随包提供自有 FSKit 扩展，按 macOS 26+ 和确切扩展路径的启用事实选择，也可加载已安装 macFUSE 的 libfuse3；不分发 macFUSE。整个应用最低 macOS 13 不变。
 
 文件根登记、租约解析、读取、修改、日志恢复、命名恢复点和进程准入均分离 worker I/O 与原 Storage 提交。挂载断连明确失效，不能将空挂载点当作空项目。关闭、取消和删除保留原资源责任；文件观察使用原 Source 重绑定，持有实际挂载引用。
 
@@ -584,19 +584,19 @@ UI 保留现有项目、工作概览、子 Agent 和协作设计，只在需要�
 
 ### B. 平台接入与产品交付
 
-已选定未修改的官方 WinFsp MSI，下载与缓存校验固定 SHA，NSIS 可选页面复用相同或更新版本，并保留跳过、取消、失败及需重启结果。App 关于页与 THIRD_PARTY_NOTICES 保留许可及版权。Windows 检查架构匹配 DLL、SxS 驱动登记、禁用与启动权限，检查本身不启动驱动。Linux deb/rpm 声明 FUSE3，沿实际设备／helper 检查区分缺失与权限。macOS 保留系统 libfuse3 接入；自有 FSKit 不在本轮落地范围，未满足现有后端时如实失败。
+已选定未修改的官方 WinFsp MSI，下载与缓存校验固定 SHA，NSIS 可选页面复用相同或更新版本，并保留跳过、取消、失败及需重启结果。App 关于页与 THIRD_PARTY_NOTICES 保留许可及版权。Windows 检查架构匹配 DLL、SxS 驱动登记、禁用与启动权限，检查本身不启动驱动。Linux deb/rpm 声明 FUSE3，准入核对字符设备、当前 namespace 的直接挂载能力与可执行 helper；卸载保留真实失败。macOS 内置扩展通过私有二进制内容通道调用原 Rust Session，不持有第二份数据库；产品构建、独立 entitlement 签名、精确扩展启用检查、用户打开 Host 设置和原挂载清理已接通。原 macFUSE VFS 路线保留，未满足实际依赖时明确失败。
 
 完成条件：实际发行平台具备可解释的依赖状态与交付流程；跳过或失败仅影响所需能力；组件更新／卸载不破坏其他应用或遗留工作区。未实测的平台如实标注，代码与文档不写成已经通过。
 
 ### C. 分叉与发布保留增量版本
 
-`FileSnapshot::freeze` 已替代 checkpoint 与 flush 中整文件 seal：只捕获仍有效的私有区间，平面描述引用原正文。`file_content.rs` 统一读取、物理导出和恢复；计算、成果、跨 Host 精确传输和 GC 均使用该内容合同。新文件／完整覆盖继续保存普通正文。描述身份为 `ranges-sha256-…`，逻辑长度与描述长度分离；不把它冒充重建正文的 SHA。读者引用及取消沿原资源寿命保留。
+`FileSnapshot::freeze` 已替代 checkpoint 与 flush 中整文件 seal：只捕获仍有效的私有区间，平面描述引用原正文。`file_content.rs` 统一读取、物理导出和恢复；计算、成果、跨 Host 精确传输和 GC 均使用该内容合同。新文件／完整覆盖继续保存普通正文。描述身份为 `ranges-sha256-…`，逻辑长度与描述长度分离；不把它冒充重建正文的 SHA。读者引用及取消沿原资源寿命保留。Linux 在协商 FUSE_SYNCFS 后启用对应写回缓存，并在原调用线程的 post-writeback 回调内固定版本；其他 sync 不消耗该边界。macOS 等待当前卷同步后进入短 Session 边界。旧 Linux ABI 保留有范围的活动 writer 障碍。
 
 完成条件：大文件小改动后的分叉只保存必要变化和元数据，未修改内容共享；父后续写入不改变子版本；重启与 GC 后固定版本仍可读取。实际必要的缓存同步单独计量。
 
 ### D. 来源与主子工作区接通
 
-已有 fixed／native 来源继续按精确版本分叉。普通目录按所选范围完成首次捕获，用户可在项目设置将主来源接入受管工作区，之后分叉不回扫原项目；已有运行与进程保留原来源。文件工具、Documents、终端、script、Office、workspace MCP、扩展、外部 Harness 和 Integration/Recovery 沿原统一 Source。Git 对象懒读、OS 原生快照和原路径透明接管保留为后续来源方案，当前不以它们作为可用性前提。
+已有 fixed／native 来源继续按精确版本分叉。普通目录按所选范围完成首次捕获，从已准入句柄尝试 APFS clone／Linux reflink，共享原数据块并核对固定内容；不支持或跨卷时沿同一句柄流式导入。用户可在项目设置将主来源接入受管工作区，之后分叉不回扫原项目；已有运行与进程保留原来源。文件工具、Documents、终端、script、Office、workspace MCP、扩展、外部 Harness 和 Integration/Recovery 沿原统一 Source。Git 对象懒读、卷级 OS 快照和原路径透明接管仍是来源候选，当前普通目录保存实际文件及私有 Git 状态。
 
 完成条件：受管主工作区持续写入时可派发独立子任务，后续分叉不扫描原项目；物理首次接入成本单独呈现，不被藏到首次命令中。Git／非 Git 项目都能交付与恢复，用户无需填写内部绑定字段。
 

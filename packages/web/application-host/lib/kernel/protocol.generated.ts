@@ -303,6 +303,7 @@ export type KernelMethod =
   | "branch.fork"
   | "workspace.adopt"
   | "workspace.backend.inspect"
+  | "workspace.backend.settings"
   | "workspace.open"
   | "workspace.inspect"
   | "workspace.acquire"
@@ -3856,11 +3857,13 @@ export interface KernelWorkspaceBackend {
   platform: string;
   architecture: string;
   reason: string | null;
-  backend: 'winfsp'|'macfuse'|'fuse';
+  backend: 'winfsp'|'macfuse'|'fuse'|'fskit';
   dependenciesReady: boolean;
   mountCompiled: boolean;
   detail: string | null;
   helpUrl: string;
+  canOpenSettings?: boolean;
+  builtInExtension?: unknown;
 }
 
 export interface KernelWorkspaceOpenParams {
@@ -6593,6 +6596,7 @@ export type KernelMethodParams = {
   "branch.fork": KernelBranchForkParams;
   "workspace.adopt": KernelWorkspaceAdoptParams;
   "workspace.backend.inspect": KernelEmptyParams;
+  "workspace.backend.settings": KernelEmptyParams;
   "workspace.open": KernelWorkspaceOpenParams;
   "workspace.inspect": KernelWorkspaceAddress;
   "workspace.acquire": KernelWorkspaceLeaseParams;
@@ -9312,6 +9316,15 @@ export type KernelRequest =
       kind: "request";
       id: string;
       method: "workspace.backend.inspect";
+      params: KernelEmptyParams;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "workspace.backend.settings";
       params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;

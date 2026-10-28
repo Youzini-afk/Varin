@@ -1,4 +1,5 @@
 export const settingsDict = {
+  "settings.projects.workspace.extensionSettings": "Увімкнути вбудоване розширення на хості",
   "settings.projects.workspace.backend": "Файлова система Host",
   "settings.projects.workspace.backendReady": "Залежності готові",
   "settings.projects.workspace.backendUnavailable": "Недоступно",

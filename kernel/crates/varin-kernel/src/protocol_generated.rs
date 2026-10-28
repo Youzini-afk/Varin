@@ -4815,6 +4815,9 @@ pub(crate) fn validate_generated_method_params(method: &str, params: &Value) -> 
         "workspace.backend.inspect" => serde_json::from_value::<KernelEmptyParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),
+        "workspace.backend.settings" => serde_json::from_value::<KernelEmptyParams>(params.clone())
+            .map(|_| ())
+            .map_err(|error| error.to_string()),
         "workspace.open" => serde_json::from_value::<KernelWorkspaceOpenParams>(params.clone())
             .map(|_| ())
             .map_err(|error| error.to_string()),

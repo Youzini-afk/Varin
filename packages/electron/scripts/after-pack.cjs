@@ -41,6 +41,11 @@ module.exports = (context) => {
     throw new Error(`Packaged Rust kernel manifest does not match ${packagedKernelPath}`);
   }
   if (context.electronPlatformName === 'darwin') {
+    const workspace = path.join(resourcesPath, 'kernel', 'VarinWorkspace.app');
+    for (const binary of ['Contents/MacOS/VarinWorkspace', 'Contents/PlugIns/VarinWorkspace.appex/Contents/MacOS/VarinWorkspace']) {
+      execFileSync('lipo', [path.join(workspace, binary), '-verify_arch', targetArchitecture === 'x64' ? 'x86_64' : 'arm64'], { stdio: 'inherit' });
+    }
+    execFileSync('codesign', ['--verify', '--strict', '--deep', workspace], { stdio: 'inherit' });
     // macOS signing below also sees the native tools resource.
     const helper = path.join(unpackedNodeModulesPath, '@varin', 'web', 'server', 'computer-driver', 'macos',
       'Varin Computer.app', 'Contents', 'MacOS', 'VarinComputer');

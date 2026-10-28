@@ -161,6 +161,7 @@
       "gatekeeperAssess": false,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.plist",
+      "sign": "scripts/sign-mac.cjs",
       "notarize": true,
       "target": [
         "dmg",

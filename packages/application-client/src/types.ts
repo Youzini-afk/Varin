@@ -664,6 +664,8 @@ export interface WorkspaceBackendStatus {
   reason: string | null;
   detail: string | null;
   helpUrl: string;
+  canOpenSettings?: boolean;
+  builtInExtension?: { ready?: boolean; reason?: string; detail?: string };
 }
 
 export interface VersionedProjectWorkspace {

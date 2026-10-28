@@ -1,4 +1,5 @@
 export const settingsDict = {
+  "settings.projects.workspace.extensionSettings": "Włącz wbudowane rozszerzenie na hoście",
   "settings.projects.workspace.backend": "System plików hosta",
   "settings.projects.workspace.backendReady": "Zależności dostępne",
   "settings.projects.workspace.backendUnavailable": "Niedostępny",

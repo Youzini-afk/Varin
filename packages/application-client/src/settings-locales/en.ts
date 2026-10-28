@@ -1,4 +1,5 @@
 export const settingsDict = {
+  "settings.projects.workspace.extensionSettings": "Enable built-in extension on Host",
   "settings.projects.workspace.backend": "Execution Host backend",
   "settings.projects.workspace.backendReady": "Dependencies ready",
   "settings.projects.workspace.backendUnavailable": "Unavailable",
@@ -6,7 +7,7 @@ export const settingsDict = {
   "settings.projects.workspace.backendHelp": "Component help",
   "settings.projects.workspace.title": "Mounted workspace",
   "settings.projects.workspace.description": "Share unchanged content and fork independent work without copying the project.",
-  "settings.projects.workspace.explanation": "An optional OS mount backend: WinFsp on Windows, macFUSE on macOS, and FUSE on Linux. Ordinary project conversations use their original directory. Enabling this backend selects a separate managed directory and retains the original folder as its import source.",
+  "settings.projects.workspace.explanation": "An optional OS mount backend: WinFsp on Windows, the built-in FSKit extension or installed macFUSE on macOS, and FUSE on Linux. Ordinary project conversations use their original directory. Enabling this backend selects a separate managed directory and retains the original folder as its import source.",
   "settings.projects.workspace.original": "Import source",
   "settings.projects.workspace.current": "Working directory",
   "settings.projects.workspace.preparing": "Preparing workspace…",

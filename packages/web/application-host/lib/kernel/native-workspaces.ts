@@ -261,6 +261,12 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             return await owners.kernel.scoped(grant).inspectWorkspaceBackend(signal);
         } finally { await owners.kernel.revokeGrant(grant.grantId); }
     };
+    const openBackendSettings = async (projectId: string, signal?: AbortSignal) => {
+        if (!(await owners.projects()).some(project => project.id === projectId)) throw new Error('Project is unavailable');
+        const grant = await owners.kernel.issueGrant({ grantId: `workspace-settings:${randomUUID()}`, capabilities: ['storage.admin'], pathScopes: [''] }, signal);
+        try { return await owners.kernel.scoped(grant).openWorkspaceBackendSettings(signal); }
+        finally { await owners.kernel.revokeGrant(grant.grantId); }
+    };
     const enableProject = async (projectId: string, signal?: AbortSignal) => {
         const project = (await owners.projects()).find(project => project.id === projectId);
         if (!project)
@@ -609,6 +615,6 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             }
         }
     };
-    return { prepare, acquire, resolveId, resolvePath, enable, disable, inspectProject, inspectBackend, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
+    return { prepare, acquire, resolveId, resolvePath, enable, disable, inspectProject, inspectBackend, openBackendSettings, open, snapshot, releaseSource, retainReference, releaseReference, retireSource, retainPrepared };
 }
 export type NativeWorkspaceOwner = ReturnType<typeof createNativeWorkspaceOwner>;

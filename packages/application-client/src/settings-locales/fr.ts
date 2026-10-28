@@ -2,6 +2,7 @@ import { settingsDict as englishSettingsDict } from './en.js';
 
 export const settingsDict = {
   ...englishSettingsDict,
+  "settings.projects.workspace.extensionSettings": "Activer l’extension intégrée sur l’hôte",
   "settings.projects.workspace.backend": "Système de fichiers du Host",
   "settings.projects.workspace.backendReady": "Dépendances disponibles",
   "settings.projects.workspace.backendUnavailable": "Indisponible",

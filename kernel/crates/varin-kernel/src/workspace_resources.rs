@@ -144,7 +144,8 @@ impl Workspaces {
         Ok(
             json!({"binding":entry.binding, "leases":entry.session.leases(grant, None)?,"rootId":root,
             "mount":view,
-            "capabilities":{"nativeFiles":true,"mountCompiled":cfg!(feature="workspace-mount"),"hardlinks":!cfg!(windows),"symlinks":true,"xattrs":cfg!(unix),"losslessNativeNames":false,"activeWritableMappingFork":false}}),
+            "capabilities":{"nativeFiles":true,"mountCompiled":cfg!(feature="workspace-mount"),"hardlinks":!cfg!(windows),"symlinks":true,"xattrs":cfg!(unix),"losslessNativeNames":false,
+                "activeWritableMappingFork":view.as_ref().and_then(|v|v["capabilities"]["activeWritableMappingFork"].as_bool()).unwrap_or(false)}}),
         )
     }
     fn checkpoint(entry: &Entry, selected: &str) -> Result<Checkpoint, KernelError> {
@@ -174,6 +175,20 @@ impl Workspaces {
         }
         if method=="workspace.backend.inspect"{
             return Ok(crate::workspace_backend::inspect());
+        }
+        if method=="workspace.backend.settings"{
+            if !grant.capabilities.iter().any(|cap|cap=="storage.admin") {return Err(KernelError::Authorization("Opening Host extension settings requires application authority".into()));}
+            #[cfg(all(target_os="macos",feature="workspace-mount"))]
+            {
+                let helper=crate::workspace_mount::macos::helper()?;
+                let bundle=helper.ancestors().nth(3).ok_or_else(||error("workspace_backend_unavailable","Workspace extension bundle is missing"))?;
+                if !helper.is_file(){return Err(error("workspace_backend_unavailable","Workspace extension is not packaged on this Host"));}
+                let output=std::process::Command::new("/usr/bin/open").arg(bundle).output()?;
+                if !output.status.success(){return Err(error("workspace_backend_unavailable",format!("Cannot open Host extension settings: {}",String::from_utf8_lossy(&output.stderr))));}
+                return Ok(json!({"opened":true}));
+            }
+            #[cfg(not(all(target_os="macos",feature="workspace-mount")))]
+            return Err(error("workspace_backend_unsupported","This Host has no bundled filesystem extension settings"));
         }
         if method == "workspace.adopt" {
             if self.stopping.load(Ordering::Acquire) {
@@ -325,7 +340,8 @@ impl Workspaces {
                         }
                     };
                     *locked(&entry.view)? = Some(
-                        json!({"mountId":id,"path":if worker.ready {Some(path)} else {None},"backend":backend(),"state":if worker.ready {"ready"} else {"cleanup_pending"}}),
+                        json!({"mountId":id,"path":if worker.ready {Some(path)} else {None},"backend":worker.capabilities.get("backend").and_then(Value::as_str).unwrap_or(backend()),
+                            "capabilities":worker.capabilities,"state":if worker.ready {"ready"} else {"cleanup_pending"}}),
                     );
                     *mounted = Some(worker);
                     if let Some(failure) = startup_error {
@@ -500,6 +516,7 @@ struct MountWorker {
     sender: mpsc::Sender<MountCommand>,
     thread: Option<std::thread::JoinHandle<()>>,
     ready: bool,
+    capabilities: Value,
 }
 impl MountWorker {
     #[cfg(feature = "workspace-mount")]
@@ -525,7 +542,11 @@ impl MountWorker {
             };
             let startup_error = mount.wait_ready_cancelled(&cancelled).err();
             let active = startup_error.is_none();
-            if ready.send(Ok(startup_error)).is_err() {
+            #[cfg(unix)]
+            let capabilities = mount.capabilities();
+            #[cfg(windows)]
+            let capabilities = json!({"backend":"winfsp","activeWritableMappingFork":false,"cacheFence":"closed_writers"});
+            if ready.send(Ok((startup_error,capabilities))).is_err() {
                 let _ = mount.stop();
                 return;
             }
@@ -555,11 +576,12 @@ impl MountWorker {
                 "Mount worker stopped before readiness",
             )
         })? {
-            Ok(startup_error) => Ok((
+            Ok((startup_error,capabilities)) => Ok((
                 Self {
                     sender,
                     thread: Some(thread),
                     ready: startup_error.is_none(),
+                    capabilities,
                 },
                 startup_error,
             )),

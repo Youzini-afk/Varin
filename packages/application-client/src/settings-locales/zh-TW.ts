@@ -1,4 +1,5 @@
 export const settingsDict = {
+  "settings.projects.workspace.extensionSettings": "在 Host 啟用內建擴充功能",
   "settings.projects.workspace.backend": "執行 Host 檔案系統後端",
   "settings.projects.workspace.backendReady": "依賴已就緒",
   "settings.projects.workspace.backendUnavailable": "無法使用",

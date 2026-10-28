@@ -148,6 +148,9 @@ interface InternalGrantHandle extends KernelGrantHandle {
 }
 
 export class KernelScopedClient {
+  async openWorkspaceBackendSettings(signal?:AbortSignal) {
+    return this.owner.workspaceRequest<{opened:boolean}>('workspace.backend.settings',{},this.grant,signal);
+  }
   async inspectWorkspaceBackend(signal?:AbortSignal){
     const hostId = this.owner.handshake?.hostId;
     const backend = await this.owner.workspaceRequest<import('./protocol.generated.js').KernelWorkspaceBackend>('workspace.backend.inspect',{},this.grant,signal);
@@ -604,7 +607,7 @@ const canonicalStoragePath = (value: string): string => {
 export class KernelClient {
   nativeWorkspaces?: import('./native-workspaces.js').NativeWorkspaceOwner;
   private nativeWorkspaceLifetime = false;
-  workspaceRequest<T>(method: 'workspace.backend.inspect' | 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.bind' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
+  workspaceRequest<T>(method: 'workspace.backend.inspect' | 'workspace.backend.settings' | 'workspace.adopt' | 'workspace.open' | 'workspace.inspect' | 'workspace.acquire' | 'workspace.release' | 'workspace.mount' | 'workspace.bind' | 'workspace.fork' | 'workspace.close' | 'workspace.result.prepare',
     params: KernelMethodParams[typeof method], grant: KernelGrantHandle, signal?: AbortSignal): Promise<T> {
     // A mount or dirty native file may outlive the HTTP caller. Once this
     // lifetime is used, graceful shutdown must await its actual drain receipt.

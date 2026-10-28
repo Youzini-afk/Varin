@@ -1858,6 +1858,10 @@ mod op {
                 header,
                 arg: data.fetch()?,
             }),
+            fuse_opcode::FUSE_SYNCFS => {
+                let _: &fuse_syncfs_in = data.fetch()?;
+                Operation::SyncFs
+            }
 
             #[cfg(target_os = "macos")]
             fuse_opcode::FUSE_SETVOLNAME => Operation::SetVolName(SetVolName {
@@ -1906,6 +1910,7 @@ pub(crate) enum Operation<'a> {
     StatFs(#[expect(dead_code)] StatFs<'a>),
     Release(Release<'a>),
     FSync(FSync<'a>),
+    SyncFs,
     SetXAttr(SetXAttr<'a>),
     GetXAttr(GetXAttr<'a>),
     ListXAttr(ListXAttr<'a>),
@@ -2003,6 +2008,7 @@ impl fmt::Display for Operation<'_> {
                 x.file_handle(),
                 x.fdatasync()
             ),
+            Operation::SyncFs => write!(f, "SYNCFS"),
             Operation::SetXAttr(x) => write!(
                 f,
                 "SETXATTR name {:?}, size {}, flags {:#x}",

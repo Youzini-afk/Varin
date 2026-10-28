@@ -3,7 +3,7 @@ import { RiArrowRightUpLine, RiLoader4Line } from '@remixicon/react';
 import type { ProjectEntry } from '@varin/application-client';
 import { Button } from '@/components/ui/button';
 import { SettingsSection } from '../shared/SettingsSection';
-import { projectWorkspaceRequest, inspectWorkspaceBackend, type ProjectWorkspaceStatus, type WorkspaceBackendStatus } from '@/lib/nativeWorkspace';
+import { projectWorkspaceRequest, inspectWorkspaceBackend, openWorkspaceBackendSettings, type ProjectWorkspaceStatus, type WorkspaceBackendStatus } from '@/lib/nativeWorkspace';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useI18n } from '@/lib/i18n';
@@ -90,6 +90,9 @@ export function ProjectWorkspaceSection({ project }: {
           {checkingBackend && <RiLoader4Line className="mr-1 size-3 animate-spin"/>}{t('settings.projects.workspace.refreshBackend')}
         </Button>
         {backend?.helpUrl && <a href={backend.helpUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">{t('settings.projects.workspace.backendHelp')}</a>}
+        {backend?.canOpenSettings && !backend.builtInExtension?.ready && <Button size="sm" variant="ghost" onClick={() => {
+            void openWorkspaceBackendSettings(project.id).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)));
+        }}>{t('settings.projects.workspace.extensionSettings')}</Button>}
       </div>
       {backend && !backend.dependenciesReady && backend.detail && <p className="typography-meta break-words text-muted-foreground">{backend.detail}</p>}
       <dl className="min-w-0 space-y-2 typography-meta">

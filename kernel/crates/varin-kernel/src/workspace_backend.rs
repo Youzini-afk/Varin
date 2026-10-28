@@ -55,8 +55,12 @@ pub(crate) fn require_isolation(host_id: &str) -> Result<(), KernelError> {
 pub(crate) fn inspect() -> Value {
     let result = require();
     let error = result.err().map(ExecutionError::from);
-    json!({"backend":backend(), "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
+    let mut value=json!({"backend":backend(), "platform":std::env::consts::OS,"architecture":std::env::consts::ARCH,
         "mountCompiled":cfg!(feature="workspace-mount"),"dependenciesReady":error.is_none(),
         "detail":error.as_ref().map(|error|&error.message),"reason":error.as_ref().and_then(|error|error.details.as_ref()).and_then(|details|details.get("reason")),
-        "helpUrl":help_url()})
+        "helpUrl":help_url()});
+    #[cfg(all(target_os="macos",feature="workspace-mount"))]
+    { let facts=crate::workspace_mount::macos::facts();if facts["ready"]==true{value["backend"]=json!("fskit");}
+      value["builtInExtension"]=facts;value["canOpenSettings"]=json!(crate::workspace_mount::macos::helper().is_ok_and(|p|p.is_file())); }
+    value
 }

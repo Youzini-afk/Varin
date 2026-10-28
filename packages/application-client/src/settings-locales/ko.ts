@@ -1,4 +1,5 @@
 export const settingsDict = {
+  "settings.projects.workspace.extensionSettings": "Host에서 내장 확장 활성화",
   "settings.projects.workspace.backend": "실행 Host 파일 시스템",
   "settings.projects.workspace.backendReady": "종속성 준비 완료",
   "settings.projects.workspace.backendUnavailable": "사용 불가",

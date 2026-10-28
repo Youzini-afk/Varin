@@ -127,8 +127,15 @@ It never installs OS components. New isolated writers use native workspace branc
 can explicitly adopt a primary workspace into a separate mounted directory. WinFsp is delay-loaded;
 the original installed DLL is located through its system registration only when starting a mount. Building
 this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
-FUSE device/helper for actual mounts; macOS requires an already-enabled macFUSE component.
-macOS defaults to runtime loading of the installed libfuse3 session API, avoiding the compat25 break tracked at
+FUSE character device and a permitted direct-mount/helper route for actual mounts. Linux negotiates
+writeback cache only with FUSE_SYNCFS support, capturing the checkpoint in the originating thread's
+post-writeback callback. Older ABIs retain the scoped active-writer obstacle. Unmount helper errors
+retain the mount; detach does not silently become lazy/forced.
+macOS first uses the bundled path-resource FSKit executor when macOS 26+ reports the exact staged
+extension enabled; otherwise it admits the installed macFUSE VFS backend. Extension state inspection
+never opens settings or installs/enables components. The explicit project settings action opens the
+Host's bundled control app and system settings. See [native executor](../packages/workspace-driver/macos/README.md).
+macFUSE uses runtime loading of the installed libfuse3 session API, avoiding the compat25 break tracked at
 https://github.com/cberner/fuser/issues/752. An explicit `fuser/libfuse2` build retains the legacy path;
 the default macOS loader never selects compat25 because an SDK happens to contain `fuse.pc`.
 The libfuse3 owner retains the session while native callbacks use a duplicated fd and destroys it on
@@ -137,7 +144,9 @@ setup failure or after detach. Native OS qualification of this selection is stil
 starts, while keeping the mount object available for cancellation and cleanup; this covers the asynchronous
 readiness distinction at https://github.com/cberner/fuser/issues/736.
 `kernel/vendor/fuser/VARIN_PATCHES.md` records the loader, capability and retryable-detach patch. macOS CI
-compiles the real default transport without installing an extension. Dependency absence is reported at
+compiles the native Swift extension and Rust transport without enabling an extension. The product
+stages/signs the bundle next to the kernel; distribution signing preserves FSKit's dedicated entitlements.
+Dependency absence is reported at
 mount admission and does not prevent the ordinary application from starting.
 
 The ignored `workspace_mount::review::native_workspace_mounts_share_storage_and_keep_fork_independent`

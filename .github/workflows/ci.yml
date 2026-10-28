@@ -54,7 +54,7 @@ jobs:
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
           fi
-          if grep -qE '(^kernel/|^scripts/(build-kernel|generate-kernel-protocol|test-kernel-authority)\.mjs$|^package\.json$|^\.github/workflows/ci\.yml$)' <<< "$CODE_CHANGED"; then
+          if grep -qE '(^kernel/|^packages/workspace-driver/|^scripts/(build-kernel|generate-kernel-protocol|test-kernel-authority)\.mjs$|^package\.json$|^\.github/workflows/ci\.yml$)' <<< "$CODE_CHANGED"; then
             echo "rust=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust=false" >> "$GITHUB_OUTPUT"
@@ -216,6 +216,14 @@ jobs:
     if: needs.changes.outputs.rust == 'true'
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Compile and ad-hoc sign the bundled FSKit executor
+        run: |
+          XCODE=$(find /Applications -maxdepth 1 -name 'Xcode_26*.app' | sort -V | tail -1)
+          if [ -n "$XCODE" ]; then sudo xcode-select -s "$XCODE/Contents/Developer"; fi
+          node packages/workspace-driver/macos/build-helper.mjs "$RUNNER_TEMP/varin-workspace" "$(node -p process.arch)"
       - name: Verify workspace tree publication on macOS
         working-directory: kernel
         run: cargo test -p varin-kernel --lib storage::versioned_workspaces_review --locked

@@ -703,6 +703,13 @@ pub trait Filesystem: Send + Sync + 'static {
         reply.error(Errno::ENOSYS);
     }
 
+    /// Synchronize a complete filesystem after the kernel has drained its
+    /// writeback requests (FUSE protocol 7.36). Implementations may establish
+    /// their durable version boundary before acknowledging this request.
+    fn syncfs(&self, _req: &Request, reply: ReplyEmpty) {
+        reply.error(Errno::ENOSYS);
+    }
+
     /// Open a directory.
     /// Filesystem may store an arbitrary file handle (pointer, index, etc) in fh, and
     /// use this in other all other directory stream operations (readdir, releasedir,

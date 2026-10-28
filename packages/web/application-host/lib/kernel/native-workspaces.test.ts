@@ -30,7 +30,8 @@ it('keeps ordinary project tasks independent of mount dependencies and only prep
   try {
     let project = { id: 'project', path: directory } as ProjectEntry;
     let finish!: () => void;
-    const entered = Promise.withResolvers<void>();
+    let signalEntered!: () => void;
+    const entered = { promise: new Promise<void>(resolve => { signalEntered = resolve; }), resolve: () => signalEntered() };
     const adopting = new Promise<void>(resolve => { finish = resolve; });
     let dependenciesReady = false;
     const view = { binding: { generation: 1 }, mount: { state: 'ready', path: '/mounted/project' }, rootId: 'mounted-root' };
