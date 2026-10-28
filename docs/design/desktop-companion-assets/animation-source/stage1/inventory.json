@@ -1,0 +1,442 @@
+[
+  {
+    "path": "README.md",
+    "bytes": 3782,
+    "sha256": "7b8d0364b75911e8a65f284de4614ea3ce4069c5c580d838b5cabd5cb6aac866",
+    "sourceSha256": "0614ba0777589f4c162930b2d1b8d09757493668791f6e27dc0b64f9b15d5edc",
+    "sourceBytes": 1365
+  },
+  {
+    "path": "add_joint_underlaps.py",
+    "bytes": 2241,
+    "sha256": "268538dd078d2cc7c7afc15ebc22f31742f9bc42ae07727f17c62a5cf05b27db",
+    "sourceSha256": "268538dd078d2cc7c7afc15ebc22f31742f9bc42ae07727f17c62a5cf05b27db",
+    "sourceBytes": 2241
+  },
+  {
+    "path": "canonical-seated-clean-v3.png",
+    "bytes": 1274674,
+    "sha256": "a5a32be78b3ab8bbb50131e0f7ae21b2829673929e8acbc6f10c550947a3265d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "a5a32be78b3ab8bbb50131e0f7ae21b2829673929e8acbc6f10c550947a3265d",
+    "sourceBytes": 1274674
+  },
+  {
+    "path": "canonical-seated-v1.png",
+    "bytes": 1586112,
+    "sha256": "fc9ac32f158d1273aba5d0b15d9a2c1d4c496fa9eec66d58ffc4bb950ab815dd",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "fc9ac32f158d1273aba5d0b15d9a2c1d4c496fa9eec66d58ffc4bb950ab815dd",
+    "sourceBytes": 1586112
+  },
+  {
+    "path": "canonical-seated-v2.png",
+    "bytes": 1394076,
+    "sha256": "1f50b968e02e75989173cc400e674d48e413ae5ef97858a54ed327449eb4317a",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "1f50b968e02e75989173cc400e674d48e413ae5ef97858a54ed327449eb4317a",
+    "sourceBytes": 1394076
+  },
+  {
+    "path": "clean_and_segment.py",
+    "bytes": 5023,
+    "sha256": "a3a39bcb1488c7559335aebc7d1a199b4972d0fe28c112c0a4fd2e6eb565237c",
+    "sourceSha256": "bdf3f56a6c398fa2a3fccdf3ca625ef706965abbd834cddb0a8ce9b600fdeaa9",
+    "sourceBytes": 4994
+  },
+  {
+    "path": "cleanup-qa-black-gray-white.jpg",
+    "bytes": 107027,
+    "sha256": "4864c885190b569e2e3c4fbc7fc57f2780f0b43e69250bf5c4ef2e082b5d426a",
+    "size": [
+      1800,
+      600
+    ],
+    "mode": "RGB",
+    "sourceSha256": "4864c885190b569e2e3c4fbc7fc57f2780f0b43e69250bf5c4ef2e082b5d426a",
+    "sourceBytes": 107027
+  },
+  {
+    "path": "cleanup-report.json",
+    "bytes": 439,
+    "sha256": "75288fd6661e38cb123623faf6ce4ee0cff7e17afc3c594b0f9f2087070c884a",
+    "sourceSha256": "75288fd6661e38cb123623faf6ce4ee0cff7e17afc3c594b0f9f2087070c884a",
+    "sourceBytes": 439
+  },
+  {
+    "path": "layers-draft/handL.png",
+    "bytes": 16358,
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "sourceBytes": 16358
+  },
+  {
+    "path": "layers-draft/handR.png",
+    "bytes": 16730,
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "sourceBytes": 16730
+  },
+  {
+    "path": "layers-draft/head.png",
+    "bytes": 295243,
+    "sha256": "7a08655cae97c72e870fc543af6b808871e2acf50e3dd9c275c4866f3606985a",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "7a08655cae97c72e870fc543af6b808871e2acf50e3dd9c275c4866f3606985a",
+    "sourceBytes": 295243
+  },
+  {
+    "path": "layers-draft/torso.png",
+    "bytes": 96874,
+    "sha256": "c34f3fcb28460183d58cd0424e31fafe91109b3ece58b7028c6c335921d1bb8f",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "c34f3fcb28460183d58cd0424e31fafe91109b3ece58b7028c6c335921d1bb8f",
+    "sourceBytes": 96874
+  },
+  {
+    "path": "layers-draft-manifest.json",
+    "bytes": 1917,
+    "sha256": "c4bfbf11563d21e845ac7752eb26d9d7e841bea8b8c9e2963ead13b0c6ba10ba",
+    "sourceSha256": "c4bfbf11563d21e845ac7752eb26d9d7e841bea8b8c9e2963ead13b0c6ba10ba",
+    "sourceBytes": 1917
+  },
+  {
+    "path": "layers-partition-v1/forearmL.png",
+    "bytes": 48798,
+    "sha256": "eef3ab7eb89589909d5b6b17fd1055d04f6882754822fa919d375b6497afcf39",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "eef3ab7eb89589909d5b6b17fd1055d04f6882754822fa919d375b6497afcf39",
+    "sourceBytes": 48798
+  },
+  {
+    "path": "layers-partition-v1/forearmR.png",
+    "bytes": 40866,
+    "sha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953",
+    "sourceBytes": 40866
+  },
+  {
+    "path": "layers-partition-v1/hairBack.png",
+    "bytes": 433047,
+    "sha256": "1431721db19f9dc698be5c3b053002533d4bd35da55a0765c9e8c756641a4722",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "1431721db19f9dc698be5c3b053002533d4bd35da55a0765c9e8c756641a4722",
+    "sourceBytes": 433047
+  },
+  {
+    "path": "layers-partition-v1/handL.png",
+    "bytes": 16358,
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "sourceBytes": 16358
+  },
+  {
+    "path": "layers-partition-v1/handR.png",
+    "bytes": 16730,
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "sourceBytes": 16730
+  },
+  {
+    "path": "layers-partition-v1/head.png",
+    "bytes": 290691,
+    "sha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17",
+    "sourceBytes": 290691
+  },
+  {
+    "path": "layers-partition-v1/lowerBody.png",
+    "bytes": 412388,
+    "sha256": "a0d1cda16d0baadaf54fb7fceb4f1a3801b274934596157fbc7f0c424faeb18b",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "a0d1cda16d0baadaf54fb7fceb4f1a3801b274934596157fbc7f0c424faeb18b",
+    "sourceBytes": 412388
+  },
+  {
+    "path": "layers-partition-v1/torso.png",
+    "bytes": 86005,
+    "sha256": "bc5d7593a661cda1f6a0267916e1ea5169f400cd2038a4946248b0849dc4a6df",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "bc5d7593a661cda1f6a0267916e1ea5169f400cd2038a4946248b0849dc4a6df",
+    "sourceBytes": 86005
+  },
+  {
+    "path": "layers-partition-v1/upperArmL.png",
+    "bytes": 37050,
+    "sha256": "4b2d3708a68f9d715e9f265e6365ec733d2faa7dad61099e3aec870ccfd51679",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "4b2d3708a68f9d715e9f265e6365ec733d2faa7dad61099e3aec870ccfd51679",
+    "sourceBytes": 37050
+  },
+  {
+    "path": "layers-partition-v1/upperArmR.png",
+    "bytes": 35288,
+    "sha256": "3edf8443a4606f5d994ceb3575265c7f784eb248de8667cfe979d95b5c7d52c3",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "3edf8443a4606f5d994ceb3575265c7f784eb248de8667cfe979d95b5c7d52c3",
+    "sourceBytes": 35288
+  },
+  {
+    "path": "layers-underlap-v1/forearmL.png",
+    "bytes": 50369,
+    "sha256": "1c6f79801dd17ecd9a1b2bec16be5196da927521905cd3488e488750463dda4a",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "1c6f79801dd17ecd9a1b2bec16be5196da927521905cd3488e488750463dda4a",
+    "sourceBytes": 50369
+  },
+  {
+    "path": "layers-underlap-v1/forearmR.png",
+    "bytes": 41585,
+    "sha256": "d1806f96d68709cf534c5a25da744520726c22efb661c44997f014cc3556a618",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "d1806f96d68709cf534c5a25da744520726c22efb661c44997f014cc3556a618",
+    "sourceBytes": 41585
+  },
+  {
+    "path": "layers-underlap-v1/hairBack.png",
+    "bytes": 462250,
+    "sha256": "9ab259158575390bf247dffacfc2ee1701ba04bdf812039cc335f6ba9808f35b",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "9ab259158575390bf247dffacfc2ee1701ba04bdf812039cc335f6ba9808f35b",
+    "sourceBytes": 462250
+  },
+  {
+    "path": "layers-underlap-v1/handL.png",
+    "bytes": 16358,
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d",
+    "sourceBytes": 16358
+  },
+  {
+    "path": "layers-underlap-v1/handR.png",
+    "bytes": 16730,
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897",
+    "sourceBytes": 16730
+  },
+  {
+    "path": "layers-underlap-v1/head.png",
+    "bytes": 290691,
+    "sha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17",
+    "sourceBytes": 290691
+  },
+  {
+    "path": "layers-underlap-v1/lowerBody.png",
+    "bytes": 419237,
+    "sha256": "7412d071ee4e332b55dfd3785fa036225b629cda5f8f08fc6aaca16b43d3719b",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "7412d071ee4e332b55dfd3785fa036225b629cda5f8f08fc6aaca16b43d3719b",
+    "sourceBytes": 419237
+  },
+  {
+    "path": "layers-underlap-v1/torso.png",
+    "bytes": 93537,
+    "sha256": "38b18b02c6f0f6b5101b1787e61e4e147a3c71dbdbf3a39270570bc81623b008",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "38b18b02c6f0f6b5101b1787e61e4e147a3c71dbdbf3a39270570bc81623b008",
+    "sourceBytes": 93537
+  },
+  {
+    "path": "layers-underlap-v1/upperArmL.png",
+    "bytes": 38731,
+    "sha256": "1e819c81339b8af9ec40545ef23036cda7408e2bf40e124834b4b1cbe9b45aa7",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "1e819c81339b8af9ec40545ef23036cda7408e2bf40e124834b4b1cbe9b45aa7",
+    "sourceBytes": 38731
+  },
+  {
+    "path": "layers-underlap-v1/upperArmR.png",
+    "bytes": 36142,
+    "sha256": "3e4f6ee9423e8bbea53174cb2dda8bfaec24dd4cbeb623c825322840412805d7",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "3e4f6ee9423e8bbea53174cb2dda8bfaec24dd4cbeb623c825322840412805d7",
+    "sourceBytes": 36142
+  },
+  {
+    "path": "partition-manifest.json",
+    "bytes": 2416,
+    "sha256": "f2051da16ce9b2f4ef253e13ddd4966a022d7567b479b266177a84ec62c45ea1",
+    "sourceSha256": "54e3b9808d1a0b629563edb62d430f749e1a2cc92c75f1b252f6870f0727d5d5",
+    "sourceBytes": 2424
+  },
+  {
+    "path": "partition-qa.jpg",
+    "bytes": 40594,
+    "sha256": "49674bcb43873dcbc2add47de09f4ac1e51349bd3c5123afde9c13eeaff3be01",
+    "size": [
+      1800,
+      780
+    ],
+    "mode": "RGB",
+    "sourceSha256": "49674bcb43873dcbc2add47de09f4ac1e51349bd3c5123afde9c13eeaff3be01",
+    "sourceBytes": 40594
+  },
+  {
+    "path": "partition-reconstruction.png",
+    "bytes": 1274674,
+    "sha256": "a5a32be78b3ab8bbb50131e0f7ae21b2829673929e8acbc6f10c550947a3265d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "a5a32be78b3ab8bbb50131e0f7ae21b2829673929e8acbc6f10c550947a3265d",
+    "sourceBytes": 1274674
+  },
+  {
+    "path": "partition_layers.py",
+    "bytes": 3371,
+    "sha256": "8ef32f18dd80c6e5aef4d1524a59fca93ccddaa345aacc8a7e7d0eca6fb4e8b9",
+    "sourceSha256": "4ccd196776b51b4a23213436de5ab4466c8c1cdab98c1fdf0c282a964c5155e7",
+    "sourceBytes": 3379
+  },
+  {
+    "path": "torso-separation-trial-v1-REJECTED.png",
+    "bytes": 809678,
+    "sha256": "15c0fc01fb54590a94841fb7c1b0d2a6a0bedb56cc96409fb2c32754958f0f04",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "15c0fc01fb54590a94841fb7c1b0d2a6a0bedb56cc96409fb2c32754958f0f04",
+    "sourceBytes": 809678
+  },
+  {
+    "path": "underlap-manifest.json",
+    "bytes": 3290,
+    "sha256": "83095d5bab3997b18abfa5a251f94c1dfb401fa38bb04d50e1d586c25732c94f",
+    "sourceSha256": "83095d5bab3997b18abfa5a251f94c1dfb401fa38bb04d50e1d586c25732c94f",
+    "sourceBytes": 3290
+  },
+  {
+    "path": "underlap-neutral-reconstruction.png",
+    "bytes": 1275862,
+    "sha256": "ce9194389b1bf4568cef8ba5ee47f4678128e03681bece41be6d0bdbc2f70c1c",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "ce9194389b1bf4568cef8ba5ee47f4678128e03681bece41be6d0bdbc2f70c1c",
+    "sourceBytes": 1275862
+  }
+]

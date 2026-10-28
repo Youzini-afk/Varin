@@ -1,0 +1,22 @@
+{
+  "source": "canonical-seated-v2.png",
+  "output": "canonical-seated-clean-v3.png",
+  "size": [
+    1382,
+    1382
+  ],
+  "sourceSize": [
+    1254,
+    1254
+  ],
+  "translation": [
+    64,
+    64
+  ],
+  "resampling": false,
+  "changedPixels": 31071,
+  "changedAlphaPixels": 29998,
+  "interiorChangeBeyond5px": 0,
+  "method": "component filtering plus narrow boundary palette-outlier and near-white matte removal",
+  "notRigReady": true
+}

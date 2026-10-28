@@ -35,6 +35,12 @@
 
 拖动只改变位置，不取消、暂停或重启实际任务，也不批准权限；人物合盖不是engine停止。放下后按最新工作事实恢复姿态。图中的界面符号只作设计示意，正式运行值由原状态owner提供。
 
+## 动画源图与分层研究
+
+[stage 1检查点](animation-source/stage1/README.md)保存真实人物canonical、clean-v3、初始mask、10层互斥分区与局部underlap、脚本、锚点和QA。静态分区逐RGBA重组差0；underlap中性合成最大差5，不是0。当前仍有头发语义余集、隐藏面、脸与道具待完成，仅研究小幅pose。
+
+最终路线是认可美术的分层动画，不用[debug几何实验](../../../tools/desktop-companion-motion-lab/README.md)代替成品角色。debug证据保持独立；本源图阶段也不是最终rig或软件动画已完成的声明。
+
 ## 未选探索归档
 
 为保留恢复线索，未选稿与current目录隔离，**不参与后续角色或表演参考选择**。归档不是待自动启用的候选。

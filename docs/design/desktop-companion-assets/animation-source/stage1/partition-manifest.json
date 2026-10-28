@@ -1,0 +1,80 @@
+{
+  "status": "STATIC_PARTITION_NOT_RIG_READY",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "source": "canonical-seated-clean-v3.png",
+  "composition": "mutually exclusive masks; RGBA pixel reconstruction exact, overpaint none",
+  "maxReconstructionChannelError": 0,
+  "assets": [
+    {
+      "node": "handL",
+      "path": "layers-partition-v1/handL.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "handR",
+      "path": "layers-partition-v1/handR.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "forearmL",
+      "path": "layers-partition-v1/forearmL.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "forearmR",
+      "path": "layers-partition-v1/forearmR.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "upperArmL",
+      "path": "layers-partition-v1/upperArmL.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "upperArmR",
+      "path": "layers-partition-v1/upperArmR.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "torso",
+      "path": "layers-partition-v1/torso.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "lowerBody",
+      "path": "layers-partition-v1/lowerBody.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "head",
+      "path": "layers-partition-v1/head.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    },
+    {
+      "node": "hairBack",
+      "path": "layers-partition-v1/hairBack.png",
+      "status": "visible-surface-partition-draft",
+      "occlusionExtended": false
+    }
+  ],
+  "missing": [
+    "Hidden skin/torso/hair surface completion",
+    "24px joint overlaps",
+    "Front/back hair semantic refinement; hairBack currently remainder contains ribbon and jacket fragments",
+    "Independent face assets pending validation",
+    "Laptop base/lid and chair absent"
+  ],
+  "warning": "Static partition tests coordinate contract, not permission to rotate these unfilled pieces as finished animation."
+}
