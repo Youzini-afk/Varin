@@ -1,0 +1,4 @@
+from pathlib import Path
+from PIL import Image,ImageDraw,ImageFilter,ImageChops
+r=Path(__file__).parent;o=r/'hug-landing-v3';o.mkdir(exist_ok=True)
+base=Image.open(r/'canonical-static-v1/hug.png').convert('RGBA');donor=Image.open(r/'departure-bridge-v1/detach-protected-v2.png').convert('RGBA');mask=Image.open(r/'departure-bridge-v1/stool-replacement-mask-v2.png');arms=Image.new('L',(512,512));ImageDraw.Draw(arms).polygon([(194,190),(324,183),(375,255),(383,361),(322,361),(284,317),(190,315)],fill=255);arms=arms.filter(ImageFilter.GaussianBlur(.6));mask=ImageChops.subtract(mask,arms);im=Image.composite(donor,base,mask);im.save(o/'contact-no-stool.png');mask.save(o/'replacement-excluding-hug-arms.png');b=Image.new('RGBA',(512,512),(26,37,50,255));b.alpha_composite(im);b.convert('RGB').save(o/'contact-no-stool-dark.jpg')

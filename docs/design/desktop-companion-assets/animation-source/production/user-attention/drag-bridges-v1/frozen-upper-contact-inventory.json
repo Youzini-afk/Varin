@@ -1,0 +1,120 @@
+{
+  "status": "upper-contact artwork candidate, pending assembled departure normal-speed QA",
+  "rejected": [
+    "permission-raw-v1.png: follows rapid curled pose, not adjacent original-laptop contact; do not consume"
+  ],
+  "files": [
+    {
+      "path": "authored-arms-mask.png",
+      "bytes": 2786,
+      "sha256": "a3eee976279a80c173192fe8e07ac06fc74ef7e67b95034d6736e4f1341960c5"
+    },
+    {
+      "path": "original-screen-protect-mask.png",
+      "bytes": 758,
+      "sha256": "25d7fd30ee4dfdb25c0b1b1e3d72b6c43afb9ce9f772b7610ceecc7a6fbe289c"
+    },
+    {
+      "path": "permission-raw-v2.png",
+      "bytes": 1692565,
+      "sha256": "4e0b2ce2f4e5252c2cbd4d1232574f72cc7514eb95f695d03d6892296133764c"
+    },
+    {
+      "path": "permission-registration.json",
+      "bytes": 491,
+      "sha256": "3a9f127c1eafdfc510cb8c51dcdbb706da33c7d5c7abe9dd745a67198edd77b6"
+    },
+    {
+      "path": "permission-support-registered.png",
+      "bytes": 331003,
+      "sha256": "a2dea7efc5a10c4ff31694dc49f4d3b8511e3c6dd21e2fbd31cbe1a500b0b965"
+    },
+    {
+      "path": "prompt-permission-v2.txt",
+      "bytes": 1311,
+      "sha256": "f507838c93f72348896d5a3ac4c87e6adab3948d9eeb1054bd6aa82a10d9c917"
+    },
+    {
+      "path": "prompt-permission.txt",
+      "bytes": 1466,
+      "sha256": "7d079f5784471a7aa489f5ed760739cd0886f92f67b7bce065a88dfc7ec038d3"
+    },
+    {
+      "path": "prompt-query.txt",
+      "bytes": 1138,
+      "sha256": "9bf393d9e5bfe2d73b7760ddde1087d9cfb4c809b7c61bfa44f7073c21d64d9a"
+    },
+    {
+      "path": "query-raw-v1.png",
+      "bytes": 1725240,
+      "sha256": "1611eee22936db3ab68ac8bbeb51c86e55f92d3e9cc8bf1417cddd10837c9fc2"
+    },
+    {
+      "path": "query-registration.json",
+      "bytes": 486,
+      "sha256": "1956cc4dc055033299f76340b03567fb09e888d56eb628f509cfb2e76d3a27d2"
+    },
+    {
+      "path": "query-support-registered.png",
+      "bytes": 312093,
+      "sha256": "8e47edf77d3ff3aa0ad8c3c9892a99ba8a7d83dceaaea512d256768fa943947b"
+    },
+    {
+      "path": "register.py",
+      "bytes": 2144,
+      "sha256": "c2622a0400b44afeee69037eee5d5197cca12fd630a0e33fdfaaf74a2cc4bd72"
+    },
+    {
+      "path": "wait-000-registration.json",
+      "bytes": 487,
+      "sha256": "19ab4effe29506fb9a775f49ddadb87a153af5d80ad9f4e633c55a8bb5e3ec43"
+    },
+    {
+      "path": "wait-000-support-registered.png",
+      "bytes": 328457,
+      "sha256": "0e47d979683820d316ee237f2ea0539304529d45349eb0987f80d05559fb8dd5"
+    },
+    {
+      "path": "wait-001-registration.json",
+      "bytes": 487,
+      "sha256": "f7a0c0c2d8da5670cd8348d909ec2f9afe1ad8a90546d6258756a0053bc2280d"
+    },
+    {
+      "path": "wait-001-support-registered.png",
+      "bytes": 327951,
+      "sha256": "0da0defba0c5a09d072383f8459cf4f4dc7f278ae11f9653e01b2e8ee41246d5"
+    },
+    {
+      "path": "wait-002-registration.json",
+      "bytes": 487,
+      "sha256": "aa9068c5eeee627867d0e13b960b93c7ce5c54bad928b7c3d16e4c97ad2c803a"
+    },
+    {
+      "path": "wait-002-support-registered.png",
+      "bytes": 327148,
+      "sha256": "d9118cb151af1749e766d5f9bc6a94a54103446c2ef17b6af3d579667c26f7dc"
+    },
+    {
+      "path": "wait-005-registration.json",
+      "bytes": 487,
+      "sha256": "61bdda7c6a46931d00233f429a83ea54b03e619ba0446fd8c3123b4d70d45d2a"
+    },
+    {
+      "path": "wait-005-support-registered.png",
+      "bytes": 333969,
+      "sha256": "f1e58e66c0ed3999d9e112a83dba56dd014aef4d4cd4e134026e976cae5595bf"
+    }
+  ],
+  "integration": "relocation owns detach lower/no-stool and original-laptop\u2192close-half\u2192mid link; preserve sleeve crossing y332\u2013365. No full-body bbox normalization.",
+  "sourceFrames": {
+    "permissionStart": "registered/permission-cycle-v2/pose-009.png",
+    "permissionRelease": "registered/permission-cycle-v2/pose-010.png",
+    "queryStart": "registered/query-understand-v1/pose-005.png",
+    "queryRelease": [
+      "registered/query-understand-v1/pose-006.png",
+      "registered/query-understand-v1/pose-007.png"
+    ],
+    "waitStart": "registered/wait-relaxed-v1/pose-NNN.png"
+  },
+  "timingProposal": "Begin native pointer-follow immediately with detached foreground; hand release/contact art may occupy85\u2013125ms, never compress four drawings solely to meet arbitrary90ms."
+}

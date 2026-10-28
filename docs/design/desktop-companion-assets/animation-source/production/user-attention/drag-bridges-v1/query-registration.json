@@ -1,0 +1,9 @@
+{
+  "raw": "query-raw-v1.png",
+  "editTarget": "registered/query-understand-v1/pose-007.png",
+  "operation": "fixed full viewport resize to512, preserve outside authored arm mask; preserve original screen interior, no bbox normalization",
+  "rawSha256": "1611eee22936db3ab68ac8bbeb51c86e55f92d3e9cc8bf1417cddd10837c9fc2",
+  "mask": "authored-arms-mask.png",
+  "protected": "original-screen-protect-mask.png",
+  "stage": "candidate-upper-contact; lower/no-stool still relocation owner"
+}

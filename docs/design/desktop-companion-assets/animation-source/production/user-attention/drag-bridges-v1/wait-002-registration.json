@@ -1,0 +1,9 @@
+{
+  "raw": "permission-raw-v2.png",
+  "editTarget": "registered/wait-relaxed-v1/pose-002.png",
+  "operation": "fixed full viewport resize to512, preserve outside authored arm mask; preserve original screen interior, no bbox normalization",
+  "rawSha256": "4e0b2ce2f4e5252c2cbd4d1232574f72cc7514eb95f695d03d6892296133764c",
+  "mask": "authored-arms-mask.png",
+  "protected": "original-screen-protect-mask.png",
+  "stage": "candidate-upper-contact; lower/no-stool still relocation owner"
+}

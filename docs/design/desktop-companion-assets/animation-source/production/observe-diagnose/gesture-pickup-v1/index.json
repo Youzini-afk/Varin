@@ -1,0 +1,149 @@
+{
+  "entries": [
+    {
+      "id": "gesture-pickup.chin-contact",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-contact/sequence.source.json",
+      "sourceStart": "observe-diagnose/gesture-pickup-v1/../canonical-chin-v2/pose-005.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-000",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-000/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-000.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-001",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-001/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-001.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-002",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-002/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-002.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-003",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-003/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-003.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-004",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-004/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-004.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-005",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-005/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-005.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-006",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-006/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-006.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-007",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-007/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-007.png"
+    },
+    {
+      "id": "gesture-pickup.stretch-008",
+      "manifest": "observe-diagnose/gesture-pickup-v1/stretch-008/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-008.png"
+    },
+    {
+      "id": "gesture-pickup.eye-rub-000",
+      "manifest": "observe-diagnose/gesture-pickup-v1/eye-rub-000/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-000.png"
+    },
+    {
+      "id": "gesture-pickup.eye-rub-001",
+      "manifest": "observe-diagnose/gesture-pickup-v1/eye-rub-001/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-001.png"
+    },
+    {
+      "id": "gesture-pickup.eye-rub-002",
+      "manifest": "observe-diagnose/gesture-pickup-v1/eye-rub-002/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-002.png"
+    },
+    {
+      "id": "gesture-pickup.eye-rub-003",
+      "manifest": "observe-diagnose/gesture-pickup-v1/eye-rub-003/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-003.png"
+    },
+    {
+      "id": "gesture-pickup.eye-rub-004",
+      "manifest": "observe-diagnose/gesture-pickup-v1/eye-rub-004/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-004.png"
+    },
+    {
+      "id": "gesture-pickup.chin-000",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-000/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-000.png"
+    },
+    {
+      "id": "gesture-pickup.chin-001",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-001/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-001.png"
+    },
+    {
+      "id": "gesture-pickup.chin-002",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-002/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-002.png"
+    },
+    {
+      "id": "gesture-pickup.chin-003",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-003/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-003.png"
+    },
+    {
+      "id": "gesture-pickup.chin-004",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-004/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-004.png"
+    },
+    {
+      "id": "gesture-pickup.chin-005",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-005/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-005.png"
+    },
+    {
+      "id": "gesture-pickup.raised-focused",
+      "manifest": "observe-diagnose/gesture-pickup-v1/raised-focused/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-focused.png"
+    },
+    {
+      "id": "gesture-pickup.raised-serious",
+      "manifest": "observe-diagnose/gesture-pickup-v1/raised-serious/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-serious.png"
+    },
+    {
+      "id": "gesture-pickup.chin-half",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-half/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/hold-half.png"
+    },
+    {
+      "id": "gesture-pickup.chin-closed",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-closed/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/hold-closed.png"
+    },
+    {
+      "id": "gesture-pickup.chin-settled",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-settled/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/chin-settled.png"
+    },
+    {
+      "id": "gesture-pickup.chin-rim",
+      "manifest": "observe-diagnose/gesture-pickup-v1/chin-rim/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/rim-rest.png"
+    }
+  ],
+  "newPixels": [
+    "near-support-source.png",
+    "far-screen-grip-source.png",
+    "far-pregrip-source.png",
+    "far-early-source.png",
+    "closed-near-support-source.png"
+  ],
+  "pointerPolicy": "Root follows pointer immediately. Exact current upper drawing retained on first detached cel. World stool independently fades.",
+  "lowerDependency": "relocation/departure-bridge-v1/detach-protected.png plus stool-replacement-mask.png",
+  "acceptance": "finite peer pending, not automatic acceptance"
+}
