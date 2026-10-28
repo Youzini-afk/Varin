@@ -25,7 +25,7 @@ it('reuses project authority for internal Git data and admits linked external ad
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-it('automatically prepares one project workspace for concurrent first tasks and reuses its native source', async () => {
+it('keeps ordinary project tasks independent of mount dependencies and only prepares an explicitly selected backend', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'varin-project-source-'));
   try {
     let project = { id: 'project', path: directory } as ProjectEntry;
@@ -35,7 +35,7 @@ it('automatically prepares one project workspace for concurrent first tasks and 
     let dependenciesReady = false;
     const view = { binding: { generation: 1 }, mount: { state: 'ready', path: '/mounted/project' }, rootId: 'mounted-root' };
     const actor = {
-      getOperation: vi.fn(async () => null), inspectWorkspaceBackend: async () => ({ dependenciesReady, detail: 'WinFsp is not installed', helpUrl: 'https://winfsp.dev/rel/' }),
+      getOperation: vi.fn(async () => null), inspectWorkspaceBackend: vi.fn(async () => ({ dependenciesReady, detail: 'WinFsp is not installed', helpUrl: 'https://winfsp.dev/rel/' })),
       fileRootRegister: async () => ({ rootId: 'original-root' }),
       adoptWorkspace: vi.fn(async () => { entered.resolve(); await adopting; }),
       openWorkspace: vi.fn(async () => view), mountWorkspace: vi.fn(async () => view), bindWorkspace: async () => view,
@@ -46,20 +46,25 @@ it('automatically prepares one project workspace for concurrent first tasks and 
       admitWorkspaceRegistration: async () => ({ canonicalPath: directory }) };
     const owner = createNativeWorkspaceOwner({ kernel, documents: documents as never, projects: async () => [project],
       update: async (_id, value) => { project = { ...project, versionedWorkspace: value }; } });
-    const live = { prepare: vi.fn(async () => { throw new Error('Physical fallback must not run'); }) };
+    const live = { prepare: vi.fn(async () => ({ hostId: 'host', canonicalRoot: directory, rootId: 'original-root' })) };
     const prepare = createThreadSourcePreparer({ documents: documents as never, nativeWorkspaces: owner,
       liveSources: live as never, workingStates: {} as never, inspectInventory: async () => { throw new Error('No old capture'); },
       sourceTools: async () => ['file_read'] });
     const input = { runtime: 'agent' as const, resourceOwner: { kind: 'local' as const }, threadId: 'thread:a', branchId: 'branch:a',
       key: 'first', workspaceId: 'original', mode: 'live_root' as const, content: { mode: 'saved-files' as const }, captureScopes: [] };
-    await expect(prepare(input)).rejects.toMatchObject({ code: 'workspace_backend_unavailable', message: expect.stringContaining('WinFsp') });
+    expect((await prepare(input)).source.mode).toBe('live_root');
+    expect(actor.inspectWorkspaceBackend).not.toHaveBeenCalled();
+    expect(project.versionedWorkspace).toBeUndefined();
+    await expect(owner.enable(project.id)).rejects.toMatchObject({ code: 'workspace_backend_unavailable', message: expect.stringContaining('WinFsp') });
     expect(actor.adoptWorkspace).not.toHaveBeenCalled();
+    expect((await prepare({ ...input, key: 'ordinary-after-failed-mount' })).source.mode).toBe('live_root');
     dependenciesReady = true;
-    const first = prepare(input);
+    const first = owner.enable(project.id);
     await entered.promise;
-    const second = prepare({ ...input, threadId: 'thread:b', branchId: 'branch:b' });
+    const second = owner.enable(project.id);
     finish();
-    const [a, b] = await Promise.all([first, second]);
+    await Promise.all([first, second]);
+    const [a, b] = await Promise.all([prepare({ ...input, key: 'mounted-a' }), prepare({ ...input, threadId: 'thread:b', branchId: 'branch:b' })]);
     expect(a.source.mode).toBe('native_workspace');
     expect(a.source).toEqual(b.source);
     expect(a.path).toBe('/mounted/project');
@@ -68,6 +73,6 @@ it('automatically prepares one project workspace for concurrent first tasks and 
     expect(project.versionedWorkspace?.state).toBe('ready');
     expect((await prepare({ ...input, key: 'next-task' })).source).toEqual(a.source);
     expect(actor.adoptWorkspace).toHaveBeenCalledTimes(1);
-    expect(live.prepare).not.toHaveBeenCalled();
+    expect(live.prepare).toHaveBeenCalledTimes(2);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

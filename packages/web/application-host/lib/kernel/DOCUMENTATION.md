@@ -48,10 +48,11 @@ until worker exit independently of a rejected transport Promise.
 
 ## Source and file adapters
 
-`native-workspaces.prepare` automatically adopts the exact registered project on
-first task preparation and coalesces concurrent consumers. Browsing alone does not
-import a directory. The saved project workspace is reused across later Threads;
-unregistered roots and explicitly selected subdirectories keep their source contract.
+`native-workspaces.prepare` resolves an explicitly selected mounted project only.
+Ordinary project tasks keep their physical source and do not require a mount driver.
+Concurrent requests to enable the optional backend share one preparation; subsequent
+Threads reuse that selected workspace. A driver-free default isolation backend is
+not yet implemented.
 Native adoption streams immutable file objects directly and validates native identity,
 change time, attributes and directory changes without a second full body read/tree walk.
 

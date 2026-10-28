@@ -44,13 +44,13 @@ export function ProjectWorkspaceSection({ project }: {
         void refresh();
         return () => { controller.abort(); clearTimeout(timer); };
     }, [busy, status?.preparing, project.id]);
-    const apply = async () => {
+    const apply = async (action: 'enable' | 'disable') => {
         const controller = new AbortController();
         pending.current = controller;
         setBusy(true);
         setError(null);
         try {
-            const next = await projectWorkspaceRequest(project.id, 'enable', controller.signal);
+            const next = await projectWorkspaceRequest(project.id, action, controller.signal);
             setStatus(next);
             const store = useProjectsStore.getState();
             const projects = store.projects.map(entry => entry.id === project.id ? { ...entry, ...(next.workspace ? { versionedWorkspace: next.workspace } : {}) } : entry);
@@ -79,12 +79,12 @@ export function ProjectWorkspaceSection({ project }: {
         {t(status.progress.phase === 'capture' ? 'settings.projects.workspace.capture' : status.progress.phase === 'verify' ? 'settings.projects.workspace.verify' : 'settings.projects.workspace.inventory')}
         {' · '}{status.progress.entries.toLocaleString()}{' · '}{(status.progress.bytes / 1048576).toFixed(1)} MiB
       </p>}
-      {!status?.progress && <p role="status" className="typography-meta text-muted-foreground">{t(busy || status?.preparing ? 'settings.projects.workspace.preparing' : enabled ? 'settings.projects.workspace.ready' : 'settings.projects.workspace.automatic')}</p>}
+      {!status?.progress && (busy || status?.preparing) && <p role="status" className="typography-meta text-muted-foreground">{t('settings.projects.workspace.preparing')}</p>}
       <div className="flex flex-wrap items-center gap-2">
-        {!enabled && project.versionedWorkspace && <Button size="sm" variant="outline" disabled={busy || status?.preparing} onClick={() => void apply()}>
+        <Button size="sm" variant="outline" disabled={busy || status?.preparing} onClick={() => void apply(enabled ? 'disable' : 'enable')}>
           {busy || status?.preparing ? <RiLoader4Line className="mr-2 h-4 w-4 animate-spin"/> : <RiArrowRightUpLine className="mr-2 h-4 w-4"/>}
-          {t(busy || status?.preparing ? 'settings.projects.workspace.preparing' : 'settings.projects.workspace.resume')}
-        </Button>}
+          {t(busy || status?.preparing ? 'settings.projects.workspace.preparing' : enabled ? 'settings.projects.workspace.disable' : project.versionedWorkspace?.state === 'preparing' ? 'settings.projects.workspace.resume' : 'settings.projects.workspace.enable')}
+        </Button>
         {busy && <Button variant="ghost" size="sm" onClick={() => pending.current?.abort()}>{t('settings.common.actions.cancel')}</Button>}
       </div>
       {status?.leases ? <p className="typography-meta text-muted-foreground">{t('settings.projects.workspace.inUse')}</p> : null}

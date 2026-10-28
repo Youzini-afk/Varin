@@ -1,9 +1,7 @@
 export const settingsDict = {
-  "settings.projects.workspace.title": "Versioned workspace",
+  "settings.projects.workspace.title": "Mounted workspace",
   "settings.projects.workspace.description": "Share unchanged content and fork independent work without copying the project.",
-  "settings.projects.workspace.explanation": "The first project task automatically prepares its managed directory. Conversations, editors and commands share it, and child tasks fork existing versions. The original folder remains the import source; running tasks change source at the next Run boundary.",
-  "settings.projects.workspace.automatic": "Prepared automatically for the first task. No manual setup is needed.",
-  "settings.projects.workspace.ready": "Ready · Subsequent tasks reuse this workspace",
+  "settings.projects.workspace.explanation": "An optional OS mount backend: WinFsp on Windows, macFUSE on macOS, and FUSE on Linux. Ordinary project conversations use their original directory. Enabling this backend selects a separate managed directory and retains the original folder as its import source.",
   "settings.projects.workspace.original": "Import source",
   "settings.projects.workspace.current": "Working directory",
   "settings.projects.workspace.preparing": "Preparing workspace…",

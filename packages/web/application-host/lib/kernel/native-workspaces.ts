@@ -187,18 +187,9 @@ export function createNativeWorkspaceOwner(owners: Owners) {
         source: ThreadSource;
         path: string;
     } | undefined> => {
-        let project = await projectFor(workspaceId);
-        // Resolve the registered project only at execution preparation. Browsing a
-        // directory does not import it, and a child/subdirectory keeps its own source.
-        if (!project && !documentViews.has(workspaceId) && !known.has(workspaceId)) {
-            const registration = await owners.documents.admitWorkspaceRegistration(workspaceId, signal);
-            project = (await owners.projects()).find(candidate =>
-                normalizePathIdentity(candidate.path) === normalizePathIdentity(registration.canonicalPath));
-            if (project) {
-                const prepared = await enable(project.id, signal);
-                project = { ...project, versionedWorkspace: prepared.workspace };
-            }
-        }
+        // An OS mount is an explicitly selected backend, not a prerequisite for
+        // opening a project or preparing an ordinary conversation.
+        const project = await projectFor(workspaceId);
         const ref = project?.versionedWorkspace;
         const selected = ref ? sourceOf(ref) : documentViews.get(workspaceId) ?? known.get(workspaceId);
         if (!selected)

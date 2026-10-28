@@ -531,15 +531,11 @@ export function ThreadConversation({ api, identity, onBranchCreated, initialWork
       void act(async () => {
         const fingerprint = submissionFingerprint();
         if (!pendingInput.current) {
-          // New inputs re-enter the original project's workspace preparation. This
-          // moves an old physical conversation at a Run boundary, never mid-execution
-          // or according to an unrelated sidebar selection. Retries retain this source.
+          // Navigation is not a source change. Reopened conversations retain their
+          // original workspace unless the user explicitly selects another source.
           let sourceForInput = preparedSource;
-          const previousSource = launch?.selection.source;
-          const physicalSource = previousSource?.mode === 'live_root' ? previousSource : undefined;
-          if (!active && !delegated && !sourceForInput && (physicalSource || !run && draft.workspacePath)) {
-            const workspace = physicalSource ? { resourceOwner: physicalSource.resource_owner, workspaceId: physicalSource.workspace_id }
-              : await api.sources.resolve(identity, { resourceOwner: { kind: 'local' }, path: draft.workspacePath! });
+          if (!active && !delegated && !run && !sourceForInput && draft.workspacePath) {
+            const workspace = await api.sources.resolve(identity, { resourceOwner: { kind: 'local' }, path: draft.workspacePath });
             if (generation !== identityGeneration.current || host !== getRuntimeEndpointGeneration()) return;
             sourceForInput = await api.prepareSource({ ...identity, key: crypto.randomUUID(), resourceOwner: workspace.resourceOwner,
               workspaceId: workspace.workspaceId, mode: 'live_root', content: { mode: 'saved-files' }, captureScopes: [] });
