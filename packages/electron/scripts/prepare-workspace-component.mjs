@@ -20,9 +20,9 @@ const messages = {
     'WinFsp 未完成安裝（結果 {result}）。Varin 仍可正常使用，之後安裝元件即可啟用獨立工作區。',
   ],
   VarinWorkspaceRestart: [
-    'WinFsp requires a Windows restart. Varin is installed; independent workspaces become available after restarting Windows.',
-    'WinFsp 需要重启 Windows。Varin 已安装，重启 Windows 后可使用独立工作区。',
-    'WinFsp 需要重新啟動 Windows。Varin 已安裝，重新啟動 Windows 後可使用獨立工作區。',
+    'WinFsp is installed and requires a Windows restart. Independent workspaces become available after restarting Windows. You can continue installing Varin.',
+    'WinFsp 已安装，需要重启 Windows 后才能使用独立工作区。你可以继续安装 Varin。',
+    'WinFsp 已安裝，需要重新啟動 Windows 後才能使用獨立工作區。你可以繼續安裝 Varin。',
   ],
 };
 

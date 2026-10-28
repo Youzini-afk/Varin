@@ -3,6 +3,7 @@
 !ifndef BUILD_UNINSTALLER
 !include "WordFunc.nsh"
 !include "x64.nsh"
+!include "StdUtils.nsh"
 !include "${__FILEDIR__}\workspace-component\component.nsh"
 !define VARIN_WINFSP_MSI "${__FILEDIR__}\workspace-component\${VARIN_WINFSP_FILE}"
 Var VarinWorkspaceChoice
@@ -10,6 +11,27 @@ Var VarinWorkspaceCheckbox
 Var VarinWorkspaceResult
 Var VarinWorkspaceInstalled
 !include "${__FILEDIR__}\workspace-component\strings.nsh"
+
+; ExecShellWait waits, but has no exit-code output parameter. Keep the
+; ShellExecute process handle so component elevation and its real receipt agree.
+!macro VarinWorkspaceExec OUT FILE VERB ARGS
+  Push $R0
+  Push $R1
+  ${StdUtils.ExecShellWaitEx} $R0 $R1 "${FILE}" "${VERB}" '${ARGS}'
+  ${If} $R0 == "ok"
+    ${StdUtils.WaitForProcEx} $R0 $R1
+    ${If} $R0 == "error"
+      StrCpy $R0 "wait_error"
+    ${EndIf}
+  ${ElseIf} $R0 == "error"
+    StrCpy $R0 "launch_error:$R1"
+  ${Else}
+    StrCpy $R0 "process_unavailable:$R0"
+  ${EndIf}
+  Pop $R1
+  Exch $R0
+  Pop ${OUT}
+!macroend
 
 !macro VarinWorkspaceFunctions
 Function VarinWorkspaceCreate
@@ -55,12 +77,9 @@ Function VarinWorkspaceLeave
   ${EndIf}
   InitPluginsDir
   File "/oname=$PLUGINSDIR\${VARIN_WINFSP_FILE}" "${VARIN_WINFSP_MSI}"
-  ClearErrors
-  ExecShellWait "runas" "$SYSDIR\msiexec.exe" '/i "$PLUGINSDIR\${VARIN_WINFSP_FILE}" /passive /norestart' SW_SHOWNORMAL $VarinWorkspaceResult
-  ${If} ${Errors}
-    StrCpy $VarinWorkspaceResult "cancelled or unavailable"
-  ${EndIf}
+  !insertmacro VarinWorkspaceExec $VarinWorkspaceResult "$SYSDIR\msiexec.exe" "runas" '/i "$PLUGINSDIR\${VARIN_WINFSP_FILE}" /passive /norestart'
   ${If} $VarinWorkspaceResult == "3010"
+  ${OrIf} $VarinWorkspaceResult == "1641"
     MessageBox MB_ICONINFORMATION "$(VarinWorkspaceRestart)"
   ${ElseIf} $VarinWorkspaceResult != "0"
     MessageBox MB_ICONEXCLAMATION "$(VarinWorkspaceSkipped)"
