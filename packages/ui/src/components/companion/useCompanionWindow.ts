@@ -1,0 +1,92 @@
+import React from 'react';
+import { invokeDesktop, isElectronShell } from '@/lib/desktop';
+
+/** Pointer ownership is local presentation; never sends cancellation or permission commands. */
+export function useCompanionWindow(canvas: React.RefObject<HTMLCanvasElement | null>) {
+  const [phase, setPhase] = React.useState<'rest' | 'lifting' | 'landing'>('rest');
+  const [pinned, setPinned] = React.useState(false);
+  const [passthrough, setPassthrough] = React.useState(false);
+  const [notice, setNotice] = React.useState('');
+  const reevaluatePointer = React.useRef<() => void>(() => {});
+  const lastMouse = React.useRef<{ x: number; y: number } | null>(null);
+  const ignored = React.useRef(false);
+  const passthroughQueue = React.useRef<Promise<unknown>>(Promise.resolve());
+  const resetPassthrough = React.useCallback(() => {
+    ignored.current = false;
+    if (isElectronShell()) passthroughQueue.current = passthroughQueue.current.catch(() => {}).then(() => invokeDesktop('desktop_companion_passthrough', { enabled: false })).catch(() => {});
+  }, []);
+  const alpha = React.useRef<{ width: number; height: number; pixels: Uint8ClampedArray } | null>(null);
+  const refreshHitMask = React.useCallback(() => {
+    const node = canvas.current, context = node?.getContext('2d');
+    alpha.current = node && context ? { width: node.width, height: node.height, pixels: context.getImageData(0,0,node.width,node.height).data } : null;
+    reevaluatePointer.current();
+  }, [canvas]);
+  const pointer = React.useRef<{ id: number; x: number; y: number; moving: boolean } | null>(null);
+  const hit = React.useCallback((x: number, y: number) => {
+    const node = canvas.current;
+    if (!node) return false;
+    const bounds = node.getBoundingClientRect();
+    if (!bounds.width || !bounds.height || x < bounds.left || y < bounds.top || x >= bounds.right || y >= bounds.bottom) return false;
+    const mask = alpha.current;
+    if (!mask) return false;
+    const px = Math.floor((x-bounds.left)*mask.width/bounds.width), py = Math.floor((y-bounds.top)*mask.height/bounds.height);
+    return (mask.pixels[(py*mask.width+px)*4+3] ?? 0) > 16;
+  }, [canvas]);
+  const send = React.useCallback((phase: 'start' | 'move' | 'end') => {
+    if (isElectronShell()) void invokeDesktop('desktop_companion_drag', { phase }).catch(error => setNotice(String(error)));
+  }, []);
+  const end = React.useCallback(() => {
+    const current = pointer.current;
+    pointer.current = null;
+    send('end'); resetPassthrough();
+    if (!current) return;
+    if (canvas.current?.hasPointerCapture(current.id)) canvas.current.releasePointerCapture(current.id);
+    setPhase(current.moving ? 'landing' : 'rest');
+  }, [canvas, send, resetPassthrough]);
+  React.useEffect(() => {
+    window.addEventListener('blur', end);
+    const hidden = () => { if (document.hidden) end(); };
+    document.addEventListener('visibilitychange', hidden);
+    return () => { window.removeEventListener('blur', end); document.removeEventListener('visibilitychange', hidden); end(); };
+  }, [end]);
+  React.useEffect(() => {
+    if (!passthrough || !isElectronShell()) return;
+    let active = true;
+    const reconcile = () => {
+      const mouse = lastMouse.current;
+      if (!mouse) return;
+      const target = document.elementFromPoint(mouse.x, mouse.y);
+      const interactivePanel = target?.closest('button,select,input,header,section');
+      const ignore = !pointer.current && !interactivePanel && !hit(mouse.x, mouse.y);
+      if (ignore === ignored.current) return;
+      ignored.current = ignore;
+      // Serialize changes so a late true cannot override cleanup's final false.
+      passthroughQueue.current = passthroughQueue.current.catch(() => {}).then(() => invokeDesktop('desktop_companion_passthrough', { enabled: ignore })).then(result => {
+        if (active && !result?.supported) { setNotice('Transparent pointer forwarding is unavailable on this platform; window remains interactive.'); setPassthrough(false); }
+      }).catch(error => { if (active) { setNotice(String(error)); setPassthrough(false); } });
+    };
+    reevaluatePointer.current = reconcile;
+    const move = (event: MouseEvent) => { lastMouse.current = { x: event.clientX, y: event.clientY }; reconcile(); };
+    window.addEventListener('mousemove', move); reconcile();
+    return () => { active = false; reevaluatePointer.current = () => {}; window.removeEventListener('mousemove', move); resetPassthrough(); };
+  }, [hit, passthrough, resetPassthrough]);
+  return { phase, notice, pinned, passthrough, setPassthrough, refreshHitMask,
+    settle: () => setPhase('rest'),
+    togglePinned: async () => { try { const result = await invokeDesktop('desktop_set_window_pinned', { pinned: !pinned }); setPinned(result?.pinned ?? false); } catch(error) { setNotice(String(error)); } },
+    handlers: {
+      onPointerDown(event: React.PointerEvent<HTMLCanvasElement>) {
+        if (!isElectronShell() || event.button !== 0 || !hit(event.clientX, event.clientY)) return;
+        event.preventDefault(); resetPassthrough(); pointer.current = { id: event.pointerId, x: event.screenX, y: event.screenY, moving: false };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      },
+      onPointerMove(event: React.PointerEvent<HTMLCanvasElement>) {
+        const current = pointer.current;
+        if (!current || current.id !== event.pointerId) return;
+        if (!current.moving && Math.hypot(event.screenX-current.x,event.screenY-current.y) < 3) return;
+        if (!current.moving) { current.moving = true; send('start'); setPhase('lifting'); }
+        send('move');
+      },
+      onPointerUp: end, onPointerCancel: end, onLostPointerCapture: end,
+    },
+  };
+}

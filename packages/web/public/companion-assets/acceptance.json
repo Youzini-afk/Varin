@@ -1,0 +1,39 @@
+{
+  "reviewedAtUtc": "2026-10-28T21:48:00Z",
+  "scope": "Four bounded working gestures/gaze bridges only; complete companion experience remains in production.",
+  "evidence": {
+    "browser": "http://127.0.0.1:8768/integrated-reviews/work-gaze-path/review.html",
+    "displayWidthCssPx": 320,
+    "speed": 1,
+    "pathDurationMs": 2905,
+    "path": "neutral\u2192screen\u2192typing\u2192scroll\u2192neutral",
+    "judgement": "Actual authored-time browser playback and stopped-frame inspection: recognizable unchanged character, stable body/laptop/stool, subtle readable finger contacts, no visible endpoint jump between these four packages. Eye direction uses genuine screen/neutral drawings. No deformation or crossfade synthesized motion.",
+    "limitations": "Acceptance is for these small actions and gaze transitions, not a long repeated living work loop, large posture changes, or drag/landing."
+  },
+  "packages": [
+    {
+      "id": "seated-work.canonical-typing-v2-pose-v1",
+      "package": "accepted-runtime/v1/typing/sequence.json",
+      "action": "editing",
+      "sourceSha256": "d5f4aff7cc493ec1566beb59b8be24a1a63b9e3ab323f5ee0e32747ce9fb99ca"
+    },
+    {
+      "id": "seated-work.canonical-scroll-v2-pose-v1",
+      "package": "accepted-runtime/v1/scroll/sequence.json",
+      "action": "browsing",
+      "sourceSha256": "d7e3e05ddc53b91260ee3728fc79255f6fa88871201ff898c32381478d992f82"
+    },
+    {
+      "id": "observe.gaze-to-screen-v1-pose-v1",
+      "package": "accepted-runtime/v1/gaze-to-screen/sequence.json",
+      "action": null,
+      "sourceSha256": "3c76ca8695cfffb895024f8bc549ba8b3bd2a002326caf8690a0fe4044bcf3bc"
+    },
+    {
+      "id": "observe.gaze-to-user-v1-pose-v1",
+      "package": "accepted-runtime/v1/gaze-to-neutral/sequence.json",
+      "action": null,
+      "sourceSha256": "6cd9267322ac63be9e43898b322cb41539db8c3fe43dc7f430a8183882fb6bf5"
+    }
+  ]
+}

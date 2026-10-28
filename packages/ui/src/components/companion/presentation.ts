@@ -1,3 +1,4 @@
+import { operationPresentation } from './toolPresentation';
 import type { ThreadSnapshot } from '@varin/application-client';
 
 /** Read-only presentation intent. Never a scheduler, permission decision or execution receipt. */
@@ -26,7 +27,11 @@ export function projectCompanionIntent(snapshot: ThreadSnapshot | undefined, hea
       && typeof permission.id === 'string' && record(permission.call) && record(permission.scope);
   })) return { state: 'W02', reason: 'An unresolved Host permission decision is waiting' };
   if (focusedPending.some(operation => operation.executor === 'ask_user')) return { state: 'W03', reason: 'An existing ask_user operation is unresolved' };
-  // Do not infer reading/coding/experiments from tool names or generated prose.
+  // Only exact admitted identities may classify activity; no generated prose/arguments.
+  const classified = focusedPending.map(operationPresentation).filter(value => value !== null);
+  const kinds = new Set(classified.map(value => value.state));
+  if (kinds.size === 1) return { state: classified[0]!.state, reason: `Active admitted tool: ${classified.map(value => value.tool).join(', ')}` };
+  if (kinds.size > 1) return { state: null, reason: 'Multiple admitted activity categories are concurrently active' };
   if (pending.some(operation => operation.phase === 'running' || operation.phase === 'settling') || run?.state === 'executing') return { state: null, reason: 'Observing active execution; specific activity is not classified' };
   if (pending.some(operation => operation.phase === 'queued')) return { state: 'W01', reason: 'An operation is queued' };
   if (pending.length || run?.state === 'waiting') return { state: 'W04', reason: 'Host work is waiting or preparing an external operation' };

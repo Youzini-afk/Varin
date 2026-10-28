@@ -1604,6 +1604,8 @@ export const settingsDict = {
   'settings.varin.desktopNetwork.field.macMenuBarDescription': 'Requires an app restart. When off, Varin does not create the menu bar item or run its session, approval, and usage updates.',
   'settings.varin.desktopNetwork.field.minimizeToTrayAria': 'Minimize and close Varin to the system tray',
   'settings.varin.desktopNetwork.field.minimizeToTray': 'Minimize and close to the system tray',
+  'settings.varin.desktopNetwork.field.companion': 'Desktop companion',
+  'settings.varin.desktopNetwork.field.companionDescription': 'Show Varin as a desktop companion. Observes existing work without changing execution or approving actions.',
   'settings.varin.desktopNetwork.field.minimizeToTrayDescription': 'Keeps Varin running in the system tray when the main window is minimized or closed.',
   'settings.varin.desktopNetwork.field.keepAwakeAria': 'Keep computer awake while Varin is running',
   'settings.varin.desktopNetwork.field.keepAwake': 'Keep computer awake while Varin is running',

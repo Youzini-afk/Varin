@@ -56,3 +56,13 @@ it('holds an authored wait until intent changes, plays its exit and bridge, and 
   player.request('missing'); const held = player.timeMs; player.tick(900);
   expect(player.timeMs).toBe(held); expect(player.blocker).toBeTruthy();
 });
+
+import { operationPresentation } from './toolPresentation';
+it('classifies exact admitted tool contracts, never command text or arbitrary executor labels', () => {
+  const operation = { phase: 'running', executor: 'file_read', intent: { kind: 'tool', call: { name: 'file_read', schema_version: '1', arguments: { command: 'train a model' } }, contract: { name: 'file_read', schema_version: '1' } } };
+  expect(operationPresentation(operation as never)?.state).toBe('T01');
+  operation.intent.contract.name = 'plugin-read'; expect(operationPresentation(operation as never)).toBeNull();
+  operation.intent.call.name = operation.intent.contract.name = 'process_spawn';
+  expect(operationPresentation(operation as never)?.state).toBe('T03'); // Not experiments merely because of the command.
+  operation.phase = 'terminal'; expect(operationPresentation(operation as never)).toBeNull();
+});

@@ -933,7 +933,10 @@ const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => {
   if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
     result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
   }
-  if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
+  if (typeof candidate.desktopCompanionEnabled === 'boolean') {
+      result.desktopCompanionEnabled = candidate.desktopCompanionEnabled;
+    }
+    if (typeof candidate.desktopKeepAwakeEnabled === 'boolean') {
     result.desktopKeepAwakeEnabled = candidate.desktopKeepAwakeEnabled;
   }
   if (typeof candidate.desktopMinimizeToTrayEnabled === 'boolean') {

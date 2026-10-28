@@ -23,6 +23,7 @@ import {
   type WebContents,
 } from 'electron';
 import contextMenu from 'electron-context-menu';
+import { CompanionWindowMovement, requireCompanionWindow, applyCompanionPassthrough } from './companion-window.js';
 import { createComputerFeedback } from './computer-feedback.js';
 import { createComputerControls } from './computer-controls.js';
 import { ElectronBrowserOwner } from './browser-owner.js';
@@ -437,7 +438,7 @@ const shouldHideMainWindowToTray = (browserWindow: BrowserWindow | null | undefi
   if (process.platform !== 'win32' && process.platform !== 'linux') return false;
   if (!state.trayController) return false;
   if (!browserWindow || browserWindow.isDestroyed()) return false;
-  if (browserWindow.__varinMiniChat === true) return false;
+  if (browserWindow.__varinMiniChat === true || browserWindow.__varinLabel === 'companion') return false;
   return readSettingsRoot().desktopMinimizeToTrayEnabled === true;
 };
 
@@ -592,8 +593,9 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 }
 
 // Companion windows are auxiliary displays, not foreground conversation surfaces.
+const companionMovement = new CompanionWindowMovement(bounds => screen.getDisplayMatching(bounds).workArea);
 const isConversationWindow = (window: BrowserWindow): boolean =>
-  !window.isDestroyed() && window.__varinLabel !== 'companion-review';
+  !window.isDestroyed() && window.__varinLabel !== 'companion';
 
 const requestQuitWhenNoProductWindows = () => {
   if (process.platform === 'darwin' || state.trayEnabled && !state.quitRequested) return;
@@ -1886,7 +1888,7 @@ const emitToAllWindows = <E extends VarinDesktopEvent>(
 // BrowserWindow constructor) because macOS otherwise leaves the material
 // uncomposited on a cold launch until the window gets a state change.
 const applyMacVibrancy = (browserWindow: BrowserWindow | null | undefined): void => {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed() || browserWindow.__varinLabel === 'companion-review') return;
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed() || browserWindow.__varinLabel === 'companion') return;
   try {
     browserWindow.setVibrancy('sidebar');
   } catch { /* best-effort vibrancy; platform may reject the material */ }
@@ -2354,7 +2356,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
 };
 
 interface BrowserWindowCreationInput {
-  presentation?: 'companion-review';
+  presentation?: 'companion';
   label?: string | undefined;
   restoreGeometry?: boolean | undefined;
   runtimeConfig?: Partial<RendererRuntimeConfig> | undefined;
@@ -2368,7 +2370,7 @@ const createBrowserWindow = ({
   url,
   runtimeConfig = {},
 }: BrowserWindowCreationInput): BrowserWindow => {
-  const companion = presentation === 'companion-review';
+  const companion = presentation === 'companion';
   const saved = restoreGeometry ? readWindowState() : null;
   const useSaved = saved !== null;
   const restoredBounds = saved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
@@ -2385,7 +2387,7 @@ const createBrowserWindow = ({
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
   const options: BrowserWindowConstructorOptions = {
-    title: companion ? 'Varin Companion — development review' : 'Varin',
+    title: companion ? 'Varin Companion' : 'Varin',
     ...(companion ? { transparent: true, frame: false, skipTaskbar: true, resizable: false, hasShadow: false } : {}),
     ...(restoredBounds && Number.isFinite(restoredBounds.x) && Number.isFinite(restoredBounds.y)
       ? { x: restoredBounds.x, y: restoredBounds.y }
@@ -2470,6 +2472,10 @@ const createBrowserWindow = ({
     browserWindow.on('focus', refreshTrafficLights);
   }
 
+  if (companion) browserWindow.on('blur', () => {
+    companionMovement.forget(browserWindow.id);
+    if (!browserWindow.isDestroyed()) browserWindow.setIgnoreMouseEvents(false);
+  });
   browserWindow.on('resize', () => {
     if (process.platform === 'darwin') {
       emitToWindow(browserWindow, 'varin:window-resized');
@@ -2511,6 +2517,7 @@ const createBrowserWindow = ({
     debounceWindowStatePersist(browserWindow, true);
   });
   browserWindow.on('closed', () => {
+    companionMovement.forget(browserWindow.id);
     state.focusedWindowIds.delete(browserWindow.id);
     if (state.mainWindow && browserWindow.id === state.mainWindow.id) {
       state.mainWindow = null;
@@ -2754,6 +2761,18 @@ const buildMiniChatUrl = ({ mode, threadId = '', branchId = '', directory = '', 
 };
 
 
+const openCompanionWindow = (review = false): BrowserWindow => {
+  const existing = BrowserWindow.getAllWindows().find((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion');
+  if (existing) { existing.showInactive(); return existing; }
+  const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
+  if (!base) throw new Error('Local companion UI is not available');
+  const url = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
+  if (review) url.searchParams.set('review', '1');
+  return createBrowserWindow({ label: 'companion', presentation: 'companion', url: url.toString(), runtimeConfig: getWindowRuntimeConfig(state.mainWindow) });
+};
+const companionStatus = () => ({ enabled: readSettingsRoot().desktopCompanionEnabled === true,
+  visible: BrowserWindow.getAllWindows().some((window: BrowserWindow) => !window.isDestroyed() && window.__varinLabel === 'companion' && window.isVisible()) });
+
 const getWindowRuntimeConfig = (browserWindow: BrowserWindow | null | undefined): RendererRuntimeConfig => {
   const fallback = {
     apiBaseUrl: state.apiBaseUrl || state.localOrigin || state.sidecarUrl || '',
@@ -2843,6 +2862,7 @@ const createMiniChatWindow = async ({
   }
 
   browserWindow.on('closed', () => {
+    companionMovement.forget(browserWindow.id);
     if (browserWindow.__varinMiniChatThreadKey) {
       const existing = state.miniChatWindowsByThread.get(browserWindow.__varinMiniChatThreadKey);
       if (existing?.id === browserWindow.id) {
@@ -2905,8 +2925,8 @@ const setMiniChatPinned = (browserWindow: BrowserWindow | null | undefined, pinn
   if (!browserWindow || browserWindow.isDestroyed()) {
     throw new Error('Window is not available');
   }
-  if (browserWindow.__varinMiniChat !== true) {
-    throw new Error('Pinning is only available for Mini Chat windows');
+  if (browserWindow.__varinMiniChat !== true && browserWindow.__varinLabel !== 'companion') {
+    throw new Error('Pinning is only available for auxiliary Mini Chat and companion windows');
   }
   const nextPinned = pinned === true;
   browserWindow.__varinPinned = nextPinned;
@@ -3830,6 +3850,29 @@ const handleInvoke = async (
   switch (command) {
     case 'desktop_start_window_drag':
       return null;
+
+    case 'desktop_get_companion': return companionStatus();
+    case 'desktop_set_companion': {
+      if (typeof args.enabled !== 'boolean') throw new Error('Companion requires an explicit boolean');
+      const enabled = args.enabled;
+      if (enabled) openCompanionWindow();
+      else for (const window of BrowserWindow.getAllWindows() as BrowserWindow[]) if (!window.isDestroyed() && window.__varinLabel === 'companion') window.close();
+      await mutateSettingsRoot(root => { root.desktopCompanionEnabled = enabled; });
+      return companionStatus();
+    }
+
+    case 'desktop_companion_drag':
+    case 'desktop_companion_passthrough': {
+      const companionOwner = requireCompanionWindow(browserWindow);
+      if (command === 'desktop_companion_drag') {
+        // Electron supplies both cursor and window bounds in native DIP space.
+        // Never assume browser CSS screen coordinates equal physical pixels.
+        const point = args.phase === 'end' ? null : screen.getCursorScreenPoint();
+        companionMovement.drag(companionOwner, { phase: args.phase, screenX: point?.x, screenY: point?.y });
+        return null;
+      }
+      return applyCompanionPassthrough(companionOwner, args.enabled, process.platform, companionMovement.isDragging(companionOwner.id));
+    }
 
     case 'desktop_is_window_fullscreen':
       return Boolean(browserWindow?.isFullScreen());
@@ -5435,14 +5478,13 @@ app.whenReady().then(async () => {
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
 
-  // Explicit development entry only; candidate artwork is never a product default.
-  if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') {
-    const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
-    if (!base) throw new Error('Local companion UI is not available');
-    const companionUrl = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
-    companionUrl.search = '?review=1';
-    createBrowserWindow({ label: 'companion-review', presentation: 'companion-review',
-      url: companionUrl.toString(), runtimeConfig: { apiBaseUrl, clientToken, requestHeaders } });
+  // Local user opt-in loads only bundled accepted art; review candidates stay explicit.
+  try {
+    if (readSettingsRoot().desktopCompanionEnabled === true) openCompanionWindow();
+    else if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') openCompanionWindow(true);
+  } catch {
+    // An optional presentation must never interrupt the primary application startup.
+    console.warn('[electron] companion window could not be opened');
   }
 
   // In remote mode, set up system tray and background notification listener

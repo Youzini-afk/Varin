@@ -1,0 +1,649 @@
+{
+  "version": 1,
+  "packages": [
+    {
+      "version": 1,
+      "id": "seated-work.canonical-typing-v2-pose-v1",
+      "family": "SEATED_WORK",
+      "stage": "motion-candidate",
+      "warning": "Accepted as a bounded working gesture or gaze bridge at320px; not a complete long-duration working performance.",
+      "reviewStatus": "accepted",
+      "kind": "action",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": "editing",
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 990,
+      "loop": null,
+      "uniqueImages": 5,
+      "entryPose": "seated-open-screen-keyboard",
+      "exitPose": "seated-open-screen-keyboard",
+      "pages": [
+        {
+          "file": "action-000-atlas-000.png",
+          "size": [
+            1816,
+            998
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "frame-001.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 0,
+          "durationMs": 240,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "rest",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-002.png",
+          "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+          "startMs": 240,
+          "durationMs": 100,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "index-lift",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-003.png",
+          "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+          "startMs": 340,
+          "durationMs": 130,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "index-press",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-004.png",
+          "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+          "startMs": 470,
+          "durationMs": 100,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "middle-lift",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-005.png",
+          "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+          "startMs": 570,
+          "durationMs": 140,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "middle-press",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            501,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-006.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 710,
+          "durationMs": 280,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "typing",
+          "pose": "rest-return",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "seated-work.canonical-scroll-v2-pose-v1",
+      "family": "SEATED_WORK",
+      "stage": "motion-candidate",
+      "warning": "Accepted as a bounded working gesture or gaze bridge at320px; not a complete long-duration working performance.",
+      "reviewStatus": "accepted",
+      "kind": "action",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": "browsing",
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 1220,
+      "loop": null,
+      "uniqueImages": 5,
+      "entryPose": "seated-open-screen-keyboard",
+      "exitPose": "seated-open-screen-keyboard",
+      "pages": [
+        {
+          "file": "action-001-atlas-000.png",
+          "size": [
+            1816,
+            998
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "frame-001.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 0,
+          "durationMs": 250,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "rest",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-002.png",
+          "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+          "startMs": 250,
+          "durationMs": 150,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "reach-palmrest",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-003.png",
+          "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+          "startMs": 400,
+          "durationMs": 200,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "two-finger-contact",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-004.png",
+          "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+          "startMs": 600,
+          "durationMs": 160,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "scroll",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-005.png",
+          "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+          "startMs": 760,
+          "durationMs": 160,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "release",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            501,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "frame-006.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 920,
+          "durationMs": 300,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {
+            "wrist": [
+              309,
+              295
+            ],
+            "seat": [
+              307,
+              361
+            ]
+          },
+          "phase": "scroll",
+          "pose": "rest-return",
+          "exitTo": [],
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "observe.gaze-to-screen-v1-pose-v1",
+      "family": "OBSERVE_DIAGNOSE",
+      "stage": "motion-candidate",
+      "warning": "Accepted as a bounded working gesture or gaze bridge at320px; not a complete long-duration working performance.",
+      "reviewStatus": "accepted",
+      "kind": "bridge",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": null,
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 350,
+      "loop": null,
+      "uniqueImages": 4,
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-screen-keyboard",
+      "pages": [
+        {
+          "file": "action-002-atlas-000.png",
+          "size": [
+            1816,
+            499
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "neutral.png",
+          "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+          "startMs": 0,
+          "durationMs": 80,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "seated-open-neutral",
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "half.png",
+          "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+          "startMs": 80,
+          "durationMs": 45,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "eyelids-transition",
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "closed.png",
+          "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+          "startMs": 125,
+          "durationMs": 65,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "eyelids-transition",
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "read-screen.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 190,
+          "durationMs": 160,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "seated-open-read-screen",
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    },
+    {
+      "version": 1,
+      "id": "observe.gaze-to-user-v1-pose-v1",
+      "family": "OBSERVE_DIAGNOSE",
+      "stage": "motion-candidate",
+      "warning": "Accepted as a bounded working gesture or gaze bridge at320px; not a complete long-duration working performance.",
+      "reviewStatus": "accepted",
+      "kind": "bridge",
+      "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+      "action": null,
+      "canvas": [
+        512,
+        512
+      ],
+      "durationMs": 345,
+      "loop": null,
+      "uniqueImages": 4,
+      "entryPose": "seated-open-screen-keyboard",
+      "exitPose": "seated-open-neutral-keyboard",
+      "pages": [
+        {
+          "file": "action-003-atlas-000.png",
+          "size": [
+            1816,
+            499
+          ]
+        }
+      ],
+      "frames": [
+        {
+          "source": "read-screen.png",
+          "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+          "startMs": 0,
+          "durationMs": 80,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "seated-open-read-screen",
+          "page": 0,
+          "rect": [
+            2,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "half.png",
+          "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+          "startMs": 80,
+          "durationMs": 40,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "eyelids-transition",
+          "page": 0,
+          "rect": [
+            456,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "closed.png",
+          "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+          "startMs": 120,
+          "durationMs": 65,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "eyelids-transition",
+          "page": 0,
+          "rect": [
+            910,
+            2,
+            450,
+            495
+          ]
+        },
+        {
+          "source": "neutral.png",
+          "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+          "startMs": 185,
+          "durationMs": 160,
+          "offset": [
+            45,
+            8
+          ],
+          "contacts": {},
+          "phase": "bridge",
+          "pose": "seated-open-neutral",
+          "page": 0,
+          "rect": [
+            1364,
+            2,
+            450,
+            495
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -365,6 +365,10 @@ export type DesktopWebRenderResult = {
 export interface VarinDesktopCommandMap {
   // --- window/chrome ---
   desktop_start_window_drag: { args: void; result: null };
+  desktop_get_companion: { args: void; result: { enabled: boolean; visible: boolean } };
+  desktop_set_companion: { args: { enabled: boolean }; result: { enabled: boolean; visible: boolean } };
+  desktop_companion_drag: { args: { phase: 'start' | 'move' | 'end' }; result: null };
+  desktop_companion_passthrough: { args: { enabled: boolean }; result: { supported: boolean; enabled: boolean } };
   desktop_set_window_title: { args: { title: string }; result: null };
   desktop_set_window_theme: { args: { themeMode?: string; themeVariant?: string }; result: null };
   desktop_is_window_fullscreen: { args: void; result: boolean };
@@ -528,6 +532,10 @@ export interface VarinDesktopBridge {
 
 export const VARIN_DESKTOP_COMMAND_CATALOG = {
   desktop_start_window_drag: true,
+  desktop_get_companion: true,
+  desktop_set_companion: true,
+  desktop_companion_drag: true,
+  desktop_companion_passthrough: true,
   desktop_set_window_title: true,
   desktop_set_window_theme: true,
   desktop_is_window_fullscreen: true,
@@ -643,6 +651,10 @@ export const VARIN_REMOTE_SAFE_DESKTOP_COMMANDS = [
   'desktop_set_window_theme',
   'desktop_is_window_fullscreen',
   'desktop_start_window_drag',
+  'desktop_get_companion',
+  'desktop_set_companion',
+  'desktop_companion_drag',
+  'desktop_companion_passthrough',
   'desktop_minimize_current_window',
   'desktop_toggle_current_window_maximized',
   'desktop_close_current_window',
