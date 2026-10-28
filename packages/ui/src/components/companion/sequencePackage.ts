@@ -1,6 +1,6 @@
 /** Drawing/exposure contract. No application commands or automatic motion synthesis. */
 export interface CompanionFrame {
-  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; pose?: string;
+  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; pose?: string; phase?: string; exitTo?: string[]; motion?: { renderedPixelSha256?: string; reverseFrom?: { sequence: string; frameIndex: number } };
 }
 export interface CompanionPackage {
   id: string; canvas: [number, number]; frames: CompanionFrame[]; pages: { file: string }[];
@@ -32,7 +32,19 @@ export function readCompanionPackage(value: unknown, review: boolean): Companion
     if (typeof frame.page !== 'number' || !Number.isSafeInteger(frame.page) || frame.page < 0 || frame.page >= pages.length || rect.some(n => n < 0) || rect[2] <= 0 || rect[3] <= 0) throw new Error('Invalid atlas region');
     if (offset.some(n => n < 0) || offset[0] + rect[2] > canvas[0] || offset[1] + rect[3] > canvas[1]) throw new Error('Drawing escapes registered canvas');
     if (typeof frame.durationMs !== 'number' || !Number.isFinite(frame.durationMs) || frame.durationMs <= 0) throw new Error('Invalid authored duration');
-    const result = { page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
+    const exitTo = frame.exitTo == null ? [] : frame.exitTo;
+    if (!Array.isArray(exitTo) || !exitTo.every(value => typeof value === 'string')) throw new Error('Invalid safe exits');
+    let motion: CompanionFrame['motion'];
+    if (frame.motion != null) {
+      const source = record(frame.motion);
+      motion = { renderedPixelSha256: typeof source.renderedPixelSha256 === 'string' ? source.renderedPixelSha256 : undefined };
+      if (source.reverseFrom != null) {
+        const reverse = record(source.reverseFrom);
+        if (typeof reverse.sequence !== 'string' || !Number.isSafeInteger(reverse.frameIndex) || (reverse.frameIndex as number) < 0) throw new Error('Invalid authored reverse entry');
+        motion.reverseFrom = { sequence: reverse.sequence, frameIndex: reverse.frameIndex as number };
+      }
+    }
+    const result = { phase: typeof frame.phase === 'string' ? frame.phase : undefined, exitTo: exitTo as string[], motion, page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
     elapsed += frame.durationMs;
     return result;
   });

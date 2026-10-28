@@ -9,7 +9,7 @@ export function frameAt(asset: PlaybackAsset, timeMs: number): (CompanionFrame &
 export class CompanionPlayback {
   constructor(assets: PlaybackAsset[]);
   current: PlaybackAsset | null; timeMs: number; pending: string | null;
-  path: string[]; blocker: string | null; hold: boolean;
+  canDisplay: (id: string) => boolean; loading: string | null; advance(): boolean | undefined; path: string[]; blocker: string | null; hold: boolean;
   request(id: string, options?: { urgent?: boolean }): RouteResult;
   tick(elapsedMs: number): void;
 }

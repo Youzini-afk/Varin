@@ -1,39 +1,272 @@
 {
-  "reviewedAtUtc": "2026-10-28T21:48:00Z",
-  "scope": "Four bounded working gestures/gaze bridges only; complete companion experience remains in production.",
-  "evidence": {
-    "browser": "http://127.0.0.1:8768/integrated-reviews/work-gaze-path/review.html",
-    "displayWidthCssPx": 320,
-    "speed": 1,
-    "pathDurationMs": 2905,
-    "path": "neutral\u2192screen\u2192typing\u2192scroll\u2192neutral",
-    "judgement": "Actual authored-time browser playback and stopped-frame inspection: recognizable unchanged character, stable body/laptop/stool, subtle readable finger contacts, no visible endpoint jump between these four packages. Eye direction uses genuine screen/neutral drawings. No deformation or crossfade synthesized motion.",
-    "limitations": "Acceptance is for these small actions and gaze transitions, not a long repeated living work loop, large posture changes, or drag/landing."
+  "initial": {
+    "reviewedAtUtc": "2026-10-28T21:48:00Z",
+    "scope": "Four bounded working gestures/gaze bridges only; complete companion experience remains in production.",
+    "evidence": {
+      "browser": "http://127.0.0.1:8768/integrated-reviews/work-gaze-path/review.html",
+      "displayWidthCssPx": 320,
+      "speed": 1,
+      "pathDurationMs": 2905,
+      "path": "neutral\u2192screen\u2192typing\u2192scroll\u2192neutral",
+      "judgement": "Actual authored-time browser playback and stopped-frame inspection: recognizable unchanged character, stable body/laptop/stool, subtle readable finger contacts, no visible endpoint jump between these four packages. Eye direction uses genuine screen/neutral drawings. No deformation or crossfade synthesized motion.",
+      "limitations": "Acceptance is for these small actions and gaze transitions, not a long repeated living work loop, large posture changes, or drag/landing."
+    },
+    "packages": [
+      {
+        "id": "seated-work.canonical-typing-v2-pose-v1",
+        "package": "accepted-runtime/v1/typing/sequence.json",
+        "action": "editing",
+        "sourceSha256": "d5f4aff7cc493ec1566beb59b8be24a1a63b9e3ab323f5ee0e32747ce9fb99ca"
+      },
+      {
+        "id": "seated-work.canonical-scroll-v2-pose-v1",
+        "package": "accepted-runtime/v1/scroll/sequence.json",
+        "action": "browsing",
+        "sourceSha256": "d7e3e05ddc53b91260ee3728fc79255f6fa88871201ff898c32381478d992f82"
+      },
+      {
+        "id": "observe.gaze-to-screen-v1-pose-v1",
+        "package": "accepted-runtime/v1/gaze-to-screen/sequence.json",
+        "action": null,
+        "sourceSha256": "3c76ca8695cfffb895024f8bc549ba8b3bd2a002326caf8690a0fe4044bcf3bc"
+      },
+      {
+        "id": "observe.gaze-to-user-v1-pose-v1",
+        "package": "accepted-runtime/v1/gaze-to-neutral/sequence.json",
+        "action": null,
+        "sourceSha256": "6cd9267322ac63be9e43898b322cb41539db8c3fe43dc7f430a8183882fb6bf5"
+      }
+    ]
   },
-  "packages": [
-    {
-      "id": "seated-work.canonical-typing-v2-pose-v1",
-      "package": "accepted-runtime/v1/typing/sequence.json",
-      "action": "editing",
-      "sourceSha256": "d5f4aff7cc493ec1566beb59b8be24a1a63b9e3ab323f5ee0e32747ce9fb99ca"
-    },
-    {
-      "id": "seated-work.canonical-scroll-v2-pose-v1",
-      "package": "accepted-runtime/v1/scroll/sequence.json",
-      "action": "browsing",
-      "sourceSha256": "d7e3e05ddc53b91260ee3728fc79255f6fa88871201ff898c32381478d992f82"
-    },
-    {
-      "id": "observe.gaze-to-screen-v1-pose-v1",
-      "package": "accepted-runtime/v1/gaze-to-screen/sequence.json",
-      "action": null,
-      "sourceSha256": "3c76ca8695cfffb895024f8bc549ba8b3bd2a002326caf8690a0fe4044bcf3bc"
-    },
-    {
-      "id": "observe.gaze-to-user-v1-pose-v1",
-      "package": "accepted-runtime/v1/gaze-to-neutral/sequence.json",
-      "action": null,
-      "sourceSha256": "6cd9267322ac63be9e43898b322cb41539db8c3fe43dc7f430a8183882fb6bf5"
-    }
-  ]
+  "observationRestLid": {
+    "scope": "Finite parent/peer-reviewed performance and safe pose transitions; not complete companion acceptance",
+    "packages": [
+      {
+        "package": "accepted-runtime/v2/observe-wait-enter-v1/sequence.json",
+        "action": null,
+        "source": "observe-diagnose/runtime-boundaries-v1/wait-enter/sequence.source.json",
+        "sourceSha256": "489f80ed8c5a365f78b07ffc66cb830a717e47a9dec244b6d9c472b1287bb688",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/observe-wait-hold-v1/sequence.json",
+        "action": "external-wait",
+        "source": "observe-diagnose/runtime-boundaries-v1/wait-hold/sequence.source.json",
+        "sourceSha256": "ebcf7ed5c8eaa074b87f01ef12c5fc0d787992f55b3cf72cef94127f2fd7c461",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/observe-wait-exit-v1/sequence.json",
+        "action": null,
+        "source": "observe-diagnose/runtime-boundaries-v1/wait-exit/sequence.source.json",
+        "sourceSha256": "49928d8c8248fcb73ffb8e007317ce634fb993278b7301f955461e49ec035384",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/rest-quiet-settle-v1/sequence.json",
+        "action": "idle-closed",
+        "source": "observe-diagnose/runtime-boundaries-v1/quiet/sequence.source.json",
+        "sourceSha256": "188d91ed9cdc2bae1f9ff30c7bca94f147c359d922dfb14fb1a01dd0c6a01b5d",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/rest-closed-eye-rub-v1/sequence.json",
+        "action": "eye-rub",
+        "source": "observe-diagnose/runtime-boundaries-v1/eye-rub/sequence.source.json",
+        "sourceSha256": "018d748f4c30c9c4e6639c4e08fb66843b00d4e4b558f3b336bc43876b56d432",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/rest-closed-stretch-v1/sequence.json",
+        "action": "stretch",
+        "source": "observe-diagnose/runtime-boundaries-v1/stretch/sequence.source.json",
+        "sourceSha256": "320cbbe4e9a2a777b19057fa2d23bf17968fc58a9ddabefa8047aa96f2fc7613",
+        "evidence": "qa/observe-rest-peer-review-20261028-2226.json"
+      },
+      {
+        "package": "accepted-runtime/v2/opening/sequence.json",
+        "action": null,
+        "source": "seated-work/canonical-lid-v2/opening/sequence.source.json",
+        "sourceSha256": "71961bc75f42ff66fa3235396ed35653a5670630425cf973d782c6c26d17a1e2",
+        "evidence": "seated-work/lid-v2-parent-review.json"
+      },
+      {
+        "package": "accepted-runtime/v2/closing/sequence.json",
+        "action": null,
+        "source": "seated-work/canonical-lid-v2/closing/sequence.source.json",
+        "sourceSha256": "e097f15163283be7604df61919e0c3b6da0fb4a8c49f0ff4e9f11224a4473b27",
+        "evidence": "seated-work/lid-v2-parent-review.json"
+      }
+    ]
+  },
+  "attention": {
+    "scope": "Finite reviewed E/H/X and genuine event gated nod/success",
+    "packages": [
+      {
+        "id": "permission-ask-enter-v1",
+        "source": "user-attention/handoffs/v1/permission-ask-enter-v1/sequence.source.json",
+        "sourceSha256": "121f73535269826b8313b88fc9fb1755bcd2dc9c3dcb5a2e718a1b26e88804d5",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "permission-palm-release-v1",
+        "source": "user-attention/handoffs/v1/permission-palm-release-v1/sequence.source.json",
+        "sourceSha256": "5ad8eba47b8ee33deb9a2891d9fbcd692d9b26cddd8837c409384f0751b9222d",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "question-ask-enter-v1",
+        "source": "user-attention/handoffs/v1/question-ask-enter-v1/sequence.source.json",
+        "sourceSha256": "f4008a65dfe86068cca150c2e7a10b74284b1f4e395927ec4cae1ec3684f0f3c",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "question-chin-release-v1",
+        "source": "user-attention/handoffs/v1/question-chin-release-v1/sequence.source.json",
+        "sourceSha256": "54f282c0d60c334e366ee80044cc4d1102a66ef55537e5bd6e4be543d8ce1d89",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "permission-unresolved-hold-v1",
+        "source": "user-attention/handoffs/v1/permission-unresolved-hold-v1/sequence.source.json",
+        "sourceSha256": "bba63c326e3a74531652c0b054c88516039aa5203aedc1eed40e24203bbbb5f4",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "question-unanswered-hold-v1",
+        "source": "user-attention/handoffs/v1/question-unanswered-hold-v1/sequence.source.json",
+        "sourceSha256": "b72932f98fe2a13c28f541ef67ca9aed8ad7d08b192ff8a95f1f55b39a17959d",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "relaxed-to-neutral-v1",
+        "source": "user-attention/handoffs/v1/relaxed-to-neutral-v1/sequence.source.json",
+        "sourceSha256": "002fef3db53b3448a1e4a81a82ecccb8b23a124b0b103b3f880d154b1e9e8598",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "relaxed-settled-to-neutral-v1",
+        "source": "user-attention/handoffs/v1/relaxed-settled-to-neutral-v1/sequence.source.json",
+        "sourceSha256": "632d1a941e65f1d641f5c88118b5e56ce99f927a7e9fb890c8b8e69126bb87bc",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "answer-understood-v1",
+        "source": "user-attention/handoffs/v1/answer-understood-v1/sequence.source.json",
+        "sourceSha256": "2cc0ac5392ec331eaa30e0ea71243beea59f5ff4dedc6ec26791bc4268bf8aeb",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      },
+      {
+        "id": "completion-once-v1",
+        "source": "user-attention/handoffs/v1/completion-once-v1/sequence.source.json",
+        "sourceSha256": "83b251aa4d8942e073dbf197f607937eb1946bea3effeed0dd2063dc9ce5394a",
+        "evidence": "user-attention/handoffs/v1/finite-handoff-review.json"
+      }
+    ]
+  },
+  "recovery": {
+    "packages": [
+      {
+        "id": "observe.cancel-entry-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/cancel-entry/sequence.source.json",
+        "sourceSha256": "d30d4ed34ccb00f5274aab4fc276b07402a19efcd7e4abf19ad76fadf35ed035",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.cancel-hold-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/cancel-hold/sequence.source.json",
+        "sourceSha256": "0746d8f154d77990bbeef6d6a1e3c7c019a274ac6c7719231e6c11451e7b4fd5",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.failure-entry-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/failure-entry/sequence.source.json",
+        "sourceSha256": "6a707adfa48e737a25336b8a79381bc3375f55268d06b539b9cd7fa68a970b57",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.unknown-entry-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/unknown-entry/sequence.source.json",
+        "sourceSha256": "d3e29e2cea3aa8aafd7934254b03c918e3ee3ef386bf814873bf3158aa4ebadc",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.unknown-hold-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/unknown-hold/sequence.source.json",
+        "sourceSha256": "6e60b1799545bfe6a263cfc751044b308e617aff4ed70f18089a452ce0d1eebb",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.sync-attention-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/sync-attention/sequence.source.json",
+        "sourceSha256": "5fa613a9074486d3ae0ed1cf34482897cb9845dfc11fddc983ed6653aab92a02",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.uncertain-check-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/uncertain-check/sequence.source.json",
+        "sourceSha256": "8652ef420d630a442932c71eb7418b783240f5a92895013a538f702d51c81d07",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.uncertain-release-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/uncertain-release/sequence.source.json",
+        "sourceSha256": "4cf62428bf35fa6784f5b4ccdbaa18028feb083c5ace7bca22f90bc8e6693f26",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.neutral-recovery-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/neutral-recovery/sequence.source.json",
+        "sourceSha256": "5c1b3f2d0254b62ef708466d41262050751df690d925f18213261553c2b8b9ae",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      },
+      {
+        "id": "observe.raised-focus-to-unknown-boundary-v1",
+        "source": "observe-diagnose/runtime-boundaries-v1/raised-focus-to-unknown/sequence.source.json",
+        "sourceSha256": "ca1dea3166c1957a0b11648fb4cc7d938528a79a6488a8d25b38da4403457c10",
+        "evidence": [
+          "observe-diagnose/runtime-boundaries-v1/recovery-visual-qa.json",
+          "observe-diagnose/runtime-boundaries-v1/recovery-peer-addendum.json"
+        ],
+        "reviewScope": "author finite visual review; independent peer added for failure/neutral, uncertain-release second-eye blocked explicitly recorded"
+      }
+    ]
+  },
+  "scope": "32 packages, not a claim of 32 fully implemented business states; relocation integration still in production."
 }

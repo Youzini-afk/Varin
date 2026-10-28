@@ -46,3 +46,11 @@ export function projectCompanionIntent(snapshot: ThreadSnapshot | undefined, hea
     default: return { state: 'C01', reason: 'No active work in the observed branch' };
   }
 }
+
+/** A clarification receipt, not a permission or an inferred tool completion. */
+export function newlyAnsweredQuestion(previousPending: ReadonlySet<string>, snapshot: ThreadSnapshot): string | null {
+  const answer = snapshot.operations.find(operation => previousPending.has(operation.id)
+    && operation.executor === 'ask_user' && operation.phase === 'terminal' && operation.outcome === 'succeeded'
+    && operation.result?.kind === 'control' && record(operation.result.value)?.answer_ref != null);
+  return answer?.id ?? null;
+}

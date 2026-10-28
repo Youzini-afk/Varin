@@ -43,55 +43,94 @@ export function frameAt(asset, timeMs) {
 
 /** Latest presentation request wins; it never sends application commands. */
 export class CompanionPlayback {
-  constructor(assets) { this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; }
+  constructor(assets) { this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; }
   request(id, { urgent = false } = {}) {
-    if (this.current?.id === id && !this.pending) return { status: 'ready', clips: [] };
+    this.loading = null; this.nextStartMs = 0;
+    if (this.current?.id === id) {
+      this.pending = null; this.path = []; this.hold = false; this.blocker = null;
+      return { status: 'ready', clips: [] };
+    }
     this.pending = id;
-    this.path = []; // Discard stale queued artistic responses, not application events.
-    this.hold = urgent; // Latest intent controls urgency; never fake a safe contact transition.
+    this.path = []; // Latest artistic intent wins, not application events.
+    this.hold = false;
     return this.plan();
   }
-  plan() {
-    const target = this.assets.find(a => a.id === this.pending);
-    let origin = this.current;
-    if (this.hold && origin && this.timeMs < origin.durationMs) {
-      const pose = frameAt(origin, this.timeMs)?.pose;
-      if (!pose) {
-        this.blocker = 'Urgent response has no authored exit at the held pose';
-        return { status: 'blocked', reason: this.blocker, clips: [] };
+  target() { return this.assets.find(a => a.id === this.pending); }
+  /** Only explicitly authored safe drawings may exit before a clip's end. */
+  leaveSafeDrawing() {
+    if (!this.pending || !this.current) return false;
+    const frame = frameAt(this.current, this.timeMs);
+    const target = this.target();
+    for (const pose of frame?.exitTo ?? []) {
+      if (pose !== frame.pose) continue;
+      const result = route({ ...this.current, exitPose: pose }, target, this.assets);
+      if (result.status === 'ready' && result.clips[0] !== this.current.id) {
+        this.path = [...result.clips]; this.blocker = null; this.advance(); return true;
       }
-      // A named pose is useful only when actual accepted bridge art begins there.
-      origin = { ...origin, exitPose: pose };
     }
-    const result = route(origin, target, this.assets);
+    return false;
+  }
+  reverseIfAuthored() {
+    const frame = this.current && frameAt(this.current, this.timeMs);
+    const ref = frame?.motion?.reverseFrom;
+    const reverse = ref && this.assets.find(a => a.id === ref.sequence && usable(a) && a.geometryReference === this.current.geometryReference && JSON.stringify(a.canvas) === JSON.stringify(this.current.canvas));
+    const reverseFrame = reverse?.frames[ref.frameIndex];
+    if (!reverseFrame || !frame.motion.renderedPixelSha256 || reverseFrame.motion?.renderedPixelSha256 !== frame.motion.renderedPixelSha256) return false;
+    const forwardRoute = route(this.current, this.target(), this.assets);
+    const reversedRoute = route(reverse, this.target(), this.assets);
+    if (reversedRoute.status !== 'ready' || (forwardRoute.status === 'ready' && reversedRoute.clips.length >= forwardRoute.clips.length)) return false;
+    // Start at the same actual pixels; never rewind or synthesize intermediate motion.
+    this.path = [reverse.id, ...reversedRoute.clips]; this.nextStartMs = reverseFrame.startMs; this.blocker = null;
+    this.advance();
+    return true;
+  }
+  plan() {
+    const result = route(this.current, this.target(), this.assets);
     this.blocker = result.status === 'blocked' ? result.reason : null;
-    if (this.blocker) this.hold = true; // Missing art must not silently play a former state's exit.
-    if (!this.blocker) {
-      this.path = [...result.clips];
-      if (!this.current || this.hold || this.timeMs >= this.current.durationMs) this.advance();
-    }
+    if (this.leaveSafeDrawing() || this.reverseIfAuthored()) return { status: 'ready', clips: [...this.path] };
+    if (this.blocker) { this.hold = true; return result; }
+    this.path = [...result.clips];
+    if (!this.current || this.timeMs >= this.current.durationMs) this.advance();
     return result;
   }
   advance() {
     if (!this.path.length) return;
-    const nextId = this.path.shift();
+    const nextId = this.path[0];
+    if (!this.canDisplay(nextId)) { this.loading = nextId; return false; }
+    this.loading = null; this.path.shift();
     const next = this.assets.find(a => a.id === nextId);
-    this.current = next; this.timeMs = 0; this.hold = false;
+    this.current = next; this.timeMs = this.nextStartMs; this.nextStartMs = 0; this.hold = false;
     if (next.id === this.pending) this.pending = null;
+    return true;
   }
   tick(elapsedMs) {
     if (!Number.isFinite(elapsedMs) || elapsedMs < 0) throw new Error('elapsedMs must be finite and non-negative');
-    if (!this.current || this.hold) return;
-    let nextTime = this.timeMs + elapsedMs;
-    if (!this.path.length && !this.pending && Array.isArray(this.current.loop)) {
-      const [first, end] = this.current.loop;
-      const startMs = this.current.frames[first].startMs;
-      const endFrame = this.current.frames[end - 1];
-      const endMs = endFrame.startMs + endFrame.durationMs;
-      if (nextTime >= endMs) nextTime = startMs + (nextTime - startMs) % (endMs - startMs);
+    let remaining = elapsedMs;
+    while (this.current && !this.hold && !this.loading && remaining > 0) {
+      // Check every entered exposure, not only the final frame after a slow display tick.
+      if (this.leaveSafeDrawing()) continue;
+      const frame = frameAt(this.current, this.timeMs);
+      const boundary = Math.min(this.current.durationMs, frame.startMs + frame.durationMs);
+      const step = Math.min(remaining, Math.max(0, boundary - this.timeMs));
+      this.timeMs += step; remaining -= step;
+      if (this.timeMs < boundary) break;
+      if (!this.path.length && !this.pending && Array.isArray(this.current.loop)) {
+        const [first, end] = this.current.loop;
+        const endFrame = this.current.frames[end - 1];
+        const endMs = endFrame.startMs + endFrame.durationMs;
+        if (this.timeMs >= endMs) {
+          const startMs = this.current.frames[first].startMs;
+          this.timeMs = startMs;
+          // Whole hold cycles have no transitions; preserve the remainder without busy looping.
+          remaining %= endMs - startMs;
+          continue;
+        }
+      }
+      if (this.timeMs >= this.current.durationMs) {
+        if (this.path.length) this.advance();
+        else break;
+      }
     }
-    this.timeMs = Math.min(this.current.durationMs, nextTime);
-    if (this.timeMs >= this.current.durationMs && this.path.length) this.advance();
   }
 }
 

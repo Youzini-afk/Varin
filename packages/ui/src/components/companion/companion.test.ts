@@ -66,3 +66,31 @@ it('classifies exact admitted tool contracts, never command text or arbitrary ex
   expect(operationPresentation(operation as never)?.state).toBe('T03'); // Not experiments merely because of the command.
   operation.phase = 'terminal'; expect(operationPresentation(operation as never)).toBeNull();
 });
+
+it('finishes the current gesture to an authored safe drawing and carries elapsed time through its bridge', () => {
+  const asset = (id: string, entryPose: string, exitPose: string, kind = 'action'): PlaybackAsset => ({
+    id, entryPose, exitPose, kind, geometryReference: 'shared', stage: 'motion-candidate', reviewStatus: 'accepted',
+    canvas: [16,16], pages: [{ file: 'atlas.png' }], durationMs: 300,
+    frames: [0,1,2].map(i => ({ page: 0, rect: [0,0,8,8], offset: [0,0], startMs: i*100, durationMs: 100 })),
+  });
+  const wait = asset('wait','contact','contact'); wait.loop = [0,3];
+  wait.frames[2] = { ...wait.frames[2]!, pose: 'contact', exitTo: ['contact'] };
+  const bridge = asset('release','contact','keyboard','bridge');
+  bridge.frames[0] = { ...bridge.frames[0]!, pose: 'contact', exitTo: ['contact'] };
+  const work = asset('work','keyboard','keyboard');
+  const player = new CompanionPlayback([wait, bridge, work]);
+  player.request('wait'); player.tick(120); player.request('work', { urgent: true });
+  expect(player.current?.id).toBe('wait'); // No teleport while the hand is moving.
+  player.tick(130);
+  expect(player.current?.id).toBe('release'); expect(player.timeMs).toBe(50);
+  player.tick(300);
+  expect(player.current?.id).toBe('work'); expect(player.timeMs).toBe(50);
+});
+
+import { newlyAnsweredQuestion } from './presentation';
+it('acknowledges only a newly observed actual clarification answer, not cancellation or reconnect history', () => {
+  const answered = { id: 'q', executor: 'ask_user', phase: 'terminal', outcome: 'succeeded', result: { kind: 'control', value: { answer_ref: { id: 'content' } } } };
+  expect(newlyAnsweredQuestion(new Set(['q']), snap({ operations: [answered] }))).toBe('q');
+  expect(newlyAnsweredQuestion(new Set(), snap({ operations: [answered] }))).toBeNull();
+  expect(newlyAnsweredQuestion(new Set(['q']), snap({ operations: [{ ...answered, outcome: 'cancelled', result: { kind: 'control', value: { cancelled: true } } }] }))).toBeNull();
+});
