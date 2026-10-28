@@ -160,7 +160,7 @@ final class WorkspaceVolume: FSVolume, FSVolume.Operations, FSVolume.ReadWriteOp
         }catch{replyHandler(count,error)}
     }
     func openItem(_ item:FSItem,modes:FSVolume.OpenModes,replyHandler:@escaping(Error?)->Void) {do {_ = try connection.call("open",["id":id(item)]);replyHandler(nil)}catch{replyHandler(error)}}
-    func closeItem(_ item:FSItem,modes:FSVolume.OpenModes,replyHandler:@escaping(Error?)->Void) {do {_ = try connection.call("close",["id":id(item)]);replyHandler(nil)}catch{replyHandler(error)}}
+    func closeItem(_ item:FSItem,modes:FSVolume.OpenModes,replyHandler:@escaping(Error?)->Void) {do {_ = try connection.call("close",["id":id(item),"keepOpen":!modes.isEmpty]);replyHandler(nil)}catch{replyHandler(error)}}
     func getXattr(named name:FSFileName,of item:FSItem,replyHandler:@escaping(Data?,Error?)->Void) {do {replyHandler(try connection.call("getxattr",["id":id(item),"name":self.name(name)]).1,nil)}catch{replyHandler(nil,error)}}
     func listXattrs(of item:FSItem,replyHandler:@escaping([FSFileName]?,Error?)->Void) {
         do {guard let names=try connection.call("listxattrs",["id":id(item)]).0 as? [String] else {throw WireError.malformed};replyHandler(names.map{FSFileName(string:$0)},nil)}catch{replyHandler(nil,error)}

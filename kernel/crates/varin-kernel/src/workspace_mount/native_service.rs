@@ -112,14 +112,16 @@ impl Service {
                 let content = matches!(node.state()?, PathState::RegularFile { .. }).then(||self.session.open_file(&node)).transpose()?;
                 let mut items = self.items.lock().map_err(|_|unsupported("FSKit item registry failed"))?;
                 let item = items.get_mut(&id).ok_or_else(|| KernelError::NotFound("FSKit open item".into()))?;
-                item.opens = item.opens.checked_add(1).ok_or_else(||unsupported("FSKit open reference space exhausted"))?;
+                // FSKit reports the aggregate mode, not one callback per fd.
+                // A read→write upgrade must not invent another lifetime ref.
+                item.opens = 1;
                 if content.is_some() { item.content = content; }
                 empty(Value::Null)
             }
             "close" => {
                 self.session.flush(&node)?;
                 { let mut items = self.items.lock().map_err(|_|unsupported("FSKit item registry failed"))?;
-                  if let Some(item) = items.get_mut(&id) { item.opens = item.opens.checked_sub(1).ok_or_else(||unsupported("Unmatched FSKit close"))?;
+                  if let Some(item) = items.get_mut(&id) { item.opens = usize::from(q["keepOpen"].as_bool().unwrap_or(false));
                       if item.opens == 0 { item.content.take(); } } }
                 self.retire(id)?; empty(Value::Null)
             }

@@ -53,12 +53,13 @@ impl Server {
                         let mut control = false;
                         let accepted = (|| -> std::io::Result<()> {
                             let (hello,body) = read(&mut stream)?;
-                            control = hello["role"] == "control";
+                            let requested_control = hello["role"] == "control";
                             if !body.is_empty() || hello["op"] != "attach" || hello["version"] != 1 || hello["token"] != token || hello["generation"] != generation
-                                || (!control && hello["role"] != "worker") {
+                                || (!requested_control && hello["role"] != "worker") {
                                 return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied,"Invalid mount executor admission"));
                             }
-                            if control && live.swap(true,Ordering::AcqRel) {control=false; return Err(std::io::Error::other("Mount already has an extension owner"));}
+                            if requested_control && live.swap(true,Ordering::AcqRel) {return Err(std::io::Error::other("Mount already has an extension owner"));}
+                            control=requested_control;
                             write(&mut stream,&json!({"value":null}),&[])?;
                             loop {
                                 let (request,body) = read(&mut stream)?;

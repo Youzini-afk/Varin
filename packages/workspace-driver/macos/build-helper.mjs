@@ -30,7 +30,7 @@ export function buildMacWorkspaceHelper({ destination, architecture = process.ar
       ...['Wire.swift', 'Volume.swift', 'Extension.swift'].map(file => path.join(source, file)),
       '-framework', 'FSKit', '-o', module], { stdio: 'inherit' });
     run('xcrun', [...common, '-target', `${arch}-apple-macosx13.0`, path.join(source, 'Control.swift'),
-      '-framework', 'AppKit', '-weak_framework', 'FSKit', '-o', executable], { stdio: 'inherit' });
+      '-framework', 'AppKit', '-Xlinker', '-weak_framework', '-Xlinker', 'FSKit', '-o', executable], { stdio: 'inherit' });
     const base = id => entry('CFBundleIdentifier', id) + entry('CFBundleExecutable', 'VarinWorkspace') + entry('CFBundleName', 'Varin Workspace')
       + entry('CFBundleVersion', version) + entry('CFBundleShortVersionString', version);
     fs.writeFileSync(path.join(candidate, 'Contents', 'Info.plist'), plist(base('com.varin.workspace') + entry('CFBundlePackageType', 'APPL')

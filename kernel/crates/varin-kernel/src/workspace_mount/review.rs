@@ -21,6 +21,8 @@ fn native_executor_keeps_binary_bytes_links_and_unlinked_open_handles() {
     let item=call(json!({"op":"create","parent":1,"name":"source.bin","kind":"file","attributes":{"mode":384}}),&[]).0;
     let id=item["id"].as_u64().unwrap();
     call(json!({"op":"open","id":id}),&[]);
+    call(json!({"op":"open","id":id}),&[]); // aggregate mode upgrade
+    call(json!({"op":"close","id":id,"keepOpen":true}),&[]);
     let bytes=[0,255,1,2,128,0];
     call(json!({"op":"write","id":id,"offset":3}),&bytes);
     assert_eq!(call(json!({"op":"read","id":id,"offset":0,"length":9}),&[]).1,[0,0,0,0,255,1,2,128,0]);
