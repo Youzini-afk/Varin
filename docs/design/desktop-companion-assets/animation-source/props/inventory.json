@@ -1,0 +1,119 @@
+[
+  {
+    "path": "README.md",
+    "bytes": 2033,
+    "sha256": "137c794d4e6dbfb70be635b60125f492fb48322f61223437efd5a10fa3974ba8",
+    "sourceSha256": "0f9d83111d1d58d865b3c95cc0b4ed484b99be0e6ecc34b131dedf0b269e4bec",
+    "sourceBytes": 1022
+  },
+  {
+    "path": "extract_props.py",
+    "bytes": 2937,
+    "sha256": "c9684d0591ea9d1ef5333bf61c5ae61e7fb2de579b23152fad1ac7a6555718a7",
+    "sourceSha256": "6c3d2f0bce369748a6904ac7d29e612df3547402321ab046919aaef45c5f7e4e",
+    "sourceBytes": 2835
+  },
+  {
+    "path": "props/chair-atlas.png",
+    "bytes": 259738,
+    "sha256": "0bfe2375071cc6b7d24c49ca96d35952c780e26c1abcd7a21b4de339c7ca90bc",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "0bfe2375071cc6b7d24c49ca96d35952c780e26c1abcd7a21b4de339c7ca90bc",
+    "sourceBytes": 259738
+  },
+  {
+    "path": "props/chair.png",
+    "bytes": 147464,
+    "sha256": "6054da667efe98c5b0acca06ed5f419503014ce60f4bd0dd9d8cd9fb737214ca",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "6054da667efe98c5b0acca06ed5f419503014ce60f4bd0dd9d8cd9fb737214ca",
+    "sourceBytes": 147464
+  },
+  {
+    "path": "props/laptopBase-atlas.png",
+    "bytes": 204798,
+    "sha256": "93754fddbafd0fb6984b03b8d29815dc8be3a8d76ee9fdba7ee8f7f3eb03ba24",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "93754fddbafd0fb6984b03b8d29815dc8be3a8d76ee9fdba7ee8f7f3eb03ba24",
+    "sourceBytes": 204798
+  },
+  {
+    "path": "props/laptopBase.png",
+    "bytes": 54165,
+    "sha256": "20baab15b481a202b97d1486a58db2c6d4d8a3fe43a592b1dd7ab66721e1dc0d",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "20baab15b481a202b97d1486a58db2c6d4d8a3fe43a592b1dd7ab66721e1dc0d",
+    "sourceBytes": 54165
+  },
+  {
+    "path": "props/laptopLid-atlas.png",
+    "bytes": 229423,
+    "sha256": "8dee1fb67a0405da7a0401fefd2d7536e162ab5856bfb10d193377a95e0c8ac1",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "8dee1fb67a0405da7a0401fefd2d7536e162ab5856bfb10d193377a95e0c8ac1",
+    "sourceBytes": 229423
+  },
+  {
+    "path": "props/laptopLid.png",
+    "bytes": 60158,
+    "sha256": "c90b5fccd9efa8ab1e042a8a1b0c91145814186f7c07987fd535e6a3e7250de5",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "c90b5fccd9efa8ab1e042a8a1b0c91145814186f7c07987fd535e6a3e7250de5",
+    "sourceBytes": 60158
+  },
+  {
+    "path": "props-atlas-original.png",
+    "bytes": 810901,
+    "sha256": "750ec045186791705b13e1834b91024c8ecc060deae9977f46e367abf1fee9b5",
+    "size": [
+      1254,
+      1254
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "750ec045186791705b13e1834b91024c8ecc060deae9977f46e367abf1fee9b5",
+    "sourceBytes": 810901
+  },
+  {
+    "path": "props-manifest.json",
+    "bytes": 1717,
+    "sha256": "f7d1556a13be5fa51ffa53eb49c3a425dc1a2c85f01be90f13692e911bbda688",
+    "sourceSha256": "f7d1556a13be5fa51ffa53eb49c3a425dc1a2c85f01be90f13692e911bbda688",
+    "sourceBytes": 1717
+  },
+  {
+    "path": "props-placement-qa.png",
+    "bytes": 1266638,
+    "sha256": "9a54a84d9a3c73b1a25ba100d6895e75d5131990d68bf225be99662d72b5cd7b",
+    "size": [
+      1382,
+      1382
+    ],
+    "mode": "RGBA",
+    "sourceSha256": "9a54a84d9a3c73b1a25ba100d6895e75d5131990d68bf225be99662d72b5cd7b",
+    "sourceBytes": 1266638
+  }
+]

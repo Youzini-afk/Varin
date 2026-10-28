@@ -1,0 +1,84 @@
+{
+  "canvas": [
+    1382,
+    1382
+  ],
+  "atlasSize": [
+    1254,
+    1254
+  ],
+  "original": "props-atlas-original.png",
+  "assets": [
+    {
+      "node": "chair",
+      "path": "props/chair.png",
+      "atlasMask": "props/chair-atlas.png",
+      "atlasRegion": [
+        0,
+        150,
+        650,
+        670
+      ],
+      "uniformScale": 0.66,
+      "translate": [
+        583.5,
+        654.7
+      ],
+      "perspectiveCoefficients": null,
+      "status": "draft-placement-needs-contact-qa"
+    },
+    {
+      "node": "laptopBase",
+      "path": "props/laptopBase.png",
+      "atlasMask": "props/laptopBase-atlas.png",
+      "atlasRegion": [
+        650,
+        280,
+        1254,
+        650
+      ],
+      "uniformScale": null,
+      "translate": null,
+      "perspectiveCoefficients": [
+        -0.6448401405389507,
+        6.255617835863346,
+        -3286.524200462528,
+        0.09742205155176574,
+        -1.0545356955021299,
+        1180.3022175952258,
+        -0.0017622004961611057,
+        0.0015518843795704449
+      ],
+      "status": "draft-placement-needs-contact-qa"
+    },
+    {
+      "node": "laptopLid",
+      "path": "props/laptopLid.png",
+      "atlasMask": "props/laptopLid-atlas.png",
+      "atlasRegion": [
+        550,
+        660,
+        1230,
+        1170
+      ],
+      "uniformScale": 0.4,
+      "translate": [
+        216.0,
+        343.79999999999995
+      ],
+      "perspectiveCoefficients": null,
+      "status": "draft-placement-needs-contact-qa"
+    }
+  ],
+  "hingeDraft": [
+    [
+      480,
+      755
+    ],
+    [
+      690,
+      795
+    ]
+  ],
+  "warning": "Draft mapping only. Screen can occlude wrists; base/lid contact and seat depth require runtime director QA."
+}

@@ -37,7 +37,9 @@
 
 ## 动画源图与分层研究
 
-[stage 1检查点](animation-source/stage1/README.md)保存真实人物canonical、clean-v3、初始mask、10层互斥分区与局部underlap、脚本、锚点和QA。静态分区逐RGBA重组差0；underlap中性合成最大差5，不是0。当前仍有头发语义余集、隐藏面、脸与道具待完成，仅研究小幅pose。
+[stage 1检查点](animation-source/stage1/README.md)保存真实人物canonical、clean-v3、初始mask、10层互斥分区与局部underlap、脚本、锚点和QA。静态分区逐RGBA重组差0；underlap中性合成最大差5，不是0。当前仍有头发语义余集、隐藏面与脸待完成，仅研究小幅pose。
+
+[独立道具研究](animation-source/props/README.md)保存原始atlas、凳/笔电底座/机盖的独立提取与同画布配准、复现脚本和静帧合成QA。固定开盖坐姿的道具已具备研究资源，不等于闭盖、抓握、开合或提起动画已完成；真实抬头、独立目光、自然闭眼与手态仍需补绘。
 
 最终路线是认可美术的分层动画，不用[debug几何实验](../../../tools/desktop-companion-motion-lab/README.md)代替成品角色。debug证据保持独立；本源图阶段也不是最终rig或软件动画已完成的声明。
 
