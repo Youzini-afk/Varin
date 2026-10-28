@@ -1,0 +1,52 @@
+{
+  "reviewer": "produce_observation_rest_animation",
+  "utc": "2026-10-28T23:30:55Z",
+  "method": "Independent Chrome tab20 autoplay320px1x; sampled actual screenshots, not exhaustive recorded-video proof",
+  "decision": "finite accept for specified representative contact paths",
+  "representatives": {
+    "closed-grab-v1/review-welcome-closed-v2-005": {
+      "ms": [
+        150,
+        399,
+        533,
+        681
+      ],
+      "scope": "withdraw through closed carried endpoint"
+    },
+    "closed-grab-v1/review-click-closed-v5-003": {
+      "ms": [
+        132,
+        150,
+        348,
+        565
+      ],
+      "scope": "local closed handoff through closed carried endpoint"
+    },
+    "open-event-grab-v1/review-completion-wave-v2-006": {
+      "ms": [
+        56,
+        167,
+        259
+      ],
+      "scope": "near support, actual wave withdrawal and bezel contact"
+    },
+    "open-event-grab-v1/review-attention-sequence-v2-004": {
+      "ms": [
+        117,
+        200
+      ],
+      "scope": "support contact to shared half closure"
+    }
+  },
+  "findings": [
+    "No visible residual stool or duplicate fingers in sampled frames",
+    "Closed handoff maintains near under-base support, no reopened lid",
+    "Completion has intermediate authored hand withdrawal rather than neutral reset",
+    "Open event contact reaches common lid closure geometry"
+  ],
+  "limits": [
+    "Initial45ms exact-source retention additionally relies on source/mask checks by producer",
+    "Not all source variants independently replayed",
+    "Open lower chain relies on already separately reviewed shared departure-v3/rapid sources, not new whole-chain claim"
+  ]
+}

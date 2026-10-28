@@ -1,0 +1,817 @@
+{
+  "checkpoint": "seated-work-current-pose-pickup-20261028T2335Z",
+  "status": "frozen-candidate-source-closure-not-blanket-motion-acceptance",
+  "activeMap": "seated-work/current-pose-detach-v2/current-pose-entries.json",
+  "history": "v1 art retained; v1 long recovery superseded by v2",
+  "files": [
+    {
+      "path": "seated-work/current-pose-detach-v1/README.md",
+      "sha256": "8cc5e495519cce4bc56e61a5469ff07b4252243c94af6e71ad7c81f760349495",
+      "bytes": 2660
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/build.py",
+      "sha256": "21a1e419d7e695472b7a14834db8bdc7ed004c6ad4c0b0c6db880cfbc74ce3fb",
+      "bytes": 4443
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/current-pose-entries.json",
+      "sha256": "06dd918f4accfcddcc268e6a3808fbb9fc0cfdff0177e8cb8757edb175ba6e4f",
+      "bytes": 1640655
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316.png",
+      "sha256": "677f60a134cf5fb6a18ac87ab3d6fa7f22215ae367187102ee5b4e8c368fc53e",
+      "bytes": 314608
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646.png",
+      "sha256": "0637c3ae3c3163cd13e6bc4810233d575236767bfb54885888ea9f6339e88106",
+      "bytes": 318172
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc.png",
+      "sha256": "4f5c644b8f216ae575257fae155a430f395e95e0c23f764263895130e4dc16cd",
+      "bytes": 318212
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548.png",
+      "sha256": "0f97560ac7eaa93a340b0a3b04e393b0b68c3860ae6b15a71a799906808360a7",
+      "bytes": 320237
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f.png",
+      "sha256": "4fbc512b09ea2fc2dcc4f20e830b2dfd651245283faedb3c1f064d25c5c486a1",
+      "bytes": 316532
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff.png",
+      "sha256": "9ac214ac24c41cef4038970d694392732a125f4654c24327f682d1165dc4620a",
+      "bytes": 318437
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8.png",
+      "sha256": "556b48b0281ed71d2a8e83e65d2e73093183fd4f97676aa3c106f8cdf2fecb43",
+      "bytes": 321964
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721.png",
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "bytes": 314108
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285.png",
+      "sha256": "9e2aa89a9a28e439ccfcbd2e01897a09d0e2cc79f00b8970eea04fb19c610dbb",
+      "bytes": 316475
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f.png",
+      "sha256": "3bb724ce23581ac2c1656706205a3eeab8909a33a886ad2f1298bda297f9e59b",
+      "bytes": 321916
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a.png",
+      "sha256": "4ff4dd31f98c16f964d2b11d72e7b3b263d47fad11ef603f58c631a0a3ae7710",
+      "bytes": 314512
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a.png",
+      "sha256": "c9ea578499f12fde99517432ec8579369cc926898c49ddb23201c6f96561df6a",
+      "bytes": 316973
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9.png",
+      "sha256": "aca2e140e628571439fd683723a83f0069f298b6afed5f62b44b7dfd52768f90",
+      "bytes": 319656
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20.png",
+      "sha256": "1dd08d32a691571c0a4637f7bbd62e749b21cfa2d053e698433eb2aecf48f8ca",
+      "bytes": 318410
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1.png",
+      "sha256": "1ba3b5cad3c4f2286df6f3185957c45118ecb865e176bc101ac5f432412bbb59",
+      "bytes": 316190
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b.png",
+      "sha256": "a2ca1263ef8450e2dc46de91595211794f2a11551108f87e4359fe2190e6265c",
+      "bytes": 317740
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2.png",
+      "sha256": "dca24ad3e45621335d59585da711cc87f463c35eb0094b8f83b6ab547c3190ab",
+      "bytes": 316560
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1.png",
+      "sha256": "f8bc862cba54afe4507886496a70c4218e3fa1b127dabb405a93328669e7eee8",
+      "bytes": 314698
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f.png",
+      "sha256": "91b94d26aea48cb1f29310f20e533af8e0b3d3c5184c5fa8a1802b97068d1939",
+      "bytes": 317541
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343.png",
+      "sha256": "669eb2698843a4f3d39ee92a11a4295eae22b7469b6cda5e81dcc50d535f1456",
+      "bytes": 314691
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8.png",
+      "sha256": "4b39e02d4d3dbdc12000f1defbb8feb13e3e81286724da41599691ee6bce2cb5",
+      "bytes": 316840
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16.png",
+      "sha256": "493c3d93a5e2d42cae0c594e6864890fc7673796ce79be74372ddac09c772166",
+      "bytes": 316062
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6.png",
+      "sha256": "87a9e7a8b69c7263980638d10db9c258469e741c133a205ccc6592e283095a63",
+      "bytes": 318261
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99.png",
+      "sha256": "c7ba4ac7d2a106673d76189fbc48bcebec41fda5916e21620ba3fc897d451612",
+      "bytes": 321714
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81.png",
+      "sha256": "a8dff163c3d97fd15bc21ae02ca80dce97cdb6aa2a557c7a365df01b14316934",
+      "bytes": 320994
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495.png",
+      "sha256": "5088e02861d7c9753814b1289b7788070447a31cd2846abdc69d3c3eb424a352",
+      "bytes": 319149
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f.png",
+      "sha256": "8c0e2e7122e029fa97a23c34c9c43ca6e181c1d055a8b4224f4d464374a81ba9",
+      "bytes": 313739
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef.png",
+      "sha256": "d57018d09a1ce6f44d9a194a7eff8f307ac027de95ea602b6a2f4f3935c5a4cc",
+      "bytes": 314645
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9.png",
+      "sha256": "8692c992ceb5340d5008711af2ae33543e50c4898c44eb9bfc2104222347e4c1",
+      "bytes": 322042
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629.png",
+      "sha256": "fc754ac334d6dd77396f6150250fd1d50bd74356f293bda824cc5e5ee48e2003",
+      "bytes": 314667
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba.png",
+      "sha256": "d1c849014e32ff8ab47e5c639b71848d144d1b236a80d2428b4c578497463d56",
+      "bytes": 316040
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f.png",
+      "sha256": "29b47534643882d7ac66c78183e6ebff9476d37648dfbe1d683033dedbe1925d",
+      "bytes": 321423
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824.png",
+      "sha256": "c895c08619ee2b8ade7996d0f7ba11d1f3c28186324ffeaf644d4edde91abbbd",
+      "bytes": 314193
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1.png",
+      "sha256": "b340235c06dd312d8d5c97cc8544ee123b72546115cf745200d6eb8e5bd6b442",
+      "bytes": 314292
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7.png",
+      "sha256": "b9e65c1a6cc94bb28fa0cc2c5961e249e5ed967c7dfde999a0cbb7bd707b38e0",
+      "bytes": 322401
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c.png",
+      "sha256": "d697d3003e5886c57f0a5d5d38d728fb8f7947cf8853469d7cc5b4a30671c9e9",
+      "bytes": 314739
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3.png",
+      "sha256": "466eff5bf12ca54b9ffa068cd1799ee4c81f08b378399353dd53fefec1d006ea",
+      "bytes": 316261
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869.png",
+      "sha256": "f8e2bc2ef98a2ddf7797225aa8f74ea31eff5d0c21e9c54d02b3d5e440017e7b",
+      "bytes": 314658
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287.png",
+      "sha256": "30fc16a3a0b5e3c19d14d98fc015cf6ba329a35281c40f52d1b31ed46e926fb9",
+      "bytes": 317321
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15.png",
+      "sha256": "b097fd2cedeb800005f690af320f1896a74cd9041000a59cc7ab469f7d2b25ce",
+      "bytes": 316463
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80.png",
+      "sha256": "8ae77cadd558316a9e954ca0e7ae50c5089ce6efcb9c6f919bf0ffe89abc4a73",
+      "bytes": 320338
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa.png",
+      "sha256": "3700ed411947f705710d457762458e82629cfefebe0ac6d34a72b7e1c9bdbd1b",
+      "bytes": 321378
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9.png",
+      "sha256": "200a6b2d1b942fcff8f03d6935033b9a410d4930c63d31cb17ca7db04a8af97e",
+      "bytes": 315640
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d.png",
+      "sha256": "b2fdb7ae99c57d60c2a840f0a3255d0a0435c149f3be11c41c64238df12dc1ce",
+      "bytes": 318842
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67.png",
+      "sha256": "6459ede634f5a373f92034be446b668610a6c5fd974236f0a0e78016533d3341",
+      "bytes": 319843
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69.png",
+      "sha256": "268705d67d2ab8ea0299100e34909b057cc7d63bab091de6507caa41b1c7e4b6",
+      "bytes": 316533
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611.png",
+      "sha256": "56af199bcce677409634228117913819c35aa9591ffdf817baa50c4126606a3a",
+      "bytes": 319161
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9.png",
+      "sha256": "e0ccc991f98dfad818f5a5efad9989967894df8a056df94677c4f99c667806ba",
+      "bytes": 318544
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05.png",
+      "sha256": "ef1bcb95557fdd2954ac812798532ffdd88f6ac010ba3127210e05cea9b70fd8",
+      "bytes": 317247
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd.png",
+      "sha256": "ff579ce88a3a8d88ee864a60eb167aa9a84d814597a61ccf7c14faa0a044ae31",
+      "bytes": 319914
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/frames/f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6.png",
+      "sha256": "854572d3ce68d5c29e78fd30654364544b997b2383d00a0b7fdc86265bed7d69",
+      "bytes": 321818
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/qa.json",
+      "sha256": "10137c1b5488bdb80101374bc18e65885431032f3a28f079ddb654799e6dd974",
+      "bytes": 8041
+    },
+    {
+      "path": "seated-work/current-pose-detach-v1/representative-review.jpg",
+      "sha256": "e87a7c07d9a61a4278b2e5e6cd3d8db0d5976d95126e391597c488b0d5e661d7",
+      "bytes": 134462
+    },
+    {
+      "path": "seated-work/current-pose-detach-v2/README.md",
+      "sha256": "02055c61bf2413102ade30ffec42d09820eb45156648d2ffdb77de02a3489553",
+      "bytes": 1885
+    },
+    {
+      "path": "seated-work/current-pose-detach-v2/build.py",
+      "sha256": "6e71a95654cbc2daaa81f35a2305501caaa07eaf6244810845575a93d13a4b53",
+      "bytes": 3220
+    },
+    {
+      "path": "seated-work/current-pose-detach-v2/current-pose-entries.json",
+      "sha256": "b57ab3d38f280c347f0564aeea1429dccb432dde633568f245ec2f7f937a2193",
+      "bytes": 720854
+    },
+    {
+      "path": "seated-work/current-pose-detach-v2/handoff-review.jpg",
+      "sha256": "c74b62fcc42dbee9341bceb35f270c0448477b67f71613f472e74c280f6c613d",
+      "bytes": 76514
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "observe-diagnose/canonical-gaze-v1/closed.png",
+      "sha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+      "bytes": 308658
+    },
+    {
+      "path": "observe-diagnose/canonical-gaze-v1/half.png",
+      "sha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+      "bytes": 309117
+    },
+    {
+      "path": "observe-diagnose/canonical-gaze-v1/read-screen.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "observe-diagnose/canonical-gaze-v1/to-user.source.json",
+      "sha256": "d5c57e644e6f354f9530c963d154618e6f83cb02cb952651f697fc8f3203b370",
+      "bytes": 1191
+    },
+    {
+      "path": "qa/pickup-source-coverage-20261028-2324.json",
+      "sha256": "0c18638b46030a030a6a466a56334e9f58237678cb53e6d444cbc04eb2156666",
+      "bytes": 85426
+    },
+    {
+      "path": "relocation/canonical-static-v1/closed.png",
+      "sha256": "43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f",
+      "bytes": 316880
+    },
+    {
+      "path": "relocation/canonical-static-v2/lap-release.png",
+      "sha256": "88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495",
+      "bytes": 314054
+    },
+    {
+      "path": "relocation/closed-handoff-v1/near-settled.png",
+      "sha256": "d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa",
+      "bytes": 316345
+    },
+    {
+      "path": "relocation/departure-bridge-v1/detach-protected-v2.png",
+      "sha256": "9bc600c76d6cab4ee16e5fd20a2c19741dd1e002b1e6b022fbc2ae37c1523d16",
+      "bytes": 321711
+    },
+    {
+      "path": "relocation/family-detach-v1/replacement-excluding-authored-arms.png",
+      "sha256": "f1573bbdac7b2233e1a53f236e60fe99b01475b5bfae88f3f7f88d80fdcf82e9",
+      "bytes": 2391
+    },
+    {
+      "path": "relocation/shared-entry-v1/open-supported.png",
+      "sha256": "4f4488cf08f92b09ec123a3771bdc89c606d2f40fa83093922f254efa3b0d065",
+      "bytes": 318069
+    },
+    {
+      "path": "relocation/transition-contract-v6/relocation.source.json",
+      "sha256": "506c0c787ff379eb40b8a0ff98f7dab0838914e34d69301d84b81cdecf91d5c0",
+      "bytes": 82513
+    },
+    {
+      "path": "seated-work/canonical-key-tap-v2/sequence.source.json",
+      "sha256": "322feb53b769efba6e210b2f3dd105a237132ef7d586e3fd4a52f607821ae1cc",
+      "bytes": 1948
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-001.png",
+      "sha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f",
+      "bytes": 311438
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-002.png",
+      "sha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69",
+      "bytes": 311439
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-003.png",
+      "sha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285",
+      "bytes": 311377
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-004.png",
+      "sha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15",
+      "bytes": 311362
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-005.png",
+      "sha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2",
+      "bytes": 311463
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-006.png",
+      "sha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8",
+      "bytes": 311742
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-007.png",
+      "sha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20",
+      "bytes": 313307
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-008.png",
+      "sha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd",
+      "bytes": 314798
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-009.png",
+      "sha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548",
+      "bytes": 315126
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-010.png",
+      "sha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff",
+      "bytes": 313338
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-011.png",
+      "sha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d",
+      "bytes": 313734
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-012.png",
+      "sha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9",
+      "bytes": 313446
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-013.png",
+      "sha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc",
+      "bytes": 313116
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-014.png",
+      "sha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646",
+      "bytes": 313076
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-015.png",
+      "sha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b",
+      "bytes": 312634
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-016.png",
+      "sha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287",
+      "bytes": 312248
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-017.png",
+      "sha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f",
+      "bytes": 312461
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-018.png",
+      "sha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a",
+      "bytes": 311881
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-019.png",
+      "sha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1",
+      "bytes": 311100
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-020.png",
+      "sha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9",
+      "bytes": 310551
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-021.png",
+      "sha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16",
+      "bytes": 310962
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-022.png",
+      "sha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba",
+      "bytes": 310955
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-023.png",
+      "sha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3",
+      "bytes": 311167
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-024.png",
+      "sha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05",
+      "bytes": 312145
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-025.png",
+      "sha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6",
+      "bytes": 313153
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-026.png",
+      "sha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611",
+      "bytes": 314035
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-027.png",
+      "sha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9",
+      "bytes": 314488
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-028.png",
+      "sha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67",
+      "bytes": 314685
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-029.png",
+      "sha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80",
+      "bytes": 315190
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-030.png",
+      "sha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81",
+      "bytes": 315877
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-031.png",
+      "sha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f",
+      "bytes": 316306
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-032.png",
+      "sha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99",
+      "bytes": 316594
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-033.png",
+      "sha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6",
+      "bytes": 316691
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-034.png",
+      "sha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8",
+      "bytes": 316852
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-035.png",
+      "sha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9",
+      "bytes": 316930
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/frame-036.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/closing/sequence.source.json",
+      "sha256": "e097f15163283be7604df61919e0c3b6da0fb4a8c49f0ff4e9f11224a4473b27",
+      "bytes": 43780
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-001.png",
+      "sha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9",
+      "bytes": 316930
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-002.png",
+      "sha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8",
+      "bytes": 316852
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-003.png",
+      "sha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6",
+      "bytes": 316691
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-004.png",
+      "sha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99",
+      "bytes": 316594
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-005.png",
+      "sha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f",
+      "bytes": 316306
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-006.png",
+      "sha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81",
+      "bytes": 315877
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-007.png",
+      "sha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80",
+      "bytes": 315190
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-008.png",
+      "sha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67",
+      "bytes": 314685
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-009.png",
+      "sha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9",
+      "bytes": 314488
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-010.png",
+      "sha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611",
+      "bytes": 314035
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-011.png",
+      "sha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6",
+      "bytes": 313153
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-012.png",
+      "sha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05",
+      "bytes": 312145
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-013.png",
+      "sha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3",
+      "bytes": 311167
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-014.png",
+      "sha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba",
+      "bytes": 310955
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-015.png",
+      "sha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16",
+      "bytes": 310962
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-016.png",
+      "sha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9",
+      "bytes": 310551
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-017.png",
+      "sha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1",
+      "bytes": 311100
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-018.png",
+      "sha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a",
+      "bytes": 311881
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-019.png",
+      "sha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f",
+      "bytes": 312461
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-020.png",
+      "sha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287",
+      "bytes": 312248
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-021.png",
+      "sha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b",
+      "bytes": 312634
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-022.png",
+      "sha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646",
+      "bytes": 313076
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-023.png",
+      "sha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc",
+      "bytes": 313116
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-024.png",
+      "sha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9",
+      "bytes": 313446
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-025.png",
+      "sha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d",
+      "bytes": 313734
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-026.png",
+      "sha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff",
+      "bytes": 313338
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-028.png",
+      "sha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548",
+      "bytes": 315126
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-029.png",
+      "sha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd",
+      "bytes": 314798
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-030.png",
+      "sha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20",
+      "bytes": 313307
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-031.png",
+      "sha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8",
+      "bytes": 311742
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-032.png",
+      "sha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2",
+      "bytes": 311463
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-033.png",
+      "sha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15",
+      "bytes": 311362
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-034.png",
+      "sha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285",
+      "bytes": 311377
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-035.png",
+      "sha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69",
+      "bytes": 311439
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-036.png",
+      "sha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f",
+      "bytes": 311438
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/frame-037.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "bytes": 309034
+    },
+    {
+      "path": "seated-work/canonical-lid-v2/opening/sequence.source.json",
+      "sha256": "71961bc75f42ff66fa3235396ed35653a5670630425cf973d782c6c26d17a1e2",
+      "bytes": 44958
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-002.png",
+      "sha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "bytes": 309618
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-003.png",
+      "sha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "bytes": 309726
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-004.png",
+      "sha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "bytes": 309531
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/frame-005.png",
+      "sha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "bytes": 309569
+    },
+    {
+      "path": "seated-work/canonical-scroll-v2/sequence.source.json",
+      "sha256": "1a498926d2a89309ab929310e6e59eed249563f8e9f12085a031d2e0fe70c6ee",
+      "bytes": 2855
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-001.png",
+      "sha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "bytes": 309217
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-002.png",
+      "sha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "bytes": 309629
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-003.png",
+      "sha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "bytes": 309436
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-004.png",
+      "sha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "bytes": 309593
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/frame-005.png",
+      "sha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "bytes": 309582
+    },
+    {
+      "path": "seated-work/canonical-typing-v2/sequence.source.json",
+      "sha256": "685f4dbe09d3ec13716699aae4d9cd975a3088547e29f85745c2dfedb582ca5c",
+      "bytes": 2854
+    }
+  ],
+  "counts": {
+    "missingEntriesCovered": 43,
+    "workSourceHashes": 46,
+    "detachedExposures": 51
+  },
+  "pathBase": "production-root",
+  "originalManifestSha256": "f5cfe4c26369b5080bf71158801c5429cfbafdec9fde3a7257bcd35c0d6c1c05"
+}

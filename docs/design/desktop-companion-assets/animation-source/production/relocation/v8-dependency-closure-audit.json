@@ -1,0 +1,25 @@
+{
+  "contractSha256": "4c4a2dfa76de5849697487cbe2ee93d10f6d7ed7a757d42b4e79fdbc20d9f717",
+  "externalCount": 612,
+  "verifiedHashes": 612,
+  "directContractReferences": 609,
+  "buildOnlyDependencies": [
+    "../observe-diagnose/gesture-pickup-v2/coverage-index.json",
+    "../user-attention/closed-grab-v1/routes.json",
+    "../user-attention/open-event-grab-v1/routes.json"
+  ],
+  "formats": {
+    "png": 556,
+    "json": 56
+  },
+  "missingRepoPathsAtAudit": 381,
+  "missingBytes": 106349168,
+  "missingUniqueBlobs": 196,
+  "missingUniqueBlobBytes": 47377081,
+  "strategy": "Copy exact missing dependency paths with SHA verification. Git deduplicates identical files. No reconstruction framework required; no HTML/GIF or rejected-motion studies in this external selection.",
+  "remainingScope": [
+    "Consumer 134-source routing and release/regrab verification; fix only concrete findings in a new version.",
+    "Native world-stool contact/pointer integration verification remains integration owner responsibility."
+  ],
+  "artScopeClosed": true
+}

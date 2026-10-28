@@ -1,0 +1,50 @@
+{
+  "id": "gesture-pickup.coverage-8820543d00b6",
+  "stage": "motion-candidate",
+  "reviewStatus": "structural-variant-review",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "coverage-8820543d00b6-detached",
+  "exitPose": "canonical-closed-laptop-supported-detached",
+  "loop": null,
+  "sourceStart": "rest/canonical-quiet-v1/closed.png",
+  "sourceStartSha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "coverage-8820543d00b6-transition",
+      "contacts": {}
+    },
+    {
+      "source": "current-supported.png",
+      "durationMs": 60,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "coverage-8820543d00b6-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-000-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-closed-laptop-supported-detached",
+      "contacts": {}
+    }
+  ]
+}

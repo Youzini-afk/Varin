@@ -1,0 +1,374 @@
+{
+  "scope": "43 newly missing work sources plus3 shared aliases; shortened v2 recovery only, never historical v1 long queue",
+  "frames": [
+    {
+      "source": "seated-work/canonical-scroll-v2/frame-004.png",
+      "sourceSha256": "00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/00eb9e5e04755a1909be4f6974312535d9757530dedbc507081169c6cf7a2316.png",
+      "detachedSha256": "677f60a134cf5fb6a18ac87ab3d6fa7f22215ae367187102ee5b4e8c368fc53e",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-022.png",
+      "sourceSha256": "0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/0c07aaeaa6d4cb4e7b698555ff6db70e630ca2022b90d86737d428557c38c646.png",
+      "detachedSha256": "0637c3ae3c3163cd13e6bc4810233d575236767bfb54885888ea9f6339e88106",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-023.png",
+      "sourceSha256": "0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/0f3ec9beba24fa9706bd1ff195a392a81a85ed58d46db0c9604078ea4660fffc.png",
+      "detachedSha256": "4f5c644b8f216ae575257fae155a430f395e95e0c23f764263895130e4dc16cd",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-028.png",
+      "sourceSha256": "11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/11e3c91556480a4b5b93abe0fee3b1a69e79e43f656d8443621b8a3225eaf548.png",
+      "detachedSha256": "0f97560ac7eaa93a340b0a3b04e393b0b68c3860ae6b15a71a799906808360a7",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-036.png",
+      "sourceSha256": "16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/16e3bcbd12bdbd1d1a53589b8166115cd141b91a01e555dd8222644abb77858f.png",
+      "detachedSha256": "4fbc512b09ea2fc2dcc4f20e830b2dfd651245283faedb3c1f064d25c5c486a1",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-026.png",
+      "sourceSha256": "1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/1ed376e4614101cb9cd4ede9d2db238e6d7143e9b170b1503794679e8c49a0ff.png",
+      "detachedSha256": "9ac214ac24c41cef4038970d694392732a125f4654c24327f682d1165dc4620a",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-002.png",
+      "sourceSha256": "22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/22987048c150352a37a1aec04275b6845310e8ef5cf1729e545c7f6b04befca8.png",
+      "detachedSha256": "556b48b0281ed71d2a8e83e65d2e73093183fd4f97676aa3c106f8cdf2fecb43",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-034.png",
+      "sourceSha256": "2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/2f9d60f97ef99bd4ee2e84348e5d114ef1c1e5f1f155a457745e51749f938285.png",
+      "detachedSha256": "9e2aa89a9a28e439ccfcbd2e01897a09d0e2cc79f00b8970eea04fb19c610dbb",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-typing-v2/frame-003.png",
+      "sourceSha256": "473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/473fec143785afb18a50f8725e703ad16efb90036338f27f0c403507f4e39d2a.png",
+      "detachedSha256": "4ff4dd31f98c16f964d2b11d72e7b3b263d47fad11ef603f58c631a0a3ae7710",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-018.png",
+      "sourceSha256": "477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/477fae7219bd3cfc04eb594daa8f6d69b951a99d93ac60ee07c783e8c5fd809a.png",
+      "detachedSha256": "c9ea578499f12fde99517432ec8579369cc926898c49ddb23201c6f96561df6a",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-009.png",
+      "sourceSha256": "54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/54b5c988b8133292cb3bb3fdf3ebe3ed9e7a107cbb5523c139486e3d8c0461f9.png",
+      "detachedSha256": "aca2e140e628571439fd683723a83f0069f298b6afed5f62b44b7dfd52768f90",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-030.png",
+      "sourceSha256": "57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/57d0de7fbbb7cdcd1669647e7c166ce92a19d4c4075c2574339f7b063fe97f20.png",
+      "detachedSha256": "1dd08d32a691571c0a4637f7bbd62e749b21cfa2d053e698433eb2aecf48f8ca",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-017.png",
+      "sourceSha256": "58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/58dff440b445c4049331fb4f548a12dfbe41d7436917b98426b74d9fd8d08df1.png",
+      "detachedSha256": "1ba3b5cad3c4f2286df6f3185957c45118ecb865e176bc101ac5f432412bbb59",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-021.png",
+      "sourceSha256": "5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/5930dcbc1471b4f02996654db8c900a854a47d220babae97327ccd80a858403b.png",
+      "detachedSha256": "a2ca1263ef8450e2dc46de91595211794f2a11551108f87e4359fe2190e6265c",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-032.png",
+      "sourceSha256": "5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/5eb017ab8d54da4442e88121b76d597874b01de1d70468145454d890dd9582a2.png",
+      "detachedSha256": "dca24ad3e45621335d59585da711cc87f463c35eb0094b8f83b6ab547c3190ab",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-typing-v2/frame-002.png",
+      "sourceSha256": "601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/601545e4887be1f86035c7aca70d1112ef0934d34ad7086c045975d00282afb1.png",
+      "detachedSha256": "f8bc862cba54afe4507886496a70c4218e3fa1b127dabb405a93328669e7eee8",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-019.png",
+      "sourceSha256": "61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/61bc9dfcdb5aecf4a6e11616bdfd351e0fd76131e8791783e5c5f2570c12765f.png",
+      "detachedSha256": "91b94d26aea48cb1f29310f20e533af8e0b3d3c5184c5fa8a1802b97068d1939",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-scroll-v2/frame-002.png",
+      "sourceSha256": "66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/66c58bc62d0bfed7d54ea6ae2e5a5fac6555725f04674c74e59fa9cd06ca1343.png",
+      "detachedSha256": "669eb2698843a4f3d39ee92a11a4295eae22b7469b6cda5e81dcc50d535f1456",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-031.png",
+      "sourceSha256": "6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/6caa69449493663de72d05051dcdbaefaca77d1514c412c37cefee3961b005a8.png",
+      "detachedSha256": "4b39e02d4d3dbdc12000f1defbb8feb13e3e81286724da41599691ee6bce2cb5",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-015.png",
+      "sourceSha256": "6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/6e1c5e9a828d26b1f3e541c9c38d1542abfebdca853bc0760114ddfd7b4e4c16.png",
+      "detachedSha256": "493c3d93a5e2d42cae0c594e6864890fc7673796ce79be74372ddac09c772166",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-011.png",
+      "sourceSha256": "725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/725fe60e065bb2487c853cd2cca5c25bbb336b410a5c40d8c16dc42e978585a6.png",
+      "detachedSha256": "87a9e7a8b69c7263980638d10db9c258469e741c133a205ccc6592e283095a63",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-004.png",
+      "sourceSha256": "7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/7980b0946a0eed0161a81f33bcedb67debb3ed1b3aa0fde2d75b5a27ad418d99.png",
+      "detachedSha256": "c7ba4ac7d2a106673d76189fbc48bcebec41fda5916e21620ba3fc897d451612",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-006.png",
+      "sourceSha256": "888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/888d20e5d0265beaf09502f723be2172adc385721986343e9235967b895c7f81.png",
+      "detachedSha256": "a8dff163c3d97fd15bc21ae02ca80dce97cdb6aa2a557c7a365df01b14316934",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-scroll-v2/frame-005.png",
+      "sourceSha256": "8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/8c1155114d33e783e3dc9f02a16ac7dd2de5592b407f19d91b0a40ed9b70f1ef.png",
+      "detachedSha256": "d57018d09a1ce6f44d9a194a7eff8f307ac027de95ea602b6a2f4f3935c5a4cc",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-001.png",
+      "sourceSha256": "8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/8f05c0949034d5555e2a304cd4db73e72745cfc8a842796d9f20ac9090154ac9.png",
+      "detachedSha256": "8692c992ceb5340d5008711af2ae33543e50c4898c44eb9bfc2104222347e4c1",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-typing-v2/frame-004.png",
+      "sourceSha256": "99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/99784f450e388ac4c6e91b98d2271ece156156c6445487f152fb3b5f27694629.png",
+      "detachedSha256": "fc754ac334d6dd77396f6150250fd1d50bd74356f293bda824cc5e5ee48e2003",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-014.png",
+      "sourceSha256": "9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/9dbc1d4ef27eb4d0ba2e1086f8a8928310de5ddaa5380dd94d81eb0980e59cba.png",
+      "detachedSha256": "d1c849014e32ff8ab47e5c639b71848d144d1b236a80d2428b4c578497463d56",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-005.png",
+      "sourceSha256": "a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/a724be3fd70fd25641b0b9f747547cb3620721153173a31c80127630b724ae6f.png",
+      "detachedSha256": "29b47534643882d7ac66c78183e6ebff9476d37648dfbe1d683033dedbe1925d",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-scroll-v2/frame-003.png",
+      "sourceSha256": "c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/c9bda7a4828bc46244000a7d94622e50d56fe27c4cb8c40f843a75ec59b2cb9c.png",
+      "detachedSha256": "d697d3003e5886c57f0a5d5d38d728fb8f7947cf8853469d7cc5b4a30671c9e9",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-013.png",
+      "sourceSha256": "ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/ca1a2ddc8a9390f6cc11bd2b7e1cbdac1ee1c6d62466566b7832b1e8172f8da3.png",
+      "detachedSha256": "466eff5bf12ca54b9ffa068cd1799ee4c81f08b378399353dd53fefec1d006ea",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-typing-v2/frame-005.png",
+      "sourceSha256": "ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/ca515c88d74c5fb75066318200211bec159f7acff08cab3f3623a1fca2fdf869.png",
+      "detachedSha256": "f8e2bc2ef98a2ddf7797225aa8f74ea31eff5d0c21e9c54d02b3d5e440017e7b",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-020.png",
+      "sourceSha256": "ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/ce602aa9e6c5322232bdaf780da318f2b13a373c75fe81305426e7edbc66f287.png",
+      "detachedSha256": "30fc16a3a0b5e3c19d14d98fc015cf6ba329a35281c40f52d1b31ed46e926fb9",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-033.png",
+      "sourceSha256": "d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/d0708f85282e3eae82d2ba600b2a12ef3deb25f8ebae2d44b27516e1b97e6a15.png",
+      "detachedSha256": "b097fd2cedeb800005f690af320f1896a74cd9041000a59cc7ab469f7d2b25ce",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-007.png",
+      "sourceSha256": "d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/d2fd6f24e33609400bab8d2ecafabcea6b86754ae89de98aeb595cbd69a20d80.png",
+      "detachedSha256": "8ae77cadd558316a9e954ca0e7ae50c5089ce6efcb9c6f919bf0ffe89abc4a73",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-016.png",
+      "sourceSha256": "d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/d430003948c43ff11753c30b999af7fd2d4cef9aa03effc8eeecc7142cf91ae9.png",
+      "detachedSha256": "200a6b2d1b942fcff8f03d6935033b9a410d4930c63d31cb17ca7db04a8af97e",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-025.png",
+      "sourceSha256": "d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/d480c3d6ad895cbd1dbfa9ef444a98786f847e1c8c48585095cc9c1748eaa47d.png",
+      "detachedSha256": "b2fdb7ae99c57d60c2a840f0a3255d0a0435c149f3be11c41c64238df12dc1ce",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-008.png",
+      "sourceSha256": "da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/da9f059e7bfcdaf405ecfb16ddf1ebaa7d54e9ab28b42f8d65bee1dbaf192e67.png",
+      "detachedSha256": "6459ede634f5a373f92034be446b668610a6c5fd974236f0a0e78016533d3341",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-035.png",
+      "sourceSha256": "de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/de86ab79aa2ce2f3d76d3d96f8f06c1486ab74ae57b3fd6265d8c99237703f69.png",
+      "detachedSha256": "268705d67d2ab8ea0299100e34909b057cc7d63bab091de6507caa41b1c7e4b6",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-010.png",
+      "sourceSha256": "e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/e0fb95749efb97a94608c3dd2f9ff78c98819e38497cc0387dc78300a1703611.png",
+      "detachedSha256": "56af199bcce677409634228117913819c35aa9591ffdf817baa50c4126606a3a",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-024.png",
+      "sourceSha256": "e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/e337f0bbc9046b93fd201e99374a96b027bb416351e8a795751634bdc4ae1de9.png",
+      "detachedSha256": "e0ccc991f98dfad818f5a5efad9989967894df8a056df94677c4f99c667806ba",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-012.png",
+      "sourceSha256": "f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/f0e1bb7e81b82fe9702247d3ed93b7a2af784073e8c0e608219f46344bd3dd05.png",
+      "detachedSha256": "ef1bcb95557fdd2954ac812798532ffdd88f6ac010ba3127210e05cea9b70fd8",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-029.png",
+      "sourceSha256": "f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/f526b3e8a496e262b51dc3a846f0d39267b99a46862a11235cc0ed2cc687e0dd.png",
+      "detachedSha256": "ff579ce88a3a8d88ee864a60eb167aa9a84d814597a61ccf7c14faa0a044ae31",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-003.png",
+      "sourceSha256": "f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/f58dbda44b52d6e38b273d5911767dd3c34972777ad71942039f481ebbeecca6.png",
+      "detachedSha256": "854572d3ce68d5c29e78fd30654364544b997b2383d00a0b7fdc86265bed7d69",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-000.png",
+      "sourceSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7.png",
+      "detachedSha256": "b9e65c1a6cc94bb28fa0cc2c5961e249e5ed967c7dfde999a0cbb7bd707b38e0",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-lid-v2/opening/frame-037.png",
+      "sourceSha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721.png",
+      "detachedSha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    },
+    {
+      "source": "seated-work/canonical-typing-v2/frame-001.png",
+      "sourceSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "detachedSource": "seated-work/current-pose-detach-v1/frames/c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1.png",
+      "detachedSha256": "b340235c06dd312d8d5c97cc8544ee123b72546115cf745200d6eb8e5bd6b442",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Original work/angle drawings already reviewed; representative deep-background detached montage and actual35degree -> half -> mid -> rapid support strip inspected; every current source head/hands/lid through y327 and outside replacement mask verified unchanged. Not43 individually replayed clips."
+    }
+  ],
+  "remaining": "Native pointer/interrupt/world-contact behavior requires runtime check"
+}

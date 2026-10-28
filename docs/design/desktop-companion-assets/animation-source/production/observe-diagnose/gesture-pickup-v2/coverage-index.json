@@ -1,0 +1,505 @@
+{
+  "entries": [
+    {
+      "id": "gesture-pickup.coverage-41004ce0b973",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-41004ce0b973/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-stop-v1/middle-surprise.png",
+      "sourceStartSha256": "41004ce0b9730cd5d53d3ad5170edabc99e6278f3c159a989965b02c013433f9",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 505,
+      "uses": [
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-surprise.png"
+        },
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-surprise.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-85668658799a",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-85668658799a/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-stop-v1/raised-surprise.png",
+      "sourceStartSha256": "85668658799a6c27e9f810f83b65f1031c9f320c897bcabd0d64e056ce5d8622",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 450,
+      "uses": [
+        {
+          "package": "observe.failure-entry-boundary-v1",
+          "exposure": 2,
+          "source": "raised-surprise.png"
+        },
+        {
+          "package": "observe.unknown-entry-boundary-v1",
+          "exposure": 2,
+          "source": "raised-surprise.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-abdad51947d1",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-abdad51947d1/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-gaze-v1/half.png",
+      "sourceStartSha256": "abdad51947d1df8e4f1b65ec6dd890564a4aa0d0d5c5273c068134f8a479e824",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 1,
+          "source": "half.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 1,
+          "source": "half.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-8a27cf5d11e2",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-8a27cf5d11e2/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-gaze-v1/closed.png",
+      "sourceStartSha256": "8a27cf5d11e24aeba98b9179fbc19e98317921bd5f139592058ddc100c93fa3f",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.gaze-to-screen-v1-pose-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        },
+        {
+          "package": "observe.gaze-to-user-v1-pose-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-8ce2c0125142",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-8ce2c0125142/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/chin-glance-user.png",
+      "sourceStartSha256": "8ce2c012514281146a422c9369df895242f6642f03c07535568dafd6861bd780",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 13,
+          "source": "chin-glance-user.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-09da09c18520",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-09da09c18520/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/rim-approach.png",
+      "sourceStartSha256": "09da09c185209721f9890563d264267c8a99a660bafcebd5242b515aa6c7bbdb",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 7,
+          "source": "rim-approach.png"
+        },
+        {
+          "package": "observe.wait-hold-v1-boundary-v1",
+          "exposure": 9,
+          "source": "rim-approach.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-6adf830b0166",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-6adf830b0166/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-005.png",
+      "sourceStartSha256": "6adf830b01666d5c23b4e45e97ce5b08057e94f129312efc63722a6a931b7e18",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 6,
+          "source": "check-005.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 0,
+          "source": "check-005.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-a1c931bef3b9",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-a1c931bef3b9/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-003.png",
+      "sourceStartSha256": "a1c931bef3b940bf8e50af0a506b6695a0d9dce602309e0e150adfe01f3d9e25",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 4,
+          "source": "check-003.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 2,
+          "source": "check-003.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-f26683c6d0f6",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-f26683c6d0f6/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/rest-half.png",
+      "sourceStartSha256": "f26683c6d0f669c5a1bf2e431dcc287218b1b89883f051fe94759a055c62bf41",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 3,
+          "source": "rest-half.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 5,
+          "source": "rest-half.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-b87df537bb12",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-b87df537bb12/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-closed.png",
+      "sourceStartSha256": "b87df537bb124afa25bd9be7ec9cc775decf2f10c417efbf692850a9336d0823",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 450,
+      "uses": [
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 2,
+          "source": "raised-closed.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-5eedd7d91a13",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-5eedd7d91a13/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/rest-focused.png",
+      "sourceStartSha256": "5eedd7d91a13f90106550b7329816bf826b7a3dfd4012c04e5f453b347ee3fb9",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 3,
+          "source": "rest-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 2,
+          "source": "rest-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 6,
+          "source": "rest-focused.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-cfe5597e8d81",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-cfe5597e8d81/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/middle-focused.png",
+      "sourceStartSha256": "cfe5597e8d81ab00bcd7362883e1c29692d79478ce5d275ccc78d9027a65e33f",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 505,
+      "uses": [
+        {
+          "package": "observe.cancel-entry-boundary-v1",
+          "exposure": 1,
+          "source": "middle-focused.png"
+        },
+        {
+          "package": "observe.sync-attention-boundary-v1",
+          "exposure": 2,
+          "source": "middle-focused.png"
+        },
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 1,
+          "source": "middle-focused.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-84ee8a6abd9d",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-84ee8a6abd9d/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-000.png",
+      "sourceStartSha256": "84ee8a6abd9d9a0c7b4aa4bff3ad5e77f162c75024114cca542f041e9e928270",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 1,
+          "source": "check-000.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 5,
+          "source": "check-000.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-326d4fcce29f",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-326d4fcce29f/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-001.png",
+      "sourceStartSha256": "326d4fcce29ffa40fadb3d8d14186ac23d91d92e1e5c03c989e618aae377e81f",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 450,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 2,
+          "source": "check-001.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 4,
+          "source": "check-001.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-c8c4ec19eb6f",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-c8c4ec19eb6f/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-004.png",
+      "sourceStartSha256": "c8c4ec19eb6fcf1f68cc8cd68fc2f2f2d07682a6675e8c6c42819d663de4f621",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 5,
+          "source": "check-004.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 1,
+          "source": "check-004.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-5b1454b39deb",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-5b1454b39deb/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/rest-closed.png",
+      "sourceStartSha256": "5b1454b39deb72781973b9f6f0bd2fba1ae702eec87ac12804e0f76e421743c6",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 560,
+      "uses": [
+        {
+          "package": "observe.neutral-recovery-boundary-v1",
+          "exposure": 4,
+          "source": "rest-closed.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-f2ec68ed05f9",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-f2ec68ed05f9/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-half.png",
+      "sourceStartSha256": "f2ec68ed05f9553053d4c8c55ab5b53e1efce256a1ac5d495c801169644fa41f",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 450,
+      "uses": [
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.cancel-hold-boundary-v1",
+          "exposure": 3,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.unknown-hold-boundary-v1",
+          "exposure": 3,
+          "source": "raised-half.png"
+        },
+        {
+          "package": "observe.raised-focus-to-unknown-boundary-v1",
+          "exposure": 1,
+          "source": "raised-half.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-639ea19851de",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-639ea19851de/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/check-002.png",
+      "sourceStartSha256": "639ea19851dedc963e9dd5d88cdea9b3ee83079746da4654203e9cddf6911b00",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 395,
+      "uses": [
+        {
+          "package": "observe.uncertain-check-boundary-v1",
+          "exposure": 3,
+          "source": "check-002.png"
+        },
+        {
+          "package": "observe.uncertain-release-boundary-v1",
+          "exposure": 3,
+          "source": "check-002.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-8e5d15ee0307",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-8e5d15ee0307/sequence.source.json",
+      "sourceStart": "rest/canonical-quiet-v1/half.png",
+      "sourceStartSha256": "8e5d15ee0307524d49345168422426db495e383a576c77b2282662e14f3b333f",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 170,
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 1,
+          "source": "half.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 3,
+          "source": "half.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-3f70a6861d87",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-3f70a6861d87/sequence.source.json",
+      "sourceStart": "rest/canonical-quiet-v1/between.png",
+      "sourceStartSha256": "3f70a6861d8756d02886dd14593936689d9e3b87b5943cbc2385291c4dc5c89e",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 170,
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 5,
+          "source": "between.png"
+        },
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 7,
+          "source": "between.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-8820543d00b6",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-8820543d00b6/sequence.source.json",
+      "sourceStart": "rest/canonical-quiet-v1/closed.png",
+      "sourceStartSha256": "8820543d00b6b24d9859e23119d6349f44fa705c876f78951a734051f0a795d1",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 170,
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 2,
+          "source": "closed.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    },
+    {
+      "id": "gesture-pickup.coverage-dca23aa400e1",
+      "manifest": "observe-diagnose/gesture-pickup-v2/coverage-dca23aa400e1/sequence.source.json",
+      "sourceStart": "rest/canonical-quiet-v1/settle.png",
+      "sourceStartSha256": "dca23aa400e19792e6095358d349ba1c3e1c9b2ab7f083d9c1a62aaeadf0b1a9",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 170,
+      "uses": [
+        {
+          "package": "rest.quiet-settle-v1-boundary-v1",
+          "exposure": 6,
+          "source": "settle.png"
+        }
+      ],
+      "reviewStatus": "finite-accept-structural-variant"
+    }
+  ],
+  "scope": "Actual unique source hashes missing from 2324 consumer inventory; no new backend action families",
+  "dependencies": [
+    "index.json",
+    "coverage-source-input.json",
+    "near-support-mask.png"
+  ],
+  "newDrawings": 0
+}

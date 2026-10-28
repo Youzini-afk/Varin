@@ -1,0 +1,58 @@
+{
+  "status": "actual authored far-hand inbetween, static QA passed, assembled departure timing pending",
+  "dependsOn": "frozen-upper-contact-inventory.json",
+  "files": [
+    {
+      "path": "mid-reach-raw-v1.png",
+      "bytes": 1723054,
+      "sha256": "2d6e6c2d92a25b88e0642d1fcb4513d12c2361c0d853854197f9b8773a9cb51c"
+    },
+    {
+      "path": "prompt-mid-reach.txt",
+      "bytes": 1329,
+      "sha256": "5e35855ae975e1b71fbc13b61383057062b955246779b8e709bc7dc8fa162d26"
+    },
+    {
+      "path": "register_mid.py",
+      "bytes": 1243,
+      "sha256": "545c4464801c49c75d5f4091d0f3b6abda10d1a7406cbd164239679651240707"
+    },
+    {
+      "path": "mid-reach-edit-mask.png",
+      "bytes": 1486,
+      "sha256": "53f315d900f34a42d7110ec41e7215c9b5ed241a66ec228be2849c9237e027a6"
+    },
+    {
+      "path": "wait-005-mid-reach.png",
+      "bytes": 333332,
+      "sha256": "f60345bd0aae0368e5ee076f20dee0bceb805eccbeb29b9df2ff9d831523cdc8"
+    },
+    {
+      "path": "query-mid-reach.png",
+      "bytes": 311997,
+      "sha256": "bf08e51aa2d234c4cd665e3f559ba7d8ba343ce2f81ce7d0f9a8c76abe450f45"
+    },
+    {
+      "path": "wait-002-mid-reach.png",
+      "bytes": 326456,
+      "sha256": "1efb5234c287e1d076c162834a5d36e96d2479e6d890f6acc1e01f2d20b01f34"
+    },
+    {
+      "path": "permission-mid-reach.png",
+      "bytes": 330417,
+      "sha256": "f4d95dfab3003703cb57609fd9538679123e71eefe1b3aac49e42097313ee0e4"
+    },
+    {
+      "path": "wait-001-mid-reach.png",
+      "bytes": 327223,
+      "sha256": "9fabb3d8c45f437d827f11bc2e0e7df75341a6ad6a10b90521ee7621acfef906"
+    },
+    {
+      "path": "wait-000-mid-reach.png",
+      "bytes": 327734,
+      "sha256": "204e12250a473e519a0c00a7bdb443cdd1c610e50ab643ee2d9d194a73503c2e"
+    }
+  ],
+  "sourceGeneration": "generated_images/exec-cedfdc40-0566-42db-8bcf-c99c4a7173ef.png",
+  "method": "Fixed fullviewport resize; only far arm edit mask changes; original head/near hand/legs unaffected; no interpolation."
+}

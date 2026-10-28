@@ -1,0 +1,54 @@
+{
+  "source": "registered/attention-sequence-v2/sequence.json",
+  "peerReview": {
+    "reviewer": "produce_observation_rest_animation",
+    "tab": 17,
+    "size": 320,
+    "speed": 1,
+    "sampleTimesMs": [
+      0,
+      250,
+      1469,
+      2369
+    ],
+    "decision": "limited accept local tap only; headlift restrained, hands/laptop/seat stable; no new art"
+  },
+  "sources": [
+    {
+      "source": "pose-000.png",
+      "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5"
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048"
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5"
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55"
+    },
+    {
+      "source": "pose-004.png",
+      "sha256": "d696a98820bb12ce672bf3899769d2a21c2708bd756aaf6840b1a743d74c5122"
+    },
+    {
+      "source": "pose-003.png",
+      "sha256": "9ac14650174359058ad356c0cafe49b50b43dbe688345b4622318c0d984a7a55"
+    },
+    {
+      "source": "pose-002.png",
+      "sha256": "cd99d09d7e3ba480d0cc6626ac056bf86b2ffd92f6e4ff6f0cd2dc230f995ae5"
+    },
+    {
+      "source": "pose-001.png",
+      "sha256": "c6fac141e72b6f5961f88939e0827ad818ace719457da3dbc9d987411d427048"
+    },
+    {
+      "source": "pose-000.png",
+      "sha256": "279130a0bcabe34a2b8e78908af71d5be2b7ab02db8496a44a3c365918a550d5"
+    }
+  ]
+}

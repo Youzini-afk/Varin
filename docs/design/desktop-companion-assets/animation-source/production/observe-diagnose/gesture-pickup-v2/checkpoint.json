@@ -1,0 +1,79 @@
+{
+  "stage": "finite-entrance-accepted",
+  "newSourceOnly": true,
+  "rebuild": "README.txt",
+  "files": [
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/build.py",
+      "bytes": 3268,
+      "sha256": "20f7c90bef532d4b88bfa3a95a4fb9e8c357c9a10e09e8876d4d40b3168dd0b0"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/derive_sequences.py",
+      "bytes": 5307,
+      "sha256": "166e524104cf68c0fd6f9e90dc21926d04aba2cb2489e728969a7bf5e8bf56a6"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/build_closed_handoff.py",
+      "bytes": 728,
+      "sha256": "139be3dc19e0fced49c507a4925bb439fac0989f33fd613dad8c77f418bd9f9e"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/derive_coverage.py",
+      "bytes": 3498,
+      "sha256": "d1eb9635435a4fd2453d3c609eba099c92a29b723e253ba060587ae26631648e"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/closed-handoff-source.png",
+      "bytes": 1620673,
+      "sha256": "c5cd4d39fd86446ec8038fd0e385bcb67d5bb27c53dac95df7aee6a777f5f7b7"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/near-support-mask.png",
+      "bytes": 1306,
+      "sha256": "29c7d8203d6452237a1f6bd2a04650582f412d021581ca5a890bc214705f66d5"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/far-arm-mask.png",
+      "bytes": 1372,
+      "sha256": "c8083f2c37a3eafee5a91515148cc160fb7a369850f0bdfd5757653d4d5a0342"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/closed-handoff-mask.png",
+      "bytes": 1873,
+      "sha256": "055b5b94ee42387cd98496287ff3e4c813b44096b2ba4b1d6673a2564b2a72fe"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/index.json",
+      "bytes": 11785,
+      "sha256": "d6ee09b22f9fe20d077baf4cf4925a5efb57c2c2e69de07457437d8a1aeecb25"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/coverage-index.json",
+      "bytes": 18334,
+      "sha256": "186c8f91f263dd0e0f2e8b2224e4ed5ac3d6b67cf64d8cb26dfd8eeca23f4b6e"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/coverage-source-input.json",
+      "bytes": 9880,
+      "sha256": "730a7089714ad2c951ef49b87db304f06a7c05246df19b9bf8852c457574963c"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/acceptance-ledger.json",
+      "bytes": 19143,
+      "sha256": "86f6af3c40e0ec19de5376994cdd1ee57f6d436004d8c347eb7691ee5e378764"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/coverage-acceptance-ledger.json",
+      "bytes": 26328,
+      "sha256": "60908630652470cb9565fb31048de7bb53e7ead531a1a1c1da7993ec10a001d1"
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/README.txt",
+      "bytes": 1197,
+      "sha256": "ae64ffdb69cf31dcdb5d204d284147571e8fb7659642d218f0ac31e2a91c9127"
+    }
+  ],
+  "pathBase": "production-root",
+  "originalManifestSha256": "94ab965e5e66f0c2a78e7af9b1fabdc87f93a57f057c10acb091002d098d6ae1"
+}

@@ -1,0 +1,7 @@
+{
+  "status": "isolated-rebuild-byte-identical-after-dependency-addendum",
+  "checkedFrozenFiles": 60,
+  "mismatches": [],
+  "initialFinding": "9 identical-image alias paths omitted from dependency list; addendum supplies exact names/hashes without altering frozen files",
+  "buildersExitCode": 0
+}

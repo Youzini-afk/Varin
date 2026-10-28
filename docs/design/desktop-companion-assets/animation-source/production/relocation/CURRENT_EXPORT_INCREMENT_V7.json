@@ -1,0 +1,85 @@
+{
+  "stage": "user-midreach-append-candidate",
+  "depends": [
+    "CURRENT_EXPORT_INCREMENT_V6.json"
+  ],
+  "files": [
+    {
+      "path": "compose_family_midreach_v1.py",
+      "bytes": 949,
+      "sha256": "06edc992a1db288b74523d2e2d5f602ad6b4730876cf4d45234f431c04ebf05b"
+    },
+    {
+      "path": "build_transition_contract_v6.py",
+      "bytes": 1159,
+      "sha256": "a362b8a24fd0fe04a74dd37a682acb5ee8e7f331dd5d7045fb7ac41e62b9b6a2"
+    },
+    {
+      "path": "transition-contract-v6/relocation.source.json",
+      "bytes": 82513,
+      "sha256": "506c0c787ff379eb40b8a0ff98f7dab0838914e34d69301d84b81cdecf91d5c0"
+    },
+    {
+      "path": "family-midreach-v1/wait-001-detach.png",
+      "bytes": 332085,
+      "sha256": "373f8d9ad09e208fb8b30584c7de6854d972445ce9047ac337980e84d611f5e8"
+    },
+    {
+      "path": "family-midreach-v1/query-detach.png",
+      "bytes": 316900,
+      "sha256": "b1c4223121c647943a08b0bb851039de9b2a8f6988b212f80d641204e654684e"
+    },
+    {
+      "path": "family-midreach-v1/wait-000-detach.png",
+      "bytes": 332592,
+      "sha256": "16ac2865f2ddc59ed6dcaf5db95b43726db5ea512e3eb6bbef55b30904dcd031"
+    },
+    {
+      "path": "family-midreach-v1/wait-005-detach.png",
+      "bytes": 338288,
+      "sha256": "8a736ce008aecdcf0d0fb9ced922389e801e3b6d05e7c5ef80d8679ee8f319cc"
+    },
+    {
+      "path": "family-midreach-v1/wait-002-detach.png",
+      "bytes": 331319,
+      "sha256": "a7884abe1d349cc3f5e60f77ce6d85e0df8cea1e4f18a4593639bc08a8bd69ea"
+    },
+    {
+      "path": "family-midreach-v1/sources.json",
+      "bytes": 2076,
+      "sha256": "35941acaa96554bb2974704ca87e45664bb74f0930be2850501c3e6c78d92ce7"
+    },
+    {
+      "path": "family-midreach-v1/permission-detach.png",
+      "bytes": 335509,
+      "sha256": "75a0cdc24b955d287e4eb70fa710089a8b4853af688c161be2b86da6a509e615"
+    }
+  ],
+  "externalDependencies": [
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-005-mid-reach.png",
+      "sha256": "f60345bd0aae0368e5ee076f20dee0bceb805eccbeb29b9df2ff9d831523cdc8"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/query-mid-reach.png",
+      "sha256": "bf08e51aa2d234c4cd665e3f559ba7d8ba343ce2f81ce7d0f9a8c76abe450f45"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-002-mid-reach.png",
+      "sha256": "1efb5234c287e1d076c162834a5d36e96d2479e6d890f6acc1e01f2d20b01f34"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/permission-mid-reach.png",
+      "sha256": "f4d95dfab3003703cb57609fd9538679123e71eefe1b3aac49e42097313ee0e4"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-001-mid-reach.png",
+      "sha256": "9fabb3d8c45f437d827f11bc2e0e7df75341a6ad6a10b90521ee7621acfef906"
+    },
+    {
+      "path": "../user-attention/drag-bridges-v1/wait-000-mid-reach.png",
+      "sha256": "204e12250a473e519a0c00a7bdb443cdd1c610e50ab643ee2d9d194a73503c2e"
+    }
+  ],
+  "bytes": 2073390
+}

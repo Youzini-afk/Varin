@@ -1,0 +1,257 @@
+{
+  "entries": [
+    {
+      "id": "gesture-pickup.chin-contact",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-contact/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-005.png",
+      "sourceStartSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 340
+    },
+    {
+      "id": "gesture-pickup.stretch-000",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-000/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-000.png",
+      "sourceStartSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 135
+    },
+    {
+      "id": "gesture-pickup.stretch-001",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-001/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-001.png",
+      "sourceStartSha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 200
+    },
+    {
+      "id": "gesture-pickup.stretch-002",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-002/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-002.png",
+      "sourceStartSha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 265
+    },
+    {
+      "id": "gesture-pickup.stretch-003",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-003/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-003.png",
+      "sourceStartSha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 330
+    },
+    {
+      "id": "gesture-pickup.stretch-004",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-004/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-004.png",
+      "sourceStartSha256": "3e8510d61b4fba530ba26c0d1a248a394dd18ecf8bc542ed2ad311f3f97acefa",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 395
+    },
+    {
+      "id": "gesture-pickup.stretch-005",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-005/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-005.png",
+      "sourceStartSha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 460
+    },
+    {
+      "id": "gesture-pickup.stretch-006",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-006/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-006.png",
+      "sourceStartSha256": "7d9897deb4e13e0a15002b281e6f64a2ff255abeb7398fd010f09448b57ccacd",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 525
+    },
+    {
+      "id": "gesture-pickup.stretch-007",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-007/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-007.png",
+      "sourceStartSha256": "511cb52602068b691562161a69cf80af2c82141a781c727ba86c9315cdaaef90",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 590
+    },
+    {
+      "id": "gesture-pickup.stretch-008",
+      "manifest": "observe-diagnose/gesture-pickup-v2/stretch-008/sequence.source.json",
+      "sourceStart": "rest/canonical-stretch-v1/pose-008.png",
+      "sourceStartSha256": "a178622139811eeb1a4f1c17c78430028c5026cf55351e11b216fec0f3e755e8",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 655
+    },
+    {
+      "id": "gesture-pickup.eye-rub-000",
+      "manifest": "observe-diagnose/gesture-pickup-v2/eye-rub-000/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-000.png",
+      "sourceStartSha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 135
+    },
+    {
+      "id": "gesture-pickup.eye-rub-001",
+      "manifest": "observe-diagnose/gesture-pickup-v2/eye-rub-001/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-001.png",
+      "sourceStartSha256": "a99c298450f0267690a2b8077b4df65a722c2f60330cb784812ab3215e125b2b",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 200
+    },
+    {
+      "id": "gesture-pickup.eye-rub-002",
+      "manifest": "observe-diagnose/gesture-pickup-v2/eye-rub-002/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-002.png",
+      "sourceStartSha256": "4854f8de9406405acc7fd349e24c165cc03fe17087d9e22d899a4d57bc804db5",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 265
+    },
+    {
+      "id": "gesture-pickup.eye-rub-003",
+      "manifest": "observe-diagnose/gesture-pickup-v2/eye-rub-003/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-003.png",
+      "sourceStartSha256": "033a60e12ed502db5e89702b918dd892eeeb9cccaad3486b2d738057d2651985",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 330
+    },
+    {
+      "id": "gesture-pickup.eye-rub-004",
+      "manifest": "observe-diagnose/gesture-pickup-v2/eye-rub-004/sequence.source.json",
+      "sourceStart": "rest/canonical-eye-rub-v1/pose-004.png",
+      "sourceStartSha256": "ebe9c0ce1fc1ef0fb2527229155c211c248c061e52ef21c17dec26e8eb7fccce",
+      "endpoint": "canonical-closed-laptop-supported-detached",
+      "mode": "closed",
+      "durationMs": 395
+    },
+    {
+      "id": "gesture-pickup.chin-000",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-000/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-000.png",
+      "sourceStartSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 500
+    },
+    {
+      "id": "gesture-pickup.chin-001",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-001/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-001.png",
+      "sourceStartSha256": "e0757a3837d659b3f6015eb168932667fdaeaca537abcd43c4b6dff04eea3404",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 445
+    },
+    {
+      "id": "gesture-pickup.chin-002",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-002/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-002.png",
+      "sourceStartSha256": "3d432405b24022b9f068293624f0cf63940f5a0a1f3550cc58551f6467024e43",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 390
+    },
+    {
+      "id": "gesture-pickup.chin-003",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-003/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-003.png",
+      "sourceStartSha256": "ae13c9f58666b277628768a528885b88e05c984490f13aa454c8a6cc8831d191",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 335
+    },
+    {
+      "id": "gesture-pickup.chin-004",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-004/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-004.png",
+      "sourceStartSha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 335
+    },
+    {
+      "id": "gesture-pickup.chin-005",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-005/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/pose-005.png",
+      "sourceStartSha256": "ecd0995eb30268798138ee57bc6893d2a33f7d003523e42c35b8493fe0e08c87",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 335
+    },
+    {
+      "id": "gesture-pickup.raised-focused",
+      "manifest": "observe-diagnose/gesture-pickup-v2/raised-focused/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-focused.png",
+      "sourceStartSha256": "2bcfdde1bbc9e690cc705ea3cded5edf9ebcd4ec316f4a76a8e1621fa8d92030",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 460
+    },
+    {
+      "id": "gesture-pickup.raised-serious",
+      "manifest": "observe-diagnose/gesture-pickup-v2/raised-serious/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-recovery-v1/raised-serious.png",
+      "sourceStartSha256": "12e9d291a7fb5c479d76f3b445c93b3b80a4312f86840153d4b8622ee5fe93b3",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 460
+    },
+    {
+      "id": "gesture-pickup.chin-half",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-half/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/hold-half.png",
+      "sourceStartSha256": "fa76ec4c24fdcee17b55ce1701ff9dc55283a4752443a1244ba69325c3d3a956",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 340
+    },
+    {
+      "id": "gesture-pickup.chin-closed",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-closed/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-chin-v2/hold-closed.png",
+      "sourceStartSha256": "cb3bbea7be2e9282e380587c36ad6d08ca43a4682647407f5af64a2482c90bd9",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 340
+    },
+    {
+      "id": "gesture-pickup.chin-settled",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-settled/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/chin-settled.png",
+      "sourceStartSha256": "916e137dc07b3dc9e8e5ff6ce3dc6a80761fdc37d0821d1ffc4e6b728447baf8",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 340
+    },
+    {
+      "id": "gesture-pickup.chin-rim",
+      "manifest": "observe-diagnose/gesture-pickup-v2/chin-rim/sequence.source.json",
+      "sourceStart": "observe-diagnose/canonical-wait-cycle-v1/rim-rest.png",
+      "sourceStartSha256": "aec5891fd40471c2d4dfd4dd370d95fe5b450bdf2bcaaad86124ca21fa6a5722",
+      "endpoint": "canonical-open-laptop-supported-detached",
+      "mode": "open",
+      "durationMs": 340
+    }
+  ],
+  "newPixels": [
+    "near-support-source.png",
+    "far-screen-grip-source.png",
+    "far-pregrip-source.png",
+    "far-early-source.png",
+    "closed-near-support-source.png"
+  ],
+  "pointerPolicy": "Root follows pointer immediately. Exact current upper drawing retained on first detached cel. World stool independently fades.",
+  "lowerDependency": "relocation/departure-bridge-v1/detach-protected-v2.png plus stool-replacement-mask-v2.png",
+  "acceptance": "finite peer pending, not automatic acceptance"
+}

@@ -1,0 +1,186 @@
+{
+  "scope": "25 core relocation authored nodes; integration candidate acceptance, not final OS behavior or blanket smoothness proof",
+  "exclusions": [
+    "rejected directional swing studies",
+    "old flared landing families",
+    "old departure mid reopening-lid / large boots",
+    "old detach mask with residual stool legs"
+  ],
+  "frames": [
+    {
+      "frame": "open",
+      "source": "relocation/rapid-pickup-v1/open.png",
+      "sha256": "3af122cea75c3533699dd7fa6c26441005fc43db937baa0018a41b19225957fb",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored source dark-composite static support/identity review, same-contact inbetween or exact shared endpoint; not separately replayed as full clip"
+    },
+    {
+      "frame": "half",
+      "source": "relocation/rapid-pickup-v1/half.png",
+      "sha256": "50ff730ed917d9326049257a61532b29ec7de9310bce9c7374151fc51b2fcdca",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored source dark-composite static support/identity review, same-contact inbetween or exact shared endpoint; not separately replayed as full clip"
+    },
+    {
+      "frame": "closed",
+      "source": "relocation/rapid-pickup-v1/closed.png",
+      "sha256": "ca135e539b6621f8f4245a5359cc3e3ed98cbae07aafb64e28eac45edac7a55e",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "turn",
+      "source": "relocation/rapid-pickup-v1/turn.png",
+      "sha256": "77ca66133cb5be06fa457d6819c786aeec1e6c2a887e6015df48840e0f59cf79",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored dark-composite static support/identity review with same suspended body; actual supported hand contacts, not separately replayed full clip"
+    },
+    {
+      "frame": "hug",
+      "source": "relocation/rapid-pickup-v1/hug.png",
+      "sha256": "c2cb7b48ddb11d1b7a9a877f1847675e891b9f2fcf9121b6db3859012af50469",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "lid65",
+      "source": "relocation/rapid-pickup-v5/lid65.png",
+      "sha256": "fa43c3df8176f3f95e6814d2e86261236bf53423e3e9a263065d467ce0d15aaf",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored source dark-composite static support/identity review, same-contact inbetween or exact shared endpoint; not separately replayed as full clip"
+    },
+    {
+      "frame": "turn70",
+      "source": "relocation/rapid-pickup-v4/turn70.png",
+      "sha256": "726298cd1039ce8ac40015fbdf447966848da4b5639df274ec45b398affbc8ad",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored source dark-composite static support/identity review, same-contact inbetween or exact shared endpoint; not separately replayed as full clip"
+    },
+    {
+      "frame": "turn20",
+      "source": "relocation/rapid-pickup-v3/turn20.png",
+      "sha256": "bc8d298b56d85dd4610baa38685b7313e919f938bc4ea68cafbc376a02fe40e8",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored dark-composite static support/identity review with same suspended body; actual supported hand contacts, not separately replayed full clip"
+    },
+    {
+      "frame": "precontact",
+      "source": "relocation/rapid-pickup-v2/precontact.png",
+      "sha256": "5907bdd35b5c0a19cb053d5e7a1de6f2bbe60ffdb9d202dd6549e13c76810e8a",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "contact",
+      "source": "relocation/canonical-static-v1/closed.png",
+      "sha256": "43c4150df0ea0dbbd8efbe97d9c8cb33393ebff29c1b09cfa4a991e087d5749f",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "release",
+      "source": "relocation/canonical-static-v2/lap-release.png",
+      "sha256": "88bce77bad478a010102cf7ab270fc73d2fe8ec1e15b894a2ad376d886fbb495",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "settle",
+      "source": "relocation/closed-handoff-v1/near-settled.png",
+      "sha256": "d31a3c129539f503b716459a8347f372bee77f656a3c2ba71d20613b03747aaa",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "seated",
+      "source": "seated-work/canonical-lid-v1/closed-canonical-candidate.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "seatedOpen",
+      "source": "shared/seated-open-canonical-alpha-v1.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored source dark-composite static support/identity review, same-contact inbetween or exact shared endpoint; not separately replayed as full clip"
+    },
+    {
+      "frame": "hugPrecontact",
+      "source": "relocation/hug-landing-v2/mid.png",
+      "sha256": "d846382b9fefd95911d594a4821f110cb5f806e9f3faedb47e624d469a29ffad",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "hugContact",
+      "source": "relocation/hug-landing-v3/contact-no-stool.png",
+      "sha256": "e745d29f3c7c43a96ce263e900139b9f02caffffefe901be63907da40f415b7a",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "seatedHug",
+      "source": "relocation/canonical-static-v1/hug.png",
+      "sha256": "c6899d1960bb41138879c08f5ae173b7a7b9f7d2bf691b247d3f557269746598",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "seatedTurn",
+      "source": "relocation/canonical-static-v1/turn.png",
+      "sha256": "f442fb7b7e7a438d2f22eeae204c6e4333708cdad544736b4e6f4a80ffdd8fae",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "seatedGrip",
+      "source": "relocation/canonical-static-v1/grip-lift-white.png",
+      "sha256": "f57d5e3ff63474aa2319b093cfd3e96eb8fb7f25d6e36f7d3c3260b4c9cd9cc9",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "entryCurrent",
+      "source": "relocation/shared-entry-v1/open-current.png",
+      "sha256": "b20b5bb8f3ea3e0255b3db42c081035271cb642a5ae1f32cdd6197efe0a80d9b",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "entrySupported",
+      "source": "relocation/shared-entry-v1/open-supported.png",
+      "sha256": "4f4488cf08f92b09ec123a3771bdc89c606d2f40fa83093922f254efa3b0d065",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "detachHalf",
+      "source": "relocation/departure-bridge-v1/detach-protected-v2.png",
+      "sha256": "9bc600c76d6cab4ee16e5fd20a2c19741dd1e002b1e6b022fbc2ae37c1523d16",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "detachMid",
+      "source": "relocation/departure-bridge-v3/mid-protected.png",
+      "sha256": "47716ba3c66ba5caa66c4d55cd3acc8356fe48584c56971cea49aa52bc095e4d",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Independent seated peer inspected boot-only v3 correction, monotonic half lid and both-hand/thigh support; inherited trajectory, no scale warp"
+    },
+    {
+      "frame": "detachClosed",
+      "source": "relocation/shared-entry-v1/closed-detached.png",
+      "sha256": "3bb724ce23581ac2c1656706205a3eeab8909a33a886ad2f1298bda297f9e59b",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Actual interactive current-pose release/regrab or supported pickup/landing segment reviewed, plus source drawing inspection"
+    },
+    {
+      "frame": "closedHandoff",
+      "source": "observe-diagnose/gesture-pickup-v2/closed-handoff.png",
+      "sha256": "ba4c15f4c6f32c86401279e662d31c62da3864048361ab6725e8a7b2cd15274e",
+      "decision": "finite-accept-for-runtime-integration",
+      "basis": "Authored localized two-hand bridge visually inspected against closed-supported and detachClosed; no lid reopening"
+    }
+  ]
+}

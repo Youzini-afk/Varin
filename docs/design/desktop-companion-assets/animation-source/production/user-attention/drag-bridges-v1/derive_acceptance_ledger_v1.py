@@ -1,0 +1,15 @@
+from pathlib import Path
+import json,hashlib,numpy as np
+from PIL import Image
+r=Path('varin-animation-production');p=r/'user-attention/drag-bridges-v1'; src=json.load(open(r/'relocation/user-current-detach-v1/current-pose-map.json')); routes=json.load(open(p/'grab-next-map-candidate.json'))['rows']; mask=np.array(Image.open(r/src['mask']).convert('L'))>0
+rows=[]
+for f in src['frames']:
+ name=Path(f['source']).parent.name;n=int(Path(f['source']).stem.split('-')[-1]);key=f'{name}/pose-{n:03}.png'; a=np.array(Image.open(r/f['source']).convert('RGBA'));b=np.array(Image.open(r/f['detachedSource']).convert('RGBA'))
+ assert hashlib.sha256((r/f['source']).read_bytes()).hexdigest()==f['sourceSha256'];assert hashlib.sha256((r/f['detachedSource']).read_bytes()).hexdigest()==f['detachedSha256'];outside=int(np.any(a!=b,axis=2)[~mask].sum());assert outside==0
+ if name.startswith('permission'):g='palm-return' if 4<=n<=9 else 'low-hand';fam='permission'
+ elif name.startswith('query'):g='nod-return' if n in [11,12,13] else ('chin-release' if n in [3,4,5,6] else 'low-hand');fam='query'
+ else:g='relaxed-eyes-and-settle';fam='wait-'+('005' if n==5 else '002' if n==2 else '001' if n in [1,3] else '000')
+ route=routes[key]['afterCurrentExposure'].copy();route.insert(len(route)-1,{'source':f'relocation/family-midreach-v1/{fam}-detach.png','durationMs':45})
+ rows.append({**f,'group':g,'result':'accepted-for-runtime-bridge','afterCurrentExposure':route,'outsideRemovalMaskChangedPixels':outside,'basis':'group representative normal-speed + inspected all source poses + exact unchanged pixels outside stool removal + explicit authored route'})
+d={'scope':'USER current exposure to support then shared departure-v3 mid. Not universal animations or native OS behavior proof.','method':'Six representative actual 320px 1x autoplay sequences; static montage all 35; SHA and masked pixel checks. Not claimed 35 separate playback tests.','representatives':{'palm-return':'permission009 to010 to midreach/support','low-hand':'permission003 direct midreach/support; query014 in nod return','chin-release':'query005 to006 to007 to midreach/support','nod-return':'query012 to013 to014, independently played 67/133/200/267ms','relaxed-eyes-and-settle':'wait000 and closed-eye002 independently played; 001 half blink,005 settled same contact geometry visually checked'},'commonTail':[{'source':'relocation/departure-bridge-v1/detach-protected-v2.png','durationMs':80},{'source':'relocation/departure-bridge-v3/mid-protected.png','durationMs':100},{'source':'relocation/rapid-pickup-v1/half.png','durationMs':350}],'exceptions':['Closed-computer welcome/tap hand paths not covered by these 35 open-computer entries.','Any unseen/new source SHA requires matching geometry review; no wildcard identity admission.','Native pointer-follow/stool world anchoring remains integration test responsibility.'],'frames':rows}
+(p/'user-grab-acceptance-ledger-v1.json').write_text(json.dumps(d,ensure_ascii=False,indent=2)+'\n');print('accepted',len(rows),'all outside-mask identical')

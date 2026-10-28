@@ -1,0 +1,106 @@
+{
+  "id": "gesture-pickup.chin-000",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "chin-000-current-detached",
+  "exitPose": "canonical-open-laptop-supported-detached",
+  "loop": null,
+  "warning": "Window follows pointer immediately. First cel preserves actual starting upper gesture with world stool separately fading. Existing authored return cels play at short explicit durations, not full source hold. No neutral reset. New supporting near hand and shared lower clean-up. Final carried computer remains canonical projection; must use authored closing/tilt departure bridge, not jump to curled rapid open.",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "chin-000-current-detached",
+      "contacts": {}
+    },
+    {
+      "source": "chin-000-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-001-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-002-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "chin-003-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "early-detached.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "pregrip-detached.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-000-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "grip-detached.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-open-laptop-supported-detached",
+      "contacts": {}
+    }
+  ],
+  "sourceStart": "observe-diagnose/canonical-chin-v2/pose-000.png",
+  "sourceStartSha256": "c0889fa559e6d59b9652d747db9249ed2c5ce6b145253bf3efea04535dc6d8a1"
+}

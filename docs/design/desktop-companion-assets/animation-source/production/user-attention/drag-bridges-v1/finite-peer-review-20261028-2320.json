@@ -1,0 +1,93 @@
+{
+  "reviewer": "plan_full_character_performance",
+  "utc": "2026-10-28T23:20:32.097663+00:00",
+  "method": "Independent Chrome tab18 autoplay, 320px, 1x. Explicit source durations. Static per-frame inspection supplemented normal-speed playback.",
+  "user_attention": {
+    "result": "finite accept recommendation",
+    "sequences": [
+      "review-v2-permission",
+      "review-v2-query",
+      "review-v2-wait-000"
+    ],
+    "scope": "Only permission009, query005, wait000 representative entry through support, half lid, departure-v3 mid and rapid half. Not all 35 entry nodes or nod branches.",
+    "findings": [
+      "Current gesture remains initial exposure, no neutral reset.",
+      "Genuine midreach precedes support contact.",
+      "Screen closes monotonically across corrected v3 middle; old reopening removed.",
+      "Boot scale no longer conspicuously inflates.",
+      "No stool pixels travel with character in reviewed sources."
+    ],
+    "observedMs": {
+      "permission": [
+        50,
+        133,
+        200,
+        283,
+        350,
+        417
+      ],
+      "query": [
+        12,
+        50,
+        79,
+        117,
+        145,
+        183,
+        212,
+        295,
+        747
+      ],
+      "wait000": [
+        50,
+        133,
+        200,
+        267,
+        333,
+        400
+      ]
+    }
+  },
+  "observe_peer": {
+    "result": "finite accept recommendation",
+    "base": "observe-diagnose/gesture-pickup-v2",
+    "sequences": [
+      "chin-contact",
+      "stretch-008",
+      "eye-rub-004"
+    ],
+    "scope": "Only representative current gesture through original-projection laptop support; excludes later tilt/carry and all 27 variants.",
+    "findings": [
+      "Near hand supports base before distant hand retracts.",
+      "No neutral snap or visible stool remnant.",
+      "Identity, sleeve contour and laptop stable at desktop size."
+    ],
+    "observedMs": {
+      "chin-contact": [
+        50,
+        133,
+        200
+      ],
+      "stretch-008": [
+        50,
+        133,
+        200,
+        267,
+        504,
+        587,
+        654
+      ],
+      "eye-rub-004": [
+        19,
+        67,
+        102,
+        183,
+        250
+      ]
+    }
+  },
+  "notClaimed": [
+    "Native OS pointer-follow verified by this review",
+    "Every current-pose interruption branch visually accepted",
+    "Production-wide final animation acceptance"
+  ]
+}

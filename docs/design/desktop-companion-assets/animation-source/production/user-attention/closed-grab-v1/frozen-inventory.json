@@ -1,0 +1,326 @@
+{
+  "stage": "accepted exact-source group family; shared tail separately owned",
+  "files": [
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/closed-near-support-source.png",
+      "sha256": "538e63d77b5519402327288d3cb0bcd313ec3aaa022488d7445b19bcb0c9a592",
+      "bytes": 1668186
+    },
+    {
+      "path": "observe-diagnose/gesture-pickup-v2/near-support-mask.png",
+      "sha256": "29c7d8203d6452237a1f6bd2a04650582f412d021581ca5a890bc214705f66d5",
+      "bytes": 1306
+    },
+    {
+      "path": "relocation/departure-bridge-v1/detach-protected-v2.png",
+      "sha256": "9bc600c76d6cab4ee16e5fd20a2c19741dd1e002b1e6b022fbc2ae37c1523d16",
+      "bytes": 321711
+    },
+    {
+      "path": "relocation/departure-bridge-v1/stool-replacement-mask-v2.png",
+      "sha256": "f9f5176a5493ccc705daf9bf2bc97be16463a4047f5d71705db6a4862a6d32cb",
+      "bytes": 1965
+    },
+    {
+      "path": "user-attention/closed-grab-v1/acceptance-ledger.json",
+      "sha256": "9a325bf968148db5116cdcecdfc3eb695c22e82b08801187a56789269414500d",
+      "bytes": 23368
+    },
+    {
+      "path": "user-attention/closed-grab-v1/build_event_ledgers.py",
+      "sha256": "fd6abbdf78980a797ec167e7595791d48cf54a9ff5246b5afbed7c2736d4da7e",
+      "bytes": 1686
+    },
+    {
+      "path": "user-attention/closed-grab-v1/build_reviews.py",
+      "sha256": "54b8a4fce0967a0a22e3f3e2b297a46c703ea58d2f52324d8ffe4c0029b7fd7e",
+      "bytes": 1822
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-000.png",
+      "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "bytes": 322375
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-001.png",
+      "sha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+      "bytes": 322424
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-002.png",
+      "sha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+      "bytes": 346537
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-003.png",
+      "sha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+      "bytes": 339464
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-004.png",
+      "sha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+      "bytes": 339000
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-005.png",
+      "sha256": "e68a2804364e9766544359a6aedf58af608bae59262a1b479b8bf3926afeda5f",
+      "bytes": 338686
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-006.png",
+      "sha256": "05f7e42bc29e7a204ad2a876bb2a26551b02e20b1ea0eae99631c4bbc2bfe66a",
+      "bytes": 339000
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-007.png",
+      "sha256": "55dd717ff8e0406cee80ce681bcbee606f42134b0b1d87c6c5fe3b5c4b555c38",
+      "bytes": 339464
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-008.png",
+      "sha256": "9414b741b7e43e5513e682568b606f8177fdcff410fbef50a33c9261698a4d0a",
+      "bytes": 346537
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-009.png",
+      "sha256": "6287228d1fafe1bbea0184e410762a69488ec0dd1708f27e8991684d5f0f00a1",
+      "bytes": 322424
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/current-010.png",
+      "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "bytes": 322375
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-005.png",
+      "sha256": "77b0f25a935bd1590e05be3658456af38007d0ae2572aa5d4b1c011026b0a879",
+      "bytes": 338619
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-006.png",
+      "sha256": "866edd6401a8f5363977faef34cde0ee890dba42d93214ec9e34fa35edd7f105",
+      "bytes": 338924
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-007.png",
+      "sha256": "83031cd43cc8e752f9f3a216a00dacc67e70a59ca57e595573f17cf7208b9d5a",
+      "bytes": 339383
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-008.png",
+      "sha256": "dbf37cc220b0e77af2d425d32647ad0a64b7fd8e71360f0a8faab492548365d2",
+      "bytes": 346442
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-009.png",
+      "sha256": "7a72127433a9ba41e1dd7f60e2c751574b60c7c35eaa4de293e8b71cb9896b56",
+      "bytes": 322367
+    },
+    {
+      "path": "user-attention/closed-grab-v1/click-closed-v5/supported-010.png",
+      "sha256": "11b0f404bb81f70f9c46aebe181f1bb0b6b868fbb26567946e645e2dd792f6fe",
+      "bytes": 322318
+    },
+    {
+      "path": "user-attention/closed-grab-v1/derive.py",
+      "sha256": "94dbb6d040575f349ef01407d764302c1a14f10ab85cddd4869ae86d6ab9e2f9",
+      "bytes": 1802
+    },
+    {
+      "path": "user-attention/closed-grab-v1/routes.json",
+      "sha256": "4f04649cb02f7e1d60fc8b7d0ba539e107e627118ec341672e83f6dde31aa43b",
+      "bytes": 3970
+    },
+    {
+      "path": "user-attention/closed-grab-v1/source-map.json",
+      "sha256": "18506cea99a8e4708eb426a2d44ca0917e89496502839746c8dce2ce7f7318af",
+      "bytes": 7529
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-000.png",
+      "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "bytes": 322375
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-001.png",
+      "sha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+      "bytes": 340359
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-002.png",
+      "sha256": "67ea6c55e378abf27324aeb272449525d555b7900f6a8d9ff03c087d94d96a9b",
+      "bytes": 337692
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-003.png",
+      "sha256": "88fe8cb1394056f3a7d7be48fc7513c5a74019d0a8eb27f4927c1e873e70202f",
+      "bytes": 343423
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-004.png",
+      "sha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+      "bytes": 336350
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-005.png",
+      "sha256": "24742c5a1de4387b040748cc75bb2b3569626aa61f3d71cd4614e6ece85173d6",
+      "bytes": 341381
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-006.png",
+      "sha256": "5db05cbfda21acd76cf9733cec7a41b2be38e6d4dc17e3a066b98682376c4da3",
+      "bytes": 336350
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-007.png",
+      "sha256": "cae797bb087d77a25f08913927929d832c89ad1956f383c0a6b7def6f739470a",
+      "bytes": 341982
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-008.png",
+      "sha256": "8a880786a33c9d4684331e80e8eaf454bc85d4baa55d34953ae2f177ae4c6033",
+      "bytes": 340359
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/current-009.png",
+      "sha256": "25c6d5f8ae723f0295a10ac9628402cbc8450cf050abeea905a5bb474f74c088",
+      "bytes": 322375
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-002.png",
+      "sha256": "5703ba7cb718a7560cdc9da87a6682eb8a6f07fc5b36d3ea55d8d40967f90d27",
+      "bytes": 337569
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-003.png",
+      "sha256": "d345da8bc0593c57670fcf868aee01168252ec3286ee2989d3670993d7d54d21",
+      "bytes": 343307
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-005.png",
+      "sha256": "ef16cd1a7f1e272930667e7fc4d46b448a78ae18e27c5568aa42c0e988662762",
+      "bytes": 341275
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-006.png",
+      "sha256": "8d9227addc367703d9b05d260c74cb0966934f95bb4b9cff49a619960e27103e",
+      "bytes": 336232
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-007.png",
+      "sha256": "ce4efd04d46b39a0fb08060e885acfba2b17ad9fc48a7593a55ad06a2d0d0ce7",
+      "bytes": 341831
+    },
+    {
+      "path": "user-attention/closed-grab-v1/welcome-closed-v2/supported-008.png",
+      "sha256": "5e98dd0853fd6cbd2a1f77260fb4886b0b0cf3b14099b1710936ffaa4c0bb762",
+      "bytes": 340257
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-001.png",
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "bytes": 317331
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-002.png",
+      "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "bytes": 341447
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-003.png",
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "bytes": 334385
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-004.png",
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "bytes": 333931
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-005.png",
+      "sha256": "d3a75fbc6057bbe1b9e88eb341911074d99d5fd2b1fbed2c4bb17c11fe87228e",
+      "bytes": 333628
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-006.png",
+      "sha256": "a0682227c79c94da6945b4a0f6b9bc7a28afd053b47587654d525d5bc501c7ef",
+      "bytes": 333931
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-007.png",
+      "sha256": "063b1d8d1cb8a888db7fb898002930ce4eb26e6f135f09191d50f1cc6db45225",
+      "bytes": 334385
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-008.png",
+      "sha256": "a559766a917aad200b08968d73d59992f559c1ef446e5e9f3c70f829062b87e3",
+      "bytes": 341447
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-009.png",
+      "sha256": "bc03df481296fde4196d5cb55cc88728bd33b27c7fe3e90191b2c21e0065182c",
+      "bytes": 317331
+    },
+    {
+      "path": "user-attention/registered/click-closed-v5/pose-010.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-000.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-001.png",
+      "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+      "bytes": 335280
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-002.png",
+      "sha256": "68709b429a10eb1a5abfda2dfe9009738dd10c6debf899b7dd33def9d2de5dcf",
+      "bytes": 332618
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-003.png",
+      "sha256": "ac8f871a2058c73fbe4db1fbb3e3544efefdc058144b5bb5b96ed0e4cf14137a",
+      "bytes": 338332
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-004.png",
+      "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+      "bytes": 331261
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-005.png",
+      "sha256": "64b656a090ce6d1d04c60eec2fe6d9658a48709693ed49c7223723b0a4c0d9ae",
+      "bytes": 336303
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-006.png",
+      "sha256": "e614b325568e5b30865884a9f87497a02b6dc053a3929752af43538f8f9340db",
+      "bytes": 331261
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-007.png",
+      "sha256": "96d72d685bdf9ca74a88bce9684b88468167904e4cbe40a844e46562d7b83b78",
+      "bytes": 336899
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-008.png",
+      "sha256": "e6bc2ce96fe3069250be4679c5d7e7eb5b67c1cfc02a5c2199c47c58d4913dd4",
+      "bytes": 335280
+    },
+    {
+      "path": "user-attention/registered/welcome-closed-v2/pose-009.png",
+      "sha256": "c8d2a1bddb1e5a3707e081ff4419aa8c1bb5fc8eb5c9ac1152d69127a5d664a7",
+      "bytes": 317282
+    }
+  ],
+  "pathBase": "production-root"
+}

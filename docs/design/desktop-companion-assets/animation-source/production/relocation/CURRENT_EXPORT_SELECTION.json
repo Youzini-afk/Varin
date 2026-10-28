@@ -5,11 +5,11 @@
   "root": "relocation",
   "externalDependencies": [
     {
-      "path": "../shared/seated-open-canonical-alpha-v1.png",
+      "path": "shared/seated-open-canonical-alpha-v1.png",
       "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
     },
     {
-      "path": "../shared/seated-open-canonical-v1.png",
+      "path": "shared/seated-open-canonical-v1.png",
       "sha256": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b"
     }
   ],
@@ -390,5 +390,6 @@
     "restore_contact_skirt.py",
     "build_scene_review.py"
   ],
-  "pathBase": "production-root"
+  "pathBase": "production-root",
+  "pathNormalization": "Both file entries and external dependency entries are relative to production-root; artifact hashes unchanged."
 }

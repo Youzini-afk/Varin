@@ -1,0 +1,113 @@
+{
+  "id": "user.tap-open-v1",
+  "family": "USER_ATTENTION",
+  "canvas": [
+    512,
+    512
+  ],
+  "stage": "motion-candidate",
+  "loop": null,
+  "warning": "Existing attention art independently reviewed at320px1x by OBSERVE for local open-laptop tap response only; not Host task acceptance. Integration owns promotion.",
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-neutral-keyboard",
+  "frames": [
+    {
+      "source": "pose-000.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "exitTo": [
+        "seated-open-neutral-keyboard"
+      ]
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 600,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 50,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-004.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-002.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-001.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "tap-open-moving",
+      "exitTo": []
+    },
+    {
+      "source": "pose-000.png",
+      "durationMs": 500,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "exitTo": [
+        "seated-open-neutral-keyboard"
+      ]
+    }
+  ],
+  "action": "tap-response",
+  "kind": "action",
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "reviewStatus": "candidate"
+}

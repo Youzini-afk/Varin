@@ -1,0 +1,73 @@
+{
+  "id": "gesture-pickup.chin-004",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "chin-004-current-detached",
+  "exitPose": "canonical-open-laptop-supported-detached",
+  "loop": null,
+  "warning": "Window follows pointer immediately. First cel preserves actual starting upper gesture with world stool separately fading. Existing authored return cels play at short explicit durations, not full source hold. No neutral reset. New supporting near hand and shared lower clean-up. Final carried computer remains canonical projection; must use authored closing/tilt departure bridge, not jump to curled rapid open.",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "chin-004-current-detached",
+      "contacts": {}
+    },
+    {
+      "source": "chin-004-supported.png",
+      "durationMs": 55,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-004-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "early-detached.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-004-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "pregrip-detached.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "chin-004-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "grip-detached.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-open-laptop-supported-detached",
+      "contacts": {}
+    }
+  ],
+  "sourceStart": "observe-diagnose/canonical-chin-v2/pose-004.png",
+  "sourceStartSha256": "878b9db63ea007ef20b94d3b244ebd2d1272b7d9a64c6a16f1da9b02e7ce346d"
+}

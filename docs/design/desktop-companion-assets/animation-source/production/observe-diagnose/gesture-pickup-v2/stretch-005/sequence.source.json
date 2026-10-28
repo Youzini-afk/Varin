@@ -1,0 +1,95 @@
+{
+  "id": "gesture-pickup.stretch-005",
+  "stage": "motion-candidate",
+  "reviewStatus": "unreviewed",
+  "family": "RELOCATION",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "stretch-005-current-detached",
+  "exitPose": "canonical-closed-laptop-supported-detached",
+  "loop": null,
+  "warning": "Window follows pointer immediately. First cel preserves actual starting upper gesture with world stool separately fading. Existing authored return cels play at short explicit durations, not full source hold. No neutral reset. New supporting near hand and shared lower clean-up. Final carried computer remains canonical projection; must use authored closing/tilt departure bridge, not jump to curled rapid open.",
+  "frames": [
+    {
+      "source": "current-detached.png",
+      "durationMs": 45,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "detach",
+      "pose": "stretch-005-current-detached",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-005-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "stretch-005-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-004-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "stretch-005-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-003-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "stretch-005-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-002-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "stretch-005-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-001-supported.png",
+      "durationMs": 65,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "stretch-005-support-transition",
+      "contacts": {}
+    },
+    {
+      "source": "stretch-000-supported.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "phase": "withdraw-to-support",
+      "pose": "canonical-closed-laptop-supported-detached",
+      "contacts": {}
+    }
+  ],
+  "sourceStart": "rest/canonical-stretch-v1/pose-005.png",
+  "sourceStartSha256": "83cf11a74ce177e7d10326aa2c4ab9be5c05dc6ab863a9b64f8fcb0e31fde8e7"
+}
