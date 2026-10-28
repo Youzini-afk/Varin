@@ -122,7 +122,7 @@ def pack(manifest_path, output, max_size=2048, padding=2):
         'version': 1, 'id': spec['id'], 'family': spec.get('family'),
         'stage': spec.get('stage'), 'warning': spec.get('warning'),
         'reviewStatus': spec.get('reviewStatus'), 'kind': spec.get('kind', 'action'),
-        'geometryReference': spec.get('geometryReference'),
+        'geometryReference': spec.get('geometryReference'), 'action': spec.get('action'),
         'canvas': [width, height], 'durationMs': total, 'loop': loop,
         'uniqueImages': len(placements),
         'entryPose': spec.get('entryPose'), 'exitPose': spec.get('exitPose'),

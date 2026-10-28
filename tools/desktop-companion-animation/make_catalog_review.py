@@ -31,7 +31,7 @@ def main():
     ids = [a['id'] for a in assets]
     if len(ids) != len(set(ids)):
         raise ValueError('Duplicate asset IDs: one real package must have one identity')
-    source = (here / 'sequence_graph.mjs').read_text().replace('export ', '')
+    source = (here.parent.parent / 'packages/ui/src/components/companion/playback.mjs').read_text().replace('export { CompanionPlayback as ReviewPlayback };', 'const ReviewPlayback = CompanionPlayback;').replace('export ', '')
     js_data = json.dumps({'catalog': catalog, 'assets': assets}, ensure_ascii=False).replace('<', '\\u003c')
     html = r'''<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Varin 完整动画资源评审</title>
 <style>body{background:#20242b;color:#edf0f6;font:15px system-ui;margin:0}main{padding:20px;max-width:1150px;margin:auto}button,select,input{padding:7px;margin:4px}canvas{max-width:100%;width:600px;height:auto;background:repeating-conic-gradient(#dde1e8 0% 25%,#f2f3f6 0% 50%) 0/24px 24px}table{border-collapse:collapse;width:100%}td,th{padding:7px;border-bottom:1px solid #46505e;text-align:left}pre{white-space:pre-wrap}p{line-height:1.6}.missing{color:#e5ac91}.candidate{color:#e4cf8c}.accepted{color:#8fddb6}</style>

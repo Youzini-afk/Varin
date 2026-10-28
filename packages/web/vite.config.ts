@@ -145,6 +145,7 @@ export default defineConfig({
         main: path.resolve(__dirname, 'index.html'),
         mobile: path.resolve(__dirname, 'mobile.html'),
         miniChat: path.resolve(__dirname, 'mini-chat.html'),
+        companion: path.resolve(__dirname, 'companion.html'),
         ...(monacoSmokeEnabled ? { monacoSmoke: path.resolve(__dirname, 'monaco-smoke.html') } : {}),
       },
       external: ['node:child_process', 'node:fs', 'node:path', 'node:url'],

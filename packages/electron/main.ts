@@ -591,9 +591,13 @@ for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
   });
 }
 
+// Companion windows are auxiliary displays, not foreground conversation surfaces.
+const isConversationWindow = (window: BrowserWindow): boolean =>
+  !window.isDestroyed() && window.__varinLabel !== 'companion-review';
+
 const requestQuitWhenNoProductWindows = () => {
   if (process.platform === 'darwin' || state.trayEnabled && !state.quitRequested) return;
-  if (BrowserWindow.getAllWindows().some(window => !desktopComputerFeedback?.ownsWindow(window.id) && !desktopComputerControls?.ownsWindow(window.id))) return;
+  if (BrowserWindow.getAllWindows().some(window => !desktopComputerFeedback?.ownsWindow(window.id) && !desktopComputerControls?.ownsWindow(window.id) && isConversationWindow(window))) return;
   if (state.installingUpdate) app.quit();
   else void requestQuitWithConfirmation();
 };
@@ -610,7 +614,7 @@ const requestQuitWithConfirmation = async () => {
 
   state.quitConfirmationPending = true;
 
-  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  const windows = BrowserWindow.getAllWindows().filter(isConversationWindow);
   const visible = windows.find((window) => window.isVisible());
   if (!visible) {
     const hidden = windows.find((window) => !window.isVisible());
@@ -904,7 +908,7 @@ const writeWindowState = async (browserWindow: BrowserWindow): Promise<void> => 
 };
 
 const debounceWindowStatePersist = (browserWindow: BrowserWindow, immediate = false): void => {
-  if (!browserWindow || browserWindow.isDestroyed()) return;
+  if (!browserWindow || !isConversationWindow(browserWindow)) return;
   const key = String(browserWindow.id);
   const revision = (state.windowGeometryRevisions.get(key) || 0) + 1;
   state.windowGeometryRevisions.set(key, revision);
@@ -1255,11 +1259,11 @@ const normalizeNotificationInput = (raw: unknown): Record<string, unknown> => {
 
 const isAnyWindowFocused = () =>
   BrowserWindow.getAllWindows().some(
-    (window) => !window.isDestroyed() && window.isFocused(),
+    (window) => isConversationWindow(window) && window.isFocused(),
   );
 
 const focusForegroundWindow = () => {
-  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  const windows = BrowserWindow.getAllWindows().filter(isConversationWindow);
   if (windows.length === 0) return;
   const target = state.mainWindow && !state.mainWindow.isDestroyed()
     ? state.mainWindow
@@ -1882,7 +1886,7 @@ const emitToAllWindows = <E extends VarinDesktopEvent>(
 // BrowserWindow constructor) because macOS otherwise leaves the material
 // uncomposited on a cold launch until the window gets a state change.
 const applyMacVibrancy = (browserWindow: BrowserWindow | null | undefined): void => {
-  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed()) return;
+  if (process.platform !== 'darwin' || !browserWindow || browserWindow.isDestroyed() || browserWindow.__varinLabel === 'companion-review') return;
   try {
     browserWindow.setVibrancy('sidebar');
   } catch { /* best-effort vibrancy; platform may reject the material */ }
@@ -2147,7 +2151,7 @@ const confirmConnectDeepLink = async (payload: ConnectImportPayload): Promise<bo
   // in-app interaction. Importing it stores a client token and points all of
   // this app's API traffic at the given server, so require explicit consent
   // BEFORE writing anything to the hosts config. Never surface the token.
-  const visible = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.isVisible());
+  const visible = BrowserWindow.getAllWindows().find((window) => isConversationWindow(window) && window.isVisible());
   if (visible) {
     visible.show();
     visible.focus();
@@ -2273,9 +2277,9 @@ const dispatchDomEventToWindow = (
 
 const getMenuTargetWindow = () => {
   const focused = BrowserWindow.getFocusedWindow();
-  if (focused && !focused.isDestroyed()) return focused;
+  if (focused && isConversationWindow(focused)) return focused;
   if (state.mainWindow && !state.mainWindow.isDestroyed()) return state.mainWindow;
-  const [firstWindow] = BrowserWindow.getAllWindows();
+  const [firstWindow] = BrowserWindow.getAllWindows().filter(isConversationWindow);
   return firstWindow && !firstWindow.isDestroyed() ? firstWindow : null;
 };
 
@@ -2350,6 +2354,7 @@ const canUseTitleBarOverlay = (browserWindow: BrowserWindow | null | undefined):
 };
 
 interface BrowserWindowCreationInput {
+  presentation?: 'companion-review';
   label?: string | undefined;
   restoreGeometry?: boolean | undefined;
   runtimeConfig?: Partial<RendererRuntimeConfig> | undefined;
@@ -2357,11 +2362,13 @@ interface BrowserWindowCreationInput {
 }
 
 const createBrowserWindow = ({
+  presentation,
   label,
   restoreGeometry = false,
   url,
   runtimeConfig = {},
 }: BrowserWindowCreationInput): BrowserWindow => {
+  const companion = presentation === 'companion-review';
   const saved = restoreGeometry ? readWindowState() : null;
   const useSaved = saved !== null;
   const restoredBounds = saved ? clampWindowBoundsToVisibleWorkArea(saved) : null;
@@ -2373,22 +2380,23 @@ const createBrowserWindow = ({
   const usesFramelessChrome = process.platform === 'win32' || process.platform === 'linux';
   const usesCustomTitleBar = process.platform === 'darwin' || usesFramelessChrome;
   // macOS vibrancy, on by default; users can disable it (Appearance settings).
-  const useVibrancy = process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
+  const useVibrancy = !companion && process.platform === 'darwin' && readSettingsRoot().desktopVibrancy !== false;
   const titleBarOverlayEnabled = false;
   const autoHidesNativeMenuBar = process.platform !== 'darwin';
   const windowIconPath = getWindowIconPath();
   const options: BrowserWindowConstructorOptions = {
-    title: 'Varin',
+    title: companion ? 'Varin Companion — development review' : 'Varin',
+    ...(companion ? { transparent: true, frame: false, skipTaskbar: true, resizable: false, hasShadow: false } : {}),
     ...(restoredBounds && Number.isFinite(restoredBounds.x) && Number.isFinite(restoredBounds.y)
       ? { x: restoredBounds.x, y: restoredBounds.y }
       : {}),
-    width: restoredBounds?.width ?? 1280,
-    height: restoredBounds?.height ?? 800,
-    minWidth: MIN_WINDOW_WIDTH,
-    minHeight: MIN_WINDOW_HEIGHT,
+    width: companion ? 440 : restoredBounds?.width ?? 1280,
+    height: companion ? 640 : restoredBounds?.height ?? 800,
+    minWidth: companion ? 240 : MIN_WINDOW_WIDTH,
+    minHeight: companion ? 300 : MIN_WINDOW_HEIGHT,
     ...(windowIconPath ? { icon: windowIconPath } : {}),
     show: false,
-    backgroundColor: useVibrancy ? '#00000000' : '#151313',
+    backgroundColor: companion || useVibrancy ? '#00000000' : '#151313',
     // Vibrancy is applied after the window is shown (see applyMacVibrancy), not
     // here: setting it in the constructor leaves the material uncomposited on a
     // cold launch until a window event. No `transparent: true` either — vibrancy
@@ -2397,9 +2405,9 @@ const createBrowserWindow = ({
     autoHideMenuBar: autoHidesNativeMenuBar,
     // Electron's hiddenInset adds its own extra inset, which leaves the controls
     // visibly lower than the app header. Use a plain hidden title bar instead.
-    titleBarStyle: usesCustomTitleBar ? 'hidden' : 'default',
+    titleBarStyle: !companion && usesCustomTitleBar ? 'hidden' : 'default',
     titleBarOverlay: titleBarOverlayEnabled,
-    ...(process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 17 } } : {}),
+    ...(!companion && process.platform === 'darwin' ? { trafficLightPosition: { x: 16, y: 17 } } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.mjs'),
       backgroundThrottling: false,
@@ -2436,7 +2444,7 @@ const createBrowserWindow = ({
   // genie-restore animation. We re-assert button position on 'minimize'
   // (before the snapshot) and 'restore'/'show'/'focus' to cover other
   // transient reset states AppKit puts the buttons in.
-  if (process.platform === 'darwin') {
+  if (!companion && process.platform === 'darwin') {
     const refreshTrafficLights = () => {
       if (browserWindow.isDestroyed()) return;
       try {
@@ -2487,9 +2495,9 @@ const createBrowserWindow = ({
       return;
     }
 
-    if (process.platform === 'darwin' && !state.quitRequested) {
+    if (!companion && process.platform === 'darwin' && !state.quitRequested) {
       const remainingVisible = BrowserWindow.getAllWindows().filter(
-        (window) => !window.isDestroyed() && window.isVisible(),
+        (window) => isConversationWindow(window) && window.isVisible(),
       ).length;
 
       if (remainingVisible <= 1) {
@@ -2612,8 +2620,8 @@ const createBrowserWindow = ({
         documentClass: classifyStartupDocument(browserWindow.webContents.getURL()),
       });
     }
-    browserWindow.show();
-    browserWindow.focus();
+    if (companion) browserWindow.showInactive();
+    else { browserWindow.show(); browserWindow.focus(); }
     if (useVibrancy) applyMacVibrancy(browserWindow);
   });
 
@@ -3005,7 +3013,7 @@ const resolveInitialUrl = async () => {
 // ---------------------------------------------------------------------------
 
 const showOrCreateMainWindow = async () => {
-  const windows = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+  const windows = BrowserWindow.getAllWindows().filter(isConversationWindow);
   if (windows.length > 0) {
     const target = state.mainWindow && !state.mainWindow.isDestroyed()
       ? state.mainWindow
@@ -5093,10 +5101,10 @@ const TRAY_BREATH_FRAME_COUNT = 16;
 // focused that is still alive.
 const resolveTraySurface = () => {
   const focused = BrowserWindow.getFocusedWindow();
-  if (focused && !focused.isDestroyed()) return focused;
+  if (focused && isConversationWindow(focused)) return focused;
   if (state.lastFocusedWindowId != null) {
     const remembered = BrowserWindow.fromId(state.lastFocusedWindowId);
-    if (remembered && !remembered.isDestroyed()) return remembered;
+    if (remembered && isConversationWindow(remembered)) return remembered;
   }
   return null;
 };
@@ -5156,7 +5164,7 @@ const setupTray = () => {
     state.trayController.update({ threads: [], approvals: [] });
     if (!state.trayFocusListener) {
       state.trayFocusListener = (_event, browserWindow) => {
-        if (browserWindow && !browserWindow.isDestroyed()) {
+        if (browserWindow && isConversationWindow(browserWindow)) {
           state.lastFocusedWindowId = browserWindow.id;
         }
       };
@@ -5238,7 +5246,7 @@ const dispatchTrayAction = async (action: TrayAction | undefined): Promise<void>
     const target = (state.mainWindow && !state.mainWindow.isDestroyed())
       ? state.mainWindow
       : BrowserWindow.getFocusedWindow();
-    if (target && !target.isDestroyed() && target.isVisible()) {
+    if (target && isConversationWindow(target) && target.isVisible()) {
       debounceWindowStatePersist(target, true);
       target.hide();
     }
@@ -5311,7 +5319,7 @@ app.on('second-instance', (_event, argv) => {
     ? argv.filter((arg) => typeof arg === 'string' && arg.startsWith(`${DEEP_LINK_PROTOCOL}://`))
     : [];
   if (urls.length > 0) handleDeepLinks(urls);
-  if (BrowserWindow.getAllWindows().length > 0) {
+  if (BrowserWindow.getAllWindows().some(isConversationWindow)) {
     focusForegroundWindow();
   } else {
     void openMainWindow();
@@ -5321,13 +5329,13 @@ app.on('second-instance', (_event, argv) => {
 app.on('open-url', (event, url) => {
   event.preventDefault();
   handleDeepLinks([url]);
-  if (BrowserWindow.getAllWindows().length === 0) {
+  if (!BrowserWindow.getAllWindows().some(isConversationWindow)) {
     void openMainWindow();
   }
 });
 
 app.on('activate', async () => {
-  const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed());
+  const windows = BrowserWindow.getAllWindows().filter(isConversationWindow);
   // Only spawn a main window when there is genuinely nothing to come back to.
   if (windows.length === 0) {
     await openMainWindow();
@@ -5426,6 +5434,16 @@ app.whenReady().then(async () => {
 
   const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
   await activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+
+  // Explicit development entry only; candidate artwork is never a product default.
+  if (!app.isPackaged && process.env.VARIN_COMPANION_REVIEW === '1') {
+    const base = shouldUsePackagedUi() ? buildPackagedUiUrl('/companion.html') : state.localOrigin || state.sidecarUrl;
+    if (!base) throw new Error('Local companion UI is not available');
+    const companionUrl = new URL(shouldUsePackagedUi() ? base : '/companion.html', base);
+    companionUrl.search = '?review=1';
+    createBrowserWindow({ label: 'companion-review', presentation: 'companion-review',
+      url: companionUrl.toString(), runtimeConfig: { apiBaseUrl, clientToken, requestHeaders } });
+  }
 
   // In remote mode, set up system tray and background notification listener
   // so the app stays alive when windows are closed and can deliver OS-level

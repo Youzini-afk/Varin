@@ -80,3 +80,13 @@ python tools/desktop-companion-animation/make_catalog_review.py review.html \
 整套关联可存为相对路径清单 `[{"action":"completion","package":"relative/sequence.json"}]`，通过 `make_catalog_review.py review.html --inventory review-assets.json` 重导，无需把内嵌图集HTML当唯一可恢复来源。
 
 后续按共同几何基准制作的资源应显式记录 `geometryReference`（基准源的SHA256）。只有实际沿该基准制作并经视觉比对后才填，不能为了通过检查给旧候选补同一个hash。正式跨资源连接要求基准一致；仅同为512画布不证明头身、电脑和机位一致。当前工作区的 `shared/canonical.json` 记录内部制作基准来源，并不冒称用户再次批准了成品。
+
+### Native development consumer
+
+The Electron companion entry is explicitly opt-in: start the existing Electron development command with `VARIN_COMPANION_REVIEW=1`. Packaged releases do not open it. `companion.html` reuses the existing trusted preload and runtime bootstrap, not a second Host. The auxiliary window is excluded from conversation-window focus, tray/menu targets, last-main-window handling and saved main geometry.
+
+Select an existing thread/branch to observe its `ThreadProjection`. Observation does not create drafts, mark messages read, approve permission, cancel work or restart tools. The **Host presentation** readout derives from current branch facts; the 32-item **Review target** menu is separate developer presentation input, not synthetic Host events. Unknown/disconnected facts supersede stale terminal snapshots; cancellation requests remain settling while operations or children remain active. Unclassified execution stays unclassified rather than guessing reading/coding from tool names.
+
+For artwork inspection, explicitly select one packed `sequence.json` together with all referenced PNG atlas pages. This uses browser file handles, never arbitrary filesystem IPC. Stop/Replay uses the authored exposure durations; it is not a fixed drawing-rate target. Candidate art is clearly labeled and cannot enter the accepted-art loader. This development consumer is **not the completed production desktop-pet UX**: accepted state assets, event-gated entry/hold/exit playback, native lift/landing choreography and user settings remain production integration work. In particular a timed permission review sequence must never automatically end a real permission wait.
+
+Focused validation: `cd packages/ui && bunx vitest run src/components/companion/companion.test.ts`; prepare existing workspace type dependencies, then run UI and Electron `tsc --noEmit` checks. No new test framework or dependency was added.
