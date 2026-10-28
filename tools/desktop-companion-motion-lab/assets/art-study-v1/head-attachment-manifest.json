@@ -1,0 +1,48 @@
+{
+  "status": "HEAD_SEAM_REFINEMENT_DRAFT",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "source": "canonical-seated-clean-v3.png",
+  "layers": "layers-partition-v2",
+  "collarPixelsMovedHeadToTorso": 117,
+  "crownPixelsMovedHairBackToHead": 7110,
+  "neutralSourceOverMaxError": 0,
+  "headHairAttachmentWeight": "head-hair-attachment-weight.png",
+  "attachmentInstruction": "Sample field on hairBack mesh vertices; weight1 through y550, smoothstep fade to0 at y850. Apply the SAME head displacement/rotation field at shared boundary. Do not independently rotate a hard head cut seam. Torso/neck separate weights needed; this map is only back-hair root attachment.",
+  "hairBounds": [
+    267,
+    480,
+    1212,
+    1168
+  ],
+  "zOrder": [
+    "hairBack",
+    "lowerBody",
+    "torso",
+    "upperArmL",
+    "upperArmR",
+    "forearmL",
+    "forearmR",
+    "handL",
+    "handR",
+    "head"
+  ],
+  "hairClothingRemnantPixelsReassigned": 7973,
+  "attachmentBandPixels": {
+    "fullHeadMatchY": [
+      430,
+      550
+    ],
+    "fadeY": [
+      550,
+      850
+    ]
+  },
+  "remaining": [
+    "Nearest-color underlap not true strand inpainting",
+    "Natural range runtime seam QA pending",
+    "Head/torso collar needs matched neck falloff, not rigid blue collar head attachment"
+  ]
+}

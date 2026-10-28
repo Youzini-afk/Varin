@@ -5,12 +5,21 @@
 ```sh
 cd tools/desktop-companion-motion-lab
 npm ci
+npm run prepare:art
 npm test
 npm run serve
 ```
 
 `serve`需要Python 3，打开 `http://127.0.0.1:8765`。返回[桌宠设计](../../docs/design/desktop-companion.md)与[已选视觉资料](../../docs/design/desktop-companion-assets/README.md)。本包独立安装/运行，不接入根workspace、CI或生产打包。
 无运行时第三方依赖。开发依赖`@napi-rs/canvas`用于离屏Canvas2D证据，Playwright只用于 `node test/browser.mjs`（需要系统 Chromium）；不安装任何商业动画SDK。此目录是仓库内独立实验，无Host接线或执行写入，不向产品增加生产依赖。
+
+## 真实人物素材试样
+
+打开 `art-study.html` 查看真实人物分层接线，范围见 [真实美术阶段说明](ART_STAGE2.md)。`index.html` 继续是独立的 debug rig，不能当作人物成品。
+
+`prepare:art` 从仓库现有美术源准备 38 个共用文件，逐一检查 SHA256 后写入被 Git 忽略的本地副本；不下载、不生成或修改原美术源。新增的头发附件带与 v2 修正分层保存在本目录，其余不重复提交。启动静态服务前先执行此命令。
+
+已归档的 8 秒影片是**小幅度接线与漏缝试样，不是主要动画预览或成品**。正常幅度诊断仍暴露领口隐藏面缺口；资源应随动作补充，不靠长期压小幅度规避。记录源代码与影片绑定保存在 `evidence/art-study/recorded-source-v1`，不能把旧影片视作当前代码的验收结果。只保留代表性关键图，完整帧可由脚本重现。真正抬头视角、眨眼、按键手型及抱机姿态尚需专门美术。
 
 ## 已实现与可验证范围
 
@@ -64,10 +73,10 @@ UI用6 CSS px阈值（不按canvas像素或DPR）区分点按/轻抖与拖动，
 
 ## 检查点与恢复
 
-本快照仅保存连续时间、IK接触、交互打断与动作衔接的debug rig源码、独立package/lock、测试、导演/素材规格和关键离屏证据。7张PNG与2段MP4是调试几何，不是最终人物动画，不证明浏览器或Electron的帧率/性能。raw PNG加载profile仅覆盖8秒`seated-study`；14秒和拖动示例在debug rig中验证，不能据此声称真实素材已覆盖全部动作。
+本目录保存连续时间、IK接触、交互打断与动作衔接的 debug rig，以及独立的真实美术分层接线实验。`evidence/offscreen` 中 7 张 PNG 与 2 段 MP4 是调试几何；`evidence/art-study` 才是真实人物试样，均不是最终动画，也不证明浏览器或 Electron 的帧率/性能。raw PNG 加载 profile 仅覆盖 8 秒 `seated-study`；14 秒和拖动示例只在 debug rig 中验证，不能据此声称真实素材已覆盖全部动作。
 
 [导演稿](MOTION_DIRECTION.md)和[素材要求](ART_REQUIREMENTS.md)说明目标与未完成的制作工作；现有实现及已验证边界以上文和实际源码/测试为准。导演稿中的时间预算不表示该动作已具备生产美术，也不自动覆盖当前6 CSS px拖动阈值等实现契约。
 
-冻结来源27项文件复制前后均逐项SHA-256一致。入库仅对README与两份导演/素材文档做入口路径及协作措辞清理，源码、测试、依赖锁和图像/视频/报告不变；随后更新[CHECKPOINT_SHA256SUMS](CHECKPOINT_SHA256SUMS)为入库版本，运行`sha256sum -c CHECKPOINT_SHA256SUMS`可复核清单。清单不包含自身。
+debug 与真实美术实验共用本目录的当前代码；真实美术历史影片另有与录制 SHA 对应的源代码快照。运行 `npm run prepare:art` 后，`sha256sum -c CHECKPOINT_SHA256SUMS` 可复核当前入库文件与准备的共用美术副本。清单不包含自身、依赖安装目录或完整逐帧中间产物。它不将已知失败的接缝图变成通过证据。
 
-未保存node_modules、840张离屏序列帧、运行日志或当前人物美术。需要重现离屏序列时，安装开发依赖后运行`npm run render:evidence`；MP4另需ffmpeg。此过程不作为已通过浏览器验收的替代。
+未保存 node_modules、完整离屏序列帧或运行日志。重现 debug 序列使用 `npm run render:evidence`，真实美术序列使用 `npm run render:art`；MP4 另需 ffmpeg。此过程不作为已通过浏览器验收的替代。

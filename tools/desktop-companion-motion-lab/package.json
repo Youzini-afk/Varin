@@ -6,7 +6,11 @@
     "test": "node --test test/*.test.mjs",
     "serve": "python3 -m http.server 8765 --bind 127.0.0.1",
     "render:evidence": "node test/offscreen.mjs",
-    "check:seams": "node test/seams.mjs"
+    "check:seams": "node test/seams.mjs",
+    "test:art-static": "node test/art-static.mjs",
+    "test:art-integrity": "node test/art-integrity.mjs",
+    "render:art": "node test/art-record.mjs",
+    "prepare:art": "node prepare-art.mjs"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.13",

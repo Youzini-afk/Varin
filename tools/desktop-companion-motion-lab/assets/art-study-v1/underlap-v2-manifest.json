@@ -1,0 +1,110 @@
+{
+  "status": "LIMITED_MOTION_UNDERLAP_DRAFT",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "source": "canonical-seated-clean-v3.png",
+  "zOrder": [
+    "hairBack",
+    "lowerBody",
+    "torso",
+    "upperArmL",
+    "upperArmR",
+    "forearmL",
+    "forearmR",
+    "handL",
+    "handR",
+    "head"
+  ],
+  "assets": [
+    {
+      "node": "hairBack",
+      "path": "layers-underlap-v2/hairBack.png",
+      "addedUnderlapPixels": 45439,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "lowerBody",
+      "path": "layers-underlap-v2/lowerBody.png",
+      "addedUnderlapPixels": 14025,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "torso",
+      "path": "layers-underlap-v2/torso.png",
+      "addedUnderlapPixels": 18315,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "upperArmL",
+      "path": "layers-underlap-v2/upperArmL.png",
+      "addedUnderlapPixels": 3309,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "upperArmR",
+      "path": "layers-underlap-v2/upperArmR.png",
+      "addedUnderlapPixels": 2319,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "forearmL",
+      "path": "layers-underlap-v2/forearmL.png",
+      "addedUnderlapPixels": 2914,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "forearmR",
+      "path": "layers-underlap-v2/forearmR.png",
+      "addedUnderlapPixels": 1188,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "handL",
+      "path": "layers-underlap-v2/handL.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "handR",
+      "path": "layers-underlap-v2/handR.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    },
+    {
+      "node": "head",
+      "path": "layers-underlap-v2/head.png",
+      "addedUnderlapPixels": 0,
+      "underlapPx": 24,
+      "method": "nearest interior edge color extension under occluders only",
+      "fullHiddenSurfacePainting": false
+    }
+  ],
+  "opaqueNeutralMaxError": 4,
+  "allNeutralMaxError": 5,
+  "limitations": [
+    "24px edge extensions are local hidden overlap only, not full newly painted limbs",
+    "No large motion approval; measure seam visibility in runtime",
+    "hairBack semantic remainder still needs detail refinement",
+    "Face layers separate pending QA"
+  ]
+}

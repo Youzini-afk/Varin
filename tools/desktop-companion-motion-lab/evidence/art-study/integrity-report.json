@@ -1,0 +1,38 @@
+{
+  "scope": "same-source small-motion underlap only; excludes 4px original silhouette boundary",
+  "interiorSamplePixels": 592212,
+  "frames": [
+    {
+      "t": 0,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 250
+    },
+    {
+      "t": 1.65,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 250
+    },
+    {
+      "t": 2.5,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 249
+    },
+    {
+      "t": 3.7,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 237
+    },
+    {
+      "t": 5.5,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 237
+    },
+    {
+      "t": 7.5,
+      "interiorAlphaBelow200": 0,
+      "minInteriorAlpha": 250
+    }
+  ],
+  "handPalmAnchor": "exactly pinned",
+  "limits": "not full occlusion/art acceptance; closed eye and independent fingers pending"
+}

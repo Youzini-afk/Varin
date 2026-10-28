@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <meta charset="utf-8" /><meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+  /><title>Varin · 原画分层校准</title
+  ><link rel="stylesheet" href="style.css" />
+  <body>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">VARIN / ART INTEGRATION · STAGE 2</span>
+          <h1>从真实原画开始。</h1>
+          <p>同源坐标 · 静态重新合成 · 实测锚点</p>
+        </div>
+        <span class="badge">受限动作试样 / 非最终动画</span>
+      </header>
+      <section class="workspace">
+        <div class="stage">
+          <canvas id="art" width="1382" height="1382"></canvas>
+        </div>
+        <aside>
+          <h2>先保证拼回去还是她</h2>
+          <p class="muted">
+            原1254²图像不缩放，四周仅补64px透明边距。10个互斥可见区保持1382²同原点。
+          </p>
+          <label
+            >检查分层
+            <select id="layer">
+              <option value="">完整重建</option>
+            </select></label
+          ><label
+            ><input id="anchors" type="checkbox" /> 标出当前近似实测锚点</label
+          ><label
+            ><input id="motion" type="checkbox" checked />
+            真实分层微动作（非整图摇摆）</label
+          >
+          <div class="transport">
+            <button id="artPlay">播放8秒</button
+            ><button id="artStep">+ 1/60秒</button>
+          </div>
+          <input
+            id="artSeek"
+            type="range"
+            min="0"
+            max="8"
+            step=".001"
+            value="0"
+          />
+          <div id="artTime" class="time">0.000 s</div>
+          <p id="status">加载中…</p>
+          <h3>当前精确缺口</h3>
+          <ul id="missing" class="muted"></ul>
+          <p class="muted">
+            这不是把10张完整人物叠起来。分区能重建不代表能分离运动；未补出的背面/袖口/头颈遮挡，不会用大幅旋转掩盖。
+          </p>
+          <a href="index.html">查看前阶段 debug 动作工作台</a>
+        </aside>
+      </section>
+    </main>
+    <script type="module" src="src/art-study-app.mjs"></script>
+  </body>
+</html>

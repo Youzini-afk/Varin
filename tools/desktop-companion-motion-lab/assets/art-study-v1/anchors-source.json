@@ -1,0 +1,111 @@
+{
+  "status": "MASK_DRAFT_ONLY",
+  "canvas": [
+    1382,
+    1382
+  ],
+  "origin": [
+    0,
+    0
+  ],
+  "source": "canonical-seated-clean-v3.png",
+  "anchorsApproximatePixels": {
+    "neck": [
+      738,
+      510
+    ],
+    "headCenter": [
+      670,
+      348
+    ],
+    "shoulderL": [
+      627,
+      555
+    ],
+    "elbowL": [
+      594,
+      681
+    ],
+    "wristL": [
+      569,
+      747
+    ],
+    "handL": [
+      537,
+      746
+    ],
+    "shoulderR": [
+      794,
+      565
+    ],
+    "elbowR": [
+      849,
+      695
+    ],
+    "wristR": [
+      737,
+      751
+    ],
+    "handR": [
+      694,
+      751
+    ],
+    "waistProjection": [
+      682,
+      741
+    ],
+    "hipSeat": [
+      665,
+      810
+    ]
+  },
+  "assets": [
+    {
+      "node": "head",
+      "path": "layers-draft/head.png",
+      "size": [
+        1382,
+        1382
+      ],
+      "status": "semantic-mask-draft-not-rig-ready",
+      "hiddenSurfaceFilled": false
+    },
+    {
+      "node": "torso",
+      "path": "layers-draft/torso.png",
+      "size": [
+        1382,
+        1382
+      ],
+      "status": "semantic-mask-draft-not-rig-ready",
+      "hiddenSurfaceFilled": false
+    },
+    {
+      "node": "handL",
+      "path": "layers-draft/handL.png",
+      "size": [
+        1382,
+        1382
+      ],
+      "status": "semantic-mask-draft-not-rig-ready",
+      "hiddenSurfaceFilled": false
+    },
+    {
+      "node": "handR",
+      "path": "layers-draft/handR.png",
+      "size": [
+        1382,
+        1382
+      ],
+      "status": "semantic-mask-draft-not-rig-ready",
+      "hiddenSurfaceFilled": false
+    }
+  ],
+  "limitations": [
+    "Head seed includes facial features and front hair; not yet face base/front hair decomposition",
+    "Torso visible source only, occluded garment pending inpaint patch",
+    "Hand masks require wrist overlap extension and finger contour QA",
+    "No claim of complete 16-node rig"
+  ],
+  "anchorNote": "Approximate source-pixel landmarks; hipSeat is hidden-seat projection, not directly visible joint. L/R retain original image-side labels."
+}

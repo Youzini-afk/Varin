@@ -1,0 +1,192 @@
+[
+  {
+    "target": "assets/art-study-v1/props-manifest.json",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props-manifest.json",
+    "sha256": "f7d1556a13be5fa51ffa53eb49c3a425dc1a2c85f01be90f13692e911bbda688"
+  },
+  {
+    "target": "assets/art-study-v1/canonical-seated-clean-v3.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/partition-reconstruction.png",
+    "sha256": "a5a32be78b3ab8bbb50131e0f7ae21b2829673929e8acbc6f10c550947a3265d"
+  },
+  {
+    "target": "assets/art-study-v1/underlap-manifest.json",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/underlap-manifest.json",
+    "sha256": "83095d5bab3997b18abfa5a251f94c1dfb401fa38bb04d50e1d586c25732c94f"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/handR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handR.png",
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/forearmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/forearmL.png",
+    "sha256": "1c6f79801dd17ecd9a1b2bec16be5196da927521905cd3488e488750463dda4a"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/upperArmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/upperArmL.png",
+    "sha256": "1e819c81339b8af9ec40545ef23036cda7408e2bf40e124834b4b1cbe9b45aa7"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/upperArmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/upperArmR.png",
+    "sha256": "3e4f6ee9423e8bbea53174cb2dda8bfaec24dd4cbeb623c825322840412805d7"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/handL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handL.png",
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v2/forearmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/forearmR.png",
+    "sha256": "d1806f96d68709cf534c5a25da744520726c22efb661c44997f014cc3556a618"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/handR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handR.png",
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/forearmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmL.png",
+    "sha256": "eef3ab7eb89589909d5b6b17fd1055d04f6882754822fa919d375b6497afcf39"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/upperArmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/upperArmL.png",
+    "sha256": "4b2d3708a68f9d715e9f265e6365ec733d2faa7dad61099e3aec870ccfd51679"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/lowerBody.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/lowerBody.png",
+    "sha256": "a0d1cda16d0baadaf54fb7fceb4f1a3801b274934596157fbc7f0c424faeb18b"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/upperArmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/upperArmR.png",
+    "sha256": "3edf8443a4606f5d994ceb3575265c7f784eb248de8667cfe979d95b5c7d52c3"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/torso.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/torso.png",
+    "sha256": "bc5d7593a661cda1f6a0267916e1ea5169f400cd2038a4946248b0849dc4a6df"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/handL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handL.png",
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/hairBack.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/hairBack.png",
+    "sha256": "1431721db19f9dc698be5c3b053002533d4bd35da55a0765c9e8c756641a4722"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/forearmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmR.png",
+    "sha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v1/head.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/head.png",
+    "sha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/handR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handR.png",
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/forearmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/forearmL.png",
+    "sha256": "1c6f79801dd17ecd9a1b2bec16be5196da927521905cd3488e488750463dda4a"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/upperArmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/upperArmL.png",
+    "sha256": "1e819c81339b8af9ec40545ef23036cda7408e2bf40e124834b4b1cbe9b45aa7"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/lowerBody.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/lowerBody.png",
+    "sha256": "7412d071ee4e332b55dfd3785fa036225b629cda5f8f08fc6aaca16b43d3719b"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/upperArmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/upperArmR.png",
+    "sha256": "3e4f6ee9423e8bbea53174cb2dda8bfaec24dd4cbeb623c825322840412805d7"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/torso.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/torso.png",
+    "sha256": "38b18b02c6f0f6b5101b1787e61e4e147a3c71dbdbf3a39270570bc81623b008"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/handL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handL.png",
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/hairBack.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/hairBack.png",
+    "sha256": "9ab259158575390bf247dffacfc2ee1701ba04bdf812039cc335f6ba9808f35b"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/forearmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-underlap-v1/forearmR.png",
+    "sha256": "d1806f96d68709cf534c5a25da744520726c22efb661c44997f014cc3556a618"
+  },
+  {
+    "target": "assets/art-study-v1/layers-underlap-v1/head.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/head.png",
+    "sha256": "ca5db178c45cb53d438087115b3bf99d9c2fcfafd97d5f97c3da49db4fad4b17"
+  },
+  {
+    "target": "assets/art-study-v1/props/chair.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/chair.png",
+    "sha256": "6054da667efe98c5b0acca06ed5f419503014ce60f4bd0dd9d8cd9fb737214ca"
+  },
+  {
+    "target": "assets/art-study-v1/props/laptopBase.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopBase.png",
+    "sha256": "20baab15b481a202b97d1486a58db2c6d4d8a3fe43a592b1dd7ab66721e1dc0d"
+  },
+  {
+    "target": "assets/art-study-v1/props/laptopLid.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/props/props/laptopLid.png",
+    "sha256": "c90b5fccd9efa8ab1e042a8a1b0c91145814186f7c07987fd535e6a3e7250de5"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/handR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handR.png",
+    "sha256": "2be2245820a462b4392420eee0a9551c7c98ba523b3436bf7025dff381fa6897"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/forearmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmL.png",
+    "sha256": "eef3ab7eb89589909d5b6b17fd1055d04f6882754822fa919d375b6497afcf39"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/upperArmL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/upperArmL.png",
+    "sha256": "4b2d3708a68f9d715e9f265e6365ec733d2faa7dad61099e3aec870ccfd51679"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/upperArmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/upperArmR.png",
+    "sha256": "3edf8443a4606f5d994ceb3575265c7f784eb248de8667cfe979d95b5c7d52c3"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/handL.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-draft/handL.png",
+    "sha256": "618af105f3edbd28d8cc9e25f8860793415d1eff678f79bb9c05c1927118109d"
+  },
+  {
+    "target": "assets/art-study-v1/layers-partition-v2/forearmR.png",
+    "source": "../../docs/design/desktop-companion-assets/animation-source/stage1/layers-partition-v1/forearmR.png",
+    "sha256": "a76ece283bb32c2d1538c0d872ef7edca80852f1b70497d468d8d438bd976953"
+  }
+]
