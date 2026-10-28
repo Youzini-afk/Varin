@@ -60,6 +60,12 @@ history item's original source through the Host before opening Documents; the se
 does not identify a task's working copy. Child rows follow Catalog execution admission order, while reports
 remain attached to their original execution. Context summary history is read through its parent-owned job.
 
+Model marks resolve the request model ID, saved ID and display name in that order, independently of the
+channel brand. Matching ignores case and recognizes family names after bracketed labels, namespaces and
+deployment separators. A complete family takes precedence over names inside its variant suffix; generic
+provider namespaces defer to the concrete model. This presentation lookup leaves request IDs and model
+capability/metadata selection with their existing owners.
+
 Chat file menus capture their link's path and source when opened. Tool links register their own
 conversation resolver, including links in nested retrieval traces; Markdown links retain their resolved
 directory. Copy contents reads saved text through Documents, while Save as downloads original bytes

@@ -19,16 +19,25 @@ const familyRules: readonly [ModelBrand, RegExp][] = [
 ];
 
 function matchFamily(value: string | null | undefined): ModelBrand | undefined {
-  const tokens = value?.trim().toLowerCase().split(/[/:\s]+/).filter(Boolean) ?? [];
+  const tokens = value?.trim().toLowerCase().split(/[^\p{L}\p{N}._-]+/u).filter(Boolean) ?? [];
+  const namespaces = new Set<string>();
   // Generic provider namespaces must not override a concrete model family,
   // e.g. openai/deepseek-v3 behind an OpenAI-compatible gateway.
-  for (const token of tokens.filter(token => !['openai', 'anthropic', 'google'].includes(token))) {
-    const family = familyRules.find(([, pattern]) => pattern.test(token));
-    if (family) return family[0];
+  for (const token of tokens) {
+    // Try the complete family first (deepseek-r1-distill-qwen stays DeepSeek),
+    // then starts after real separators in deployment/channel decorations.
+    // An embedded word such as myclaude is not a model-family boundary.
+    const starts = [0, ...[...token.matchAll(/[-_.]+/g)].map(match => match.index + match[0].length)];
+    for (const start of starts) {
+      const candidate = token.slice(start);
+      if (['openai', 'anthropic', 'google'].includes(candidate)) { namespaces.add(candidate); continue; }
+      const family = familyRules.find(([, pattern]) => pattern.test(candidate));
+      if (family) return family[0];
+    }
   }
-  return tokens.includes('anthropic') ? 'anthropic'
-    : tokens.includes('google') ? 'google'
-      : tokens.includes('openai') ? 'openai' : undefined;
+  return namespaces.has('anthropic') ? 'anthropic'
+    : namespaces.has('google') ? 'google'
+      : namespaces.has('openai') ? 'openai' : undefined;
 }
 
 export function resolveModelBrand(identity: ModelBrandIdentity): ModelBrand {
