@@ -1,0 +1,80 @@
+{
+  "id": "question-ask-enter-v1",
+  "family": "USER_ATTENTION",
+  "kind": "action",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "stage": "motion-candidate",
+  "reviewStatus": "candidate",
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-query-chin-attentive",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-000.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-001.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 85,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 90,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "question-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 320,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-query-chin-attentive",
+      "phase": "enter"
+    }
+  ],
+  "warning": "Derived from peer-reviewed drawings, handoff order awaiting finite path review. Application state owns decisions; no approval, answer, success, timeout, or work command inferred from exposure completion.",
+  "trigger": "actual clarification question displayed",
+  "safeExitFrames": []
+}

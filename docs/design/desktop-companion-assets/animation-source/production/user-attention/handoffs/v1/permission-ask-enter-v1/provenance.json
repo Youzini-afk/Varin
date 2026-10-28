@@ -1,0 +1,55 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/permission-cycle-v2/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/permission-cycle-v2/pose-001.png",
+      "sha256": "7a7e59882efd7a259186da25c88cfd3f9350a29dac9aa4dd89cb1f6168a4bb7e"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/permission-cycle-v2/pose-002.png",
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/permission-cycle-v2/pose-003.png",
+      "sha256": "c224944557fed9f2da49a7b1073c645deb2f5e44ae3119bc4ea1b3d9f8995c15"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/permission-cycle-v2/pose-004.png",
+      "sha256": "a1d49752eca51651f08cab3f76676e49257cb91fbacce6841c83f210736458f4"
+    },
+    {
+      "frame": "frame-005.png",
+      "source": "registered/permission-cycle-v2/pose-005.png",
+      "sha256": "9d548c5769377748e3ac47908dacf753f6a3a30c2fba44482223aa9809f4fa56"
+    },
+    {
+      "frame": "frame-006.png",
+      "source": "registered/permission-cycle-v2/pose-006.png",
+      "sha256": "f567b6b4da1b088df7ea92b8190ac5784ccc9de6b38d28b6122a29d045420f18"
+    },
+    {
+      "frame": "frame-007.png",
+      "source": "registered/permission-cycle-v2/pose-007.png",
+      "sha256": "fa90c96d80c7e95094b0ed3ee1872d467b0b0f5fefef14b4338a041266f54c32"
+    },
+    {
+      "frame": "frame-008.png",
+      "source": "registered/permission-cycle-v2/pose-008.png",
+      "sha256": "409aa7714ab85498aa01dd353de3c12ae7eb2b77b0970eee2fa316a40b4ba91e"
+    },
+    {
+      "frame": "frame-009.png",
+      "source": "registered/permission-cycle-v2/pose-009.png",
+      "sha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+    }
+  ]
+}

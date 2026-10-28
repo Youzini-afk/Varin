@@ -1,0 +1,142 @@
+{
+  "status": "handoff-path-review-pending",
+  "assets": [
+    {
+      "id": "permission-ask-enter-v1",
+      "source": "permission-ask-enter-v1/sequence.source.json",
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-permission-palm-attentive",
+      "trigger": "actual permission-pending begins",
+      "loop": null,
+      "safeExitFrames": []
+    },
+    {
+      "id": "permission-palm-release-v1",
+      "source": "permission-palm-release-v1/sequence.source.json",
+      "entryPose": "seated-open-permission-palm-attentive",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "permission granted or denied while palm is still raised",
+      "loop": null,
+      "safeExitFrames": [
+        3
+      ]
+    },
+    {
+      "id": "question-ask-enter-v1",
+      "source": "question-ask-enter-v1/sequence.source.json",
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-query-chin-attentive",
+      "trigger": "actual clarification question displayed",
+      "loop": null,
+      "safeExitFrames": []
+    },
+    {
+      "id": "question-chin-release-v1",
+      "source": "question-chin-release-v1/sequence.source.json",
+      "entryPose": "seated-open-query-chin-attentive",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "answer or cancellation while chin question remains",
+      "loop": null,
+      "safeExitFrames": [
+        5
+      ]
+    },
+    {
+      "id": "permission-unresolved-hold-v1",
+      "source": "permission-unresolved-hold-v1/sequence.source.json",
+      "entryPose": "seated-open-permission-palm-attentive",
+      "exitPose": "seated-open-watch-user-relaxed",
+      "trigger": "same request remains unresolved; lowering hand does NOT resolve it",
+      "loop": [
+        3,
+        10
+      ],
+      "safeExitFrames": [
+        3,
+        7,
+        8,
+        9
+      ]
+    },
+    {
+      "id": "question-unanswered-hold-v1",
+      "source": "question-unanswered-hold-v1/sequence.source.json",
+      "entryPose": "seated-open-query-chin-attentive",
+      "exitPose": "seated-open-watch-user-relaxed",
+      "trigger": "same request remains unresolved; lowering hand does NOT resolve it",
+      "loop": [
+        6,
+        13
+      ],
+      "safeExitFrames": [
+        6,
+        10,
+        11,
+        12
+      ]
+    },
+    {
+      "id": "relaxed-to-neutral-v1",
+      "source": "relaxed-to-neutral-v1/sequence.source.json",
+      "entryPose": "seated-open-watch-user-relaxed",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "real resolution/cancellation or presentation transition after safe hold pose",
+      "loop": null,
+      "safeExitFrames": [
+        3
+      ]
+    },
+    {
+      "id": "relaxed-settled-to-neutral-v1",
+      "source": "relaxed-settled-to-neutral-v1/sequence.source.json",
+      "entryPose": "seated-open-watch-user-relaxed-settled",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "real resolution/cancellation or presentation transition after safe hold pose",
+      "loop": null,
+      "safeExitFrames": [
+        5
+      ]
+    },
+    {
+      "id": "answer-understood-v1",
+      "source": "answer-understood-v1/sequence.source.json",
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "actual user answer received and understood; never timeout or denial",
+      "loop": null,
+      "safeExitFrames": [
+        0,
+        4
+      ]
+    },
+    {
+      "id": "completion-once-v1",
+      "source": "completion-once-v1/sequence.source.json",
+      "entryPose": "seated-open-neutral-keyboard",
+      "exitPose": "seated-open-neutral-keyboard",
+      "trigger": "actual task succeeded once; presentation repeats must not replay success gesture",
+      "loop": null,
+      "safeExitFrames": [
+        0,
+        10
+      ]
+    }
+  ],
+  "decisionGate": {
+    "permissionGranted": "release from actual safe pose -> neutral -> authored gaze-to-screen -> work",
+    "permissionDenied": "release from actual safe pose -> neutral; no success gesture/no resume command",
+    "questionAnswered": "release from actual safe pose -> neutral -> answer-understood-v1",
+    "questionCancelled": "release -> neutral; do NOT nod understanding",
+    "completionToRest": "completion-once -> open neutral -> accepted actual laptop-close bridge -> closed quiet; never relabel open as closed"
+  },
+  "runtimeRules": [
+    "E completion is visual only, must not resolve request.",
+    "H loop never times out the request.",
+    "If application outcome arrives during movement, finish only to next registered safe pose, not entire long hold cycle.",
+    "At half/closed blink finish the blink to W before requesting exit; at S use matching S bridge.",
+    "Bridge target should come from real application presentation, not expose animation callbacks as commands."
+  ],
+  "remaining": [
+    "Explicit open-to-closed laptop bridge acceptance is owned by seated/integration; do not fake it."
+  ]
+}

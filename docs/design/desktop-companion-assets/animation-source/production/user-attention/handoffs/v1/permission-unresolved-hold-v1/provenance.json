@@ -1,0 +1,55 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/permission-cycle-v2/pose-009.png",
+      "sha256": "5843feb9a48fe08371ce5667a1718ab49e0c656708996d3335cd51e6580c6ca9"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/permission-cycle-v2/pose-010.png",
+      "sha256": "64adb42cea608c7590473bf74844d49aa87b640483361d26e7d3b037061c35d0"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/permission-cycle-v2/pose-011.png",
+      "sha256": "e8cf9baa011df423f7999b183b95c99da1d23b477a4126b683556c7d98810585"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/wait-relaxed-v1/pose-000.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/wait-relaxed-v1/pose-001.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "frame": "frame-005.png",
+      "source": "registered/wait-relaxed-v1/pose-002.png",
+      "sha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+    },
+    {
+      "frame": "frame-006.png",
+      "source": "registered/wait-relaxed-v1/pose-003.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "frame": "frame-007.png",
+      "source": "registered/wait-relaxed-v1/pose-004.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "frame": "frame-008.png",
+      "source": "registered/wait-relaxed-v1/pose-005.png",
+      "sha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+    },
+    {
+      "frame": "frame-009.png",
+      "source": "registered/wait-relaxed-v1/pose-006.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    }
+  ]
+}

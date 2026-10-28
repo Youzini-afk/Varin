@@ -1,0 +1,120 @@
+{
+  "id": "permission-ask-enter-v1",
+  "family": "USER_ATTENTION",
+  "kind": "action",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "390be1c39ac6cf1398492de22bcf3155f4c97cde41271b371a8c44e82f6a307b",
+  "stage": "motion-candidate",
+  "reviewStatus": "candidate",
+  "entryPose": "seated-open-neutral-keyboard",
+  "exitPose": "seated-open-permission-palm-attentive",
+  "loop": null,
+  "frames": [
+    {
+      "source": "frame-000.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-neutral-keyboard",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-001.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-002.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-003.png",
+      "durationMs": 70,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-004.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-005.png",
+      "durationMs": 75,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-006.png",
+      "durationMs": 80,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-007.png",
+      "durationMs": 120,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-008.png",
+      "durationMs": 100,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "permission-enter-moving",
+      "phase": "enter"
+    },
+    {
+      "source": "frame-009.png",
+      "durationMs": 250,
+      "offset": [
+        0,
+        0
+      ],
+      "pose": "seated-open-permission-palm-attentive",
+      "phase": "enter"
+    }
+  ],
+  "warning": "Derived from peer-reviewed drawings, handoff order awaiting finite path review. Application state owns decisions; no approval, answer, success, timeout, or work command inferred from exposure completion.",
+  "trigger": "actual permission-pending begins",
+  "safeExitFrames": []
+}

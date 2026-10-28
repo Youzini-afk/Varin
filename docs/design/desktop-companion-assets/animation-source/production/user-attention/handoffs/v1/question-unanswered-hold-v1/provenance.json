@@ -1,0 +1,70 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/query-understand-v1/pose-005.png",
+      "sha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/query-understand-v1/pose-006.png",
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/query-understand-v1/pose-007.png",
+      "sha256": "9388abed6cd5ef04e649837b6faf1e191f2c1a89850d3ad5c3945c7bebf324ff"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/query-understand-v1/pose-008.png",
+      "sha256": "034855f9a5c3a419f92338610892b2d9e7621b4b1bc70f7c296e23c21f8f36fb"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/query-understand-v1/pose-009.png",
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "frame": "frame-005.png",
+      "source": "registered/query-understand-v1/pose-010.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "frame": "frame-006.png",
+      "source": "registered/wait-relaxed-v1/pose-000.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "frame": "frame-007.png",
+      "source": "registered/wait-relaxed-v1/pose-001.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "frame": "frame-008.png",
+      "source": "registered/wait-relaxed-v1/pose-002.png",
+      "sha256": "84fd24637cc576f83afd8b1cf29cf08ff4e2f3d130d70c6f61fb3e0a7bc60a7f"
+    },
+    {
+      "frame": "frame-009.png",
+      "source": "registered/wait-relaxed-v1/pose-003.png",
+      "sha256": "3bf9e2da9edf22edfc4945aaea83e72bac8bc986f17f242db346b4f1ae295ff2"
+    },
+    {
+      "frame": "frame-010.png",
+      "source": "registered/wait-relaxed-v1/pose-004.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    },
+    {
+      "frame": "frame-011.png",
+      "source": "registered/wait-relaxed-v1/pose-005.png",
+      "sha256": "07db95e7a079b4b84bf7ef6e7dd9794fae6f9ed9c5815d93d02c20c1c0863ccf"
+    },
+    {
+      "frame": "frame-012.png",
+      "source": "registered/wait-relaxed-v1/pose-006.png",
+      "sha256": "33f3e15dc06110e65c0df71b5c64c4f04591dee6e5d7c1e0a1839ac548beedf0"
+    }
+  ]
+}

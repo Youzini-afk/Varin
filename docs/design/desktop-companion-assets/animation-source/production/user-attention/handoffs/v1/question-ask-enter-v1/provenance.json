@@ -1,0 +1,35 @@
+{
+  "method": "Exact source-cel copy, no scaling/deformation/fade or new image generation",
+  "sources": [
+    {
+      "frame": "frame-000.png",
+      "source": "registered/query-understand-v1/pose-000.png",
+      "sha256": "25eead33dd408600be423882ce7921a561b8fdb006642fe6f07b2f8580f65721"
+    },
+    {
+      "frame": "frame-001.png",
+      "source": "registered/query-understand-v1/pose-001.png",
+      "sha256": "c0c20c966551f92e592b08460a4e6ad44d2c9a302574d98eb7e5bd7a562a7f0e"
+    },
+    {
+      "frame": "frame-002.png",
+      "source": "registered/query-understand-v1/pose-002.png",
+      "sha256": "026ccb6ed968c03e11ae922c4dc94f88492193ea66920582df6b9ef37cf694b3"
+    },
+    {
+      "frame": "frame-003.png",
+      "source": "registered/query-understand-v1/pose-003.png",
+      "sha256": "071577bc01dcbae22f0d12b0204153cd79e1fc43fc79e17785b45abc14eefa33"
+    },
+    {
+      "frame": "frame-004.png",
+      "source": "registered/query-understand-v1/pose-004.png",
+      "sha256": "840b5c78d23f25a22211f59649807a22115ab343901e645294f5e0ac8e620a53"
+    },
+    {
+      "frame": "frame-005.png",
+      "source": "registered/query-understand-v1/pose-005.png",
+      "sha256": "594ebbb8f66a066882a82e1ead4b1d5508d82c6aceef08aa7b39c9e8cd27d49e"
+    }
+  ]
+}

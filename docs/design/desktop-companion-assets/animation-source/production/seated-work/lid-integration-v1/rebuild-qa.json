@@ -1,0 +1,6 @@
+{
+  "status": "isolated-rebuild-byte-identical",
+  "checkedFrozenV2Files": 106,
+  "mismatches": [],
+  "method": "Only frozen closure plus declared shared-alpha dependency copied to /tmp; render, QA, metadata and 75 interruption checks rerun; original frozen files untouched."
+}
