@@ -1,6 +1,6 @@
 //! Credit-backed process projections. Control/ack/terminal notifications never wait for a data
 //! credit, and slow observers never hold guardian, spool writer, or Storage transaction locks.
-use super::{failure, read_output, OutputHandle, SpoolCursor, CHUNK_BYTES};
+use super::{failure, read_output, OutputHandle, CHUNK_BYTES};
 use crate::error::KernelError;
 use serde_json::{json, Value};
 use std::{
@@ -11,10 +11,9 @@ use std::{
 
 struct State {
     cursor: u64,
-    spool: SpoolCursor,
     data_sequence: u64,
     control_sequence: u64,
-    data_pending: Option<(u64, u64, SpoolCursor)>,
+    data_pending: Option<(u64, u64)>,
     control_pending: Option<u64>,
     last_data_ack: u64,
     last_control_ack: u64,
@@ -78,7 +77,6 @@ impl ProcessSubscriptions {
             replay_cursor,
             state: Mutex::new(State {
                 cursor,
-                spool: SpoolCursor::default(),
                 data_sequence: 0,
                 control_sequence: 0,
                 data_pending: None,
@@ -155,15 +153,14 @@ impl ProcessSubscriptions {
                 if !state
                     .data_pending
                     .as_ref()
-                    .is_some_and(|(pending, _, _)| *pending == sequence)
+                    .is_some_and(|(pending, _)| *pending == sequence)
                 {
                     return Err(failure(
                         "process data acknowledgement is stale or out of order",
                     ));
                 }
-                let (_, cursor, spool) = state.data_pending.take().expect("checked data credit");
+                let (_, cursor) = state.data_pending.take().expect("checked data credit");
                 state.cursor = cursor;
-                state.spool = spool;
                 state.last_data_ack = sequence;
             }
             "control" => {
@@ -332,7 +329,7 @@ fn control_loop(
 fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender) {
     loop {
         let mut buffer = subscription.output.shared.lock();
-        let (cursor, mut spool) = loop {
+        let cursor = loop {
             let state = match subscription.state.lock() {
                 Ok(state) => state,
                 Err(_) => return,
@@ -341,7 +338,7 @@ fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender
                 return;
             }
             if state.data_pending.is_none() && state.cursor < buffer.end {
-                break (state.cursor, state.spool.clone());
+                break state.cursor;
             }
             drop(state);
             buffer = subscription
@@ -352,7 +349,7 @@ fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender
                 .unwrap_or_else(|poison| poison.into_inner());
         };
         drop(buffer);
-        let mut result = match read_output(&subscription.output, &mut spool, cursor, CHUNK_BYTES) {
+        let mut result = match read_output(&subscription.output, cursor, CHUNK_BYTES) {
             Ok(result) => result,
             Err(error) => {
                 close(&subscription, &error.to_string());
@@ -377,7 +374,7 @@ fn data_loop(subscription: Arc<Subscription>, outbound: crate::transport::Sender
         };
         state.data_sequence += 1;
         let sequence = state.data_sequence;
-        state.data_pending = Some((sequence, next, spool));
+        state.data_pending = Some((sequence, next));
         let frame = envelope(&subscription, "data", sequence, Some(result), None);
         drop(state);
         drop(buffer);

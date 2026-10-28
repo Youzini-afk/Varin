@@ -8,6 +8,16 @@ use serde_json::{json, Value};
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Mode { #[default] Text, Raw }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all="camelCase", deny_unknown_fields)]
+pub(crate) struct ReadPage {
+    pub cursor: u64,
+    pub max_bytes: Option<u64>,
+    #[serde(default)]
+    pub mode: Mode,
+    pub encoding: Option<String>,
+}
+
 pub(crate) fn code_page() -> Option<u32> {
     #[cfg(windows)] { Some(unsafe { windows_sys::Win32::Globalization::GetOEMCP() }) }
     #[cfg(not(windows))] { None }
@@ -26,7 +36,7 @@ fn readable(text: &str) -> bool {
     !text.chars().any(|c| c == '\0' || c.is_control() && !matches!(c, '\n'|'\r'|'\t'|'\x08'|'\x1b'|'\x07'|'\x0c'))
 }
 
-fn code_page_encoding(page: u32) -> Option<&'static Encoding> {
+pub(super) fn code_page_encoding(page: u32) -> Option<&'static Encoding> {
     match page {
         65001 => Some(encoding_rs::UTF_8), 936 => Some(encoding_rs::GBK),
         932 => Some(encoding_rs::SHIFT_JIS), 949 => Some(encoding_rs::EUC_KR), 950 => Some(encoding_rs::BIG5),
@@ -123,7 +133,7 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     if let (Some(next), Some(end), Some(chunks)) = (value["nextCursor"].as_u64(), value["endCursor"].as_u64(), value["chunks"].as_array()) {
         let returned: u64 = chunks.iter().filter_map(|chunk| chunk["byteLength"].as_u64()).sum();
         let unread = end.saturating_sub(next);
-        value["outputSummary"] = json!({"returnedBytes":returned,"retainedBytes":end,
+        value["outputSummary"] = json!({"returnedBytes":returned,"retainedBytes":end,"startCursor":value["startCursor"].as_u64().unwrap_or(0),"endCursor":end,
             "unreadBytes":unread,"nextCursor":next,
             "message":format!("Read a {returned}-byte page; {end} bytes retained at this observation, {unread} bytes remain after cursor {next}. {}",
                 if unread > 0 {"Continue with process_read using nextCursor."} else if value["outputComplete"] == true {"Output is complete."} else {"The output may still grow."})});
@@ -132,18 +142,20 @@ pub(crate) fn project(value: &mut Value, mode: &Mode, label: Option<&str>) {
     let process_id = process["processId"].as_str().or_else(|| value["processId"].as_str()).map(str::to_owned);
     let page = process["outputCodePage"].as_u64().and_then(|v| u32::try_from(v).ok());
     let pty = process["mode"] == "pty";
+    let source_bom = value["textEncoding"].as_str().and_then(|label|Encoding::for_label(label.as_bytes()));
+    let aligned = value["characterAligned"] == true;
     let explicit = label.filter(|label| *label != "auto").and_then(|label| Encoding::for_label(label.as_bytes()));
     let Some(chunks) = value["chunks"].as_array_mut() else { return; };
     for chunk in chunks {
         let Some(fields) = chunk.as_object_mut() else { continue; };
         if matches!(mode, Mode::Raw) { fields.remove("text"); fields.insert("encoding".into(), json!("base64")); continue; }
         let Some(bytes) = fields.get("bytesBase64").and_then(Value::as_str).and_then(|s| BASE64.decode(s).ok()) else { continue; };
-        let bom = Encoding::for_bom(&bytes).map(|(encoding, _)| encoding);
+        let bom = Encoding::for_bom(&bytes).map(|(encoding, _)| encoding).or(source_bom);
         let selected = explicit.or(bom);
         let decoded = if let Some(encoding) = selected {
             let (text, _, errors) = encoding.decode(&bytes);
             (!errors && readable(&text)).then(|| (text.into_owned(), encoding.name().to_lowercase(), if explicit.is_some() {"requested"} else {"bom"}))
-        } else { automatic_text(&bytes, page, pty, fields.get("offset").and_then(Value::as_u64).unwrap_or(0)) };
+        } else { automatic_text(&bytes, page, pty, if aligned {0} else {fields.get("offset").and_then(Value::as_u64).unwrap_or(0)} ) };
         let mut raw_available = false;
         if let Some((text, encoding, source)) = decoded {
             fields.insert("text".into(), json!(plain(&text)));

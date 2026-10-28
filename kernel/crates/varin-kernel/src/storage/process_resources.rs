@@ -463,6 +463,7 @@ impl Storage {
         canonical_relative: &str,
         canonical: &Path,
         grant: &Grant,
+        lease_id: &str,
     ) -> Result<super::process_tasks::Admission, KernelError> {
         let id = string(params_value, "processId")?;
         let workspace = string(params_value, "workspaceId")?;
@@ -530,14 +531,14 @@ impl Storage {
                 self.refresh_process_record(id)?.unwrap_or(record),
             ));
         }
-        self.assert_canonical_file_lease(
+        self.assert_retained_canonical_file_lease(
             grant,
             root_id,
             &[crate::model::CanonicalFileLeaseResource {
                 absolute: canonical.to_path_buf(),
                 subtree: true,
             }],
-            None,
+            lease_id,
         )?;
         let record = json!({"processId":id,"kernelEpoch":grant.kernel_epoch,"workspaceId":workspace,
             "cwd":cwd,"sourceRoot":root.canonical_root,"sourceRelativeCwd":canonical_relative,"mode":mode,"stdinMode":if mode=="pty" {"pty"} else {stdin_mode},
@@ -733,7 +734,9 @@ impl Storage {
                 "invalid process read chunk size".into(),
             ));
         }
-        let mut result = self.processes.read(id, cursor, limit as usize)?;
+        let mut result = if params_value["mode"] == "text" {
+            self.processes.read_text(id, cursor, limit as usize, params_value["encoding"].as_str(), &record)?
+        } else { self.processes.read(id, cursor, limit as usize)? };
         result["process"] = record;
         Ok(result)
     }

@@ -3704,12 +3704,16 @@ export interface KernelProcessSpawnParams {
   rows?: number;
 }
 
+export type ProcessOutputMode = 'text' | 'raw';
+
 export interface KernelProcessReadParams {
   workspaceId: string;
   processId: string;
   rootId?: string;
   cursor: number;
   maxBytes?: number;
+  mode?: ProcessOutputMode;
+  encoding?: string;
 }
 
 export interface KernelProcessWriteParams {
@@ -3793,6 +3797,11 @@ export interface KernelProcessReadResult {
   chunks: KernelProcessOutputChunk[];
   nextCursor: number;
   endCursor: number;
+  startCursor?: number;
+  requestedCursor?: number;
+  actualCursor?: number;
+  characterAligned?: boolean;
+  textEncoding?: string;
   inputSequence: number;
   inputError: string | null;
   outputComplete: boolean;
@@ -5897,7 +5906,7 @@ export type SourceResourceAction = {kind:'read';path:string;offset:number;length
  | {kind:'child_storage_receipt';operation_id:string;receipt_kind:string}
  | {kind:'child_root_idle'}
  | {kind:'collaboration_pin';release:boolean;pin_id:string}
- | {kind:'process_observation';source_run_id:string;lineage:{process_id:string;source_run_id:string;target_run_id:string;source:LaunchSource;target:LaunchSource;executions:string[]}|null;process_id:string;read:[number,number|null]|null}
+ | {kind:'process_observation';source_run_id:string;lineage:{process_id:string;source_run_id:string;target_run_id:string;source:LaunchSource;target:LaunchSource;executions:string[]}|null;process_id:string;read:{cursor:number;maxBytes:number|null;mode:ProcessOutputMode;encoding:string|null}|null}
  | {kind:'reconcile_mutation';mutation:{action:'write';path:string;readVersion:string;content:string}|{action:'edit';path:string;readVersion:string;edits:{oldText:string;newText:string}[]};executor:string};
 
 export interface ChildSourceAuthority { authority_id:string;resource_epoch:string }

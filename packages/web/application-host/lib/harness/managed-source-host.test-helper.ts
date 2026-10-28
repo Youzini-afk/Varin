@@ -313,7 +313,7 @@ async function childSources(runtime: AgentRuntimeClient, service: ManagedSourceC
     assert(nextBinding.physicalRoot); assert.notEqual(nextBinding.physicalRoot.canonicalRoot, privateRoot.canonicalRoot);
     const processOutput = await client.service({ ...addressOf(nextBinding), requestId: randomUUID(), operation: { kind: 'native_resource',
       context: { run_id: continuationRun, origin, operation_id: toolOperationId(origin, 'observe-continued-process') }, authorizeOnly: false,
-      action: { kind: 'process_observation', process_id: childProcess.operationId, source_run_id: childRun, read: [0, 4096],
+      action: { kind: 'process_observation', process_id: childProcess.operationId, source_run_id: childRun, read: { cursor: 0, maxBytes: 4096, mode: 'raw', encoding: null },
         lineage: { process_id: childProcess.operationId, source_run_id: childRun, target_run_id: continuationRun,
           source: privateBinding.source, target: nextBinding.source, executions: [continuation.execution_id] } } } }) as {
           chunks: Array<{ bytesBase64: string }>; process: { status: string; exitCode: number; writerActive: boolean } };

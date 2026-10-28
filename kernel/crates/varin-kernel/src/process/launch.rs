@@ -254,6 +254,7 @@ impl Launch {
         let data_shared = shared.clone();
         thread::spawn(move || {
             let result = (|| -> io::Result<()> {
+                let mut offset=0u64;
                 while let Some(frame) = read_frame(&mut data)? {
                     let value: Value = serde_json::from_slice(&frame)?;
                     if value["type"] != "output" {
@@ -279,11 +280,15 @@ impl Launch {
                     spool.write_all(&[channel])?;
                     spool.write_all(&bytes)?;
                     let position = spool.stream_position()?;
+                    let end=offset.checked_add(bytes.len() as u64).ok_or_else(||io::Error::other("process output cursor overflow"))?;
+                    // Publish seek metadata before bytes become observable, without
+                    // holding the control mutex during index or filesystem work.
+                    data_shared.spool_index.lock().unwrap_or_else(|error|error.into_inner()).record(SpoolFrame {
+                        offset,position:position-5-bytes.len() as u64,length:bytes.len(),channel:if channel==1 {"stdout"} else {"stderr"},
+                    });
+                    offset=end;
                     let mut buffer = data_shared.lock();
-                    buffer.end = buffer
-                        .end
-                        .checked_add(bytes.len() as u64)
-                        .ok_or_else(|| io::Error::other("process output cursor overflow"))?;
+                    buffer.end=end;
                     buffer.file_end = position;
                     data_shared.notify();
                 }
@@ -336,7 +341,6 @@ impl Launch {
             output: OutputHandle {
                 shared: shared.clone(),
                 output_path: spool_path.clone(),
-                cursor: Arc::new(Mutex::new(SpoolCursor::default())),
             },
             live: LiveProcess {
                 guardian,

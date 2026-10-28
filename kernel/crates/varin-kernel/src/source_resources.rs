@@ -505,7 +505,7 @@ pub(crate) enum SourceResourceAction {
         source_run_id: String,
         lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
         process_id: String,
-        read: Option<(u64, Option<u64>)>,
+        read: Option<crate::process::text::ReadPage>,
     },
     ReconcileMutation {
         mutation: crate::storage::file_mutations::TextMutation,

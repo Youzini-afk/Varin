@@ -6,7 +6,7 @@ use super::file_effects::Local;
 use super::file_mutations::{
     edit_preserving_line_endings, fixed_read_namespace, read_version, FileWriteMode, TextMutation,
 };
-use super::file_resource_leases::{canonical_lease_path, FileLeaseRequest, RetainedFileLease};
+use super::file_resource_leases::{canonical_lease_path, FileLeaseRequest};
 use super::file_resources::{
     normalized_relative_path, parse_file_params, resolve_admitted_resource, FileState,
 };
@@ -155,17 +155,20 @@ impl Task {
                 return Err(KernelError::Authorization("Canonical file resource changed after admission".into()));
             }
             let proof=canonical.clone();
-            self.control(owner,move |t,s|{
+            let waiting=self.control(owner,move |t,s|{
                 let grant=t.authorize(s)?;
                 let paths=vec![FileLeaseResource{path:t.mutation.path().into(),subtree:false}];
                 let params=parse_file_params(&json!({"workspaceId":t.workspace,"rootId":t.root.root_id,"leaseId":t.lease,
                     "resources":[{"path":t.mutation.path(),"scope":"exact"}]}))?;
-                let result=s.acquire_file_lease_for(FileLeaseRequest{params,resources:paths,canonical_resources:vec![proof]},&grant,None)?;
-                if result["status"]!="acquired"{return Err(KernelError::Operation("file resource is busy".into()));}
-                s.retained_file_leases.insert(t.lease.clone(),RetainedFileLease{release_requested:true});
-                Ok(())
+                s.queue_worker_file_lease(FileLeaseRequest{params,resources:paths,canonical_resources:vec![proof]},&grant,t.cancellation.clone())
             })?;
+            waiting.recv().map_err(|_|KernelError::Storage("File lease owner disconnected".into()))??;
             retained=true;
+            self.check()?;
+            let current=resolve_admitted_resource(&self.root,self.mutation.path(),&self.grant,false)?;
+            if canonical_lease_path(current.absolute)? != canonical.absolute {
+                return Err(KernelError::Authorization("Queued mutation path changed physical identity".into()));
+            }
             let request_hash=hash_json(&json!(["text-mutation-v1",self.grant.grant_id,self.workspace,self.root.root_id,self.operation,&*self.mutation]))?;
             let prior=self.control(owner,|t,s|{t.authorize(s)?;s.operation_get(&json!({"operationId":t.operation}))})?;
             if !prior.is_null(){

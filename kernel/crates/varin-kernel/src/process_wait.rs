@@ -298,7 +298,7 @@ impl ProcessWaitTools {
         let (id, read, mode, encoding) = if call.name == "process_read" {
             let h: ReadHandle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
             crate::process::text::validate_encoding(h.encoding.as_deref()).map_err(error)?;
-            (h.process_id, Some((h.cursor, h.max_bytes)), h.mode, h.encoding)
+            (h.process_id, Some(crate::process::text::ReadPage{cursor:h.cursor,max_bytes:h.max_bytes,mode:h.mode.clone(),encoding:h.encoding.clone()}), h.mode, h.encoding)
         } else {
             let h: Handle = serde_json::from_value(call.arguments.clone()).map_err(error)?;
             (h.process_id, None, crate::process::text::Mode::Text, None)

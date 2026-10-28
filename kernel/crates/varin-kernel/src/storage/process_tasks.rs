@@ -152,15 +152,38 @@ impl Task {
             ));
         }
         let canonical = super::file_resource_leases::canonical_lease_path(cwd.clone())?;
-        let launch = self.control(owner, move |t, s| {
-            let grant = t.authorize(s)?;
-            if !path_allowed(&grant, &relative) {
-                return Err(KernelError::Authorization(
-                    "Process cwd scope changed during admission".into(),
-                ));
-            }
-            s.begin_process_launch(&t.params, &t.root, &cwd, &relative, &canonical, &grant)
+        let lease_id = format!("process-launch:{}", Uuid::new_v4());
+        let (proof, requested_lease) = (canonical.clone(),lease_id.clone());
+        let waiting = self.control(owner, move |t,s| {
+            let grant=t.authorize(s)?;
+            let path=t.params["cwd"].as_str().expect("admitted cwd");
+            let params=super::file_resources::parse_file_params(&json!({"workspaceId":t.root.owning_workspace_id,
+                "rootId":t.root.root_id,"leaseId":requested_lease,"resources":[{"path":path,"scope":"subtree"}]}))?;
+            s.queue_worker_file_lease(super::file_resource_leases::FileLeaseRequest {params,
+                resources:vec![FileLeaseResource {path:path.into(),subtree:true}],
+                canonical_resources:vec![crate::model::CanonicalFileLeaseResource {absolute:proof,subtree:true}],
+            },&grant,t.cancellation.clone())
         })?;
+        waiting.recv().map_err(|_|KernelError::Storage("Process lease owner disconnected".into()))??;
+        let held=lease_id.clone();
+        let admission=(|| {
+            self.check()?;
+            let current=resolve_admitted_resource(&self.root,self.params["cwd"].as_str().expect("admitted cwd"),&self.grant,true)?;
+            if fs::canonicalize(current.absolute)? != cwd {
+                return Err(KernelError::Authorization("Queued process cwd changed physical identity".into()));
+            }
+            self.control(owner, move |t, s| {
+                let grant = t.authorize(s)?;
+                if !path_allowed(&grant, &relative) {
+                    return Err(KernelError::Authorization("Process cwd scope changed during admission".into()));
+                }
+                s.begin_process_launch(&t.params, &t.root, &cwd, &relative, &canonical, &grant, &held)
+            })
+        })();
+        // Exclude overlapping mutations only through startup admission. A running
+        // process is a writer activity, not a lifetime-exclusive directory lease.
+        self.control(owner,move |_,s|{s.finish_retained_file_lease(&lease_id);Ok(())})?;
+        let launch=admission?;
         let Admission::Launch(launch) = launch else {
             let Admission::Complete(value) = launch else {
                 unreachable!()

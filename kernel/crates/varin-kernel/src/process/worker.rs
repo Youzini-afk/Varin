@@ -100,6 +100,7 @@ fn child_cwd(path: &std::path::Path) -> std::borrow::Cow<'_, std::path::Path> {
 }
 
 fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
+    let executable = super::program::resolve(config)?;
     #[cfg(target_os = "linux")]
     platform::prepare_guardian()?;
     if config.mode == "pty" {
@@ -119,7 +120,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             input.write_all(b"\x1b[1;1R")?;
             input.flush()?;
         }
-        let mut command = CommandBuilder::new(&config.command);
+        let mut command = CommandBuilder::new(&executable);
         command.args(&config.args);
         command.cwd(child_cwd(&config.cwd).as_os_str());
         command.env_clear();
@@ -135,7 +136,7 @@ fn spawn(config: &Config) -> Result<Spawned, Box<dyn std::error::Error>> {
             readers: vec![("stdout".into(), reader)],
         })
     } else {
-        let mut command = Command::new(&config.command);
+        let mut command = Command::new(&executable);
         command
             .args(&config.args)
             .current_dir(child_cwd(&config.cwd))

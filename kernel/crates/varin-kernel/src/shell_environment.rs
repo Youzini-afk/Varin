@@ -22,6 +22,16 @@ pub(crate) struct ExecutionEnvironment {
     pub shells: Vec<ExecutionShell>,
 }
 impl ExecutionEnvironment {
+    pub(crate) fn program_shell(&self, command:&str) -> Option<&ExecutionShell> {
+        fn stem(name:&str)->&str {name.rsplit_once('.').filter(|(_,extension)|extension.eq_ignore_ascii_case("exe")).map_or(name,|(base,_)|base)}
+        if command.contains(['/', '\\', ':']) {return None;}
+        self.shells.iter().find(|shell| {
+            let name=std::path::Path::new(&shell.executable).file_name().and_then(|name|name.to_str()).unwrap_or(&shell.id);
+            if self.platform=="win32" {
+                stem(command).eq_ignore_ascii_case(&shell.id) || stem(name).eq_ignore_ascii_case(stem(command))
+            } else {command==shell.id || command==name}
+        })
+    }
     pub(crate) fn select(
         &self,
         requested: Option<&str>,

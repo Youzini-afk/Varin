@@ -7,6 +7,8 @@ pub(crate) mod receipt_wake;
 pub(crate) mod subscriptions;
 pub(crate) mod worker;
 pub(crate) mod text;
+mod paging;
+mod program;
 pub(crate) mod launch;
 use crate::{
     error::KernelError,
@@ -39,12 +41,9 @@ pub(crate) struct ProcessTerminal {
 }
 #[derive(Default)]
 struct Buffer {
-    read_position: u64,
-    frame_start: u64,
     file_end: u64,
     output_closed: bool,
     output_error: Option<String>,
-    base: u64,
     end: u64,
     closed: bool,
     discard: bool,
@@ -60,6 +59,9 @@ struct Shared {
     changed: Condvar,
     publication: Mutex<()>,
     interaction_wakes: Mutex<HashMap<String, SyncSender<()>>>,
+    // Seek metadata only; reading never consumes or deletes retained output.
+    spool_index: Mutex<SpoolIndex>,
+    text_pages: Mutex<paging::Boundaries>,
 }
 impl Shared {
     fn new() -> Self {
@@ -71,6 +73,8 @@ impl Shared {
             changed: Condvar::new(),
             publication: Mutex::new(()),
             interaction_wakes: Mutex::new(HashMap::new()),
+            spool_index: Mutex::new(SpoolIndex::default()),
+            text_pages: Mutex::new(paging::Boundaries::default()),
         }
     }
     fn notify(&self) {
@@ -272,13 +276,27 @@ struct LiveProcess {
 struct OutputHandle {
     shared: Arc<Shared>,
     output_path: PathBuf,
-    cursor: Arc<Mutex<SpoolCursor>>,
 }
-#[derive(Clone, Default)]
-struct SpoolCursor {
-    base: u64,
-    read_position: u64,
-    frame_start: u64,
+#[derive(Default)]
+struct SpoolIndex {
+    checkpoints: Vec<SpoolFrame>,
+    tail: Option<SpoolFrame>,
+}
+impl SpoolIndex {
+    fn record(&mut self, frame:SpoolFrame) {
+        // Physical intervals bound metadata even for one-byte transport frames.
+        if self.checkpoints.last().is_none_or(|checkpoint|frame.position-checkpoint.position>=CHUNK_BYTES as u64) {
+            self.checkpoints.push(frame.clone());
+        }
+        self.tail=Some(frame);
+    }
+}
+#[derive(Clone)]
+struct SpoolFrame {
+    offset: u64,
+    position: u64,
+    length: usize,
+    channel: &'static str,
 }
 #[derive(Default)]
 pub(crate) struct ProcessManager {
@@ -405,6 +423,7 @@ impl ProcessManager {
             let mut position = 0u64;
             let mut end = 0u64;
             let mut truncated = false;
+            let mut index = SpoolIndex::default();
             while position < length {
                 if length - position < 5 {
                     truncated = true;
@@ -421,6 +440,7 @@ impl ProcessManager {
                     truncated = true;
                     break;
                 }
+                index.record(SpoolFrame {offset:end,position,length:count as usize,channel:if header[4]==1 {"stdout"} else {"stderr"}});
                 end = end
                     .checked_add(count)
                     .ok_or_else(|| failure("retained output cursor overflow"))?;
@@ -448,6 +468,7 @@ impl ProcessManager {
                 false
             };
             let shared = Arc::new(Shared::new());
+            *shared.spool_index.lock().unwrap_or_else(|error|error.into_inner())=index;
             {
                 let mut buffer = shared.lock();
                 buffer.end = end;
@@ -469,7 +490,6 @@ impl ProcessManager {
                 OutputHandle {
                     shared,
                     output_path: path,
-                    cursor: Arc::new(Mutex::new(SpoolCursor::default())),
                 },
             );
         }
@@ -555,11 +575,11 @@ impl ProcessManager {
             .outputs
             .get(id)
             .ok_or_else(|| failure("process output storage unavailable"))?;
-        let mut state = output
-            .cursor
-            .lock()
-            .map_err(|_| failure("output cursor poisoned"))?;
-        read_output(output, &mut state, cursor, limit)
+        read_output(output, cursor, limit)
+    }
+    pub(crate) fn read_text(&self, id: &str, cursor: u64, limit: usize, encoding: Option<&str>, record: &Value) -> Result<Value, KernelError> {
+        let output = self.outputs.get(id).ok_or_else(|| failure("process output storage unavailable"))?;
+        paging::read(output, cursor, limit, encoding, record)
     }
     pub(crate) fn kill(&mut self, id: &str, force: bool) -> Result<Value, KernelError> {
         if let Some(starting)=self.starting.get(id){
@@ -661,72 +681,53 @@ impl Drop for ProcessManager {
 
 fn read_output(
     live: &OutputHandle,
-    cursor_state: &mut SpoolCursor,
     cursor: u64,
     limit: usize,
 ) -> Result<Value, KernelError> {
-    let (
-        base,
-        end,
-        mut position,
-        mut frame_start,
-        file_end,
-        input_sequence,
-        input_error,
-        output_error,
-        output_complete,
-    ) = {
+    let (end, file_end, input_sequence, input_error, output_error, output_complete) = {
         let buffer = live.shared.lock();
-        (
-            cursor_state.base,
-            buffer.end,
-            cursor_state.read_position,
-            cursor_state.frame_start,
-            buffer.file_end,
-            buffer.input_sequence,
-            buffer.input_error.clone(),
-            buffer.output_error.clone(),
-            buffer.output_closed && buffer.output_error.is_none(),
-        )
+        (buffer.end, buffer.file_end, buffer.input_sequence, buffer.input_error.clone(),
+            buffer.output_error.clone(), buffer.output_closed && buffer.output_error.is_none())
     };
-    if cursor < base || cursor > end {
-        return Err(failure("process output cursor is outside retained bytes"));
+    if cursor > end {
+        return Err(failure(format!("process output cursor {cursor} is outside retained range [0, {end}]; read from any cursor in that range")));
     }
     let mut file = File::open(&live.output_path)?;
-    let header = |file: &mut File, position: u64| -> Result<(usize, &'static str), KernelError> {
+    let header=|file:&mut File, position:u64, offset:u64| -> Result<SpoolFrame,KernelError> {
         file.seek(SeekFrom::Start(position))?;
-        let mut header = [0u8; 5];
-        file.read_exact(&mut header)?;
+        let mut header = [0u8;5]; file.read_exact(&mut header)?;
         let length = u32::from_le_bytes(header[..4].try_into().expect("fixed header")) as usize;
-        if length == 0 || length > CHUNK_BYTES {
+        if length == 0 || length > CHUNK_BYTES || position + 5 + length as u64 > file_end {
             return Err(failure("invalid process output storage frame"));
         }
-        let channel = match header[4] {
-            1 => "stdout",
-            2 => "stderr",
-            _ => return Err(failure("invalid stored output channel")),
-        };
-        Ok((length, channel))
+        let channel = match header[4] {1 => "stdout",2 => "stderr",_ => return Err(failure("invalid stored output channel"))};
+        Ok(SpoolFrame {offset,position,length,channel})
     };
-    while frame_start < cursor {
-        let (length, _) = header(&mut file, position)?;
-        if frame_start + length as u64 > cursor {
-            break;
-        }
-        position += 5 + length as u64;
-        frame_start += length as u64;
+    let mut index = live.shared.spool_index.lock().map_err(|_|failure("output index poisoned"))?;
+    let target = cursor.saturating_add(limit as u64).min(end);
+    while index.tail.as_ref().map_or(0, |frame|frame.offset + frame.length as u64) < target {
+        let (offset, position) = index.tail.as_ref().map_or((0,0), |frame|(frame.offset + frame.length as u64, frame.position + 5 + frame.length as u64));
+        let frame=header(&mut file,position,offset)?;
+        index.record(frame);
     }
-    cursor_state.base = cursor;
-    cursor_state.read_position = position;
-    cursor_state.frame_start = frame_start;
+    let mut frame=if cursor<target {
+        let start=index.checkpoints.partition_point(|frame|frame.offset<=cursor).saturating_sub(1);
+        let checkpoint=index.checkpoints[start].clone();
+        Some(index.tail.as_ref().filter(|tail|tail.offset<=cursor).cloned().unwrap_or(checkpoint))
+    } else {None};
+    drop(index);
     let mut raw_chunks: Vec<(&str, u64, Vec<u8>)> = Vec::new();
     let mut remaining = limit;
     let mut next = cursor;
-    while remaining > 0 && next < end && position < file_end {
-        let (length, channel) = header(&mut file, position)?;
-        let skip = (next - frame_start) as usize;
-        let count = remaining.min(length - skip);
-        file.seek(SeekFrom::Start(position + 5 + skip as u64))?;
+    while let Some(current)=frame {
+        if current.offset+current.length as u64<=next {
+            frame=Some(header(&mut file,current.position+5+current.length as u64,current.offset+current.length as u64)?);
+            continue;
+        }
+        let channel = current.channel;
+        let skip = (next - current.offset) as usize;
+        let count = remaining.min(current.length - skip);
+        file.seek(SeekFrom::Start(current.position + 5 + skip as u64))?;
         let mut bytes = vec![0u8; count];
         file.read_exact(&mut bytes)?;
         // Storage frames are transport boundaries, not character boundaries.
@@ -738,10 +739,7 @@ fn read_output(
         }
         next += count as u64;
         remaining -= count;
-        if skip + count == length {
-            position += 5 + length as u64;
-            frame_start += length as u64;
-        }
+        frame=if next<target {Some(header(&mut file,current.position+5+current.length as u64,current.offset+current.length as u64)?)} else {None};
     }
     let chunks=raw_chunks.into_iter().map(|(channel,offset,bytes)|{
         let mut chunk=json!({"channel":channel,"offset":offset,"byteLength":bytes.len(),"bytesBase64":BASE64.encode(&bytes),"encoding":"base64"});
@@ -754,13 +752,73 @@ fn read_output(
         }
         chunk
     }).collect::<Vec<_>>();
-    Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,
+    Ok(json!({"chunks":chunks,"nextCursor":next,"endCursor":end,"startCursor":0,
             "inputSequence":input_sequence,"inputError":input_error,"outputError":output_error,"outputComplete":output_complete}))
 }
 
 #[cfg(test)]
 mod output_projection_tests {
     use super::*;
+    fn spool(bytes:&[u8]) -> OutputHandle {
+        let path=std::env::temp_dir().join(format!("varin-spool-{}",uuid::Uuid::new_v4()));
+        let mut file=File::create(&path).unwrap();
+        for bytes in bytes.chunks(997) {
+            file.write_all(&(bytes.len() as u32).to_le_bytes()).unwrap();
+            file.write_all(&[1]).unwrap();file.write_all(bytes).unwrap();
+        }
+        let shared=Arc::new(Shared::new());
+        {let mut state=shared.lock();state.file_end=file.metadata().unwrap().len();state.end=bytes.len() as u64;state.output_closed=true;}
+        OutputHandle{shared,output_path:path}
+    }
+    #[test]
+    fn text_pages_align_gbk_utf8_and_utf16_without_consuming_raw_bytes() {
+        for (encoding,text) in [(encoding_rs::GBK,"中文错误abcd"),(encoding_rs::UTF_8,"中文🙂abcd"),(encoding_rs::UTF_16LE,"中文🙂abcd")] {
+            let text=text.repeat(20000);
+            let bytes=if encoding==encoding_rs::UTF_16LE {text.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>()} else {encoding.encode(&text).0.into_owned()};
+            let handle=spool(&bytes);
+            let record=json!({"mode":"pipe","outputCodePage":936});
+            let mut cursor=0;
+            let mut decoded=String::new();
+            for limit in [1,7,65535].into_iter().cycle() {
+                let mut page=paging::read(&handle,cursor,limit,Some(encoding.name()),&record).unwrap();
+                assert!(page["nextCursor"].as_u64().unwrap()>cursor,"{page}");
+                cursor=page["nextCursor"].as_u64().unwrap();
+                page["process"]=record.clone();text::project(&mut page,&text::Mode::Text,Some(encoding.name()));
+                for chunk in page["chunks"].as_array().unwrap(){decoded.push_str(chunk["text"].as_str().unwrap());}
+                if cursor==bytes.len() as u64 {break;}
+            }
+            assert_eq!(decoded,text);
+            for cursor in [199997,2,0,65537] {
+                let page=paging::read(&handle,cursor,311,Some(encoding.name()),&record).unwrap();
+                assert_eq!(page["characterAligned"],true);
+                let data=page["chunks"].as_array().unwrap().iter().flat_map(|chunk|BASE64.decode(chunk["bytesBase64"].as_str().unwrap()).unwrap()).collect::<Vec<_>>();
+                assert!(encoding.decode_without_bom_handling_and_without_replacement(&data).is_some());
+                let raw=read_output(&handle,cursor,311).unwrap();
+                let data=raw["chunks"].as_array().unwrap().iter().flat_map(|chunk|BASE64.decode(chunk["bytesBase64"].as_str().unwrap()).unwrap()).collect::<Vec<_>>();
+                assert_eq!(data,&bytes[cursor as usize..cursor as usize+311]);
+            }
+            std::fs::remove_file(&handle.output_path).unwrap();
+        }
+    }
+    #[test]
+    fn automatic_pages_keep_mixed_pipe_lines_readable_at_tiny_and_large_edges() {
+        let (gbk,_,_)=encoding_rs::GBK.encode("活动代码页 936：中文错误\r\n");
+        let expected="活动代码页 936：中文错误\r\nUTF-8 输出：体检通过 ✓ 🚀\n";
+        let source=[gbk.as_ref(),"UTF-8 输出：体检通过 ✓ 🚀\n".as_bytes()].concat().repeat(2300);
+        let handle=spool(&source);
+        let record=json!({"mode":"pipe","outputCodePage":936});
+        let mut cursor=0;let mut decoded=String::new();
+        for limit in [1,7,311,65535].into_iter().cycle() {
+            let mut page=paging::read(&handle,cursor,limit,None,&record).unwrap();
+            assert_eq!(page["characterAligned"],true,"{page}");
+            let next=page["nextCursor"].as_u64().unwrap();assert!(next>cursor);cursor=next;
+            page["process"]=record.clone();text::project(&mut page,&text::Mode::Text,None);
+            for chunk in page["chunks"].as_array().unwrap(){decoded.push_str(chunk["text"].as_str().unwrap());}
+            if cursor==source.len() as u64 {break;}
+        }
+        assert_eq!(decoded,expected.repeat(2300));
+        std::fs::remove_file(&handle.output_path).unwrap();
+    }
     #[test]
     fn spool_frames_join_utf8_while_page_boundaries_preserve_exact_bytes() {
         let path=std::env::temp_dir().join(format!("varin-spool-{}",uuid::Uuid::new_v4()));
@@ -770,12 +828,12 @@ mod output_projection_tests {
         }
         let size=file.metadata().unwrap().len();drop(file);
         let shared=Arc::new(Shared::new());{let mut state=shared.lock();state.file_end=size;state.end=text.len() as u64;state.output_closed=true;}
-        let handle=OutputHandle{shared,output_path:path.clone(),cursor:Arc::default()};
-        let all=read_output(&handle,&mut SpoolCursor::default(),0,65536).unwrap();
+        let handle=OutputHandle{shared,output_path:path.clone()};
+        let all=read_output(&handle,0,65536).unwrap();
         assert_eq!(all["chunks"].as_array().unwrap().len(),1);assert_eq!(all["chunks"][0]["text"],"中文🙂\n");
-        let mut cursor=SpoolCursor::default();let first=read_output(&handle,&mut cursor,0,2).unwrap();
+        let first=read_output(&handle,0,2).unwrap();
         assert_eq!(first["chunks"][0]["encoding"],"base64");assert!(first["chunks"][0]["encodingReason"].as_str().unwrap().contains("boundary"));
-        let second=read_output(&handle,&mut cursor,2,65536).unwrap();
+        let second=read_output(&handle,2,65536).unwrap();
         let bytes=first["chunks"].as_array().unwrap().iter().chain(second["chunks"].as_array().unwrap()).flat_map(|chunk|BASE64.decode(chunk["bytesBase64"].as_str().unwrap()).unwrap()).collect::<Vec<_>>();
         assert_eq!(bytes,text);assert_eq!(second["outputComplete"],true);assert_eq!(second["nextCursor"],text.len());
         std::fs::remove_file(path).unwrap();

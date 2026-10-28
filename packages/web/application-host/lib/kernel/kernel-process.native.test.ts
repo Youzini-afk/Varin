@@ -10,7 +10,7 @@ import os from "node:os";
 import { stripVTControlCharacters } from "node:util";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { afterEach, it as vitestIt } from "vitest";
+import { afterEach, expect, it as vitestIt } from "vitest";
 import { createKernelClient, type KernelClient, type KernelScopedClient } from "./kernel-client.js";
 import type { KernelMethodParams, KernelProcessSnapshot } from "./protocol.generated.js";
 
@@ -289,15 +289,6 @@ it("kernel death invalidates the Host handle without manufacturing an exit event
 }, 30_000);
 
 
-it("a held filesystem lease prevents a new native writer entering that directory", async () => {
-  const f = await fixture();
-  await f.client.fileLeaseAcquire({ ...f.address, leaseId: "capture-lease", resources: [{ path: "child", scope: "subtree" }] });
-  await assert.rejects(f.client.processSpawn(f.spawn("leased", "process.exit(0)")), /busy|lease/i);
-  await f.client.fileLeaseRelease({ ...f.address, leaseId: "capture-lease" });
-  await f.client.processSpawn(f.spawn("leased", "process.exit(0)"));
-  assert.equal((await drain(f.client, "leased")).process.exitCode, 0);
-}, 30_000);
-
 it("revoking a process actor requests native stop and leaves exit confirmation to maintenance", async () => {
   const f = await fixture();
   await f.client.processSpawn(f.spawn("revoked", "setInterval(()=>{},1000)"));
@@ -494,7 +485,7 @@ vitestIt.skipIf(!available || process.platform !== "linux")("a truncated guardia
   }
 }, 20_000);
 
-it("spooled output preserves partial-frame cursor replay and rejects acknowledged history", async () => {
+it("spooled output preserves exact random-access replay for independent readers", async () => {
   const f = await fixture();
   const expected = Buffer.from(Array.from({ length: 131_079 }, (_, index) => index % 251));
   await f.client.processSpawn(f.spawn("partial-cursor", "process.stdout.write(Buffer.from(Array.from({length:131079},(_,i)=>i%251)))"));
@@ -524,10 +515,61 @@ it("spooled output preserves partial-frame cursor replay and rejects acknowledge
     assert.equal(cursor, read.nextCursor);
     assert.equal(read.nextCursor - request.cursor, maxBytes);
   }
-  await assert.rejects(f.client.processRead({ workspaceId: "ws", processId: "partial-cursor", cursor: 0 }), /outside retained bytes/);
+  for (const offset of [cursor - 1, 0, 100_001, 2]) {
+    const page = await f.client.processRead({ workspaceId: "ws", processId: "partial-cursor", cursor: offset, maxBytes: 17 });
+    assert.equal(page.startCursor, 0);
+    assert.deepEqual(Buffer.concat(page.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))), expected.subarray(offset, offset + 17));
+  }
+  await assert.rejects(f.client.processRead({ workspaceId: 'ws', processId: 'partial-cursor', cursor: expected.length + 1 }), /retained range \[0, 131079\]/);
   const rest = await drain(f.client, "partial-cursor", cursor);
   assert.deepEqual(Buffer.concat([...bytes, rest.stdout]), expected);
 }, 30_000);
+
+it('process startup waits for an overlapping file lease and cancellation withdraws the waiter', async () => {
+  const f = await fixture();
+  const held = { ...f.address, leaseId: 'write-in-progress', resources: [{ path: 'child/ready.txt', scope: 'exact' as const }] };
+  await f.client.fileLeaseAcquire(held);
+  const processOwner = f.host.scoped(await f.host.issueGrant({ grantId: 'spawn-only', owningWorkspace: 'ws', executionWorkspace: 'ws',
+    pathScopes: [''], capabilities: ['process'] }));
+  let settled = false;
+  const starting = processOwner.processSpawn(f.spawn('after-write', "process.stdout.write(require('fs').readFileSync('ready.txt','utf8'))"))
+    .then(value => { settled = true; return value; });
+  void starting.catch(() => undefined);
+  const accepted = async (processId: string) => expect.poll(() => {
+    const request = f.probe.sent.find(frame => frame.kind === 'request' && frame.method === 'process.spawn'
+      && (frame.params as { processId?: string })?.processId === processId);
+    return Boolean(request);
+  }).toBe(true);
+  await accepted('after-write');
+  await f.client.health();
+  assert.equal(settled, false);
+  const controller = new AbortController();
+  const cancelled = processOwner.processSpawn(f.spawn('cancelled-launch', "require('fs').writeFileSync('must-not-exist','bad')"), controller.signal);
+  const rejected = expect(cancelled).rejects.toThrow(/cancel/i);
+  await accepted('cancelled-launch');controller.abort();await rejected;
+  await fs.writeFile(path.join(f.workspace, 'child/ready.txt'), 'complete write');
+  await f.client.fileLeaseRelease({ ...f.address, leaseId: held.leaseId });
+  await starting;
+  const result = await drain(processOwner, 'after-write');
+  assert.equal(result.stdout.toString(), 'complete write');
+  await assert.rejects(fs.access(path.join(f.workspace, 'child/must-not-exist')));
+  assert.equal((await f.client.fileLeaseAcquire(held)).status, 'acquired');
+  await f.client.fileLeaseRelease({ ...f.address, leaseId: held.leaseId });
+}, 30_000);
+
+it('text pagination aligns GBK characters and raw reads can revisit any earlier byte', async () => {
+  const f = await fixture();
+  const source = Buffer.from([0xd6, 0xd0, 0xce, 0xc4, 0x0a]);
+  await f.client.processSpawn(f.spawn('gbk-pages', `process.stdout.write(Buffer.from(${JSON.stringify([...source])}))`));
+  await drain(f.client, 'gbk-pages');
+  const first = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, maxBytes: 1, mode: 'text', encoding: 'gbk' });
+  assert.equal(first.nextCursor, 2);
+  const second = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 3, maxBytes: 1, mode: 'text', encoding: 'gbk' });
+  assert.equal(second.requestedCursor, 3);assert.equal(second.actualCursor, 2);assert.equal(second.nextCursor, 4);
+  assert.equal(Buffer.concat(second.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))).toString('hex'), 'cec4');
+  const raw = await f.client.processRead({ workspaceId: 'ws', processId: 'gbk-pages', cursor: 0, mode: 'raw' });
+  assert.deepEqual(Buffer.concat(raw.chunks.map(chunk => Buffer.from(chunk.bytesBase64, 'base64'))), source);
+}, 20_000);
 
 it("immediate stop after spawn admission retains a provable tree exit even before started observation", async () => {
   const f = await fixture();

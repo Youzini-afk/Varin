@@ -175,6 +175,7 @@ impl Storage {
                     canonical_resources: canonical,
                     cancellation: task.cancellation.clone(),
                     resolving: false,
+                    worker: None,
                 });
             }
             Ok(None)
@@ -201,6 +202,37 @@ impl Storage {
         let pending = std::mem::take(&mut self.file_lease_waiters);
         let (mut completed, mut tasks) = (Vec::new(), Vec::new());
         for mut waiter in pending {
+            if let Some(worker) = waiter.worker.take() {
+                let outcome = (|| {
+                    if waiter.cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+                    let grant = self.load_grant(&waiter.grant_id)?;
+                    if grant.state != crate::model::GrantState::Active || grant.kernel_epoch != epoch
+                        || grant.host_id != host || grant.host_generation != generation {
+                        return Err(KernelError::Authorization("Original queued worker grant is no longer active".into()));
+                    }
+                    let root = self.admitted_file_root(&worker.root.root_id, &grant)?;
+                    if root.canonical_root != worker.root.canonical_root
+                        || root.owning_workspace_id != worker.root.owning_workspace_id
+                        || root.execution_workspace_id != worker.root.execution_workspace_id {
+                        return Err(KernelError::Authorization("Original queued worker source changed".into()));
+                    }
+                    let params = parse_file_params(&waiter.params)?;
+                    let resources = Self::parse_lease_resources(&params)?;
+                    let result = self.acquire_file_lease_for(FileLeaseRequest {
+                        params, resources, canonical_resources:waiter.canonical_resources.clone(),
+                    }, &grant, Some(&waiter.request_id))?;
+                    Ok(result["status"] == "acquired")
+                })();
+                match outcome {
+                    Ok(false) => {waiter.worker=Some(worker); self.file_lease_waiters.push_back(waiter);}
+                    Ok(true) => {
+                        self.retained_file_leases.insert(waiter.lease_id.clone(), super::file_resource_leases::RetainedFileLease {release_requested:true});
+                        if worker.completion.try_send(Ok(())).is_err() { self.finish_retained_file_lease(&waiter.lease_id); }
+                    }
+                    Err(error) => {let _=worker.completion.try_send(Err(error));}
+                }
+                continue;
+            }
             if waiter.resolving {
                 self.file_lease_waiters.push_back(waiter);
                 continue;

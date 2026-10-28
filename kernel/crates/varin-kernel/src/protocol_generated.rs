@@ -1551,6 +1551,8 @@ pub(crate) struct KernelProcessReadParams {
     pub(crate) root_id: Option<String>,
     pub(crate) cursor: i64,
     pub(crate) max_bytes: Option<i64>,
+    pub(crate) mode: Option<crate::process::text::Mode>,
+    pub(crate) encoding: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]

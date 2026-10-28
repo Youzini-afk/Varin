@@ -196,12 +196,15 @@ guardian 是同一发行 executable 的另一模式，不另开数据库 writer�
 `process_read` 继续读取保留的输出。
 底层输出块保留精确的 `bytesBase64` 和字节游标，终端及 LSP/DAP 等协议消费者继续读原始字节。
 Agent 的 `process_read` 默认 `mode: text`，输出可读文本并去掉 ANSI 控制序列；`mode: raw` 返回原始字节。
+输出读取不消费保留的历史；各读者可以独立续读或回读任意保留字节。帧位置索引只缓存磁盘偏移，不复制正文，输出释放时一并释放。
+文本页按完整字符对齐，`nextCursor` 仍是原输出的字节位置；从字符中间请求时，`actualCursor` 给出该字符起点，
+`requestedCursor` 保留原请求。`maxBytes` 是文本页目标，极小页面也会返回一个完整字符；原始模式严格保留请求的字节范围。
 自动解码先看 BOM、UTF-8，再参考实际进程 Host 的 Windows 代码页；`encodingSource` 标明依据，不把代码页默认值伪称为检测结果。
 同一 pipe 块内分行输出不同编码时，逐行应用 UTF-8／原进程代码页判断，混合结果标为 `encoding: mixed`、
-`encodingSource: line_detection`，并保留原字节读取入口。不会猜测一行内部的编码切换；跨页残缺字符仍可按原游标重读。
+`encodingSource: line_detection`，并保留原字节读取入口。不会猜测一行内部的编码切换。分页使用同样的逐行判断，并在边缘查看完整字符；编码边界检查点只服务定位，不修改原输出。
 已知编码可传 `encoding`（如 `gbk`、`utf-16le`），初始启动输出可传 `outputEncoding`。无法无损解码的页在模型文本视图中
 返回原因、`rawAvailable` 与原位置的 `rawRead` 调用，不内联大段 base64；原进程保留精确字节，`mode: raw` 可读取。
-`outputSummary` 给出本页原始字节数、观察时保留的总字节数、尚未读取量和续读游标；运行中的总量仍可能增长。
+`outputSummary` 给出本页原始字节数、实际保留的起止游标及总字节数、页面之后的字节数和续读游标；越界错误也说明可读范围，运行中的末尾仍可能增长。
 `process_spawn` 顶层状态与其附带观察使用同一最新快照；`stdinMode` 如实区分 PTY，`input` 说明可写性、EOF 和行结束符。
 `process_write.text` 按 JSON 解码一次后原样写入；`submit:true` 在原输入确定时追加一次原进程的 `input.lineEnding`。
 空 text 可以只提交回车，实际追加字节进入原输入序列及幂等回执。`confirmedBytes` / `state:applied` 确认通道写入；
@@ -213,6 +216,8 @@ Windows 启动时将规范化路径转换为子进程可用的目录表示，内
 
 Windows 使用 named Jobs；Linux 使用 managed session 加 subreaper。旧 epoch 无法证明的退出保留 unknown，继续保护目录。
 Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 PID、HTTP abort 或 Promise reject 虚构退出码。
+进程启动与文本修改遇到短时文件租约时，进入既有物理资源 FIFO；只有冲突范围等待，Storage 控制线程继续服务。
+等待沿用原操作的授权与取消，获准后重新校验来源和物理路径；进程登记启动意图后就释放临时目录租约，不锁住整个进程生命周期。
 目录解析或进程受理失败时，Storage 用原进程意图记录确认是否尚未启动；确认未启动的失败返回 `not_dispatched`，
 供模型修正参数后继续。`cwd` 使用选中 Source 下的相对目录，空字符串和 `.` 表示根目录；入口统一处理 `./` 和路径分隔符。
 
@@ -225,6 +230,9 @@ Host 对可能仍存在 executor 的启动/停止失败保留 owner，不用旧 
 `process_spawn.shellCommand` 使用公布的默认解释器；可选 `shell` 按实际候选选择。Windows Agent auto 优先有效显式环境选择，
 然后 Git Bash、pwsh、Windows PowerShell、CMD；WSL 的 bash 启动入口不属于本机 Shell 候选。
 终端面板保留自己的默认偏好和 auto 顺序。`command + args` 继续直接启动程序，不能与 shellCommand/shell 混用。
+未显式覆盖 `env` 时，直接启动 `bash` 等已发现的 Shell 名称使用同一冻结候选的可执行文件和附加 PATH；其他程序也继承默认 Shell 的工具目录。
+pipe 与 PTY 在原 guardian 中统一按进程自身的 cwd、PATH 和 Windows PATHEXT 查找程序，不借用 guardian 的隐含搜索环境。
+绝对或相对程序路径保留显式选择；完整 `env` 覆盖仍按调用方提供的环境查找。
 非交互命令按 Shell 家族传递正文且不加载个人 Profile；启动回执记录实际解释器。程序失效时返回 `shell_unavailable`，
 不更换语言重新执行正文。Windows PowerShell 5.1 的 curl 别名需要使用 `curl.exe` 才能接收 curl 参数。
 

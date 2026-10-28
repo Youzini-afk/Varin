@@ -219,6 +219,37 @@ it('freezes the published Shell for a request and applies changed Host defaults 
   expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });
   expect(serial).toBe(hasCmd ? 6 : 5);
 }, 45_000);
+it('direct Bash and shellCommand use the same discovered executable and PATH for pipe and PTY', async ({ skip }) => {
+  let serial = 0;
+  const f = await fixture((body, response) => {
+    if (++serial === 1) {
+      batch(response, ['pipe', 'pty'].flatMap(mode => [
+        { id: `direct-${mode}`, name: 'process_spawn', args: { command: 'bash', args: ['--noprofile', '--norc', '-c', 'printf bash-direct-ok'], mode, waitMs: 10_000 } },
+        { id: `shell-${mode}`, name: 'process_spawn', args: { shell: 'bash', shellCommand: 'printf bash-shell-ok', mode, waitMs: 10_000 } },
+      ]));
+    } else {
+      const outputs = (body.input as Array<Record<string, unknown>>).filter(item => item.type === 'function_call_output');
+      for (const style of ['direct', 'shell']) for (const mode of ['pipe', 'pty']) {
+        expect(JSON.parse(responsesMetadataText(outputs.find(output => output.call_id === `${style}-${mode}`)?.output))).toMatchObject({
+          kind: 'job_accepted', content: { shell: { id: 'bash' }, exitCode: 0 },
+        });
+      }
+      done(response);
+    }
+  });
+  const environment = await f.runtime.executionEnvironment();
+  if (!environment.shells.some(shell => shell.id === 'bash')) { skip(); return; }
+  f.kernel.setContextOwner({ close() {}, query: async query => ({ status: 'ready' as const,
+    ...(query.action === 'execution_environment' ? { environment } : {}) }) });
+  const identity = await f.api.create('direct-shell-lookup');
+  const prepared = await f.api.prepareSource({ ...identity, key: 'capture', resourceOwner: { kind: 'local' },
+    workspaceId: (await f.documents.resolveWorkspace({ path: f.workspace })).workspaceId,
+    content: { mode: 'saved-files' }, captureScopes: [], mode: 'materialized' });
+  const receipt = await f.api.submit({ ...identity, key: 'direct-shell', expectedHead: null, text: 'Run Bash directly and through the published Shell', model, source: prepared.source });
+  await expect.poll(async () => (await f.runtime.run(receipt.run_id)).state, { timeout: 30_000 }).toMatch(/^(completed|failed|cancelled)$/);
+  expect(f.launchErrors).toEqual([]);expect(await f.runtime.run(receipt.run_id)).toMatchObject({ state: 'completed' });expect(serial).toBe(2);
+}, 45_000);
+
 function batch(response: ServerResponse, calls: Array<{ name: string; args: Record<string, unknown>; id: string }>) {
   response.writeHead(200, { 'content-type': 'text/event-stream' });
   response.end(`data: ${JSON.stringify({ type: 'response.completed', response: { output: calls.map(call => ({

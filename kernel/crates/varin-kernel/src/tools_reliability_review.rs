@@ -6,6 +6,19 @@ const GENERATION: &str = "tools-generation";
 const EPOCH: &str = "tools-epoch";
 
 #[test]
+fn process_environment_inheritance_works_without_a_shell_snapshot_and_respects_full_overrides() {
+    let f=Fixture::new();
+    let parse=|args:Value|f.executor.operation(None,&ToolCall {call_id:"env".into(),name:"process_spawn".into(),schema_version:"1".into(),arguments:args}).unwrap();
+    let ResourceOperation::ProcessSpawn(inherited)=parse(json!({"command":"program"})) else {panic!("process operation")};
+    let path=inherited.env.iter().find(|entry|entry.name=="PATH").unwrap();
+    assert_eq!(std::env::split_paths(&path.value).collect::<Vec<_>>(),std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect::<Vec<_>>());
+    let ResourceOperation::ProcessSpawn(empty)=parse(json!({"command":"program","env":[]})) else {panic!("process operation")};
+    assert!(empty.env.is_empty());
+    let ResourceOperation::ProcessSpawn(custom)=parse(json!({"command":"program","env":[{"name":"PATH","value":"caller-only"}]})) else {panic!("process operation")};
+    assert_eq!(custom.env.len(),1);assert_eq!(custom.env[0].value,"caller-only");
+}
+
+#[test]
 fn missing_workspace_backend_rejects_isolation_before_source_receipts_and_keeps_shared() {
     if crate::workspace_backend::require().is_ok() { return; }
     let f = Fixture::new();

@@ -66,6 +66,12 @@ pub(super) struct FileLeaseWaiter {
     pub(super) canonical_resources: Vec<CanonicalFileLeaseResource>,
     pub(super) cancellation: Arc<AtomicBool>,
     pub(super) resolving: bool,
+    pub(super) worker: Option<WorkerFileLease>,
+}
+
+pub(super) struct WorkerFileLease {
+    pub root: FileRoot,
+    pub completion: std::sync::mpsc::SyncSender<Result<(), KernelError>>,
 }
 
 pub(super) struct FileLeaseRequest {
@@ -136,13 +142,43 @@ impl Storage {
         let mut cancelled = Vec::new();
         for waiter in pending {
             waiter.cancellation.store(true, Ordering::Release);
-            if waiter.resolving {
+            if let Some(worker) = waiter.worker {
+                let _ = worker.completion.try_send(Err(KernelError::Cancelled));
+            } else if waiter.resolving {
                 self.file_lease_waiters.push_back(waiter);
             } else {
                 cancelled.push(waiter.request_id);
             }
         }
         cancelled
+    }
+
+    /// Native workers join the same physical FIFO as Host file operations. Only
+    /// their waiting worker blocks; Storage remains available to release leases.
+    /// The caller has authorized its original operation, not a new file RPC.
+    pub(super) fn queue_worker_file_lease(
+        &mut self, prepared: FileLeaseRequest, grant: &Grant, cancellation: Arc<AtomicBool>,
+    ) -> Result<std::sync::mpsc::Receiver<Result<(), KernelError>>, KernelError> {
+        if cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        let root = self.admitted_file_root(&prepared.params.root_id, grant)?;
+        let lease_id = prepared.params.lease_id.clone();
+        let params = json!({"workspaceId":prepared.params.workspace_id,"rootId":prepared.params.root_id,
+            "leaseId":lease_id,"resources":prepared.resources.iter().map(|resource|json!({"path":resource.path,
+                "scope":if resource.subtree {"subtree"} else {"exact"}})).collect::<Vec<_>>()});
+        let canonical_resources = prepared.canonical_resources.clone();
+        let (completion, receiver) = std::sync::mpsc::sync_channel(1);
+        let result = self.acquire_file_lease_for(prepared, grant, Some(&lease_id))?;
+        if result["status"] == "acquired" {
+            self.retained_file_leases.insert(lease_id, RetainedFileLease {release_requested:true});
+            let _ = completion.try_send(Ok(()));
+        } else {
+            self.file_lease_waiters.push_back(FileLeaseWaiter {
+                request_id:lease_id.clone(), params, grant_id:grant.grant_id.clone(), lease_id,
+                canonical_resources, cancellation, resolving:false,
+                worker:Some(WorkerFileLease {root,completion}),
+            });
+        }
+        Ok(receiver)
     }
 
     pub(crate) fn finish_retained_file_lease(&mut self, lease_id: &str) {

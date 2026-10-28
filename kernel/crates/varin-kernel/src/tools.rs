@@ -108,7 +108,7 @@ impl ToolKind {
                 "Inspect a retained process owned by the admitted execution environment."
             }
             Self::ProcessRead => {
-                "Read bounded output from a retained process in the admitted execution environment."
+                "Read retained process output. Reading is non-destructive: any retained byte cursor can be revisited. Text pages align to complete characters; continue with nextCursor. Raw mode returns the exact requested bytes."
             }
             Self::ProcessSpawn => {
                 "Start a process in the admitted execution environment and return its durable operation handle."
@@ -429,7 +429,7 @@ enum ResourceOperation {
         source_run_id: String,
         lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
         process_id: String,
-        read: Option<(u64, Option<u64>)>,
+        read: Option<crate::process::text::ReadPage>,
     },
     ProcessInspect(ProcessInspectArgs),
     ProcessRead(ProcessReadArgs),
@@ -619,11 +619,8 @@ impl ResourceOperation {
                 process_id, read, ..
             } => {
                 let mut params = json!({"workspaceId":binding.workspace_id,"processId":process_id});
-                if let Some((cursor, limit)) = read {
-                    params["cursor"] = json!(cursor);
-                    if let Some(limit) = limit {
-                        params["maxBytes"] = json!(limit);
-                    }
+                if let Some(read) = read {
+                    params.as_object_mut().expect("read params").extend(serde_json::to_value(read).expect("read options").as_object().unwrap().iter().filter(|(_,value)|!value.is_null()).map(|(key,value)|(key.clone(),value.clone())));
                 }
                 (
                     if read.is_some() {
@@ -727,10 +724,11 @@ impl ResourceOperation {
                 json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"rootId":binding.root_id}),
             ),
             Self::ProcessRead(args) => {
-                let mut params = json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"rootId":binding.root_id,"cursor":args.cursor});
+                let mut params = json!({"workspaceId":binding.workspace_id,"processId":args.process_id,"rootId":binding.root_id,"cursor":args.cursor,"mode":args.mode});
                 if let Some(limit) = args.max_bytes {
                     params["maxBytes"] = json!(limit);
                 }
+                if let Some(encoding)=&args.encoding { params["encoding"]=json!(encoding); }
                 ("process.read", params)
             }
             Self::ProcessWrite(_) | Self::ProcessResize(_) => {
@@ -1013,7 +1011,7 @@ impl KernelResourceClient {
         process_id: &str,
         source_run_id: &str,
         lineage: Option<varin_runtime::catalog::process_wait::ProcessResultLineage>,
-        read: Option<(u64, Option<u64>)>,
+        read: Option<crate::process::text::ReadPage>,
         authorize_only: bool,
         cancel: &CancellationToken,
     ) -> Result<Value, ExecutionError> {
@@ -1897,20 +1895,29 @@ impl KernelToolExecutor {
             } else if arguments.get("shell").is_some() {
                 return Err(ExecutionError::new("invalid_tool_arguments", "shell requires shellCommand; command and args starts a program directly"));
             }
-            if inherit && self.binding.remote_authority.is_none() {
-                if let Some(environment)=&self.binding.execution_environment {
-                    let mut env=std::env::vars().filter(|(key,_)|if cfg!(windows) {!key.eq_ignore_ascii_case("path")} else {key!="PATH"})
-                        .map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>();
-                    let inherited=std::env::var("PATH").unwrap_or_default();
-                    let current=environment.search_path.as_deref().unwrap_or(&inherited);
-                    let extra=selected_shell.as_ref().map(|shell|shell.path.as_slice()).unwrap_or(&[]);
-                    let path=std::env::join_paths(std::env::split_paths(current).chain(extra.iter().map(std::path::PathBuf::from)))
-                        .map_err(|error|ExecutionError::new("environment_encoding",error.to_string()))?;
-                    env.push(json!({"name":"PATH","value":path.to_string_lossy()}));
-                    arguments["env"]=json!(env);
+            if inherit && selected_shell.is_none() {
+                if let Some(shell)=self.binding.execution_environment.as_ref().and_then(|environment| {
+                    environment.program_shell(arguments["command"].as_str()?)
+                }) {
+                    arguments["command"]=json!(shell.executable);
+                    selected_shell=Some(shell.clone());
                 }
             }
+            if inherit && self.binding.remote_authority.is_none() {
+                let environment=self.binding.execution_environment.as_ref();
+                let mut env=std::env::vars().filter(|(key,_)|if cfg!(windows) {!key.eq_ignore_ascii_case("path")} else {key!="PATH"})
+                    .map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>();
+                let inherited=std::env::var("PATH").unwrap_or_default();
+                let current=environment.and_then(|environment|environment.search_path.as_deref()).unwrap_or(&inherited);
+                let extra=selected_shell.as_ref().or_else(||environment.and_then(|environment|environment.shells.iter().find(|shell|Some(&shell.id)==environment.default_shell.as_ref())))
+                    .map(|shell|shell.path.as_slice()).unwrap_or(&[]);
+                let path=std::env::join_paths(std::env::split_paths(current).chain(extra.iter().map(std::path::PathBuf::from)))
+                    .map_err(|error|ExecutionError::new("environment_encoding",error.to_string()))?;
+                env.push(json!({"name":"PATH","value":path.to_string_lossy()}));
+                arguments["env"]=json!(env);
+            }
         }
+
         let mut operation = ResourceOperation::parse(kind, &arguments)?;
         if let ResourceOperation::ProcessSpawn(args) = &mut operation { args.shell=selected_shell; }
         if let ResourceOperation::FileQuery(args) = &mut operation {
@@ -2495,7 +2502,7 @@ impl KernelToolExecutor {
                             let _ = receiver.recv_timeout(std::time::Duration::from_millis(args.wait_ms));
                         }
                         match self.resources.observe_process(&self.binding,context,&context.operation_id,&context.run_id,None,
-                            Some((0,args.max_output_bytes)),false,&CancellationToken::default()) {
+                            Some(crate::process::text::ReadPage {cursor:0,max_bytes:args.max_output_bytes,mode:crate::process::text::Mode::Text,encoding:args.output_encoding.clone()}),false,&CancellationToken::default()) {
                             Ok(mut output) => {
                                 crate::process::text::project(&mut output, &crate::process::text::Mode::Text, args.output_encoding.as_deref());
                                 if let Some(current) = output["process"].as_object() {
@@ -2768,7 +2775,7 @@ fn tool_schema(kind: ToolKind) -> Value {
         ToolKind::FileRead => return read::schema(),
         ToolKind::ProcessInspect => (json!({"processId":{"type":"string"}}), vec!["processId"]),
         ToolKind::ProcessRead => (
-            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0},"maxBytes":{"type":"integer","minimum":1},
+            json!({"processId":{"type":"string"},"cursor":{"type":"integer","minimum":0,"description":"Original byte offset. Text may include the character crossing this position and reports actualCursor."},"maxBytes":{"type":"integer","minimum":1,"description":"Byte page target. Text pages end at a complete character; a tiny target returns at least one complete character."},
                 "mode":{"type":"string","enum":["text","raw"],"default":"text","description":"text decodes readable output and removes ANSI controls; raw returns exact base64 bytes. Byte cursors always refer to the original output."},
                 "encoding":{"type":"string","description":"Text encoding override, such as utf-8, gbk, shift_jis or utf-16le. Auto uses BOM/UTF-8, then the actual Windows source Host's codepage hint."}}),
             vec!["processId", "cursor"],
@@ -3630,7 +3637,7 @@ impl ResourceOperation {
                 source_run_id: source_run_id.clone(),
                 lineage: lineage.clone(),
                 process_id: process_id.clone(),
-                read: *read,
+                read: read.clone(),
             },
             Self::ReconcileMutation { mutation, executor } => A::ReconcileMutation {
                 mutation: mutation.clone(),
