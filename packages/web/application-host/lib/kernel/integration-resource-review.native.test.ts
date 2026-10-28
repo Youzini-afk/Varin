@@ -107,8 +107,11 @@ it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result 
     expect(await fs.readFile(path.join(workspace, 'old-dir', 'leaf.txt'), 'utf8')).toBe('original directory child\n');
     expect((await native.recovery.getOperation(parent.workspaceId, 'git-integration-stale'))?.state).toBe('aborted');
     await fs.writeFile(path.join(workspace, 'node'), 'original parent file\n');
+    // Restoring bytes is another parent change, including its native metadata.
+    const restoredPreview = await coordinator.previewResult(input);
+    expect(restoredPreview.mergeReady).toBe(true);
     stage = 'apply published result';
-    const applied = await coordinator.mergeResult({ ...input, expectedBindingFingerprint: preview.bindingFingerprint });
+    const applied = await coordinator.mergeResult({ ...input, expectedBindingFingerprint: restoredPreview.bindingFingerprint });
     expect(applied.status).toBe('applied');
     expect(await fs.readFile(path.join(workspace, 'node', 'child.txt'), 'utf8')).toBe('fixed child content\n');
     expect(await fs.readFile(path.join(workspace, 'old-dir'), 'utf8')).toBe('fixed replacement file\n');

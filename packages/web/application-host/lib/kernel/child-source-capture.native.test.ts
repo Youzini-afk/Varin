@@ -67,6 +67,8 @@ it('shares one active native capture, drains cancellation independently, and obs
       expect(state?.kind === 'regular-file' ? (await store.getObject(state.objectHash))?.toString() : null).toBe('modified');
       expect(states!['added.txt']?.kind).toBe('regular-file');
     });
+    const retainedHealth = await native.client.health();
+    expect(retainedHealth.temporaryObjectOwners).toBe(0);
     const stopping = gate(), drain = gate(), lastEntered = gate();
     const cancelledCapture = createChildPhysicalCapture(native.client, native.adapter, { documents,
       inspectInventory: async (_directory, signal) => {
@@ -85,7 +87,19 @@ it('shares one active native capture, drains cancellation independently, and obs
     await stopping.promise;
     expect(settled).toBe(false);
     drain.release(); await cancelled;
-    expect(await native.client.health()).toMatchObject({ temporaryObjectOwners: 0, branches: 2 });
+    // Count all owned branches, including native metadata companions, without
+    // assuming how many implementation branches each retained source needs.
+    expect(await native.client.health()).toMatchObject({
+      temporaryObjectOwners: retainedHealth.temporaryObjectOwners, branches: retainedHealth.branches,
+    });
+    await native.workingStates.withBranchStore(workspaceId, 'inspect-cancelled-capture', async store => {
+      expect(await store.getBranchRoot('child-source:last')).toBeNull();
+      for (const [branch, expected] of [['b', 'original'], ['c', 'modified']] as const) {
+        const states = await store.readStateSlice(`child-source:${branch}`, ['body.txt'], { revision: 0 });
+        const state = states?.['body.txt'];
+        expect(state?.kind === 'regular-file' ? (await store.getObject(state.objectHash))?.toString() : null).toBe(expected);
+      }
+    });
     await native.client.revokeGrant(registration.grantId);
   } finally {
     await native.dispose(); await documents.dispose(); await fs.rm(root, { recursive: true, force: true });
