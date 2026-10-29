@@ -1,0 +1,101 @@
+{
+  "version": 2,
+  "status": "frozen internal production anchors; not product replacement",
+  "canvas": [
+    512,
+    512
+  ],
+  "normalization": "full1254 square viewport resized to512; never bbox fit",
+  "identityRaw": {
+    "path": "upright-open-anchor-v2-raw.png",
+    "sha256": "5155f30fc8a3806ddbd8d74d56ba89c67b2daab14b9d6fb3e2add49854e6135d"
+  },
+  "anchors": [
+    {
+      "path": "upright-open-neutral-v2.png",
+      "role": "open-neutral",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+      "status": "parent visual accepted"
+    },
+    {
+      "path": "closed-neutral-v1.png",
+      "role": "closed-neutral",
+      "sha256": "d263bfc23b10bbad1978df2eeeb0fac715b25478d3edf39b63c9fc2ee78c9de0",
+      "status": "parent visual accepted"
+    },
+    {
+      "path": "open-screen-read-v2.png",
+      "role": "open-screen-read",
+      "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+      "status": "parent visual accepted as base reading gaze; stronger reading acting uses separate new pose"
+    },
+    {
+      "path": "open-screen-gaze-v1.png",
+      "role": "side-glance",
+      "sha256": "cb588e1be065b85d8e0fc520a2ebebfb1f39617e486415dc43b1463a145ffc7f",
+      "status": "not screen-read; optional expression source"
+    }
+  ],
+  "landmarksApproximateNotMechanicalRig": {
+    "headTop": [
+      260,
+      4
+    ],
+    "chin": [
+      260,
+      181
+    ],
+    "throat": [
+      260,
+      190
+    ],
+    "leftPupilInImage": [
+      227,
+      145
+    ],
+    "rightPupilInImage": [
+      289,
+      141
+    ],
+    "openScreenCorners": [
+      [
+        110,
+        229
+      ],
+      [
+        218,
+        237
+      ],
+      [
+        240,
+        311
+      ],
+      [
+        138,
+        309
+      ]
+    ],
+    "lapBaseSupport": [
+      226,
+      326
+    ],
+    "seatPelvisSupport": [
+      316,
+      353
+    ],
+    "bootFloorY": 498
+  },
+  "motionRules": [
+    "Upright natural neck default; pitch and purposeful short tilt allowed for acting, no return to perpetual sideways roll.",
+    "New6 activity poses use this identity. Old source only motion reference, not spliceable artwork.",
+    "Never rotate old whole head or squash whole body to create a new pose. Actual new anatomy/contact regions require authored redraw.",
+    "Preserve unchanged regions; do not freeze areas which physically need to respond.",
+    "World stool and laptop retain same viewport/geometry unless intentional new perspective gets a matching contact sequence."
+  ],
+  "provenance": [
+    "alpha-cleanup.json",
+    "derived-anchor-provenance.json",
+    "screen-read-provenance.json"
+  ],
+  "sourceIdentity": "upright-open-anchor-v2-raw.png"
+}
