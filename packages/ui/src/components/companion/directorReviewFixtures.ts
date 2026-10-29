@@ -2,7 +2,7 @@ import type { ThreadAttentionBranch, ThreadAttentionItem, ThreadAttentionSnapsho
 import { CompanionDirector } from './directorPresentation';
 import { DirectorPortfolioProjector } from './directorPortfolio';
 
-/** Explicit offline review data. These identities must never be used for Host navigation or writes. */
+/** Explicit offline coordination choreography review, NOT evidence of a real Varin delegation route. These identities must never be used for Host navigation or writes. */
 export type DirectorReviewStep = 'portfolio' | 'team-active' | 'a-child-ended' | 'b-intake' | 'b-result' | 'requests' | 'b-resolved' | 'unknown' | 'reconnected';
 export interface DirectorReviewViewOptions {
   visible?: boolean;
@@ -71,7 +71,7 @@ export function createDirectorReviewFixtureSession() {
     options = nextOptions;
     const presentation = director.observe(attention, health,
       options.inspected === undefined ? identity('a') : options.inspected,
-      { visible: options.visible ?? true, interacting: options.interacting ?? false, cardCapacity: 3 });
+      { visible: options.visible ?? true, interacting: options.interacting ?? false, cardCapacity: 3, interactionRoute: 'coordination-review' });
     return { reviewOnly: true as const, attention, presentation,
       projection: mapper.project(presentation, attention, 1, [], { hideTaskNames: options.hideTaskNames }) };
   };

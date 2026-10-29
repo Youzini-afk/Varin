@@ -1,3 +1,4 @@
+import { useCompanionProductMode } from '@/components/companion/useCompanionProductMode';
 import { companionDirectorMode } from '@/components/companion/directorMode';
 import { createDirectorReviewFixtureSession, type DirectorReviewStep } from '@/components/companion/directorReviewFixtures';
 import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
@@ -42,6 +43,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [finishedDirectorSentence, setFinishedDirectorSentence] = React.useState<string | null>(null);
   const generation = React.useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeEndpointGeneration, getRuntimeEndpointGeneration);
   const attention = useCompanionAttention(apis.threads, generation);
+  const productMode = useCompanionProductMode(apis.extensions, generation);
   const teamProjector = React.useRef(new CompanionChildTeam());
   const [attentionOpen, setAttentionOpen] = React.useState(false);
   const [threads, setThreads] = React.useState<ThreadSummary[]>([]);
@@ -86,7 +88,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [presentation, setPresentation] = React.useState('C01');
   const [reviewRoute, setReviewRoute] = React.useState(false);
   const [controlsOpen, setControlsOpen] = React.useState(false);
-  const [directorLocal, setDirectorLocal] = React.useState<{ action: 'tap-response' | 'hover-response' | 'director-open-attention'; context: string; event: 'tap' | 'hover' } | null>(null);
+  const [directorLocal, setDirectorLocal] = React.useState<{ action: NonNullable<ReturnType<typeof directorLocalResponse>>; context: string; event: 'tap' | 'hover' } | null>(null);
   const discardDirectorTransient = React.useRef<() => void>(() => {});
   const [localAction, setLocalAction] = React.useState<'welcome' | 'tap-response' | 'hover-response' | null>(review ? null : 'welcome');
   const progressFacts = React.useRef(new CompanionProgressFacts());
@@ -161,7 +163,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     return () => document.removeEventListener('visibilitychange', visibility);
   }, [attention.refresh]);
   const liveDirector = useCompanionDirector(directorMode && !fixtureActive ? attention : { ...attention, snapshot: null, health: 'unknown' }, selected?.generation === generation ? selected.identity : null, generation,
-    { visible: directorMode && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3 });
+    { visible: directorMode && !document.hidden, interacting: companionWindow.phase !== 'rest', cardCapacity: 3, interactionRoute: productMode });
   const directorDetail = directorToolDetail(snapshot, health);
   const livePortfolio = useDirectorPortfolio(liveDirector, directorMode && !fixtureActive ? attention.snapshot : null, generation, directorMode && !fixtureActive && directorDetail ? [directorDetail] : [], { hideTaskNames });
   const fixtureView = fixtureActive ? fixtureSession.view({ visible: !document.hidden, interacting: companionWindow.phase !== 'rest', inspected: fixtureInspection, hideTaskNames }) : null;
@@ -172,7 +174,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const rawScene = sceneForIntent(sceneFact, intent.state);
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation)
     : stableIntent.state !== intent.state && rawScene.phase === 'active' ? { kind: null, phase: 'withdraw', outcome: null, count: null } as SceneFact : rawScene;
-  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
+  const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
   const directorLayout = useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null);
   const restDue = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision);
@@ -513,9 +515,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     {review && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
       <label><input type="checkbox" checked={directorReview} onChange={event => setDirectorEnabled(event.target.checked)} />主管候选（独立资源，仅开发审阅）</label>
       {directorReview && <>
-        <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">离线演示 fixture · 非真实任务</option></select></label>
+        <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">Bot统筹演示 fixture · 非真实任务</option></select></label>
         {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A/C各自主队与子队</option><option value="a-child-ended">A子队结束 · C子队仍执行</option><option value="b-intake">B新项目接收→交负责人</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option></select></label>}
-        <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '离线示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
+        <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '显式Bot协调示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
       </>}
     </section>}
     <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReview ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
@@ -528,8 +530,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       <div>{portfolioProjection.legend.map(item => <button key={item.key} onClick={() => { if (fixtureActive) { setFixtureInspection(item.identity); setFinishedDirectorSentence(null); refreshFixture(); } else setSelected({ generation, identity: item.identity }); }}>{item.label} · {item.title || 'Untitled task'}</button>)}</div>
       {!assetList.some(item => item.action === 'director-supervise') && <p>Load the explicit complete director candidate bundle to review management performances. No old tool-action fallback is used.</p>}
     </section>}
-    {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary directorMode={directorMode} onClearInspection={() => setSelected(null)} attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
-    {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel directorMode={directorMode} onClearInspection={() => { setSelected(null); setAttentionOpen(false); }} attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
+    {!review && <section style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => setSelected(null)} attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
+    {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => { setSelected(null); setAttentionOpen(false); }} attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
     {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
     {review && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>

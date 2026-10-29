@@ -1,5 +1,7 @@
 export const companionAttentionEn = {
   'companion.director.overview': 'Portfolio overview',
+  'companion.director.taskOverview': 'Task overview',
+  'companion.director.taskReminders': 'Task reminders',
   'companion.director.inspection': 'Inspecting project: {title}',
   'companion.director.clearInspection': 'Return to overview',
   'companion.director.inspect': 'Inspect project',
@@ -67,6 +69,8 @@ export const companionAttentionEn = {
 } as const;
 export const companionAttentionZh: Record<keyof typeof companionAttentionEn, string> = {
   'companion.director.overview': '主管总览',
+  'companion.director.taskOverview': '任务总览',
+  'companion.director.taskReminders': '任务提醒',
   'companion.director.inspection': '正在检查项目：{title}',
   'companion.director.clearInspection': '返回总览',
   'companion.director.inspect': '检查项目',

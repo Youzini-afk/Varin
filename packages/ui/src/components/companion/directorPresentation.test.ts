@@ -2,7 +2,7 @@ import { expect, it } from 'vitest';
 import type { ThreadAttentionBranch, ThreadAttentionItem, ThreadAttentionSnapshot, ThreadIdentity } from '@varin/application-client';
 import { CompanionDirector } from './directorPresentation';
 import { agentAvatarForIdentity } from '@varin/protocol';
-const options={visible:true,interacting:false,cardCapacity:3};
+const options={visible:true,interacting:false,cardCapacity:3,interactionRoute:'coordination-review' as const};
 const id=(threadId:string):ThreadIdentity=>({runtime:'agent',threadId,branchId:`branch-${threadId}`});
 function branch(threadId:string,state:NonNullable<ThreadAttentionBranch['currentRun']>['state']='executing',runId=`run-${threadId}`):ThreadAttentionBranch {
  const run={id:runId,state,revision:1,cancelRequested:false};
@@ -73,4 +73,35 @@ it('labels a failed or cancelled round as that outcome, never a successful proje
   expect(result.body.edge).toMatchObject({kind:'receive-result',outcome:state,workRemains:true});
   expect(result.cards[0]?.status).toBe('settling');
  }
+});
+
+it('defaults to unknown without invented coordination: new accepted runs and inspection do not invent Varin coordination',()=>{
+ const director=new CompanionDirector(),normal={visible:true,interacting:false,cardCapacity:3};
+ director.observe(facts([branch('A')]),'current',null,normal);
+ const frame=director.observe(facts([branch('A'),branch('B','accepted')]),'current',id('B'),normal);
+ expect(frame.interactionRoute).toBe('unknown');expect(frame.body.verb).toBe('review-portfolio');expect(frame.body.edge).toBeNull();
+ expect(frame.inspection?.identity).toEqual(id('B'));
+ const notified=director.observe(facts([branch('A'),branch('B','completed')]),'current',id('A'),normal);
+ expect(notified.body.verb).toBe('notify-result');expect(notified.body.subject).toEqual(id('B'));expect(notified.body.edge?.runId).toBe('run-B');
+});
+it('agent-companion notifies exact requests and exceptions; consuming a visual edge cannot resolve them',()=>{
+ const director=new CompanionDirector(),normal={visible:true,interacting:false,cardCapacity:3,interactionRoute:'agent-companion' as const};
+ const data=facts([branch('A'),branch('B')],[request('B')]);
+ const before=director.observe(data,'current',id('A'),normal);
+ expect(before.body.verb).toBe('notify-attention');expect(before.body.attentionOwner).toEqual(id('B'));
+ director.consumeEdge('not-a-request');
+ expect(director.observe(data,'current',id('B'),normal).counts?.actionRequired).toBe(1);
+ const failure={...request('A'),key:'failure',kind:'run_failed' as const,actionable:false};
+ const after=director.observe(facts([branch('A','failed')],[failure]),'current',null,normal);
+ expect(after.body.verb).toBe('notify-attention');expect(after.body.attentionItem?.kind).toBe('run_failed');expect(after.counts?.actionRequired).toBe(0);
+});
+
+it('preserves explicit Bot coordination while mode changes never replay past intake',()=>{
+ const director=new CompanionDirector(),bot={visible:true,interacting:false,cardCapacity:3,interactionRoute:'bot-coordinator' as const};
+ director.observe(facts([branch('A')]),'current',null,bot);
+ const incoming=facts([branch('A'),branch('B','accepted')]);
+ expect(director.observe(incoming,'current',null,bot).body.verb).toBe('receive-work');
+ const agent=director.observe(incoming,'current',id('B'),{...bot,interactionRoute:'agent-companion'});
+ expect(agent.body.edge).toBeNull();expect(agent.body.verb).toBe('review-portfolio');
+ expect(director.observe(incoming,'current',null,bot).body.edge).toBeNull();
 });

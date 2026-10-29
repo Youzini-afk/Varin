@@ -3,6 +3,7 @@ import type { ThreadAttentionItem, ThreadIdentity } from '@varin/application-cli
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { AgentAvatar } from '@/components/ui/AgentAvatar';
 import type { CompanionAttentionView } from './attentionCoordinator';
+import type { DirectorInteractionRoute } from './directorPresentation';
 import { CompanionAttentionLedger } from './attentionLedger';
 
 const kindKey = (kind: ThreadAttentionItem['kind']) => `companion.attention.${kind}` as I18nKey;
@@ -12,12 +13,13 @@ const PAGE_SIZE = 20; // Rendering budget, never a limit on tasks or requests.
 const buttonStyle: React.CSSProperties = { border: '1px solid #b9c8c6', borderRadius: 7, padding: '4px 7px', background: '#f2f5f4', color: '#253c3a', cursor: 'pointer' };
 
 /** This is an explicit interactive surface, never the click-through ornament window. */
-export function CompanionAttentionPanel({ attention, identity, focusTitle, onFocus, onOpenThread, onClose, onRefresh, directorMode = false, onClearInspection }: {
+export function CompanionAttentionPanel({ attention, identity, focusTitle, onFocus, onOpenThread, onClose, onRefresh, directorMode = false, onClearInspection, interactionRoute }: {
   attention: CompanionAttentionView; identity: ThreadIdentity | null; focusTitle?: string;
   onFocus(identity: ThreadIdentity): void; onOpenThread(identity: ThreadIdentity): void;
-  onClose(): void; onRefresh(): void; directorMode?: boolean; onClearInspection?(): void;
+  onClose(): void; onRefresh(): void; directorMode?: boolean; onClearInspection?(): void; interactionRoute?: DirectorInteractionRoute;
 }) {
   const { t } = useI18n();
+  const companionRole = directorMode && (interactionRoute === 'agent-companion' || interactionRoute === 'unknown');
   const close = useRef<HTMLButtonElement>(null);
   const ledger = useRef(new CompanionAttentionLedger());
   const [, redraw] = useState(0);
@@ -40,12 +42,12 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
     return rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   };
   const groups = [items.filter(item => item.actionable), items.filter(item => !item.actionable)];
-  return <section role="region" aria-label={t('companion.attention.title')} onKeyDown={event => {
+  return <section role="region" aria-label={t(companionRole ? 'companion.director.taskReminders' : 'companion.attention.title')} onKeyDown={event => {
     if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
   }} style={{ color: '#253c3a', background: '#fafcf9f5', border: '1px solid #b9c8c6', borderRadius: 12, padding: 12, fontSize: 12 }}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{t('companion.attention.title')}</strong>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{t(companionRole ? 'companion.director.taskReminders' : 'companion.attention.title')}</strong>
       <button ref={close} style={buttonStyle} onClick={onClose} aria-label={t('companion.attention.close')}>×</button></div>
-    <p>{identity ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? 'companion.director.overview' : 'companion.attention.noFocus')}</p>
+    <p>{identity ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? companionRole ? 'companion.director.taskOverview' : 'companion.director.overview' : 'companion.attention.noFocus')}</p>
     {directorMode && identity && onClearInspection && <button style={buttonStyle} onClick={onClearInspection}>{t('companion.director.clearInspection')}</button>}
     <p>{t('companion.attention.scope')}</p>
     {attention.health !== 'current' && <p role="status">{t(attention.health === 'unknown' ? 'companion.attention.stale' : 'companion.attention.sync')}</p>}
@@ -89,10 +91,11 @@ export function CompanionAttentionPanel({ attention, identity, focusTitle, onFoc
 }
 
 /** Small readable cue. No global idle/completion claim; no per-token live announcements. */
-export function CompanionAttentionSummary({ attention, focusTitle, focused, focusStatus, onInspect, directorMode = false, onClearInspection }: {
-  attention: CompanionAttentionView; focusTitle?: string; focused: boolean; focusStatus: string; onInspect(): void; directorMode?: boolean; onClearInspection?(): void;
+export function CompanionAttentionSummary({ attention, focusTitle, focused, focusStatus, onInspect, directorMode = false, onClearInspection, interactionRoute }: {
+  attention: CompanionAttentionView; focusTitle?: string; focused: boolean; focusStatus: string; onInspect(): void; directorMode?: boolean; onClearInspection?(): void; interactionRoute?: DirectorInteractionRoute;
 }) {
   const { t } = useI18n();
+  const companionRole = directorMode && (interactionRoute === 'agent-companion' || interactionRoute === 'unknown');
   const snapshot = attention.snapshot;
   const attentionText = attention.health !== 'current' ? t(attention.health === 'unknown' ? 'companion.attention.stale' : 'companion.attention.sync')
     : snapshot?.counts.actionRequired ? t('companion.attention.needsYou', { count: snapshot.counts.actionRequired, tasks: snapshot.counts.affectedBranches })
@@ -100,7 +103,7 @@ export function CompanionAttentionSummary({ attention, focusTitle, focused, focu
   const first = snapshot?.items.find(item => item.actionable) ?? snapshot?.items.find(item => item.kind === 'effect_unknown') ?? snapshot?.items[0];
   const branch = first && snapshot?.branches.find(row => same(row, first));
   return <div style={{ textAlign: 'center', maxWidth: '100%', fontSize: 12 }}>
-    <div title={focusTitle} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{focused ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? 'companion.director.overview' : 'companion.attention.noFocus')}</div>
+    <div title={focusTitle} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{focused ? t(directorMode ? 'companion.director.inspection' : 'companion.attention.focus', { title: focusTitle || t('companion.attention.untitled') }) : t(directorMode ? companionRole ? 'companion.director.taskOverview' : 'companion.director.overview' : 'companion.attention.noFocus')}</div>
     {focused && <div>{directorMode ? t('companion.director.projectStatus', { status: focusStatus }) : focusStatus}</div>}
     <div role="status" aria-live="polite" aria-atomic="true">{attentionText}{first && attention.health === 'current' ? ` · ${branch?.title || t('companion.attention.untitled')}: ${t(kindKey(first.kind))}` : ''}</div>
     <button style={buttonStyle} onClick={onInspect}>{t('companion.attention.check')}</button>

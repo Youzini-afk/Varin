@@ -70,3 +70,16 @@ it('director summary is portfolio-aware without inspection and attributes tool s
  act(()=>root.render(<CompanionAttentionSummary directorMode attention={attention} focused focusTitle="Task A" focusStatus="Reading" onInspect={()=>{}}/>));
  expect(document.body.textContent).toContain('Project execution: Reading');expect(document.body.textContent).toContain('Inspecting project: Task A');
 });
+
+it('uses companion task reminders for Agent/unknown and preserves explicit Bot coordination labels', () => {
+ const root=environment();const attention={snapshot:facts,health:'current' as const,refreshing:false,observationRevision:0};
+ for(const interactionRoute of ['agent-companion','unknown'] as const) {
+  act(()=>root.render(<CompanionAttentionPanel directorMode interactionRoute={interactionRoute} attention={attention} identity={null} onFocus={()=>{}} onOpenThread={()=>{}} onClose={()=>{}} onRefresh={()=>{}}/>));
+  expect(document.querySelector('[role="region"]')?.getAttribute('aria-label')).toBe('Task reminders');
+  expect(document.body.textContent).toContain('Task overview');expect(document.body.textContent).not.toContain('Portfolio overview');
+  act(()=>root.render(<CompanionAttentionSummary directorMode interactionRoute={interactionRoute} attention={attention} focused={false} focusStatus="Reading" onInspect={()=>{}}/>));
+  expect(document.body.textContent).toContain('Task overview');
+ }
+ act(()=>root.render(<CompanionAttentionSummary directorMode interactionRoute="bot-coordinator" attention={attention} focused={false} focusStatus="" onInspect={()=>{}}/>));
+ expect(document.body.textContent).toContain('Portfolio overview');
+});

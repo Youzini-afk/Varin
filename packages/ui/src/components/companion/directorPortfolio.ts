@@ -106,8 +106,8 @@ export class DirectorPortfolioProjector {
     }
     const inspectedKey = view.inspectedProjectKey ? nativeKey.get(view.inspectedProjectKey) ?? null : null;
     const subjectKey = view.body.subject ? nativeKey.get(directorBranchKey(view.body.subject)) ?? null : null;
-    const mode: DesktopCompanionPortfolio['mode'] = !current ? 'overview' : view.body.verb === 'present-attention' ? 'attention'
-      : view.body.verb === 'receive-work' ? 'intake' : view.body.verb === 'receive-result' ? 'result'
+    const mode: DesktopCompanionPortfolio['mode'] = !current ? 'overview' : ['present-attention', 'notify-attention'].includes(view.body.verb) ? 'attention'
+      : view.body.verb === 'receive-work' ? 'intake' : ['receive-result', 'notify-result'].includes(view.body.verb) ? 'result'
         : inspectedKey ? 'inspection' : 'overview';
     const portfolio: DesktopCompanionPortfolio = { mode, projects, inspectedKey, subjectKey,
       overflowCards: current ? view.overflowCards + Math.max(0, cards.size - wanted.length) : null };
