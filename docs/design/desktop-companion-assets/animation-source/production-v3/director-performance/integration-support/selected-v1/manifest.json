@@ -1,0 +1,93 @@
+{
+  "status": "frozen author support candidate for relocation peer review",
+  "pathBase": "manifest directory",
+  "donor": "references/clean-donor.png",
+  "commonMask": "references/common-removal-mask.png",
+  "records": {
+    "gather-release-v1": {
+      "source": "../../frames/gather-release-v1.png",
+      "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+      "foregroundExclusion": "gather-release-v1-foreground-exclusion.png",
+      "cleanPatch": "gather-release-v1-clean-tail-patch.png",
+      "finalPatchMask": "gather-release-v1-patch-mask.png",
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "hiddenRaw": null,
+      "hiddenRawSHA256": null,
+      "ordinarySourceUnchanged": true,
+      "note": "each sleeve pose uses its own same-pose genuinely generated hidden surface; IN/user share identical lower anatomy; exact visible sleeve preserved",
+      "supportSHA256": {
+        "foregroundExclusion": "ef2a4c8949cdab1ef24e678bdb88cc276b1fd75e62066e47011c2ce53996efe6",
+        "cleanPatch": "e99f36fa4d7e47c65fb662aa62a78bd8cfdaa05e81f3bdc38b4f7c6e840c1f32",
+        "finalPatchMask": "ef2a4c8949cdab1ef24e678bdb88cc276b1fd75e62066e47011c2ce53996efe6"
+      }
+    },
+    "gather-out-v2": {
+      "source": "../../frames/gather-out-v2.png",
+      "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+      "foregroundExclusion": "gather-out-v2-foreground-exclusion.png",
+      "cleanPatch": "gather-out-v2-clean-tail-patch.png",
+      "finalPatchMask": "gather-out-v2-patch-mask.png",
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "hiddenRaw": "../../raw/gather-out-no-stool-donor-v1.png",
+      "hiddenRawSHA256": "c39fb1598e1b1240bf54719b3e668af880823a50bbb95f701a2b2c79eb929989",
+      "ordinarySourceUnchanged": true,
+      "note": "each sleeve pose uses its own same-pose genuinely generated hidden surface; IN/user share identical lower anatomy; exact visible sleeve preserved",
+      "supportSHA256": {
+        "foregroundExclusion": "bb9330a7a5b20b6fdce3f32b8a68053091822d3fa8f07e6e170e930c7b2c4e65",
+        "cleanPatch": "00eba5dbec0f4d09cf40cc8abde7ea5cf15518994e861a568d4ff31f10545875",
+        "finalPatchMask": "80b164af6c65521eb661d4128cea8e9a47d33a2eb2a31ff095f41de9a997ebb9"
+      }
+    },
+    "gather-sweep-mid-v2": {
+      "source": "../../frames/gather-sweep-mid-v2.png",
+      "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+      "foregroundExclusion": "gather-sweep-mid-v2-foreground-exclusion.png",
+      "cleanPatch": "gather-sweep-mid-v2-clean-tail-patch.png",
+      "finalPatchMask": "gather-sweep-mid-v2-patch-mask.png",
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "hiddenRaw": "../../raw/gather-sweep-no-stool-donor-v1.png",
+      "hiddenRawSHA256": "9ff32a13a3f3f42996339028ec1303ae25f363a9cf34924f5f1d7c340ea4c2dc",
+      "ordinarySourceUnchanged": true,
+      "note": "each sleeve pose uses its own same-pose genuinely generated hidden surface; IN/user share identical lower anatomy; exact visible sleeve preserved",
+      "supportSHA256": {
+        "foregroundExclusion": "46d193251d1113a4c5c56c41cb2c22549d91adbd2b20b7e75859f2b40973eef2",
+        "cleanPatch": "fdfa00eb895b01532a5be0a23f3e5d623f4fb7d6375c2782c115a6b2e006d40a",
+        "finalPatchMask": "80b164af6c65521eb661d4128cea8e9a47d33a2eb2a31ff095f41de9a997ebb9"
+      }
+    },
+    "gather-in-v1": {
+      "source": "../../frames/gather-in-v1.png",
+      "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+      "foregroundExclusion": "gather-in-v1-foreground-exclusion.png",
+      "cleanPatch": "gather-in-v1-clean-tail-patch.png",
+      "finalPatchMask": "gather-in-v1-patch-mask.png",
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "hiddenRaw": "../../raw/gather-in-no-stool-donor-v1.png",
+      "hiddenRawSHA256": "4975e218a460eb6ab839306a26b2b0ce006422b1d503101b4fb57eb75b2695b9",
+      "ordinarySourceUnchanged": true,
+      "note": "each sleeve pose uses its own same-pose genuinely generated hidden surface; IN/user share identical lower anatomy; exact visible sleeve preserved",
+      "supportSHA256": {
+        "foregroundExclusion": "ef2a4c8949cdab1ef24e678bdb88cc276b1fd75e62066e47011c2ce53996efe6",
+        "cleanPatch": "fba773bd2ef84b95050ebffe80389d6c637188a6e130bffe1f8775b9147a918c",
+        "finalPatchMask": "80b164af6c65521eb661d4128cea8e9a47d33a2eb2a31ff095f41de9a997ebb9"
+      }
+    },
+    "gather-user-v1": {
+      "source": "../../frames/gather-user-v1.png",
+      "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+      "foregroundExclusion": "gather-user-v1-foreground-exclusion.png",
+      "cleanPatch": "gather-user-v1-clean-tail-patch.png",
+      "finalPatchMask": "gather-user-v1-patch-mask.png",
+      "order": "common*(1-foregroundExclusion/255) donor composite, then cleanPatch via finalPatchMask",
+      "hiddenRaw": "../../raw/gather-in-no-stool-donor-v1.png",
+      "hiddenRawSHA256": "4975e218a460eb6ab839306a26b2b0ce006422b1d503101b4fb57eb75b2695b9",
+      "ordinarySourceUnchanged": true,
+      "note": "each sleeve pose uses its own same-pose genuinely generated hidden surface; IN/user share identical lower anatomy; exact visible sleeve preserved",
+      "supportSHA256": {
+        "foregroundExclusion": "ef2a4c8949cdab1ef24e678bdb88cc276b1fd75e62066e47011c2ce53996efe6",
+        "cleanPatch": "b8535755bf5ee61161b558996cceddf7e6e69a45c923c595cad724be5e7bc1aa",
+        "finalPatchMask": "80b164af6c65521eb661d4128cea8e9a47d33a2eb2a31ff095f41de9a997ebb9"
+      }
+    }
+  }
+}

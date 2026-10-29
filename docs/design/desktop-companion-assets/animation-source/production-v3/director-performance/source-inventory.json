@@ -1,0 +1,43 @@
+{
+  "status": "candidate source closure frozen for parent scene review",
+  "runtimeSources": [
+    {
+      "source": "frames/listen-turn-reuse-v2.png",
+      "sha256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442"
+    },
+    {
+      "source": "frames/listen-lean-v2.png",
+      "sha256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40"
+    },
+    {
+      "source": "frames/listen-left-turn-reuse-v1.png",
+      "sha256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7"
+    },
+    {
+      "source": "frames/listen-left-lean-v1.png",
+      "sha256": "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3"
+    },
+    {
+      "source": "frames/gather-release-v1.png",
+      "sha256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669"
+    },
+    {
+      "source": "frames/gather-sweep-mid-v2.png",
+      "sha256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde"
+    },
+    {
+      "source": "frames/gather-out-v2.png",
+      "sha256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d"
+    },
+    {
+      "source": "frames/gather-in-v1.png",
+      "sha256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf"
+    },
+    {
+      "source": "frames/gather-user-v1.png",
+      "sha256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20"
+    }
+  ],
+  "manifestSHA256": "36457ca2475cf64b3ba52a0d2fc2e374bc2a778815015d2dab3806d1296daf09",
+  "previewNote": "MP4 is 30fps review encoding of exact exposure GIF; runtime uses manifest durations, no required global fps."
+}

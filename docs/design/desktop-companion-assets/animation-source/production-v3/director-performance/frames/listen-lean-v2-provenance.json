@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/listen-rest.png",
+  "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+  "raw": "raw/listen-lean-v2.png",
+  "rawSHA256": "ba0ed595d9f9523a8042d3d34392e727a011cc041b4080c5d2d1d3afbcc99bf4",
+  "prompt": "prompts/listen-lean-v2.txt",
+  "output": "frames/listen-lean-v2.png",
+  "sha256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40",
+  "mask": "masks/listen-lean-v2.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "checks": [
+    {
+      "source": "gather-release-v1",
+      "allFourOutputHashesEqual": true,
+      "supportHashesVerified": true
+    },
+    {
+      "source": "gather-out-v2",
+      "allFourOutputHashesEqual": true,
+      "supportHashesVerified": true
+    },
+    {
+      "source": "gather-sweep-mid-v2",
+      "allFourOutputHashesEqual": true,
+      "supportHashesVerified": true
+    },
+    {
+      "source": "gather-in-v1",
+      "allFourOutputHashesEqual": true,
+      "supportHashesVerified": true
+    },
+    {
+      "source": "gather-user-v1",
+      "allFourOutputHashesEqual": true,
+      "supportHashesVerified": true
+    }
+  ],
+  "sameManifest": true,
+  "ordinarySourceHashesUnchanged": true
+}

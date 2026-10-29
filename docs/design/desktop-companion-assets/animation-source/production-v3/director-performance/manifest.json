@@ -1,0 +1,607 @@
+{
+  "status": "authored director candidate; parent/runtime full-sequence review pending",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "pathBase": ".",
+  "runtimeSourceNames": [
+    "listen-turn-reuse-v2",
+    "listen-lean-v2",
+    "listen-left-turn-reuse-v1",
+    "listen-left-lean-v1",
+    "gather-release-v1",
+    "gather-sweep-mid-v2",
+    "gather-out-v2",
+    "gather-in-v1",
+    "gather-user-v1"
+  ],
+  "actions": {
+    "director-listen-right": {
+      "publicAction": "director-listen",
+      "targetSide": "right",
+      "entryPose": "upright-v2:listen",
+      "exitPose": "upright-v2:listen",
+      "entrySource": "references/listen-rest.png",
+      "exitSource": "references/listen-rest.png",
+      "wholeSequenceLoop": false,
+      "frames": [
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "enter",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/listen-turn-reuse-v2.png",
+          "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+          "pose": "upright-v2:director:listen-turn-reuse-v2",
+          "durationMs": 160,
+          "cue": "ATTEND_LEAD",
+          "phase": "enter",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/listen-lean-v2.png",
+          "sourceSHA256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40",
+          "pose": "upright-v2:director:listen-lean-v2",
+          "durationMs": 650,
+          "cue": "LISTEN",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/listen-turn-reuse-v2.png",
+          "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+          "pose": "upright-v2:director:listen-turn-reuse-v2",
+          "durationMs": 180,
+          "cue": "RELEASE",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 900,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "sustain": "After the one-shot attentive lean, hold exact listen-rest; do not loop head lean or alternate sides. Matching listen-rest blink may be reused from existing package."
+    },
+    "director-listen-left": {
+      "publicAction": "director-listen",
+      "targetSide": "left",
+      "entryPose": "upright-v2:listen",
+      "exitPose": "upright-v2:listen",
+      "entrySource": "references/listen-rest.png",
+      "exitSource": "references/listen-rest.png",
+      "wholeSequenceLoop": false,
+      "frames": [
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "enter",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/listen-left-turn-reuse-v1.png",
+          "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+          "pose": "upright-v2:director:listen-left-turn-reuse-v1",
+          "durationMs": 160,
+          "cue": "ATTEND_LEAD",
+          "phase": "enter",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/listen-left-lean-v1.png",
+          "sourceSHA256": "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3",
+          "pose": "upright-v2:director:listen-left-lean-v1",
+          "durationMs": 650,
+          "cue": "LISTEN",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/listen-left-turn-reuse-v1.png",
+          "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+          "pose": "upright-v2:director:listen-left-turn-reuse-v1",
+          "durationMs": 180,
+          "cue": "RELEASE",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 900,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "sustain": "After the one-shot attentive lean, hold exact listen-rest; do not loop head lean or alternate sides. Matching listen-rest blink may be reused from existing package."
+    },
+    "director-gather-present": {
+      "publicAction": "director-gather-present",
+      "targetSide": "fixed-laptop-summary",
+      "entryPose": "upright-v2:open-user",
+      "exitPose": "upright-v2:open-user",
+      "entrySource": "references/open-user.png",
+      "exitSource": "references/open-user.png",
+      "wholeSequenceLoop": false,
+      "frames": [
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 160,
+          "cue": "REST",
+          "phase": "enter",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 120,
+          "cue": "HAND_RELEASE",
+          "phase": "enter",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-sweep-mid-v2.png",
+          "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+          "pose": "upright-v2:director:gather-sweep-mid-v2",
+          "durationMs": 140,
+          "cue": "GATHER_PREPARE",
+          "phase": "enter",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-out-v2.png",
+          "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+          "pose": "upright-v2:director:gather-out-v2",
+          "durationMs": 180,
+          "cue": "GATHER_OUT",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-sweep-mid-v2.png",
+          "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+          "pose": "upright-v2:director:gather-sweep-mid-v2",
+          "durationMs": 120,
+          "cue": "GATHER_IN",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-in-v1.png",
+          "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+          "pose": "upright-v2:director:gather-in-v1",
+          "durationMs": 220,
+          "cue": "GATHER_IN",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-user-v1.png",
+          "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+          "pose": "upright-v2:director:gather-user-v1",
+          "durationMs": 260,
+          "cue": "ADDRESS_USER",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/offer-mid.png",
+          "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "pose": "upright-v2:director:offer-mid",
+          "durationMs": 130,
+          "cue": "PRESENT_PREPARE",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/offer.png",
+          "sourceSHA256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+          "pose": "upright-v2:director:offer",
+          "durationMs": 500,
+          "cue": "PRESENT",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/offer-mid.png",
+          "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "pose": "upright-v2:director:offer-mid",
+          "durationMs": 130,
+          "cue": "RELEASE",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 130,
+          "cue": "HAND_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 900,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "sustain": "Stable open-user after finite presentation; any unresolved item stays on its identified card/list. No repeated palm lifting timer."
+    }
+  },
+  "ordinaryRecoveryBySourceSHA": {
+    "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442": {
+      "actualSource": "frames/listen-turn-reuse-v2.png",
+      "actualPose": "upright-v2:director:listen-turn-reuse-v2",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:listen",
+      "frames": [
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40": {
+      "actualSource": "frames/listen-lean-v2.png",
+      "actualPose": "upright-v2:director:listen-lean-v2",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:listen",
+      "frames": [
+        {
+          "source": "frames/listen-turn-reuse-v2.png",
+          "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+          "pose": "upright-v2:director:listen-turn-reuse-v2",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7": {
+      "actualSource": "frames/listen-left-turn-reuse-v1.png",
+      "actualPose": "upright-v2:director:listen-left-turn-reuse-v1",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:listen",
+      "frames": [
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3": {
+      "actualSource": "frames/listen-left-lean-v1.png",
+      "actualPose": "upright-v2:director:listen-left-lean-v1",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:listen",
+      "frames": [
+        {
+          "source": "frames/listen-left-turn-reuse-v1.png",
+          "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+          "pose": "upright-v2:director:listen-left-turn-reuse-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/listen-rest.png",
+          "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "pose": "upright-v2:listen",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669": {
+      "actualSource": "frames/gather-release-v1.png",
+      "actualPose": "upright-v2:director:gather-release-v1",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde": {
+      "actualSource": "frames/gather-sweep-mid-v2.png",
+      "actualPose": "upright-v2:director:gather-sweep-mid-v2",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d": {
+      "actualSource": "frames/gather-out-v2.png",
+      "actualPose": "upright-v2:director:gather-out-v2",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "frames/gather-sweep-mid-v2.png",
+          "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+          "pose": "upright-v2:director:gather-sweep-mid-v2",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf": {
+      "actualSource": "frames/gather-in-v1.png",
+      "actualPose": "upright-v2:director:gather-in-v1",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "frames/gather-user-v1.png",
+          "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+          "pose": "upright-v2:director:gather-user-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20": {
+      "actualSource": "frames/gather-user-v1.png",
+      "actualPose": "upright-v2:director:gather-user-v1",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570": {
+      "actualSource": "references/offer.png",
+      "actualPose": "upright-v2:director:offer",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "references/offer-mid.png",
+          "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "pose": "upright-v2:director:offer-mid",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a": {
+      "actualSource": "references/offer-mid.png",
+      "actualPose": "upright-v2:director:offer-mid",
+      "currentExposureMaxRemainingMs": 40,
+      "endpoint": "upright-v2:open-user",
+      "frames": [
+        {
+          "source": "frames/gather-release-v1.png",
+          "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+          "pose": "upright-v2:director:gather-release-v1",
+          "durationMs": 100,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": false
+        },
+        {
+          "source": "references/open-user.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "pose": "upright-v2:open-user",
+          "durationMs": 80,
+          "cue": "ORDINARY_RETURN",
+          "phase": "exit",
+          "pauseSafe": true
+        }
+      ],
+      "discardOldSemanticCue": true
+    },
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": {
+      "actualSource": "references/open-user.png",
+      "actualPose": "upright-v2:open-user",
+      "currentExposureMaxRemainingMs": 0,
+      "endpoint": "upright-v2:open-user",
+      "frames": [],
+      "discardOldSemanticCue": true
+    },
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": {
+      "actualSource": "references/listen-rest.png",
+      "actualPose": "upright-v2:listen",
+      "currentExposureMaxRemainingMs": 0,
+      "endpoint": "upright-v2:listen",
+      "frames": [],
+      "discardOldSemanticCue": true
+    }
+  },
+  "layoutContract": {
+    "sceneCanvas": [
+      300,
+      250
+    ],
+    "actorRect": [
+      50,
+      25,
+      200,
+      200
+    ],
+    "inspectionDock": {
+      "right": [
+        250,
+        128
+      ],
+      "left": [
+        42,
+        128
+      ]
+    },
+    "laptopSummary": [
+      166,
+      147
+    ],
+    "resolveSideOnceForBodyAndScene": true,
+    "noMirroring": true,
+    "edgeChange": "On resolved-side change during lean, show latest card placement immediately and withdraw actual pose via TURN to listen-rest, then optionally attend new side only if still relevant; never interpolate across skull or replay historical event."
+  },
+  "sourceReuse": {
+    "listenTurns": "Genuinely drawn v2 yaw intermediates registered to exact listen-rest hand pose, not new generated yaw or whole-head rotation",
+    "offer": "Existing exact v2 offer sources; same actual SHA, no new artwork claimed"
+  },
+  "endpointBoundary": "LISTEN starts/ends exact public listen-rest. Cross-family open-user\u2194listen public bridge must be provided/confirmed by runtime owner; this package does not silently jump hands across laptop. Gather starts/ends exact open-user.",
+  "priority": "Latest factual UI/pointer motion immediate; bodily current-exposure recovery only. Drag uses exact SHA detached ingress. New user/business cue never waits for full scene.",
+  "reducedMotion": "Skip optional gesture; use appropriate existing exact endpoint while all scoped facts remain visible."
+}

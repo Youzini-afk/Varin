@@ -1,0 +1,65 @@
+{
+  "status": "candidate source archive verified; not full native/motion acceptance",
+  "copiedSelectedFiles": 26,
+  "independentRebuild": {
+    "inputOrigin": "repository archive only",
+    "location": "workspace disk temporary independent copy; removed after validation",
+    "finalPNGsSHAExact": 9,
+    "finalMasksSHAExact": 9,
+    "outputs": [
+      {
+        "sourceSHA256": "b7d49b429ef4d8860cd6a41c4b8c6546f9aad6b3e12324f3407753becd8f0442",
+        "detachedSHA256": "e82d97c2785127add038e69c44174fdfd6282feb73b5332e86b272d51c909b68",
+        "maskSHA256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c"
+      },
+      {
+        "sourceSHA256": "a3cea784fdff757bb5aa502757718371fd615db9f59455d6fddb842def3b1b40",
+        "detachedSHA256": "5f833ba1fa4cca2a591a7c06536754b8e28332cc18ff9e055ffcef2f6abde37d",
+        "maskSHA256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c"
+      },
+      {
+        "sourceSHA256": "aaa5e2139d210d0f836d212d386ad52b844921ed3559157fcc9cb6e197350be7",
+        "detachedSHA256": "894286dac0ca1e309db0e0ef097f18e245bf96f41c44664dba3c0479fe302316",
+        "maskSHA256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c"
+      },
+      {
+        "sourceSHA256": "69c450b47e2c5a44383e8ad17d633b1bcfe14d20c3452e6f49ecdb5e0e82fda3",
+        "detachedSHA256": "6b92877fccda6f7ac25fd7b4e920082fbaae642ed7b5226f2813bc553488879c",
+        "maskSHA256": "490b349133af73d7a9118e3b94ae260dfafb738639deedf225be3139ac8c0b4c"
+      },
+      {
+        "sourceSHA256": "38d417e028d5bb3522b93c85399e3174884cebf0316b938133ec3575aa17ecde",
+        "detachedSHA256": "645f3ce8f5d6394522e9d10c812984f3ae922e279be08d8679696054b68b3ead",
+        "maskSHA256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470"
+      },
+      {
+        "sourceSHA256": "44cfbcf18137c43e6efc41ba6a23d7efbba4587a10962f246617c8cb8d2d665d",
+        "detachedSHA256": "9f596fa4b55906c2b936524854962fcb837813f3b45ffbd1f3530ccaacb0728a",
+        "maskSHA256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470"
+      },
+      {
+        "sourceSHA256": "8faafa5486908c7de7a6998570ce196e48f9babc6ba4c2cf5f1e4199be7a2669",
+        "detachedSHA256": "e99f36fa4d7e47c65fb662aa62a78bd8cfdaa05e81f3bdc38b4f7c6e840c1f32",
+        "maskSHA256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b"
+      },
+      {
+        "sourceSHA256": "c359a6e8ccee20bb71d29cd261205ea8b336f182db598a8615ef3c5ae17e50bf",
+        "detachedSHA256": "9f8d0193e1e3fd3ccefe227bca496bcf8b0441c92a97cd3c69bff25f949a1533",
+        "maskSHA256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470"
+      },
+      {
+        "sourceSHA256": "ecbadf94a1047de809ca65ee85dc86fb76c5d199fef8d75f99ecd15dde655c20",
+        "detachedSHA256": "89dbdaaeab778e0f2dc3ad3562b14e72e0e894c6da814d19a53abe8c77499cb3",
+        "maskSHA256": "604e23e3354bb4da8f7fbc6b9f6ce02e23232c0215c1b8116dd7886b2b3c0470"
+      }
+    ]
+  },
+  "existingSourceMappingsUnchanged": {
+    "v2": 55,
+    "v3Prior": 21,
+    "checkedPaths": 151,
+    "allHashesUnchanged": true
+  },
+  "sourcePathMapping": "director-performance/new-poses in artist workspace -> director-performance in repository",
+  "runtimeSourceClosure": "13 actual action/recovery source SHAs covered by old55+21+new9, see director-reachable-source-coverage.json"
+}
