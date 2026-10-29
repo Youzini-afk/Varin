@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { ThreadSnapshot } from '@varin/application-client';
+import { visibleSceneViewport } from './sceneViewport';
 import { CompanionSceneFacts } from './sceneFacts';
 const snapshot = (operations: unknown[], childActivity = {}) => ({ operations, childActivity, activeRun: null } as unknown as ThreadSnapshot);
 const tool = (name: string, id = name) => ({ id, phase: 'running', intent: { kind: 'tool', call: { name, schema_version: '1' }, contract: { name, schema_version: '1' } } });
@@ -54,4 +55,15 @@ describe('companion decorative facts', () => {
     const spoof=tool('file_read');spoof.intent.contract.name='other';
     expect(facts.observe(snapshot([spoof]),'current').kind).toBeNull();
   });
+});
+
+test('suppresses the last legal scene while scrolling and restores only a fully visible canvas', () => {
+  const rect = { x:0, y:40, width:360, height:360 };
+  const first = visibleSceneViewport(rect,360,480,null);
+  expect(first.visible).toBe(true);
+  const scrolled = visibleSceneViewport({...rect,y:-60},360,480,first.viewport);
+  expect(scrolled).toEqual({viewport:first.viewport,visible:false});
+  expect(visibleSceneViewport({...rect,y:-60},360,480,null)).toEqual({viewport:null,visible:false});
+  expect(visibleSceneViewport(rect,360,300,first.viewport).visible).toBe(false);
+  expect(visibleSceneViewport({...rect,y:20},360,480,first.viewport)).toMatchObject({visible:true,viewport:{y:20}});
 });
