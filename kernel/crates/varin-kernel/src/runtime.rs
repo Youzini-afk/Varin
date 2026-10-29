@@ -672,6 +672,17 @@ impl Kernel {
             });
             return Ok(None);
         }
+        if method == "recovery.operation.conflicts" {
+            let task = storage.prepare_recovery_conflicts(&authorized_params, &authorized_grant, cancellation.clone())?;
+            let (port, completed, request) = (Self::workspace_port(completions), completions.clone(), request.clone());
+            self.file_workers.retain(|(_, worker)| !worker.is_finished());
+            let worker = thread::Builder::new().name("recovery-conflicts".into()).spawn(move || {
+                let result = task.run(port);
+                let _ = completed.send(WorkerRequest::ResourceRequestDone { request, result });
+            })?;
+            self.file_workers.push((cancellation, worker));
+            return Ok(None);
+        }
         if matches!(method, "file.lease.wait" | "file.lease.acquire" | "file.lease.check") {
             let task = storage.prepare_file_lease_task(method, &authorized_params, &authorized_grant, cancellation)?;
             self.spawn_file_lease(request.clone(), task, completions)?;

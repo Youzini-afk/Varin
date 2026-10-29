@@ -493,7 +493,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
             await actor.closeWorkspace({ branchId: branch, generation: entry.view.binding.generation });
         }
         catch (error) {
-            if (error instanceof Error && error.message.includes('workspace_in_use'))
+            if (error instanceof KernelClientError && error.code === 'workspace_in_use')
                 return;
             entry.view = await actor.inspectWorkspace({ branchId: branch, generation: entry.view.binding.generation }).catch(() => entry.view);
             throw error;
@@ -575,7 +575,7 @@ export function createNativeWorkspaceOwner(owners: Owners) {
                 await releaseSource(original?.source ?? source);
             }
             catch (error) {
-                if (error instanceof Error && /workspace_(?:in_use|native_handles_active)/.test(error.message))
+                if (error instanceof KernelClientError && ['workspace_in_use', 'workspace_native_handles_active'].includes(error.code))
                     return false;
                 throw error;
             }

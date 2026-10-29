@@ -224,7 +224,7 @@ impl FileReadTask {
             if matches!(state, FileState::Directory {..}|FileState::Symlink {..}) {
                 let attributes=match &resource.native {Some(owner)=>owner.attributes(&resource.path)?,None=>crate::native_metadata::observe(&resource.absolute)?.attributes};
                 if resource.native.is_some(){match &mut state{FileState::Directory{mode,..}|FileState::Symlink{mode,..}=>*mode=Some(attributes.mode),_=>()}}
-                state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some()));
+                state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some())?);
             }
             self.check()?;
             let after = resolve_admitted_resource(&self.root, requested, &self.grant, false)?;
@@ -354,7 +354,7 @@ impl FileReadTask {
         };
         let attributes=match &resource.native{Some(owner)=>owner.attributes(&resource.path)?,None=>crate::native_metadata::observe(&resource.absolute)?.attributes};
         if resource.native.is_some(){if let FileState::RegularFile{mode,..}=&mut state{*mode=Some(attributes.mode);}}
-        state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some()));
+        state.set_native(crate::native_metadata::recoverable(&attributes,resource.native.is_some())?);
         let version = super::file_mutations::read_version(
             self.params["rootId"].as_str().expect("admitted root"),
             &resource.path,

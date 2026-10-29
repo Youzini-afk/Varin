@@ -9,8 +9,6 @@ use std::sync::Arc;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod fuse;
-#[cfg(any(target_os = "linux", target_os = "macos", test))]
-mod cache_fence;
 #[cfg(any(target_os = "macos", test))]
 mod native_service;
 #[cfg(target_os = "macos")]

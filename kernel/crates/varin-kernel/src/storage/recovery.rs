@@ -1718,36 +1718,14 @@ impl Storage {
     /// A scoped physical overlap query. It discloses only reservations intersecting the
     /// caller's authorized target, including aliases owned by another workspace identity.
     pub(super) fn recovery_operation_conflicts(
-        &self,
+        &mut self,
         params_value: &Value,
         grant: &Grant,
     ) -> Result<Value, KernelError> {
-        let workspace = self.recovery_workspace(params_value, &grant.grant_id)?;
-        let root_id = params_value["rootId"]
-            .as_str()
-            .ok_or_else(|| KernelError::Authorization("reservation root missing".into()))?;
-        let paths = params_value["paths"]
-            .as_array()
-            .ok_or_else(|| KernelError::Operation("reservation paths missing".into()))?
-            .iter()
-            .map(|value| {
-                let path = value
-                    .as_str()
-                    .ok_or_else(|| KernelError::Operation("reservation path malformed".into()))?;
-                Ok(FileLeaseResource {
-                    path: path.into(),
-                    subtree: true,
-                })
-            })
-            .collect::<Result<Vec<_>, KernelError>>()?;
-        let requested = self.canonical_lease_resources(root_id, &paths, grant)?;
-        let except = params_value
-            .get("exceptOperationId")
-            .and_then(Value::as_str);
-        let reservations = self.recovery_file_reservations(&workspace, except)?;
-        let operations = resolve_reservation_conflicts(&reservations, &requested)?;
-        Ok(json!({"operations":operations}))
+        self.prepare_recovery_conflicts(params_value, grant, self.cancellation.clone()
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false))))?.run_local(self)
     }
+
     pub(super) fn recovery_file_reservations(&self, workspace: &str, except: Option<&str>) -> Result<Vec<Value>, KernelError> {
         let mut statement=self.conn.prepare("SELECT workspace_id,operation_id,state,revision,COALESCE(json_extract(result_json,'$.reservedResources.canonicalRoot'),json_extract(data_json,'$.reservedResources.canonicalRoot'),json_extract(result_json,'$.applyCanonicalRoot'),json_extract(data_json,'$.applyCanonicalRoot')),COALESCE(json_extract(result_json,'$.reservedResources.paths'),json_extract(data_json,'$.reservedResources.paths')),COALESCE(json_extract(result_json,'$.targets'),json_extract(data_json,'$.targets')),COALESCE(json_extract(result_json,'$.applyRootId'),json_extract(data_json,'$.applyRootId')) FROM recovery_operations WHERE kind='integration' AND COALESCE(json_extract(result_json,'$.parentBranchId'),json_extract(data_json,'$.parentBranchId')) IS NULL AND state NOT IN ('complete','conflict','compensated','aborted','undone') ORDER BY workspace_id,operation_id")?;
         let mut rows = statement.query([])?;

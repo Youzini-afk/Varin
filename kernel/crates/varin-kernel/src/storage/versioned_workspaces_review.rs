@@ -128,7 +128,7 @@ fn partial_file_fork_keeps_only_changed_ranges_and_survives_reopen_and_collectio
 #[test]
 fn imported_root_attributes_and_directory_identities_follow_replacement_and_exact_rebase() {
     let mut f = Fixture::new();
-    let mut attributes = Storage::new_workspace_metadata(&PathState::Directory {mode:Some(0o700)}).attributes.file_metadata();
+    let mut attributes = Storage::new_workspace_metadata(&PathState::Directory {mode:Some(0o700)}).attributes.file_metadata().unwrap();
     attributes.xattrs.insert("dXNlci52YXJpbg".into(),b"original".to_vec());
     let encoded = serde_json::to_string(&attributes).unwrap();
     f.begin("selected",None);
@@ -378,6 +378,14 @@ fn workspace_session_keeps_native_handles_and_forks_dirty_bytes_without_stopping
         &session,
         &Session::open(port.clone(), "main".into(), actor.clone()).unwrap()
     ));
+    let original = actor.clone();
+    let metadata = port.call(move |s| s.dispatch("branch.read",
+        &json!({"branchId":"main","includeEntries":false}), Some("owner"), &original)).unwrap();
+    assert_eq!(metadata["entries"], json!([]));
+    let original = actor.clone();
+    let bypass = port.call(move |s| s.dispatch("branch.read",
+        &json!({"branchId":"main","paths":["folder/a"]}), Some("owner"), &original));
+    assert!(matches!(bypass,Err(KernelError::Execution(ref error)) if error.code=="workspace_live_boundary_required"));
     let original = actor.clone();
     let bypass = port.call(move |s| {
         s.dispatch(

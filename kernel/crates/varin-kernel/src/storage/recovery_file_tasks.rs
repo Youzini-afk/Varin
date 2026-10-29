@@ -8,6 +8,91 @@ use super::*;
 use crate::protocol_generated::KernelFileRecoveryParams;
 use varin_runtime::catalog::journal::JournalAnchor;
 
+/// A reservation query resolves filesystem aliases on a worker, just like file
+/// effects. Resolving a mounted pathname on Storage would wait on its own I/O.
+#[derive(Clone)]
+pub(crate) struct ConflictTask {
+    root: FileRoot,
+    grant: Grant,
+    paths: Vec<String>,
+    except: Option<String>,
+    cancellation: Arc<AtomicBool>,
+    _native_retention: Option<Arc<super::native_sources::NativeReadRetention>>,
+}
+impl ConflictTask {
+    fn authorize(&self, storage: &Storage) -> Result<Grant, KernelError> {
+        if self.cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        let grant = storage.load_grant(&self.grant.grant_id)?;
+        if grant.state != crate::model::GrantState::Active
+            || grant.kernel_epoch != self.grant.kernel_epoch
+            || grant.host_id != self.grant.host_id
+            || grant.host_generation != self.grant.host_generation {
+            return Err(KernelError::Authorization("Original reservation query grant is no longer active".into()));
+        }
+        require_capability(&grant, "recovery.operation.conflicts")?;
+        let root = storage.admitted_file_root(&self.root.root_id, &grant)?;
+        if root.canonical_root != self.root.canonical_root
+            || root.owning_workspace_id != self.root.owning_workspace_id
+            || root.execution_workspace_id != self.root.execution_workspace_id {
+            return Err(KernelError::Authorization("Original reservation query root changed".into()));
+        }
+        Ok(grant)
+    }
+    fn requested(&self) -> Result<Vec<crate::model::CanonicalFileLeaseResource>, KernelError> {
+        self.paths.iter().map(|path| {
+            if self.cancellation.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+            let resolved = super::file_resources::resolve_admitted_resource(&self.root, path, &self.grant, true)?;
+            Ok(crate::model::CanonicalFileLeaseResource {
+                absolute: super::file_resource_leases::canonical_lease_path(resolved.absolute)?,
+                subtree: true,
+            })
+        }).collect()
+    }
+    fn run_with(&self, owner: &mut impl Control) -> Result<Value, KernelError> {
+        loop {
+            let task = self.clone();
+            let reservations = owner.call(move |s| {
+                task.authorize(s)?;
+                s.recovery_file_reservations(&task.root.owning_workspace_id, task.except.as_deref())
+            })?;
+            let requested = self.requested()?;
+            let operations = super::recovery::resolve_reservation_conflicts(&reservations, &requested)?;
+            if self.requested()? != requested {
+                return Err(KernelError::Authorization("Reservation query path identity changed".into()));
+            }
+            let task = self.clone();
+            let current = owner.call(move |s| {
+                task.authorize(s)?;
+                Ok(s.recovery_file_reservations(&task.root.owning_workspace_id, task.except.as_deref())? == reservations)
+            })?;
+            if current { return Ok(json!({"operations":operations})); }
+        }
+    }
+    pub(crate) fn run(&self, mut port: workspace_session::StoragePort) -> Result<Value, KernelError> {
+        self.run_with(&mut port)
+    }
+    pub(super) fn run_local(&self, storage: &mut Storage) -> Result<Value, KernelError> {
+        self.run_with(&mut Local(storage))
+    }
+}
+impl Storage {
+    pub(crate) fn prepare_recovery_conflicts(&self, params: &Value, grant: &Grant,
+        cancellation: Arc<AtomicBool>) -> Result<ConflictTask, KernelError> {
+        let params: crate::protocol_generated::KernelRecoveryOperationConflictsParams = parse_file_params(params)?;
+        self.recovery_workspace(&json!({"workspaceId":params.workspace_id}), &grant.grant_id)?;
+        let root = self.admitted_file_root(&params.root_id, grant)?;
+        if root.owning_workspace_id != params.workspace_id {
+            return Err(KernelError::Authorization("Reservation query workspace differs from its original root".into()));
+        }
+        for path in &params.paths {
+            let (path, _) = super::file_resources::normalized_relative_path(path, true)?;
+            if !path_allowed(grant, &path) { return Err(KernelError::Authorization("Reservation query is outside grant scope".into())); }
+        }
+        Ok(ConflictTask { _native_retention:self.retain_native_reader(&params.root_id)?, root,
+            grant:grant.clone(), paths:params.paths, except:params.except_operation_id, cancellation })
+    }
+}
+
 pub(crate) fn parse_params(input: &Value) -> Result<KernelFileRecoveryParams, KernelError> {
     parse_file_params(input)
 }

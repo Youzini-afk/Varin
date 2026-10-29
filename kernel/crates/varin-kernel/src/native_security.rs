@@ -2,6 +2,25 @@
 //! its offsets. The same wire bytes may be stored on a different Host platform.
 use crate::error::KernelError;
 
+/// Component order/offsets in a self-relative descriptor are not ACL semantics.
+/// Preserve each SID, ACE order and control bit while giving equal descriptors
+/// one layout, including across WinFsp and ordinary Windows file APIs.
+pub(crate) fn canonical(bytes: &[u8]) -> Result<Vec<u8>, KernelError> {
+    validate(bytes)?;
+    let mut output = bytes[..20].to_vec();
+    for field in [4, 8, 12, 16] {
+        let start = u32::from_le_bytes(bytes[field..field + 4].try_into().unwrap()) as usize;
+        if start == 0 { continue; }
+        let length = if field <= 8 { 8 + usize::from(bytes[start + 1]) * 4 }
+            else { usize::from(u16::from_le_bytes([bytes[start + 2], bytes[start + 3]])) };
+        while output.len() % 4 != 0 { output.push(0); }
+        let offset = u32::try_from(output.len()).map_err(|_| KernelError::Operation("Security descriptor offset is outside the native range".into()))?;
+        output[field..field + 4].copy_from_slice(&offset.to_le_bytes());
+        output.extend_from_slice(&bytes[start..start + length]);
+    }
+    Ok(output)
+}
+
 pub(crate) fn validate(bytes: &[u8]) -> Result<(), KernelError> {
     fn invalid() -> KernelError {
         KernelError::Operation("Invalid self-relative security descriptor".into())

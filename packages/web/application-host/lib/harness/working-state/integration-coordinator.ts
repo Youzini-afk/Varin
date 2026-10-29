@@ -1168,9 +1168,11 @@ export class IntegrationCoordinator {
       if (reservedId) {
         await this.withWorkingStore(input.workspaceId, "integration-abort-preparation", async (_store, context) => {
           const operation = await context.durableRecoveryStore.getOperation(input.workspaceId, reservedId!);
+          const failure = error instanceof Error ? error.message : String(error);
           if (operation?.state === "planned") await context.durableRecoveryStore.completeOperation({
             operationId: reservedId!, workspaceId: input.workspaceId, expectedRevision: Number(operation.revision),
-            state: "aborted", result: { ...operation.data as Record<string, unknown>, executorStopped: true },
+            state: "aborted", result: { ...operation.data as Record<string, unknown>, failure, executorStopped: true },
+            failure: { message: failure },
           });
         }, "exclusive", input.scopedWorkingStates).catch(() => undefined);
       }

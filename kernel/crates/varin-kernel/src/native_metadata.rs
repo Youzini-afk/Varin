@@ -13,15 +13,15 @@ use uuid::Uuid;
 mod effects;
 pub(crate) use effects::{apply, validate_apply};
 
-pub(crate) fn recoverable(attributes:&Attributes,native:bool)->varin_runtime::catalog::followups::FileMetadata{
-    let mut value=attributes.file_metadata();
+pub(crate) fn recoverable(attributes:&Attributes,native:bool)->Result<varin_runtime::catalog::followups::FileMetadata,KernelError>{
+    let mut value=attributes.file_metadata()?;
     // Unix ctime/birthtime may be observable without being settable. Managed
     // workspaces retain them in their own metadata; ordinary Unix targets don't
     // advertise a creation-time restore capability they cannot provide.
     #[cfg(not(any(windows,target_os="macos")))]
     if !native {value.created=None;}
     let _=native;
-    value
+    Ok(value)
 }
 
 #[cfg(target_os="macos")]

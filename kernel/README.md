@@ -128,8 +128,10 @@ can explicitly adopt a primary workspace into a separate mounted directory. WinF
 the original installed DLL is located through its system registration only when starting a mount. Building
 this feature on Windows also requires libclang for the bundled SDK bindings. Linux requires a working
 FUSE character device and a permitted direct-mount/helper route for actual mounts. Linux negotiates
-writeback cache only with FUSE_SYNCFS support, capturing the checkpoint in the originating thread's
-post-writeback callback. Older ABIs retain the scoped active-writer obstacle. Unmount helper errors
+writeback cache only when the connection offers and accepts FUSE_HAS_SYNCFS, then captures the
+checkpoint after its waiting syncfs call completes. An opcode version alone does not enable this
+capability on ordinary FUSE mounts. Other connections retain the scoped active-writer obstacle.
+Unmount helper errors
 retain the mount; detach does not silently become lazy/forced.
 macOS first uses the bundled path-resource FSKit executor when macOS 26+ reports the exact staged
 extension enabled; otherwise it admits the installed macFUSE VFS backend. Extension state inspection

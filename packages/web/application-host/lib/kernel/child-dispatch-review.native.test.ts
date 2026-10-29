@@ -390,10 +390,11 @@ it.each(['shared', 'isolated_write'] as const)('external harness dispatch uses i
     else if (step === 4) { expect(JSON.stringify(result(body, 'send'))).toContain('next_input'); complete(response, [tool('send', { targetThreadId: `external:child:${operationId}`, kind: 'request', text: 'CONTINUE_EXTERNAL_TASK', wait: {} }, 'external-request')]); }
     else if (step === 5) complete(response, [tool('update', { source: `external:child:${operationId}`, files: ['external-result.txt'] }, 'external-update')]);
     else if (step === 6) {
+      expect(result(body, 'update'), JSON.stringify(result(body, 'update'))).toMatchObject({ outcome: 'succeeded' });
       expect(JSON.stringify(result(body, 'update'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied');
-      fs.writeFile(path.join(f.workspace, 'parent-result.txt'), 'Parent result for external peer').then(() => complete(response, [tool('submit_code', { target: `external:child:${operationId}`, files: ['parent-result.txt'] }, 'external-submit')]), error => { throw error; });
+      return fs.writeFile(path.join(f.workspace, 'parent-result.txt'), 'Parent result for external peer').then(() => complete(response, [tool('submit_code', { target: `external:child:${operationId}`, files: ['parent-result.txt'] }, 'external-submit')]));
     }
-    else if (step === 7) { expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
+    else if (step === 7) { expect(result(body, 'submit_code'), JSON.stringify(result(body, 'submit_code'))).toMatchObject({ outcome: 'succeeded' }); expect(JSON.stringify(result(body, 'submit_code'))).toContain(workMode === 'shared' ? 'shared_source' : 'applied'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
     else { expect(JSON.stringify(body.input)).toContain('EXTERNAL_HARNESS_RESULT'); complete(response, [answer('Delegation received', 'external-parent-answer')]); }
   });
   const h = await f.openHost({ external: true });
@@ -1206,10 +1207,10 @@ it.each([undefined, 'selected'] as const)('the shipped worker preset writes a pr
       expect(receipt?.content?.readVersion).toBeTypeOf('string');
       complete(response, [tool('file_write', { path: 'source.txt', readVersion: receipt!.content!.readVersion, content: 'alpha\nbeta\n' }, 'child-write')]);
     } else if (childSteps === 3) {
-      expect(receipt).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
       complete(response, [tool('file_edit', { path: 'source.txt', readVersion: receipt!.content!.readVersion, edits: [{ oldText: 'beta', newText: 'gamma' }] }, 'child-edit')]);
     } else if (childSteps === 4) {
-      expect(receipt).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
+      expect(receipt, JSON.stringify(receipt)).toMatchObject({ outcome: 'succeeded', effect: 'confirmed' });
       complete(response, [tool('file_read', { path: 'source.txt' }, 'child-read-final')]);
     } else {
       expect(receipt?.content?.content?.text).toBe(finalText);
@@ -1235,7 +1236,7 @@ it.each([undefined, 'selected'] as const)('the shipped worker preset writes a pr
   await expect.poll(async () => (await h.runtime.run(parent.run_id)).state, { timeout: 15_000 }).toBe('completed');
   const child = await h.runtime.child(operationId);
   expect(child.launch.tools.map(item => item.name).sort()).toEqual([...worker.tools.names].sort());
-  expect(child.source).toMatchObject({ kind: 'ready', selection: { mode: 'materialized', revision: 0 }, provenance: { consistency: 'fixed-root' } });
+  expect(child.source).toMatchObject({ kind: 'ready', selection: { mode: 'native_workspace', revision: null }, provenance: { consistency: 'fixed-root' } });
   expect(child.code_result.kind).toBe('published');
   if (child.code_result.kind !== 'published') throw new Error('Expected the original fixed WorkingResult');
   const resultRef = child.code_result.result;
@@ -1243,7 +1244,7 @@ it.each([undefined, 'selected'] as const)('the shipped worker preset writes a pr
   expect(child.report?.outcome).toBe('succeeded');
   expect(await fs.readFile(path.join(f.workspace, 'source.txt'), 'utf8')).toBe('fixed child source before parent changes');
   const fixedResult = await h.workingStates.withBranchStore(resultRef.workspace_id, 'inspect-isolated-result', store => store.getResult(resultRef.branch_id, resultRef.result_revision), 'shared', { threadId: child.child_thread_id });
-  expect(fixedResult).toMatchObject({ root: resultRef.root, baseRoot: resultRef.base_root, changedPaths: ['source.txt'],
+  expect(fixedResult).toMatchObject({ root: resultRef.root, baseRoot: resultRef.base_root, changedPaths: ['.', 'source.txt'],
     pathStates: { 'source.txt': { kind: 'regular-file', objectHash: `sha256-${createHash('sha256').update(finalText).digest('hex')}` } } });
   const history = (await h.api.snapshot(identity)).history;
   expect(history.filter(item => item.source === 'agent')).toHaveLength(1);
@@ -2310,11 +2311,12 @@ it.each(['live_root', 'materialized'] as const)('read-only dispatch shares its o
     expect(child.code_result.kind).toBe('no_changes');
     const launch = await h.runtime.launch(child.receipt!.run_id);
     const parentLaunch = await h.runtime.launch(parent.run_id);
-    if (mode === 'live_root') expect(launch!.selection.source).toEqual(parentLaunch!.selection.source);
-    else expect(launch!.selection.source).toEqual({ ...parentLaunch!.selection.source, environment_run_id: parent.run_id });
+    expect(parentLaunch!.selection.source!.mode).toBe(mode === 'live_root' ? 'live_root' : 'native_workspace');
+    expect(launch!.selection.source).toEqual(parentLaunch!.selection.source);
     if (label === 'A') {
       first = child;
-      firstRoot = mode === 'live_root' ? directory : (await originalMaterializationLocation(f.root, workspaceId, parent.run_id)).targetPath;
+      firstRoot = mode === 'live_root' ? directory : (await h.kernel.nativeWorkspaces!.retainReference(
+        parentLaunch!.selection.source!, 'worktree-continuation-view')).path;
     }
   }
   await fs.writeFile(path.join(firstRoot, 'source.txt'), 'A_UPDATED');
@@ -2328,6 +2330,7 @@ it.each(['live_root', 'materialized'] as const)('read-only dispatch shares its o
   expect((await h.runtime.launch(finished.receipt!.run_id))!.selection.source).toEqual((await h.runtime.launch(first!.receipt!.run_id))!.selection.source);
   expect(childSteps.get('A')).toBe(4); expect(childSteps.get('B')).toBe(2);
   expect(h.errors.map(String)).toEqual([]);
+  await h.kernel.nativeWorkspaces!.releaseReference('worktree-continuation-view');
 }, 45_000);
 
 it.each(['user_continuation', 'message_request'] as const)('%s continues a completed writable child after Host restart from its exact fixed files with independent reports/results', async continuationKind => {
@@ -2387,7 +2390,11 @@ it.each(['user_continuation', 'message_request'] as const)('%s continues a compl
   await fs.writeFile(path.join(f.workspace, 'source.txt'), 'CHANGED_PARENT_SOURCE_MUST_NOT_REPLACE_FIXED_CHILD_RESULT');
   const reopened = await f.openHost();
   await reopened.collaboration!.recover();
-  await expect.poll(async () => (await reopened.runtime.childExecution(accepted.execution_id)).code_result.kind, { timeout: 15_000 }).toBe('published');
+  await expect.poll(async () => {
+    const child = await reopened.runtime.childExecution(accepted.execution_id);
+    if (child.code_result.kind === 'unavailable') throw new Error(JSON.stringify(child.report));
+    return child.code_result.kind;
+  }, { timeout: 15_000 }).toBe('published');
   const finished = await reopened.runtime.childExecution(accepted.execution_id);
   if (!finished.receipt || finished.code_result.kind !== 'published' || !finished.report) throw new Error('Continuation did not fix its result');
   expect(finished.receipt.run_id).not.toBe(original.receipt.run_id);

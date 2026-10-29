@@ -60,7 +60,18 @@ export class KernelRecoveryContentStore implements RecoveryFileStore {
   private targetResources?: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>;
   bindTargetResources(resolve: (identity: RecoveryIdentity) => Promise<KernelFileResourceBackend>): void { this.targetResources = resolve; }
   private readonly resourceScope = new AsyncLocalStorage<{ key: string; backend: KernelFileResourceBackend }>();
-  private async resources(identity: RecoveryIdentity): Promise<KernelFileResourceBackend> { const active = this.resourceScope.getStore(); if (active?.key === JSON.stringify(identity)) return active.backend; return identity.fileTarget ? (this.targetResources ? this.targetResources(identity) : Promise.reject(new Error("Recovery source owner is unavailable"))) : this.fileResources; }
+  private async resources(identity: RecoveryIdentity): Promise<KernelFileResourceBackend> {
+    if (this.scopedActor) {
+      if (identity.workspaceId !== this.scopedActor.identity.workspaceId
+        || !sameRecoveryFileTarget(identity.fileTarget, this.scopedActor.identity.fileTarget))
+        throw new Error("Recovery file target differs from its admitted actor");
+      return this.fileResources;
+    }
+    const active = this.resourceScope.getStore();
+    if (active?.key === JSON.stringify(identity)) return active.backend;
+    return identity.fileTarget ? (this.targetResources ? this.targetResources(identity)
+      : Promise.reject(new Error("Recovery source owner is unavailable"))) : this.fileResources;
+  }
   private readonly owners = new Map<string, Set<string>>();
   private readonly sources = new Map<string, Array<{ workspaceId: string; recordId: string; slot: string }>>();
   readonly fileResources: KernelFileResourceBackend;

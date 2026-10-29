@@ -78,37 +78,6 @@ fn native_executor_keeps_binary_bytes_links_and_unlinked_open_handles() {
     f.finish();
 }
 
-#[test]
-fn cache_fence_selects_only_its_original_sync_and_preserves_the_boundary() {
-    let f = ExecutorFixture::new();
-    let file = f.session.create_file("before.txt", 0o644).unwrap();
-    f.session.write(&file, Some(0), b"before").unwrap();
-    let fence = super::cache_fence::CacheFence::default();
-    let request = fence.request("", 17).unwrap();
-    fence.synchronize(&f.session, 99).unwrap();
-    f.session.write(&file, Some(0), b"chosen").unwrap();
-    fence.synchronize(&f.session, 17).unwrap();
-    f.session.write(&file, Some(0), b"later!").unwrap();
-    let boundary = request.finish(Ok(())).unwrap();
-    boundary
-        .fork("child", "fence-fork", &AtomicBool::new(false))
-        .unwrap();
-    boundary.release().unwrap();
-    let child = Session::open(f.port.clone(), "child".into(), f.session.owner()).unwrap();
-    let node = child.lookup("before.txt").unwrap();
-    let mut data = [0; 6];
-    child.read(&node, 0, &mut data).unwrap();
-    assert_eq!(&data, b"chosen");
-    child.close().unwrap();
-    drop((node, child, file));
-    let missing = fence.request("", 18).unwrap().finish(Ok(())).err().unwrap();
-    assert_eq!(
-        super::kind_error(&missing),
-        "workspace_cache_fence_unavailable"
-    );
-    f.finish();
-}
-
 struct ExecutorFixture {
     directory: std::path::PathBuf,
     session: Arc<Session>,
@@ -322,6 +291,8 @@ fn native_process_client() {
         return;
     }
     use std::io::Write;
+    std::fs::create_dir_all(&root).expect("existing mounted source remains a valid directory");
+    std::fs::write(root.join("written.txt"), b"before replacement").unwrap();
     let mut file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -432,6 +403,16 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
         .status()
         .unwrap();
     assert!(result.success());
+    #[cfg(windows)]
+    {
+        let node = parent.lookup("written.txt").unwrap();
+        let metadata = node.attributes().unwrap().file_metadata().unwrap();
+        let exported = directory.join("exported.txt");
+        std::fs::write(&exported, b"written in ordinary process").unwrap();
+        crate::native_metadata::apply(&exported, Some(0o644), &metadata).unwrap();
+        assert_eq!(crate::native_metadata::observe(&exported).unwrap().attributes.file_metadata().unwrap(), metadata);
+        parent.forget_cached(&node).unwrap();
+    }
     #[cfg(unix)]
     let mapping = mount.capabilities()["activeWritableMappingFork"]
         .as_bool()

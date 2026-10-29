@@ -603,16 +603,16 @@ impl Storage {
             data.extend(result.clone());
         }
         let exchange=matches!(data.get("operationBinding").and_then(|v|v.get("kind")).and_then(Value::as_str),Some("code_exchange"|"external_code_exchange"));
-        let target=if exchange {serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(data["operationBinding"]["target"].clone())?}else{read.source.clone()};
-        let source = &target;
+        let target=serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(
+            data.get("operationBinding").and_then(|binding|binding.get("target")).cloned()
+                .ok_or_else(||KernelError::Authorization("Integration journal target is missing".into()))?)?;
+        let source = if exchange { &target } else { &read.source };
         if source.workspace_id!=read.source.workspace_id || source.resource_owner!=read.source.resource_owner {
             return Err(KernelError::Authorization("file exchange journal belongs to another resource owner".into()));
         }
-        if data
-            .get("operationBinding")
-            .and_then(|value| value.get("target"))
-            != Some(&serde_json::to_value(source)?)
-        {
+        // Optional fields have the same identity whether absent or explicitly
+        // null. Compare the typed source, retaining every actual identity field.
+        if &target != source {
             return Err(KernelError::Authorization(
                 "Integration journal target differs from original source".into(),
             ));
@@ -748,12 +748,14 @@ mod tests {
         assert_eq!(result["status"], "materialized");
         let directory = managed.join(&key);
         assert!(directory.is_dir());
+        let mut target = serde_json::to_value(&source).unwrap();
+        target["native_scope"] = Value::Null;
         journal(
             &mut storage,
             "actor",
             "workspace",
             "integration:tool",
-            json!({"operationBinding":{"target":source},"applyCanonicalRoot":directory,"executorStopped":true}),
+            json!({"operationBinding":{"target":target},"applyCanonicalRoot":directory,"executorStopped":true}),
             "complete",
         );
         fs::remove_dir_all(&directory).unwrap();

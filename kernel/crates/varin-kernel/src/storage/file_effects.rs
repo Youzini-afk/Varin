@@ -160,7 +160,7 @@ impl Task {
             let mut comparisons = self.params.clone();
             for field in ["targetJson", "expectedJson", "expectedFromJson", "expectedToJson"] {
                 if let Some(raw) = self.params[field].as_str() {
-                    let state: FileState = serde_json::from_str(raw)?;
+                    let state = self.target_state(serde_json::from_str(raw)?)?;
                     comparisons[field] = json!(serde_json::to_string(&super::file_content::physical_state(&self.storage_root, &state, &self.cancellation)?)?);
                 }
             }
@@ -229,14 +229,32 @@ impl Task {
         }
         outcome
     }
+    fn target_state(&self, mut state: FileState) -> Result<FileState, KernelError> {
+        if let Some(mut native) = state.native().cloned() {
+            native.windows_attributes &= !0x80;
+            native.security = native.security.as_deref().map(crate::native_security::canonical).transpose()?;
+            state.set_native(native);
+        }
+        #[cfg(windows)]
+        if self.root.native.is_none() {
+            // Ordinary Windows files expose readonly/writable permissions;
+            // mounted workspaces keep their full stored mode unchanged.
+            match &mut state {
+                FileState::RegularFile { mode, .. } | FileState::Directory { mode, .. } =>
+                    *mode = mode.map(|value| if value & 0o200 == 0 { 0o444 } else { 0o666 }),
+                _ => (),
+            }
+        }
+        Ok(state)
+    }
     fn apply(&self, resuming: bool, before: &[FileState]) -> Result<Value, KernelError> {
         match self.method {
             "file.apply" => {
-                let mut target: FileState = serde_json::from_str(
+                let mut target = self.target_state(serde_json::from_str(
                     self.params["targetJson"]
                         .as_str()
                         .expect("validated file target"),
-                )?;
+                )?)?;
                 // A caller replacing text/Office bytes need not reconstruct the
                 // original ACL and xattrs. Unspecified attributes preserve the
                 // actually admitted inode; explicitly selected result attributes

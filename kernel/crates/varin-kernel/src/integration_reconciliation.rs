@@ -71,6 +71,8 @@ pub(crate) fn reconcile(
     let mut data=journal["data"].as_object().ok_or_else(||error("Integration journal data is malformed"))?.clone();
     if let Some(result)=journal["result"].as_object(){data.extend(result.clone());}
     let data=Value::Object(data);
+    let journal_target:varin_runtime::catalog::launches::SourceSelection=
+        serde_json::from_value(data["operationBinding"]["target"].clone())?;
     let mut expected=if exchange {
         let saved=&data["operationBinding"];
         let db=owner.lock().map_err(error)?;
@@ -81,12 +83,15 @@ pub(crate) fn reconcile(
             let physical=child.source.as_ref().ok_or_else(||error("external file source is unprepared"))?;
             let receiving=invocation.call.name=="update";
             let peer=invocation.call.arguments[if receiving{"source"}else{"target"}].as_str();
-            let target:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(saved["target"].clone())?;
-            let valid_target=if receiving{target==source}else{
+            let target=&journal_target;
+            let valid_target=if receiving{target==&source}else if physical.get("nativeSource").is_some(){
+                let original_target:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(physical["nativeSource"].clone())?;
+                target==&original_target && target.mode==varin_runtime::SourceMode::NativeWorkspace
+            }else{
                 let mut original_target:varin_runtime::catalog::launches::SourceSelection=serde_json::from_value(physical["baseline"]["source"].clone())?;
                 original_target.mode=varin_runtime::SourceMode::Materialized;
                 original_target.environment_run_id=Some(child.conversation_id.clone());
-                target==original_target && target.mode==varin_runtime::SourceMode::Materialized
+                target==&original_target && target.mode==varin_runtime::SourceMode::Materialized
             };
             if saved["operationId"]!=operation.id || saved["parentRunId"]!=run.id || saved["parentThreadId"]!=run.thread_id || saved["parentBranchId"]!=run.branch_id
                 || saved["callId"]!=invocation.call.call_id || saved["origin"]!=serde_json::to_value(&invocation.origin)?
@@ -111,7 +116,7 @@ pub(crate) fn reconcile(
         let peer=if let Some(supplied)=supplied {db.agent_identity(supplied).map_err(error)?["threadId"].as_str().map(str::to_owned)}else{db.child_task_for_thread(&run.thread_id).map_err(error)?.map(|c|c.parent_thread_id)};
         if saved["kind"]!="code_exchange" || saved["operationId"]!=operation.id || saved["parentRunId"]!=run.id || saved["parentThreadId"]!=run.thread_id || saved["parentBranchId"]!=run.branch_id
             || saved["callId"]!=invocation.call.call_id || saved["origin"]!=serde_json::to_value(&invocation.origin)?
-            || saved["target"]!=serde_json::to_value(target_launch)? || saved["childThreadId"]!=source_run.thread_id || saved["targetThreadId"]!=target_run.thread_id
+            || journal_target!=target_launch || saved["childThreadId"]!=source_run.thread_id || saved["targetThreadId"]!=target_run.thread_id
             || saved["result"]["workspaceId"]!=source.workspace_id || peer.as_deref()!=Some(&other.thread_id)
             || (invocation.call.name=="submit_code" && source_run.id!=run.id) || (invocation.call.name=="update" && target_run.id!=run.id) {
             return Err(KernelError::Authorization("exchange journal differs from its original invocation or family".into()));
@@ -165,7 +170,12 @@ pub(crate) fn reconcile(
             expected["journal"]=saved.clone();
         }
     }
-    if data["operationBinding"] != expected
+    let mut supplied=data["operationBinding"].clone();
+    supplied["target"]=serde_json::to_value(&journal_target)?;
+    // Compare the typed optional source fields alongside the unchanged original
+    // invocation, family, publication and journal identities.
+    expected["target"]=serde_json::to_value(serde_json::from_value::<varin_runtime::catalog::launches::SourceSelection>(expected["target"].clone())?)?;
+    if supplied != expected
         || journal["threadId"] != run.thread_id
         || journal["runId"] != run.id
     {

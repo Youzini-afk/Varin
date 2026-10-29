@@ -2271,8 +2271,11 @@ impl Storage {
                     | "branch.publish"
                     | "branch.delete"
                     | "working.result.prepare"
-            ) || (matches!(method, "branch.pin" | "branch.read" | "branch.path.inspect")
-                && params["revision"].is_null());
+            ) || (matches!(method, "branch.pin" | "branch.path.inspect")
+                && params["revision"].is_null())
+                || (method == "branch.read" && params["revision"].is_null()
+                    && (params["paths"].is_array() || params["roots"].is_array()
+                        || params["includeEntries"] == true));
         let branch = if matches!(method, "branch.write.finish" | "working.result.prepare") {
             params["builderId"]
                 .as_str()

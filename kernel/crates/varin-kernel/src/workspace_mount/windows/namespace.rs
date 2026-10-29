@@ -310,7 +310,10 @@ impl FileSystemContext for Namespace {
     ) -> winfsp::Result<Context> {
         let (name, backend, relative) = self.select(name)?;
         if path(&relative)?.is_empty() {
-            return Err(status(0xc0000022));
+            // The generation directory already exists. mkdir/create_dir_all
+            // depend on the ordinary name-collision result, even though its
+            // lifetime is owned by the mount rather than a file operation.
+            return Err(status(0xc0000035));
         }
         let handle = backend.create(
             &relative, options, access, attributes, security, allocation, extra, reparse, info,

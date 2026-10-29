@@ -72,7 +72,7 @@ pub(crate) fn apply(
                     tv_nsec: created.nanos.into(),
                 });
             }
-            if value.backup != prior.attributes.file_metadata().backup {
+            if value.backup != prior.attributes.file_metadata()?.backup {
                 attributes.commonattr |= libc::ATTR_CMN_BKUPTIME;
                 let backup =
                     value
@@ -274,6 +274,9 @@ pub(crate) fn apply(
                 flags &= !1;
             }
         }
+        // Zero means "leave attributes unchanged" to FileBasicInfo. NORMAL
+        // explicitly clears ARCHIVE/HIDDEN/etc. for an empty requested set.
+        if flags == 0 { flags = 0x80; }
         let mut basic = FILE_BASIC_INFO {
             CreationTime: value
                 .created

@@ -409,7 +409,7 @@ impl ResultPublicationTask {
                 let before=reader.state(&self.branch.base_root,&path)?;
                 let after=reader.state(&self.branch.head_root,&path)?;
                 let attrs=|root:&str,state:&PathState|->Result<Option<(u32,varin_runtime::catalog::followups::FileMetadata)>,KernelError>{
-                    if matches!(state,PathState::Missing|PathState::Unsupported){Ok(None)}else{let attributes=reader.metadata(&fs.head,root,&path,state)?.attributes;Ok(Some((attributes.mode,attributes.file_metadata())))}
+                    if matches!(state,PathState::Missing|PathState::Unsupported){Ok(None)}else{let attributes=reader.metadata(&fs.head,root,&path,state)?.attributes;Ok(Some((attributes.mode,attributes.file_metadata()?)))}
                 };
                 if before!=after||attrs(&fs.base_root,&before)?!=attrs(&fs.root,&after)?{
                     difference.paths.insert(path,(Some(before),Some(after)));
@@ -453,7 +453,7 @@ impl ResultPublicationTask {
                 if let Some(fs)=&filesystem{
                     if !matches!(state,PathState::Missing|PathState::Unsupported){
                         let metadata=reader.metadata(&fs.head,if prefix=="base"{&fs.base_root}else{&fs.root},path,&state)?;
-                        value["native"]=serde_json::to_value(metadata.attributes.file_metadata())?;
+                        value["native"]=serde_json::to_value(metadata.attributes.file_metadata()?)?;
                         value["mode"]=json!(metadata.attributes.mode);
                     }
                 }

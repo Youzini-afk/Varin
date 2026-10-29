@@ -105,24 +105,26 @@ pub(crate) struct Attributes {
     pub xattrs: BTreeMap<String, Vec<u8>>,
 }
 impl Attributes {
-    pub(crate) fn file_metadata(&self) -> varin_runtime::catalog::followups::FileMetadata {
+    pub(crate) fn file_metadata(&self) -> Result<varin_runtime::catalog::followups::FileMetadata, KernelError> {
         use varin_runtime::catalog::followups::{FileMetadata, FileTimestamp};
         let time = |v: Timestamp| FileTimestamp {
             seconds: v.seconds,
             nanos: v.nanos,
         };
-        FileMetadata {
+        Ok(FileMetadata {
             uid: self.uid,
             gid: self.gid,
             created: self.creation_exported.then(|| time(self.created)),
             modified: time(self.modified),
             backup: self.backup.map(time),
-            windows_attributes: self.windows_attributes,
+            // NORMAL is the Win32 spelling of an empty attribute set, not a
+            // separate property of a file's recoverable state.
+            windows_attributes: self.windows_attributes & !0x80,
             bsd_flags: self.bsd_flags,
-            security: self.security.clone(),
+            security: self.security.as_deref().map(crate::native_security::canonical).transpose()?,
             reparse_data: self.reparse_data.clone(),
             xattrs: self.xattrs.clone(),
-        }
+        })
     }
     pub(crate) fn with_file_metadata(
         mut self,
@@ -400,7 +402,7 @@ impl Storage {
             if !matches!(state, PathState::Missing | PathState::Unsupported) {
                 let attributes = self.read_workspace_metadata_root(&head, &root, path, &state)?.attributes;
                 entry["state"]["mode"] = json!(attributes.mode);
-                entry["nativeJson"] = json!(serde_json::to_string(&attributes.file_metadata())?);
+                entry["nativeJson"] = json!(serde_json::to_string(&attributes.file_metadata()?)?);
             }
         }
         Ok(())
@@ -823,7 +825,7 @@ impl Storage {
         let mut info = key(path)?;
         info.push("info".into());
         let mut binding = value.binding.clone();
-        binding.attributes_revision = Some(hash_json(&json!([value.attributes.mode, value.attributes.file_metadata()]))?);
+        binding.attributes_revision = Some(hash_json(&json!([value.attributes.mode, value.attributes.file_metadata()?]))?);
         let root = self.metadata_set(&root, &info, &binding)?;
         let root = self.metadata_set(
             &root,
@@ -848,7 +850,7 @@ impl Storage {
             let mut info = key(path)?;
             info.push("info".into());
             let mut binding = metadata.binding.clone();
-            binding.attributes_revision = Some(hash_json(&json!([metadata.attributes.mode, metadata.attributes.file_metadata()]))?);
+            binding.attributes_revision = Some(hash_json(&json!([metadata.attributes.mode, metadata.attributes.file_metadata()?]))?);
             root = self.metadata_set(&root, &info, &binding)?;
             root = self.metadata_set(
                 &root,

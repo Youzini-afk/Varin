@@ -15,9 +15,11 @@ Linux defaults are unchanged. This does not disable mmap or data caching.
 The request decoder now handles FUSE_SYNCFS (ABI 7.36), including its fixed input
 payload, ACL admission and filesystem callback. Advertising a newer ABI must not
 make a legitimate syncfs request terminate the dispatcher. Varin negotiates
-writeback cache only with this boundary and freezes its selected Session inside
-the matching requesting thread's post-writeback callback; unrelated syncs cannot
-consume the boundary. O_WRONLY cache-fill reads are admitted only in that mode.
+writeback cache only when FUSE_HAS_SYNCFS is actually offered and accepted. The
+flag is included in the INIT definitions; ABI 7.36's opcode alone does not enable
+SYNCFS on ordinary Linux FUSE mounts. Varin waits for its own syncfs syscall before
+freezing the selected Session; callback headers are not caller-thread receipts.
+O_WRONLY cache-fill reads are admitted only in writeback mode.
 
 Pure-Rust Linux dependency checks inspect the actual FUSE device and mounting
 route. A direct mount needs CAP_SYS_ADMIN in the current namespace; otherwise an

@@ -92,6 +92,8 @@ bitflags! {
         const FUSE_OVER_IO_URING = 1 << 41;
         /// kernel supports request timeout
         const FUSE_REQUEST_TIMEOUT = 1 << 42;
+        /// propagate syncfs to a privileged server (ABI 7.47)
+        const FUSE_HAS_SYNCFS = 1 << 44;
 
         /// pre-allocate space for a file
         #[cfg(target_os = "macos")]

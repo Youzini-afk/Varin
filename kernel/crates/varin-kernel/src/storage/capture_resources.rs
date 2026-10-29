@@ -507,10 +507,10 @@ fn read_entry(
     };
     if let Some(attributes)=&native {
         if resource.native.is_some(){match &mut state {FileState::RegularFile{mode,..}|FileState::Directory{mode,..}|FileState::Symlink{mode,..}=>*mode=Some(attributes.mode),_=>()}}
-        let projected=crate::native_metadata::recoverable(attributes,resource.native.is_some());
+        let projected=crate::native_metadata::recoverable(attributes,resource.native.is_some())?;
         state.set_native(projected.clone());
         let after=resource.native.as_ref().map(|owner|owner.attributes(&resource.path)).unwrap_or_else(||crate::native_metadata::observe(&resource.absolute).map(|v|v.attributes))?;
-        if projected!=crate::native_metadata::recoverable(&after,resource.native.is_some()){return Err(KernelError::SnapshotChanged(format!("file attributes changed while being captured: {}",resource.path)));}
+        if projected!=crate::native_metadata::recoverable(&after,resource.native.is_some())?{return Err(KernelError::SnapshotChanged(format!("file attributes changed while being captured: {}",resource.path)));}
     }
     check(cancel)?;
     if resolve()?.absolute != resource.absolute {
