@@ -1,0 +1,223 @@
+{
+  "status": "independent authored candidate; parent visual and normal-speed review pending; no runtime/selected integration",
+  "geometryReference": "varin-upright-v2",
+  "canvas": [
+    512,
+    512
+  ],
+  "entryPose": "upright-v2:open-user",
+  "exitPose": "upright-v2:open-user",
+  "actions": {
+    "open-hover-response": {
+      "wholeSequenceLoop": false,
+      "entrySource": "references/upright-open-neutral-v2.png",
+      "exitSource": "references/upright-open-neutral-v2.png",
+      "frames": [
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 80,
+          "phase": "enter",
+          "cue": "LOCAL_NOTICE",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        },
+        {
+          "source": "frames/open-hover-middle-v2.png",
+          "actualSourceSHA": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+          "durationMs": 120,
+          "phase": "enter",
+          "cue": "LOCAL_APPROACH",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-hover-middle-v2"
+        },
+        {
+          "source": "frames/open-hover-attend-v1.png",
+          "actualSourceSHA": "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a",
+          "durationMs": 320,
+          "phase": "hold",
+          "cue": "LOCAL_ATTEND",
+          "pauseSafe": true,
+          "pose": "upright-v2:local:open-hover-attend-v1"
+        },
+        {
+          "source": "frames/open-hover-middle-v2.png",
+          "actualSourceSHA": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+          "durationMs": 140,
+          "phase": "exit",
+          "cue": "LOCAL_RELEASE",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-hover-middle-v2"
+        },
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        }
+      ]
+    },
+    "tap-repeat-response": {
+      "wholeSequenceLoop": false,
+      "entrySource": "references/upright-open-neutral-v2.png",
+      "exitSource": "references/upright-open-neutral-v2.png",
+      "frames": [
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 80,
+          "phase": "enter",
+          "cue": "LOCAL_NOTICE",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        },
+        {
+          "source": "references/open-smile.png",
+          "actualSourceSHA": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 110,
+          "phase": "enter",
+          "cue": "LOCAL_SOFTEN",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-smile"
+        },
+        {
+          "source": "frames/open-tap-playful-v1.png",
+          "actualSourceSHA": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+          "durationMs": 380,
+          "phase": "hold",
+          "cue": "LOCAL_PLAYFUL",
+          "pauseSafe": true,
+          "pose": "upright-v2:local:open-tap-playful-v1"
+        },
+        {
+          "source": "references/open-smile.png",
+          "actualSourceSHA": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 140,
+          "phase": "exit",
+          "cue": "LOCAL_RELEASE",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-smile"
+        },
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 120,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        }
+      ]
+    }
+  },
+  "ordinaryRecoveryByActualSHA": {
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": [
+      {
+        "source": "references/upright-open-neutral-v2.png",
+        "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+        "durationMs": 80,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true,
+        "pose": "upright-v2:open-user"
+      }
+    ],
+    "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe": [
+      {
+        "source": "references/upright-open-neutral-v2.png",
+        "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true,
+        "pose": "upright-v2:open-user"
+      }
+    ],
+    "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a": [
+      {
+        "source": "frames/open-hover-middle-v2.png",
+        "actualSourceSHA": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+        "durationMs": 120,
+        "phase": "exit",
+        "cue": "LOCAL_RELEASE",
+        "pauseSafe": false,
+        "pose": "upright-v2:local:open-hover-middle-v2"
+      },
+      {
+        "source": "references/upright-open-neutral-v2.png",
+        "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true,
+        "pose": "upright-v2:open-user"
+      }
+    ],
+    "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59": [
+      {
+        "source": "references/open-smile.png",
+        "actualSourceSHA": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "LOCAL_RELEASE",
+        "pauseSafe": false,
+        "pose": "upright-v2:local:open-smile"
+      },
+      {
+        "source": "references/upright-open-neutral-v2.png",
+        "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true,
+        "pose": "upright-v2:open-user"
+      }
+    ],
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": [
+      {
+        "source": "references/upright-open-neutral-v2.png",
+        "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+        "durationMs": 100,
+        "phase": "exit",
+        "cue": "REST",
+        "pauseSafe": true,
+        "pose": "upright-v2:open-user"
+      }
+    ]
+  },
+  "interruptContract": {
+    "stableHold": "immediate transition into actual-source recovery; not locked for remaining hold",
+    "intermediate": "finish at most 40ms exposure then actual-source recovery",
+    "hoverLeave": "discard local intention and recover; never replay approach",
+    "newFacts": "display immediately, latest context after recovery",
+    "drag": "needs exact actualSHA no-stool closure before runtime admission"
+  },
+  "eligibility": {
+    "hover": "safe exact open-user endpoint after real hit dwell; no forced opening/closing; busy may keep existing short smile",
+    "repeat": "one per burst, previous response finished, clearly idle, no pending/unknown; not approval/nod",
+    "closed": "existing closed tap only, never open lid to use this package"
+  },
+  "newSources": [
+    {
+      "source": "frames/open-hover-middle-v2.png",
+      "sha256": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+      "provenance": "frames/open-hover-middle-v2-provenance.json",
+      "mask": "masks/open-hover-middle-v2.png"
+    },
+    {
+      "source": "frames/open-hover-attend-v1.png",
+      "sha256": "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a",
+      "provenance": "frames/open-hover-attend-v1-provenance.json",
+      "mask": "masks/open-hover-attend-v1.png"
+    },
+    {
+      "source": "frames/open-tap-playful-v1.png",
+      "sha256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+      "provenance": "frames/open-tap-playful-v1-provenance.json",
+      "mask": "masks/open-tap-playful-v1.png"
+    }
+  ]
+}

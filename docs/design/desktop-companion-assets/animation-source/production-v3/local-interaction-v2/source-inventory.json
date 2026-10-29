@@ -1,0 +1,142 @@
+[
+  {
+    "path": "README.md",
+    "sha256": "870f095f8acb90c907414cdd318e678d279a071dcb93f53f27bbe7f9af648f28",
+    "bytes": 1524
+  },
+  {
+    "path": "archive-verification.json",
+    "sha256": "788d4fc29e1a136561ad11d722386a6ece170f8e8c29bc2023fe0cbcbcc7b72b",
+    "bytes": 3798
+  },
+  {
+    "path": "build_handoff.py",
+    "sha256": "4a8182671b26919e556d7c625452c0ba536e1a3c9cec0ad9c3670347b6c3eb48",
+    "bytes": 3736
+  },
+  {
+    "path": "frames/open-hover-attend-v1-provenance.json",
+    "sha256": "a106841cf7fa51e0bd3fcd41bb94ef7683b8931f699f8f64a1ec99432e4d1ae6",
+    "bytes": 717
+  },
+  {
+    "path": "frames/open-hover-attend-v1.png",
+    "sha256": "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a",
+    "bytes": 323965
+  },
+  {
+    "path": "frames/open-hover-middle-v2-provenance.json",
+    "sha256": "582dc255ddd25bd3f63ceeccdc9ebc3240d315b9100227029fd0df6735f71830",
+    "bytes": 717
+  },
+  {
+    "path": "frames/open-hover-middle-v2.png",
+    "sha256": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+    "bytes": 329490
+  },
+  {
+    "path": "frames/open-tap-playful-v1-provenance.json",
+    "sha256": "8cc9a363db1090bae8cbc211b17537b40ea158fc720725498563aa03729ad6ef",
+    "bytes": 713
+  },
+  {
+    "path": "frames/open-tap-playful-v1.png",
+    "sha256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+    "bytes": 332052
+  },
+  {
+    "path": "generation-inputs.json",
+    "sha256": "f20326ec08328083f7698fc923d7c1c1afb5bdc2a1874b56df4f114603077e98",
+    "bytes": 4846
+  },
+  {
+    "path": "manifest.json",
+    "sha256": "0d88d9fe23ed34b51ca7ffc6b460cce7585eb53742035cd9defac2062afe9c13",
+    "bytes": 8394
+  },
+  {
+    "path": "masks/open-hover-attend-v1.png",
+    "sha256": "c1620f88e88285e10d345e2a7029ddd814419f2d8d94fe5c735064a207d9a769",
+    "bytes": 2040
+  },
+  {
+    "path": "masks/open-hover-middle-v2.png",
+    "sha256": "c1620f88e88285e10d345e2a7029ddd814419f2d8d94fe5c735064a207d9a769",
+    "bytes": 2040
+  },
+  {
+    "path": "masks/open-tap-playful-v1.png",
+    "sha256": "84c56884a96427613216d23725146c47d77d9474d9c69aac7422f60926ba06d4",
+    "bytes": 1875
+  },
+  {
+    "path": "prompts/open-hover-attend-v1.txt",
+    "sha256": "3ad069cc62209a3093bd45b6e956452091b94043d471ddf6a4a06058864153d0",
+    "bytes": 1430
+  },
+  {
+    "path": "prompts/open-hover-middle-v2.txt",
+    "sha256": "d666914789f40660c7da9b93ec9039c7d514527c566c81d2dfb731fae3af03b8",
+    "bytes": 898
+  },
+  {
+    "path": "prompts/open-tap-playful-v1.txt",
+    "sha256": "2f335840b18862052cade50a227437f5b27da15399695bb4398b41cea3329b9e",
+    "bytes": 989
+  },
+  {
+    "path": "qa/first-coherent-poses.jpg",
+    "sha256": "292c6993c4393fe9c1192f14cfe2a189d015814f023ab5bbe090e84700ece6f3",
+    "bytes": 91904
+  },
+  {
+    "path": "raw/open-hover-attend-v1.png",
+    "sha256": "670492c7196d4a62844e78419a4b3405ff9bf3e3cf8d17c950bbeb2e308470c6",
+    "bytes": 1576511
+  },
+  {
+    "path": "raw/open-hover-middle-v2.png",
+    "sha256": "cc3b9bbd5f2745435608ebfa3ef33d54ddbb444ddd2c75ea11de5e2b0e4f0ab2",
+    "bytes": 1595086
+  },
+  {
+    "path": "raw/open-tap-playful-v1.png",
+    "sha256": "646b3e28e73bbfc98f8d13cdf2345d6df35fc07e7e312e03706fd29852d8c27e",
+    "bytes": 1608697
+  },
+  {
+    "path": "rebuild-verification.json",
+    "sha256": "c4d27f10b72c0f94ff724ff474b40935c5cd95537353123780de871191382525",
+    "bytes": 191
+  },
+  {
+    "path": "references/hover-attend-v1.png",
+    "sha256": "5cc791dd3cd49ad987f4818847aa195fba03f96ab41735de88281454163ebc30",
+    "bytes": 336626
+  },
+  {
+    "path": "references/open-smile.png",
+    "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+    "bytes": 332241
+  },
+  {
+    "path": "references/upright-open-neutral-v2.png",
+    "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+    "bytes": 332071
+  },
+  {
+    "path": "register_pose.py",
+    "sha256": "908e3551a4fe43da2fc9756ac44995312c9743175e09082343644c3a22c377a2",
+    "bytes": 2699
+  },
+  {
+    "path": "rejected.json",
+    "sha256": "c6bf51fb94a2adf9dcca55abc01538b272d0ace05a1a3abdebb955a27d9d3196",
+    "bytes": 172
+  },
+  {
+    "path": "verify_portable.py",
+    "sha256": "5c81f7bb1a5d96bcc2a4434737958b1f057b0ace063d3613dcaa84e57fe0c8a0",
+    "bytes": 1051
+  }
+]

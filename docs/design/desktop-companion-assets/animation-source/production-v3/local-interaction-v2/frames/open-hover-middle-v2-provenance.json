@@ -1,0 +1,17 @@
+{
+  "status": "candidate",
+  "source": "references/upright-open-neutral-v2.png",
+  "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+  "raw": "raw/open-hover-middle-v2.png",
+  "rawSHA256": "cc3b9bbd5f2745435608ebfa3ef33d54ddbb444ddd2c75ea11de5e2b0e4f0ab2",
+  "prompt": "prompts/open-hover-middle-v2.txt",
+  "output": "frames/open-hover-middle-v2.png",
+  "sha256": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+  "mask": "masks/open-hover-middle-v2.png",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "full square viewport resize; generated edge cleanup; authored movement-region registration only, no head rotation, no body rig",
+  "outsideMaskExact": true
+}

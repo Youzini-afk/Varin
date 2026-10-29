@@ -1,0 +1,20 @@
+{
+  "validatedAtUTC": "2026-10-29T16:02:49Z",
+  "sourceCommit": "85980d63f3cc5c12a4bfcc8e15620426505373e4",
+  "selectedBundleSHA256": "ed6830296471e492521e7f0b9adc026f057a0e744726faa86462c5cee90ad2aa",
+  "nativeEvidence": [
+    "Launched normal companion using isolated actual Host and normal workbench UI",
+    "Agent/default workbench showed companion task overview, not supervisor overview",
+    "Selected Varin bot in actual top-bar profile menu; live companion changed to supervisor overview without restart",
+    "Selected Workbench/default again; live companion reverted to task overview",
+    "Main application closed gracefully; no companion or decorative windows remained"
+  ],
+  "scope": "Authoritative product-profile synchronization smoke on empty isolated Linux Host; event routing separately covered by targeted tests",
+  "notClaimed": [
+    "Real paid Bot or Agent executions",
+    "Every animation inspected in each mode",
+    "Windows/macOS verification"
+  ],
+  "settingsSHA256": "87ee5fe4ec53a5fd4226d8ca790df57bd94e82c597dc8b72e94a6353a39bdcab",
+  "nativeLogSHA256": "d61e0a96884de09ef821068a460ffe0ca2120d89870effa7b7f946ea297d8cfd"
+}

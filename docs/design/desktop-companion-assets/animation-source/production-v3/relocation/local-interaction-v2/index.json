@@ -1,0 +1,106 @@
+{
+  "pathBase": "production-v3",
+  "geometryReference": "varin-upright-v2",
+  "sourceManifest": "local-interaction-v2/manifest.json",
+  "sourceManifestSHA256": "0d88d9fe23ed34b51ca7ffc6b460cce7585eb53742035cd9defac2062afe9c13",
+  "entries": [
+    {
+      "source": "local-interaction-v2/frames/open-hover-middle-v2.png",
+      "sourceSHA256": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+      "detachedSource": "relocation/local-interaction-v2/frames/open-hover-middle-v2.png",
+      "detachedSHA256": "a0dee865823a4e7f727c8fbaf905ef9b6330baf972f5114cf996e5e0c67442a6",
+      "mask": "relocation/local-interaction-v2/frames/open-hover-middle-v2-mask.png",
+      "maskSHA256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "outsideMaskPixelExact": true,
+      "lowerBodyY275ExactToCanonical": true,
+      "embeddedStool": false,
+      "ordinaryRecovery": [
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        }
+      ],
+      "ordinaryRecoveryPathBase": "local-interaction-v2",
+      "restoreSeatedSameExposure": true,
+      "stage": "candidate; art and actual player acceptance separate"
+    },
+    {
+      "source": "local-interaction-v2/frames/open-hover-attend-v1.png",
+      "sourceSHA256": "f319e0c0d34b012a2e9c4151f7358c593250da2b703c60e2b1501ce395ba095a",
+      "detachedSource": "relocation/local-interaction-v2/frames/open-hover-attend-v1.png",
+      "detachedSHA256": "6395aeb46a081c9554123e98dbe6b62850bd289c9e1f92422186225c905392b3",
+      "mask": "relocation/local-interaction-v2/frames/open-hover-attend-v1-mask.png",
+      "maskSHA256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "outsideMaskPixelExact": true,
+      "lowerBodyY275ExactToCanonical": true,
+      "embeddedStool": false,
+      "ordinaryRecovery": [
+        {
+          "source": "frames/open-hover-middle-v2.png",
+          "actualSourceSHA": "53a818bd704447e9a57ea945a990e7d6ea20c3b22433cf94517961d1b2b0ddfe",
+          "durationMs": 120,
+          "phase": "exit",
+          "cue": "LOCAL_RELEASE",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-hover-middle-v2"
+        },
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        }
+      ],
+      "ordinaryRecoveryPathBase": "local-interaction-v2",
+      "restoreSeatedSameExposure": true,
+      "stage": "candidate; art and actual player acceptance separate"
+    },
+    {
+      "source": "local-interaction-v2/frames/open-tap-playful-v1.png",
+      "sourceSHA256": "f195320d4ee0e041df695a9b739ba48da7804cca900b8ccd8a4ea97f595e6b59",
+      "detachedSource": "relocation/local-interaction-v2/frames/open-tap-playful-v1.png",
+      "detachedSHA256": "2966294a2bc53bd90843936bd7cd82c977917b55af904c329240c18fb936416c",
+      "mask": "relocation/local-interaction-v2/frames/open-tap-playful-v1-mask.png",
+      "maskSHA256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "outsideMaskPixelExact": true,
+      "lowerBodyY275ExactToCanonical": true,
+      "embeddedStool": false,
+      "ordinaryRecovery": [
+        {
+          "source": "references/open-smile.png",
+          "actualSourceSHA": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "LOCAL_RELEASE",
+          "pauseSafe": false,
+          "pose": "upright-v2:local:open-smile"
+        },
+        {
+          "source": "references/upright-open-neutral-v2.png",
+          "actualSourceSHA": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 100,
+          "phase": "exit",
+          "cue": "REST",
+          "pauseSafe": true,
+          "pose": "upright-v2:open-user"
+        }
+      ],
+      "ordinaryRecoveryPathBase": "local-interaction-v2",
+      "restoreSeatedSameExposure": true,
+      "stage": "candidate; art and actual player acceptance separate"
+    }
+  ],
+  "actualActionRecoverySourceCount": 5,
+  "missing": [],
+  "method": "Exact same lower geometry as canonical; accepted canonical no-stool source/matte, no new generated identity or pose",
+  "interruptRule": "Same displayed SHA first; suppress semantic cues on author recovery; exact seated counterpart on early release; current exposure on regrab",
+  "status": "candidate, no selected/public change"
+}

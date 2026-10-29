@@ -1,0 +1,20 @@
+{
+  "status": "candidate archive only; not selected/public",
+  "inputOrigin": "repository archive only",
+  "sourceManifestSHA256": "0d88d9fe23ed34b51ca7ffc6b460cce7585eb53742035cd9defac2062afe9c13",
+  "independentWorkspaceDiskCopyRebuild": {
+    "PNG": {
+      "exact": 3,
+      "total": 3
+    },
+    "masks": {
+      "exact": 3,
+      "total": 3
+    },
+    "indexByteExact": true
+  },
+  "actualActionRecoverySources": 5,
+  "missing": [],
+  "workspaceAbsoluteDependencies": false,
+  "temporaryCopyRemoved": true
+}

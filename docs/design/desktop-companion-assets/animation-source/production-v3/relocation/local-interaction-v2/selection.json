@@ -1,0 +1,60 @@
+{
+  "pathBase": "this directory",
+  "files": [
+    {
+      "path": "build.py",
+      "sha256": "e571fa4709c3dcd77553de3ebb2c9dab727a8d916f48bff5f06beb3ce8b65e09",
+      "bytes": 3086
+    },
+    {
+      "path": "frames/open-hover-attend-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/open-hover-attend-v1.png",
+      "sha256": "6395aeb46a081c9554123e98dbe6b62850bd289c9e1f92422186225c905392b3",
+      "bytes": 324977
+    },
+    {
+      "path": "frames/open-hover-middle-v2-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/open-hover-middle-v2.png",
+      "sha256": "a0dee865823a4e7f727c8fbaf905ef9b6330baf972f5114cf996e5e0c67442a6",
+      "bytes": 330512
+    },
+    {
+      "path": "frames/open-tap-playful-v1-mask.png",
+      "sha256": "19092e9a3945edce972946c0c953abb48de7cdd091589ef63b13a32b5f56c05b",
+      "bytes": 2111
+    },
+    {
+      "path": "frames/open-tap-playful-v1.png",
+      "sha256": "2966294a2bc53bd90843936bd7cd82c977917b55af904c329240c18fb936416c",
+      "bytes": 333063
+    },
+    {
+      "path": "index.json",
+      "sha256": "426ae9ee0cf8be52f290104d0a8a7b7388c8ad34024bebe75f5ff43a93380654",
+      "bytes": 4872
+    },
+    {
+      "path": "review.jpg",
+      "sha256": "1c2d8885490cc409b0a0dab575f7366f6982f77d345dc1d7ce8c8fee8b3c172f",
+      "bytes": 570383
+    },
+    {
+      "path": "verification.json",
+      "sha256": "5b7ad0856816994e2b1d2579e2430dd4d41e3e556bdb6d30471636f0481b570a",
+      "bytes": 355
+    }
+  ],
+  "requiredDependencies": [
+    "production-v3/local-interaction-v2 frozen source package",
+    "production-v2/relocation/current-source-detached-index-v4.json and exact canonical neutral detached/mask"
+  ],
+  "status": "candidate; selected/public unchanged"
+}

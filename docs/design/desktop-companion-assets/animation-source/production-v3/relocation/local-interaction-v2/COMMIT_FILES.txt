@@ -1,0 +1,13 @@
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/archive-verification.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/build.py
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-hover-attend-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-hover-attend-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-hover-middle-v2-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-hover-middle-v2.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-tap-playful-v1-mask.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/frames/open-tap-playful-v1.png
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/index.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/review.jpg
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/selection.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/verification.json
+docs/design/desktop-companion-assets/animation-source/production-v3/relocation/local-interaction-v2/COMMIT_FILES.txt

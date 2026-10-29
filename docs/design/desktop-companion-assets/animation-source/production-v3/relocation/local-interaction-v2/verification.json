@@ -1,0 +1,9 @@
+{
+  "independentRebuildPNGHashEqual": 3,
+  "independentRebuildMaskHashEqual": 3,
+  "independentRebuildIndexEqual": true,
+  "actualActionRecoverySources": 5,
+  "sourceCoverageMissing": [],
+  "scope": "candidate source closure; not native lifecycle acceptance",
+  "sourceManifestSHA256": "0d88d9fe23ed34b51ca7ffc6b460cce7585eb53742035cd9defac2062afe9c13"
+}
