@@ -2,28 +2,28 @@
 export function coverage(catalog, assets) {
   return catalog.states.map(state => ({ ...state, actions: state.requires.map(action => {
     const candidates = assets.filter(asset => asset.action === action);
-    const accepted = candidates.filter(usable);
+    const accepted = candidates.filter(asset => usable(asset));
     return { action, status: accepted.length ? 'accepted' : candidates.length ? 'candidate' : 'missing', candidates: candidates.map(a => a.id) };
   }) }));
 }
 
-function usable(asset) {
-  return asset && asset.reviewStatus === 'accepted' && asset.stage === 'motion-candidate'
+function usable(asset, allowCandidates = false) {
+  return asset && (asset.reviewStatus === 'accepted' || allowCandidates && asset.reviewStatus === 'candidate') && asset.stage === 'motion-candidate'
     && asset.entryPose && asset.exitPose && asset.frames?.length;
 }
 
 /** Route only across explicitly authored, visually accepted pose matches. No implicit fade. */
-export function route(current, target, assets) {
-  if (!usable(target)) return { status: 'blocked', reason: 'Target is missing or not visually accepted', clips: [] };
+export function route(current, target, assets, allowCandidates = false) {
+  if (!usable(target, allowCandidates)) return { status: 'blocked', reason: 'Target is missing or not visually accepted', clips: [] };
   if (!current) return { status: 'ready', clips: [target.id] };
-  if (!usable(current)) return { status: 'blocked', reason: 'Current material has no validated exit contract', clips: [] };
+  if (!usable(current, allowCandidates)) return { status: 'blocked', reason: 'Current material has no validated exit contract', clips: [] };
   if (!current.geometryReference || current.geometryReference !== target.geometryReference) {
     return { status: 'blocked', reason: 'Shared geometry reference missing or different; do not normalize whole-body proportions', clips: [] };
   }
   if (JSON.stringify(current.canvas) !== JSON.stringify(target.canvas)) {
     return { status: 'blocked', reason: 'Registered canvas mismatch; explicit registration required', clips: [] };
   }
-  const bridges = assets.filter(a => usable(a) && a.kind === 'bridge' && a.geometryReference === current.geometryReference && JSON.stringify(a.canvas) === JSON.stringify(current.canvas));
+  const bridges = assets.filter(a => usable(a, allowCandidates) && a.kind === 'bridge' && a.geometryReference === current.geometryReference && JSON.stringify(a.canvas) === JSON.stringify(current.canvas));
   const queue = [{ pose: current.exitPose, clips: [] }], visited = new Set();
   while (queue.length) {
     const node = queue.shift();
@@ -43,7 +43,8 @@ export function frameAt(asset, timeMs) {
 
 /** Latest presentation request wins; it never sends application commands. */
 export class CompanionPlayback {
-  constructor(assets) { this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; this.gesture = null; this.latestIntent = null; this.worldEvent = null; this.worldRevision = 0; }
+  constructor(assets, { allowCandidates = false } = {}) { this.allowCandidates = allowCandidates; this.assets = assets; this.current = null; this.timeMs = 0; this.pending = null; this.path = []; this.blocker = null; this.hold = false; this.canDisplay = () => true; this.loading = null; this.nextStartMs = 0; this.gesture = null; this.latestIntent = null; this.worldEvent = null; this.worldRevision = 0; }
+  usable(asset) { return usable(asset, this.allowCandidates); }
   request(id, { urgent = false } = {}) {
     this.latestIntent = id;
     if (this.gesture) return { status: 'ready', clips: [] }; // Host facts keep updating; only its latest artistic intent waits.
@@ -59,7 +60,7 @@ export class CompanionPlayback {
   }
   emitWorld(phase) { this.worldEvent = { phase, packageId: this.current?.id ?? null, revision: ++this.worldRevision }; }
   queueGesture(ids) {
-    if (ids.some(id => !usable(this.assets.find(asset => asset.id === id)))) {
+    if (ids.some(id => !this.usable(this.assets.find(asset => asset.id === id)))) {
       this.blocker = 'Missing visually accepted gesture continuation'; this.path = []; this.hold = true; return false;
     }
     this.path = [...ids]; this.loading = null; this.nextStartMs = 0; this.hold = false; this.blocker = null; return true;
@@ -76,10 +77,16 @@ export class CompanionPlayback {
     if (this.gesture) {
       this.gesture.released = false; this.gesture.restoreMs = null; this.gesture.restoreNext = null;
       if (this.gesture.worldStarted) this.emitWorld('lift');
-      return this.queueGesture(this.current.gesture?.grabNext ?? []);
+      const immediate = this.current.gesture?.grabImmediate;
+      const path = this.current.gesture?.grabNext ?? [];
+      if (immediate && immediate !== this.current.id) {
+        if (!this.queueGesture([immediate, ...path])) return false;
+        this.advance(); return true; // Same-exposure no-stool swap before the native root moves.
+      }
+      return this.queueGesture(path);
     }
     const source = this.current && frameAt(this.current, this.timeMs)?.sha256;
-    const entry = source && this.assets.find(asset => usable(asset) && asset.gesture?.entrySourceSha256 === source);
+    const entry = source && this.assets.find(asset => this.usable(asset) && asset.gesture?.entrySourceSha256 === source);
     if (!entry) { this.blocker = 'No reviewed same-exposure pickup entry for this drawing'; return false; }
     this.gesture = { previous: this.current, previousTime: this.timeMs, released: false, restoreMs: null, worldStarted: false };
     this.pending = null;
@@ -97,7 +104,7 @@ export class CompanionPlayback {
     if (restoreSource) {
       const previous = this.gesture.previous;
       const alreadySameDrawing = frameAt(previous, this.gesture.previousTime)?.sha256 === restoreSource;
-      const candidates = [previous, ...this.assets.filter(asset => !asset.gesture && usable(asset))];
+      const candidates = [previous, ...this.assets.filter(asset => !asset.gesture && this.usable(asset))];
       const target = candidates.find(asset => asset.frames.some(frame => frame.sha256 === restoreSource));
       const matches = target?.frames.filter(item => item.sha256 === restoreSource) ?? [];
       // Canonical pixels can occur at both ends of a one-shot. Preserve the exact
@@ -107,12 +114,14 @@ export class CompanionPlayback {
       if (alreadySameDrawing) { /* Keep the grabbed authored position. */ }
       else if (target && frame) { this.gesture.previous = target; this.gesture.previousTime = frame.startMs; }
       else {
-        const seated = this.assets.find(asset => usable(asset) && asset.gesture?.embeddedStool && asset.frames.some(item => item.sha256 === restoreSource));
+        const seated = this.assets.find(asset => this.usable(asset) && asset.gesture?.embeddedStool && asset.frames.some(item => item.sha256 === restoreSource));
         if (seated) this.gesture.restoreNext = [seated.id, ...seated.gesture.releaseNext];
         else { this.blocker = 'No actual seated counterpart installed for this recovery drawing'; this.hold = true; this.path = []; return; }
       }
     }
-    if (this.current.gesture?.restoreOnRelease || restoreSource) {
+    if (this.current.gesture?.releaseViaFrames) {
+      this.queueGesture(this.current.gesture.releaseNext);
+    } else if (this.current.gesture?.restoreOnRelease || restoreSource) {
       this.path = []; this.loading = null; this.gesture.restoreMs = 100;
     } else this.queueGesture(this.current.gesture?.releaseNext ?? []);
   }
@@ -144,7 +153,7 @@ export class CompanionPlayback {
       this.timeMs += step; remaining -= step;
       if (this.timeMs < this.current.durationMs) break;
       if (this.path.length) this.advance();
-      else if (this.gesture.released && this.current.gesture?.settled) this.finishGesture();
+      else if (this.gesture.released && this.current.gesture?.settled) this.finishGesture(!!this.current.gesture.restorePreviousOnSettle);
       else break; // Actual authored airborne hold; never manufacture a new pose.
     }
     if (!this.gesture && remaining > 0) this.tick(remaining);
@@ -153,7 +162,7 @@ export class CompanionPlayback {
     const first = this.current?.loop && this.current.frames[this.current.loop[0]];
     const frame = this.current && frameAt(this.current, this.timeMs);
     return !!(first && frame && !this.gesture && !this.pending && !this.path.length && !this.loading
-      && this.timeMs >= first.startMs && frame.pose && frame.exitTo?.includes(frame.pose));
+      && frame.pauseSafe !== false && this.timeMs >= first.startMs && frame.pose && frame.exitTo?.includes(frame.pose));
   }
   target() { return this.assets.find(a => a.id === this.pending); }
   /** Only explicitly authored safe drawings may exit before a clip's end. */
@@ -163,7 +172,7 @@ export class CompanionPlayback {
     const target = this.target();
     for (const pose of frame?.exitTo ?? []) {
       if (pose !== frame.pose) continue;
-      const result = route({ ...this.current, exitPose: pose }, target, this.assets);
+      const result = route({ ...this.current, exitPose: pose }, target, this.assets, this.allowCandidates);
       if (result.status === 'ready' && result.clips[0] !== this.current.id) {
         this.path = [...result.clips]; this.blocker = null; this.advance(); return true;
       }
@@ -173,11 +182,11 @@ export class CompanionPlayback {
   reverseIfAuthored() {
     const frame = this.current && frameAt(this.current, this.timeMs);
     const ref = frame?.motion?.reverseFrom;
-    const reverse = ref && this.assets.find(a => a.id === ref.sequence && usable(a) && a.geometryReference === this.current.geometryReference && JSON.stringify(a.canvas) === JSON.stringify(this.current.canvas));
+    const reverse = ref && this.assets.find(a => a.id === ref.sequence && this.usable(a) && a.geometryReference === this.current.geometryReference && JSON.stringify(a.canvas) === JSON.stringify(this.current.canvas));
     const reverseFrame = reverse?.frames[ref.frameIndex];
     if (!reverseFrame || !frame.motion.renderedPixelSha256 || reverseFrame.motion?.renderedPixelSha256 !== frame.motion.renderedPixelSha256) return false;
-    const forwardRoute = route(this.current, this.target(), this.assets);
-    const reversedRoute = route(reverse, this.target(), this.assets);
+    const forwardRoute = route(this.current, this.target(), this.assets, this.allowCandidates);
+    const reversedRoute = route(reverse, this.target(), this.assets, this.allowCandidates);
     if (reversedRoute.status !== 'ready' || (forwardRoute.status === 'ready' && reversedRoute.clips.length >= forwardRoute.clips.length)) return false;
     // Start at the same actual pixels; never rewind or synthesize intermediate motion.
     this.path = [reverse.id, ...reversedRoute.clips]; this.nextStartMs = reverseFrame.startMs; this.blocker = null;
@@ -185,7 +194,7 @@ export class CompanionPlayback {
     return true;
   }
   plan() {
-    const result = route(this.current, this.target(), this.assets);
+    const result = route(this.current, this.target(), this.assets, this.allowCandidates);
     this.blocker = result.status === 'blocked' ? result.reason : null;
     if (this.leaveSafeDrawing() || this.reverseIfAuthored()) return { status: 'ready', clips: [...this.path] };
     if (this.blocker) { this.hold = true; return result; }

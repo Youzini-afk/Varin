@@ -66,7 +66,7 @@ def pack(manifest_path, output, max_size=2048, padding=2):
             'offset': [offset[0] + bounds[0], offset[1] + bounds[1]],
             'contacts': contacts,
         }
-        for field in ('phase', 'pose', 'exitTo', 'motion'):
+        for field in ('phase', 'pose', 'exitTo', 'motion', 'cue'):
             if field in frame:
                 record[field] = frame[field]
         output_frames.append(record)

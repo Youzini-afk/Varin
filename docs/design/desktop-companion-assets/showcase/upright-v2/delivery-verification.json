@@ -1,0 +1,92 @@
+{
+  "video": {
+    "file": "varin-upright-showcase.mp4",
+    "sizeBytes": 1930911,
+    "sha256": "10804ab2a0a8c792630cfa1e0cbff07180dd9b0505484286fe66cb7fa3b5a4a1",
+    "durationSeconds": "116.000000",
+    "width": 1280,
+    "height": 720,
+    "frameRate": "24/1",
+    "frames": "2784",
+    "fullDecodeExitCode": 0
+  },
+  "bundleSha256": "399bf528c3ee7b601ddbd1ca126df123a8a04b78d353b5a3216d1fce8ab1d268",
+  "uniqueSourceDrawings": 58,
+  "coveredPackages": 32,
+  "cues": [
+    "acknowledge",
+    "ask",
+    "attend",
+    "dispatch-left",
+    "dispatch-right",
+    "offer",
+    "page-turn",
+    "present",
+    "read",
+    "review",
+    "revise",
+    "scan-left",
+    "scan-right",
+    "select",
+    "split",
+    "transition",
+    "type",
+    "watch"
+  ],
+  "scenes": [
+    "dispatch",
+    "editing",
+    "permission",
+    "question",
+    "reading",
+    "searching"
+  ],
+  "containsSyntheticCharacterFrames": false,
+  "displaySampling": "24 fps, authored exposures through production CompanionPlayback; no whole-character crossfade or frame interpolation",
+  "worldEvents": [
+    {
+      "ms": 107000,
+      "package": "v2-core-closedDetached-100",
+      "exposure": 0,
+      "sourceSha256": "d19e8eb5376d230e3a50068d1f7b9f5ec1801b13a73b66934c71dc3940c81e1a",
+      "sourceTimeMs": 0,
+      "cue": "transition",
+      "scene": "reading",
+      "phase": "withdraw",
+      "outcome": null,
+      "gesture": true,
+      "position": {
+        "x": 448,
+        "y": 193
+      },
+      "world": {
+        "phase": "lift",
+        "ms": 107000,
+        "x": 448,
+        "y": 193
+      }
+    },
+    {
+      "ms": 110000,
+      "package": "v2-core-airborneNeutral-140",
+      "exposure": 0,
+      "sourceSha256": "ece6e77b48bbc40ba261a9a9cd98b7e464bf6d705f59fd8a2e91ad24a0918a9d",
+      "sourceTimeMs": 0,
+      "cue": "transition",
+      "scene": "reading",
+      "phase": "withdraw",
+      "outcome": null,
+      "gesture": true,
+      "position": {
+        "x": 548,
+        "y": 193
+      },
+      "world": {
+        "phase": "landing",
+        "ms": 110000,
+        "x": 548,
+        "y": 193
+      }
+    }
+  ]
+}

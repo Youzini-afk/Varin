@@ -81,7 +81,9 @@ it('finishes the current gesture to an authored safe drawing and carries elapsed
   const work = asset('work','keyboard','keyboard');
   const player = new CompanionPlayback([wait, bridge, work]);
   const quiet = new CompanionPlayback([wait, bridge, work]);quiet.request('wait');quiet.tick(220);
-  expect(quiet.canPauseRepeatedMotion()).toBe(true);quiet.request('work');expect(quiet.canPauseRepeatedMotion()).toBe(false);
+  expect(quiet.canPauseRepeatedMotion()).toBe(true);
+  wait.frames[2]!.pauseSafe = false; expect(quiet.canPauseRepeatedMotion()).toBe(false);
+  delete wait.frames[2]!.pauseSafe; quiet.request('work');expect(quiet.canPauseRepeatedMotion()).toBe(false);
   player.request('wait'); player.tick(120);expect(player.canPauseRepeatedMotion()).toBe(false); player.request('work', { urgent: true });
   expect(player.current?.id).toBe('wait'); // No teleport while the hand is moving.
   player.tick(130);

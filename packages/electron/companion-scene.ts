@@ -95,11 +95,13 @@ export class CompanionSceneWindows {
     const entry = this.entries.get(ownerId); if (!entry) return;
     if (entry.owner.isDestroyed() || entry.window.isDestroyed()) { this.clear(ownerId); return; }
     // Native input suppression happens synchronously, before queued renderer work.
-    if (!this.visible(entry)) { entry.window.hide(); return; }
+    if (!this.visible(entry)) entry.window.hide();
     if (!entry.ready) return;
     entry.queue = entry.queue.catch(() => {}).then(async () => {
       if (this.entries.get(ownerId) !== entry || entry.window.isDestroyed() || entry.owner.isDestroyed()) return;
-      if (!this.visible(entry)) { entry.window.hide(); return; }
+      // Publish suppression even when native visibility events are throttled or disabled.
+      // The decorative renderer must stop its own RAF, not rely on document.hidden.
+      if (!this.visible(entry)) entry.window.hide();
       const { bounds, layout } = companionSceneLayout(entry.owner.getContentBounds(), entry.viewport, this.workArea(entry.owner.getContentBounds()));
       entry.window.setBounds(bounds); entry.window.setAlwaysOnTop(entry.owner.isAlwaysOnTop());
       const descriptor = { ...entry.descriptor, suppressed: !this.visible(entry) };

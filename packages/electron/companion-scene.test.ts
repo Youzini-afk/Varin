@@ -33,7 +33,11 @@ it('uses one inert scene, preserves character DIP anchor and follows visibility 
   expect(f.windows).toHaveLength(1); expect(f.windows[0]?.bounds.x).toBe(139); expect(f.windows[0]?.pinned).toBe(true);
   f.owner.visible = false; f.manager.refresh(f.owner.id); expect(f.windows[0]?.visible).toBe(false);
   await flush(); expect(f.windows[0]?.visible).toBe(false);
+  expect(f.windows[0]?.payloads.at(-1)?.descriptor.suppressed).toBe(true);
+  const hiddenCount = f.windows[0]!.payloads.length;
+  f.manager.refresh(f.owner.id); await flush(); expect(f.windows[0]!.payloads.length).toBe(hiddenCount);
   f.owner.visible = true; f.manager.refresh(f.owner.id); await flush(); expect(f.windows[0]?.visible).toBe(true);
+  expect(f.windows[0]?.payloads.at(-1)?.descriptor.suppressed).toBe(false);
   f.manager.clearAll(); expect(f.windows[0]?.closed).toBe(true);
 });
 

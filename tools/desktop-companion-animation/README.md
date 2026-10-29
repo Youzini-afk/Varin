@@ -90,3 +90,20 @@ Select an existing thread/branch to observe its `ThreadProjection`. Observation 
 For artwork inspection, explicitly select one packed `sequence.json` together with all referenced PNG atlas pages. This uses browser file handles, never arbitrary filesystem IPC. Stop/Replay uses the authored exposure durations; it is not a fixed drawing-rate target. Candidate art is clearly labeled and cannot enter the accepted-art loader. This development consumer is **not the completed production desktop-pet UX**: accepted state assets, event-gated entry/hold/exit playback, native lift/landing choreography and user settings remain production integration work. In particular a timed permission review sequence must never automatically end a real permission wait.
 
 Focused validation: `cd packages/ui && bunx vitest run src/components/companion/companion.test.ts`; prepare existing workspace type dependencies, then run UI and Electron `tsc --noEmit` checks. No new test framework or dependency was added.
+
+### Upright source selection
+
+`build_upright_bundle.py --root <production-v2-source-root> --repo <checkout> --output <candidate-directory>` compiles the supplied inventory and exact-source recovery contracts with the existing atlas packer and playback graph. Prepare its source inventory with `prepare_upright_inventory.py --root <source-root>` and `prepare_upright_recovery.py --root <source-root>`; it must include the selected mechanical lid, six performance families, closed idle, and source-specific relocation contracts. Generated internal nodes are not extra user-facing states.
+
+The result remains candidate-only. `select_upright_bundle.py <candidate/bundle.json> <selected-directory> --expected-sha <reviewed-candidate-sha256>` selects only that exact reviewed artifact and records its source/atlas hashes and finite acceptance basis. It does not automatically accept a rebuilt or later candidate. Install the selected directory as one generation, including its hash-named world stool; do not mix identity epochs or overwrite only the character pages.
+
+Repository-only reproduction (no original workspace required):
+
+```sh
+SOURCE=docs/design/desktop-companion-assets/animation-source/production-v2
+python tools/desktop-companion-animation/prepare_upright_inventory.py --root "$SOURCE"
+python tools/desktop-companion-animation/prepare_upright_recovery.py --root "$SOURCE"
+python tools/desktop-companion-animation/build_upright_bundle.py --root "$SOURCE" --output /tmp/varin-upright-candidate
+```
+
+Preparation writes only reproducible inventory/recovery JSON below the source root's `integration` directory. The source-specific authored recovery mapping and local-event manifest are included in the repository. `integration/portable-runtime-verification.json` records the independent rebuild: candidate and selected runtime artifact bytes match, with no external source dependency. The original acceptance ledger's JSON key ordering differs from the first independent reconstruction but its parsed contents are identical; subsequent selections sort filenames deterministically. Final native QA fields are appended afterward and are intentionally separate from the reproducible source-art selection.

@@ -25,6 +25,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [liveCompletion, setLiveCompletion] = React.useState<string | null>(null);
   const pendingQuestions = React.useRef(new Set<string>());
   const [liveAnswer, setLiveAnswer] = React.useState<string | null>(null);
+  const [livePermissionReceipt, setLivePermissionReceipt] = React.useState(false);
+  const lastSceneReceipt = React.useRef<SceneFact | null>(null);
   const sceneFacts = React.useRef(new CompanionSceneFacts());
   const sceneScope = React.useRef(0);
   const [sceneFact, setSceneFact] = React.useState<SceneFact>(() => sceneFacts.current.reset());
@@ -61,8 +63,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     || (snapshot?.operations.some(operation => operation.phase !== 'terminal') ?? false)
     || Object.values(snapshot?.childActivity ?? {}).some(child => child.state !== 'preparation_failed')
     || (reviewRoute && /^(C0[2345]|T|W)/.test(presentation));
-  const localReviewAction: Record<string, string> = { L01: 'welcome', L02: 'idle-closed', L06: 'stretch', L07: 'idle-closed', E03: 'idle-closed' };
-  const preferredAction = reviewRoute && localReviewAction[presentation] ? localReviewAction[presentation]!
+  const localReviewAction: Record<string, string> = { L01: 'welcome', L02: 'idle-closed', L06: assetList.some(item => item.action === 'stretch' && item.reviewStatus === 'accepted') ? 'stretch' : 'idle-closed', L07: 'idle-closed', E03: 'idle-closed' };
+  const permissionAcknowledgement = !reviewRoute && livePermissionReceipt && health === 'current'
+    && !['W02','W03','C06'].includes(visualIntent.state ?? '') && !visualIntent.state?.startsWith('E')
+    && assetList.some(item => item.action === 'permission-allowed' && item.reviewStatus === 'accepted');
+  const preferredAction = permissionAcknowledgement ? 'permission-allowed' : reviewRoute && localReviewAction[presentation] ? localReviewAction[presentation]!
     : visualIntent.state === 'E05' ? 'disconnected' : visualIntent.state === 'T03' && requestedAction !== 'understood' ? 'execution-observe' : requestedAction;
   const visualAction = preferredAction && assetList.some(item => item.action === preferredAction && item.reviewStatus === 'accepted' && item.stage === 'motion-candidate' && item.geometryReference && item.entryPose && item.exitPose) ? preferredAction
     : hasActiveWork && !visualIntent.state?.startsWith('E') ? 'external-wait' : preferredAction;
@@ -78,6 +83,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current') || manualReview, controlsOpen, visibleCue);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
+    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
   }, [automatic.finished, automatic.packageId, assetList, localAction]);
@@ -91,8 +97,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     seenTap.current = companionWindow.tapRevision;
     if (!localAllowed) return;
     const current = assetList.find(item => item.id === automatic.packageId);
-    const posture = current?.exitPose?.startsWith('seated-open-') ? 'seated-open-' : current?.exitPose?.startsWith('seated-closed-') ? 'seated-closed-' : null;
-    if (posture && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.entryPose?.startsWith(posture))) setLocalAction('tap-response');
+    // Identity-specific pose names are artwork contracts, not UI prefix conventions.
+    // The existing player chooses the nearest authored tap variant and its safe bridge.
+    if (current && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.geometryReference === current.geometryReference)) setLocalAction('tap-response');
   }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed]);
   const pictures = asset ? imageLibrary[asset.id] ?? [] : [];
   const displayedExposure = !playing && !manualReview && automatic.packageId === asset?.id ? automatic.exposure : exposure;
@@ -115,6 +122,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   }, [controlsOpen, apis.threads, generation]);
   React.useEffect(() => {
     if (selected) setLocalAction(null);
+    lastSceneReceipt.current = null; setLivePermissionReceipt(false);
     sceneScope.current++; setSceneFact(sceneFacts.current.reset());
     setSnapshot(undefined); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null);
     if (!apis.threads || !selected || selected.generation !== generation) { setConnection('No thread selected'); setHealth('unselected'); return; }
@@ -123,18 +131,20 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     const projection = new ThreadProjection(apis.threads, selected.identity,
       value => { if (!closed) {
         // Observe each projection callback before React can coalesce short tool snapshots.
-        setSceneFact(sceneFacts.current.observe(value, 'current'));
+        const nextScene = sceneFacts.current.observe(value, 'current');
+        if (nextScene !== lastSceneReceipt.current && nextScene.kind === 'permission' && nextScene.phase === 'resolve' && nextScene.outcome === 'allowed') setLivePermissionReceipt(true);
+        lastSceneReceipt.current = nextScene; setSceneFact(nextScene);
         const answered = newlyAnsweredQuestion(pendingQuestions.current, value);
         if (answered) setLiveAnswer(answered);
         pendingQuestions.current = new Set(value.operations.filter(operation => operation.executor === 'ask_user' && operation.phase !== 'terminal').map(operation => operation.id));
         const nextIntent = projectCompanionIntent(value, 'current');
-        if (nextIntent.state === 'W02' || nextIntent.state === 'W03' || nextIntent.state?.startsWith('E')) setLiveAnswer(null);
+        if (nextIntent.state === 'W02' || nextIntent.state === 'W03' || nextIntent.state?.startsWith('E')) { setLiveAnswer(null); setLivePermissionReceipt(false); }
         const nextRun = value.activeRun, previous = previousRun.current;
-        if (nextRun && ['completed', 'failed', 'cancelled'].includes(nextRun.state)) setLiveAnswer(null);
+        if (nextRun && ['completed', 'failed', 'cancelled'].includes(nextRun.state)) { setLiveAnswer(null); setLivePermissionReceipt(false); }
         if (nextRun?.state === 'completed' && previous?.id === nextRun.id && !['completed','failed','cancelled'].includes(previous.state)) setLiveCompletion(nextRun.id);
         previousRun.current = nextRun ? { id: nextRun.id, state: nextRun.state } : null;
         setSnapshot(value); setHealth('current'); setConnection('Observing existing thread — read only'); } },
-      cause => { if (!closed) { setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
+      cause => { if (!closed) { setLivePermissionReceipt(false); lastSceneReceipt.current = null; setSceneFact(sceneFacts.current.reset()); setHealth('unknown'); previousRun.current = null; setLiveCompletion(null); pendingQuestions.current.clear(); setLiveAnswer(null); setConnection(`Connection unknown: ${String(cause)}`); } },
       undefined, undefined, undefined, { contextInspection: false });
     projection.start();
     return () => { closed = true; projection.close(); };
@@ -264,10 +274,10 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     context.drawImage(images[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
     displayedDrawing.current = { packageId: sequence.id, exposure };
     const cue = frame.cue ? sceneCue(frame.cue) : 'engaged';
-    const cueKey = JSON.stringify([sequence.action, cue]);
+    const cueKey = JSON.stringify([sequence.sceneAction ?? sequence.action, cue]);
     if (lastVisibleCue.current !== cueKey) {
       lastVisibleCue.current = cueKey;
-      setVisibleCue({ cue, action: sequence.action, instance: ++visibleCueCounter.current });
+      setVisibleCue({ cue, action: sequence.sceneAction ?? sequence.action, instance: ++visibleCueCounter.current });
     }
     companionWindow.refreshHitMask();
   };

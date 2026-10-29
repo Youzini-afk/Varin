@@ -1,11 +1,11 @@
 /** Drawing/exposure contract. No application commands or automatic motion synthesis. */
 export interface CompanionFrame {
-  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; sha256?: string; pose?: string; phase?: string; cue?: string; exitTo?: string[]; motion?: { renderedPixelSha256?: string; reverseFrom?: { sequence: string; frameIndex: number } };
+  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; pauseSafe?: boolean; sha256?: string; pose?: string; phase?: string; cue?: string; exitTo?: string[]; motion?: { renderedPixelSha256?: string; reverseFrom?: { sequence: string; frameIndex: number } };
 }
 export interface CompanionPackage {
   id: string; canvas: [number, number]; frames: CompanionFrame[]; pages: { file: string }[];
-  gesture?: { entrySourceSha256?: string; restoreSourceSha256?: string; grabNext: string[]; releaseNext: string[]; embeddedStool: boolean; settled: boolean; restoreOnRelease: boolean };
-  durationMs: number; entryPose?: string; exitPose?: string; geometryReference?: string; loop?: [number, number] | null; kind?: string; action?: string; stage?: string; reviewStatus?: string; warning?: string;
+  gesture?: { releaseViaFrames?: boolean; restorePreviousOnSettle?: boolean; grabImmediate?: string; entrySourceSha256?: string; restoreSourceSha256?: string; grabNext: string[]; releaseNext: string[]; embeddedStool: boolean; settled: boolean; restoreOnRelease: boolean };
+  durationMs: number; entryPose?: string; exitPose?: string; geometryReference?: string; loop?: [number, number] | null; kind?: string; action?: string; sceneAction?: string; stage?: string; reviewStatus?: string; warning?: string;
 }
 const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid sequence record');
@@ -45,7 +45,7 @@ export function readCompanionPackage(value: unknown, review: boolean): Companion
         motion.reverseFrom = { sequence: reverse.sequence, frameIndex: reverse.frameIndex as number };
       }
     }
-    const result = { cue: typeof frame.cue === 'string' ? frame.cue : undefined, sha256: typeof frame.sha256 === 'string' ? frame.sha256 : undefined, phase: typeof frame.phase === 'string' ? frame.phase : undefined, exitTo: exitTo as string[], motion, page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
+    const result = { pauseSafe: typeof frame.pauseSafe === 'boolean' ? frame.pauseSafe : undefined, cue: typeof frame.cue === 'string' ? frame.cue : undefined, sha256: typeof frame.sha256 === 'string' ? frame.sha256 : undefined, phase: typeof frame.phase === 'string' ? frame.phase : undefined, exitTo: exitTo as string[], motion, page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
     elapsed += frame.durationMs;
     return result;
   });
@@ -63,10 +63,10 @@ export function readCompanionPackage(value: unknown, review: boolean): Companion
     const node = record(data.gesture);
     if (!Array.isArray(node.grabNext) || !Array.isArray(node.releaseNext) || ![...node.grabNext,...node.releaseNext].every(id => typeof id === 'string' && id.length > 0)
       || typeof node.embeddedStool !== 'boolean' || typeof node.settled !== 'boolean' || typeof node.restoreOnRelease !== 'boolean' || frames.length !== 1) throw new Error('Invalid authored gesture node');
-    gesture = { restoreSourceSha256: typeof node.restoreSourceSha256 === 'string' ? node.restoreSourceSha256 : undefined, entrySourceSha256: typeof node.entrySourceSha256 === 'string' ? node.entrySourceSha256 : undefined, grabNext: node.grabNext as string[], releaseNext: node.releaseNext as string[], embeddedStool: node.embeddedStool, settled: node.settled, restoreOnRelease: node.restoreOnRelease };
+    gesture = { releaseViaFrames: node.releaseViaFrames === true, restorePreviousOnSettle: node.restorePreviousOnSettle === true, grabImmediate: typeof node.grabImmediate === 'string' ? node.grabImmediate : undefined, restoreSourceSha256: typeof node.restoreSourceSha256 === 'string' ? node.restoreSourceSha256 : undefined, entrySourceSha256: typeof node.entrySourceSha256 === 'string' ? node.entrySourceSha256 : undefined, grabNext: node.grabNext as string[], releaseNext: node.releaseNext as string[], embeddedStool: node.embeddedStool, settled: node.settled, restoreOnRelease: node.restoreOnRelease };
   }
   if (!Number.isFinite(elapsed)) throw new Error('Invalid sequence duration');
-  return { id: data.id, gesture, canvas, frames, pages, durationMs: elapsed, entryPose, exitPose, geometryReference, loop, kind: typeof data.kind === 'string' ? data.kind : undefined, action: typeof data.action === 'string' ? data.action : undefined,
+  return { id: data.id, gesture, canvas, frames, pages, durationMs: elapsed, entryPose, exitPose, geometryReference, loop, sceneAction: typeof data.sceneAction === 'string' ? data.sceneAction : undefined, kind: typeof data.kind === 'string' ? data.kind : undefined, action: typeof data.action === 'string' ? data.action : undefined,
     stage: typeof data.stage === 'string' ? data.stage : undefined,
     reviewStatus: typeof data.reviewStatus === 'string' ? data.reviewStatus : undefined,
     warning: typeof data.warning === 'string' ? data.warning : undefined };

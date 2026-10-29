@@ -12,7 +12,8 @@ const ease = (n: number) => 1 - (1-clamp(n)) ** 3;
 const group = (content: string, x = 0, y = 0, angle = 0, cx = 0, cy = 0) => `<g transform="translate(${x} ${y}) rotate(${angle} ${cx} ${cy})">${content}</g>`;
 
 /** Code-native decorative shapes, not generated/reconstructed character art. */
-function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed, readingRight = false): string {
+function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed, readingRight = false, edge: 'left' | 'right' | null = null): string {
+  const cl=geometry.computerLeft, cr=geometry.computerRight;
   const seconds = elapsed / 1000, reduced = d.reducedMotion, active = d.phase === 'active';
   const wave = reduced || !active ? 0 : Math.sin(seconds * 1.5);
   const entrance = reduced ? 1 : ease(elapsed/300);
@@ -26,7 +27,7 @@ function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed
       z = group(page(10,81,43,57), -18*(1-entrance), 5*(1-entrance), -8*entrance, 50,135)
         + group(page(24,73,47,64), 0, 2*wave, 13*flip, 67,125)
         + path(`M31 ${94+(motion && (legacy || d.cue === 'read') ? (legacy ? (cycle/.66%1) : clamp(cueElapsed/800))*28 : 9)} L61 ${94+(motion && (legacy || d.cue === 'read') ? (legacy ? (cycle/.66%1) : clamp(cueElapsed/800))*28 : 9)}`, cyan, 'none', 4);
-      z = group(z, readingRight ? 210 : 0) + path(readingRight ? 'M234 130 Q212 138 191 156' : 'M72 125 Q86 130 97 151', cyan);
+      z = group(z, readingRight ? 210 : 0) + path(readingRight ? `M234 130 Q212 138 ${cr.x} ${cr.y}` : `M72 125 Q86 130 ${cl.x} ${cl.y}`, cyan);
       break;
     }
     case 'editing': {
@@ -36,8 +37,9 @@ function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed
       [48,34,43].forEach((len,i)=>z+=path(`M228 ${108+i*13} l${len*fill} 0`, blue, 'none', 3));
       z += path('M278 102 l0 13', purple,'none',3)
         + group(path('M230 120 l30 0', purple,'none',7), 0,-14*rewrite,-4*rewrite,230,120)
-        + path('M205 161 Q196 170 185 159',purple);
-      z = group(z, 28*(1-entrance), wave);
+        ;
+      const shift=edge==='right'?-207:0;
+      z = group(z, shift+28*(1-entrance), wave) + path(`M${218+shift} 152 Q${190+shift/2} 168 ${cr.x} ${cr.y}`,purple);
       break;
     }
     case 'searching': {
@@ -56,11 +58,13 @@ function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed
       // Send once on entry. Counts change the factual badge only: a disappearing child is not a result receipt.
       const send=reduced?1:ease((legacy ? elapsed : cueElapsed)/280);
       const sendLeft = legacy || d.cue === 'dispatch-left', sendRight = legacy || d.cue === 'dispatch-right';
-      z=path('M97 155 Q67 145 46 115 M191 156 Q222 141 247 109',purple)
-        +group(page(13,79,35,38,purple),-20*(1-entrance),wave)
-        +group(page(244,72,35,38,cyan),20*(1-entrance),-wave)
-        +(sendLeft?dot(97-51*send,155-40*send,purple,4):'')+(sendRight?dot(191+56*send,156-47*send,cyan,4):'');
-      if(d.count!==null) z+=`<text x="267" y="101" text-anchor="middle" fill="${ink}" font-size="12" font-family="system-ui">${d.count}</text>`;
+      const lx=edge==='left'?242:13, ly=edge==='left'?163:79, rx=edge==='right'?15:244, ry=edge==='right'?156:72;
+      const lt={x:lx+17,y:ly+38},rt={x:rx+17,y:ry+38};
+      z=path(`M${cl.x} ${cl.y} Q${(cl.x+lt.x)/2} ${Math.max(cl.y,lt.y)+8} ${lt.x} ${lt.y} M${cr.x} ${cr.y} Q${(cr.x+rt.x)/2} ${Math.max(cr.y,rt.y)+8} ${rt.x} ${rt.y}`,purple)
+        +group(page(lx,ly,35,38,purple),-20*(1-entrance),wave)
+        +group(page(rx,ry,35,38,cyan),20*(1-entrance),-wave)
+        +(sendLeft?dot(cl.x+(lt.x-cl.x)*send,cl.y+(lt.y-cl.y)*send,purple,4):'')+(sendRight?dot(cr.x+(rt.x-cr.x)*send,cr.y+(rt.y-cr.y)*send,cyan,4):'');
+      if(d.count!==null) z+=`<text x="${rx+23}" y="${ry+29}" text-anchor="middle" fill="${ink}" font-size="12" font-family="system-ui">${d.count}</text>`;
       break;
     }
     case 'question': {
@@ -100,7 +104,7 @@ export function mountCompanionScene(root: HTMLElement) {
   let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
   const render = (now: number) => {
     frame=0;
-    if(!current || current.descriptor.suppressed || !current.descriptor.kind || document.hidden) { root.replaceChildren(); return; }
+    if(!current || current.descriptor.suppressed || current.descriptor.menuOpen || !current.descriptor.kind || document.hidden) { root.replaceChildren(); return; }
     const {descriptor:d,layout:l}=current, elapsed=now-started;
     const w=root.clientWidth||522,h=root.clientHeight||432;
     const scale=l.character.width*w/geometry.character.width, tx=l.character.x*w-geometry.character.x*scale,ty=l.character.y*h-geometry.character.y*scale;
@@ -113,15 +117,15 @@ export function mountCompanionScene(root: HTMLElement) {
     const terminal=d.phase!=='active', phaseAge=now-phaseStarted;
     const end=d.phase==='resolve'?900:600;
     const opacity=terminal?1-clamp((phaseAge-(d.phase==='resolve'?500:0))/(d.phase==='resolve'?400:600)):d.reducedMotion?1:ease(elapsed/220);
-    let body=lane(artwork(d,elapsed,now-cueStarted,leftCrop && !rightCrop));
+    let body=lane(artwork(d,elapsed,now-cueStarted,leftCrop && !rightCrop,leftCrop&&!rightCrop?'left':rightCrop&&!leftCrop?'right':null));
     if(previous&&!d.reducedMotion&&now-previousAt<240&&previous.descriptor.scope===d.scope&&!terminal) body=`<g opacity="${1-(now-previousAt)/240}">${lane(artwork({...previous.descriptor,phase:'withdraw'},previousElapsed))}</g>`+body;
     // At a display edge put one-sided scenes on the available side. Do not
     // push cards through the protected face or mirror the character to make room.
-    const rightOnly = d.kind === 'editing' || d.kind === 'question' || d.kind === 'permission';
+    const rightOnly = d.kind === 'question' || d.kind === 'permission';
     let layers = body;
     if (rightCrop && !leftCrop && rightOnly) layers = group(body, -207);
     // Reading relocates its cards inside artwork and reconnects to the fixed laptop anchor.
-    else if ((leftCrop || rightCrop) && (d.kind === 'searching' || d.kind === 'dispatch')) {
+    else if ((leftCrop || rightCrop) && d.kind === 'searching') {
       // Keep the available card lane; relocating the opposite lane vertically
       // preserves a branching/search composition instead of clipping it offscreen.
       layers = leftCrop
@@ -146,6 +150,9 @@ export function mountCompanionScene(root: HTMLElement) {
       else if(value.descriptor.phase==='resolve') started=now;
     }
     if (current?.descriptor.cue !== value.descriptor.cue || current?.descriptor.cueInstance !== value.descriptor.cueInstance || !same) cueStarted=performance.now();
+    if (current && (current.descriptor.suppressed || current.descriptor.menuOpen) && !value.descriptor.suppressed && !value.descriptor.menuOpen) {
+      started=phaseStarted=cueStarted=performance.now(); previous=null;
+    }
     current=value;
     if(frame)cancelAnimationFrame(frame);
     frame=requestAnimationFrame(render);

@@ -1,0 +1,1278 @@
+{
+  "routes": {
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": {
+      "source": "question-permission/poses/listen-rest.png",
+      "steps": [
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18": {
+      "source": "question-permission/wave/closed-peak.png",
+      "steps": [
+        {
+          "source": "question-permission/wave/closed-mid.png",
+          "sha256": "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/wave/closed-smile.png",
+          "sha256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e": {
+      "source": "question-permission/blink/listen-rest-half.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": {
+      "source": "shared/upright-open-neutral-v2.png",
+      "steps": [],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811": {
+      "source": "question-permission/wave/closed-smile.png",
+      "steps": [
+        {
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3": {
+      "source": "question-permission/wave/closed-mid.png",
+      "steps": [
+        {
+          "source": "question-permission/wave/closed-smile.png",
+          "sha256": "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2": {
+      "source": "question-permission/wave/open-mid.png",
+      "steps": [
+        {
+          "source": "question-permission/wave/open-smile.png",
+          "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6": {
+      "source": "question-permission/local-closures/closed-quiet-blink-closed.png",
+      "steps": [
+        {
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482": {
+      "source": "question-permission/poses/nod-soft.png",
+      "steps": [
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb": {
+      "source": "shared/open-screen-read-v2.png",
+      "steps": [],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b": {
+      "source": "question-permission/local-closures/closed-quiet-blink-half.png",
+      "steps": [
+        {
+          "source": "question-permission/references/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": {
+      "source": "lid/frames/closed-rest-rigid-v2.png",
+      "steps": [],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a": {
+      "source": "question-permission/poses/offer-mid.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c": {
+      "source": "question-permission/blink/listen-rest-closed.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": {
+      "source": "question-permission/wave/open-smile.png",
+      "steps": [
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570": {
+      "source": "question-permission/poses/offer.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/offer-mid.png",
+          "sha256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+          "durationMs": 130,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020": {
+      "source": "question-permission/poses/ask.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/attend-corrected.png",
+          "sha256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15": {
+      "source": "question-permission/wave/open-peak.png",
+      "steps": [
+        {
+          "source": "question-permission/wave/open-mid.png",
+          "sha256": "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/wave/open-smile.png",
+          "sha256": "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f": {
+      "source": "question-permission/poses/attend-corrected.png",
+      "steps": [
+        {
+          "source": "question-permission/poses/listen-rest.png",
+          "sha256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "question-permission/references/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 160,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04": {
+      "source": "editing-dispatch/frames/gaze-right.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/neutral.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 130,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25": {
+      "source": "editing-dispatch/frames/split-gaze.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9": {
+      "source": "editing-dispatch/frames/review-v2.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f": {
+      "source": "editing-dispatch/frames/type-burst.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b": {
+      "source": "editing-dispatch/frames/type-prepare.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613": {
+      "source": "editing-dispatch/frames/type-forward.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d": {
+      "source": "editing-dispatch/frames/type-forward-hands-b.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/type-forward.png",
+          "sha256": "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/type-prepare.png",
+          "sha256": "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2": {
+      "source": "editing-dispatch/frames/review.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/review-rise.png",
+          "sha256": "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/select.png",
+          "sha256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6": {
+      "source": "editing-dispatch/frames/review-rise.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/select.png",
+          "sha256": "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b": {
+      "source": "editing-dispatch/frames/select.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/type-burst.png",
+          "sha256": "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb": {
+      "source": "editing-dispatch/frames/dispatch-a-gaze.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/dispatch-rise-gaze.png",
+          "sha256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d": {
+      "source": "editing-dispatch/frames/dispatch-rise-gaze.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec": {
+      "source": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1": {
+      "source": "editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+      "steps": [
+        {
+          "source": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+          "sha256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/review-v2.png",
+          "sha256": "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9",
+          "durationMs": 180,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "editing-dispatch/frames/screen-read.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 170,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482": {
+      "source": "reading-search/read-prepare-v2-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa": {
+      "source": "reading-search/read-middle-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3": {
+      "source": "reading-search/read-settle-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/read-middle-v1-candidate.png",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825": {
+      "source": "reading-search/read-hand-prepare-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/read-settle-v1-candidate.png",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-middle-v1-candidate.png",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742": {
+      "source": "reading-search/read-turn-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/read-hand-prepare-v1-candidate.png",
+          "sha256": "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-settle-v1-candidate.png",
+          "sha256": "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-middle-v1-candidate.png",
+          "sha256": "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/read-prepare-v2-candidate.png",
+          "sha256": "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce": {
+      "source": "reading-search/search-left-middle-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263": {
+      "source": "reading-search/search-left-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/search-left-middle-v1-candidate.png",
+          "sha256": "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5": {
+      "source": "reading-search/search-right-middle-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852": {
+      "source": "reading-search/search-right-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/search-right-middle-v1-candidate.png",
+          "sha256": "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "reading-search/shared/upright-open-neutral-v2.png",
+          "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b": {
+      "source": "reading-search/search-focus-v1-candidate.png",
+      "steps": [
+        {
+          "source": "reading-search/shared/open-screen-read-v2.png",
+          "sha256": "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369": {
+      "source": "lid/frames/release-low-registered-v2.png",
+      "steps": [
+        {
+          "source": "lid/frames/release-near-registered-v2.png",
+          "sha256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/release-first-registered-v2.png",
+          "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-100-registered-v3.png",
+          "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d": {
+      "source": "lid/frames/release-near-registered-v2.png",
+      "steps": [
+        {
+          "source": "lid/frames/release-first-registered-v2.png",
+          "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-100-registered-v3.png",
+          "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75": {
+      "source": "lid/frames/release-first-registered-v2.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-100-registered-v3.png",
+          "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd",
+          "durationMs": 120,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd": {
+      "source": "lid/frames/contact-100-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-070-registered-v3.png",
+          "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3": {
+      "source": "lid/frames/contact-070-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-055-registered-v3.png",
+          "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12",
+          "durationMs": 65,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12": {
+      "source": "lid/frames/contact-055-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-045-registered-v3.png",
+          "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7",
+          "durationMs": 70,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7": {
+      "source": "lid/frames/contact-045-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-030-registered-v3.png",
+          "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049",
+          "durationMs": 75,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049": {
+      "source": "lid/frames/contact-030-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-015-registered-v3.png",
+          "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77": {
+      "source": "lid/frames/contact-015-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/contact-000-registered-v3.png",
+          "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc": {
+      "source": "lid/frames/contact-000-registered-v3.png",
+      "steps": [
+        {
+          "source": "lid/frames/closed-rest-rigid-v2.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 140,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8": {
+      "source": "closed-idle/frames/look-left-middle.png",
+      "steps": [
+        {
+          "source": "closed-idle/frames/closed-rest.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    },
+    "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3": {
+      "source": "closed-idle/frames/look-left-peak.png",
+      "steps": [
+        {
+          "source": "closed-idle/frames/look-left-middle.png",
+          "sha256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY"
+        },
+        {
+          "source": "closed-idle/frames/closed-rest.png",
+          "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "cue": "RECOVERY_ONLY"
+        }
+      ],
+      "scope": "real-source recovery candidate; no receipt or scene action cue"
+    }
+  },
+  "allActualSources": {
+    "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f": "shared/upright-open-neutral-v2.png",
+    "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a": "question-permission/poses/listen-rest.png",
+    "75cdf8fb7f58db0e9a2a346473cf92d1538b98edd2f205306de4425c346c98f3": "question-permission/wave/closed-mid.png",
+    "5bcffbbd86ec0a2be70512ffd86adfa30dee8494bdff82657d72b2ca117e8811": "question-permission/wave/closed-smile.png",
+    "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb": "closed-idle/frames/closed-rest.png",
+    "31e2e0989dff6647dbcd2f6a046713db6dff1a45490868da0d1a520bcd1dab18": "question-permission/wave/closed-peak.png",
+    "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e": "question-permission/blink/listen-rest-half.png",
+    "e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc": "question-permission/wave/open-smile.png",
+    "99b6488cc9bec1d84b5e60d37fe119aae86d09d4a2272784bf25a2fd29c9b8b2": "question-permission/wave/open-mid.png",
+    "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6": "question-permission/local-closures/closed-quiet-blink-closed.png",
+    "b1cf7a2325e40d8eddcdfd90a5fcf249d42a943b4c6c0237f9ff76c44c1ca482": "question-permission/poses/nod-soft.png",
+    "bfb89d2c259e4de0ea0951b4d2464a9a635b022585a96c42f63626e3f9d8b2eb": "shared/open-screen-read-v2.png",
+    "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b": "question-permission/local-closures/closed-quiet-blink-half.png",
+    "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f": "question-permission/poses/attend-corrected.png",
+    "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a": "question-permission/poses/offer-mid.png",
+    "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c": "question-permission/blink/listen-rest-closed.png",
+    "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570": "question-permission/poses/offer.png",
+    "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020": "question-permission/poses/ask.png",
+    "ec5196e0e74ca38c7e29a24bee1a45ace6d4e2d3ffee3b5bfb96b292b01f1f15": "question-permission/wave/open-peak.png",
+    "f7b962a3a3c626c382b358191b290cc557e5dff20d38dd001187a69905a9ce04": "editing-dispatch/frames/gaze-right.png",
+    "6dce48dd5e9d1c6ce5c62b3ef8d68918a8110a530e20f216ebccaced960482e9": "editing-dispatch/frames/review-v2.png",
+    "6adbd265d91917ffedabfcc7fa1fdbe6400ec8aaeb6188903a64ee6f28149d25": "editing-dispatch/frames/split-gaze.png",
+    "da120f3f2677022dc0fe1d5fe74b6364dd7c4ac1c4319417426dbc6fa83a7c0f": "editing-dispatch/frames/type-burst.png",
+    "23608ccc309b5d78b9149af113eae1551254f8cb3b875b386447897a2ad5fc2b": "editing-dispatch/frames/type-prepare.png",
+    "d90f98b9e7788ad47b23e8131e14e88b14e9f7244bb762071e12a8c0798a8613": "editing-dispatch/frames/type-forward.png",
+    "53af80828518845f1e59885de3605bca28025f4d0631da66602e6c52df56198d": "editing-dispatch/frames/type-forward-hands-b.png",
+    "35446977eeccfe3d24edec1cc6b9043548eef1d7f8fc1f7b3776a18278b552b6": "editing-dispatch/frames/review-rise.png",
+    "f2782751d0af1f2041f4ffc6191887ea7af44fdb81ab512073f2e889b7f8864b": "editing-dispatch/frames/select.png",
+    "2ff88020f1da38714ac9484698cc921b3db0cd3d93dccf72833b0b052ba571f2": "editing-dispatch/frames/review.png",
+    "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d": "editing-dispatch/frames/dispatch-rise-gaze.png",
+    "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+    "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb": "editing-dispatch/frames/dispatch-a-gaze.png",
+    "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1": "editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+    "c462dedbd8474209fa9c8b1c1053bbe303ece1743c304687c8cead9b2079b482": "reading-search/read-prepare-v2-candidate.png",
+    "fbc12a86f30268cfb41a8ebb036cd77aec7b51b127e6f507f399f324928f93fa": "reading-search/read-middle-v1-candidate.png",
+    "8d3fcaeb238c937fc40632182ed3e1d1055d1a8ead403e80cfd363fccf0950a3": "reading-search/read-settle-v1-candidate.png",
+    "0d0eacea2797a2839f58de1e4710d0ae38d75d2ada98e0ad2d1f28b9aa695825": "reading-search/read-hand-prepare-v1-candidate.png",
+    "a054b4fd21078b9d8072ed62379e6f8672b5e4436b378f61f75b7a3d1b2d6742": "reading-search/read-turn-v1-candidate.png",
+    "5a364fff536d7bfca3e9d76e28baa39cc646e5363bd1d2f456b129c6111606ce": "reading-search/search-left-middle-v1-candidate.png",
+    "80eb7082b48da3fc8222f3df7077714e14bbe08c8c77fd84044606120299a263": "reading-search/search-left-v1-candidate.png",
+    "94f5abbb2dd3a1b3a8a52659032264b828df1a5cdb512e83a565b6b77574dad5": "reading-search/search-right-middle-v1-candidate.png",
+    "be98c75f7b414826430d3da08f76ce3c1365a0b3cb9daff95b74429273ff1852": "reading-search/search-right-v1-candidate.png",
+    "ede1c1f9bc6a588b18697016a2cfcaddd158b18b9b24b559cc01dd7859d9166b": "reading-search/search-focus-v1-candidate.png",
+    "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d": "lid/frames/release-near-registered-v2.png",
+    "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75": "lid/frames/release-first-registered-v2.png",
+    "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd": "lid/frames/contact-100-registered-v3.png",
+    "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3": "lid/frames/contact-070-registered-v3.png",
+    "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12": "lid/frames/contact-055-registered-v3.png",
+    "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7": "lid/frames/contact-045-registered-v3.png",
+    "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049": "lid/frames/contact-030-registered-v3.png",
+    "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77": "lid/frames/contact-015-registered-v3.png",
+    "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc": "lid/frames/contact-000-registered-v3.png",
+    "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369": "lid/frames/release-low-registered-v2.png",
+    "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8": "closed-idle/frames/look-left-middle.png",
+    "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3": "closed-idle/frames/look-left-peak.png"
+  },
+  "detachedMissing": [],
+  "timingNote": "Reading and lid recovery-only holds capped at140ms; actual drawings unchanged, this timing remains integration-review candidate."
+}

@@ -2438,6 +2438,7 @@ const createBrowserWindow = ({
   };
 
   const browserWindow = new BrowserWindow(options);
+  let auxiliaryClosing = false;
   browserWindow.__varinLabel = label || nextWindowLabel();
   browserWindow.__varinRuntimeConfig = rendererRuntimeConfig;
   browserWindow.__varinInitScript = decorative ? '' : buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);
@@ -2519,6 +2520,7 @@ const createBrowserWindow = ({
     debounceWindowStatePersist(browserWindow, false);
   });
   browserWindow.on('close', (event) => {
+    if (companion) auxiliaryClosing = true;
     if (browserWindow.__varinLabel === 'companion') void persistCompanionPlacement(browserWindow);
     if (!state.quitRequested && shouldHideMainWindowToTray(browserWindow)) {
       debounceWindowStatePersist(browserWindow, true);
@@ -2659,7 +2661,7 @@ const createBrowserWindow = ({
       });
     }
     if (decorative) browserWindow.setIgnoreMouseEvents(true);
-    if (scene) return; // Scene owner publishes data before allowing its inert surface to appear.
+    if (decorative) return; // Owners verify scene data or the selected plate before showing inert surfaces.
     if (companion) browserWindow.showInactive();
     else { browserWindow.show(); browserWindow.focus(); }
     if (useVibrancy) applyMacVibrancy(browserWindow);
@@ -2667,9 +2669,19 @@ const createBrowserWindow = ({
 
   if (url) {
     const navigation = navigateWindow(browserWindow, url);
-    if (companion) void navigation.catch(() => {
-      console.warn('[electron] auxiliary companion UI failed to load');
-      if (!browserWindow.isDestroyed()) browserWindow.close();
+    if (companion) void navigation.catch(error => {
+      // Replacing a transient decoration or closing its owner cancels an in-flight
+      // navigation normally. Do not mistake that intentional cancellation for a
+      // failed living UI, but retain actionable diagnostics for genuine failures.
+      if (auxiliaryClosing || browserWindow.isDestroyed()) return;
+      const failure = error && typeof error === 'object' ? recordOf(error) : {};
+      log.warn('[electron] auxiliary companion UI failed to load', {
+        label: browserWindow.__varinLabel,
+        code: typeof failure.code === 'string' ? failure.code : undefined,
+        errno: typeof failure.errno === 'number' ? failure.errno : undefined,
+        reason: isBenignNavigationAbort(error) ? 'unexpected navigation abort' : 'navigation failure',
+      });
+      browserWindow.close();
     });
     else void navigation;
   } else {
@@ -2846,15 +2858,29 @@ const companionStools = new CompanionStoolWindows((bounds, phase, owner) => {
   // No parent relationship: its world-space location must not follow the character window.
   return { isDestroyed: () => window.isDestroyed(), close: () => window.close(),
     onReady: (callback: () => void) => {
-      let shown = false, loaded = false, started = false;
+      let nativeReady = false, loaded = false, started = false;
       const start = () => {
-        if (!shown || !loaded || started || window.isDestroyed()) return;
+        if (!nativeReady || !loaded || started || window.isDestroyed()) return;
         started = true;
         // Both the local image document and native surface are ready. Start its fade
         // before the lifecycle timer, using a constant decorative event, no preload/IPC.
-        void window.webContents.executeJavaScript("window.dispatchEvent(new Event('varin-stool-visible'))").then(callback).catch(() => { if (!window.isDestroyed()) window.close(); });
+        void window.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+          if (document.documentElement.dataset.varinCompanionStoolReady === 'true') { resolve(); return; }
+          const ready = () => { clearTimeout(timer); resolve(); };
+          const timer = setTimeout(() => { window.removeEventListener('varin-companion-stool-ready', ready); reject(new Error('Decorative plate timed out')); }, 15000);
+          window.addEventListener('varin-companion-stool-ready', ready, { once: true });
+        })`).then(async () => {
+          if (window.isDestroyed()) return;
+          window.showInactive();
+          await window.webContents.executeJavaScript("window.dispatchEvent(new Event('varin-stool-visible'))");
+          if (!window.isDestroyed()) callback();
+        }).catch(error => {
+          if (window.isDestroyed()) return;
+          log.warn('[companion] decorative stool readiness failed', { phase, errorType: error instanceof Error ? error.name : 'unknown' });
+          window.close();
+        });
       };
-      window.once('ready-to-show', () => { shown = true; start(); });
+      window.once('ready-to-show', () => { nativeReady = true; start(); });
       window.webContents.once('did-finish-load', () => { loaded = true; start(); });
     } };
 });
