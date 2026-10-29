@@ -43,3 +43,14 @@ it('keeps the Bot root request visible as user-facing attention, not an external
  expect(directorBodyAction({...root,body:{...root.body,verb:'receive-work'}},'right')).toBe('director-supervise');
  expect(root.body.subject.threadId).toBe('bot-entry');
 });
+
+it('uses distinct reminder art when available without changing local-response or coordination authority', () => {
+ const agent={...view,interactionRoute:'agent-companion' as const,body:{...view.body,verb:'notify-attention' as const}};
+ const before=structuredClone(agent);
+ expect(directorBodyAction(agent,null,true)).toBe('director-notify-attention');
+ expect(directorBodyAction(agent,null,false)).toBe('director-open-attention');
+ expect(directorBodyAction({...agent,body:{...agent.body,verb:'notify-result'}},null,true)).toBe('director-notify-attention');
+ expect(directorBodyAction({...agent,health:'unknown'},null,true)).toBe('director-supervise');
+ expect(directorBodyAction({...view,body:{...view.body,verb:'receive-result'}},null,true)).toBe('director-gather-present');
+ expect(agent).toEqual(before);
+});

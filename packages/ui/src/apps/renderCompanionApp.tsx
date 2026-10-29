@@ -192,7 +192,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const { restDue, quietDue, finishQuiet } = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision, usableAction('quiet-hair-smooth'));
   const ordinaryDisplayAction = quietDue && !localAction && usableAction('quiet-hair-smooth') ? 'quiet-hair-smooth' : restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
-  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null);
+  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null, usableAction('director-notify-attention'));
   const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
