@@ -1,0 +1,105 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "pathBase": "production-v4",
+  "entries": [
+    {
+      "source": "response/frames/attention.png",
+      "sourceSHA256": "03f8833bd9620eb483354064340dc76ee8741f61ba33cee22427670fdc3b3f64",
+      "detachedSource": "response/detached/attention.png",
+      "detachedSHA256": "86acc94ae93cdd7d1eb0a88c561fcff226b6a581eb5bcce8793ee1bb8b1892e9",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/lift.png",
+      "sourceSHA256": "7d056fb851da57f45f55590e82aa658d12164a9b6e0be98c21496d5179ff458f",
+      "detachedSource": "response/detached/lift.png",
+      "detachedSHA256": "8ca7619c4d776d1b5125f1906c6b1720ed66a304d7d16ef38a66e083bc84c2a6",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/palm-opening.png",
+      "sourceSHA256": "6c611cd761887c68f67b052cb2885ab91fcf3e0885a7e98bd9754a415351627d",
+      "detachedSource": "response/detached/palm-opening.png",
+      "detachedSHA256": "6da02ee6399c1da98c7fa947ae3e3d2b6d68840c41cbd96dfc3108db23c9b784",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/palm.png",
+      "sourceSHA256": "9dfa8549de49261a6decc9eb466ca9f9d9ee75ea4035d408e67283d8aa98986b",
+      "detachedSource": "response/detached/palm.png",
+      "detachedSHA256": "da52dc9f7a619247ce64702a7b0e03dbe07a6174d1351867d54076e3e77b8625",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/lower.png",
+      "sourceSHA256": "d018349372c6b85b6d307c88da1406bd4857ba7b1c7614b59bd1376d4f363fba",
+      "detachedSource": "response/detached/lower.png",
+      "detachedSHA256": "e30cb2c25e60895dda7afd3ee9994f30cd4f64654af43945c1c836031a96abbf",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/keyboard-hover.png",
+      "sourceSHA256": "3902c131d7e4a8aa24a3d5b22a61be66eac68fe52cd03c0c01a8ecdd04300161",
+      "detachedSource": "response/detached/keyboard-hover.png",
+      "detachedSHA256": "e5b059183df98633f8b28558e9b7e3989b46e46f61e8c0e43bef12a8bca5737c",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/keyboard-contact.png",
+      "sourceSHA256": "8263c79ef102df884d3ecd3b7f09150151851efa835b44a8039a4e9cb142089e",
+      "detachedSource": "response/detached/keyboard-contact.png",
+      "detachedSHA256": "ac4845ca2e98f8fdde9fb25f80dd64f9b4ec9e3eed00f5e65e73495ac6eea691",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/busy-ack.png",
+      "sourceSHA256": "a3a700d58a93cf18e442b7410153bbfc3da9d5ada7d547cfe9fbd9f335338e4b",
+      "detachedSource": "response/detached/busy-ack.png",
+      "detachedSHA256": "5386071033ca3aa9a6197924202ecc60e04bb7cb439ccf0100bfe7caa7192693",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/busy-release.png",
+      "sourceSHA256": "154012d54595f0c1fb0edf4906a4557c20adbcc5745c5cc1506a642b54cab480",
+      "detachedSource": "response/detached/busy-release.png",
+      "detachedSHA256": "07c0eff197eb4e345c28c6f1dbe1912bd178f96269e9241bb8b31f57499c8ac5",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/playful-entry.png",
+      "sourceSHA256": "8fe783f2d8f73b2d88f72d873a6306c66a4f094ca9b503d9d425d3e3bf2a0f7c",
+      "detachedSource": "response/detached/playful-entry.png",
+      "detachedSHA256": "ba2e1c8b1f09453716f2013bd1124c3249611829248480c22207b2c4d89a9bb7",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    },
+    {
+      "source": "response/frames/playful-gather.png",
+      "sourceSHA256": "89b68835cb583f9931ce823253c5f8a3103d8ed6d2b65878c4f096ae2ea49ae3",
+      "detachedSource": "response/detached/playful-gather.png",
+      "detachedSHA256": "9f86ef39f2718b39aaa88fd3f46d4b4da68944839f6091310024a33d5d323ed4",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose source contact retained; whole pickup graph acceptance remains separate"
+    }
+  ]
+}

@@ -1,0 +1,295 @@
+{
+  "status": "selected expression source subset; not installed; final full-suite integration pending",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "varin-upright-v2",
+  "replaceActions": [
+    "query",
+    "completion",
+    "failure"
+  ],
+  "semanticAliases": {
+    "unknown-effect-check": "failure"
+  },
+  "sequences": [
+    {
+      "id": "v4-expression-question",
+      "kind": "action",
+      "action": "query",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "../coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/question.png",
+          "sourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+          "durationMs": 360,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual pending question; expression does not answer or approve."
+    },
+    {
+      "id": "v4-expression-result-eye-smile",
+      "kind": "action",
+      "action": "completion",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "../coordination/frames/release.png",
+          "sourceSHA256": "788c23d97cd5a3aeeb45e7889390129533e03910fa5cc67fd81335d69eaee549",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/half-lift.png",
+          "sourceSHA256": "dd79f507f3ae038f39831ae17eade4b17eb90366867e276d76b3b6e766b7b251",
+          "durationMs": 110,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/result-eye-smile.png",
+          "sourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+          "durationMs": 360,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual completion of indicated task, not all projects."
+    },
+    {
+      "id": "v4-expression-serious-rest",
+      "kind": "action",
+      "action": "failure",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 1,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/serious-rest.png",
+          "sourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+          "durationMs": 500,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ],
+      "semanticSuggestion": "Actual failure or unknown-effect check; quiet serious face, no new hand gesture."
+    }
+  ],
+  "ordinaryRecoveryByActualSource": [
+    {
+      "source": "frames/question.png",
+      "actualSourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+      "frames": [
+        {
+          "source": "../coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/result-eye-smile.png",
+      "actualSourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+      "frames": [
+        {
+          "source": "../coordination/frames/wrist-return.png",
+          "sourceSHA256": "ac2b6ff6329ee5a609b5d885d5b4453150fd83b22797047e1376adc8996c3398",
+          "durationMs": 90,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-hover.png",
+          "sourceSHA256": "f09ab8823e808b9247dee50d2eb6aab0e908bb9f34f07b6ead46ec1b2019396a",
+          "durationMs": 100,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../coordination/frames/keyboard-contact.png",
+          "sourceSHA256": "bec591211e8bf3ea3154c3165aa73e489202410026d6c920e3e1037a75e04ea4",
+          "durationMs": 150,
+          "cue": "RECOVERY_ONLY",
+          "phase": "act",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/serious-rest.png",
+      "actualSourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+      "frames": [
+        {
+          "source": "../../production-v2/shared/upright-open-neutral-v2.png",
+          "sourceSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+          "durationMs": 180,
+          "cue": "REST",
+          "phase": "hold",
+          "pauseSafe": true
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Start recovery from actual source, never replay the expression peak.",
+    "Question/result reuse coordination wrist, hover and contact. Serious rest has no forced hand gesture.",
+    "Pending request persistence and task identity belong to information layer; viewing/clicking never approves.",
+    "Detached index supplies exact same-instant expression variants; E pickup join remains integration-owned."
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "geometryReference": "varin-upright-v2",
+  "pathBase": "production-v4",
+  "entries": [
+    {
+      "source": "coordination-expressions/frames/question.png",
+      "sourceSHA256": "4a43f748b214312327638d2292848f37d604619b16fae14ca4a32d3fd352205c",
+      "detachedSource": "coordination-expressions/detached/question.png",
+      "detachedSHA256": "fc40c238817dfc4d6c44b300163f13790fd327efc5e0bfb6d20f0a16872bc434",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    },
+    {
+      "source": "coordination-expressions/frames/result-eye-smile.png",
+      "sourceSHA256": "917acee0a33ee42b3f2814e60968cbe46a76760d57ad4b84089befcabeaf8ade",
+      "detachedSource": "coordination-expressions/detached/result-eye-smile.png",
+      "detachedSHA256": "da349cf2b01f153e9a1ccd561ac3decb8b0279f012c2535eb6a99c1c4ea0d1d3",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    },
+    {
+      "source": "coordination-expressions/frames/serious-rest.png",
+      "sourceSHA256": "78245105c97395375c9b554ebd1a4fb710db2578f506a01fe806b28f05050e95",
+      "detachedSource": "coordination-expressions/detached/serious-rest.png",
+      "detachedSHA256": "1c48d2e88e6cfd5973801cc0dcc7126ead79cbc9f969d4bd885cdb69af188567",
+      "embeddedStool": false,
+      "outsideMaskPixelExact": false,
+      "stage": "same-pose and expression reviewed at360; runtime graph acceptance separate"
+    }
+  ]
+}
