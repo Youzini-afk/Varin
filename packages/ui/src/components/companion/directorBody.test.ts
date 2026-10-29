@@ -54,3 +54,24 @@ it('uses distinct reminder art when available without changing local-response or
  expect(directorBodyAction({...view,body:{...view.body,verb:'receive-result'}},null,true)).toBe('director-gather-present');
  expect(agent).toEqual(before);
 });
+
+
+it('selects available scoped question/result expressions but never celebrates cancellation or unknown outcomes', () => {
+ const agent={...view,interactionRoute:'agent-companion' as const,body:{...view.body,verb:'notify-attention' as const,attentionItem:{key:'q',threadId:project.threadId,branchId:project.branchId,runId:'run',kind:'question' as const,actionable:true,revision:1}}};
+ expect(directorBodyAction(agent,null,true,()=>true)).toBe('query');
+ expect(directorBodyAction(agent,null,true,()=>false)).toBe('director-notify-attention');
+ expect(directorBodyAction(agent,null,false,()=>true)).toBe('director-open-attention');
+ for(const [outcome,expected] of [['completed','completion'],['failed','failure'],['cancelled','director-notify-attention'],[null,'director-notify-attention']] as const){
+  const result={...agent,body:{...agent.body,verb:'notify-result' as const,attentionItem:null,edge:{key:'r',kind:'receive-result' as const,project,runId:'run',outcome,workRemains:false}}};
+  expect(directorBodyAction(result,null,true,()=>true)).toBe(expected);
+  expect(directorBodyAction({...result,health:'unknown'},null,true,()=>true)).toBe('director-supervise');
+ }
+});
+
+it('keeps known failure attention, unknown effects, and permission semantically distinct', () => {
+ for (const [kind, expected] of [['run_failed','failure'],['preparation_failed','failure'],['mcp_error','failure'],['effect_unknown','unknown-effect-check'],['permission','director-notify-attention']] as const) {
+  const notice={...view,interactionRoute:'agent-companion' as const,body:{...view.body,verb:'notify-attention' as const,attentionItem:{key:'notice',threadId:project.threadId,branchId:project.branchId,runId:'run',kind,actionable:true,revision:1}}};
+  expect(directorBodyAction(notice,null,true,()=>true)).toBe(expected);
+  expect(directorBodyAction(notice,null,true,()=>false)).toBe('director-notify-attention');
+ }
+});

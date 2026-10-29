@@ -10,7 +10,7 @@ import { useCompanionAttention } from '@/components/companion/useCompanionAttent
 import { useCompanionVisualIntent } from '@/components/companion/useCompanionVisualIntent';
 import { CompanionAttentionPanel, CompanionAttentionSummary } from '@/components/companion/CompanionAttentionPanel';
 import { CompanionChildTeam, hasCurrentChildWork } from '@/components/companion/childTeam';
-import { useCompanionLeisure } from '@/components/companion/useCompanionLeisure';
+import { COMPANION_QUIET_ACTIONS, useCompanionLeisure } from '@/components/companion/useCompanionLeisure';
 import { CompanionProgressFacts, withCompanionProgress, type CompanionProgress } from '@/components/companion/progressPresentation';
 import { sceneCue } from '@/components/companion/sceneCues';
 import React from 'react';
@@ -190,15 +190,16 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorLayout = useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null, visibleDrawing, directorMode);
   const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
-  const { restDue, quietDue, finishQuiet } = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision, usableAction('quiet-hair-smooth'));
-  const ordinaryDisplayAction = quietDue && !localAction && usableAction('quiet-hair-smooth') ? 'quiet-hair-smooth' : restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
+  const availableQuietActions = COMPANION_QUIET_ACTIONS.filter(usableAction);
+  const { restDue, quietAction, finishQuiet } = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision, availableQuietActions.length > 0, availableQuietActions);
+  const ordinaryDisplayAction = quietAction && !localAction && usableAction(quietAction) ? quietAction : restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
-  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null, usableAction('director-notify-attention'));
+  const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null, usableAction('director-notify-attention'), usableAction);
   const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
   const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
-  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : quietDue && usableAction('quiet-hair-smooth') ? 'quiet-hair-smooth' : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
+  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : quietAction && usableAction(quietAction) ? quietAction : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
   repeatTapAllowed.current = directorMode && localInteractionIdle && director.health === 'current' && !directorLocalAction && usableAction('tap-repeat-response');
   const localDirectorResponse = (event: 'tap' | 'tap-repeat' | 'hover') => {
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
@@ -247,7 +248,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     }
   }, [directorMode, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
   React.useEffect(() => {
-    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'quiet-hair-smooth') finishQuiet();
+    if (automatic.finished && COMPANION_QUIET_ACTIONS.some(action => action === assetList.find(item => item.id === automatic.packageId)?.action)) finishQuiet();
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
