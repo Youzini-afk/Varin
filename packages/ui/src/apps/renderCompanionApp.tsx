@@ -1,3 +1,4 @@
+import { sceneCue } from '@/components/companion/sceneCues';
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { getRuntimeEndpointGeneration, subscribeRuntimeEndpointChanged, type RuntimeAPIs, type ThreadIdentity, type ThreadSnapshot, type ThreadSummary } from '@varin/application-client';
@@ -42,6 +43,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [playing, setPlaying] = React.useState(false);
   const [manualReview, setManualReview] = React.useState(false);
   const [exposure, setExposure] = React.useState(0);
+  const [visibleCue, setVisibleCue] = React.useState<{ cue: ReturnType<typeof sceneCue>; instance: number; action: string | undefined }>();
+  const visibleCueCounter = React.useRef(0);
+  const lastVisibleCue = React.useRef('');
   const [presentation, setPresentation] = React.useState('C01');
   const [reviewRoute, setReviewRoute] = React.useState(false);
   const [controlsOpen, setControlsOpen] = React.useState(false);
@@ -71,8 +75,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current });
   const sceneCurrent = review && reviewRoute ? reviewSceneFact(presentation) : sceneFact;
   useCompanionScene(canvas, sceneCurrent, `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
-    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current') || manualReview, controlsOpen,
-    assetList.find(item => item.id === automatic.packageId)?.action === ({ reading: 'reading', editing: 'editing', searching: 'browsing', dispatch: 'dispatch', question: 'query', permission: 'permission' } as const)[sceneCurrent.kind ?? 'reading']);
+    companionWindow.phase !== 'rest' || (!reviewRoute && health !== 'current') || manualReview, controlsOpen, visibleCue);
   React.useEffect(() => {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
@@ -260,6 +263,12 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     context.clearRect(0, 0, node.width, node.height);
     context.drawImage(images[frame.page]!, ...frame.rect, ...frame.offset, frame.rect[2], frame.rect[3]);
     displayedDrawing.current = { packageId: sequence.id, exposure };
+    const cue = frame.cue ? sceneCue(frame.cue) : 'engaged';
+    const cueKey = JSON.stringify([sequence.action, cue]);
+    if (lastVisibleCue.current !== cueKey) {
+      lastVisibleCue.current = cueKey;
+      setVisibleCue({ cue, action: sequence.action, instance: ++visibleCueCounter.current });
+    }
     companionWindow.refreshHitMask();
   };
   // Swap to the predecoded same-exposure drawing before sending native movement,

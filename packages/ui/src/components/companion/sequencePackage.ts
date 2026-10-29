@@ -1,6 +1,6 @@
 /** Drawing/exposure contract. No application commands or automatic motion synthesis. */
 export interface CompanionFrame {
-  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; sha256?: string; pose?: string; phase?: string; exitTo?: string[]; motion?: { renderedPixelSha256?: string; reverseFrom?: { sequence: string; frameIndex: number } };
+  page: number; rect: [number, number, number, number]; offset: [number, number]; durationMs: number; startMs: number; sha256?: string; pose?: string; phase?: string; cue?: string; exitTo?: string[]; motion?: { renderedPixelSha256?: string; reverseFrom?: { sequence: string; frameIndex: number } };
 }
 export interface CompanionPackage {
   id: string; canvas: [number, number]; frames: CompanionFrame[]; pages: { file: string }[];
@@ -45,7 +45,7 @@ export function readCompanionPackage(value: unknown, review: boolean): Companion
         motion.reverseFrom = { sequence: reverse.sequence, frameIndex: reverse.frameIndex as number };
       }
     }
-    const result = { sha256: typeof frame.sha256 === 'string' ? frame.sha256 : undefined, phase: typeof frame.phase === 'string' ? frame.phase : undefined, exitTo: exitTo as string[], motion, page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
+    const result = { cue: typeof frame.cue === 'string' ? frame.cue : undefined, sha256: typeof frame.sha256 === 'string' ? frame.sha256 : undefined, phase: typeof frame.phase === 'string' ? frame.phase : undefined, exitTo: exitTo as string[], motion, page: frame.page, rect, offset, durationMs: frame.durationMs, startMs: elapsed, pose: typeof frame.pose === 'string' ? frame.pose : undefined };
     elapsed += frame.durationMs;
     return result;
   });

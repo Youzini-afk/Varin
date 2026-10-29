@@ -373,7 +373,8 @@ export interface DesktopCompanionScene {
   suppressed: boolean;
   reducedMotion: boolean;
   menuOpen: boolean;
-  cue: 'transition' | 'engaged';
+  cue: 'transition' | 'engaged' | 'present' | 'read' | 'page-turn' | 'type' | 'review' | 'revise' | 'scan-left' | 'scan-right' | 'select' | 'split' | 'dispatch-left' | 'dispatch-right' | 'watch' | 'ask' | 'offer' | 'attend' | 'acknowledge';
+  cueInstance?: number;
 }
 
 export interface VarinDesktopCommandMap {

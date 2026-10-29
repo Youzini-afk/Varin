@@ -12,24 +12,26 @@ const ease = (n: number) => 1 - (1-clamp(n)) ** 3;
 const group = (content: string, x = 0, y = 0, angle = 0, cx = 0, cy = 0) => `<g transform="translate(${x} ${y}) rotate(${angle} ${cx} ${cy})">${content}</g>`;
 
 /** Code-native decorative shapes, not generated/reconstructed character art. */
-function artwork(d: DesktopCompanionScene, elapsed: number): string {
+function artwork(d: DesktopCompanionScene, elapsed: number, cueElapsed = elapsed, readingRight = false): string {
   const seconds = elapsed / 1000, reduced = d.reducedMotion, active = d.phase === 'active';
   const wave = reduced || !active ? 0 : Math.sin(seconds * 1.5);
   const entrance = reduced ? 1 : ease(elapsed/300);
-  const motion = active && d.cue === 'engaged' && !reduced;
+  const legacy = d.cue === 'engaged';
+  const motion = active && !reduced;
+  const stroke = reduced ? 1 : ease(cueElapsed / 180);
   let z = '';
   switch (d.kind) {
     case 'reading': {
-      const cycle = (seconds % 4.8)/4.8, flip = motion && cycle > .66 ? Math.sin((cycle-.66)/.34*Math.PI) : 0;
+      const cycle = (seconds % 4.8)/4.8, flip = motion && (d.cue === 'page-turn' || legacy && cycle > .66) ? Math.sin((legacy ? (cycle-.66)/.34 : clamp(cueElapsed/240))*Math.PI) : 0;
       z = group(page(10,81,43,57), -18*(1-entrance), 5*(1-entrance), -8*entrance, 50,135)
         + group(page(24,73,47,64), 0, 2*wave, 13*flip, 67,125)
-        + path('M72 125 Q86 130 97 151', cyan)
-        + path(`M31 ${94+(motion ? (cycle/.66%1)*28 : 9)} L61 ${94+(motion ? (cycle/.66%1)*28 : 9)}`, cyan, 'none', 4);
+        + path(`M31 ${94+(motion && (legacy || d.cue === 'read') ? (legacy ? (cycle/.66%1) : clamp(cueElapsed/800))*28 : 9)} L61 ${94+(motion && (legacy || d.cue === 'read') ? (legacy ? (cycle/.66%1) : clamp(cueElapsed/800))*28 : 9)}`, cyan, 'none', 4);
+      z = group(z, readingRight ? 210 : 0) + path(readingRight ? 'M234 130 Q212 138 191 156' : 'M72 125 Q86 130 97 151', cyan);
       break;
     }
     case 'editing': {
-      const cycle = (seconds % 4.2)/4.2, rewrite = motion && cycle>.6 ? Math.sin((cycle-.6)/.4*Math.PI) : 0;
-      const fill = motion ? .45+.55*Math.min(1,cycle/.6) : .8;
+      const cycle = (seconds % 4.2)/4.2, rewrite = motion && (d.cue === 'revise' || legacy && cycle>.6) ? Math.sin((legacy ? (cycle-.6)/.4 : clamp(cueElapsed/240))*Math.PI) : 0;
+      const fill = motion && (legacy || d.cue === 'type' || d.cue === 'revise') ? .45+.55*(legacy ? Math.min(1,cycle/.6) : stroke) : .8;
       z = path('M218 93 Q247 89 287 94 L286 152 Q251 149 220 154 Z', blue, 'url(#paper)');
       [48,34,43].forEach((len,i)=>z+=path(`M228 ${108+i*13} l${len*fill} 0`, blue, 'none', 3));
       z += path('M278 102 l0 13', purple,'none',3)
@@ -39,22 +41,25 @@ function artwork(d: DesktopCompanionScene, elapsed: number): string {
       break;
     }
     case 'searching': {
-      const cycle=(seconds%5)/5, select=motion ? Math.max(0,Math.sin((cycle-.25)*Math.PI*2)) : 0;
+      const focusVisible=legacy || ['scan-left','scan-right','select'].includes(d.cue);
+      const scanX=d.cue==='scan-left'?35:250, scanY=d.cue==='scan-left'?119:105;
+      const cycle=(seconds%5)/5, select=motion && (legacy || d.cue === 'select') ? (legacy ? Math.max(0,Math.sin((cycle-.25)*Math.PI*2)) : stroke) : 0;
       z=group(page(9,105,34,33),-18*(1-entrance),4*wave)
         +group(page(237,74,34,33,cyan),18*(1-entrance),-2*wave)
         +group(page(250,141,34,33),25*(1-entrance)-8*select,2*wave-10*select)
         +path('M40 99 Q62 77 84 70 M218 72 Q240 86 251 112',cyan)
-        +`<circle cx="${250+5*select}" cy="${91+43*(1-select)}" r="22" fill="none" stroke="${gold}" stroke-width="2.5"/>`
-        +path(`M${267+5*select} ${109+43*(1-select)} l10 10`,gold,'none',3);
+        +(focusVisible?`<circle cx="${scanX+5*select}" cy="${scanY+12*(1-select)}" r="22" fill="none" stroke="${gold}" stroke-width="2.5"/>`: '')
+        +(focusVisible?path(`M${scanX+17+5*select} ${scanY+18+12*(1-select)} l10 10`,gold,'none',3):'');
       break;
     }
     case 'dispatch': {
       // Send once on entry. Counts change the factual badge only: a disappearing child is not a result receipt.
-      const send=reduced?1:ease(elapsed/650);
+      const send=reduced?1:ease((legacy ? elapsed : cueElapsed)/280);
+      const sendLeft = legacy || d.cue === 'dispatch-left', sendRight = legacy || d.cue === 'dispatch-right';
       z=path('M97 155 Q67 145 46 115 M191 156 Q222 141 247 109',purple)
         +group(page(13,79,35,38,purple),-20*(1-entrance),wave)
         +group(page(244,72,35,38,cyan),20*(1-entrance),-wave)
-        +dot(97-51*send,155-40*send,purple,4)+dot(191+56*send,156-47*send,cyan,4);
+        +(sendLeft?dot(97-51*send,155-40*send,purple,4):'')+(sendRight?dot(191+56*send,156-47*send,cyan,4):'');
       if(d.count!==null) z+=`<text x="267" y="101" text-anchor="middle" fill="${ink}" font-size="12" font-family="system-ui">${d.count}</text>`;
       break;
     }
@@ -92,7 +97,7 @@ function artwork(d: DesktopCompanionScene, elapsed: number): string {
 export function mountCompanionScene(root: HTMLElement) {
   root.style.cssText='position:fixed;inset:0;overflow:hidden;pointer-events:none;user-select:none';
   root.setAttribute('aria-hidden','true');
-  let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0;
+  let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
   const render = (now: number) => {
     frame=0;
     if(!current || current.descriptor.suppressed || !current.descriptor.kind || document.hidden) { root.replaceChildren(); return; }
@@ -108,14 +113,14 @@ export function mountCompanionScene(root: HTMLElement) {
     const terminal=d.phase!=='active', phaseAge=now-phaseStarted;
     const end=d.phase==='resolve'?900:600;
     const opacity=terminal?1-clamp((phaseAge-(d.phase==='resolve'?500:0))/(d.phase==='resolve'?400:600)):d.reducedMotion?1:ease(elapsed/220);
-    let body=lane(artwork(d,elapsed));
+    let body=lane(artwork(d,elapsed,now-cueStarted,leftCrop && !rightCrop));
     if(previous&&!d.reducedMotion&&now-previousAt<240&&previous.descriptor.scope===d.scope&&!terminal) body=`<g opacity="${1-(now-previousAt)/240}">${lane(artwork({...previous.descriptor,phase:'withdraw'},previousElapsed))}</g>`+body;
     // At a display edge put one-sided scenes on the available side. Do not
     // push cards through the protected face or mirror the character to make room.
     const rightOnly = d.kind === 'editing' || d.kind === 'question' || d.kind === 'permission';
     let layers = body;
     if (rightCrop && !leftCrop && rightOnly) layers = group(body, -207);
-    else if (leftCrop && !rightCrop && d.kind === 'reading') layers = group(body, 218);
+    // Reading relocates its cards inside artwork and reconnects to the fixed laptop anchor.
     else if ((leftCrop || rightCrop) && (d.kind === 'searching' || d.kind === 'dispatch')) {
       // Keep the available card lane; relocating the opposite lane vertically
       // preserves a branching/search composition instead of clipping it offscreen.
@@ -140,6 +145,7 @@ export function mountCompanionScene(root: HTMLElement) {
       if(current?.descriptor.scope!==value.descriptor.scope || current?.descriptor.kind!==value.descriptor.kind || value.descriptor.phase==='active') started=now;
       else if(value.descriptor.phase==='resolve') started=now;
     }
+    if (current?.descriptor.cue !== value.descriptor.cue || current?.descriptor.cueInstance !== value.descriptor.cueInstance || !same) cueStarted=performance.now();
     current=value;
     if(frame)cancelAnimationFrame(frame);
     frame=requestAnimationFrame(render);
