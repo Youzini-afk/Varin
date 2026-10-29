@@ -3,7 +3,7 @@ import { CompanionDirector } from './directorPresentation';
 import { DirectorPortfolioProjector } from './directorPortfolio';
 
 /** Explicit offline review data. These identities must never be used for Host navigation or writes. */
-export type DirectorReviewStep = 'portfolio' | 'team-active' | 'b-intake' | 'b-result' | 'requests' | 'b-resolved' | 'unknown' | 'reconnected';
+export type DirectorReviewStep = 'portfolio' | 'team-active' | 'a-child-ended' | 'b-intake' | 'b-result' | 'requests' | 'b-resolved' | 'unknown' | 'reconnected';
 export interface DirectorReviewViewOptions {
   visible?: boolean;
   interacting?: boolean;
@@ -20,7 +20,7 @@ function branch(name: string, title: string, avatar: string, parent: string | nu
 function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnapshot {
   const branches = [branch('a', '资料整理', 'slope-lilac'), branch('b', '页面方案', 'dome-ivory'), branch('c', '行程确认', 'taper-sage')];
   const team = step !== 'portfolio';
-  if (team) branches.push(branch('a-child', '资料核对', 'pebble-blue', 'a'));
+  if (team) branches.push(branch('a-child', '资料核对', 'pebble-blue', 'a'), branch('c-child', '路线核对', 'overlap-coral', 'c'));
   if (step === 'b-intake') {
     const b = branches[1]!;
     b.currentRun = { ...b.currentRun!, state: 'accepted' }; b.latestRun = b.currentRun;
@@ -29,6 +29,11 @@ function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnaps
     const b = branches[1]!;
     b.activeRunId = null; b.hasUnsettledWork = false;
     b.currentRun = { ...b.currentRun!, state: 'completed', revision: 2 }; b.latestRun = b.currentRun;
+  }
+  if (step === 'a-child-ended') {
+    const child = branches.find(value => value.threadId === identity('a-child').threadId)!;
+    child.activeRunId = null; child.hasUnsettledWork = true;
+    child.currentRun = { ...child.currentRun!, state: 'completed', revision: 2 }; child.latestRun = child.currentRun;
   }
   const items: ThreadAttentionItem[] = [];
   const request = (name: string, kind: 'permission' | 'question'): ThreadAttentionItem => ({ ...identity(name),
@@ -45,7 +50,13 @@ function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnaps
     teamExecutions: team ? [{ parentThreadId: identity('a').threadId, parentBranchId: identity('a').branchId,
       parentRunId: runId('a'), childOperationId: 'review-child-operation-a', executionId: 'review-child-execution-a',
       childThreadId: identity('a-child').threadId, childBranchId: identity('a-child').branchId, avatar: 'pebble-blue',
-      state: 'ready', childRunId: runId('a-child'), childRunState: 'executing', activity: 'running' }] : [],
+      state: step === 'a-child-ended' ? 'completed' : 'ready', childRunId: runId('a-child'),
+        childRunState: step === 'a-child-ended' ? 'completed' : 'executing',
+        ...(step === 'a-child-ended' ? {} : { activity: 'running' as const }) },
+      { parentThreadId: identity('c').threadId, parentBranchId: identity('c').branchId, parentRunId: runId('c'),
+        childOperationId: 'review-child-operation-c', executionId: 'review-child-execution-c',
+        childThreadId: identity('c-child').threadId, childBranchId: identity('c-child').branchId, avatar: 'overlap-coral',
+        state: 'ready', childRunId: runId('c-child'), childRunState: 'executing', activity: 'running' }] : [],
     counts: { actionRequired: items.length, affectedBranches: new Set(items.map(item => item.branchId)).size, unknownEffects: 0 } };
 }
 
@@ -69,7 +80,7 @@ export function createDirectorReviewFixtureSession() {
     step(name: DirectorReviewStep): void {
       // A button jump still observes the actual precursor; React batching cannot manufacture edges.
       director.discardTransient(); health = 'current';
-      attention = fixture(name === 'b-result' ? 'team-active' : name === 'b-resolved' ? 'requests' : name, ++cursor);
+      attention = fixture(name === 'b-result' || name === 'a-child-ended' ? 'team-active' : name === 'b-resolved' ? 'requests' : name, ++cursor);
       if (name === 'b-intake') attention.branches = attention.branches.filter(value => value.threadId !== identity('b').threadId);
       view();
       if (name === 'reconnected') { health = 'unknown'; view(); health = 'current'; }

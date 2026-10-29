@@ -1,4 +1,4 @@
-import {escapePortfolioText,portfolioCaption,managementPacketPose} from './portfolioArtwork';
+import {escapePortfolioText,portfolioCaption,managementPacketPose,squadWorkTiming,squadHome} from './portfolioArtwork';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_AVATAR_ART } from '../ui/agent-avatar-art';
 import { mountCompanionScene, type SceneUpdate } from './sceneRenderer';
@@ -67,14 +67,14 @@ describe('atelier scene renderer',()=>{
 });
 
 describe('review-only director portfolio',()=>{
- const portfolio={mode:'inspection' as const,projects:[{key:'opaque-a',label:'A' as const,lead:{avatar:'ribbon-blue' as const,role:'project-lead' as const},status:'active' as const,requestCount:0,uncertainCount:0,detail:'reading' as const}],inspectedKey:'opaque-a',subjectKey:null,overflowCards:2,team:{projectKey:'opaque-a',members:[{key:'child',avatar:'scoop-pistachio' as const,state:'running' as const}],overflowCount:1}};
+ const portfolio={mode:'inspection' as const,projects:[{key:'opaque-a',label:'A' as const,lead:{avatar:'ribbon-blue' as const,role:'project-lead' as const},status:'active' as const,requestCount:0,uncertainCount:0,detail:'reading' as const}],inspectedKey:'opaque-a',subjectKey:null,overflowCards:2,teams:[{projectKey:'opaque-a',members:[{key:'child',avatar:'scoop-pistachio' as const,state:'running' as const}],overflowCount:1}]};
  it.each(['left','right'] as const)('uses native %s inspection side, real identities and exact overflow',side=>{
   const s=mountCompanionScene(root),v=scene('portfolio',{portfolio});v.layout={...layout,inspectionSide:side};s.update(v);tick(700);
   expect(root.innerHTML).toContain('data-project-slot="A"');expect(root.innerHTML).toContain(AGENT_AVATAR_ART['ribbon-blue'].body);expect(root.innerHTML).toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);expect(root.innerHTML).toContain('+2');expect(root.innerHTML).toContain('+1');expect(root.innerHTML).not.toContain('opaque-a');expect(jobs.size).toBe(0);s.dispose();
  });
  it('does not guess inspection side or show a mismatched child squad',()=>{
   const s=mountCompanionScene(root);s.update(scene('portfolio',{portfolio}));tick(700);expect(root.innerHTML).not.toContain('data-project-slot');
-  const v=scene('portfolio',{revision:2,portfolio:{...portfolio,team:{...portfolio.team,projectKey:'other'}}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(1400);expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
+  const v=scene('portfolio',{revision:2,portfolio:{...portfolio,teams:[{...portfolio.teams[0]!,projectKey:'other'}]}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(1400);expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
  });
  it('tool details update without body tool cues, have bounded accents, and unknown clears child evidence',()=>{
   const s=mountCompanionScene(root),v=scene('portfolio',{portfolio});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
@@ -84,7 +84,7 @@ describe('review-only director portfolio',()=>{
  it('routes a new B result to B while A remains inspected without lending A children to B',()=>{
   const s=mountCompanionScene(root),b={...portfolio.projects[0]!,key:'opaque-b',label:'B' as const,status:'result' as const};
   const v=scene('portfolio',{portfolio:{...portfolio,mode:'result',subjectKey:b.key,projects:[...portfolio.projects,b]}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
-  expect(root.innerHTML).toContain('data-brief-project="B"');expect(root.innerHTML).toContain('data-project-slot="A"');expect(root.innerHTML).toContain('队2');expect(root.innerHTML).toContain('推进');expect(root.innerHTML).not.toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
+  expect(root.innerHTML).toContain('data-project-slot="B"');expect(root.innerHTML).toContain('data-project-slot="A"');expect(root.innerHTML).toContain('data-child-owner="A"');expect(root.innerHTML).toContain('推进');expect(root.innerHTML).toContain(AGENT_AVATAR_ART['scoop-pistachio'].body);s.dispose();
  });
 
  it('renders bounded task names as escaped inert text and respects omitted captions',()=>{
@@ -129,10 +129,28 @@ describe('review-only director portfolio',()=>{
   for(let age=0;age<=400;age+=10){const point=managementPacketPose('management-delegate',age,side,false,lead)!;expect(point.x+13>=82&&point.x-13<=216&&point.y+9>=18&&point.y-9<=108).toBe(false);}
  });
 
- it('yields the large dossier to the handoff and restores it during real return',()=>{
+ it('does not reintroduce a large dossier during handoff or return',()=>{
   const s=mountCompanionScene(root),v=scene('portfolio',{cue:'management-delegate',portfolio:{...portfolio,mode:'intake',subjectKey:'opaque-a'}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(100);
-  expect(root.innerHTML).toContain('data-brief-project="A" opacity="0"');expect(root.innerHTML).toContain('data-project-slot="A"');
-  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition'}});tick(400);expect(root.innerHTML).toContain('data-brief-project="A" opacity="1"');s.dispose();
+  expect(root.innerHTML).not.toContain('data-brief-project');expect(root.innerHTML).toContain('data-project-slot="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:'transition'}});tick(400);expect(root.innerHTML).not.toContain('data-brief-project');s.dispose();
+ });
+
+ it('shows independent A/C child ownership and only removes the changed team member',()=>{
+  const s=mountCompanionScene(root),c={...portfolio.projects[0]!,key:'c',label:'C' as const,lead:{avatar:'overlap-coral' as const,role:'project-lead' as const}},teams=[portfolio.teams[0]!,{projectKey:'c',members:[{key:'cc',avatar:'pillar-lilac' as const,state:'running' as const}],overflowCount:0}];
+  const v=scene('portfolio',{portfolio:{...portfolio,projects:[...portfolio.projects,c],teams}});v.layout={...layout,inspectionSide:'right'};s.update(v);tick(700);
+  expect(root.innerHTML).toContain('data-child-owner="A"');expect(root.innerHTML).toContain('data-child-owner="C"');
+  s.update({...v,descriptor:{...v.descriptor,revision:2,portfolio:{...v.descriptor.portfolio!,teams:[{...teams[0]!,members:[]},teams[1]!]}}});tick(1400);expect(root.innerHTML).not.toContain('data-child-owner="A"');expect(root.innerHTML).toContain('data-child-owner="C"');expect(root.innerHTML).toContain(AGENT_AVATAR_ART['pillar-lilac'].body);s.dispose();
+ });
+ it.each(['left','right'] as const)('only the real inspected lead approaches and returns from %s listen dock',side=>{
+  const s=mountCompanionScene(root),v=scene('portfolio',{portfolio});v.layout={...layout,inspectionSide:side};s.update(v);tick(700);
+  const home=squadHome('A',side);expect(root.innerHTML).toContain(`data-center="${home.x},${home.y}"`);
+  s.update({...v,descriptor:{...v.descriptor,revision:2,cue:side==='right'?'listen-right':'listen-left'}});tick(860);expect(root.innerHTML).toContain(`data-center="${side==='right'?250:42},128"`);expect(root.innerHTML).toContain('data-child-owner="A"');
+  s.update({...v,descriptor:{...v.descriptor,revision:3,cue:'transition'}});tick(1060);expect(root.innerHTML).toContain(`data-center="${home.x},${home.y}"`);s.dispose();
+ });
+ it('active work has finite motion windows and sleeps between them; waiting/unknown/reduced cannot work',()=>{
+  const d=scene('portfolio',{portfolio}).descriptor;expect(squadWorkTiming(d,300,0).animate).toBe(true);expect(squadWorkTiming(d,700,0)).toEqual({animate:false,wakeIn:4500});
+  for(const status of ['needs-user','unknown','uncertain','settling','result','available'] as const)expect(squadWorkTiming({...d,portfolio:{...portfolio,projects:[{...portfolio.projects[0]!,status}]}},300,0)).toEqual({animate:false,wakeIn:null});
+  expect(squadWorkTiming({...d,reducedMotion:true},300,0).animate).toBe(false);
  });
 
 });

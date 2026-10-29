@@ -72,9 +72,13 @@ export function companionSceneLayout(content: Bounds, viewport: unknown, workAre
   const bounds = { x: character.x - Math.round((width-character.width)/2), y: character.y-(height-character.height), width, height };
   const left = Math.max(bounds.x,workArea.x), top = Math.max(bounds.y,workArea.y);
   const right = Math.min(bounds.x+width,workArea.x+workArea.width), bottom = Math.min(bounds.y+height,workArea.y+workArea.height);
-  const rightFits = character.x + character.width * 1.14 <= workArea.x + workArea.width;
-  const leftFits = character.x - character.width * 0.18 >= workArea.x;
-  const inspectionSide: 'left' | 'right' = rightFits || !leftFits ? 'right' : 'left';
+  // Admit the whole decorative side lane, not merely the old 56px brief card.
+  // Teams can occupy any point within this already allocated inert surface.
+  const sideMargin = (width - character.width) / 2;
+  const rightSpace = workArea.x + workArea.width - (character.x + character.width);
+  const leftSpace = character.x - workArea.x;
+  const rightFits = rightSpace >= sideMargin, leftFits = leftSpace >= sideMargin;
+  const inspectionSide: 'left' | 'right' = rightFits ? 'right' : leftFits ? 'left' : rightSpace >= leftSpace ? 'right' : 'left';
   return { bounds, layout: { inspectionSide,
     character: { x: (character.x-bounds.x)/width, y: (character.y-bounds.y)/height, width: character.width/width, height: character.height/height },
     visible: { x: (left-bounds.x)/width, y: (top-bounds.y)/height, width: Math.max(0,right-left)/width, height: Math.max(0,bottom-top)/height },

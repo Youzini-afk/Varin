@@ -1,4 +1,4 @@
-import { portfolioArtwork, type PortfolioBeat } from './portfolioArtwork';
+import { portfolioArtwork, squadWorkTiming, type PortfolioListen, type PortfolioBeat } from './portfolioArtwork';
 import type { DesktopCompanionScene } from '@varin/application-client';
 import { COMPANION_SCENE_GEOMETRY as geometry, COMPANION_TEAM_VISIBLE_LIMIT } from './sceneGeometry';
 import { AGENT_AVATAR_ART, agentAvatarSvg } from '../ui/agent-avatar-art';
@@ -182,12 +182,15 @@ export function mountCompanionScene(root: HTMLElement) {
   let resetRoster=false;
   let portfolioBeats=new Map<string,PortfolioBeat>();
   let portfolioCueStarted=0;
+  let portfolioListen:PortfolioListen|null=null,workEpoch=performance.now();
+  let workTimer:ReturnType<typeof setTimeout>|undefined;
   let portfolioPacketCue:string|null=null,portfolioPacketStarted=0;
   let teamBeats = new Map<string, TeamBeat>();
   let departing = new Map<string,{ member: TeamMember; at: number }>();
   let current: SceneUpdate | null=null, previous: SceneUpdate|null=null, started=0, previousAt=0, lastRevision=-1, frame=0, phaseStarted=0, previousElapsed=0, cueStarted=0;
   const render = (now: number) => {
     frame=0;
+    if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}
     if(!current || current.descriptor.suppressed || current.descriptor.menuOpen || (!current.descriptor.kind && !current.descriptor.team?.members.length && !departing.size) || document.hidden) { root.replaceChildren(); return; }
     const {descriptor:incoming,layout:l}=current, elapsed=now-started;
     for(const [key,value] of departing)if(now-value.at>=500)departing.delete(key);
@@ -205,7 +208,7 @@ export function mountCompanionScene(root: HTMLElement) {
     const opacity=terminal?1-clamp((phaseAge-(d.phase==='resolve'?500:0))/(d.phase==='resolve'?400:600)):d.reducedMotion?1:ease(elapsed/220);
     const edge=leftCrop&&!rightCrop?'left':rightCrop&&!leftCrop?'right':null;
     const hasTeam=!!d.team?.members.length;
-    let body=d.kind==='portfolio'?lane(portfolioArtwork(d,l.inspectionSide,now,now-portfolioCueStarted,portfolioBeats,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined)):d.kind==='dispatch'?'':lane(artwork({...d,team:undefined,count:d.team?null:d.count},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now));
+    let body=d.kind==='portfolio'?lane(portfolioArtwork(d,l.inspectionSide,now,now-portfolioCueStarted,portfolioBeats,portfolioPacketCue?{cue:portfolioPacketCue,age:now-portfolioPacketStarted}:undefined,portfolioListen,workEpoch)):d.kind==='dispatch'?'':lane(artwork({...d,team:undefined,count:d.team?null:d.count},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now));
     const teamLayer=hasTeam?lane(artwork({...d,phase:'active',outcome:null,count:null},elapsed,now-cueStarted,leftCrop&&!rightCrop,edge,teamBeats,now,true)):'';
     if(d.kind!=='portfolio'&&previous&&!d.reducedMotion&&now-previousAt<240&&previous.descriptor.scope===d.scope&&!terminal) body=`<g opacity="${1-(now-previousAt)/240}">${lane(previous.descriptor.kind==='dispatch'?'':artwork({...previous.descriptor,phase:'withdraw',team:undefined},previousElapsed))}</g>`+body;
     // At a display edge put one-sided scenes on the available side. Do not
@@ -218,11 +221,15 @@ export function mountCompanionScene(root: HTMLElement) {
     if(terminal&&phaseAge>=end&&!hasTeam) { root.replaceChildren(); return; }
     const portfolioMoving=d.kind==='portfolio'&&[...portfolioBeats.values()].some(beat=>now-beat.at<480);
     const teamMoving=[...teamBeats.values()].some(beat=>((d.kind==='dispatch'&&beat.entering) || beat.state==='leaving') && now-beat.at<650);
-    if(terminal&&phaseAge<end || !d.reducedMotion && (elapsed < 550 || now-cueStarted < 550 || teamMoving || portfolioMoving)) frame=requestAnimationFrame(render);
+    const work=d.kind==='portfolio'?squadWorkTiming(d,now,workEpoch):{animate:false,wakeIn:null};
+    const listenMoving=portfolioListen&&now-portfolioListen.started<180;
+    if(terminal&&phaseAge<end || !d.reducedMotion && (elapsed < 550 || now-cueStarted < 550 || teamMoving || portfolioMoving || work.animate || listenMoving)) frame=requestAnimationFrame(render);
+    else if(work.wakeIn!==null)workTimer=setTimeout(()=>{workTimer=undefined;frame=requestAnimationFrame(render);},Math.max(16,work.wakeIn));
   };
   const update=(value:SceneUpdate)=>{
     if(value.descriptor.revision<lastRevision)return;
     lastRevision=value.descriptor.revision;
+    if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}
     const same=current?.descriptor.scope===value.descriptor.scope&&current?.descriptor.kind===value.descriptor.kind&&current?.descriptor.phase===value.descriptor.phase&&current?.descriptor.status===value.descriptor.status;
 
     if(!same){
@@ -266,6 +273,13 @@ export function mountCompanionScene(root: HTMLElement) {
     teamBeats=nextBeats;
     resetRoster=hidden;
     const portfolio=value.descriptor.portfolio;
+    const listenKey=portfolio?.inspectedKey??null;
+    const listenValid=portfolio?.projects.some(p=>p.key===listenKey&&!['unknown','uncertain'].includes(p.status));
+    if(hidden||current?.descriptor.scope!==value.descriptor.scope||portfolioListen&&portfolioListen.key!==listenKey||!listenValid)portfolioListen=null;
+    if(!hidden&&listenValid&&listenKey&&['listen-left','listen-right'].includes(value.descriptor.cue)){
+      if(!portfolioListen||portfolioListen.phase==='return')portfolioListen={key:listenKey,started:performance.now(),phase:'approach'};
+    }else if(portfolioListen?.phase==='approach')portfolioListen={...portfolioListen,started:performance.now(),phase:'return'};
+
     if(current?.descriptor.scope!==value.descriptor.scope || current?.descriptor.cue!==value.descriptor.cue || current?.descriptor.portfolio?.subjectKey!==portfolio?.subjectKey || hidden)portfolioCueStarted=performance.now();
     const packetSubject=portfolio?.projects.find(project=>project.key===(portfolio.mode==='inspection'?portfolio.inspectedKey:portfolio.subjectKey));
     const packetUnavailable=packetSubject?.status==='unknown'||packetSubject?.status==='uncertain';
@@ -285,18 +299,20 @@ export function mountCompanionScene(root: HTMLElement) {
       const old=resetPortfolio?undefined:portfolioBeats.get(project.key),now=performance.now();
       // Initial/reconnected facts are static. Changes during cooldown update detail
       // immediately but cannot sustain a never-ending accent under tool bursts.
-      const at=old&&old.detail!==project.detail&&now-old.at>=1200?now:old?.at??now-2000;
-      nextPortfolio.set(project.key,{detail:project.detail,at});
+      const signature=JSON.stringify([project.detail,project.status,(portfolio?.teams??[]).find(t=>t.projectKey===project.key)?.members.map(m=>[m.key,m.state])]);
+      const at=old&&old.detail!==signature&&now-old.at>=1200?now:old?.at??now-2000;
+      nextPortfolio.set(project.key,{detail:signature,at});
     }
     portfolioBeats=nextPortfolio;
+    if(current?.descriptor.scope!==value.descriptor.scope)workEpoch=performance.now();
     current=value;
     if(frame)cancelAnimationFrame(frame);
     frame=requestAnimationFrame(render);
   };
   const event=(e:Event)=>update((e as CustomEvent<SceneUpdate>).detail);
-  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(document.hidden){resetRoster=true;departing.clear();teamBeats.clear();portfolioBeats.clear();portfolioPacketCue=null;root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
+  const visibility=()=>{if(frame)cancelAnimationFrame(frame);if(workTimer!==undefined){clearTimeout(workTimer);workTimer=undefined;}if(document.hidden){resetRoster=true;departing.clear();teamBeats.clear();portfolioBeats.clear();portfolioPacketCue=null;portfolioListen=null;root.replaceChildren();}else {started=performance.now();frame=requestAnimationFrame(render);}};
   window.addEventListener('varin-companion-scene',event);document.addEventListener('visibilitychange',visibility);
   document.documentElement.dataset.varinCompanionSceneReady = 'true';
   window.dispatchEvent(new Event('varin-companion-scene-ready'));
-  return { update, dispose:()=>{delete document.documentElement.dataset.varinCompanionSceneReady;cancelAnimationFrame(frame);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
+  return { update, dispose:()=>{delete document.documentElement.dataset.varinCompanionSceneReady;cancelAnimationFrame(frame);if(workTimer!==undefined)clearTimeout(workTimer);root.replaceChildren();window.removeEventListener('varin-companion-scene',event);document.removeEventListener('visibilitychange',visibility);} };
 }

@@ -1,5 +1,9 @@
 import { expect, it } from 'vitest';
 import { createDirectorReviewFixtureSession } from './directorReviewFixtures';
+const teamFor = (frame: ReturnType<ReturnType<typeof createDirectorReviewFixtureSession>['view']>, name: string) => {
+  const key = frame.projection.legend.find(item => item.identity.threadId === `review-thread-${name}`)?.key;
+  return frame.projection.portfolio.teams?.find(team => team.projectKey === key);
+};
 
 it('uses real projection contracts for three leads and keeps A children alive when B returns a result', () => {
   const session = createDirectorReviewFixtureSession();
@@ -8,8 +12,11 @@ it('uses real projection contracts for three leads and keeps A children alive wh
   const frame = session.view();
   expect(frame.reviewOnly).toBe(true);
   expect(frame.presentation.body.edge).toMatchObject({ kind: 'receive-result', runId: 'review-run-b', outcome: 'completed' });
-  expect(frame.projection.portfolio.team?.members).toHaveLength(1);
-  expect(frame.projection.portfolio.team?.members[0]?.state).toBe('running');
+  expect(teamFor(frame, 'a')?.members).toHaveLength(1);
+  expect(teamFor(frame, 'c')?.members).toHaveLength(1);
+  expect(teamFor(frame, 'a')?.members[0]?.key).not.toBe(teamFor(frame, 'c')?.members[0]?.key);
+  expect(teamFor(frame, 'b')?.members).toEqual([]);
+  expect(teamFor(frame, 'a')?.members[0]?.state).toBe('running');
   expect(frame.attention.teamExecutions[0]?.parentRunId).toBe(frame.attention.branches[0]?.currentRun?.id);
   const edge = frame.presentation.body.edge!;
   session.consumeEdge(edge.key);
@@ -32,11 +39,11 @@ it('unknown retains identities without stale team and reconnect never replays hi
   const unknown = session.view();
   expect(unknown.projection.portfolio.projects).toHaveLength(3);
   expect(unknown.projection.portfolio.projects.every(card => card.status === 'unknown' && card.requestCount === null)).toBe(true);
-  expect(unknown.projection.portfolio.team).toBeUndefined();
+  expect(unknown.projection.portfolio.teams).toBeUndefined();
   session.step('reconnected'); const restored = session.view();
   expect(restored.projection.sourceCurrent).toBe(true);
   expect(restored.presentation.body.edge).toBeNull();
-  expect(restored.projection.portfolio.team?.members).toHaveLength(1);
+  expect(teamFor(restored, 'a')?.members).toHaveLength(1);
   session.step('b-result'); session.view({ visible: false });
   expect(session.view({ visible: true }).presentation.body.edge).toBeNull();
   expect(session.view({ hideTaskNames: true }).projection.portfolio.projects.every(card => card.caption === undefined)).toBe(true);
@@ -53,9 +60,19 @@ it('observes a genuinely new accepted B run before producing intake, independent
   expect(frame.projection.portfolio.mode).toBe('intake');
   const subject = frame.projection.portfolio.projects.find(card => card.key === frame.projection.portfolio.subjectKey);
   expect(subject).toMatchObject({ caption: '页面方案', lead: { role: 'project-lead' } });
-  expect(frame.projection.portfolio.team?.members[0]?.state).toBe('running');
+  expect(teamFor(frame, 'a')?.members[0]?.state).toBe('running');
   session.consumeEdge(frame.presentation.body.edge!.key);
   expect(session.view().presentation.body.edge).toBeNull();
   session.step('b-intake'); session.view({ interacting: true });
   expect(session.view({ interacting: false }).presentation.body.edge).toBeNull();
+});
+
+it('retires only the exact terminal child squad member, retaining the other project’s live child', () => {
+  const session = createDirectorReviewFixtureSession(); session.step('team-active');
+  const before = session.view(); const cKey = teamFor(before, 'c')?.members[0]?.key;
+  session.step('a-child-ended'); const after = session.view();
+  expect(teamFor(after, 'a')?.members).toEqual([]);
+  expect(teamFor(after, 'c')?.members[0]?.key).toBe(cKey);
+  expect(teamFor(after, 'c')?.members[0]?.state).toBe('running');
+  expect(after.presentation.body.edge).toBeNull();
 });

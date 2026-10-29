@@ -167,6 +167,11 @@ if a.director_manifest:
  # blink, not the focused project's typing/reading loop renamed as management.
  blink=next(p for p in base['packages'] if p['id']=='v2-question-hold')['frames']
  add('v3-director-supervise',[{'sha256':f['sha256'],'durationMs':f['durationMs'],'cue':'REST','pauseSafe':f['sha256']==listen} for f in blink], 'action','director-supervise',[0,len(blink)],'director-supervise')
+ # Local user attention is not a project handoff or an approval. Exact existing
+ # face-only smile preserves the open laptop and all hand/body pixels.
+ smile='e11e8ffe9617e9714f6ada8911566d100cdb9516e4921056f007d1c99d4c72fc'
+ if smile not in placements:raise ValueError('Missing exact open local smile drawing')
+ add('v3-director-open-attention',[{'sha256':h,'durationMs':ms,'cue':'LOCAL_ATTENTION','pauseSafe':h==neutral} for h,ms in [(neutral,80),(smile,180),(neutral,100)]], 'action','director-open-attention')
  # A complete one-shot project intake uses real receipt then handoff drawings.
  # It is triggered only by a scoped project edge, never by a tool/child count.
  received=next(p for p in plans if p['name']=='accept-open')['frames'][1:]

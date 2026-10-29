@@ -22,11 +22,17 @@ export function readCompanionPortfolio(input: unknown, readTeam: (value: unknown
       uncertainCount: raw.uncertainCount as number|null, ...(raw.detail === undefined ? {} : { detail: raw.detail as NonNullable<DesktopCompanionPortfolio['projects'][number]['detail']> }) };
   });
   if (![input.inspectedKey,input.subjectKey].every(v => v === null || typeof v === 'string' && keys.has(v))) throw new Error('Director subject is not a visible project');
-  let team: DesktopCompanionPortfolio['team'];
-  if (input.team !== undefined) {
-    if (!object(input.team) || !key(input.team.projectKey) || !keys.has(input.team.projectKey) || input.team.projectKey !== input.inspectedKey) throw new Error('Director team has no inspected owner');
-    team = { ...readTeam(input.team), projectKey: input.team.projectKey };
+  if (input.team !== undefined) throw new Error('Director portfolio requires per-project teams, not an inspected-only team');
+  let teams: DesktopCompanionPortfolio['teams'];
+  if (input.teams !== undefined) {
+    if (!Array.isArray(input.teams) || input.teams.length > COMPANION_PROJECT_VISIBLE_LIMIT) throw new Error('Invalid director teams');
+    const owners = new Set<string>();
+    teams = input.teams.map(value => {
+      if (!object(value) || !key(value.projectKey) || !keys.has(value.projectKey) || owners.has(value.projectKey)) throw new Error('Director team has no unique visible project owner');
+      owners.add(value.projectKey);
+      return { ...readTeam(value), projectKey: value.projectKey };
+    });
   }
   return { mode: input.mode as DesktopCompanionPortfolio['mode'], projects, inspectedKey: input.inspectedKey as string|null,
-    subjectKey: input.subjectKey as string|null, overflowCards: input.overflowCards as number|null, ...(team ? { team } : {}) };
+    subjectKey: input.subjectKey as string|null, overflowCards: input.overflowCards as number|null, ...(teams === undefined ? {} : { teams }) };
 }

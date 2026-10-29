@@ -111,20 +111,22 @@ export class DirectorPortfolioProjector {
         : inspectedKey ? 'inspection' : 'overview';
     const portfolio: DesktopCompanionPortfolio = { mode, projects, inspectedKey, subjectKey,
       overflowCards: current ? view.overflowCards + Math.max(0, cards.size - wanted.length) : null };
-    // Always use the displayed root card's own direct roster. Child inspection stays a separate lens.
-    const inspectedRoot = view.inspectedProjectKey ? cards.get(view.inspectedProjectKey) : undefined;
-    if (current && inspectedKey && inspectedRoot) {
-      const children = new Map(inspectedRoot.children.map(child => [child.key, child]));
-      const team = this.teams.get(inspectedRoot.key) ?? { keys: [], tokens: new Map<string, string>() };
+    // Every visible lead owns only its own exact direct roster, independent of inspection.
+    if (current) portfolio.teams = [];
+    for (const identityKey of current ? wanted : []) {
+      const card = cards.get(identityKey)!;
+      const projectKey = nativeKey.get(identityKey)!;
+      const children = new Map(card.children.map(child => [child.key, child]));
+      const team = this.teams.get(identityKey) ?? { keys: [], tokens: new Map<string, string>() };
       team.keys = team.keys.filter(key => children.has(key));
       for (const key of children.keys()) if (team.keys.length < COMPANION_TEAM_VISIBLE_LIMIT && !team.keys.includes(key)) team.keys.push(key);
       for (const key of team.tokens.keys()) if (!team.keys.includes(key)) team.tokens.delete(key);
       for (const key of team.keys) if (!team.tokens.has(key)) team.tokens.set(key, `agent-${++this.serial}`);
-      this.teams.set(inspectedRoot.key, team);
-      portfolio.team = { projectKey: inspectedKey, members: team.keys.map(key => {
+      this.teams.set(identityKey, team);
+      portfolio.teams!.push({ projectKey, members: team.keys.map(key => {
         const child = children.get(key)!;
         return { key: team.tokens.get(key)!, avatar: child.avatar, state: child.state };
-      }), overflowCount: Math.max(0, children.size - team.keys.length) };
+      }), overflowCount: Math.max(0, children.size - team.keys.length) });
     }
     return { portfolio, legend, sourceCurrent: current };
   }

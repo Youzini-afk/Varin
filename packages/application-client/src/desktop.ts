@@ -390,7 +390,8 @@ export interface DesktopCompanionPortfolio {
   inspectedKey: string | null;
   subjectKey: string | null;
   overflowCards: number | null;
-  team?: DesktopCompanionTeam & { projectKey: string };
+  /** Independent real direct teams, each owned by one visible project lead. */
+  teams?: Array<DesktopCompanionTeam & { projectKey: string }>;
 }
 export interface DesktopCompanionSceneLayoutReceipt {
   scope: string;

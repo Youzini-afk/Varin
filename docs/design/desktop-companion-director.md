@@ -77,7 +77,7 @@ Varin：接待、协调、跟进、递交待决事项、呈现已确认结果
 
 ### A. 三项目并行，工具每 50ms 变化
 
-A 卡显示资料阅读，B 卡显示实验执行，C 卡显示文本生成；各自有真实主 agent。Varin 看项目台、短记一笔、回到安静跟进。A 的读取→搜索→改写只更新 A 卡/检查详情，没有人物连续换道具。默认只展开检查中的一队子精灵；其他卡保留负责人和确证小队摘要，不画三群蜂拥旋转。
+A 卡显示资料阅读，B 卡显示实验执行，C 卡显示文本生成；各自有真实主 agent。Varin 看项目台、短记一笔、回到安静跟进。A 的读取→搜索→改写只更新 A 卡/检查详情，没有人物连续换道具。各工作中的负责人以稳定小队席位出现；较小的真实子 agent 围绕所属负责人交流，不把全部任务堆成卡片。检查只改变详情镜头，不决定其他真实小队是否可见。
 
 ### B. 新项目真实受理
 
@@ -100,7 +100,7 @@ Varin 接收 A 的结果状态卡，轻指 A 的完成标记；B 主 agent 保�
 全局 attention 已有 branch 的实际主 agent 身份；backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
 
 当前关系范围是现有 Family CURRENT 中每个真实 child 的最新 execution；包括仍需交付/结算的终态成员，不含任意历史。child Run terminal 而 delegated owner 仍 ready 时为 settling；owner 真正 terminal 才离场。原 parentRun 跨 continuation 保留。没有任务输入/正文/工具参数，没有新的调度或写入，沿同一个全局只读 attention 流更新，不为每个项目开 full snapshot/projection。
-默认项目卡显示实际主 agent；只对检查项目展开小队，或者在新确证分派时短展示其真实成员。未覆盖的小队信息显示未读取/未知，不能用装饰精灵凑数。旧父 Run 派发的真实工作可继续属于同一父 branch，精灵按自己的原 parentRun/execution 校验；terminal 所有结局都中性离场，失败保留在结果/待处理。准备失败但未终结可显示温和问题标记。
+每个可见工作席显示实际主 agent，并通过 `portfolio.teams` 的 projectKey 展示自己的真实直接子队（最多三席、每席最多三个可见成员，各有真实 overflow）；空队保持空，不凭负责人工作状态捏造子成员。未覆盖的小队信息显示未读取/未知，不能用装饰精灵凑数。旧父 Run 派发的真实工作可继续属于同一父 branch，精灵按自己的原 parentRun/execution 校验；terminal 所有结局都中性离场，失败保留在结果/待处理。准备失败但未终结可显示温和问题标记。
 
 同一 child 多 execution 的头像身份不变，仍有工作就不能被旧终态移除。原全局 ledger 只计一次请求；父卡“子任务需要你”是指向同一项，不复制请求数字。
 
@@ -116,7 +116,7 @@ Varin 接收 A 的结果状态卡，轻指 A 的完成标记；B 主 agent 保�
 
 `directorPresentation.ts` 先提供独立纯投影原型：输入全局 attention、观察健康、检查身份与本地可见/拖动状态；输出管理 body verb、稳定项目卡、真实主 agent identity、检查镜头、覆盖范围及 exact 短边缘。不导入工具分类，不调用写 API，不生成报告。现有 `attentionCoordinator`、ledger、面板和 child identity 校验继续复用，旧 `projectCompanionIntent` 保留给项目执行详情。
 
-候选 `directorPortfolio.ts` / `useDirectorPortfolio` 将投影映射为最多三个稳定 A/B/C 席位和当前检查根项目的直接子队；传给非交互场景的是短 opaque key、白名单头像、状态/类别枚举和当前已证实的计数。默认同时发送可读的真实任务短标题 caption（最多 24 个 Unicode 码点，超长末尾省略，空白规范化并清除控制/双向覆盖字符），以纯文本节点绘制；A/B/C 只作稳定席位辅助，不迫使用户打开面板才能知道主体。隐藏任务名选项省略 caption，但不改变席位或执行状态。完整标题与 thread/branch/run/request 身份留在交互 UI 的 legend；短标题绝不作为 HTML、URL、命令或导航目标解释。epoch/cursor 不匹配或健康未知时计数为 unknown，移除工具细节与小队，不把旧事实写成零。项目工具细节按自己的 identity/run 核验，独立于 Varin 身体 cue；身体 cue 只控制管理交接/倾听/汇拢。子任务检查不复制成另一个根项目，也不把其孙任务画到根负责人的直接小队。
+候选 `directorPortfolio.ts` / `useDirectorPortfolio` 将投影映射为最多三个稳定 A/B/C 席位及每个可见项目各自的直接子队；传给非交互场景的是短 opaque key、白名单头像、状态/类别枚举和当前已证实的计数。默认同时发送可读的真实任务短标题 caption（最多 24 个 Unicode 码点，超长末尾省略，空白规范化并清除控制/双向覆盖字符），以纯文本节点绘制；A/B/C 只作稳定席位辅助，不迫使用户打开面板才能知道主体。隐藏任务名选项省略 caption，但不改变席位或执行状态。完整标题与 thread/branch/run/request 身份留在交互 UI 的 legend；短标题绝不作为 HTML、URL、命令或导航目标解释。epoch/cursor 不匹配或健康未知时计数为 unknown，移除工具细节与小队，不把旧事实写成零。项目工具细节按自己的 identity/run 核验，独立于 Varin 身体 cue；身体 cue 只控制管理交接/倾听/汇拢。子任务检查不复制成另一个根项目，也不把其孙任务画到根负责人的直接小队。
 
 实际主体姿态映射、项目台构图、主 agent 角色外观对齐后，只先接隔离 review 消费者；不升级默认 app 或已选资源。验收至少覆盖：无检查选择但多项目执行、每 50ms 工具变化不影响主体、两请求独立解决、一个项目完成另一个仍忙、检查镜头变化不切 body actor、历史结果/重连不重演、exact 负责人/子执行关系和 terminal 退出。
 

@@ -39,27 +39,27 @@ it('never relabels a child inspection roster as the root lead’s direct childre
  const data=snapshot([branch('root'),branch('child','root'),branch('grandchild','child')],[],[row('root','child'),row('child','grandchild')]);
  const director=new CompanionDirector(),mapper=new DirectorPortfolioProjector();
  const out=mapper.project(observe(director,data,id('child')),data,1).portfolio;
- expect(out.projects).toHaveLength(1);expect(out.team?.projectKey).toBe(out.projects[0]?.key);
- expect(out.team?.members.map(m=>m.avatar)).toEqual([agentAvatarForIdentity('thread-child')]);
- expect(out.team?.members).toHaveLength(1);expect(out.inspectedKey).toBe(out.projects[0]?.key);
+ expect(out.projects).toHaveLength(1);expect(out.teams?.[0]?.projectKey).toBe(out.projects[0]?.key);
+ expect(out.teams?.[0]?.members.map(m=>m.avatar)).toEqual([agentAvatarForIdentity('thread-child')]);
+ expect(out.teams?.[0]?.members).toHaveLength(1);expect(out.inspectedKey).toBe(out.projects[0]?.key);
 });
 it('bounds actual child seats, preserves survivors and never invents a child for a lonely lead',()=>{
  const director=new CompanionDirector(),mapper=new DirectorPortfolioProjector();
  const data=snapshot([branch('root'),...['a','b','c','d'].map(x=>branch(x,'root'))],[],['a','b','c','d'].map(x=>row('root',x)));
  const first=mapper.project(observe(director,data,id('root')),data,1).portfolio;
- expect(first.team?.members).toHaveLength(3);expect(first.team?.overflowCount).toBe(1);
+ expect(first.teams?.[0]?.members).toHaveLength(3);expect(first.teams?.[0]?.overflowCount).toBe(1);
  const nextData={...data,eventCursor:2,teamExecutions:data.teamExecutions.slice(1)};
  const next=mapper.project(observe(director,nextData,id('root')),nextData,1).portfolio;
- expect(next.team?.members[0]?.key).toBe(first.team?.members[1]?.key);expect(next.team?.members[1]?.key).toBe(first.team?.members[2]?.key);
+ expect(next.teams?.[0]?.members[0]?.key).toBe(first.teams?.[0]?.members[1]?.key);expect(next.teams?.[0]?.members[1]?.key).toBe(first.teams?.[0]?.members[2]?.key);
  const alone=snapshot([branch('root')]);alone.eventCursor=3;
  const last=mapper.project(observe(director,alone,id('root')),alone,1).portfolio;
- expect(last.projects[0]?.lead.role).toBe('project-lead');expect(last.team?.members).toEqual([]);expect(last.team?.overflowCount).toBe(0);
+ expect(last.projects[0]?.lead.role).toBe('project-lead');expect(last.teams?.[0]?.members).toEqual([]);expect(last.teams?.[0]?.overflowCount).toBe(0);
 });
 it('marks stale/mismatched snapshot counts unknown, hides team/details, and isolates Host scope tokens',()=>{
  const data=snapshot([branch('one')]),director=new CompanionDirector(),mapper=new DirectorPortfolioProjector();const view=observe(director,data,id('one'));
  const first=mapper.project(view,data,1).portfolio;
  const stale=mapper.project(view,{...data,eventCursor:2},1,[{identity:id('one'),runId:'run-one',category:'reading',health:'current'}]).portfolio;
- expect(stale.projects[0]).toMatchObject({status:'unknown',requestCount:null,uncertainCount:null});expect(stale.overflowCards).toBeNull();expect(stale.team).toBeUndefined();expect(stale.projects[0]?.detail).toBeUndefined();
+ expect(stale.projects[0]).toMatchObject({status:'unknown',requestCount:null,uncertainCount:null});expect(stale.overflowCards).toBeNull();expect(stale.teams).toBeUndefined();expect(stale.projects[0]?.detail).toBeUndefined();
  expect(mapper.project(view,data,2).portfolio.projects[0]?.key).not.toBe(first.projects[0]?.key);
 });
 it('shows a result subject card even when other active projects would otherwise fill every seat',()=>{
@@ -116,4 +116,20 @@ it('uses mixed for actual categories and never turns failures or unknown effects
  expect(directorProjectNotice([{...item,kind:'mcp_sampling_output'}],true)).toBe('inspect');
  expect(directorProjectNotice([item],false)).toBe('unknown');
  expect(directorProjectNotice([],true)).toBeUndefined();
+});
+
+it('projects independent exact squads for every visible lead without inspection, keeping survivor keys and filtering terminals',()=>{
+ const data=snapshot([branch('a'),branch('b'),branch('a1','a'),branch('b1','b')],[],[row('a','a1'),row('b','b1')]);
+ const director=new CompanionDirector(),mapper=new DirectorPortfolioProjector();
+ const first=mapper.project(observe(director,data),data,1);
+ const key=(name:string)=>first.legend.find(x=>x.identity.threadId===`thread-${name}`)!.key;
+ const a=first.portfolio.teams!.find(team=>team.projectKey===key('a'))!,b=first.portfolio.teams!.find(team=>team.projectKey===key('b'))!;
+ expect(a.members.map(member=>member.avatar)).toEqual([agentAvatarForIdentity('thread-a1')]);
+ expect(b.members.map(member=>member.avatar)).toEqual([agentAvatarForIdentity('thread-b1')]);
+ expect(a.members[0]?.key).not.toBe(b.members[0]?.key);
+ const next={...data,eventCursor:2,teamExecutions:[{...data.teamExecutions[0]!,state:'completed'},data.teamExecutions[1]!]};
+ const after=mapper.project(observe(director,next,id('b')),next,1).portfolio;
+ expect(after.teams!.find(team=>team.projectKey===key('a'))?.members).toEqual([]);
+ expect(after.teams!.find(team=>team.projectKey===key('b'))?.members[0]?.key).toBe(b.members[0]?.key);
+ expect(mapper.project(observe(director,next,null,'unknown'),next,1).portfolio.teams).toBeUndefined();
 });

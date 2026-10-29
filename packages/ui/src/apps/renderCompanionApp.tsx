@@ -2,6 +2,7 @@ import { createDirectorReviewFixtureSession, type DirectorReviewStep } from '@/c
 import { useCompanionDirector } from '@/components/companion/useCompanionDirector';
 import { useDirectorPortfolio } from '@/components/companion/useDirectorPortfolio';
 import { directorToolDetail } from '@/components/companion/directorPortfolio';
+import { directorLocalResponse } from '@/components/companion/directorLocalInteraction';
 import { directorBodyAction } from '@/components/companion/directorBody';
 import { useCompanionAttention } from '@/components/companion/useCompanionAttention';
 import { useCompanionVisualIntent } from '@/components/companion/useCompanionVisualIntent';
@@ -83,6 +84,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const [presentation, setPresentation] = React.useState('C01');
   const [reviewRoute, setReviewRoute] = React.useState(false);
   const [controlsOpen, setControlsOpen] = React.useState(false);
+  const [directorLocal, setDirectorLocal] = React.useState<{ action: 'tap-response' | 'hover-response' | 'director-open-attention'; context: string; event: 'tap' | 'hover' } | null>(null);
+  const discardDirectorTransient = React.useRef<() => void>(() => {});
   const [localAction, setLocalAction] = React.useState<'welcome' | 'tap-response' | 'hover-response' | null>(review ? null : 'welcome');
   const progressFacts = React.useRef(new CompanionProgressFacts());
   const canAnimateEdges = React.useRef(true);
@@ -142,10 +145,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const companionWindow = useCompanionWindow(canvas, review, () => beforeNativeLift.current());
   canAnimateEdges.current = companionWindow.phase === 'rest';
   React.useEffect(() => {
-    if (companionWindow.phase !== 'rest') { setLiveCompletion(null); setLiveAnswer(null); setLivePermissionReceipt(false); setOutputBeat(false); setLocalAction(null); }
+    if (companionWindow.phase !== 'rest') { setDirectorLocal(null); discardDirectorTransient.current(); setLiveCompletion(null); setLiveAnswer(null); setLivePermissionReceipt(false); setOutputBeat(false); setLocalAction(null); }
   }, [companionWindow.phase]);
   React.useEffect(() => {
     const visibility = () => {
+      setDirectorLocal(null); discardDirectorTransient.current();
       setLiveCompletion(null); setLiveAnswer(null); setLivePermissionReceipt(false); setOutputBeat(false); setLocalAction(null);
       setProviderProgress(current => current?.kind === 'retry' ? current : null);
       if (!document.hidden) { attention.refresh(); void focusedProjection.current?.refresh(); }
@@ -160,6 +164,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const livePortfolio = useDirectorPortfolio(liveDirector, directorReview && !fixtureActive ? attention.snapshot : null, generation, directorReview && !fixtureActive && directorDetail ? [directorDetail] : [], { hideTaskNames });
   const fixtureView = fixtureActive ? fixtureSession.view({ visible: !document.hidden, interacting: companionWindow.phase !== 'rest', inspected: fixtureInspection, hideTaskNames }) : null;
   const director = fixtureView ? { ...fixtureView.presentation, consumeEdge: (key: string) => { fixtureSession.consumeEdge(key); refreshFixture(); }, discardTransient: () => { fixtureSession.discardTransient(); refreshFixture(); } } : liveDirector;
+  discardDirectorTransient.current = director.discardTransient;
   const portfolioProjection = fixtureView?.projection ?? livePortfolio;
   const selectFixture = (step: DirectorReviewStep) => { fixtureSession.step(step); setFixtureStep(step); setFinishedDirectorSentence(null); setManualReview(false); setPlaying(false); refreshFixture(); };
   const rawScene = sceneForIntent(sceneFact, intent.state);
@@ -168,20 +173,39 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
   const directorLayout = useCompanionScene(canvas, sceneCurrent, directorReview ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorReview && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorReview || reviewRoute ? undefined : team, directorReview ? portfolioProjection.portfolio : undefined, directorReview ? directorContextKey : null);
-  const restDue = useCompanionLeisure(localAllowed && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (health === 'current' || health === 'unselected'), companionWindow.activityRevision);
+  const restDue = useCompanionLeisure((directorReview ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorReview || health === 'current' || health === 'unselected'), companionWindow.activityRevision);
   const ordinaryDisplayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
   const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null);
   const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
-  const displayAction = directorReview ? finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction : ordinaryDisplayAction;
+  const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
+  const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
+  const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
+  const displayAction = directorReview ? directorLocalAction ?? (restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
+  const localDirectorResponse = (event: 'tap' | 'hover') => {
+    const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
+    const decision = directorLocalResponse({ event, current: director.health === 'current', visible: !document.hidden,
+      interacting: companionWindow.phase !== 'rest', blockedUI: controlsOpen || attentionOpen || manualReview,
+      finiteHandover: ['director-intake', 'director-gather-present'].includes(directorBaseAction)
+        || !!shown && ['director-intake', 'director-gather-present'].includes(shown.action ?? '') && (displayedDrawing.current?.exposure ?? 0) < shown.frames.length - 1,
+      closed: shown?.entryPose === 'upright-v2:closed' && shown.exitPose === 'upright-v2:closed' });
+    if (!decision) return;
+    // End this inspection sentence, not its project facts; do not replay LISTEN.
+    if (usableAction(decision)) {
+      if (directorBaseAction.startsWith('director-listen-')) setFinishedDirectorSentence(directorSentenceKey);
+      setDirectorLocal({ action: decision, context: directorContextKey, event });
+    }
+  };
+  React.useEffect(() => { setDirectorLocal(null); }, [directorContextKey, directorReview, director.health, controlsOpen, attentionOpen, manualReview]);
   React.useEffect(() => {
     if (!companionWindow.hoverRevision || seenHover.current === companionWindow.hoverRevision) return;
     seenHover.current = companionWindow.hoverRevision;
+    if (directorReview) { localDirectorResponse('hover'); return; }
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
     // Closed-only attention must not close an open laptop merely to react to hover.
     if (localAllowed && !controlsOpen && shown && assetList.some(item => item.action === 'hover-response' && item.reviewStatus === 'accepted' && item.geometryReference === shown.geometryReference && item.entryPose === shown.entryPose && item.exitPose === shown.exitPose)) setLocalAction('hover-response');
-  }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList]);
-  React.useEffect(() => { if (!companionWindow.hovered) setLocalAction(current => current === 'hover-response' ? null : current); }, [companionWindow.hovered]);
+  }, [companionWindow.hoverRevision, localAllowed, controlsOpen, assetList, directorReview, localDirectorResponse]);
+  React.useEffect(() => { if (!companionWindow.hovered) { setLocalAction(current => current === 'hover-response' ? null : current); setDirectorLocal(current => current?.event === 'hover' ? null : current); } }, [companionWindow.hovered]);
   const displayedDrawing = React.useRef<{ packageId: string; exposure: number; context: string | null } | null>(null);
   const automatic = useCompanionPlayback(assetList, displayAction, playing || manualReview, Object.keys(imageLibrary), { phase: companionWindow.phase, displayed: () => displayedDrawing.current }, { allowCandidates: directorReview, presentationKey: directorReview ? directorContextKey : null });
   React.useEffect(() => {
@@ -196,8 +220,9 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
+    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === directorLocalAction) setDirectorLocal(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
-  }, [automatic.finished, automatic.packageId, assetList, localAction]);
+  }, [automatic.finished, automatic.packageId, assetList, localAction, directorLocalAction]);
 
   // A local greeting/tap is not a queued application event. Higher-priority facts
   // discard it instead of replaying it after a permission or interruption clears.
@@ -206,12 +231,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   React.useEffect(() => {
     if (!companionWindow.tapRevision || seenTap.current === companionWindow.tapRevision) return;
     seenTap.current = companionWindow.tapRevision;
+    if (directorReview) { localDirectorResponse('tap'); return; }
     if (!localAllowed) return;
     const current = assetList.find(item => item.id === automatic.packageId);
     // Identity-specific pose names are artwork contracts, not UI prefix conventions.
     // The existing player chooses the nearest authored tap variant and its safe bridge.
     if (current && assetList.some(item => item.action === 'tap-response' && item.reviewStatus === 'accepted' && item.geometryReference === current.geometryReference)) setLocalAction('tap-response');
-  }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed]);
+  }, [companionWindow.tapRevision, assetList, automatic.packageId, localAllowed, directorReview, localDirectorResponse]);
   const pictures = asset ? imageLibrary[asset.id] ?? [] : [];
   const displayedExposure = !playing && !manualReview && automatic.packageId === asset?.id ? automatic.exposure : exposure;
   const loadGeneration = React.useRef(0);
@@ -483,7 +509,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       <label><input type="checkbox" checked={directorReview} onChange={event => setDirectorEnabled(event.target.checked)} />主管候选（独立资源，仅开发审阅）</label>
       {directorReview && <>
         <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">离线演示 fixture · 非真实任务</option></select></label>
-        {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A负责人和子队</option><option value="b-intake">B新项目接收→交负责人</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option></select></label>}
+        {fixtureActive && <label>演示 <select aria-label="Offline director scenario" value={fixtureStep} onChange={event => selectFixture(event.target.value as DirectorReviewStep)}><option value="portfolio">三项目总览</option><option value="team-active">A/C各自主队与子队</option><option value="a-child-ended">A子队结束 · C子队仍执行</option><option value="b-intake">B新项目接收→交负责人</option><option value="b-result">B结果 · A仍执行</option><option value="requests">B授权 · C问题</option><option value="b-resolved">B解除 · C仍待答</option><option value="unknown">观察未知</option><option value="reconnected">恢复观察不重播</option></select></label>}
         <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '离线示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
       </>}
     </section>}
