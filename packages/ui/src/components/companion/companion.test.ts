@@ -38,6 +38,7 @@ it('rejects escaping geometry, paths and invalid timing', () => {
 });
 
 import { CompanionPlayback, type PlaybackAsset } from './playback.mjs';
+import { pickupPreloadDependencies } from './pickupPreload';
 it('holds an authored wait until intent changes, plays its exit and bridge, and blocks missing art', () => {
   const asset = (id: string, entryPose: string, exitPose: string): PlaybackAsset => ({
     id, entryPose, exitPose, geometryReference: 'shared', stage: 'motion-candidate', reviewStatus: 'accepted',
@@ -117,4 +118,26 @@ it('uses the actually displayed pickup frame, keeps latest intent, and restores 
   p.release({packageId:'carry',exposure:0});
   p.canDisplay = id => id !== 'work';p.tick(100);expect(p.current?.id).toBe('carry');expect(p.loading).toBe('work');
   p.canDisplay = () => true;p.advance();expect(p.current?.id).toBe('work');expect(p.gesture).toBeNull(); // Exact seated counterpart, not the original pre-grab angle.
+});
+
+it('prepares the immediate detached drawing before a landing seat can be shown and regrabbed', () => {
+  const asset = (id: string, sha: string): PlaybackAsset => ({ id, entryPose: 'seat', exitPose: 'seat', geometryReference: 'shared', stage: 'motion-candidate', reviewStatus: 'accepted', canvas: [16,16], pages: [{file:'atlas.png'}], durationMs: 100, frames: [{page:0,rect:[0,0,8,8],offset:[0,0],startMs:0,durationMs:100,sha256:sha}] });
+  const gesture = { grabNext: [] as string[], releaseNext: [] as string[], embeddedStool: false, settled: false, restoreOnRelease: false };
+  const rest = asset('rest','rest');
+  const entry = {...asset('entry','entry'),gesture:{...gesture,entrySourceSha256:'rest',grabNext:['air']}};
+  const air = {...asset('air','air'),gesture:{...gesture,releaseNext:['seat']}};
+  const seat = {...asset('seat','seat'),gesture:{...gesture,embeddedStool:true,settled:true,grabImmediate:'seat-detached',grabNext:['air']}};
+  const detached = {...asset('seat-detached','seat-detached'),gesture:{...gesture,grabNext:['air']}};
+  const assets = [rest,entry,air,seat,detached], dependencies = pickupPreloadDependencies(assets);
+  const ready = new Set(['rest','entry','air','seat']);
+  const player = new CompanionPlayback(assets);
+  player.canDisplay = id => ready.has(id) && (dependencies.get(id) ?? []).every(next => ready.has(next));
+  player.request('rest'); player.grab(); player.tick(100); player.release(); player.tick(100);
+  expect(player.current?.id).toBe('air'); expect(player.loading).toBe('seat');
+  // The decoder uses the same direct dependency set for its pending landing.
+  expect(dependencies.get(player.loading!)).toContain('seat-detached');
+  ready.add('seat-detached'); player.advance();
+  expect(player.current?.id).toBe('seat');
+  expect(player.grab({packageId:'seat',exposure:0})).toBe(true);
+  expect(player.current?.id).toBe('seat-detached'); expect(player.loading).toBeNull();
 });

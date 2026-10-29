@@ -21,6 +21,7 @@ import { invokeDesktop, isElectronShell } from '@/lib/desktop';
 import { readCompanionPackage, type CompanionPackage } from '@/components/companion/sequencePackage';
 import { useCompanionWindow } from '@/components/companion/useCompanionWindow';
 import { useCompanionPlayback } from '@/components/companion/useCompanionPlayback';
+import { pickupPreloadDependencies } from '@/components/companion/pickupPreload';
 import { projectCompanionIntent, newlyAnsweredQuestion, type ObservationHealth } from '@/components/companion/presentation';
 import { initializeLocale, I18nProvider, useI18n, type I18nKey } from '@/lib/i18n';
 import { CompanionSceneFacts, reviewSceneFact, sceneForIntent, type SceneFact } from '@/components/companion/sceneFacts';
@@ -344,13 +345,11 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   // While decoding, the controller keeps the last valid drawing; Host facts update immediately.
   React.useEffect(() => {
     const wanted = new Set([asset?.id, automatic.packageId, automatic.neededPackageId].filter((id): id is string => !!id));
+    const pickupDependencies = pickupPreloadDependencies(assetList.filter(item =>
+      (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate') && item.stage === 'motion-candidate'
+      && !!item.entryPose && !!item.exitPose && !!item.geometryReference));
     for (const id of [...wanted]) {
-      const parent = assetList.find(item => item.id === id);
-      if (!parent || parent.gesture) continue;
-      for (const frame of parent.frames) {
-        const entry = frame.sha256 && assetList.find(item => (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate') && item.gesture?.entrySourceSha256 === frame.sha256);
-        if (entry) { wanted.add(entry.id); for (const next of entry.gesture!.grabNext.slice(0,2)) wanted.add(next); }
-      }
+      for (const next of pickupDependencies.get(id) ?? []) wanted.add(next);
     }
     wantedImages.current = wanted;
     // A package may return while its old page promises are still settling. Invalidate
@@ -400,7 +399,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         finally { if (isCurrent()) loadingImages.current.delete(id); }
       })();
     }
-  }, [asset?.id, assetList, automatic.packageId, automatic.neededPackageId, imageLibrary]);
+  }, [asset?.id, assetList, automatic.packageId, automatic.neededPackageId, imageLibrary, directorReview]);
   const loadFiles = async (files: FileList | null) => {
     if (!review || !files) return;
     setManualReview(true);
