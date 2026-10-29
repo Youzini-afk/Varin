@@ -6,7 +6,9 @@ export function directorBodyAction(view: DirectorPresentation, side: 'left' | 'r
   if (view.body.verb === 'available') return 'idle-closed';
   const coordinates = (route: DirectorPresentation['interactionRoute']) => route === 'bot-coordinator' || route === 'coordination-review';
   const productCoordinates = coordinates(view.interactionRoute);
-  const subjectCoordinates = productCoordinates && coordinates(view.body.subjectRoute);
+  const subject = view.body.subject;
+  const hasExternalSubject = !!subject && view.cards.some(card => card.identity.threadId === subject.threadId && card.identity.branchId === subject.branchId);
+  const subjectCoordinates = productCoordinates && coordinates(view.body.subjectRoute) && hasExternalSubject;
   if (view.body.verb === 'notify-attention' || view.body.verb === 'notify-result') return 'director-open-attention';
   if (view.body.verb === 'receive-work') return subjectCoordinates ? 'director-intake' : 'director-supervise';
   if (view.body.verb === 'receive-result' || view.body.verb === 'present-attention') return subjectCoordinates ? 'director-gather-present' : 'director-open-attention';

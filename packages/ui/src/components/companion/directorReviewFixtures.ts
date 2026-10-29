@@ -14,16 +14,16 @@ const identity = (name: string): ThreadIdentity => ({ runtime: 'agent', threadId
 const runId = (name: string) => `review-run-${name}`;
 function branch(name: string, title: string, avatar: string, parent: string | null = null): ThreadAttentionBranch {
   const run = { id: runId(name), state: 'executing' as const, revision: 1, cancelRequested: false };
-  return { ...identity(name), title, avatar, parentThreadId: parent ? identity(parent).threadId : null,
+  return { ...identity(name), title, avatar, botId:'review-bot', parentThreadId: parent ? identity(parent).threadId : null,
     archived: false, deleted: false, activeRunId: run.id, currentRun: run, latestRun: run, hasUnsettledWork: true };
 }
 function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnapshot {
-  const branches = [branch('a', '资料整理', 'slope-lilac'), branch('b', '页面方案', 'dome-ivory'), branch('c', '行程确认', 'taper-sage')];
+  const branches = [branch('a', '资料整理', 'slope-lilac', 'entry'), branch('b', '页面方案', 'dome-ivory', 'entry'), branch('c', '行程确认', 'taper-sage', 'entry'), branch('entry', 'Varin', 'dome-ivory')];
   const team = step !== 'portfolio';
   if (team) branches.push(branch('a-child', '资料核对', 'pebble-blue', 'a'), branch('c-child', '路线核对', 'overlap-coral', 'c'));
   if (step === 'b-intake') {
     const b = branches[1]!;
-    b.currentRun = { ...b.currentRun!, state: 'accepted' }; b.latestRun = b.currentRun;
+    b.currentRun = { ...b.currentRun!, state: 'executing' }; b.latestRun = b.currentRun;
   }
   if (['b-result', 'unknown', 'reconnected'].includes(step)) {
     const b = branches[1]!;
@@ -46,7 +46,9 @@ function fixture(step: DirectorReviewStep, cursor: number): ThreadAttentionSnaps
     const owner = branches.find(value => value.threadId === item.threadId)!;
     owner.currentRun = { ...owner.currentRun!, state: 'waiting' }; owner.latestRun = owner.currentRun;
   }
-  return { epoch: 1, eventCursor: cursor, coverage: { native: 'complete', external: 'unsupported', scope: 'host' }, branches, items,
+  return { botEntries:[{botId:'review-bot',...identity('entry'),profileRevision:1}],
+    delegations: branches.filter(value=>value.parentThreadId).map(value=>({operationId:`review-delegation-${value.threadId}`,parentThreadId:value.parentThreadId!,parentBranchId:value.parentThreadId!.replace('thread','branch'),parentRunId:value.parentThreadId!.replace('thread','run'),childThreadId:value.threadId,childBranchId:value.branchId,acceptedCursor:step==='b-intake'&&value.threadId===identity('b').threadId?cursor:1})),
+    epoch: 1, eventCursor: cursor, coverage: { native: 'complete', external: 'unsupported', scope: 'host' }, branches, items,
     teamExecutions: team ? [{ parentThreadId: identity('a').threadId, parentBranchId: identity('a').branchId,
       parentRunId: runId('a'), childOperationId: 'review-child-operation-a', executionId: 'review-child-execution-a',
       childThreadId: identity('a-child').threadId, childBranchId: identity('a-child').branchId, avatar: 'pebble-blue',

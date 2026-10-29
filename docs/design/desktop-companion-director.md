@@ -6,6 +6,10 @@
 
 ## 1. 她是谁：主管与秘书，不是所有项目的亲自执行者
 
+下列统筹分镜属于 **Bot 模式**。Agent 模式是用户直接与项目主 agent 对话，Varin 只提醒真实事项/授权/问题/结果；检查项目不等于她听取汇报或批示。工作台模式与每个项目归属分别核验，Bot 视图中的普通 Agent 后台任务也不能被改演成 Varin 派发。
+
+Bot 的权威 `BotProfile.entry` 是 Varin 本体入口 E，不是另一个负责人。只有由稳定、精确分支关系证明的 E→A/B 直接任务才是项目负责人；A→a1 才是较小子精灵。缺少或冲突的根/关系证据显示普通 task 身份，不猜负责人层级；E 的请求仍在主体提醒和列表中保留精确导航，但不另画团子。
+
 ```text
 用户：交代工作 / 做出决定 / 查看结果
                     ↕
@@ -97,12 +101,14 @@ Varin 接收 A 的结果状态卡，轻指 A 的完成标记；B 主 agent 保�
 
 ## 6. 精确关系：只画真实负责人和真实子队
 
-全局 attention 已有 branch 的实际主 agent 身份；backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
+全局 attention 的 branch 是执行身份，不单凭 parentThreadId 判定角色。新增候选 `botEntries` 从 Host 校验过的 Bot profile entry/revision 提供本体边界，`delegations` 从既有稳定派发关系提供精确父子分支与原始 acceptedCursor；终态移出 CURRENT 不能让项目负责人退化成未知子任务。backend `7fa96e77` 已实现并以 native fixture 验证同事务紧凑 `teamExecutions`，不是未来占位合同。每项包含原 parent thread/branch/run、child operation、execution ID、child thread/branch、原已保存头像、owner state、childRunId/childRunState 及必要 activity。只有 exact relation 才把子请求接到具体父 branch；单独 parentThreadId 仍不足以猜分支归属。
 
 当前关系范围是现有 Family CURRENT 中每个真实 child 的最新 execution；包括仍需交付/结算的终态成员，不含任意历史。child Run terminal 而 delegated owner 仍 ready 时为 settling；owner 真正 terminal 才离场。原 parentRun 跨 continuation 保留。没有任务输入/正文/工具参数，没有新的调度或写入，沿同一个全局只读 attention 流更新，不为每个项目开 full snapshot/projection。
 每个可见工作席显示实际主 agent，并通过 `portfolio.teams` 的 projectKey 展示自己的真实直接子队（最多三席、每席最多三个可见成员，各有真实 overflow）；空队保持空，不凭负责人工作状态捏造子成员。未覆盖的小队信息显示未读取/未知，不能用装饰精灵凑数。旧父 Run 派发的真实工作可继续属于同一父 branch，精灵按自己的原 parentRun/execution 校验；terminal 所有结局都中性离场，失败保留在结果/待处理。准备失败但未终结可显示温和问题标记。
 
 同一 child 多 execution 的头像身份不变，仍有工作就不能被旧终态移除。原全局 ledger 只计一次请求；父卡“子任务需要你”是指向同一项，不复制请求数字。
+
+Bot 收件只由已核验根的真实新派发事件触发：同 epoch 的前后 snapshot cursor 区间中出现原 acceptedCursor，即使首个可见 Run 已在 executing 也可一次接件；首屏、重连、刚核验根、已终态派发不补演开工。收件尚无 child Run 时不借用 parentRun 冒充其执行身份。
 
 ## 7. 单一表演、稳定信息与可访问性
 

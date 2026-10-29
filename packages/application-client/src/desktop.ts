@@ -379,7 +379,7 @@ export interface DesktopCompanionPortfolio {
     label: 'A' | 'B' | 'C';
     /** Optional plain short display name; never an identity or executable markup. */
     caption?: string;
-    lead: { avatar: import('@varin/protocol').AgentAvatarId; role: 'project-lead' | 'child-agent' };
+    lead: { avatar: import('@varin/protocol').AgentAvatarId; role: 'project-lead' | 'child-agent' | 'task' };
     status: 'needs-user' | 'uncertain' | 'active' | 'settling' | 'result' | 'available' | 'unknown';
     notice?: 'permission' | 'question' | 'mixed' | 'inspect' | 'unknown';
     requestCount: number | null;

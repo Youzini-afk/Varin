@@ -1,7 +1,8 @@
 import { expect, it } from 'vitest';
 import { directorBodyAction } from './directorBody';
 import type { DirectorPresentation } from './directorPresentation';
-const view: DirectorPresentation = { interactionRoute:'bot-coordinator', inspectionRoute:'bot-coordinator', health: 'current', source: null, body: { subjectRoute:'bot-coordinator', verb: 'review-portfolio', subject: null, attentionOwner: null, attentionMode: null, attentionItem: null, edge: null }, cards: [], overflowCards: 0, inspectedProjectKey: null, inspection: null, counts: null, coverage: null };
+const project = {runtime:'agent' as const,threadId:'project-1',branchId:'branch-1'};
+const view: DirectorPresentation = { interactionRoute:'bot-coordinator', inspectionRoute:'bot-coordinator', health: 'current', source: null, body: { subjectRoute:'bot-coordinator', verb: 'review-portfolio', subject: project, attentionOwner: null, attentionMode: null, attentionItem: null, edge: null }, cards: [{key:'project-1',identity:project,title:'Project',botId:'bot',lead:{role:'project-lead',identity:'lead',avatar:'slope-lilac',runId:'run',state:'executing'},status:'active',attentionKeys:[],children:[],relation:'project-task'}], overflowCards: 0, inspectedProjectKey: null, inspection: null, counts: null, coverage: null };
 it('uses direction only for actual managerial attention, not project tool changes', () => {
   expect(directorBodyAction(view, 'left')).toBe('director-supervise');
   const inspection = { ...view, inspectedProjectKey: 'project-1' };
@@ -34,4 +35,11 @@ it('does not borrow the Bot workbench authority for an Agent project or a missin
  expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'receive-work'}},'right')).toBe('director-supervise');
  expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'receive-result'}},'right')).toBe('director-open-attention');
  expect(directorBodyAction({...mixed,body:{...mixed.body,verb:'present-attention'}},'left')).toBe('director-open-attention');
+});
+
+it('keeps the Bot root request visible as user-facing attention, not an external teammate report', () => {
+ const root={...view,cards:[],body:{...view.body,subject:{runtime:'agent' as const,threadId:'bot-entry',branchId:'root'},verb:'present-attention' as const}};
+ expect(directorBodyAction(root,'right')).toBe('director-open-attention');
+ expect(directorBodyAction({...root,body:{...root.body,verb:'receive-work'}},'right')).toBe('director-supervise');
+ expect(root.body.subject.threadId).toBe('bot-entry');
 });

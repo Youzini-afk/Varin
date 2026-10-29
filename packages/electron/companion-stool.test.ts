@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { CompanionStoolWindows, type StoolBounds, type StoolPhase } from './companion-stool';
+import { CompanionStoolWindows, type StoolBounds, type StoolPhase } from './companion-stool.js';
 afterEach(() => vi.useRealTimers());
 function fixture() {
   const calls: { bounds: StoolBounds; phase: StoolPhase; closed: boolean; ready?: () => void }[] = [];

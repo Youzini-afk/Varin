@@ -30,6 +30,16 @@ import catalog from '../../../../tools/desktop-companion-animation/coverage.json
 function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const { t } = useI18n();
   const review = new URLSearchParams(window.location.search).get('review') === '1';
+  const [reviewStageOnly, setReviewStageOnly] = React.useState(false);
+  const reviewChrome = review && !reviewStageOnly;
+  const restoreReview = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    if (!review || !reviewStageOnly) return;
+    restoreReview.current?.focus();
+    const restore = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); setReviewStageOnly(false); } };
+    window.addEventListener('keydown', restore);
+    return () => window.removeEventListener('keydown', restore);
+  }, [review, reviewStageOnly]);
   const [directorEnabled, setDirectorEnabled] = React.useState(() => review && new URLSearchParams(window.location.search).get('director') === '1');
   const directorReview = review && directorEnabled;
   const [reviewBundleIdentity, setReviewBundleIdentity] = React.useState('');
@@ -178,16 +188,16 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
   const directorContextKey = JSON.stringify([fixtureActive ? `offline-fixture-${fixtureStep}` : generation, director.interactionRoute, director.body.subjectRoute, director.inspectionRoute, director.body.verb, director.body.edge?.key, director.body.attentionItem?.key, portfolioProjection.portfolio.subjectKey ?? director.inspectedProjectKey]);
   const directorLayout = useCompanionScene(canvas, sceneCurrent, directorMode ? fixtureActive ? 'director-explicit-offline-fixture' : `director-${generation}-${attention.snapshot?.epoch ?? 'unknown'}` : `scene-${sceneScope.current}${reviewRoute ? '-review' : ''}`,
     companionWindow.phase !== 'rest' || (!directorMode && !reviewRoute && health !== 'current' && sceneCurrent.kind !== 'status') || manualReview, controlsOpen || attentionOpen, visibleCue, directorMode || reviewRoute ? undefined : team, directorMode ? portfolioProjection.portfolio : undefined, directorMode ? directorContextKey : null, visibleDrawing, directorReview);
-  const restDue = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision);
-  const ordinaryDisplayAction = restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
+  const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
+  const { restDue, quietDue, finishQuiet } = useCompanionLeisure((directorMode ? !fixtureActive && director.health === 'current' && director.body.verb === 'available' : localAllowed) && !!observedNativeIdle && companionWindow.phase === 'rest' && !controlsOpen && !attentionOpen && (directorMode || health === 'current' || health === 'unselected'), companionWindow.activityRevision, usableAction('quiet-hair-smooth'));
+  const ordinaryDisplayAction = quietDue && !localAction && usableAction('quiet-hair-smooth') ? 'quiet-hair-smooth' : restDue && !localAction && assetList.some(item => item.action === 'rest-sleep' && item.reviewStatus === 'accepted') ? 'rest-sleep' : primaryAction;
   const seenHover = React.useRef(0);
   const directorRequestedAction = directorBodyAction(director, directorLayout?.inspectionSide ?? null);
   const directorSentenceKey = JSON.stringify([directorContextKey, directorLayout?.inspectionSide]);
   const directorBaseAction = finishedDirectorSentence === directorSentenceKey && directorRequestedAction !== 'idle-closed' ? 'director-supervise' : directorRequestedAction;
   const directorLocalAction = directorLocal?.context === directorContextKey && director.health === 'current' && companionWindow.phase === 'rest' && !manualReview ? directorLocal.action : null;
-  const usableAction = (action: string) => assetList.some(item => item.action === action && (item.reviewStatus === 'accepted' || directorReview && item.reviewStatus === 'candidate'));
   const directorWelcome = directorMode && localAction === 'welcome' && director.health === 'current' && director.body.verb === 'available' && usableAction('welcome');
-  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
+  const displayAction = directorMode ? directorLocalAction ?? (directorWelcome ? 'welcome' : quietDue && usableAction('quiet-hair-smooth') ? 'quiet-hair-smooth' : restDue && usableAction('rest-sleep') ? 'rest-sleep' : directorBaseAction) : ordinaryDisplayAction;
   repeatTapAllowed.current = directorMode && localInteractionIdle && director.health === 'current' && !directorLocalAction && usableAction('tap-repeat-response');
   const localDirectorResponse = (event: 'tap' | 'tap-repeat' | 'hover') => {
     const shown = assetList.find(item => item.id === displayedDrawing.current?.packageId);
@@ -236,13 +246,14 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     }
   }, [directorMode, automatic.finished, automatic.context, directorContextKey, automatic.packageId, directorRequestedAction, directorSentenceKey, assetList]);
   React.useEffect(() => {
+    if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'quiet-hair-smooth') finishQuiet();
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'output-emphasis') setOutputBeat(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'completion') setLiveCompletion(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'permission-allowed') setLivePermissionReceipt(false);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === 'understood') setLiveAnswer(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === directorLocalAction) setDirectorLocal(null);
     if (automatic.finished && assetList.find(item => item.id === automatic.packageId)?.action === localAction) setLocalAction(null);
-  }, [automatic.finished, automatic.packageId, assetList, localAction, directorLocalAction]);
+  }, [automatic.finished, automatic.packageId, assetList, localAction, directorLocalAction, finishQuiet]);
 
   // A local greeting/tap is not a queued application event. Higher-priority facts
   // discard it instead of replaying it after a permission or interruption clears.
@@ -528,12 +539,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
       .companion-controls input[type=checkbox]{accent-color:#a9c3ec}
       .companion-controls select{display:block;width:100%;margin-top:7px}
     `}</style>
-    {review ? <header style={{ ...panel, WebkitAppRegion: 'drag' } as React.CSSProperties}>
-      <strong>{review ? 'Varin companion · development review' : 'Varin'}</strong>
+    {review ? reviewChrome && <header style={{ ...panel, WebkitAppRegion: 'drag' } as React.CSSProperties}>
+      <strong>Varin companion · development review</strong>
+      <button style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties} onClick={() => { setControlsOpen(false); setAttentionOpen(false); setReviewStageOnly(true); window.scrollTo(0, 0); }}>只看角色/小队</button>
       <button style={{ float: 'right', WebkitAppRegion: 'no-drag' } as React.CSSProperties} disabled={!isElectronShell()}
         onClick={() => void invokeDesktop('desktop_close_current_window')}>Close</button>
     </header> : <button aria-label={t('companion.controls')} aria-expanded={controlsOpen} onClick={() => setControlsOpen(value => !value)} style={{ position: 'absolute', right: 6, top: 6, zIndex: 20, borderRadius: 20, background: '#20242bca', color: 'white', border: 0, padding: '6px 10px' }}>⋯</button>}
-    {review && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
+    {reviewChrome && <section style={{ ...panel, margin: 0, padding: '4px 8px' }} aria-label="Director review entry">
       <label><input type="checkbox" checked={directorReview} onChange={event => setDirectorEnabled(event.target.checked)} />主管候选（独立资源，仅开发审阅）</label>
       {directorReview && <>
         <label style={{ display: 'block' }}>数据 <select aria-label="Director review data source" value={fixtureMode ? 'fixture' : 'host'} onChange={event => { setFixtureMode(event.target.value === 'fixture'); setFinishedDirectorSentence(null); fixtureSession.discardTransient(); refreshFixture(); }}><option value="host">实际 Host · 只读</option><option value="fixture">Bot统筹演示 fixture · 非真实任务</option></select></label>
@@ -541,10 +553,13 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         <small style={{ display: 'block', color: fixtureActive ? '#ffd393' : undefined }}>{fixtureActive ? '显式Bot协调示例：不写Host，不执行/打开任何示例任务' : '真实Host空列表将保持为空；不生成示例任务'} · 未选择正式人物包</small>
       </>}
     </section>}
-    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReview ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
+    {review && reviewStageOnly && <div style={{ position: 'fixed', left: 4, top: 4, zIndex: 30, background: '#20242bd9', color: 'white', padding: '3px 6px', borderRadius: 8, font: '10px system-ui' }}>
+      <span>{fixtureActive ? '开发舞台 · 演示任务（非真实执行）' : '开发舞台 · 实际Host只读'}</span> <button ref={restoreReview} onClick={() => setReviewStageOnly(false)} aria-label="恢复开发审阅控件">恢复控件</button>
+    </div>}
+    <canvas ref={canvas} {...companionWindow.handlers} style={{ width: directorReview && !reviewStageOnly ? 'min(100%,320px)' : 'min(100%,360px)', height: 'auto', margin: 'auto', touchAction: 'none', display: asset ? 'block' : 'none' }} />
     {error && !review && <p role="alert" style={panel}>{error}</p>}
     {!asset && <p style={panel}>{assetList.length ? t('companion.loading') : t('companion.missing')}</p>}
-    {directorReview && <section data-companion-scene-floor style={panel} aria-label="Director candidate portfolio">
+    {directorReview && reviewChrome && <section data-companion-scene-floor style={panel} aria-label="Director candidate portfolio">
       <strong>Director candidate — read-only project inspection, not final artwork selection</strong>
       <p>候选 {reviewBundleIdentity.slice(0, 12) || "尚未加载"} · Management: {director.body.verb}. Project execution detail does not select Varin's body.</p>
       <label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />Hide decorative task names</label>
@@ -553,8 +568,8 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
     </section>}
     {!review && <section data-companion-scene-floor style={{ ...panel, position: 'fixed', bottom: 3, left: 5, right: 5, margin: 0, maxHeight: 104, overflow: 'auto', boxSizing: 'border-box' }}><CompanionAttentionSummary interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => setSelected(null)} attention={attention} focusTitle={focusTitle} focused={!!identity} focusStatus={shortStatus} onInspect={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }} /></section>}
     {attentionOpen && <div style={{ position: 'fixed', inset: '6px 4px', maxHeight: 'calc(100vh - 12px)', zIndex: 30, overflow: 'auto' }}><CompanionAttentionPanel interactionRoute={director.interactionRoute} directorMode={directorMode} onClearInspection={() => { setSelected(null); setAttentionOpen(false); }} attention={attention} identity={identity} focusTitle={focusTitle} onFocus={target => { setSelected({ generation, identity: target }); setAttentionOpen(false); }} onOpenThread={openThread} onClose={() => setAttentionOpen(false)} onRefresh={attention.refresh} /></div>}
-    {(review || controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
-    {review && <section style={panel} aria-label="Development presentation review">
+    {(reviewChrome || !review && controlsOpen) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: 40, left: 4, right: 4, zIndex: 20, maxHeight: 140, overflow: 'auto' } as React.CSSProperties : {}) }}><button disabled={!isElectronShell()} onClick={() => void companionWindow.togglePinned()}>{companionWindow.pinned ? t('companion.unpin') : t('companion.pin')}</button><label><input type="checkbox" disabled={!isElectronShell()} checked={companionWindow.passthrough} onChange={event => companionWindow.setPassthrough(event.target.checked)} />{t('companion.passthrough')}</label>{directorMode && <><button onClick={() => { setControlsOpen(false); setAttentionOpen(true); attention.refresh(); }}>{t('companion.director.projects')}</button><label><input type="checkbox" checked={hideTaskNames} onChange={event => setHideTaskNames(event.target.checked)} />{t('companion.director.hideTaskNames')}</label></>}{review && <p>Local movement: {companionWindow.phase}. Movement artwork remains gated by accepted lift/landing assets.</p>}{windowNotice && <p role="status">{windowNotice}</p>}{!review && <button disabled={!isElectronShell()} onClick={() => void invokeDesktop('desktop_set_companion', { enabled: false }).catch(cause => setError(String(cause)))}>{t('companion.close')}</button>}</section>}
+    {reviewChrome && <section style={panel} aria-label="Development presentation review">
       <label>Preview presentation (not Host state) <select value={presentation} onChange={event => { setPresentation(event.target.value); setReviewRoute(true); setManualReview(false); setPlaying(false); }}>
         {catalog.states.map(state => <option key={state.id} value={state.id} disabled={state.id === 'L04' || state.id === 'L05'}>{state.id} {state.label}{state.id === 'L04' || state.id === 'L05' ? ' · drag/release the character' : ''}</option>)}
       </select></label>
@@ -567,7 +582,7 @@ function CompanionApp({ apis }: { apis: RuntimeAPIs }) {
         <span> {displayedExposure + 1}/{asset.frames.length} exposures</span><button onClick={() => { setPlaying(false); setManualReview(false); setReviewRoute(false); }}>Follow actual Host presentation</button></>}
       {error && <p role="alert">{error}</p>}
     </section>}
-    {(review || controlsOpen && !directorMode) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: windowNotice ? 215 : 145, left: 4, right: 4, zIndex: 20, maxHeight: windowNotice ? 'calc(100vh - 230px)' : 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
+    {(reviewChrome || !review && controlsOpen && !directorMode) && <section className="companion-controls" style={{ ...panel, ...(!review ? { position: 'absolute', top: windowNotice ? 215 : 145, left: 4, right: 4, zIndex: 20, maxHeight: windowNotice ? 'calc(100vh - 230px)' : 'calc(100vh - 160px)', overflow: 'auto' } as React.CSSProperties : {}) }} aria-label="Actual Host facts">
       <strong>{review ? 'Actual Host facts — independent of review target' : t('companion.observe')}</strong>
       <select aria-label="Observe an existing thread branch" value={identity ? JSON.stringify(identity) : ''} onChange={event => {
         setSelected(event.target.value ? { generation, identity: JSON.parse(event.target.value) as ThreadIdentity } : null);

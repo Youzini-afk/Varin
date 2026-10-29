@@ -15,25 +15,49 @@ const rank: Record<DirectorChildMember['state'], number> = { running: 0, waiting
 export function directorProjectRelations(snapshot: ThreadAttentionSnapshot) {
   const branches = new Map(snapshot.branches.map(branch => [directorBranchKey(branch), branch]));
   const parents = new Map<string, Set<string>>();
-  for (const row of snapshot.teamExecutions) {
+  const roots = new Map<string, string>();
+  const rootCandidates = new Map<string, Set<string>>();
+  for (const entry of snapshot.botEntries ?? []) {
+    const key = directorBranchKey(entry);
+    if (branches.get(key)?.botId !== entry.botId) continue;
+    const keys = rootCandidates.get(entry.botId) ?? new Set<string>(); keys.add(JSON.stringify([key,entry.profileRevision])); rootCandidates.set(entry.botId, keys);
+  }
+  for (const entry of snapshot.botEntries ?? []) {
+    const key = directorBranchKey(entry);
+    if (rootCandidates.get(entry.botId)?.size === 1 && branches.get(key)?.botId === entry.botId) roots.set(key, JSON.stringify([entry.botId, key, entry.profileRevision]));
+  }
+  // Stable relations survive CURRENT roster removal. Old Host fallback is only for non-Bot work.
+  const relations = snapshot.delegations ?? snapshot.teamExecutions.filter(row => !branches.get(directorBranchKey({threadId:row.childThreadId,branchId:row.childBranchId}))?.botId);
+  for (const row of relations) {
     const childKey = directorBranchKey({ threadId: row.childThreadId, branchId: row.childBranchId });
     const parentKey = directorBranchKey({ threadId: row.parentThreadId, branchId: row.parentBranchId });
-    const child = branches.get(childKey);
-    if (!child || !branches.has(parentKey) || child.parentThreadId !== row.parentThreadId || childKey === parentKey) continue;
+    const child = branches.get(childKey), parent = branches.get(parentKey);
+    if (!child || !parent || child.parentThreadId !== row.parentThreadId || childKey === parentKey || child.botId !== parent.botId) continue;
     const owners = parents.get(childKey) ?? new Set<string>(); owners.add(parentKey); parents.set(childKey, owners);
   }
   const projectForBranch = new Map<string, string>();
+  const leadKeys = new Set<string>();
+  const proven = new Set<string>();
   for (const key of branches.keys()) {
+    if (roots.has(key)) { projectForBranch.set(key,key); proven.add(key); continue; }
     let current = key;
     const seen = new Set<string>();
-    while (parents.get(current)?.size === 1 && !seen.has(current)) {
-      seen.add(current); current = [...parents.get(current)!][0]!;
+    let valid = true, reachedRoot = false;
+    while (true) {
+      if (seen.has(current) || (parents.get(current)?.size ?? 0) > 1) { valid = false; break; }
+      seen.add(current);
+      const parent = parents.get(current)?.values().next().value;
+      if (!parent) break;
+      if (roots.has(parent)) { reachedRoot = true; break; }
+      current = parent;
     }
-    // A cycle or a multi-parent relation is not proof of any single project owner.
-    if (seen.has(current) || (parents.get(current)?.size ?? 0) > 1) current = key;
+    const top = branches.get(current)!;
+    if (valid && (reachedRoot || top.botId === null && top.parentThreadId === null)) {
+      proven.add(key); leadKeys.add(current);
+    } else current = key;
     projectForBranch.set(key, current);
   }
-  return { projectForBranch };
+  return { projectForBranch, roots, leadKeys, proven };
 }
 
 /** A project lead is deliberately absent here: these are only real delegated executions. */

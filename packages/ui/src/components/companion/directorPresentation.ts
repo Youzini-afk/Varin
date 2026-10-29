@@ -9,11 +9,11 @@ export interface DirectorProjectCard {
   title: string;
   /** undefined: old/unknown Host metadata; null: known no Bot binding. */
   botId?: string | null;
-  lead: { role: 'project-lead' | 'child-agent'; identity: string; avatar: AgentAvatarId; runId: string | null; state: string | null };
+  lead: { role: 'project-lead' | 'child-agent' | 'task'; identity: string; avatar: AgentAvatarId; runId: string | null; state: string | null };
   status: 'needs-user' | 'uncertain' | 'active' | 'settling' | 'result' | 'available' | 'unknown';
   attentionKeys: string[];
   children: DirectorChildMember[];
-  relation: 'project-task' | 'child-task';
+  relation: 'project-task' | 'child-task' | 'unclassified-task';
 }
 export type DirectorInteractionRoute = 'bot-coordinator' | 'agent-companion' | 'unknown' | 'coordination-review';
 export type DirectorVerb = 'synchronizing' | 'unavailable' | 'review-portfolio' | 'available'
@@ -22,7 +22,8 @@ export interface DirectorEdge {
   key: string;
   kind: 'receive-work' | 'receive-result';
   project: ThreadIdentity;
-  runId: string;
+  runId: string | null;
+  dispatchOperationId?: string;
   outcome: 'completed' | 'failed' | 'cancelled' | null;
   /** A completed parent Run can still leave independent work unsettled. */
   workRemains: boolean;
@@ -63,10 +64,12 @@ export class CompanionDirector {
   private order: string[] = [];
   private previousRuns = new Map<string, string>();
   private initialized = false;
+  private previousCursor: number | null = null;
+  private previousRoots = new Map<string,string>();
   private edge: DirectorEdge | null = null;
   private attentionSubject: string | null = null;
 
-  discardTransient(): void { this.edge = null; this.initialized = false; this.previousRuns.clear(); }
+  discardTransient(): void { this.edge = null; this.initialized = false; this.previousRuns.clear(); this.previousCursor = null; this.previousRoots.clear(); }
   consumeEdge(key: string): void { if (this.edge?.key === key) this.edge = null; }
 
   observe(snapshot: ThreadAttentionSnapshot | null, health: 'current' | 'unknown' | 'synchronizing',
@@ -75,13 +78,14 @@ export class CompanionDirector {
     if (snapshot?.epoch !== this.epoch || route !== this.route) {
       this.route = route;
       this.epoch = snapshot?.epoch ?? null; this.order = []; this.previousRuns.clear();
-      this.initialized = false; this.edge = null; this.attentionSubject = null;
+      this.initialized = false; this.edge = null; this.attentionSubject = null; this.previousCursor = null; this.previousRoots.clear();
     }
     const current = health === 'current' && snapshot !== null;
     const items = snapshot?.items ?? [];
     const branches = snapshot?.branches ?? [];
     const cards = new Map<string, DirectorProjectCard>();
-    const projectForBranch = snapshot ? directorProjectRelations(snapshot).projectForBranch : new Map<string, string>();
+    const relations = snapshot ? directorProjectRelations(snapshot) : {projectForBranch:new Map<string,string>(),roots:new Map<string,string>(),leadKeys:new Set<string>(),proven:new Set<string>()};
+    const { projectForBranch } = relations;
     const projectKey = (value: { threadId: string; branchId: string }) => projectForBranch.get(branchKey(value)) ?? branchKey(value);
     for (const branch of branches) {
       const pending = items.filter(item => projectKey(item) === branchKey(branch) || branchKey(item) === branchKey(branch));
@@ -92,13 +96,13 @@ export class CompanionDirector {
             : branch.latestRun && ended(branch.latestRun.state) ? 'result' : 'available';
       const key = branchKey(branch);
       cards.set(key, { key, identity: identity(branch), title: branch.title, botId: branch.botId,
-        lead: { role: branch.parentThreadId ? 'child-agent' : 'project-lead', identity: branch.threadId, avatar: agentAvatarForIdentity(branch.threadId, branch.avatar),
+        lead: { role: relations.leadKeys.has(key) ? 'project-lead' : relations.proven.has(key) && !relations.roots.has(key) ? 'child-agent' : 'task', identity: branch.threadId, avatar: agentAvatarForIdentity(branch.threadId, branch.avatar),
           runId: branch.activeRunId, state: branch.currentRun?.state ?? null }, status,
-        attentionKeys: pending.map(item => item.key), children: directorChildMembers(snapshot?.teamExecutions ?? [], identity(branch)), relation: branch.parentThreadId ? 'child-task' : 'project-task' });
+        attentionKeys: pending.map(item => item.key), children: relations.proven.has(key) && !relations.roots.has(key) ? directorChildMembers((snapshot?.teamExecutions ?? []).filter(row => relations.proven.has(branchKey({threadId:row.childThreadId,branchId:row.childBranchId})) && projectKey({threadId:row.childThreadId,branchId:row.childBranchId}) === projectKey(branch)), identity(branch)) : [], relation: relations.leadKeys.has(key) ? 'project-task' : relations.proven.has(key) && !relations.roots.has(key) ? 'child-task' : 'unclassified-task' });
     }
     const inspection = inspected ? cards.get(branchKey(inspected)) ?? null : null;
     // Without exact parent-branch/execution facts, never attach a child to a guessed project branch.
-    const portfolio = branches.filter(branch => projectKey(branch) === branchKey(branch) && (!branch.parentThreadId
+    const portfolio = branches.filter(branch => !relations.roots.has(branchKey(branch)) && projectKey(branch) === branchKey(branch) && (relations.leadKeys.has(branchKey(branch)) || !branch.parentThreadId
       || cards.get(branchKey(branch))!.attentionKeys.length > 0 || active(branch)));
     const candidates = new Set(portfolio.map(branchKey));
     // Child inspection stays a detail lens, not a second independent project card.
@@ -118,10 +122,26 @@ export class CompanionDirector {
       runs.set(runKey, run.state);
       const previous = this.previousRuns.get(runKey);
       // Only top-level task Runs drive the manager's intake/result beat, never every child/tool.
-      if (current && this.initialized && !branch.parentThreadId) {
+      if (current && this.initialized && !relations.roots.has(branchKey(branch)) && projectKey(branch) === branchKey(branch)) {
         const kind = ended(run.state) && previous && !ended(previous) ? 'receive-result'
-          : isCoordinating(directorProjectRoute(route, branch.botId)) && previous === undefined && ['accepted', 'preparing', 'runnable'].includes(run.state) ? 'receive-work' : null;
+          : null;
         if (kind) newEdges.push({ key: JSON.stringify([snapshot!.epoch, runKey, kind]), kind, project: identity(branch), runId: run.id, outcome: kind === 'receive-result' ? run.state as 'completed' | 'failed' | 'cancelled' : null, workRemains: active(branch) });
+      }
+    }
+    if (current && this.initialized && this.previousCursor !== null && snapshot!.eventCursor >= this.previousCursor) {
+      for (const delegation of snapshot!.delegations ?? []) {
+        const rootKey = branchKey({threadId:delegation.parentThreadId,branchId:delegation.parentBranchId});
+        const childKey = branchKey({threadId:delegation.childThreadId,branchId:delegation.childBranchId});
+        const child = branches.find(branch => branchKey(branch) === childKey);
+        const cursor = delegation.acceptedCursor;
+        const execution = snapshot!.teamExecutions.find(row => row.childOperationId === delegation.operationId);
+        const rootRevision = relations.roots.get(rootKey);
+        if (!rootRevision || this.previousRoots.get(rootKey) !== rootRevision || !relations.leadKeys.has(childKey)
+          || cursor === null || cursor <= this.previousCursor || cursor > snapshot!.eventCursor || !child
+          || !isCoordinating(directorProjectRoute(route, child.botId))
+          || execution && ended(execution.state) || child.currentRun?.cancelRequested || ended((child.currentRun ?? child.latestRun)?.state ?? '')) continue;
+        newEdges.push({key:JSON.stringify([snapshot!.epoch,delegation.operationId,cursor,'receive-work']),kind:'receive-work',
+          project:identity(child),runId:child.currentRun?.id ?? null,dispatchOperationId:delegation.operationId,outcome:null,workRemains:true});
       }
     }
     if (!current || !options.visible || options.interacting) {
@@ -133,23 +153,28 @@ export class CompanionDirector {
         const card = cards.get(branchKey(this.edge.project));
         const branch = branches.find(value => branchKey(value) === branchKey(this.edge!.project));
         const relevant = branch && [branch.currentRun, branch.latestRun].some(run => run?.id === this.edge!.runId);
-        const edgeRun = branch && [branch.currentRun, branch.latestRun].find(run => run?.id === this.edge!.runId);
-        if (!card || !relevant || (this.edge.kind === 'receive-work' && !isCoordinating(directorProjectRoute(route, card.botId)))
-          || (this.edge.kind === 'receive-result' && branch?.currentRun && !ended(branch.currentRun.state))
-          || (this.edge.kind === 'receive-work' && edgeRun && !['accepted', 'preparing', 'runnable'].includes(edgeRun.state))) this.edge = null;
+        if (!card || !branch) this.edge = null;
+        else if (this.edge.kind === 'receive-work') {
+          const delegation = snapshot?.delegations?.find(row => row.operationId === this.edge!.dispatchOperationId);
+          const execution = snapshot?.teamExecutions.find(row => row.childOperationId === this.edge!.dispatchOperationId);
+          if (!delegation || execution && ended(execution.state) || !relations.leadKeys.has(branchKey(branch)) || !isCoordinating(directorProjectRoute(route, card.botId))
+            || branch.currentRun?.cancelRequested || ended((branch.currentRun ?? branch.latestRun)?.state ?? '')) this.edge = null;
+        } else if (!relevant || branch.currentRun && !ended(branch.currentRun.state)) this.edge = null;
       }
       this.initialized = true;
     }
     this.previousRuns = current ? runs : new Map();
+    this.previousCursor = current && options.visible && !options.interacting ? snapshot!.eventCursor : null;
+    this.previousRoots = current && options.visible && !options.interacting ? new Map(relations.roots) : new Map();
     const workingProjects = portfolio.filter(branch => active(branch) || branches.some(child => projectKey(child) === branchKey(branch) && active(child)));
     const subject = needsUser.length ? this.attentionSubject && cards.get(this.attentionSubject)?.identity : this.edge?.project;
     const attentionItem = needsUser.find(item => projectKey(item) === this.attentionSubject) ?? null;
     const subjectCard = subject ? cards.get(branchKey(subject)) : undefined;
-    let subjectRoute = subjectCard ? directorProjectRoute(route, subjectCard.botId) : 'unknown' as DirectorInteractionRoute;
+    let subjectRoute = subjectCard && relations.proven.has(subjectCard.key) && !relations.roots.has(subjectCard.key) ? directorProjectRoute(route, subjectCard.botId) : 'unknown' as DirectorInteractionRoute;
     // A nested request retains its exact owner; incomplete/conflicting ownership never borrows the root's authority.
     if (subjectRoute === 'bot-coordinator' && attentionItem
       && cards.get(branchKey(attentionItem))?.botId !== subjectCard?.botId) subjectRoute = 'unknown';
-    const inspectionRoute = inspection ? directorProjectRoute(route, inspection.botId) : 'unknown';
+    const inspectionRoute = inspection && relations.proven.has(inspection.key) && !relations.roots.has(inspection.key) ? directorProjectRoute(route, inspection.botId) : 'unknown';
     const verb: DirectorVerb = !current ? health === 'unknown' ? 'unavailable' : 'synchronizing'
       : needsUser.length ? isCoordinating(subjectRoute) ? 'present-attention' : 'notify-attention'
         : this.edge ? isCoordinating(subjectRoute) ? this.edge.kind : 'notify-result'
@@ -166,7 +191,7 @@ export class CompanionDirector {
     return { interactionRoute: route, inspectionRoute, source: snapshot ? { epoch: snapshot.epoch, eventCursor: snapshot.eventCursor } : null, health, body: { subjectRoute, verb, subject: subject || null, attentionOwner: attentionItem ? identity(attentionItem) : null,
       attentionMode: needsUser.length > 1 ? 'multiple' : needsUser.length ? 'single' : null, attentionItem, edge: this.edge }, cards: visible, overflowCards: Math.max(0, candidates.size - visible.length), inspectedProjectKey: inspected ? projectKey(inspected) : null, inspection,
       counts: current ? { actionRequired: snapshot!.counts.actionRequired, uncertain: snapshot!.counts.unknownEffects,
-        activeProjectTasks: workingProjects.filter(branch => !branch.parentThreadId).length } : null,
+        activeProjectTasks: workingProjects.filter(branch => relations.leadKeys.has(branchKey(branch))).length } : null,
       coverage: snapshot?.coverage ?? null };
   }
 }

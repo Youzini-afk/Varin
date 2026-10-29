@@ -30,7 +30,7 @@ it('requires actual alpha dwell and never turns pointer cancellation into tap', 
 });
 it('requires uninterrupted eligible visible idle, rather than hidden elapsed time', () => {
   const root=environment(); let due=false;
-  function Harness({eligible,activity}:{eligible:boolean;activity:number}){due=useCompanionLeisure(eligible,activity);return null;}
+  function Harness({eligible,activity}:{eligible:boolean;activity:number}){due=useCompanionLeisure(eligible,activity).restDue;return null;}
   act(()=>root.render(<Harness eligible activity={0}/>)); act(()=>vi.advanceTimersByTime(299999)); expect(due).toBe(false);
   act(()=>root.render(<Harness eligible={false} activity={0}/>)); act(()=>vi.advanceTimersByTime(300001)); expect(due).toBe(false);
   act(()=>root.render(<Harness eligible activity={1}/>)); act(()=>vi.advanceTimersByTime(300000)); expect(due).toBe(true);

@@ -49,14 +49,14 @@ it('unknown retains identities without stale team and reconnect never replays hi
   expect(session.view({ hideTaskNames: true }).projection.portfolio.projects.every(card => card.caption === undefined)).toBe(true);
 });
 
-it('observes a genuinely new accepted B run before producing intake, independently of A inspection', () => {
+it('observes a genuinely new B dispatch even when the snapshot already sees execution before producing intake, independently of A inspection', () => {
   const session = createDirectorReviewFixtureSession();
   session.step('b-intake');
   const frame = session.view();
   expect(frame.presentation.body.verb).toBe('receive-work');
   expect(frame.presentation.body.edge).toMatchObject({ kind: 'receive-work', runId: 'review-run-b', project: { threadId: 'review-thread-b', branchId: 'review-branch-b' }, outcome: null });
   expect(frame.presentation.inspection?.identity.threadId).toBe('review-thread-a');
-  expect(frame.attention.branches.find(branch => branch.threadId === 'review-thread-b')?.currentRun?.state).toBe('accepted');
+  expect(frame.attention.branches.find(branch => branch.threadId === 'review-thread-b')?.currentRun?.state).toBe('executing');
   expect(frame.projection.portfolio.mode).toBe('intake');
   const subject = frame.projection.portfolio.projects.find(card => card.key === frame.projection.portfolio.subjectKey);
   expect(subject).toMatchObject({ caption: '页面方案', lead: { role: 'project-lead' } });

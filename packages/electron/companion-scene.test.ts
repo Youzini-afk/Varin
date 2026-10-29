@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { CompanionSceneWindows, companionSceneLayout, readCompanionSceneDescriptor, type CompanionSceneDescriptor, type CompanionScenePayload } from './companion-scene';
+import { CompanionSceneWindows, companionSceneLayout, readCompanionSceneDescriptor, type CompanionSceneDescriptor, type CompanionScenePayload } from './companion-scene.js';
 
 const descriptor = (revision: number, extra: Partial<CompanionSceneDescriptor> = {}): CompanionSceneDescriptor => ({ revision, scope: 'host/thread/branch', kind: 'reading', phase: 'active', outcome: null, count: null, suppressed: false, reducedMotion: false, menuOpen: false, cue: 'engaged', ...extra });
 const viewport = { x: 0, y: 0, width: 360, height: 360, viewportWidth: 360, viewportHeight: 480 };
@@ -123,6 +123,7 @@ it('accepts only bounded portfolio identities and independent visible-project te
   const portfolio = { mode: 'inspection', projects: [{ key: 'project-1', label: 'A', lead: { avatar: 'slope-lilac', role: 'project-lead' }, status: 'active', requestCount: 0, uncertainCount: 0 }], inspectedKey: 'project-1', subjectKey: null, overflowCards: 0 };
   const d = descriptor(1, { kind: 'portfolio', cue: 'transition', portfolio: portfolio as NonNullable<CompanionSceneDescriptor['portfolio']> });
   expect(readCompanionSceneDescriptor(d).portfolio?.projects[0]?.lead.avatar).toBe('slope-lilac');
+  expect(readCompanionSceneDescriptor({...d,portfolio:{...portfolio,projects:[{...portfolio.projects[0],lead:{avatar:'slope-lilac',role:'task'}}]}}).portfolio?.projects[0]?.lead.role).toBe('task');
   for (const notice of ['permission','question','mixed','inspect','unknown']) expect(readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], notice }] } }).portfolio?.projects[0]?.notice).toBe(notice);
   expect(() => readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], notice: 'approved' }] } })).toThrow();
   expect(readCompanionSceneDescriptor({ ...d, portfolio: { ...portfolio, projects: [{ ...portfolio.projects[0], caption: '材料 <检查>' }] } }).portfolio?.projects[0]?.caption).toBe('材料 <检查>');

@@ -4,7 +4,7 @@ import { directorBranchKey, directorProjectRelations, directorChildMembers } fro
 const row=(overrides:Partial<ThreadAttentionTeamExecution>={}):ThreadAttentionTeamExecution=>({parentThreadId:'A',parentBranchId:'branch-A',parentRunId:'older-parent-run',childOperationId:'op-child',executionId:'execution-child',childThreadId:'child',childBranchId:'branch-child',avatar:'cove-sage',state:'ready',childRunId:'run-child',childRunState:'executing',activity:'running',...overrides});
 const parent={runtime:'agent' as const,threadId:'A',branchId:'branch-A'};
 it('joins only exact parent branches and leaves multi-parent ambiguity ungrouped',()=>{
- const snapshot={branches:[{threadId:'A',branchId:'branch-A',parentThreadId:null},{threadId:'A',branchId:'other-A',parentThreadId:null},{threadId:'child',branchId:'branch-child',parentThreadId:'A'}],teamExecutions:[row()]} as ThreadAttentionSnapshot;
+ const snapshot={branches:[{threadId:'A',branchId:'branch-A',parentThreadId:null,botId:null},{threadId:'A',branchId:'other-A',parentThreadId:null,botId:null},{threadId:'child',branchId:'branch-child',parentThreadId:'A',botId:null}],teamExecutions:[row()]} as ThreadAttentionSnapshot;
  const child=directorBranchKey({threadId:'child',branchId:'branch-child'});
  expect(directorProjectRelations(snapshot).projectForBranch.get(child)).toBe(directorBranchKey(parent));
  snapshot.teamExecutions.push(row({parentBranchId:'other-A',executionId:'ambiguous'}));
