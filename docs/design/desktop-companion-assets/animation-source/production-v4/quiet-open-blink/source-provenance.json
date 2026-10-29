@@ -1,0 +1,74 @@
+{
+  "generator": "builtin image_gen edit",
+  "canonicalSource": "../../production-v2/shared/upright-open-neutral-v2.png",
+  "canonicalSHA256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f",
+  "seatedPrompt": "Edit only eyelids halfway/fully closed; preserve exact approved open laptop keyboard-supported body, head angle, hands, laptop, stool, boots and full square framing. True transparent background.",
+  "detachedPrompt": "Remove only stool seat and legs; preserve instantaneous eyelids and seated pose, keyboard contacts, laptop, anatomy and full canvas. True transparency.",
+  "outsideEditPixelExact": false,
+  "files": [
+    {
+      "path": "frames/half.png",
+      "sha256": "02178d2e85cd576adf3cb0474f4090fe8154529987c3039144a97523c53a8741",
+      "rawSHA256": "5a46e80e60c15433e30bd2ce43cf1501129a3b0b545bafc10c406e018c350e41",
+      "sourceCanvas": [
+        1254,
+        1254
+      ],
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "export": "whole-canvas uniform Lanczos to 512; original alpha preserved; no bbox normalization or repaint"
+    },
+    {
+      "path": "frames/closed.png",
+      "sha256": "a5109ef9f135ab0432a400fade27b17dbe72f011a163ccd9c57a94d41d061f66",
+      "rawSHA256": "98be719d43ad5c37b8a491b9bbd06b7a7a973c866e8acbd847e356c8eef188ce",
+      "sourceCanvas": [
+        1254,
+        1254
+      ],
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "export": "whole-canvas uniform Lanczos to 512; original alpha preserved; no bbox normalization or repaint"
+    },
+    {
+      "path": "detached/half.png",
+      "sha256": "74e6f961ff0bb6eee5474d9c37901bbc75c443cb9034129820a3367ae5e33be9",
+      "rawSHA256": "b9998c73799525bb79865d7d3510298c358b4ec591c6dc1a9257f79c519c9c44",
+      "sourceCanvas": [
+        1254,
+        1254
+      ],
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "export": "whole-canvas uniform Lanczos to 512; original alpha preserved; no bbox normalization or repaint"
+    },
+    {
+      "path": "detached/closed.png",
+      "sha256": "8583319f6974880c065dc4000867e8beab37dd4f85af01a0b1d9d2e78bddf1b8",
+      "rawSHA256": "54d0af0dd84b4a63b7b80adf55d38c04e852dcb8ba6283b6896809b6a0d3c840",
+      "sourceCanvas": [
+        1254,
+        1254
+      ],
+      "sourceRect": [
+        0,
+        0,
+        1254,
+        1254
+      ],
+      "export": "whole-canvas uniform Lanczos to 512; original alpha preserved; no bbox normalization or repaint"
+    }
+  ]
+}

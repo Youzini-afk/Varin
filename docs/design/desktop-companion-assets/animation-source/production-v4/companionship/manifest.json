@@ -1,0 +1,2214 @@
+{
+  "status": "selected closed physical source subset; source-pair review complete; runtime integration review pending; not public installation",
+  "canvas": [
+    512,
+    512
+  ],
+  "geometryReference": "varin-upright-v2",
+  "replaceActions": [
+    "hover-response",
+    "idle-closed",
+    "quiet-hair-smooth",
+    "quiet-seat-adjust",
+    "quiet-sleeve-smooth",
+    "quiet-stretch",
+    "relax-idle",
+    "rest-sleep",
+    "tap-repeat-response",
+    "tap-response",
+    "welcome"
+  ],
+  "sequences": [
+    {
+      "id": "v4-closed-tap-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "tap-response"
+    },
+    {
+      "id": "v4-closed-tap-repeat-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "tap-repeat-response"
+    },
+    {
+      "id": "v4-closed-welcome",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 90,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-palm.png",
+          "sourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "welcome"
+    },
+    {
+      "id": "v4-closed-hover-response",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/social-release.png",
+          "sourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "hover-response"
+    },
+    {
+      "id": "v4-closed-idle-closed",
+      "kind": "action",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 4500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/blink-closed.png",
+          "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+          "durationMs": 75,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 2500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "idle-closed"
+    },
+    {
+      "id": "v4-closed-relax-idle",
+      "kind": "action",
+      "loop": [
+        0,
+        5
+      ],
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 4500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/blink-closed.png",
+          "sourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+          "durationMs": 75,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 2500,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "relax-idle"
+    },
+    {
+      "id": "v4-closed-quiet-hair-smooth",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/hair-enter-1.png",
+          "sourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-enter-2.png",
+          "sourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-enter-3.png",
+          "sourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-contact-1.png",
+          "sourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-contact-2.png",
+          "sourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-contact-3.png",
+          "sourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-hair-smooth"
+    },
+    {
+      "id": "v4-closed-quiet-sleeve-smooth",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-cross.png",
+          "sourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-brush-1.png",
+          "sourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-brush-2.png",
+          "sourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-sleeve-smooth"
+    },
+    {
+      "id": "v4-closed-quiet-seat-adjust",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/comfort-1.png",
+          "sourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/comfort-2.png",
+          "sourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+          "durationMs": 200,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-seat-adjust"
+    },
+    {
+      "id": "v4-closed-quiet-stretch",
+      "kind": "action",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/stretch-enter-1.png",
+          "sourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-enter-2.png",
+          "sourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-enter-3.png",
+          "sourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-crest.png",
+          "sourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+          "durationMs": 350,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ],
+      "action": "quiet-stretch"
+    },
+    {
+      "id": "v4-closed-doze-enter",
+      "kind": "bridge",
+      "loop": null,
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/yawn-enter-1.png",
+          "sourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-enter-2.png",
+          "sourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-enter-3.png",
+          "sourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+          "durationMs": 100,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-crest.png",
+          "sourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+          "durationMs": 400,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/doze-relax.png",
+          "sourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 300,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "id": "v4-closed-doze-hold",
+      "kind": "action",
+      "loop": [
+        0,
+        1
+      ],
+      "frames": [
+        {
+          "source": "frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 1800,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        }
+      ],
+      "action": "rest-sleep"
+    },
+    {
+      "id": "v4-closed-wake-exit",
+      "kind": "bridge",
+      "loop": null,
+      "frames": [
+        {
+          "source": "frames/doze.png",
+          "sourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST_DOZE",
+          "pauseSafe": true
+        },
+        {
+          "source": "frames/wake-aware.png",
+          "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+          "durationMs": 300,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 180,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 1,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    }
+  ],
+  "ordinaryRecoveryByActualSource": [
+    {
+      "source": "frames/yawn-enter-1.png",
+      "actualSourceSHA256": "39f32613fc5f81600acfd82b2ae9a545f5dfdb8170b1cbbd514f07e72de4a756",
+      "frames": [
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-enter-2.png",
+      "actualSourceSHA256": "12f83f5bae667150750a446c2e52528758409ae6ca65eaacc1c2436024dcbf08",
+      "frames": [
+        {
+          "source": "frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-enter-3.png",
+      "actualSourceSHA256": "a1798d9b14e5d9daa9c835f9ab2c22088337f7dcdbfb54072dc3de2c11666078",
+      "frames": [
+        {
+          "source": "frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-crest.png",
+      "actualSourceSHA256": "2f7de840280ac3feee5ab4bf5784d8db8eefd69cea859126e06d9ee6b715d11b",
+      "frames": [
+        {
+          "source": "frames/yawn-return-1.png",
+          "sourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-return-1.png",
+      "actualSourceSHA256": "0e4779249206126e485ee798b838d35337487fbb4ba81841cfee8feed66c718a",
+      "frames": [
+        {
+          "source": "frames/yawn-return-2.png",
+          "sourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-return-2.png",
+      "actualSourceSHA256": "19d026fa0e38c0e2c6c5cec76cae984047034ff4e39eb7432a7e02a4e0995a85",
+      "frames": [
+        {
+          "source": "frames/yawn-return-3.png",
+          "sourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/yawn-return-3.png",
+      "actualSourceSHA256": "02935548cdcc798151f9fc3594df9d253fc744292269e7f77d5a224070285c4b",
+      "frames": [
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/doze-relax.png",
+      "actualSourceSHA256": "2e7ffeb722fa7ccabc2f73ac28ac5aa25d45414b97e25030234b349e98f4edd5",
+      "frames": [
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/doze.png",
+      "actualSourceSHA256": "f0a6b6c15692fa3755947080e1abf0ae4870ef80671402c9153ddb902c94f0ab",
+      "frames": [
+        {
+          "source": "frames/wake-aware.png",
+          "sourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+          "durationMs": 240,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/wake-aware.png",
+      "actualSourceSHA256": "97f0d3fc7b464a8de47aceb5048dd3ef1491b163502b191662d53def7dcaf77e",
+      "frames": [
+        {
+          "source": "frames/wake-load-half.png",
+          "sourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/wake-load-half.png",
+      "actualSourceSHA256": "06a9329a7b30f8348d704c40109dcb5d2c45a8f79be055375efea2a97c6ec3c9",
+      "frames": [
+        {
+          "source": "frames/wake-support.png",
+          "sourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/wake-support.png",
+      "actualSourceSHA256": "254b6069ef9a8b8fc3800b0958bbcb11096e0803325167430bbdeedd8a02e328",
+      "frames": [
+        {
+          "source": "frames/wake-unload.png",
+          "sourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/wake-unload.png",
+      "actualSourceSHA256": "d4b040ca9589b3b6f3f9dd21128961524f3758c49609623347bbdd247290d067",
+      "frames": [
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/rest-settle.png",
+      "actualSourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-enter-1.png",
+      "actualSourceSHA256": "1491bba9579f80b3c6b3cb6545e36263b0722adb907168b3e56af956e0efdafc",
+      "frames": [
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-enter-2.png",
+      "actualSourceSHA256": "15c3e91d1a404c64ed1605816421185cbcb14ea1b0fe8780dda66858905d305d",
+      "frames": [
+        {
+          "source": "frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-enter-3.png",
+      "actualSourceSHA256": "96b736eef127aa332b93be47f9e8b1e590d3dfbc6289cba9182caea67899ec7b",
+      "frames": [
+        {
+          "source": "frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-crest.png",
+      "actualSourceSHA256": "768a3e206ced3ded9a723b7ce0d86d57684cff9a3c0ff9a6b0d5a6e11dcbab16",
+      "frames": [
+        {
+          "source": "frames/stretch-return-1.png",
+          "sourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-return-1.png",
+      "actualSourceSHA256": "feeef7f5eab97542dd8597804156c8224b65734c773a84276fa6b997fd7e8f3c",
+      "frames": [
+        {
+          "source": "frames/stretch-unload.png",
+          "sourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-return-2.png",
+      "actualSourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+      "frames": [
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-return-3.png",
+      "actualSourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/stretch-unload.png",
+      "actualSourceSHA256": "dd2a2bb41ec19d712543480ab5a1fbf98d7b630066100763b81e287ebadf6e67",
+      "frames": [
+        {
+          "source": "frames/stretch-return-2.png",
+          "sourceSHA256": "2a0b48753182d7100b7d462c32918946bd8d618ed26893d06a91b0f87186116d",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/stretch-return-3.png",
+          "sourceSHA256": "2ac12dc438760c6dbab882f432b29b66cb725c2f8a1aec08b5bd4720c937f67a",
+          "durationMs": 130,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-enter-1.png",
+      "actualSourceSHA256": "763073ab2c571513ff1c78d97ff024889bbababf2c4a9edfa99f3934314e75a7",
+      "frames": [
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-enter-2.png",
+      "actualSourceSHA256": "1d6b1c5c712ee1016de9c2db9d6626fab39a74c435d9b5f6ad8280ca910857c4",
+      "frames": [
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-enter-3.png",
+      "actualSourceSHA256": "343550a2ebfbd3dbace43f991987d840cc86129db4a64edd247340b69aae51ab",
+      "frames": [
+        {
+          "source": "frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-contact-1.png",
+      "actualSourceSHA256": "cd27319fe19e9905a9f315f5e903eeac0882e369a7ed9a246cf9901b20ceaf6b",
+      "frames": [
+        {
+          "source": "frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-contact-2.png",
+      "actualSourceSHA256": "6fc5d6559b29421f174bfc3960ce93e11a9ebac0caea81050e7480efd89547f7",
+      "frames": [
+        {
+          "source": "frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-contact-3.png",
+      "actualSourceSHA256": "4ed27dd08efdcfea379670b2ddcb244aa866b336108b0c6c3ef0910ac47d3f9f",
+      "frames": [
+        {
+          "source": "frames/hair-return-1.png",
+          "sourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-return-1.png",
+      "actualSourceSHA256": "668bfafacf924bc4e88144f089b4be6d19e55e9250c9313c6cfd8254b9c63a6b",
+      "frames": [
+        {
+          "source": "frames/hair-return-2.png",
+          "sourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-return-2.png",
+      "actualSourceSHA256": "d32cef82956daee993178f3a9804078bee10526cb4326daa3c8fb057dcb8eaba",
+      "frames": [
+        {
+          "source": "frames/hair-return-3.png",
+          "sourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/hair-return-3.png",
+      "actualSourceSHA256": "d6a5dd846fc1bf1b1f6b8eb387d210e39efd72ad82c3b6bda8bcb543de7650c3",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/sleeve-release.png",
+      "actualSourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/sleeve-cross.png",
+      "actualSourceSHA256": "da26aa6b0e3012ab7c3430c589f9bde92096502c07fbad05d6b935996f92de2c",
+      "frames": [
+        {
+          "source": "frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/sleeve-brush-1.png",
+      "actualSourceSHA256": "59252f4f92dd27196b31be395a12ed176081ef1ea6196b29381cb62c05b0f191",
+      "frames": [
+        {
+          "source": "frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/sleeve-brush-2.png",
+      "actualSourceSHA256": "8c307a2a92cefc9f0bc35f065af41b804960325f2822ab6a90bf65dc66c490c8",
+      "frames": [
+        {
+          "source": "frames/sleeve-brush-3.png",
+          "sourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/sleeve-brush-3.png",
+      "actualSourceSHA256": "d21dbf9ce2545f410e4a1bf084a826fc6534094b9677c381088fd8105ae474f4",
+      "frames": [
+        {
+          "source": "frames/sleeve-release.png",
+          "sourceSHA256": "5ce178afd5e49da75f429112141fc96d9f81e23ca0fc376508307fb0a73228de",
+          "durationMs": 120,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/comfort-1.png",
+      "actualSourceSHA256": "3ecbb9e67641ab6beb0b2e0d7118adfa407ddcd1e78f270b0d6c330c43fcdf08",
+      "frames": [
+        {
+          "source": "frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/comfort-2.png",
+      "actualSourceSHA256": "8ade80f217a988016f99bcf1bddd3d1dcc25445893a18aa990c1b09345d71d6c",
+      "frames": [
+        {
+          "source": "frames/comfort-3.png",
+          "sourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+          "durationMs": 160,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/comfort-3.png",
+      "actualSourceSHA256": "cd04b7bc8a75688147a3c00692ba9049ae4754c0de57569081ee97662b5a8a4a",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/social-release.png",
+      "actualSourceSHA256": "b8a64e307855255a167f5a923a9a587f6173cbbfb385428264f3ee3658a73261",
+      "frames": [
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/social-wrist.png",
+      "actualSourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+      "frames": [
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/social-lower.png",
+      "actualSourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+      "frames": [
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/blink-half.png",
+      "actualSourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+      "frames": [
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/blink-closed.png",
+      "actualSourceSHA256": "06a59b977b7205ae9715f059442df5eaf667553397e1a2b4fa79477c25aaf799",
+      "frames": [
+        {
+          "source": "frames/blink-half.png",
+          "sourceSHA256": "21b69a3f29748741e4ea9cb96af05a95e1384072b3e1d17e788fb181c7f3aaba",
+          "durationMs": 45,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 80,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    },
+    {
+      "source": "frames/social-palm.png",
+      "actualSourceSHA256": "dc75164f59d83ef3bef4378a86e773b5a6e6579b0d09ed16082973056685eb54",
+      "frames": [
+        {
+          "source": "frames/social-wrist.png",
+          "sourceSHA256": "0b046241e9b972c9680870c46e7d92003facf40b2e4920b6fc24787370f763da",
+          "durationMs": 70,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/social-lower.png",
+          "sourceSHA256": "424a3fd241cbde18c4120c99d877d5841e043ced04cae25d14f0c6b73bd9c040",
+          "durationMs": 110,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "frames/rest-settle.png",
+          "sourceSHA256": "9628303c9bc152c868911da24b14e8f99345000ebdd06e48633d4f5187d87c2c",
+          "durationMs": 140,
+          "phase": "act",
+          "cue": "RECOVERY_ONLY",
+          "pauseSafe": false
+        },
+        {
+          "source": "../../production-v2/lid/frames/closed-rest-rigid-v2.png",
+          "sourceSHA256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+          "durationMs": 180,
+          "phase": "hold",
+          "cue": "REST",
+          "pauseSafe": true
+        }
+      ]
+    }
+  ]
+}
