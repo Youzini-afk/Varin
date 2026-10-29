@@ -650,6 +650,19 @@ export function createThreadResourceScope(owners: ThreadResourceScopeOwners): Th
         const id = `workspace:${source.workspaceId}`;
         const previous = options.snapshot?.readers.find(reader => reader.domainId === id);
         const viewId = previous?.viewId ?? `live-resource:${liveRoot.rootId}:${randomUUID()}`;
+        if (source.mode === 'native_workspace') {
+          const capture = (await store.readOriginalSource(source.branchId, signal ? { signal } : {}))?.provenance.resources;
+          const base = createDocumentResourceReader({ domainId: id, viewId, workspaceId: resourceWorkspaceId,
+            documents: owners.documents, list: (relative, signal) => listSourceDirectory(store, root, { domainId: id, viewId }, relative, signal) });
+          const reader = capture ? withSourceLinks(base, capture) : base;
+          scope.sourceIdentity = `workspace:${source.workspaceId}:native:${liveRoot.rootId}`;
+          scope.project = { reader, cwd: capture?.cwd ?? '', skillAncestorBoundary: capture?.skillAncestorBoundary ?? '', displayRoot: root };
+          // Ancestors and external dependencies belong to the original source.
+          // A mount below Storage is an execution path, not another project
+          // whose host-directory ancestors should be scanned and recaptured.
+          if (capture) applyCapture(scope, reader, capture);
+          return finish();
+        }
         let documents: Pick<DocumentAuthority, 'readSnapshot'> = owners.documents;
         if (owners.documents.readSnapshots && !options.snapshot) {
           // These same candidates are used by source capture and context assembly.

@@ -304,25 +304,6 @@ pub fn terminate_session(session: u32, force: bool) -> io::Result<bool> {
 }
 
 #[cfg(target_os = "linux")]
-pub fn arm_parent_death_signal() -> io::Result<()> {
-    // The control pipe is the normal lifetime boundary. PR_SET_PDEATHSIG is
-    // the Linux backstop for an abrupt kernel exit (including process::exit,
-    // which cannot run ProcessManager::drop). Arm it before accepting the
-    // spawn configuration, then close the prctl race by checking the parent.
-    let parent = unsafe { libc::getppid() };
-    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGUSR2) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if unsafe { libc::getppid() } != parent {
-        return Err(io::Error::new(
-            io::ErrorKind::BrokenPipe,
-            "owning kernel exited while arming guardian lifetime",
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
 pub fn prepare_guardian() -> io::Result<()> {
     if unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) } != 0 {
         return Err(io::Error::last_os_error());

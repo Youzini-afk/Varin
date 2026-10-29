@@ -332,6 +332,7 @@ const kernelComplete = async (
 const kernelCompensateDisk = async (context: DurableFileOperationContext, operationId: string, data: PersistedIntegrationData): Promise<void> => {
   const paths = (data.appliedPaths ?? []).filter(file => data.targetKinds?.[file] === "disk"
     && data.targets?.[file]?.target && data.safety?.[file]);
+  const directories = new DirectoryMetadataContinuity();
   // Undo follows the retained safety tree, not the forward apply order. Remove
   // child entries before replacing their directory with its original file.
   for (const { path: file } of orderForStates(paths.map(path => ({ path })), entry => data.safety[entry.path]!)) {
@@ -345,19 +346,23 @@ const kernelCompensateDisk = async (context: DurableFileOperationContext, operat
         if (!data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
         return;
       }
-      if (!sameState(current, target)) {
+      if (!sameState(current, directories.expected(file, target, current))) {
         await kernelTransition(context, operationId, file, "needs-attention");
         if (!data.needsAttentionPaths.includes(file)) data.needsAttentionPaths.push(file);
         return;
       }
       await kernelTransition(context, operationId, file, "compensate-intent");
-      await applyFile(context, operationId, file, safety, target, "compensate");
+      await applyFile(context, operationId, file, safety, current, "compensate");
+      directories.note(file);
       const restored = (await capture(context, file, false)).state;
       if (!sameState(restored, safety)) throw new Error(`Compensation did not restore ${file}`);
       await kernelTransition(context, operationId, file, "safety-observed");
       if (!data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
     });
   }
+  await directories.finish(context, Object.fromEntries(paths.filter(file => !data.needsAttentionPaths.includes(file))
+    .map(file => [file, data.safety[file]!])),
+  (file, target, expected) => applyFile(context, operationId, file, target, expected, "compensate-metadata"));
 };
 
 const isBranchIntegration = (data: Pick<PersistedIntegrationData, "parentBranchId" | "targetKinds">): boolean => (
@@ -409,14 +414,56 @@ class AcknowledgedIntegrationFileFailure extends Error {
   constructor(message: string, readonly effect: "none" | "unknown") { super(message); }
 }
 
+type FileApplyPhase = "apply" | "compensate" | "undo" | "apply-metadata" | "compensate-metadata" | "undo-metadata";
+
+// Changing a child entry changes its parent directory's mtime. That is an
+// effect of this integration, not a competing edit. Keep every other attribute
+// fenced, pass the exact current state to native CAS, and restore selected
+// directory timestamps after all children have settled.
+class DirectoryMetadataContinuity {
+  private readonly changed = new Set<string>();
+
+  note(file: string): void {
+    const slash = file.lastIndexOf("/");
+    this.changed.add(slash < 0 ? "." : file.slice(0, slash));
+  }
+
+  affects(file: string): boolean { return this.changed.has(file); }
+
+  expected(file: string, selected: RecoveryState, current: RecoveryState): RecoveryState {
+    return this.affects(file) && selected.kind === "directory" && current.kind === "directory"
+      && selected.native && current.native
+      ? { ...selected, native: { ...selected.native, modified: current.native.modified } }
+      : selected;
+  }
+
+  async finish(context: DurableFileOperationContext, states: Record<string, RecoveryState>,
+    apply: (file: string, target: RecoveryState, expected: RecoveryState) => Promise<void>): Promise<void> {
+    const directories = Object.entries(states).filter(([file, state]) => this.affects(file)
+      && state.kind === "directory" && state.native).sort(([a], [b]) => pathDepth(b) - pathDepth(a));
+    for (const [file, target] of directories) {
+      await runPathOperation(context, file, "subtree", async () => {
+        const current = (await capture(context, file, false)).state;
+        if (!sameState(current, this.expected(file, target, current))) {
+          throw new Error(`Directory attributes changed during integration: ${file}`);
+        }
+        if (!sameState(current, target)) await apply(file, target, current);
+        if (!sameState((await capture(context, file, false)).state, target)) {
+          throw new Error(`Integration did not restore directory attributes: ${file}`);
+        }
+      });
+    }
+  }
+}
+
 const applyFile = async (context: DurableFileOperationContext, operationId: string, file: string,
-  target: RecoveryState, expected: RecoveryState, phase: "apply" | "compensate" | "undo"): Promise<void> => {
+  target: RecoveryState, expected: RecoveryState, phase: FileApplyPhase): Promise<void> => {
   if (!context.fileResources) return context.fileStore.applyState(context.identity, context.root, file, target, {reservationOperationId:operationId});
   const identity = createHash("sha256").update(JSON.stringify([operationId, file, phase])).digest("hex");
   const applied = await context.fileResources.applyStateDetailed(context.identity, file, target, {
     expected, operationId: `integration-file:${identity}`, reservationOperationId:operationId,
     ...(target.kind === "regular-file" ? { recordId: `operation-file:${operationId}:${file}`,
-      slot: `${file}.${phase === "apply" ? "target" : "safety"}` } : {}),
+      slot: `${file}.${phase.startsWith("apply") ? "target" : "safety"}` } : {}),
   });
   if (applied.status === "conflict" || (applied.status === "applied" && !sameState(applied.state, target))) {
     throw new AcknowledgedIntegrationFileFailure(`Integration ${phase} conflicted: ${file}`, applied.status === "conflict" ? "none" : "unknown");
@@ -520,13 +567,15 @@ const applyKernelDurableFileOperation = async (
   }
   const unacknowledgedWrites = new Set<string>();
   const possiblyWrittenPaths = new Set<string>();
-  const applyTracked = async (file: string, target: RecoveryState, expected: RecoveryState, phase: "apply" | "compensate"): Promise<void> => {
+  const directories = new DirectoryMetadataContinuity();
+  const applyTracked = async (file: string, target: RecoveryState, expected: RecoveryState, phase: FileApplyPhase): Promise<void> => {
     const request = `${phase}\0${file}`;
     unacknowledgedWrites.add(request);
     if (phase === "apply") possiblyWrittenPaths.add(file);
     try {
       await applyFile(context, spec.id, file, target, expected, phase);
       unacknowledgedWrites.delete(request);
+      if (!phase.endsWith("-metadata")) directories.note(file);
     } catch (error) {
       if (error instanceof AcknowledgedIntegrationFileFailure) {
         unacknowledgedWrites.delete(request);
@@ -537,7 +586,7 @@ const applyKernelDurableFileOperation = async (
   };
   const compensateKernel = async (): Promise<void> => {
     for (const { path: file, states } of orderForStates(Object.entries(spec.targets).map(([path, states]) => ({ path, states })), (entry) => safety[entry.path]!)) {
-      if (!possiblyWrittenPaths.has(file)) {
+      if (!possiblyWrittenPaths.has(file) && !(safety[file]!.kind === "directory" && directories.affects(file))) {
         // No write was dispatched, or its exact CAS-conflict ACK proves no
         // effect. Do not read/wait on or undo another writer's later content.
         if (phases.get(file)?.phase !== "pending") await transition(file, "pending");
@@ -550,15 +599,21 @@ const applyKernelDurableFileOperation = async (
           if (data.appliedPaths.includes(file) && !data.compensatedPaths.includes(file)) data.compensatedPaths.push(file);
           continue;
         }
-        if (!sameState(current, states.target)) { data.needsAttentionPaths.push(file); await transition(file, "needs-attention"); continue; }
+        if (!sameState(current, directories.expected(file, states.target, current))
+          && !sameState(current, directories.expected(file, safety[file]!, current))) {
+          data.needsAttentionPaths.push(file); await transition(file, "needs-attention"); continue;
+        }
         await transition(file, "compensate-intent");
-        await applyTracked(file, safety[file]!, states.target, "compensate");
+        await applyTracked(file, safety[file]!, current, "compensate");
         const restored = (await capture(context, file, false)).state;
         if (!sameState(restored, safety[file]!)) throw new Error(`Compensation did not restore ${file}`);
         data.compensatedPaths.push(file);
         await transition(file, "safety-observed", { safety: safety[file]! });
       } catch { data.needsAttentionPaths.push(file); await transition(file, "needs-attention").catch(() => undefined); }
     }
+    await directories.finish(context, Object.fromEntries(Object.entries(safety).filter(([file]) => targetKinds[file] === "disk"
+      && !data.needsAttentionPaths.includes(file))),
+    (file, target, expected) => applyTracked(file, target, expected, "compensate-metadata"));
     // This path runs before Surface dispatch. Unattempted targets are safe;
     // every actual disk request must have its own completion, including CAS
     // conflicts and compensation. A generic rejection remains unacknowledged.
@@ -570,17 +625,19 @@ const applyKernelDurableFileOperation = async (
       spec.signal?.throwIfAborted();
       await runPathOperation(context, file, "subtree", async () => {
         const current = (await capture(context, file, false)).state;
-        if (!sameState(current, safety[file]!)) throw new Error(`Parent workspace changed during integration: ${file}`);
+        if (!sameState(current, directories.expected(file, safety[file]!, current))) throw new Error(`Parent workspace changed during integration: ${file}`);
         spec.signal?.throwIfAborted();
         await transition(file, "apply-intent");
         spec.signal?.throwIfAborted();
-        await applyTracked(file, states.target, safety[file]!, "apply");
+        await applyTracked(file, states.target, current, "apply");
         const observed = (await capture(context, file, false)).state;
         if (!sameState(observed, states.target)) throw new Error(`Integrated path did not match target: ${file}`);
         await transition(file, "target-observed", { target: states.target });
         data.appliedPaths.push(file);
       }, spec.signal);
     }
+    await directories.finish(context, Object.fromEntries(Object.entries(spec.targets).map(([file, states]) => [file, states.target])),
+    (file, target, expected) => applyTracked(file, target, expected, "apply-metadata"));
     spec.signal?.throwIfAborted();
   } catch (error) {
     data.failure = error instanceof Error ? error.message : String(error);
@@ -1102,21 +1159,23 @@ export const undoBranchIntegrationOnDirectory = async (
   // the persisted undoing state lets startup inspect the real after/before
   // state and decide whether to retry or surface attention.
   let driftPath: string | undefined;
+  const directories = new DirectoryMetadataContinuity();
   try {
     await context.resourceOperationGate.run(
     paths.map((file) => ({ resourceId: file, scope: "subtree" as const })),
     async () => {
-      for (const file of paths) {
+      for (const { path: file } of orderForStates(paths.map(path => ({ path })), entry => missingState(entry.path))) {
         const current = await captureCurrent(file);
         if (sameState(current, missingState(file))) continue;
-        if (!sameState(current, targetState(file))) {
+        if (!sameState(current, directories.expected(file, targetState(file), current))) {
           driftPath = file;
           throw Object.assign(new Error(`The materialized parent changed before integration undo: ${file}`), {
             code: "INTEGRATION_UNDO_DRIFT",
           });
         }
         await kernelTransition(context, input.operationId, file, "compensate-intent");
-        await applyFile(context, input.operationId, file, missingState(file), targetState(file), "undo");
+        await applyFile(context, input.operationId, file, missingState(file), current, "undo");
+        directories.note(file);
         const observed = await captureCurrent(file);
         if (!sameState(observed, missingState(file))) {
           driftPath = file;
@@ -1128,6 +1187,8 @@ export const undoBranchIntegrationOnDirectory = async (
       }
     },
     );
+    await directories.finish(context, Object.fromEntries(paths.map(file => [file, missingState(file)])),
+    (file, target, expected) => applyFile(context, input.operationId, file, target, expected, "undo-metadata"));
   } catch (error) {
     if ((error as { code?: unknown }).code === "INTEGRATION_UNDO_DRIFT") {
       return await writeAttention(

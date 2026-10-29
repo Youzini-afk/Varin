@@ -226,8 +226,6 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         libc::signal(libc::SIGUSR1, stop_signal as libc::sighandler_t);
         libc::signal(libc::SIGUSR2, stop_signal as libc::sighandler_t);
     }
-    #[cfg(target_os = "linux")]
-    platform::arm_parent_death_signal()?;
     let output = Arc::new(Mutex::new(io::stdout()));
     let data_output = Arc::new(Mutex::new(io::stderr()));
     // The parent must not deliver Unix signals until the handlers above are installed.
@@ -550,6 +548,10 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 _ => break,
             }
         }
+        // This private pipe belongs to the kernel process, including when it exits
+        // abruptly. Do not bind guardian lifetime to PR_SET_PDEATHSIG: on Linux
+        // it fires when the short-lived launcher thread exits, even while the
+        // owning kernel and this control pipe remain alive.
         STOP.store(2, Ordering::Release);
         #[cfg(windows)]
         control_job.abort();

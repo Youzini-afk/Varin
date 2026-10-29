@@ -211,6 +211,12 @@ export function createExternalSourceOwner(deps: {
         ))
     )
       return;
+    if (unstarted && child.work_mode === 'isolated_write') {
+      // Mount admission can fail before the source is attached to the external
+      // conversation. Close that original session before deleting its baseline.
+      await deps.kernel.nativeWorkspaces?.releaseSource({ ...child.handoff.source,
+        branch_id: `child-source:${child.operation_id}` });
+    }
     const native=record(source.nativeSource);
     if(native.mode==='native_workspace'){
       const reference=native as unknown as LaunchSource;

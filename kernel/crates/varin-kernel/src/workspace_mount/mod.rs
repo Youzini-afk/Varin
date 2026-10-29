@@ -73,20 +73,32 @@ fn component(value: &std::ffi::OsStr) -> Result<&str, KernelError> {
     Ok(value)
 }
 
-/// Never mount over an existing project or a directory containing user files.
-/// This tests the explicit target only; backend admission remains responsible
-/// for the native atomic mount-point claim.
+/// Check only the explicit target. FUSE mounts over an empty directory;
+/// WinFsp creates and owns a new junction. Neither may cover user files.
 fn admit_target(target: &Path) -> Result<(), KernelError> {
-    let metadata = std::fs::symlink_metadata(target)?;
-    if !metadata.is_dir()
-        || metadata.file_type().is_symlink()
-        || std::fs::read_dir(target)?.next().is_some()
+    // WinFsp atomically creates and owns its delete-on-close junction. Creating
+    // and removing a placeholder first can leave Windows deletion pending.
+    #[cfg(windows)]
     {
-        return Err(unsupported(
-            "Workspace mount target must be an existing empty real directory",
-        ));
+        return match std::fs::symlink_metadata(target) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+            Ok(_) => Err(unsupported("WinFsp mount target must not already exist")),
+        };
     }
-    Ok(())
+    #[cfg(not(windows))]
+    {
+        let metadata = std::fs::symlink_metadata(target)?;
+        if !metadata.is_dir()
+            || metadata.file_type().is_symlink()
+            || std::fs::read_dir(target)?.next().is_some()
+        {
+            return Err(unsupported(
+                "Workspace mount target must be an existing empty real directory",
+            ));
+        }
+        Ok(())
+    }
 }
 
 fn kind_error(error: &KernelError) -> &str {

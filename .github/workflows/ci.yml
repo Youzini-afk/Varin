@@ -113,6 +113,13 @@ jobs:
         name: Build native kernel authority
         run: node scripts/test-kernel-authority.mjs --build-only
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        name: Prepare FUSE for native workspace acceptance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fuse3
+          sudo modprobe fuse
+          test -c /dev/fuse
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
         name: Verify native kernel authority
         run: node scripts/test-kernel-authority.mjs
       # Rust state-machine/unit tests have one Linux owner. The release-binary
@@ -189,6 +196,16 @@ jobs:
         id: native-build
         name: Build native kernel
         run: node scripts/test-kernel-authority.mjs --build-only
+      - if: ${{ !cancelled() && steps.native-build.outcome == 'success' }}
+        name: Prepare WinFsp for native workspace acceptance
+        shell: pwsh
+        run: |
+          node packages/electron/scripts/prepare-workspace-component.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $component = Get-Content packages/electron/resources/workspace-component.json -Raw | ConvertFrom-Json
+          $installer = Join-Path $PWD "packages/electron/resources/workspace-component/$($component.file)"
+          $installation = Start-Process msiexec.exe -ArgumentList @('/i', "`"$installer`"", '/qn', '/norestart') -Wait -PassThru -WindowStyle Hidden
+          if ($installation.ExitCode -ne 0) { throw "WinFsp installation did not finish without a restart: $($installation.ExitCode)" }
       - if: ${{ !cancelled() && steps.native-build.outcome == 'success' && needs.changes.outputs.rust == 'true' }}
         name: Verify native workspace storage and runtime on Windows
         shell: cmd

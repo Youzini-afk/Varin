@@ -331,14 +331,20 @@ impl Storage {
         let dispatch = id
             .strip_prefix("child-source-handoff:")
             .ok_or_else(|| KernelError::Authorization("corrupt handoff identity".into()))?;
+        // Preparing an isolated child checks the actual Host backend before
+        // creating its source. This metadata query does not open a workspace
+        // or grant access to any other source, including during refresh.
+        if method == "workspace.backend.inspect" {
+            return Ok(());
+        }
         if handoff.refresh.is_some() {
             return self.authorize_child_refresh(grant, dispatch, &handoff, method, params);
         }
         let branch = format!("child-source:{dispatch}");
         let deny = || {
-            KernelError::Authorization(
-                "preparation grant exceeds the accepted child source handoff".into(),
-            )
+            KernelError::Authorization(format!(
+                "preparation grant exceeds the accepted child source handoff ({method})"
+            ))
         };
         // External harnesses need a real cwd before a native Run exists. Their original
         // Catalog-checked handoff may materialize only this child's pinned baseline into

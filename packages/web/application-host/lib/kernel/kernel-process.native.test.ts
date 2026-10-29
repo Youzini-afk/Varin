@@ -107,14 +107,16 @@ async function drain(client: KernelScopedClient, processId: string, start = 0) {
 
 vitestIt.skipIf(!available || process.platform !== 'win32')('Windows cmd PTY starts in the admitted source directory', async () => {
   const f = await fixture();
-  const params = { ...f.spawn('cmd-cwd', '', 'pty'), command: 'cmd.exe', args: ['/d', '/c', 'cd'] };
+  const params = { ...f.spawn('cmd-cwd', '', 'pty'), command: 'cmd.exe', args: ['/d', '/c', 'echo VARIN_CWD=%CD%'] };
   await f.client.processSpawn(params);
   const read = await drain(f.client, params.processId);
   const output = stripVTControlCharacters(read.stdout.toString('utf8'));
   // Windows temp paths can contain an 8.3 alias (RUNNER~1), while cmd prints
   // the canonical long path selected by the native process owner.
   const expectedCwd = await fs.realpath(path.join(f.workspace, 'child'));
-  assert.equal(output.trim().toLowerCase(), expectedCwd.toLowerCase());
+  // ConPTY may prepend an OSC window title. Observe the command's own marker
+  // rather than depending on Node's generic VT regex to decode that title.
+  assert.equal(/VARIN_CWD=([^\r\n]*)/.exec(output)?.[1]?.trim().toLowerCase(), expectedCwd.toLowerCase());
   assert(!output.includes('UNC'), output);
 }, 30_000);
 

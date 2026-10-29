@@ -530,12 +530,16 @@ impl MountWorker {
         let target = path.clone();
         let thread = std::thread::spawn(move || {
             let prepared = (|| {
+                #[cfg(windows)]
+                std::fs::create_dir_all(target.parent().ok_or_else(||error("workspace_mount_failed","Mount target has no parent directory"))?)?;
+                #[cfg(not(windows))]
                 std::fs::create_dir_all(&target)?;
-                crate::workspace_mount::Mount::start(session, &target)
+                crate::workspace_mount::Mount::start(session.clone(), &target)
             })();
             let mut mount = match prepared {
                 Ok(mount) => mount,
                 Err(failure) => {
+                    session.mount_disconnected();
                     let _ = ready.send(Err(failure));
                     return;
                 }

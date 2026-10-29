@@ -76,6 +76,9 @@ WinFsp 与 Linux/macOS FUSE 回调由默认 `workspace-mount` feature 编入；�
 macOS 默认运行时加载已安装的 libfuse3 session 接口，缺少组件不阻止应用启动；显式 SDK 构建仍保留 libfuse2/libfuse3 入口。真实挂载仍需平台验收。
 原生会话已通过 `workspace.*` 私有协议接入真实 Kernel 与 Host 客户端：项目 owner 持有文件系统，Run／Operation
 租约独立接纳和释放；挂载、区间版本持久化、卸载及进程／计算退出的等待都在 worker，原 Storage 继续服务回调。
+Windows 由 WinFsp 原子创建挂载点，保留系统卷登记以兼容标准文件路径 API；FUSE 则使用已存在的空目录。
+当前 Windows 挂载需要 Host 具有系统卷挂载权限（通常为管理员权限）；私有 junction 不能兼容标准 realpath，因此不作为替代路径。
+启动失败时标记原 Session 已断开，由来源 owner 关闭并释放，不留下仍等待挂载的来源。
 关闭先封闭新的原生 open/create，保留 dispatcher 直到实际文件／目录句柄关闭。原关闭回执等待真实释放，重试由关闭事件触发；清理回执之前到来的关闭事件也会保留，不会漏掉重试。
 `workspace.result.prepare` 固定同一数据和属性边界，交给原 WorkingResult 发布；父 head 后续写入继续保留。
 发布时的属性引用随成果存活，释放候选不提前释放已发布成果；成果或分支删除会清理相应私有记录和 pin。
@@ -186,6 +189,8 @@ Harness 在同一次遍历中处理路径与过滤，调用方仍可通过 `excl
 
 Rust ProcessManager/guardian 拥有 pipe/PTY、stdin 序列回执、原始输出、resize、终止和真实进程树退出回执。
 guardian 是同一发行 executable 的另一模式，不另开数据库 writer。Host Terminal、shell、task、test、LSP、DAP 适配原 handle。
+guardian 的寿命由内核持有的私有控制管道维持；内核正常或突然退出都会关闭管道并触发进程树清理。
+Linux 的临时启动线程结束不触发停止，避免把线程退出误当成内核进程退出。
 
 输出观察、业务结果和 executor stop 是不同维度。业务副作用可未知而进程已确认停止；响应丢失也不能证明进程停止。
 工具结果未确认时，默认策略将原结果交回模型，允许继续调用工具与回答。原 owner 通过已有回执通道更新原操作，

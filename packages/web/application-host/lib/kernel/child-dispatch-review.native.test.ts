@@ -806,7 +806,8 @@ it.each(['quick','formal','isolated'] as const)('%s retrieval uses native search
       children:(await h.runtime.children()).map(child=>({state:child.state,report:child.report,codeResult:child.code_result}))});
     throw error;
   }
-  expect(parentSteps).toBe(mode==='quick'?5:3);expect(childSteps).toBe(5);
+  expect(parentSteps).toBe(mode==='quick'?5:3);
+  expect(childSteps, JSON.stringify((await h.runtime.children()).map(child => child.report))).toBe(5);
   expect(await fs.readFile(path.join(f.workspace,'source.txt'),'utf8')).toBe('fixed child source before parent changes');
   if(mode==='quick') {
     expect(await h.api.collaboration!.children(identity)).toEqual([]);

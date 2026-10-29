@@ -47,18 +47,19 @@ it('maps a scoped child publication into its parent subtree and undoes through t
 
 /** Real Git linked worktree and native Storage IPC; all data belongs to this
  * temporary fixture. No renderer, installed-package or provider claim. */
-it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result and undoes file-directory, deletion, binary, mode and symlink changes', async () => {
+it('integrates a fixed Git worktree result and undoes file-directory, deletion, binary and native attribute changes', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'varin-integration-git-'));
   const workspace = path.join(root, 'workspace');
   const child = path.join(root, 'child');
   const dataDir = path.join(root, 'data');
   await fs.mkdir(workspace);
-  const git = async (...args: string[]) => (await exec('git', ['-C', workspace, ...args], { env: process.env })).stdout.trim();
+  const git = async (...args: string[]) => (await exec('git', ['-C', workspace, '-c', 'core.autocrlf=false', ...args], { env: process.env })).stdout.trim();
   await git('init', '-q');
   for (const [name, body] of Object.entries({ node: 'original parent file\n', 'obsolete.txt': 'original deleted file\n',
     'run.sh': '#!/bin/sh\necho original\n', 'keep.txt': 'unrelated original\n' })) await fs.writeFile(path.join(workspace, name), body);
   await fs.mkdir(path.join(workspace, 'old-dir'));
   await fs.writeFile(path.join(workspace, 'old-dir', 'leaf.txt'), 'original directory child\n');
+  const originalDirectoryTime = (await fs.stat(path.join(workspace, 'old-dir'), { bigint: true })).mtimeNs;
   await fs.chmod(path.join(workspace, 'run.sh'), 0o644);
   await git('add', '.');
   await git('-c', 'user.name=Varin fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture baseline');
@@ -84,9 +85,13 @@ it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result 
     await fs.writeFile(path.join(child, 'old-dir'), 'fixed replacement file\n');
     await fs.rm(path.join(child, 'obsolete.txt'));
     await fs.writeFile(path.join(child, 'new.bin'), Buffer.from([0, 1, 254, 255]));
-    await fs.chmod(path.join(child, 'run.sh'), 0o755);
-    await fs.symlink('run.sh', path.join(child, 'run-link'));
-    const paths = ['node', 'node/child.txt', 'old-dir', 'old-dir/leaf.txt', 'obsolete.txt', 'new.bin', 'run.sh', 'run-link'];
+    const unixAttributes = process.platform !== 'win32';
+    if (unixAttributes) {
+      await fs.chmod(path.join(child, 'run.sh'), 0o755);
+      await fs.symlink('run.sh', path.join(child, 'run-link'));
+    }
+    const paths = ['node', 'node/child.txt', 'old-dir', 'old-dir/leaf.txt', 'obsolete.txt', 'new.bin',
+      ...(unixAttributes ? ['run.sh', 'run-link'] : [])];
     stage = 'publish child result';
     const result = await native.workingStates.withBranchStore(parent.workspaceId, 'git-result',
       store => store.publishDirectoryResult('git-child-source', child, paths), 'exclusive',
@@ -112,12 +117,19 @@ it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result 
     expect(restoredPreview.mergeReady).toBe(true);
     stage = 'apply published result';
     const applied = await coordinator.mergeResult({ ...input, expectedBindingFingerprint: restoredPreview.bindingFingerprint });
-    expect(applied.status).toBe('applied');
+    expect(applied.status, applied.text).toBe('applied');
     expect(await fs.readFile(path.join(workspace, 'node', 'child.txt'), 'utf8')).toBe('fixed child content\n');
+    const appliedDirectoryTime = (await fs.stat(path.join(workspace, 'node'), { bigint: true })).mtimeNs;
+    const appliedJournal = await native.recovery.getOperation(parent.workspaceId, applied.operationId);
+    expect(appliedJournal?.result).toMatchObject({ targets: { node: { target: { native: { modified: {
+      seconds: Number(appliedDirectoryTime / 1_000_000_000n), nanos: Number(appliedDirectoryTime % 1_000_000_000n),
+    } } } } } });
     expect(await fs.readFile(path.join(workspace, 'old-dir'), 'utf8')).toBe('fixed replacement file\n');
     expect(await fs.readFile(path.join(workspace, 'new.bin'))).toEqual(Buffer.from([0, 1, 254, 255]));
-    expect(await fs.readlink(path.join(workspace, 'run-link'))).toBe('run.sh');
-    expect((await fs.stat(path.join(workspace, 'run.sh'))).mode & 0o777).toBe(0o755);
+    if (unixAttributes) {
+      expect(await fs.readlink(path.join(workspace, 'run-link'))).toBe('run.sh');
+      expect((await fs.stat(path.join(workspace, 'run.sh'))).mode & 0o777).toBe(0o755);
+    }
     await expect(fs.stat(path.join(workspace, 'obsolete.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await git('rev-parse', 'HEAD')).toBe(head);
     expect(await fs.readFile(path.join(workspace, '.git', 'index'))).toEqual(index);
@@ -126,9 +138,10 @@ it.skipIf(process.platform === 'win32')('integrates a fixed Git worktree result 
       operationId: applied.operationId })).status).toBe('compensated');
     expect(await fs.readFile(path.join(workspace, 'node'), 'utf8')).toBe('original parent file\n');
     expect(await fs.readFile(path.join(workspace, 'old-dir', 'leaf.txt'), 'utf8')).toBe('original directory child\n');
+    expect((await fs.stat(path.join(workspace, 'old-dir'), { bigint: true })).mtimeNs).toBe(originalDirectoryTime);
     expect(await fs.readFile(path.join(workspace, 'obsolete.txt'), 'utf8')).toBe('original deleted file\n');
-    expect((await fs.stat(path.join(workspace, 'run.sh'))).mode & 0o777).toBe(0o644);
-    for (const file of ['new.bin', 'run-link']) await expect(fs.lstat(path.join(workspace, file))).rejects.toMatchObject({ code: 'ENOENT' });
+    if (unixAttributes) expect((await fs.stat(path.join(workspace, 'run.sh'))).mode & 0o777).toBe(0o644);
+    for (const file of ['new.bin', ...(unixAttributes ? ['run-link'] : [])]) await expect(fs.lstat(path.join(workspace, file))).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await fs.readFile(path.join(workspace, 'keep.txt'), 'utf8')).toBe('later unrelated user edit\n');
     expect(await git('status', '--porcelain')).toBe('M keep.txt');
     const journal = await native.recovery.getOperation(parent.workspaceId, applied.operationId);

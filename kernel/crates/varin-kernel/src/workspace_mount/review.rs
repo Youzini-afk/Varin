@@ -364,8 +364,12 @@ fn native_workspace_mounts_share_storage_and_keep_fork_independent() {
     let storage_root = directory.join("storage");
     let parent_path = directory.join("parent");
     let child_path = directory.join("child");
-    std::fs::create_dir_all(&parent_path).unwrap();
-    std::fs::create_dir(&child_path).unwrap();
+    std::fs::create_dir_all(&directory).unwrap();
+    #[cfg(not(windows))]
+    {
+        std::fs::create_dir(&parent_path).unwrap();
+        std::fs::create_dir(&child_path).unwrap();
+    }
     let mut storage = Storage::open(&storage_root, "host").unwrap();
     storage.issue_grant(&json!({"grantId":"mount-owner","hostGeneration":"gen","owningWorkspace":"project","executionWorkspace":"project",
         "threadId":"thread","runId":"run","capabilities":["storage.admin"],"pathScopes":[""]}),"host","gen",&storage_root.to_string_lossy(),"epoch").unwrap();

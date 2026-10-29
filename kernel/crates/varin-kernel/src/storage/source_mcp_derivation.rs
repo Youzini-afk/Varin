@@ -615,6 +615,8 @@ mod tests {
             "principalId":"client","coordinatorHostId":"coordinator","grantId":"preparation",
             "scope":{"kind":"source_read","threadId":"thread:child:dispatch","branchId":"branch:child:dispatch","key":"child:dispatch"},
             "source":handoff.source,"handoff":handoff})).unwrap(),EPOCH,HOST,"generation").unwrap();
+        storage.authorize(Some("preparation"),EPOCH,HOST,"generation","workspace.backend.inspect",&json!({})).unwrap();
+        assert!(storage.authorize(Some("preparation"),EPOCH,HOST,"generation","workspace.open",&json!({})).is_err());
         storage.begin_branch_builder(&json!({"builderId":"builder","operationId":"branch-create:child-source:dispatch",
             "branchId":"child-source:dispatch","workspaceId":"workspace","draftBasePaths":[],"captureScopes":[]}),"preparation").unwrap();
         let branch = storage.finish_branch_builder(&json!({"builderId":"builder","operationId":"branch-create:child-source:dispatch"}),"preparation").unwrap();
@@ -686,6 +688,8 @@ mod tests {
             "scope":{"kind":"source_read","threadId":"thread:child:dispatch","branchId":"branch:child:dispatch","key":"continuation"},
             "source":basis,"continuation":{"executionId":"continuation","previousRunId":"child-run","root":branch["root"],"refresh":refresh_source}
         })).unwrap(),EPOCH,HOST,"generation").unwrap();
+        storage.authorize(Some("continuation-preparation"),EPOCH,HOST,"generation","workspace.backend.inspect",&json!({})).unwrap();
+        assert!(storage.authorize(Some("continuation-preparation"),EPOCH,HOST,"generation","workspace.open",&json!({})).is_err());
         let (next_root,next_parent)=if refresh {
             let params=json!({"operationId":"branch-create:child-refresh:continuation","branchId":"child-refresh:continuation","workspaceId":"workspace",
                 "draftBasePaths":[],"captureScopes":[],"entries":[{"path":"incoming-stage","state":{"kind":"directory","mode":null}}]});

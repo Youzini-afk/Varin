@@ -57,6 +57,12 @@ jobs:
       - run: bun run docs:validate
       - run: bun run type-check
       - run: bun run lint
+      - name: Prepare FUSE for native workspace acceptance
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fuse3
+          sudo modprobe fuse
+          test -c /dev/fuse
       - name: Build and verify native kernel authority
         run: node scripts/test-kernel-authority.mjs --build
       - run: bun run test:packages
