@@ -1,0 +1,143 @@
+{
+  "stage": "motion candidate v3: complete hand matte correction, awaiting review",
+  "canvas": [
+    512,
+    512
+  ],
+  "method": "fixed-hinge original prop texture + actual authored hand/cuff drawings; unchanged identity regions protected",
+  "opening": [
+    {
+      "source": "frames/closed-rest-rigid-v2.png",
+      "durationMs": 650,
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    {
+      "source": "frames/contact-000-registered-v3.png",
+      "durationMs": 100,
+      "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc"
+    },
+    {
+      "source": "frames/contact-015-registered-v3.png",
+      "durationMs": 80,
+      "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77"
+    },
+    {
+      "source": "frames/contact-030-registered-v3.png",
+      "durationMs": 75,
+      "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049"
+    },
+    {
+      "source": "frames/contact-045-registered-v3.png",
+      "durationMs": 70,
+      "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7"
+    },
+    {
+      "source": "frames/contact-055-registered-v3.png",
+      "durationMs": 65,
+      "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12"
+    },
+    {
+      "source": "frames/contact-070-registered-v3.png",
+      "durationMs": 65,
+      "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3"
+    },
+    {
+      "source": "frames/contact-100-registered-v3.png",
+      "durationMs": 120,
+      "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd"
+    },
+    {
+      "source": "frames/release-first-registered-v2.png",
+      "durationMs": 65,
+      "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75"
+    },
+    {
+      "source": "frames/release-near-registered-v2.png",
+      "durationMs": 90,
+      "sha256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d"
+    },
+    {
+      "source": "frames/release-low-registered-v2.png",
+      "durationMs": 90,
+      "sha256": "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369"
+    },
+    {
+      "source": "frames/open-rest-v1.png",
+      "durationMs": 850,
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    }
+  ],
+  "closing": [
+    {
+      "source": "frames/open-rest-v1.png",
+      "durationMs": 850,
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    },
+    {
+      "source": "frames/release-low-registered-v2.png",
+      "durationMs": 90,
+      "sha256": "f483496bfd97c4f88f38b2e8d105ea87359818ebf57742e3d9555c9f90dca369"
+    },
+    {
+      "source": "frames/release-near-registered-v2.png",
+      "durationMs": 90,
+      "sha256": "26733b57f612201b3fcdeaf55df19cee7aedd05eea12a8fcb8a4a0bd14d2ad0d"
+    },
+    {
+      "source": "frames/release-first-registered-v2.png",
+      "durationMs": 65,
+      "sha256": "6c95a04464786dfafdcaf421b8d587f185d2a782fe6ca8cfcb86b0ae3eea1e75"
+    },
+    {
+      "source": "frames/contact-100-registered-v3.png",
+      "durationMs": 120,
+      "sha256": "e210e85d0e0951c1f38d5a7bba263ad12778b86932f904df3d2ff84c4528b3bd"
+    },
+    {
+      "source": "frames/contact-070-registered-v3.png",
+      "durationMs": 65,
+      "sha256": "f4079cd03524a164ec6a9a9bd43e97690d1fedfab7db9bcac543f8142174b6d3"
+    },
+    {
+      "source": "frames/contact-055-registered-v3.png",
+      "durationMs": 65,
+      "sha256": "274d464e9d25105e5037b8c1c5551c4a3e5475609e7871b52ae4abe3cc5bdf12"
+    },
+    {
+      "source": "frames/contact-045-registered-v3.png",
+      "durationMs": 70,
+      "sha256": "a450f1760c1b86d0f4977460fde14ff56d59e780cf6e0922f661ca7fcbdcc7b7"
+    },
+    {
+      "source": "frames/contact-030-registered-v3.png",
+      "durationMs": 75,
+      "sha256": "a06197dc119a97631169502b1ba3782fbc918929eca2da0dca01823da6f01049"
+    },
+    {
+      "source": "frames/contact-015-registered-v3.png",
+      "durationMs": 80,
+      "sha256": "8ceda1407199a8ff971fe7efe6fc05d61950bfce01110f5c035c738dfd370a77"
+    },
+    {
+      "source": "frames/contact-000-registered-v3.png",
+      "durationMs": 100,
+      "sha256": "1b3aad22a86becb9565d1aae7639760547a14a51477e728d5d950bcf462673cc"
+    },
+    {
+      "source": "frames/closed-rest-rigid-v2.png",
+      "durationMs": 650,
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    }
+  ],
+  "knownReviewFocus": [
+    "0-degree hand/lid occlusion",
+    "normal speed contact transitions and release",
+    "new closed rest endpoint differs from static initial closed anchor"
+  ],
+  "rawRejected": [
+    "half-open-v1-raw.png: hinge moved",
+    "half-fixedhinge-v2-raw.png: residual hinge movement; hand reference only",
+    "contact-015-v1-raw.png: lid/hand raised too far, use crop-v2",
+    "release-low-v1-raw.png: wrong hand moved, use crop-v2"
+  ]
+}

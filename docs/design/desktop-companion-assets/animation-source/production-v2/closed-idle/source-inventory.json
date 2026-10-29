@@ -1,0 +1,101 @@
+{
+  "status": "candidate",
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "d54d3ce68840dbdea8d5d79aa1a2dd221705a1393003e1d6605f229b5bc30731"
+    },
+    {
+      "path": "build_closed_idle.py",
+      "sha256": "6c3135513476291e6cb23622dadddfcd6cf62a52ab4b9f8a95bdcbbf64b2b4b7"
+    },
+    {
+      "path": "frames/blink-closed-mask.png",
+      "sha256": "ecf95e3ebc41130ae169478db65edcd1a7bdc95e7821438eda85d970fb04b7db"
+    },
+    {
+      "path": "frames/blink-closed.png",
+      "sha256": "a1a14583842ac30ce4f8155437453ddae3524d08aa90cf91fa43ab24cb54caf6"
+    },
+    {
+      "path": "frames/blink-half-mask.png",
+      "sha256": "ecf95e3ebc41130ae169478db65edcd1a7bdc95e7821438eda85d970fb04b7db"
+    },
+    {
+      "path": "frames/blink-half.png",
+      "sha256": "c5547f4f69d88dfec1b54a32be8708a42732f9cb32f3e5a4506fe1d362620c8b"
+    },
+    {
+      "path": "frames/closed-rest.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    {
+      "path": "frames/look-left-middle-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "frames/look-left-middle.png",
+      "sha256": "25efd7fb746e9650425cccb15f1f77e6029080101fdbaa898cb40bcc9c457df8"
+    },
+    {
+      "path": "frames/look-left-peak-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    },
+    {
+      "path": "frames/look-left-peak.png",
+      "sha256": "b2bbc33f62b529e7be2dc4dceb2e6fd98f28f725e611be173cb18e9080dfacf3"
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "ec0f90e9e4a394c36a3b6bff756023d5d46c466f22ccdea6e041e859dc1adc16"
+    },
+    {
+      "path": "qa/closed-idle-blink-contact.jpg",
+      "sha256": "579944a96697108583550400f358b544c2ab68957d10a57cc1a36e64921f2c7b"
+    },
+    {
+      "path": "qa/closed-idle-normal-timing.gif",
+      "sha256": "06be386a4c362e86320d65f7a34a29d507d42e5354e64357f8f86821d2fea930"
+    },
+    {
+      "path": "qa/closed-idle-yaw-contact.jpg",
+      "sha256": "a76f2205eeaa082eb39d3e3d5fb46daec0a071e8e03a4091494ae9bd7fe39ad1"
+    },
+    {
+      "path": "rebuild-verification.json",
+      "sha256": "e6791c1a80805738b83295f021528b92f67ac4b692649361b8036fa9337ed026"
+    },
+    {
+      "path": "references/closed-rest-rigid-v2.png",
+      "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb"
+    },
+    {
+      "path": "references/eye-mask.png",
+      "sha256": "fb2a9fbc12aa8d063a996da99c6ce748e00fbd98e374aaec08d67ed0fcc25462"
+    },
+    {
+      "path": "references/left-middle-authored.png",
+      "sha256": "7e13d4a99fa6f8e9341ca31dee7bc4091fc08f1342316116830aff2ec8e0b5a3"
+    },
+    {
+      "path": "references/left-peak-authored.png",
+      "sha256": "b4b3d3922a94acc52f99079a90faca64d2f2b8897baa32c00a84afeaf0f57e94"
+    },
+    {
+      "path": "references/neutral-blink-closed.png",
+      "sha256": "dd320f6b55172c9ef31c2ed617a49ddb14bb9a2686f39f22168b2337bc65678a"
+    },
+    {
+      "path": "references/neutral-blink-half.png",
+      "sha256": "efc14d3eaa97fcb1dafdfa8f21142286b3b06674940e4c16f180424895c9ab6f"
+    },
+    {
+      "path": "references/open-neutral.png",
+      "sha256": "55eeda4052ec205573fe37f929f86c074bfa83af9dbb4976b0b1d80cb78f818f"
+    },
+    {
+      "path": "references/yaw-edit-mask.png",
+      "sha256": "394f151ea490241d9c9d25458d606a4261ad6c06e017c97b9d0e3b2471875a8a"
+    }
+  ]
+}

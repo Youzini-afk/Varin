@@ -1,0 +1,121 @@
+{
+  "pathBase": "manifest directory",
+  "status": "author traced integration foreground exclusion; verify donor composite visually",
+  "method": "removeMask=commonMask*(1-protection/255); retain exact garment foreground; not rectangle, not color threshold",
+  "polygon": [
+    [
+      290,
+      170
+    ],
+    [
+      385,
+      170
+    ],
+    [
+      385,
+      305
+    ],
+    [
+      361,
+      323
+    ],
+    [
+      365,
+      329
+    ],
+    [
+      370,
+      335
+    ],
+    [
+      375,
+      341
+    ],
+    [
+      380,
+      349
+    ],
+    [
+      384,
+      357
+    ],
+    [
+      387,
+      362
+    ],
+    [
+      373,
+      364
+    ],
+    [
+      360,
+      364
+    ],
+    [
+      352,
+      358
+    ],
+    [
+      344,
+      352
+    ],
+    [
+      333,
+      341
+    ],
+    [
+      290,
+      330
+    ]
+  ],
+  "notes": "Original edit masks are NOT foreground masks and include small seat/background changes. Do not protect all changed pixels: bottom edge changes y365..367 are seat noise. Only coat tail/lower sleeve silhouette is protected here. Frozen source files untouched.",
+  "records": {
+    "ask": {
+      "source": "../question-permission/poses/ask.png",
+      "sourceSHA256": "e94bad1a611a0667968000ea7b20ee4d3dea69efc84ee6c6f4a522e0d5a52020",
+      "protection": "ask-stool-exclusion.png",
+      "protectedPixels": 59,
+      "originalEditMask": "../question-permission/masks/ask.png"
+    },
+    "offer": {
+      "source": "../question-permission/poses/offer.png",
+      "sourceSHA256": "e1ec07972535f18e8cf01caed7955482f3eb87b9c7abe8740682725ff6595570",
+      "protection": "offer-stool-exclusion.png",
+      "protectedPixels": 59,
+      "originalEditMask": "../question-permission/masks/offer.png"
+    },
+    "offer-mid": {
+      "source": "../question-permission/poses/offer-mid.png",
+      "sourceSHA256": "d2e83a6ffc411797d6d60f8970cd272becac41d10a61fdaf1438a629b3a37f2a",
+      "protection": "offer-mid-stool-exclusion.png",
+      "protectedPixels": 59,
+      "originalEditMask": "../question-permission/masks/offer-mid.png"
+    },
+    "attend-corrected": {
+      "source": "../question-permission/poses/attend-corrected.png",
+      "sourceSHA256": "fe99fc6fdc42127249f67a5c3fa59bbb9cb02648ebd6a11e5394fadc6e69342f",
+      "protection": "attend-corrected-stool-exclusion.png",
+      "protectedPixels": 59,
+      "originalEditMask": "../question-permission/masks/attend-corrected.png"
+    },
+    "listen-rest": {
+      "source": "../question-permission/poses/listen-rest.png",
+      "sourceSHA256": "0633d12e97fd3e8f2bdb5b3bcfbcb7463888412e19263bd88e7ba12d14d2827a",
+      "protection": "listen-rest-stool-exclusion.png",
+      "protectedPixels": 59,
+      "originalEditMask": "../question-permission/masks/listen-rest.png"
+    },
+    "listen-rest-half": {
+      "source": "../question-permission/blink/listen-rest-half.png",
+      "sourceSHA256": "3e6b8200dce9badf7d42fa59fd60760413fb6cf908b2d7eddfb8e7df3469fd9e",
+      "protection": "listen-rest-half-stool-exclusion.png",
+      "bodyGeometry": "identical to listen-rest; only eyelids differ"
+    },
+    "listen-rest-closed": {
+      "source": "../question-permission/blink/listen-rest-closed.png",
+      "sourceSHA256": "d348609a22369e182dbbdd3e3e70d2abf866c23aa4cc9c1aed4eb30e3ebf8a7c",
+      "protection": "listen-rest-closed-stool-exclusion.png",
+      "bodyGeometry": "identical to listen-rest; only eyelids differ"
+    }
+  }
+}

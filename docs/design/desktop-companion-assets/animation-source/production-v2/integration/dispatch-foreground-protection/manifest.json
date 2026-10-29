@@ -1,0 +1,34 @@
+[
+  {
+    "frame": "editing-dispatch/frames/dispatch-rise-gaze.png",
+    "sourceSHA256": "5d4d15266492ad447b1d1a1ae697f0e6997a26d6b8cb8877f7aa410d08a6e37d",
+    "authoredUnionMask": "editing-dispatch/masks/dispatch-rise.png",
+    "protectMask": "dispatch-rise-gaze-foreground-protect.png",
+    "protectedRemovalPixels": 193,
+    "method": "light sleeve/silver-hair foreground within authored union and removal intersection, 1px non-dark outline expansion; excludes dark stool"
+  },
+  {
+    "frame": "editing-dispatch/frames/dispatch-a-gaze.png",
+    "sourceSHA256": "ab20db707e2626d6e09adf24be7867388b6af91c7e7057c9c13db54a9d4926eb",
+    "authoredUnionMask": "editing-dispatch/masks/dispatch-a.png",
+    "protectMask": "dispatch-a-gaze-foreground-protect.png",
+    "protectedRemovalPixels": 491,
+    "method": "light sleeve/silver-hair foreground within authored union and removal intersection, 1px non-dark outline expansion; excludes dark stool"
+  },
+  {
+    "frame": "editing-dispatch/frames/dispatch-transit-gazeB.png",
+    "sourceSHA256": "527fec887984b39c041d9d05936be9a8614214095c6aebcc8b962fc51f23a1ec",
+    "authoredUnionMask": "editing-dispatch/masks/dispatch-transit.png",
+    "protectMask": "dispatch-transit-gazeB-foreground-protect.png",
+    "protectedRemovalPixels": 0,
+    "method": "light sleeve/silver-hair foreground within authored union and removal intersection, 1px non-dark outline expansion; excludes dark stool"
+  },
+  {
+    "frame": "editing-dispatch/frames/dispatch-b-v2-gazeB.png",
+    "sourceSHA256": "631cd46348bc70590e5ca7262370886bc59e3e2fbdf10ab81cfc6aba5221b9e1",
+    "authoredUnionMask": "editing-dispatch/masks/dispatch-b-v2.png",
+    "protectMask": "dispatch-b-v2-gazeB-foreground-protect.png",
+    "protectedRemovalPixels": 0,
+    "method": "light sleeve/silver-hair foreground within authored union and removal intersection, 1px non-dark outline expansion; excludes dark stool"
+  }
+]

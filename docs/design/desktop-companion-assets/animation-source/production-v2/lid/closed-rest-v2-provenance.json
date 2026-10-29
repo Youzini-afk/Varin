@@ -1,0 +1,8 @@
+{
+  "source": "../shared/closed-neutral-v1.png",
+  "previous": "frames/closed-rest-rigid-v1.png",
+  "output": "frames/closed-rest-rigid-v2.png",
+  "sha256": "d029c4fc7e78432f465781669f978c96980e34fce0d9a81756abe3aca35064bb",
+  "method": "whole authored hand contour mattes preserving all outline/shadow pixels; no skin-color key",
+  "mask": "frames/closed-rest-hand-silhouette-mask-v2.png"
+}
