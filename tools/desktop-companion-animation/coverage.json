@@ -16,8 +16,7 @@
       "label": "接任务",
       "family": "SEATED_WORK",
       "requires": [
-        "accept-closed",
-        "accept-open"
+        "accept"
       ]
     },
     {

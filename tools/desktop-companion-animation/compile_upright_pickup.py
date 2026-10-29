@@ -1,12 +1,14 @@
 """Source-keyed graph compiler; no new player, inferred poses or artwork."""
 import json,hashlib
 
-def compile_pickup(root, inventory, core):
+def compile_pickup(root, inventory, core, *, extra_detached=None, extra_recovery=None, ordinary_frames=None):
  rel=root/'relocation'; work=root.parent; nodes={}; sources={}
  index=json.loads((rel/'current-source-detached-index-v4.json').read_text()); detached={e['sourceSHA256']:e for e in index['entries']}
+ detached.update(extra_detached or {})
  recovery=json.loads((root/'integration/recovery-by-source.json').read_text())['routes']
+ recovery.update(extra_recovery or {})
  support=json.loads((rel/'lid-support-bridge-v1.json').read_text()); angles={f['angle']:f for f in support['frames']}; bysha={f['originalSeatedSHA256']:f for f in support['frames']}
- ordinary={f['sha256']:f for s in inventory['sequences'] if s['id']!='relocation-core' for f in s['frames']}
+ ordinary={f['sha256']:f for f in ordinary_frames} if ordinary_frames is not None else {f['sha256']:f for s in inventory['sequences'] if s['id']!='relocation-core' for f in s['frames']}
  def image(path, expected):
   path=path.resolve(); actual=hashlib.sha256(path.read_bytes()).hexdigest()
   if actual!=expected:raise ValueError(f'pickup source mismatch: {path}')
