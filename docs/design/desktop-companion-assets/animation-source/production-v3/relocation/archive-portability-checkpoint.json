@@ -1,0 +1,19 @@
+{
+  "selectedFilesCopiedAndHashVerified": 50,
+  "sourceDependenciesMissing": [
+    "companionship/frames/wake-middle-v1.png",
+    "companionship/frames/drowsy-middle-v1.png",
+    "companionship/frames/rest-settled-v2.png",
+    "companionship/frames/yawn-hand-release-v1.png",
+    "companionship/frames/wake-alert-v1.png",
+    "companionship/frames/hover-attend-v1.png",
+    "companionship/frames/rest-middle-v1.png",
+    "companionship/frames/yawn-lift-v1.png",
+    "companionship/frames/yawn-cover-v1.png",
+    "companionship/frames/hover-middle-v1.png",
+    "companionship/frames/tap-response-v1.png",
+    "companionship/frames/doze-v1.png",
+    "companionship/frames/yawn-near-v1.png"
+  ],
+  "status": "checkpoint source copied; full archive rebuild pending companionship author archive"
+}
