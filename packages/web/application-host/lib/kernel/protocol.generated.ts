@@ -151,6 +151,7 @@ export type KernelMethod =
   | "runtime.thread.usage"
   | "runtime.model.presentations"
   | "runtime.thread.catalog.list"
+  | "runtime.thread.attention.read"
   | "runtime.thread.update"
   | "runtime.thread.delete"
   | "runtime.thread.read"
@@ -6466,6 +6467,7 @@ export type KernelMethodParams = {
   "runtime.thread.usage": ThreadUsageParams;
   "runtime.model.presentations": ModelPresentationParams;
   "runtime.thread.catalog.list": ThreadCatalogQuery;
+  "runtime.thread.attention.read": KernelEmptyParams;
   "runtime.thread.update": ThreadMetadataUpdateParams;
   "runtime.thread.delete": ThreadDeleteParams;
   "runtime.thread.read": ThreadReadPositionParams;
@@ -8092,6 +8094,15 @@ export type KernelRequest =
       id: string;
       method: "runtime.thread.catalog.list";
       params: ThreadCatalogQuery;
+      epoch?: string;
+      grantId?: string;
+    }
+  | {
+      v: typeof KERNEL_PROTOCOL_VERSION;
+      kind: "request";
+      id: string;
+      method: "runtime.thread.attention.read";
+      params: KernelEmptyParams;
       epoch?: string;
       grantId?: string;
     }

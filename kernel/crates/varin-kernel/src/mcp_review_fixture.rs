@@ -218,7 +218,7 @@ impl Host {
                         runtime.clone(),
                         method,
                         params.clone(),
-                        &AtomicBool::new(false),
+                        &Arc::new(AtomicBool::new(false)),
                     )
                 };
                 let result = if acceptance && self.reject_acceptance_reply && result.is_ok() {

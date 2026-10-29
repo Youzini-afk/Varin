@@ -909,6 +909,9 @@ export class AgentRuntimeClient {
   threads(signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.list', {}, signal);
   }
+  attention(signal?: AbortSignal): Promise<import('@varin/application-client').ThreadAttentionSnapshot> {
+    return this.kernel.agentRuntimeRequest('runtime.thread.attention.read', {}, signal);
+  }
   threadCatalog(query: import('./protocol.generated.js').ThreadCatalogQuery = {}, signal?: AbortSignal): Promise<ThreadSummary[]> {
     return this.kernel.agentRuntimeRequest('runtime.thread.catalog.list', query, signal);
   }

@@ -159,7 +159,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     update: ['runtime', 'threadId', 'key', 'expectedRevision', 'title', 'pinned', 'archived'],
     delete: ['runtime', 'threadId', 'key', 'expectedRevision'],
     read: ['runtime', 'threadId', 'key', 'throughCursor'],
-    create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
+    attention: [], create: ['key'], list: ['query', 'archived'], models: [], submit: ['runtime', 'threadId', 'branchId', 'key', 'text', 'images', 'materials', 'expectedHead', 'model', 'source', 'agent', 'clientTime'],
     usage: ['runtime', 'threadId', 'branchId'],
     'context/inspect': ['runtime', 'threadId', 'branchId', 'headId'],
     snapshot: ['runtime', 'threadId', 'branchId'], 'history/page': ['runtime', 'threadId', 'branchId', 'headId', 'beforeId', 'limit'],
@@ -438,6 +438,7 @@ export function registerThreadRoutes(app: Express, adapter: ThreadAdapter, requi
     if (body.runtime !== 'agent') throw new Error('Explicit Thread runtime selection is required');
     return { runtime: 'agent', threadId: text(body.threadId) };
   };
+  post('attention', (_body, signal) => adapter.attention(signal));
   post('list', (body, signal) => {
     if (body.query !== undefined && typeof body.query !== 'string') throw new Error('Search query must be a string');
     if (body.archived !== undefined && !['exclude', 'include', 'only'].includes(String(body.archived))) throw new Error('Invalid archive filter');

@@ -505,7 +505,7 @@ fn original_mcp_content_resources_prompts_reach_model_permissions_and_persisted_
                     runtime.clone(),
                     method,
                     params.clone(),
-                    &AtomicBool::new(false),
+                    &Arc::new(AtomicBool::new(false)),
                 )
                 .unwrap();
                 host.send(

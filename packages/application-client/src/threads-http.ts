@@ -114,6 +114,7 @@ export function createThreadsHttpAPI(): ThreadsAPI {
       list: identity => post('goal/list', identity),
     },
     list: (options = {}, signal) => post('list', options, signal),
+    attention: signal => post('attention', {}, signal),
     update: input => post('update', input), delete: input => post('delete', input), markRead: input => post('read', input),
     listModels: () => post('models', {}),
     selectModel: input => post('model/select',input),

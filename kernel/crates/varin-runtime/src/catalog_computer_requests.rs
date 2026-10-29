@@ -710,3 +710,11 @@ impl Catalog {
         Ok(true)
     }
 }
+
+/// Pure user-decision eligibility; physical owner acquisition still happens only in
+/// begin_computer_decision. Reading this never resolves or cancels a stale request.
+pub(super) fn attention(db: &Connection, request: &ComputerRequestRecord, epoch: u64) -> Result<bool> {
+    if request.status != ComputerRequestStatus::Pending { return Ok(false); }
+    let run: Run = record(db, "runs", &request.requester.run_id)?;
+    Ok(run.epoch == epoch && live(db, &request.requester)?)
+}

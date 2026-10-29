@@ -214,7 +214,7 @@ fn permission_record(op: &Operation, id: &str) -> Result<Value> {
     Ok(value)
 }
 fn validate_live_permission(
-    tx: &Transaction<'_>,
+    tx: &Connection,
     op: &Operation,
     run: &Run,
     permission: &Value,
@@ -249,4 +249,27 @@ fn validate_live_permission(
         ));
     }
     Ok(())
+}
+
+/// Metadata-only projection of the same one-action owner checked by decide/consume.
+/// This is evidence for navigation, never a permission grant.
+pub(super) fn attention(db: &Connection, op: &Operation, run: &Run, epoch: u64) -> Result<Option<String>> {
+    if op.run_id != run.id || run.epoch != epoch || op.epoch != epoch
+        || op.phase != OperationPhase::Waiting || op.effect != Effect::None
+        || op.cancel_requested || run.cancel_requested || run.state.terminal() {
+        return Ok(None);
+    }
+    let Some(OperationResultMetadata::Control { value }) = &op.result else { return Ok(None); };
+    let Some(permission) = value.get("permission") else { return Ok(None); };
+    let Some(id) = permission.get("id").and_then(Value::as_str).filter(|id| !id.is_empty()) else { return Ok(None); };
+    if permission.get("decision") != Some(&Value::Null)
+        || permission.get("consumed") != Some(&Value::Bool(false))
+        || permission.get("epoch").and_then(Value::as_u64) != Some(epoch) { return Ok(None); }
+    let active: Option<String> = db.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |r| r.get(0))?;
+    if active.as_deref() != Some(&run.id) { return Ok(None); }
+    match validate_live_permission(db, op, run, permission) {
+        Ok(()) => Ok(Some(id.to_owned())),
+        Err(RuntimeError::Conflict(_)) => Ok(None),
+        Err(error) => Err(error),
+    }
 }

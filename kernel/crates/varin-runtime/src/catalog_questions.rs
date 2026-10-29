@@ -453,3 +453,20 @@ impl Catalog {
         Ok(())
     }
 }
+
+/// An admitted ask_user is actionable only once its Job acceptance was consumed and
+/// its original Run owns the matching wait. Opening/settling is not a user question.
+pub(super) fn attention(db: &Connection, op: &Operation, run: &Run, epoch: u64) -> Result<bool> {
+    if op.executor.as_deref() != Some(QUESTION_TOOL) || op.run_id != run.id
+        || op.epoch != epoch || run.epoch != epoch || op.phase != OperationPhase::Waiting
+        || !op.handed_off || op.cancel_requested || run.cancel_requested
+        || run.state != RunState::Waiting {
+        return Ok(false);
+    }
+    let Some(wait_id) = op.waiting_on.as_deref() else { return Ok(false); };
+    if run.waiting_on.as_deref() != Some(wait_id) { return Ok(false); }
+    let active: Option<String> = db.query_row("SELECT active_run FROM branches WHERE id=?1", [&run.branch_id], |r| r.get(0))?;
+    if active.as_deref() != Some(&run.id) { return Ok(false); }
+    let wait: Wait = record(db, "waits", wait_id)?;
+    Ok(!wait.cancelled && super::result_content::job_acceptance_consumed(db, op)?)
+}

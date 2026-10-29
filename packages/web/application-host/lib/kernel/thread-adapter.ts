@@ -468,6 +468,9 @@ export class ThreadAdapter {
     return this.models.listModels();
   }
 
+  attention(signal?: AbortSignal) {
+    return this.runtime.attention(signal);
+  }
   list(options: import('@varin/application-client').ThreadListOptions = {}, signal?: AbortSignal) {
     return this.runtime.threadCatalog(options, signal);
   }

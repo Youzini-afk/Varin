@@ -5,7 +5,7 @@ pub(super) fn execute(
     runtime: Arc<RunSupervisor>,
     method: &str,
     params: Value,
-    cancelled: &AtomicBool,
+    cancelled: &Arc<AtomicBool>,
 ) -> Result<Value, KernelError> {
     if cancelled.load(Ordering::Acquire) {
         return Err(KernelError::Cancelled);
@@ -41,6 +41,19 @@ pub(super) fn execute(
             .capture_events_read(cursor, limit)
             .map_err(domain)?;
         return Ok(serde_json::to_value(read.load().map_err(domain)?)?);
+    }
+    if method == "runtime.thread.attention.read" {
+        let _: crate::protocol_generated::KernelEmptyParams = serde_json::from_value(params)?;
+        let read = owner.lock()
+            .map_err(|_| KernelError::Storage("catalog owner failed".into()))?
+            .capture_attention_read();
+        let snapshot = read.load_cancellable(cancelled.clone()).map_err(domain)?;
+        if cancelled.load(Ordering::Acquire) { return Err(KernelError::Cancelled); }
+        // The read connection can outlive owner replacement; never publish the old generation.
+        if owner.lock().map_err(|_| KernelError::Storage("catalog owner failed".into()))?.epoch() != snapshot.epoch {
+            return Err(KernelError::Protocol("attention snapshot belongs to a previous owner epoch".into()));
+        }
+        return Ok(serde_json::to_value(snapshot)?);
     }
     if method == "runtime.thread.operations.active" {
         let p: ThreadOperationsParams = serde_json::from_value(params)?;

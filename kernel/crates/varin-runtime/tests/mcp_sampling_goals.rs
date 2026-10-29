@@ -29,7 +29,8 @@ struct Fixture {
 fn commit(db: &mut Catalog, run: &str, record: ExecutionRecord) {
     db.commit_execution(run, db.epoch(), &record).unwrap();
 }
-fn fixture(budget: u64) -> Fixture {
+fn fixture(budget: u64) -> Fixture { fixture_with_reviews(budget, false) }
+fn fixture_with_reviews(budget: u64, additional_reviews: bool) -> Fixture {
     let root = std::env::temp_dir().join(format!("varin-sampling-goal-{}", uuid::Uuid::new_v4()));
     let mut db = Catalog::open(&root).unwrap();
     db.create_thread("thread", "branch").unwrap();
@@ -215,6 +216,25 @@ fn fixture(budget: u64) -> Fixture {
         .unwrap();
 
     let binding:McpInteractionBinding=serde_json::from_value(json!({"operationId":context.operation_id,"executionOwner":owner,"endpoint":{"server":"peer","resourceKey":"mcp:peer","configurationVersion":"configuration","credentialVersion":"grant"},"connectionId":"original-client","source":{"kind":"server_request","requestId":"sample:original","relation":{"kind":"rpc_response_stream","outgoingRequestId":7}}})).unwrap();
+    if additional_reviews {
+        let mut form_binding = binding.clone();
+        form_binding.source = serde_json::from_value(json!({"kind":"server_request","requestId":"attention-form",
+            "relation":{"kind":"rpc_response_stream","outgoingRequestId":8}})).unwrap();
+        let body = db.prepare_result_content().write_data(&json!({
+            "request":{"message":"Private form question"},"presentation":{"mode":"form","message":"Private form question"}
+        })).unwrap();
+        db.open_mcp_interaction("attention-form".into(), form_binding, McpInteractionMode::Form,
+            &body, &snapshot, &original, None).unwrap();
+        let mut error_binding = binding.clone();
+        error_binding.source = serde_json::from_value(json!({"kind":"rpc_error","outgoingRequestId":9,
+            "method":"resources/subscribe","elicitationId":"attention-error"})).unwrap();
+        let body = db.prepare_result_content().write_data(&json!({
+            "request":{"code":-32042,"data":{"private":"URL requirement"}},
+            "presentations":[{"mode":"url","url":"https://private.invalid/review"}]
+        })).unwrap();
+        db.open_mcp_error_interactions(vec![("attention-error".into(), error_binding)],
+            &body, &snapshot, &original, None).unwrap();
+    }
     let request = json!({"messages":[{"role":"user","content":{"type":"text","text":"Sample under explicit bounded Goal"}}],"maxTokens":32});
     let staged = db
         .prepare_result_content()
@@ -233,6 +253,14 @@ fn fixture(budget: u64) -> Fixture {
             None,
         )
         .unwrap();
+    if budget > 2 {
+        let attention = db.capture_attention_read().load(&|| false).unwrap();
+        assert!(attention.items.iter().any(|item| item.kind == "mcp_sampling_request" && item.actionable
+            && item.request_id.as_deref() == Some("sample:original")));
+        let wire = serde_json::to_string(&attention).unwrap();
+        assert!(!wire.contains("Sample under explicit bounded Goal"));
+        assert!(!wire.contains("request_ref"));
+    }
     let config: ModelSessionConfiguration = serde_json::from_value(config).unwrap();
     let admission = db
         .prepare_sampling_content()
@@ -339,6 +367,11 @@ fn sampling_actual_usage_is_measured_once_on_the_existing_goal() {
     f.db.dispatch_mcp_sampling(&f.id).unwrap();
     assert_eq!(goal(&f).usage.pending_inferences, 1);
     settle(&mut f, actual());
+    let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+    assert!(attention.items.iter().any(|item| item.kind == "mcp_sampling_output" && item.actionable
+        && item.request_id.as_deref() == Some("sample:original")));
+    assert!(!attention.items.iter().any(|item| item.kind == "mcp_sampling_request"));
+    assert!(!serde_json::to_string(&attention).unwrap().contains("largeProviderOriginal"));
     settle(&mut f, actual());
     let after = goal(&f);
     assert_eq!(after.usage.pending_inferences, 0);
@@ -402,4 +435,41 @@ fn recovery_measures_only_durable_short_sampling_usage_and_never_replays() {
         f.db = Catalog::open(&root).unwrap();
         assert_eq!(serde_json::to_value(goal(&f).usage).unwrap(), before);
     }
+}
+
+#[test]
+fn attention_mcp_reviews_and_unknown_delivery_are_independent_of_operation_effect() {
+    let mut f = fixture_with_reviews(200, true);
+    let cursor = f.db.event_cursor().unwrap();
+    let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+    assert_eq!(f.db.event_cursor().unwrap(), cursor);
+    assert_eq!(attention.counts.action_required, 2);
+    let form = attention.items.iter().find(|item| item.kind == "mcp_elicitation").unwrap();
+    assert_eq!(form.request_id.as_deref(), Some("attention-form"));
+    assert!(attention.items.iter().any(|item| item.kind == "mcp_error"
+        && item.request_id.as_deref() == Some("attention-error")));
+    let operation_id = form.operation_id.clone().unwrap();
+    let run_id = form.run_id.clone();
+    let wire = serde_json::to_string(&attention).unwrap();
+    for private in ["Private form question", "URL requirement", "https://private.invalid/review"] {
+        assert!(!wire.contains(private));
+    }
+    let form: McpInteractionRecord = serde_json::from_value(f.db.inspect_mcp_interaction(&operation_id, "attention-form").unwrap()).unwrap();
+    let response = f.db.prepare_result_content().write_data(&json!({"action":"accept","content":{}})).unwrap();
+    f.db.respond_mcp_interaction(&operation_id, "attention-form", form.revision, McpInteractionChoice::Accept, response).unwrap();
+    f.db.begin_mcp_interaction_response(&form.binding, "attention-form").unwrap();
+    f.db.settle_mcp_interaction_response(&form.binding, "attention-form", McpInteractionDelivery::Unknown).unwrap();
+    assert_ne!(f.db.operation(&operation_id).unwrap().effect, Effect::Unknown);
+    let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+    assert_eq!(attention.counts.action_required, 1);
+    assert!(attention.items.iter().any(|item| item.kind == "effect_unknown"
+        && item.request_id.as_deref() == Some("attention-form") && !item.actionable));
+    f.db.release_mcp_interaction_source(&run_id).unwrap();
+    let attention = f.db.capture_attention_read().load(&|| false).unwrap();
+    assert!(!attention.items.iter().any(|item| item.kind == "mcp_elicitation"));
+    assert!(attention.items.iter().any(|item| item.kind == "mcp_error"
+        && item.request_id.as_deref() == Some("attention-error")),
+        "local RPC-error review survives source closure without resuming the Run");
+    assert!(attention.items.iter().any(|item| item.kind == "effect_unknown"
+        && item.request_id.as_deref() == Some("attention-form")));
 }

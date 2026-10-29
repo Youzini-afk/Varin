@@ -963,3 +963,40 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
 }
+
+/// Compact, read-only eligibility using the original MCP owner. Unlike pending_mcp_interactions
+/// this does not reconcile availability, load bodies, or publish events.
+pub(super) fn attention(db: &Connection, raw: &str, epoch: u64) -> Result<Option<(McpInteractionRecord, &'static str)>> {
+    let m: Metadata = serde_json::from_str(raw)?;
+    if m.record.choice.is_some() { return Ok(None); }
+    // RPC-error local review is explicitly allowed by respond_mcp_interaction after
+    // natural completion/owner loss. It does not resume the original execution.
+    if m.record.mode != Mode::Sampling && m.record.binding.source.is_error() {
+        return Ok(Some((m.record, "mcp_error")));
+    }
+    match original_live(db, &m, epoch) {
+        Ok(()) => {},
+        Err(RuntimeError::Conflict(_) | RuntimeError::GoalChanged) => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    let kind = if m.record.mode == Mode::Sampling {
+        match m.record.sampling.as_ref().map(|sampling| sampling.review.as_str()) {
+            Some("request") => {
+                // The review label survives admission/preparation. An in-flight generation
+                // may still be cancelled, but it does not need a second Generate approval.
+                if let Some(id)=m.record.sampling.as_ref().and_then(|s|s.generation_operation_id.as_deref()) {
+                    let generation:Operation=record(db,"operations",id)?;
+                    if generation.phase!=OperationPhase::Terminal || sampling::state(&generation)?.dispatch!="not_started" {
+                        return Ok(None);
+                    }
+                }
+                "mcp_sampling_request"
+            },
+            // Even when acceptance of an output is unavailable, decline/cancel remains
+            // a real user action at this review stage.
+            Some("output") => "mcp_sampling_output",
+            _ => return Ok(None),
+        }
+    } else { "mcp_elicitation" };
+    Ok(Some((m.record, kind)))
+}

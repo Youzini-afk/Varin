@@ -144,3 +144,32 @@ it('projects only the displayed failed Run\'s original failure and preserves an 
   await expect(f.api.snapshot(identity)).rejects.toMatchObject({ code: 'thread-request-failed' });
   expect(f.requests.mock.calls.some(([method]) => /cancel|resume|retry/.test(method))).toBe(false);
 });
+
+it('reads complete attention through authenticated Host without per-thread hydration or scope injection', async () => {
+  const f = fixture();
+  const view = { epoch: 7, eventCursor: 42,
+    coverage: { native: 'complete', external: 'unsupported', scope: 'host' }, teamExecutions: [],
+    branches: [], items: [], counts: { actionRequired: 0, affectedBranches: 0, unknownEffects: 0 } };
+  f.requests.mockResolvedValue(view);
+  await expect(f.api.attention()).resolves.toEqual(view);
+  expect(f.requests.mock.calls.map(([method, params]) => [method, params])).toEqual([
+    ['runtime.thread.attention.read', {}],
+  ]);
+  expect((await f.request('/api/threads/attention', {}, false)).status).toBe(401);
+  expect((await f.request('/api/threads/attention', { threadId: 'invented-scope' })).status).toBe(400);
+  expect(f.requests).toHaveBeenCalledOnce();
+});
+
+it('cancels only the original attention read and does not turn unavailable data into empty success', async () => {
+  const f = fixture();
+  const controller = new AbortController();
+  f.requests.mockImplementation(async (_method, _params, signal) => new Promise((_resolve, reject) => {
+    signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+  }));
+  const pending = f.adapter.attention(controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  expect(f.requests.mock.calls[0]?.[2]).toBe(controller.signal);
+  controller.abort();
+  await rejected;
+  expect(f.requests.mock.calls.map(([method]) => method)).toEqual(['runtime.thread.attention.read']);
+});

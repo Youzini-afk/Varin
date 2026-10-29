@@ -1989,3 +1989,6 @@ pub mod knowledge_inference;
 
 #[path = "catalog_context_observations.rs"]
 pub mod context_observations;
+
+#[path = "catalog_attention.rs"]
+pub mod attention;

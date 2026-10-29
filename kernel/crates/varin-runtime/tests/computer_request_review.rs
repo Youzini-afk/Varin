@@ -14,6 +14,16 @@ fn real_child_request_and_wait_recover_one_environment_decision_from_both_origin
     for policy in [false, true] {
         let mut f = Fixture::new();
         let request = f.request(policy);
+        let attention = f.base.db.capture_attention_read().load(&|| false).unwrap();
+        let team=attention.team_executions.iter().find(|team|team.child_run_id.as_deref()==Some(f.child_run.as_str())).unwrap();
+        assert_eq!(team.parent_run_id,f.parent_run);assert_eq!(team.parent_thread_id,request.root_thread_id);
+        assert_eq!(team.child_thread_id,request.requester.thread_id);assert_eq!(team.state,"ready");
+        let item = attention.items.iter().find(|item| item.request_id.as_deref() == Some(request.id.as_str())).unwrap();
+        assert_eq!(item.kind, "computer_permission");
+        assert!(item.actionable);
+        assert_eq!(item.thread_id, request.root_thread_id);
+        assert_eq!(item.branch_id, request.root_branch_id);
+        assert_eq!(item.run_id, request.requester.run_id);
         let wait = f.wait(&request, policy);
         assert_eq!(
             f.base.db.run(&f.child_run).unwrap().state,
@@ -57,6 +67,9 @@ fn real_child_request_and_wait_recover_one_environment_decision_from_both_origin
             )
             .unwrap();
         assert_eq!(claiming.status, ComputerRequestStatus::Granting);
+        let attention = f.base.db.capture_attention_read().load(&|| false).unwrap();
+        assert!(!attention.items.iter().any(|item| item.actionable && item.request_id.as_deref() == Some(request.id.as_str())));
+        assert!(!serde_json::to_string(&attention).unwrap().contains("Original grant explanation"));
         let changed = f
             .base
             .db
