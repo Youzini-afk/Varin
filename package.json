@@ -77,6 +77,7 @@
     "mobile:add:ios": "bun run --cwd packages/mobile add:ios",
     "mobile:add:android": "bun run --cwd packages/mobile add:android",
     "mobile:build:android:debug": "bun run --cwd packages/mobile build:android:debug",
+    "mobile:build:android:release": "bun run --cwd packages/mobile build:android:release",
     "mobile:build:ios:simulator": "bun run --cwd packages/mobile build:ios:simulator",
     "mobile:sim:boot": "bun run --cwd packages/mobile sim:boot",
     "mobile:sim:install": "bun run --cwd packages/mobile sim:install",
@@ -114,7 +115,7 @@
     "test:packages": "bun run --sequential --no-exit-on-error --filter '@varin/*' test",
     "test:packages:dist": "bun run --sequential --no-exit-on-error --filter '@varin/*' test:dist",
     "check:packages": "bun run type-check && bun run test:packages",
-    "test:tooling": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js scripts/dependabot-report.test.mjs scripts/ci-workflow.test.mjs scripts/zod-consumer-compatibility.test.mjs scripts/harness-replay.test.mjs scripts/npm-public-release.test.mjs packages/computer-driver/macos/test_build_helper.mjs packages/mobile/scripts/native-identity.test.mjs \"packages/electron/scripts/*.test.mjs\"",
+    "test:tooling": "node --test scripts/host-production-boundary.test.mjs scripts/cloud-runtime-layout.test.js scripts/dependabot-report.test.mjs scripts/ci-workflow.test.mjs scripts/zod-consumer-compatibility.test.mjs scripts/harness-replay.test.mjs scripts/npm-public-release.test.mjs packages/computer-driver/macos/test_build_helper.mjs packages/mobile/scripts/native-identity.test.mjs packages/mobile/scripts/android-release.test.mjs \"packages/electron/scripts/*.test.mjs\"",
     "test:packages:platform": "bun run --sequential --no-exit-on-error --filter '@varin/electron' --filter '@varin/extension-host' --filter '@varin/extension-loader' --filter '@varin/extension-cli' --filter '@varin/settings-store' --filter '@varin/script-runtime' test"
   },
   "overrides": {

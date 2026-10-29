@@ -6,7 +6,7 @@
 | 云镜像与远端 Host | [Cloud deployment](cloud-deployment.md) |
 | 反向代理 | [Reverse proxy](REVERSE_PROXY.md) |
 | 桌面打包、签名、smoke | [Electron](../../packages/electron/README.md) |
-| 移动构建与连接 | [Mobile](../../packages/mobile/README.md) |
+| 移动构建、Android 发布签名与连接 | [Mobile](../../packages/mobile/README.md) |
 | 会话与文件恢复 | [Recovery](recovery.md) |
 | Varin 扩展开发 | [Extension authoring](varin-extension-authoring.md) |
 | 主题配置 | [Custom themes](CUSTOM_THEMES.md) |

@@ -2,6 +2,7 @@ node_modules/
 dist/
 dist-ssr/
 /packages/electron/resources/installer-tools/
+/packages/mobile/release-assets/
 coverage/
 .cache/
 .vite/
